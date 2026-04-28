@@ -1,0 +1,90 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="ooo.klae.connex.backend.mappers.TaskMapper">
+
+  <resultMap id="TaskResult" type="Task">
+    <id     property="id"          column="id"/>
+    <result property="description" column="description"/>
+    <result property="completed"   column="completed"/>
+    <result property="dueDate"     column="due_date"/>
+    <result property="createdAt"   column="created_at"/>
+    <result property="updatedAt"   column="updated_at"/>
+    <association property="assignedTo" javaType="User">
+      <id property="id" column="assigned_to_id"/>
+    </association>
+    <association property="person" javaType="Person">
+      <id property="id" column="person_id"/>
+    </association>
+    <association property="deal" javaType="Deal">
+      <id property="id" column="deal_id"/>
+    </association>
+  </resultMap>
+
+  <sql id="taskColumns">
+    id, description, completed, due_date, assigned_to_id, person_id, deal_id,
+    created_at, updated_at
+  </sql>
+
+  <select id="getAllTasks" resultMap="TaskResult">
+    SELECT <include refid="taskColumns"/> FROM task ORDER BY due_date IS NULL, due_date
+  </select>
+
+  <select id="getTasksByAssignedToId" resultMap="TaskResult">
+    SELECT <include refid="taskColumns"/> FROM task
+    WHERE assigned_to_id = #{assignedToId}
+    ORDER BY due_date IS NULL, due_date
+  </select>
+
+  <select id="getTasksByPersonId" resultMap="TaskResult">
+    SELECT <include refid="taskColumns"/> FROM task
+    WHERE person_id = #{personId}
+    ORDER BY due_date IS NULL, due_date
+  </select>
+
+  <select id="getTasksByDealId" resultMap="TaskResult">
+    SELECT <include refid="taskColumns"/> FROM task
+    WHERE deal_id = #{dealId}
+    ORDER BY due_date IS NULL, due_date
+  </select>
+
+  <select id="getTaskById" resultMap="TaskResult">
+    SELECT <include refid="taskColumns"/> FROM task WHERE id = #{id}
+  </select>
+
+  <insert id="insert" useGeneratedKeys="true" keyProperty="id">
+    INSERT INTO task (description, completed, due_date, assigned_to_id, person_id, deal_id)
+    VALUES (
+      #{description}, #{completed}, #{dueDate}, #{assignedTo.id},
+      <choose>
+        <when test="person != null">#{person.id}</when>
+        <otherwise>NULL</otherwise>
+      </choose>,
+      <choose>
+        <when test="deal != null">#{deal.id}</when>
+        <otherwise>NULL</otherwise>
+      </choose>
+    )
+  </insert>
+
+  <update id="update">
+    UPDATE task
+    SET description = #{description},
+        completed = #{completed},
+        due_date = #{dueDate},
+        assigned_to_id = #{assignedTo.id},
+        person_id =
+          <choose>
+            <when test="person != null">#{person.id}</when>
+            <otherwise>NULL</otherwise>
+          </choose>,
+        deal_id =
+          <choose>
+            <when test="deal != null">#{deal.id}</when>
+            <otherwise>NULL</otherwise>
+          </choose>
+    WHERE id = #{id}
+  </update>
+
+  <delete id="delete">DELETE FROM task WHERE id = #{id}</delete>
+</mapper>

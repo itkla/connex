@@ -1,0 +1,121 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="ooo.klae.connex.backend.mappers.DealMapper">
+
+  <resultMap id="DealResult" type="Deal">
+    <id     property="id"                column="id"/>
+    <result property="name"              column="name"/>
+    <result property="value"             column="value"/>
+    <result property="currency"          column="currency"/>
+    <result property="expectedCloseDate" column="expected_close_date"/>
+    <result property="closedAt"          column="closed_at"/>
+    <result property="createdAt"         column="created_at"/>
+    <result property="updatedAt"         column="updated_at"/>
+    <association property="pipeline" javaType="Pipeline">
+      <id property="id" column="pipeline_id"/>
+    </association>
+    <association property="stage" javaType="Stage">
+      <id property="id" column="stage_id"/>
+    </association>
+    <association property="company" javaType="Company">
+      <id property="id" column="company_id"/>
+    </association>
+  </resultMap>
+
+  <sql id="dealColumns">
+    id, name, value, currency, pipeline_id, stage_id, company_id,
+    expected_close_date, closed_at, created_at, updated_at
+  </sql>
+
+  <sql id="qualifiedDealColumns">
+    d.id, d.name, d.value, d.currency, d.pipeline_id, d.stage_id, d.company_id,
+    d.expected_close_date, d.closed_at, d.created_at, d.updated_at
+  </sql>
+
+  <select id="getAllDeals" resultMap="DealResult">
+    SELECT <include refid="dealColumns"/> FROM deal
+  </select>
+
+  <select id="getDealsByPipelineId" resultMap="DealResult">
+    SELECT <include refid="dealColumns"/> FROM deal WHERE pipeline_id = #{pipelineId}
+  </select>
+
+  <select id="getDealsByStageId" resultMap="DealResult">
+    SELECT <include refid="dealColumns"/> FROM deal WHERE stage_id = #{stageId}
+  </select>
+
+  <select id="getDealsByCompanyId" resultMap="DealResult">
+    SELECT <include refid="dealColumns"/> FROM deal WHERE company_id = #{companyId}
+  </select>
+
+  <select id="getDealsByPersonId" resultMap="DealResult">
+    SELECT <include refid="qualifiedDealColumns"/>
+    FROM deal d
+    JOIN deal_person dp ON dp.deal_id = d.id
+    WHERE dp.person_id = #{personId}
+  </select>
+
+  <select id="getDealsByTagId" resultMap="DealResult">
+    SELECT <include refid="qualifiedDealColumns"/>
+    FROM deal d
+    JOIN deal_tag dt ON dt.deal_id = d.id
+    WHERE dt.tag_id = #{tagId}
+  </select>
+
+  <select id="getDealById" resultMap="DealResult">
+    SELECT <include refid="dealColumns"/> FROM deal WHERE id = #{id}
+  </select>
+
+  <insert id="insert" useGeneratedKeys="true" keyProperty="id">
+    INSERT INTO deal (name, value, currency, pipeline_id, stage_id, company_id,
+                      expected_close_date, closed_at)
+    VALUES (
+      #{name}, #{value}, #{currency}, #{pipeline.id}, #{stage.id},
+      <choose>
+        <when test="company != null">#{company.id}</when>
+        <otherwise>NULL</otherwise>
+      </choose>,
+      #{expectedCloseDate}, #{closedAt}
+    )
+  </insert>
+
+  <update id="update">
+    UPDATE deal
+    SET name = #{name},
+        value = #{value},
+        currency = #{currency},
+        pipeline_id = #{pipeline.id},
+        stage_id = #{stage.id},
+        company_id =
+          <choose>
+            <when test="company != null">#{company.id}</when>
+            <otherwise>NULL</otherwise>
+          </choose>,
+        expected_close_date = #{expectedCloseDate},
+        closed_at = #{closedAt}
+    WHERE id = #{id}
+  </update>
+
+  <delete id="delete">DELETE FROM deal WHERE id = #{id}</delete>
+
+  <insert id="addTag">
+    INSERT IGNORE INTO deal_tag (deal_id, tag_id)
+    VALUES (#{dealId}, #{tagId})
+  </insert>
+
+  <delete id="removeTag">
+    DELETE FROM deal_tag
+    WHERE deal_id = #{dealId} AND tag_id = #{tagId}
+  </delete>
+
+  <insert id="addPerson">
+    INSERT IGNORE INTO deal_person (deal_id, person_id)
+    VALUES (#{dealId}, #{personId})
+  </insert>
+
+  <delete id="removePerson">
+    DELETE FROM deal_person
+    WHERE deal_id = #{dealId} AND person_id = #{personId}
+  </delete>
+</mapper>

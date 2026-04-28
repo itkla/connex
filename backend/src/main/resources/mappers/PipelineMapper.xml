@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="ooo.klae.connex.backend.mappers.PipelineMapper">
+
+  <resultMap id="StageResult" type="Stage">
+    <id property="id" column="id"/>
+    <result property="name" column="name"/>
+    <result property="position" column="position"/>
+    <association property="pipeline" javaType="Pipeline">
+      <id property="id" column="pipeline_id"/>
+    </association>
+  </resultMap>
+
+  <select id="getAllPipelines" resultType="Pipeline">
+    SELECT id, name, created_at, updated_at FROM pipeline
+  </select>
+
+  <select id="getPipelineById" resultType="Pipeline">
+    SELECT id, name, created_at, updated_at FROM pipeline WHERE id = #{id}
+  </select>
+
+  <insert id="insertPipeline" useGeneratedKeys="true" keyProperty="id">
+    INSERT INTO pipeline (name) VALUES (#{name})
+  </insert>
+
+  <update id="updatePipeline">
+    UPDATE pipeline SET name = #{name} WHERE id = #{id}
+  </update>
+
+  <delete id="deletePipeline">DELETE FROM pipeline WHERE id = #{id}</delete>
+
+  <select id="getStageById" resultMap="StageResult">
+    SELECT id, name, pipeline_id, position FROM stage WHERE id = #{id}
+  </select>
+
+  <select id="getStagesByPipelineId" resultMap="StageResult">
+    SELECT id, name, pipeline_id, position FROM stage
+    WHERE pipeline_id = #{pipelineId}
+    ORDER BY position
+  </select>
+
+  <insert id="insertStage" useGeneratedKeys="true" keyProperty="id">
+    INSERT INTO stage (name, pipeline_id, position)
+    VALUES (#{name}, #{pipeline.id}, #{position})
+  </insert>
+
+  <update id="updateStage">
+    UPDATE stage
+    SET name = #{name}, pipeline_id = #{pipeline.id}, position = #{position}
+    WHERE id = #{id}
+  </update>
+
+  <delete id="deleteStage">DELETE FROM stage WHERE id = #{id}</delete>
+</mapper>

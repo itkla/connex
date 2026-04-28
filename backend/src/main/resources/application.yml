@@ -1,0 +1,19 @@
+# spring.application.name=backend
+
+spring:
+    application:
+        name: backend
+    datasource:
+        url: jdbc:mysql://localhost:3306/connexdb
+        username: connexuser
+        password: connexpassword
+        # driver-class-name: com.mysql.cj.jdbc.Driver
+    sql:
+        init:
+            mode: always
+            encoding: UTF-8
+
+mybatis:
+    configuration:
+        map-underscore-to-camel-case: true
+    

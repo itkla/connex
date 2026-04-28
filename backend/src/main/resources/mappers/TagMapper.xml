@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="ooo.klae.connex.backend.mappers.TagMapper">
+
+  <select id="getAllTags" resultType="Tag">
+    SELECT id, name, color FROM tag ORDER BY name
+  </select>
+
+  <select id="getTagById" resultType="Tag">
+    SELECT id, name, color FROM tag WHERE id = #{id}
+  </select>
+
+  <select id="getTagByName" resultType="Tag">
+    SELECT id, name, color FROM tag WHERE name = #{name}
+  </select>
+
+  <insert id="insert" useGeneratedKeys="true" keyProperty="id">
+    INSERT INTO tag (name, color) VALUES (#{name}, #{color})
+  </insert>
+
+  <update id="update">
+    UPDATE tag SET name = #{name}, color = #{color} WHERE id = #{id}
+  </update>
+
+  <delete id="delete">DELETE FROM tag WHERE id = #{id}</delete>
+
+  <select id="getTagsByPersonId" resultType="Tag">
+    SELECT t.id, t.name, t.color
+    FROM tag t
+    JOIN person_tag pt ON pt.tag_id = t.id
+    WHERE pt.person_id = #{personId}
+    ORDER BY t.name
+  </select>
+
+  <select id="getTagsByCompanyId" resultType="Tag">
+    SELECT t.id, t.name, t.color
+    FROM tag t
+    JOIN company_tag ct ON ct.tag_id = t.id
+    WHERE ct.company_id = #{companyId}
+    ORDER BY t.name
+  </select>
+
+  <select id="getTagsByDealId" resultType="Tag">
+    SELECT t.id, t.name, t.color
+    FROM tag t
+    JOIN deal_tag dt ON dt.tag_id = t.id
+    WHERE dt.deal_id = #{dealId}
+    ORDER BY t.name
+  </select>
+</mapper>

@@ -1,0 +1,91 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="ooo.klae.connex.backend.mappers.PersonMapper">
+
+  <resultMap id="PersonResult" type="Person">
+    <id     property="id"        column="id"/>
+    <result property="name"      column="name"/>
+    <result property="email"     column="email"/>
+    <result property="phone"     column="phone"/>
+    <result property="title"     column="title"/>
+    <result property="createdAt" column="created_at"/>
+    <result property="updatedAt" column="updated_at"/>
+    <association property="company" javaType="Company">
+      <id property="id" column="company_id"/>
+    </association>
+  </resultMap>
+
+  <sql id="personColumns">
+    id, name, email, phone, company_id, title, created_at, updated_at
+  </sql>
+
+  <select id="getAllPersons" resultMap="PersonResult">
+    SELECT <include refid="personColumns"/> FROM person ORDER BY name
+  </select>
+
+  <select id="getPersonsByCompanyId" resultMap="PersonResult">
+    SELECT <include refid="personColumns"/> FROM person
+    WHERE company_id = #{companyId} ORDER BY name
+  </select>
+
+  <select id="getPersonsByTagId" resultMap="PersonResult">
+    SELECT
+      p.id, p.name, p.email, p.phone, p.company_id, p.title, p.created_at, p.updated_at
+    FROM person p
+    JOIN person_tag pt ON pt.person_id = p.id
+    WHERE pt.tag_id = #{tagId}
+    ORDER BY p.name
+  </select>
+
+  <select id="getPersonsByDealId" resultMap="PersonResult">
+    SELECT
+      p.id, p.name, p.email, p.phone, p.company_id, p.title, p.created_at, p.updated_at
+    FROM person p
+    JOIN deal_person dp ON dp.person_id = p.id
+    WHERE dp.deal_id = #{dealId}
+    ORDER BY p.name
+  </select>
+
+  <select id="getPersonById" resultMap="PersonResult">
+    SELECT <include refid="personColumns"/> FROM person WHERE id = #{id}
+  </select>
+
+  <insert id="insert" useGeneratedKeys="true" keyProperty="id">
+    INSERT INTO person (name, email, phone, company_id, title)
+    VALUES (
+      #{name}, #{email}, #{phone},
+      <choose>
+        <when test="company != null">#{company.id}</when>
+        <otherwise>NULL</otherwise>
+      </choose>,
+      #{title}
+    )
+  </insert>
+
+  <update id="update">
+    UPDATE person
+    SET name = #{name},
+        email = #{email},
+        phone = #{phone},
+        company_id =
+          <choose>
+            <when test="company != null">#{company.id}</when>
+            <otherwise>NULL</otherwise>
+          </choose>,
+        title = #{title}
+    WHERE id = #{id}
+  </update>
+
+  <delete id="delete">DELETE FROM person WHERE id = #{id}</delete>
+
+  <insert id="addTag">
+    INSERT IGNORE INTO person_tag (person_id, tag_id)
+    VALUES (#{personId}, #{tagId})
+  </insert>
+
+  <delete id="removeTag">
+    DELETE FROM person_tag
+    WHERE person_id = #{personId} AND tag_id = #{tagId}
+  </delete>
+</mapper>

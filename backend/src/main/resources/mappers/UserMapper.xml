@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="ooo.klae.connex.backend.mappers.UserMapper">
+
+  <select id="getAllUsers" resultType="User">
+    SELECT id, username, display_name, email, password_hash, created_at, updated_at
+    FROM app_user
+  </select>
+
+  <select id="getUserById" resultType="User">
+    SELECT id, username, display_name, email, password_hash, created_at, updated_at
+    FROM app_user WHERE id = #{id}
+  </select>
+
+  <select id="getUserByUsername" resultType="User">
+    SELECT id, username, display_name, email, password_hash, created_at, updated_at
+    FROM app_user WHERE username = #{username}
+  </select>
+
+  <insert id="insert" useGeneratedKeys="true" keyProperty="id">
+    INSERT INTO app_user (username, display_name, email, password_hash)
+    VALUES (#{username}, #{displayName}, #{email}, #{passwordHash})
+  </insert>
+
+  <update id="update">
+    UPDATE app_user
+    SET username = #{username},
+        display_name = #{displayName},
+        email = #{email},
+        password_hash = #{passwordHash}
+    WHERE id = #{id}
+  </update>
+
+  <delete id="delete">DELETE FROM app_user WHERE id = #{id}</delete>
+</mapper>

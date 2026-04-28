@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="ooo.klae.connex.backend.mappers.ActivityMapper">
+
+  <resultMap id="ActivityResult" type="Activity">
+    <id     property="id"        column="id"/>
+    <result property="type"      column="type"/>
+    <result property="subject"   column="subject"/>
+    <result property="notes"     column="notes"/>
+    <result property="timestamp" column="timestamp"/>
+    <association property="person" javaType="Person">
+      <id property="id" column="person_id"/>
+    </association>
+    <association property="deal" javaType="Deal">
+      <id property="id" column="deal_id"/>
+    </association>
+    <association property="createdBy" javaType="User">
+      <id property="id" column="created_by_id"/>
+    </association>
+  </resultMap>
+
+  <sql id="activityColumns">
+    id, type, subject, notes, person_id, deal_id, created_by_id, timestamp
+  </sql>
+
+  <select id="getAllActivities" resultMap="ActivityResult">
+    SELECT <include refid="activityColumns"/> FROM activity ORDER BY timestamp DESC
+  </select>
+
+  <select id="getActivitiesByPersonId" resultMap="ActivityResult">
+    SELECT <include refid="activityColumns"/> FROM activity
+    WHERE person_id = #{personId} ORDER BY timestamp DESC
+  </select>
+
+  <select id="getActivitiesByDealId" resultMap="ActivityResult">
+    SELECT <include refid="activityColumns"/> FROM activity
+    WHERE deal_id = #{dealId} ORDER BY timestamp DESC
+  </select>
+
+  <select id="getActivitiesByCreatedById" resultMap="ActivityResult">
+    SELECT <include refid="activityColumns"/> FROM activity
+    WHERE created_by_id = #{createdById} ORDER BY timestamp DESC
+  </select>
+
+  <select id="getActivityById" resultMap="ActivityResult">
+    SELECT <include refid="activityColumns"/> FROM activity WHERE id = #{id}
+  </select>
+
+  <insert id="insert" useGeneratedKeys="true" keyProperty="id">
+    INSERT INTO activity (type, subject, notes, person_id, deal_id, created_by_id, timestamp)
+    VALUES (
+      #{type}, #{subject}, #{notes},
+      <choose>
+        <when test="person != null">#{person.id}</when>
+        <otherwise>NULL</otherwise>
+      </choose>,
+      <choose>
+        <when test="deal != null">#{deal.id}</when>
+        <otherwise>NULL</otherwise>
+      </choose>,
+      #{createdBy.id}, #{timestamp}
+    )
+  </insert>
+
+  <update id="update">
+    UPDATE activity
+    SET type = #{type},
+        subject = #{subject},
+        notes = #{notes},
+        person_id =
+          <choose>
+            <when test="person != null">#{person.id}</when>
+            <otherwise>NULL</otherwise>
+          </choose>,
+        deal_id =
+          <choose>
+            <when test="deal != null">#{deal.id}</when>
+            <otherwise>NULL</otherwise>
+          </choose>,
+        created_by_id = #{createdBy.id},
+        timestamp = #{timestamp}
+    WHERE id = #{id}
+  </update>
+
+  <delete id="delete">DELETE FROM activity WHERE id = #{id}</delete>
+</mapper>

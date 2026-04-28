@@ -1,0 +1,19 @@
+services:
+  db:
+    image: mysql:latest
+    restart: always
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpassword
+      MYSQL_DATABASE: connexdb
+      MYSQL_USER: connexuser
+      MYSQL_PASSWORD: connexpassword
+      TZ: Asia/Tokyo
+    ports:
+      - 3306:3306
+      - 33060:33060
+
+  adminer:
+    image: adminer:latest
+    restart: always
+    ports:
+      - 9001:8080
