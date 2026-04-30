@@ -13,6 +13,7 @@ import ooo.klae.connex.backend.services.AuthService;
 
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import jakarta.validation.Valid;
 
 import lombok.RequiredArgsConstructor;
 
@@ -34,7 +35,7 @@ public class AuthController {
      * @return
      */
     @PostMapping("/register")
-    public User register(@RequestBody RegisterDto request) {
+    public User register(@Valid @RequestBody RegisterDto request) {
         return authService.register(request);
     }
 
@@ -46,7 +47,7 @@ public class AuthController {
      * @return
      */
     @PostMapping("/login")
-    public User login(@RequestBody LoginDto request, HttpServletRequest httpRequest, HttpServletResponse httpResponse) {
+    public User login(@Valid @RequestBody LoginDto request, HttpServletRequest httpRequest, HttpServletResponse httpResponse) {
         return authService.login(request, httpRequest, httpResponse);
     }
 
