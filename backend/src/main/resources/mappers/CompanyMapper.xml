@@ -7,6 +7,20 @@
     id, name, website, industry, phone, address, created_at, updated_at
   </sql>
 
+  <resultMap id="CompanyFullResult" type="Company">
+    <id property="id" column="id"/>
+    <result property="name" column="name"/>
+    <result property="website" column="website"/>
+    <result property="industry" column="industry"/>
+    <result property="phone" column="phone"/>
+    <result property="address" column="address"/>
+    <result property="createdAt" column="created_at"/>
+    <result property="updatedAt" column="updated_at"/>
+    <collection property="people" ofType="Person" column="id" select="ooo.klae.connex.backend.mappers.PersonMapper.getPersonsByCompanyId"/>
+    <collection property="deals" ofType="Deal" column="id" select="ooo.klae.connex.backend.mappers.DealMapper.getDealsByCompanyId"/>
+    <collection property="tags" ofType="Tag" column="id" select="ooo.klae.connex.backend.mappers.TagMapper.getTagsByCompanyId"/>
+  </resultMap>
+
   <select id="getAllCompanies" resultType="Company">
     SELECT <include refid="companyColumns"/> FROM company ORDER BY name
   </select>
@@ -20,7 +34,7 @@
     ORDER BY c.name
   </select>
 
-  <select id="getCompanyById" resultType="Company">
+  <select id="getCompanyById" resultMap="CompanyFullResult">
     SELECT <include refid="companyColumns"/> FROM company WHERE id = #{id}
   </select>
 

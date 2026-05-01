@@ -23,6 +23,14 @@
     </association>
   </resultMap>
 
+  <resultMap id="DealFullResult" type="Deal" extends="DealResult">
+    <collection property="people" ofType="Person" column="id" select="ooo.klae.connex.backend.mappers.PersonMapper.getPersonsByDealId"/>
+    <collection property="activities" ofType="Activity" column="id" select="ooo.klae.connex.backend.mappers.ActivityMapper.getActivitiesByDealId"/>
+    <collection property="notes" ofType="Note" column="id" select="ooo.klae.connex.backend.mappers.NoteMapper.getNotesByDealId"/>
+    <collection property="tasks" ofType="Task" column="id" select="ooo.klae.connex.backend.mappers.TaskMapper.getTasksByDealId"/>
+    <collection property="tags" ofType="Tag" column="id" select="ooo.klae.connex.backend.mappers.TagMapper.getTagsByDealId"/>
+  </resultMap>
+
   <sql id="dealColumns">
     id, name, value, currency, pipeline_id, stage_id, company_id,
     expected_close_date, closed_at, created_at, updated_at
@@ -63,7 +71,7 @@
     WHERE dt.tag_id = #{tagId}
   </select>
 
-  <select id="getDealById" resultMap="DealResult">
+  <select id="getDealById" resultMap="DealFullResult">
     SELECT <include refid="dealColumns"/> FROM deal WHERE id = #{id}
   </select>
 
