@@ -3,6 +3,7 @@ package ooo.klae.connex.backend.mappers;
 import org.apache.ibatis.annotations.Param;
 
 import ooo.klae.connex.backend.beans.Deal;
+import ooo.klae.connex.backend.beans.DealPerson;
 import java.util.List;
 
 /**
@@ -28,8 +29,10 @@ public interface DealMapper {
     int clearTags(int dealId);
     int insertTags(@Param("dealId") int dealId, @Param("tagIds") List<Integer> tagIds);
 
-    int addPerson(@Param("dealId") int dealId, @Param("personId") int personId);
+    List<DealPerson> getDealPeopleByDealId(int dealId);
+    int addPerson(@Param("dealId") int dealId, @Param("personId") int personId, @Param("role") String role);
+    int updatePersonRole(@Param("dealId") int dealId, @Param("personId") int personId, @Param("role") String role);
     int removePerson(@Param("dealId") int dealId, @Param("personId") int personId);
     int clearPeople(int dealId);
-    int insertPeople(@Param("dealId") int dealId, @Param("personIds") List<Integer> personIds);
+    int insertPeople(@Param("dealId") int dealId, @Param("people") List<DealPerson> people);
 }

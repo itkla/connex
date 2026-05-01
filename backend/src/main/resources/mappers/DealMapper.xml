@@ -24,12 +24,27 @@
   </resultMap>
 
   <resultMap id="DealFullResult" type="Deal" extends="DealResult">
-    <collection property="people" ofType="Person" column="id" select="ooo.klae.connex.backend.mappers.PersonMapper.getPersonsByDealId"/>
+    <collection property="people" ofType="DealPerson" column="id" select="ooo.klae.connex.backend.mappers.DealMapper.getDealPeopleByDealId"/>
     <collection property="activities" ofType="Activity" column="id" select="ooo.klae.connex.backend.mappers.ActivityMapper.getActivitiesByDealId"/>
     <collection property="notes" ofType="Note" column="id" select="ooo.klae.connex.backend.mappers.NoteMapper.getNotesByDealId"/>
     <collection property="tasks" ofType="Task" column="id" select="ooo.klae.connex.backend.mappers.TaskMapper.getTasksByDealId"/>
     <collection property="tags" ofType="Tag" column="id" select="ooo.klae.connex.backend.mappers.TagMapper.getTagsByDealId"/>
   </resultMap>
+
+  <resultMap id="DealPersonResult" type="DealPerson">
+    <result property="role" column="role"/>
+    <association property="person" javaType="Person" resultMap="ooo.klae.connex.backend.mappers.PersonMapper.PersonResult"/>
+  </resultMap>
+
+  <select id="getDealPeopleByDealId" resultMap="DealPersonResult">
+    SELECT
+      p.id, p.name, p.email, p.phone, p.company_id, p.title, p.created_at, p.updated_at,
+      dp.role
+    FROM deal_person dp
+    JOIN person p ON p.id = dp.person_id
+    WHERE dp.deal_id = #{dealId}
+    ORDER BY p.name
+  </select>
 
   <sql id="dealColumns">
     id, name, value, currency, pipeline_id, stage_id, company_id,
@@ -118,9 +133,15 @@
   </delete>
 
   <insert id="addPerson">
-    INSERT IGNORE INTO deal_person (deal_id, person_id)
-    VALUES (#{dealId}, #{personId})
+    INSERT INTO deal_person (deal_id, person_id, role)
+    VALUES (#{dealId}, #{personId}, #{role})
+    ON DUPLICATE KEY UPDATE role = VALUES(role)
   </insert>
+
+  <update id="updatePersonRole">
+    UPDATE deal_person SET role = #{role}
+    WHERE deal_id = #{dealId} AND person_id = #{personId}
+  </update>
 
   <delete id="removePerson">
     DELETE FROM deal_person
@@ -143,9 +164,10 @@
   </delete>
 
   <insert id="insertPeople">
-    INSERT IGNORE INTO deal_person (deal_id, person_id) VALUES
-    <foreach collection="personIds" item="personId" separator=",">
-      (#{dealId}, #{personId})
+    INSERT INTO deal_person (deal_id, person_id, role) VALUES
+    <foreach collection="people" item="dp" separator=",">
+      (#{dealId}, #{dp.person.id}, #{dp.role})
     </foreach>
+    ON DUPLICATE KEY UPDATE role = VALUES(role)
   </insert>
 </mapper>

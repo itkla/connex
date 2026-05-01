@@ -181,7 +181,7 @@ class DealMapperTest extends AbstractMapperTest {
         Deal deal = newDeal(pipeline, stage, company);
         Person person = newPerson(company);
 
-        dealMapper.addPerson(deal.getId(), person.getId());
+        dealMapper.addPerson(deal.getId(), person.getId(), null);
 
         List<Deal> matched = dealMapper.getDealsByPersonId(person.getId());
         assertTrue(matched.stream().anyMatch(x -> x.getId() == deal.getId()));
@@ -197,8 +197,8 @@ class DealMapperTest extends AbstractMapperTest {
         Deal deal = newDeal(pipeline, stage, newCompany());
         Person person = newPerson(newCompany());
 
-        dealMapper.addPerson(deal.getId(), person.getId());
-        dealMapper.addPerson(deal.getId(), person.getId());
+        dealMapper.addPerson(deal.getId(), person.getId(), null);
+        dealMapper.addPerson(deal.getId(), person.getId(), null);
 
         long matching = dealMapper.getDealsByPersonId(person.getId()).stream()
                 .filter(x -> x.getId() == deal.getId()).count();
@@ -214,7 +214,7 @@ class DealMapperTest extends AbstractMapperTest {
         Stage stage = newStage(pipeline, 0);
         Deal deal = newDeal(pipeline, stage, newCompany());
         Person person = newPerson(newCompany());
-        dealMapper.addPerson(deal.getId(), person.getId());
+        dealMapper.addPerson(deal.getId(), person.getId(), null);
 
         dealMapper.removePerson(deal.getId(), person.getId());
 

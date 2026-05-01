@@ -211,6 +211,7 @@ CREATE TABLE note (
 CREATE TABLE deal_person (
     deal_id     INT NOT NULL,
     person_id   INT NOT NULL,
+    role        VARCHAR(64),
     PRIMARY KEY (deal_id, person_id),
     CONSTRAINT fk_deal_person_deal   FOREIGN KEY (deal_id)   REFERENCES deal(id)   ON DELETE CASCADE,
     CONSTRAINT fk_deal_person_person FOREIGN KEY (person_id) REFERENCES person(id) ON DELETE CASCADE,
