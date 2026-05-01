@@ -16,6 +16,14 @@
     </association>
   </resultMap>
 
+  <resultMap id="PersonFullResult" type="Person" extends="PersonResult">
+    <collection property="deals" ofType="Deal" column="id" select="ooo.klae.connex.backend.mappers.DealMapper.getDealsByPersonId"/>
+    <collection property="activities" ofType="Activity" column="id" select="ooo.klae.connex.backend.mappers.ActivityMapper.getActivitiesByPersonId"/>
+    <collection property="notes" ofType="Note" column="id" select="ooo.klae.connex.backend.mappers.NoteMapper.getNotesByPersonId"/>
+    <collection property="tasks" ofType="Task" column="id" select="ooo.klae.connex.backend.mappers.TaskMapper.getTasksByPersonId"/>
+    <collection property="tags" ofType="Tag" column="id" select="ooo.klae.connex.backend.mappers.TagMapper.getTagsByPersonId"/>
+  </resultMap>
+
   <sql id="personColumns">
     id, name, email, phone, company_id, title, created_at, updated_at
   </sql>
@@ -47,7 +55,7 @@
     ORDER BY p.name
   </select>
 
-  <select id="getPersonById" resultMap="PersonResult">
+  <select id="getPersonById" resultMap="PersonFullResult">
     SELECT <include refid="personColumns"/> FROM person WHERE id = #{id}
   </select>
 
