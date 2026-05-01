@@ -1,11 +1,13 @@
 package ooo.klae.connex.backend.services;
 
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import ooo.klae.connex.backend.mappers.DealMapper;
 import ooo.klae.connex.backend.mappers.PersonMapper;
 import ooo.klae.connex.backend.mappers.TagMapper;
 import ooo.klae.connex.backend.beans.Deal;
+import ooo.klae.connex.backend.beans.DealPerson;
 import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.beans.Tag;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
@@ -114,19 +116,41 @@ public class DealService {
         dealMapper.removeTag(dealId, tagId);
     }
 
-    public List<Person> getPeopleByDealId(int dealId) {
+    public List<DealPerson> getPeopleByDealId(int dealId) {
         if (dealMapper.getDealById(dealId) == null) throw new ResourceNotFoundException("Deal not found with id: " + dealId);
-        return personMapper.getPersonsByDealId(dealId);
+        return dealMapper.getDealPeopleByDealId(dealId);
     }
 
-    public void addPerson(int dealId, int personId) {
+    public void addPerson(int dealId, int personId, String role) {
         if (dealMapper.getDealById(dealId) == null) throw new ResourceNotFoundException("Deal not found with id: " + dealId);
         if (personMapper.getPersonById(personId) == null) throw new ResourceNotFoundException("Person not found with id: " + personId);
-        dealMapper.addPerson(dealId, personId);
+        dealMapper.addPerson(dealId, personId, role);
+    }
+
+    public void updatePersonRole(int dealId, int personId, String role) {
+        if (dealMapper.getDealById(dealId) == null) throw new ResourceNotFoundException("Deal not found with id: " + dealId);
+        if (dealMapper.updatePersonRole(dealId, personId, role) == 0)
+            throw new ResourceNotFoundException("Person " + personId + " is not associated with deal " + dealId);
     }
 
     public void removePerson(int dealId, int personId) {
         if (dealMapper.getDealById(dealId) == null) throw new ResourceNotFoundException("Deal not found with id: " + dealId);
         dealMapper.removePerson(dealId, personId);
+    }
+
+    @Transactional
+    public List<Tag> replaceTags(int dealId, List<Integer> tagIds) {
+        if (dealMapper.getDealById(dealId) == null) throw new ResourceNotFoundException("Deal not found with id: " + dealId);
+        dealMapper.clearTags(dealId);
+        if (tagIds != null && !tagIds.isEmpty()) dealMapper.insertTags(dealId, tagIds);
+        return tagMapper.getTagsByDealId(dealId);
+    }
+
+    @Transactional
+    public List<DealPerson> replacePeople(int dealId, List<DealPerson> people) {
+        if (dealMapper.getDealById(dealId) == null) throw new ResourceNotFoundException("Deal not found with id: " + dealId);
+        dealMapper.clearPeople(dealId);
+        if (people != null && !people.isEmpty()) dealMapper.insertPeople(dealId, people);
+        return dealMapper.getDealPeopleByDealId(dealId);
     }
 }

@@ -96,4 +96,15 @@
     DELETE FROM person_tag
     WHERE person_id = #{personId} AND tag_id = #{tagId}
   </delete>
+
+  <delete id="clearTags">
+    DELETE FROM person_tag WHERE person_id = #{personId}
+  </delete>
+
+  <insert id="insertTags">
+    INSERT IGNORE INTO person_tag (person_id, tag_id) VALUES
+    <foreach collection="tagIds" item="tagId" separator=",">
+      (#{personId}, #{tagId})
+    </foreach>
+  </insert>
 </mapper>

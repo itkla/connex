@@ -11,7 +11,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import ooo.klae.connex.backend.beans.Deal;
-import ooo.klae.connex.backend.beans.Person;
+import ooo.klae.connex.backend.beans.DealPerson;
 import ooo.klae.connex.backend.beans.Tag;
 import ooo.klae.connex.backend.services.DealService;
 
@@ -131,27 +131,46 @@ public class DealController {
      * @return
      */
     @GetMapping("/{id}/people")
-    public List<Person> getPeopleForDeal(@PathVariable int id) {
+    public List<DealPerson> getPeopleForDeal(@PathVariable int id) {
         return dealService.getPeopleByDealId(id);
     }
 
-    /**
-     * POST endpoint to associate a person with a deal.
-     * @param id
-     * @param personId
-     */
     @PostMapping("/{id}/people/{personId}")
-    public void addPersonToDeal(@PathVariable int id, @PathVariable int personId) {
-        dealService.addPerson(id, personId);
+    public void addPersonToDeal(@PathVariable int id, @PathVariable int personId,
+                                @RequestParam(required = false) String role) {
+        dealService.addPerson(id, personId, role);
     }
 
-    /**
-     * DELETE endpoint to dissociate a person from a deal.
-     * @param id
-     * @param personId
-     */
+    @PutMapping("/{id}/people/{personId}")
+    public void updatePersonRoleOnDeal(@PathVariable int id, @PathVariable int personId,
+                                       @RequestParam(required = false) String role) {
+        dealService.updatePersonRole(id, personId, role);
+    }
+
     @DeleteMapping("/{id}/people/{personId}")
     public void removePersonFromDeal(@PathVariable int id, @PathVariable int personId) {
         dealService.removePerson(id, personId);
+    }
+
+    /**
+     * PUT endpoint to replace the tags associated with a deal.
+     * @param id
+     * @param tagIds
+     * @return
+     */
+    @PutMapping("/{id}/tags")
+    public List<Tag> replaceTagsForDeal(@PathVariable int id, @RequestBody List<Integer> tagIds) {
+        return dealService.replaceTags(id, tagIds);
+    }
+
+    /**
+     * PUT endpoint to replace the people associated with a deal.
+     * @param id
+     * @param personIds
+     * @return List of people
+     */
+    @PutMapping("/{id}/people")
+    public List<DealPerson> replacePeopleForDeal(@PathVariable int id, @RequestBody List<DealPerson> people) {
+        return dealService.replacePeople(id, people);
     }
 }

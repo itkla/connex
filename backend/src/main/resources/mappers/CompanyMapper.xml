@@ -64,4 +64,15 @@
     DELETE FROM company_tag
     WHERE company_id = #{companyId} AND tag_id = #{tagId}
   </delete>
+
+  <delete id="clearTags">
+    DELETE FROM company_tag WHERE company_id = #{companyId}
+  </delete>
+
+  <insert id="insertTags">
+    INSERT IGNORE INTO company_tag (company_id, tag_id) VALUES
+    <foreach collection="tagIds" item="tagId" separator=",">
+      (#{companyId}, #{tagId})
+    </foreach>
+  </insert>
 </mapper>

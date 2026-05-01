@@ -1,6 +1,7 @@
 package ooo.klae.connex.backend.services;
 
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import ooo.klae.connex.backend.mappers.PersonMapper;
 import ooo.klae.connex.backend.mappers.TagMapper;
@@ -100,5 +101,13 @@ public class PersonService {
     public void removeTag(int personId, int tagId) {
         if (personMapper.getPersonById(personId) == null) throw new ResourceNotFoundException("Person not found with id: " + personId);
         personMapper.removeTag(personId, tagId);
+    }
+
+    @Transactional
+    public List<Tag> replaceTags(int personId, List<Integer> tagIds) {
+        if (personMapper.getPersonById(personId) == null) throw new ResourceNotFoundException("Person not found with id: " + personId);
+        personMapper.clearTags(personId);
+        if (tagIds != null && !tagIds.isEmpty()) personMapper.insertTags(personId, tagIds);
+        return tagMapper.getTagsByPersonId(personId);
     }
 }

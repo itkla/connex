@@ -21,4 +21,6 @@ public interface CompanyMapper {
 
     int addTag(@Param("companyId") int companyId, @Param("tagId") int tagId);
     int removeTag(@Param("companyId") int companyId, @Param("tagId") int tagId);
+    int clearTags(int companyId);
+    int insertTags(@Param("companyId") int companyId, @Param("tagIds") List<Integer> tagIds);
 }

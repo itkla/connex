@@ -169,7 +169,7 @@ class PersonMapperTest extends AbstractMapperTest {
         Pipeline pipeline = newPipeline();
         Stage stage = newStage(pipeline, 0);
         Deal deal = newDeal(pipeline, stage, company);
-        dealMapper.addPerson(deal.getId(), person.getId());
+        dealMapper.addPerson(deal.getId(), person.getId(), null);
 
         List<Person> matched = personMapper.getPersonsByDealId(deal.getId());
 

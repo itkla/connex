@@ -21,7 +21,7 @@ public class Deal {
     private Pipeline pipeline;
     private Stage stage;
     private Company company;
-    private Person[] people;
+    private DealPerson[] people;
     private Activity[] activities;
     private Note[] notes;
     private Task[] tasks;
@@ -90,11 +90,11 @@ public class Deal {
         this.company = company;
     }
 
-    public Person[] getPeople() {
+    public DealPerson[] getPeople() {
         return people;
     }
 
-    public void setPeople(Person[] people) {
+    public void setPeople(DealPerson[] people) {
         this.people = people;
     }
 
