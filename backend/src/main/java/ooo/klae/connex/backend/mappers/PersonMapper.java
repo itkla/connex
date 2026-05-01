@@ -23,4 +23,6 @@ public interface PersonMapper {
 
     int addTag(@Param("personId") int personId, @Param("tagId") int tagId);
     int removeTag(@Param("personId") int personId, @Param("tagId") int tagId);
+    int clearTags(int personId);
+    int insertTags(@Param("personId") int personId, @Param("tagIds") List<Integer> tagIds);
 }

@@ -25,6 +25,11 @@ public interface DealMapper {
 
     int addTag(@Param("dealId") int dealId, @Param("tagId") int tagId);
     int removeTag(@Param("dealId") int dealId, @Param("tagId") int tagId);
+    int clearTags(int dealId);
+    int insertTags(@Param("dealId") int dealId, @Param("tagIds") List<Integer> tagIds);
+
     int addPerson(@Param("dealId") int dealId, @Param("personId") int personId);
     int removePerson(@Param("dealId") int dealId, @Param("personId") int personId);
+    int clearPeople(int dealId);
+    int insertPeople(@Param("dealId") int dealId, @Param("personIds") List<Integer> personIds);
 }

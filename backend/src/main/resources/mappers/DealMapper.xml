@@ -126,4 +126,26 @@
     DELETE FROM deal_person
     WHERE deal_id = #{dealId} AND person_id = #{personId}
   </delete>
+
+  <delete id="clearTags">
+    DELETE FROM deal_tag WHERE deal_id = #{dealId}
+  </delete>
+
+  <insert id="insertTags">
+    INSERT IGNORE INTO deal_tag (deal_id, tag_id) VALUES
+    <foreach collection="tagIds" item="tagId" separator=",">
+      (#{dealId}, #{tagId})
+    </foreach>
+  </insert>
+
+  <delete id="clearPeople">
+    DELETE FROM deal_person WHERE deal_id = #{dealId}
+  </delete>
+
+  <insert id="insertPeople">
+    INSERT IGNORE INTO deal_person (deal_id, person_id) VALUES
+    <foreach collection="personIds" item="personId" separator=",">
+      (#{dealId}, #{personId})
+    </foreach>
+  </insert>
 </mapper>

@@ -154,4 +154,26 @@ public class DealController {
     public void removePersonFromDeal(@PathVariable int id, @PathVariable int personId) {
         dealService.removePerson(id, personId);
     }
+
+    /**
+     * PUT endpoint to replace the tags associated with a deal.
+     * @param id
+     * @param tagIds
+     * @return
+     */
+    @PutMapping("/{id}/tags")
+    public List<Tag> replaceTagsForDeal(@PathVariable int id, @RequestBody List<Integer> tagIds) {
+        return dealService.replaceTags(id, tagIds);
+    }
+
+    /**
+     * PUT endpoint to replace the people associated with a deal.
+     * @param id
+     * @param personIds
+     * @return List of people
+     */
+    @PutMapping("/{id}/people")
+    public List<Person> replacePeopleForDeal(@PathVariable int id, @RequestBody List<Integer> personIds) {
+        return dealService.replacePeople(id, personIds);
+    }
 }

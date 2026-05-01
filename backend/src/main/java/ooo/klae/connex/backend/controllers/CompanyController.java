@@ -111,4 +111,15 @@ public class CompanyController {
     public void removeTagFromCompany(@PathVariable int id, @PathVariable int tagId) {
         companyService.removeTag(id, tagId);
     }
+
+    /**
+     * PUT endpoint to replace the tags associated with a company.
+     * @param id
+     * @param tagIds
+     * @return List of tags
+     */
+    @PutMapping("/{id}/tags")
+    public List<Tag> replaceTagsForCompany(@PathVariable int id, @RequestBody List<Integer> tagIds) {
+        return companyService.replaceTags(id, tagIds);
+    }
 }

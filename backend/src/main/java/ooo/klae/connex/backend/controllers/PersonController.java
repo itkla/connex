@@ -117,4 +117,15 @@ public class PersonController {
     public void removeTagFromPerson(@PathVariable int id, @PathVariable int tagId) {
         personService.removeTag(id, tagId);
     }
+
+    /**
+     * PUT endpoint to replace the tags associated with a person.
+     * @param id
+     * @param tagIds
+     * @return
+     */
+    @PutMapping("/{id}/tags")
+    public List<Tag> replaceTagsForPerson(@PathVariable int id, @RequestBody List<Integer> tagIds) {
+        return personService.replaceTags(id, tagIds);
+    }
 }

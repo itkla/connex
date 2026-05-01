@@ -1,6 +1,7 @@
 package ooo.klae.connex.backend.services;
 
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import ooo.klae.connex.backend.mappers.DealMapper;
 import ooo.klae.connex.backend.mappers.PersonMapper;
@@ -128,5 +129,21 @@ public class DealService {
     public void removePerson(int dealId, int personId) {
         if (dealMapper.getDealById(dealId) == null) throw new ResourceNotFoundException("Deal not found with id: " + dealId);
         dealMapper.removePerson(dealId, personId);
+    }
+
+    @Transactional
+    public List<Tag> replaceTags(int dealId, List<Integer> tagIds) {
+        if (dealMapper.getDealById(dealId) == null) throw new ResourceNotFoundException("Deal not found with id: " + dealId);
+        dealMapper.clearTags(dealId);
+        if (tagIds != null && !tagIds.isEmpty()) dealMapper.insertTags(dealId, tagIds);
+        return tagMapper.getTagsByDealId(dealId);
+    }
+
+    @Transactional
+    public List<Person> replacePeople(int dealId, List<Integer> personIds) {
+        if (dealMapper.getDealById(dealId) == null) throw new ResourceNotFoundException("Deal not found with id: " + dealId);
+        dealMapper.clearPeople(dealId);
+        if (personIds != null && !personIds.isEmpty()) dealMapper.insertPeople(dealId, personIds);
+        return personMapper.getPersonsByDealId(dealId);
     }
 }
