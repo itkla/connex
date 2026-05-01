@@ -4,7 +4,7 @@ import { ArrowRightCircleIcon } from "@heroicons/react/16/solid";
 
 export default function Home() {
   return (
-    <div className="min-h-screen bg-white max-w-7xl mx-auto">
+    <div className="min-h-screen bg-white max-w-full">
       <header className="flex items-center justify-between px-8 py-6">
         <div className="flex items-center gap-12">
           <a href="/" className="text-2xl font-bold tracking-tight text-black">
