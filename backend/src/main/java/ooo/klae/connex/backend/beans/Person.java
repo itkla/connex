@@ -19,7 +19,7 @@ public class Person {
     private String phone;
     private Company company;
     private String title;
-    private String[] tags;
+    private Tag[] tags;
     private Task[] tasks; // tasks assigned to this contact
     private Activity[] activities; // interactions logged with this contact
     private Deal[] deals; // deals this person is associated with (many-to-many). NOT the same as the company’s deals.
@@ -75,11 +75,11 @@ public class Person {
         this.title = title;
     }
 
-    public String[] getTags() {
+    public Tag[] getTags() {
         return tags;
     }
 
-    public void setTags(String[] tags) {
+    public void setTags(Tag[] tags) {
         this.tags = tags;
     }
 

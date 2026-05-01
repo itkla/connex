@@ -25,7 +25,7 @@ public class Deal {
     private Activity[] activities;
     private Note[] notes;
     private Task[] tasks;
-    private String[] tags;
+    private Tag[] tags;
     private String expectedCloseDate;
     private String closedAt;
     private String createdAt;
@@ -122,11 +122,11 @@ public class Deal {
         this.tasks = tasks;
     }
 
-    public String[] getTags() {
+    public Tag[] getTags() {
         return tags;
     }
 
-    public void setTags(String[] tags) {
+    public void setTags(Tag[] tags) {
         this.tags = tags;
     }
 
