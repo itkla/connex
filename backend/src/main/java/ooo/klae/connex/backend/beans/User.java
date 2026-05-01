@@ -52,6 +52,7 @@ public class User implements org.springframework.security.core.userdetails.UserD
         this.id = id;
     }
 
+    @Override
     public String getUsername() {
         return username;
     }
