@@ -20,7 +20,7 @@ public class Company {
     private String address;
     private Person[] people; // associated contacts
     private Deal[] deals; // associated deals
-    private String[] tags; // e.g. "VIP", "Prospect", "Customer"
+    private Tag[] tags;
     private String createdAt;
     private String updatedAt;
 
@@ -88,11 +88,11 @@ public class Company {
         this.deals = deals;
     }
 
-    public String[] getTags() {
+    public Tag[] getTags() {
         return tags;
     }
 
-    public void setTags(String[] tags) {
+    public void setTags(Tag[] tags) {
         this.tags = tags;
     }
 
