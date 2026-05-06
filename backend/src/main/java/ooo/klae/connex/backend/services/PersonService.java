@@ -3,10 +3,18 @@ package ooo.klae.connex.backend.services;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import ooo.klae.connex.backend.mappers.ActivityMapper;
+import ooo.klae.connex.backend.mappers.DealMapper;
+import ooo.klae.connex.backend.mappers.NoteMapper;
 import ooo.klae.connex.backend.mappers.PersonMapper;
 import ooo.klae.connex.backend.mappers.TagMapper;
+import ooo.klae.connex.backend.mappers.TaskMapper;
+import ooo.klae.connex.backend.beans.Activity;
+import ooo.klae.connex.backend.beans.Deal;
+import ooo.klae.connex.backend.beans.Note;
 import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.beans.Tag;
+import ooo.klae.connex.backend.beans.Task;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import java.util.List;
 
@@ -23,6 +31,10 @@ import lombok.RequiredArgsConstructor;
 public class PersonService {
     private final PersonMapper personMapper;
     private final TagMapper tagMapper;
+    private final DealMapper dealMapper;
+    private final ActivityMapper activityMapper;
+    private final NoteMapper noteMapper;
+    private final TaskMapper taskMapper;
 
     /**
      * Retrieves all {@code Person} records.
@@ -109,5 +121,25 @@ public class PersonService {
         personMapper.clearTags(personId);
         if (tagIds != null && !tagIds.isEmpty()) personMapper.insertTags(personId, tagIds);
         return tagMapper.getTagsByPersonId(personId);
+    }
+
+    public List<Deal> getDealsByPersonId(int personId) {
+        if (personMapper.getPersonById(personId) == null) throw new ResourceNotFoundException("Person not found with id: " + personId);
+        return dealMapper.getDealsByPersonId(personId);
+    }
+
+    public List<Activity> getActivitiesByPersonId(int personId) {
+        if (personMapper.getPersonById(personId) == null) throw new ResourceNotFoundException("Person not found with id: " + personId);
+        return activityMapper.getActivitiesByPersonId(personId);
+    }
+
+    public List<Note> getNotesByPersonId(int personId) {
+        if (personMapper.getPersonById(personId) == null) throw new ResourceNotFoundException("Person not found with id: " + personId);
+        return noteMapper.getNotesByPersonId(personId);
+    }
+
+    public List<Task> getTasksByPersonId(int personId) {
+        if (personMapper.getPersonById(personId) == null) throw new ResourceNotFoundException("Person not found with id: " + personId);
+        return taskMapper.getTasksByPersonId(personId);
     }
 }

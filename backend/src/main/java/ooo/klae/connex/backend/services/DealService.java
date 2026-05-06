@@ -3,13 +3,19 @@ package ooo.klae.connex.backend.services;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import ooo.klae.connex.backend.mappers.ActivityMapper;
 import ooo.klae.connex.backend.mappers.DealMapper;
+import ooo.klae.connex.backend.mappers.NoteMapper;
 import ooo.klae.connex.backend.mappers.PersonMapper;
 import ooo.klae.connex.backend.mappers.TagMapper;
+import ooo.klae.connex.backend.mappers.TaskMapper;
+import ooo.klae.connex.backend.beans.Activity;
 import ooo.klae.connex.backend.beans.Deal;
 import ooo.klae.connex.backend.beans.DealPerson;
+import ooo.klae.connex.backend.beans.Note;
 import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.beans.Tag;
+import ooo.klae.connex.backend.beans.Task;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 
 import java.util.List;
@@ -28,6 +34,9 @@ public class DealService {
     private final DealMapper dealMapper;
     private final PersonMapper personMapper;
     private final TagMapper tagMapper;
+    private final ActivityMapper activityMapper;
+    private final NoteMapper noteMapper;
+    private final TaskMapper taskMapper;
 
     /**
      * Retrieves all {@code Deal} records.
@@ -152,5 +161,20 @@ public class DealService {
         dealMapper.clearPeople(dealId);
         if (people != null && !people.isEmpty()) dealMapper.insertPeople(dealId, people);
         return dealMapper.getDealPeopleByDealId(dealId);
+    }
+
+    public List<Activity> getActivitiesByDealId(int dealId) {
+        if (dealMapper.getDealById(dealId) == null) throw new ResourceNotFoundException("Deal not found with id: " + dealId);
+        return activityMapper.getActivitiesByDealId(dealId);
+    }
+
+    public List<Note> getNotesByDealId(int dealId) {
+        if (dealMapper.getDealById(dealId) == null) throw new ResourceNotFoundException("Deal not found with id: " + dealId);
+        return noteMapper.getNotesByDealId(dealId);
+    }
+
+    public List<Task> getTasksByDealId(int dealId) {
+        if (dealMapper.getDealById(dealId) == null) throw new ResourceNotFoundException("Deal not found with id: " + dealId);
+        return taskMapper.getTasksByDealId(dealId);
     }
 }

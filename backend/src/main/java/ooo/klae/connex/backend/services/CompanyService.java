@@ -4,8 +4,12 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import ooo.klae.connex.backend.mappers.CompanyMapper;
+import ooo.klae.connex.backend.mappers.DealMapper;
+import ooo.klae.connex.backend.mappers.PersonMapper;
 import ooo.klae.connex.backend.mappers.TagMapper;
 import ooo.klae.connex.backend.beans.Company;
+import ooo.klae.connex.backend.beans.Deal;
+import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.beans.Tag;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 
@@ -24,6 +28,8 @@ import lombok.RequiredArgsConstructor;
 public class CompanyService {
     private final CompanyMapper companyMapper;
     private final TagMapper tagMapper;
+    private final PersonMapper personMapper;
+    private final DealMapper dealMapper;
 
     /**
      * Retrieves all {@code Company} records.
@@ -109,5 +115,15 @@ public class CompanyService {
         companyMapper.clearTags(companyId);
         if (tagIds != null && !tagIds.isEmpty()) companyMapper.insertTags(companyId, tagIds);
         return tagMapper.getTagsByCompanyId(companyId);
+    }
+
+    public List<Person> getPersonsByCompanyId(int companyId) {
+        if (companyMapper.getCompanyById(companyId) == null) throw new ResourceNotFoundException("Company not found with id: " + companyId);
+        return personMapper.getPersonsByCompanyId(companyId);
+    }
+
+    public List<Deal> getDealsByCompanyId(int companyId) {
+        if (companyMapper.getCompanyById(companyId) == null) throw new ResourceNotFoundException("Company not found with id: " + companyId);
+        return dealMapper.getDealsByCompanyId(companyId);
     }
 }

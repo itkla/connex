@@ -10,8 +10,12 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import ooo.klae.connex.backend.beans.Activity;
+import ooo.klae.connex.backend.beans.Deal;
+import ooo.klae.connex.backend.beans.Note;
 import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.beans.Tag;
+import ooo.klae.connex.backend.beans.Task;
 import ooo.klae.connex.backend.services.PersonService;
 
 import java.util.List;
@@ -127,5 +131,25 @@ public class PersonController {
     @PutMapping("/{id}/tags")
     public List<Tag> replaceTagsForPerson(@PathVariable int id, @RequestBody List<Integer> tagIds) {
         return personService.replaceTags(id, tagIds);
+    }
+
+    @GetMapping("/{id}/deals")
+    public List<Deal> getDealsForPerson(@PathVariable int id) {
+        return personService.getDealsByPersonId(id);
+    }
+
+    @GetMapping("/{id}/activities")
+    public List<Activity> getActivitiesForPerson(@PathVariable int id) {
+        return personService.getActivitiesByPersonId(id);
+    }
+
+    @GetMapping("/{id}/notes")
+    public List<Note> getNotesForPerson(@PathVariable int id) {
+        return personService.getNotesByPersonId(id);
+    }
+
+    @GetMapping("/{id}/tasks")
+    public List<Task> getTasksForPerson(@PathVariable int id) {
+        return personService.getTasksByPersonId(id);
     }
 }

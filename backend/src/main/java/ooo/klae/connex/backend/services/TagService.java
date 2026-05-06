@@ -2,7 +2,13 @@ package ooo.klae.connex.backend.services;
 
 import org.springframework.stereotype.Service;
 
+import ooo.klae.connex.backend.mappers.CompanyMapper;
+import ooo.klae.connex.backend.mappers.DealMapper;
+import ooo.klae.connex.backend.mappers.PersonMapper;
 import ooo.klae.connex.backend.mappers.TagMapper;
+import ooo.klae.connex.backend.beans.Company;
+import ooo.klae.connex.backend.beans.Deal;
+import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.beans.Tag;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 
@@ -19,6 +25,9 @@ import lombok.RequiredArgsConstructor;
 @RequiredArgsConstructor
 public class TagService {
     private final TagMapper tagMapper;
+    private final DealMapper dealMapper;
+    private final PersonMapper personMapper;
+    private final CompanyMapper companyMapper;
 
     public List<Tag> getAllTags() {
         return tagMapper.getAllTags();
@@ -57,5 +66,20 @@ public class TagService {
 
     public List<Tag> getTagsByDealId(int dealId) {
         return tagMapper.getTagsByDealId(dealId);
+    }
+
+    public List<Deal> getDealsByTagId(int tagId) {
+        if (tagMapper.getTagById(tagId) == null) throw new ResourceNotFoundException("Tag not found with id: " + tagId);
+        return dealMapper.getDealsByTagId(tagId);
+    }
+
+    public List<Person> getPersonsByTagId(int tagId) {
+        if (tagMapper.getTagById(tagId) == null) throw new ResourceNotFoundException("Tag not found with id: " + tagId);
+        return personMapper.getPersonsByTagId(tagId);
+    }
+
+    public List<Company> getCompaniesByTagId(int tagId) {
+        if (tagMapper.getTagById(tagId) == null) throw new ResourceNotFoundException("Tag not found with id: " + tagId);
+        return companyMapper.getCompaniesByTagId(tagId);
     }
 }
