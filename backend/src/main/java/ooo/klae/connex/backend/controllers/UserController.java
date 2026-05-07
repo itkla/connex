@@ -9,6 +9,9 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import ooo.klae.connex.backend.beans.Activity;
+import ooo.klae.connex.backend.beans.Note;
+import ooo.klae.connex.backend.beans.Task;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.services.UserService;
 
@@ -75,5 +78,35 @@ public class UserController {
     @DeleteMapping("/{id}")
     public void deleteUser(@PathVariable int id) {
         userService.delete(id);
+    }
+
+    /**
+     * GET endpoint to retrieve activities created by a user.
+     * @param id
+     * @return
+     */
+    @GetMapping("/{id}/activities")
+    public List<Activity> getActivitiesForUser(@PathVariable int id) {
+        return userService.getActivitiesByUserId(id);
+    }
+
+    /**
+     * GET endpoint to retrieve tasks assigned to a user.
+     * @param id
+     * @return
+     */
+    @GetMapping("/{id}/tasks")
+    public List<Task> getTasksForUser(@PathVariable int id) {
+        return userService.getTasksByUserId(id);
+    }
+
+    /**
+     * GET endpoint to retrieve notes authored by a user.
+     * @param id
+     * @return
+     */
+    @GetMapping("/{id}/notes")
+    public List<Note> getNotesForUser(@PathVariable int id) {
+        return userService.getNotesByUserId(id);
     }
 }

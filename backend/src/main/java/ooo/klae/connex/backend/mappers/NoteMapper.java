@@ -13,6 +13,7 @@ public interface NoteMapper {
     List<Note> getAllNotes();
     List<Note> getNotesByPersonId(int personId);
     List<Note> getNotesByDealId(int dealId);
+    List<Note> getNotesByAuthorId(int authorId);
     Note getNoteById(int id);
     int insert(Note note);
     int update(Note note);

@@ -5,7 +5,13 @@ import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.security.core.userdetails.UsernameNotFoundException;
 import org.springframework.stereotype.Service;
 
+import ooo.klae.connex.backend.mappers.ActivityMapper;
+import ooo.klae.connex.backend.mappers.NoteMapper;
+import ooo.klae.connex.backend.mappers.TaskMapper;
 import ooo.klae.connex.backend.mappers.UserMapper;
+import ooo.klae.connex.backend.beans.Activity;
+import ooo.klae.connex.backend.beans.Note;
+import ooo.klae.connex.backend.beans.Task;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 
@@ -23,6 +29,9 @@ import lombok.RequiredArgsConstructor;
 @RequiredArgsConstructor
 public class UserService implements UserDetailsService {
     private final UserMapper userMapper;
+    private final ActivityMapper activityMapper;
+    private final NoteMapper noteMapper;
+    private final TaskMapper taskMapper;
 
     @Override
     public UserDetails loadUserByUsername(String username) throws UsernameNotFoundException {
@@ -62,5 +71,35 @@ public class UserService implements UserDetailsService {
     public void delete(int id) {
         if (userMapper.getUserById(id) == null) throw new ResourceNotFoundException("User not found with id: " + id);
         userMapper.delete(id);
+    }
+
+    /**
+     * Retrieves the activities created by a user.
+     * @param userId
+     * @return
+     */
+    public List<Activity> getActivitiesByUserId(int userId) {
+        if (userMapper.getUserById(userId) == null) throw new ResourceNotFoundException("User not found with id: " + userId);
+        return activityMapper.getActivitiesByCreatedById(userId);
+    }
+
+    /**
+     * Retrieves the tasks assigned to a user.
+     * @param userId
+     * @return
+     */
+    public List<Task> getTasksByUserId(int userId) {
+        if (userMapper.getUserById(userId) == null) throw new ResourceNotFoundException("User not found with id: " + userId);
+        return taskMapper.getTasksByAssignedToId(userId);
+    }
+
+    /**
+     * Retrieves the notes authored by a user.
+     * @param userId
+     * @return
+     */
+    public List<Note> getNotesByUserId(int userId) {
+        if (userMapper.getUserById(userId) == null) throw new ResourceNotFoundException("User not found with id: " + userId);
+        return noteMapper.getNotesByAuthorId(userId);
     }
 }

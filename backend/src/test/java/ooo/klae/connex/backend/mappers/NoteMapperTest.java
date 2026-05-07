@@ -174,4 +174,23 @@ class NoteMapperTest extends AbstractMapperTest {
         assertTrue(matched.stream().anyMatch(x -> x.getId() == note1.getId()));
         assertTrue(matched.stream().noneMatch(x -> x.getId() == note2.getId()));
     }
+
+    /**
+     * Gets notes by author ID and checks the returned list contains only notes authored by that user.
+     */
+    @Test
+    void getNotesByAuthorId_filtersByAuthor() {
+        User user1 = newUser();
+        User user2 = newUser();
+
+        Note note1 = build("by u1", user1, null, null);
+        Note note2 = build("by u2", user2, null, null);
+        noteMapper.insert(note1);
+        noteMapper.insert(note2);
+
+        List<Note> matched = noteMapper.getNotesByAuthorId(user1.getId());
+
+        assertTrue(matched.stream().anyMatch(x -> x.getId() == note1.getId()));
+        assertTrue(matched.stream().noneMatch(x -> x.getId() == note2.getId()));
+    }
 }
