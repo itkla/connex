@@ -2,7 +2,9 @@ package ooo.klae.connex.backend.services;
 
 import org.springframework.stereotype.Service;
 
+import ooo.klae.connex.backend.mappers.DealMapper;
 import ooo.klae.connex.backend.mappers.PipelineMapper;
+import ooo.klae.connex.backend.beans.Deal;
 import ooo.klae.connex.backend.beans.Pipeline;
 import ooo.klae.connex.backend.beans.Stage;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
@@ -20,6 +22,7 @@ import lombok.RequiredArgsConstructor;
 @RequiredArgsConstructor
 public class PipelineService {
     private final PipelineMapper pipelineMapper;
+    private final DealMapper dealMapper;
 
     public List<Pipeline> getAllPipelines() {
         return pipelineMapper.getAllPipelines();
@@ -79,5 +82,25 @@ public class PipelineService {
     public void deleteStage(int id) {
         if (pipelineMapper.getStageById(id) == null) throw new ResourceNotFoundException("Stage not found with id: " + id);
         pipelineMapper.deleteStage(id);
+    }
+
+    /**
+     * Retrieves the deals associated with a pipeline.
+     * @param pipelineId
+     * @return
+     */
+    public List<Deal> getDealsByPipelineId(int pipelineId) {
+        if (pipelineMapper.getPipelineById(pipelineId) == null) throw new ResourceNotFoundException("Pipeline not found with id: " + pipelineId);
+        return dealMapper.getDealsByPipelineId(pipelineId);
+    }
+
+    /**
+     * Retrieves the deals associated with a stage.
+     * @param stageId
+     * @return
+     */
+    public List<Deal> getDealsByStageId(int stageId) {
+        if (pipelineMapper.getStageById(stageId) == null) throw new ResourceNotFoundException("Stage not found with id: " + stageId);
+        return dealMapper.getDealsByStageId(stageId);
     }
 }

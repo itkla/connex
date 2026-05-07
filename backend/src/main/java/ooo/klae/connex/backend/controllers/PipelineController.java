@@ -9,6 +9,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import ooo.klae.connex.backend.beans.Deal;
 import ooo.klae.connex.backend.beans.Pipeline;
 import ooo.klae.connex.backend.beans.Stage;
 import ooo.klae.connex.backend.services.PipelineService;
@@ -129,5 +130,25 @@ public class PipelineController {
     @DeleteMapping("/stages/{id}")
     public void deleteStage(@PathVariable int id) {
         pipelineService.deleteStage(id);
+    }
+
+    /**
+     * GET endpoint to retrieve deals associated with a pipeline.
+     * @param id
+     * @return
+     */
+    @GetMapping("/{id}/deals")
+    public List<Deal> getDealsForPipeline(@PathVariable int id) {
+        return pipelineService.getDealsByPipelineId(id);
+    }
+
+    /**
+     * GET endpoint to retrieve deals associated with a stage.
+     * @param id
+     * @return
+     */
+    @GetMapping("/stages/{id}/deals")
+    public List<Deal> getDealsForStage(@PathVariable int id) {
+        return pipelineService.getDealsByStageId(id);
     }
 }
