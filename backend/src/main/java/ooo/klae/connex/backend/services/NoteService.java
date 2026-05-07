@@ -33,6 +33,10 @@ public class NoteService {
         return noteMapper.getNotesByDealId(dealId);
     }
 
+    public List<Note> getNotesByAuthorId(int authorId) {
+        return noteMapper.getNotesByAuthorId(authorId);
+    }
+
     public Note getNoteById(int id) {
         Note note = noteMapper.getNoteById(id);
         if (note == null) throw new ResourceNotFoundException("Note not found with id: " + id);

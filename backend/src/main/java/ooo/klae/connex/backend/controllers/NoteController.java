@@ -37,10 +37,12 @@ public class NoteController {
     @GetMapping
     public List<Note> getNotes(
         @RequestParam(required = false) Integer personId,
-        @RequestParam(required = false) Integer dealId
+        @RequestParam(required = false) Integer dealId,
+        @RequestParam(required = false) Integer authorId
     ) {
         if (personId != null) return noteService.getNotesByPersonId(personId);
         if (dealId != null)   return noteService.getNotesByDealId(dealId);
+        if (authorId != null) return noteService.getNotesByAuthorId(authorId);
         return noteService.getAllNotes();
     }
 
