@@ -4,8 +4,12 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import ooo.klae.connex.backend.mappers.CompanyMapper;
+import ooo.klae.connex.backend.mappers.DealMapper;
+import ooo.klae.connex.backend.mappers.PersonMapper;
 import ooo.klae.connex.backend.mappers.TagMapper;
 import ooo.klae.connex.backend.beans.Company;
+import ooo.klae.connex.backend.beans.Deal;
+import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.beans.Tag;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 
@@ -24,6 +28,8 @@ import lombok.RequiredArgsConstructor;
 public class CompanyService {
     private final CompanyMapper companyMapper;
     private final TagMapper tagMapper;
+    private final PersonMapper personMapper;
+    private final DealMapper dealMapper;
 
     /**
      * Retrieves all {@code Company} records.
@@ -87,27 +93,68 @@ public class CompanyService {
         companyMapper.delete(id);
     }
 
+    /**
+     * Retrieves the tags associated with a company.
+     * @param companyId
+     * @return
+     */
     public List<Tag> getTagsByCompanyId(int companyId) {
         if (companyMapper.getCompanyById(companyId) == null) throw new ResourceNotFoundException("Company not found with id: " + companyId);
         return tagMapper.getTagsByCompanyId(companyId);
     }
 
+    /**
+     * Adds a tag to a company.
+     * @param companyId
+     * @param tagId
+     */
     public void addTag(int companyId, int tagId) {
         if (companyMapper.getCompanyById(companyId) == null) throw new ResourceNotFoundException("Company not found with id: " + companyId);
         if (tagMapper.getTagById(tagId) == null) throw new ResourceNotFoundException("Tag not found with id: " + tagId);
         companyMapper.addTag(companyId, tagId);
     }
 
+    /**
+     * Removes a tag from a company.
+     * @param companyId
+     * @param tagId
+     */
     public void removeTag(int companyId, int tagId) {
         if (companyMapper.getCompanyById(companyId) == null) throw new ResourceNotFoundException("Company not found with id: " + companyId);
         companyMapper.removeTag(companyId, tagId);
     }
 
+    /**
+     * Replaces the tags associated with a company.
+     * @param companyId
+     * @param tagIds
+     * @return
+     */
     @Transactional
     public List<Tag> replaceTags(int companyId, List<Integer> tagIds) {
         if (companyMapper.getCompanyById(companyId) == null) throw new ResourceNotFoundException("Company not found with id: " + companyId);
         companyMapper.clearTags(companyId);
         if (tagIds != null && !tagIds.isEmpty()) companyMapper.insertTags(companyId, tagIds);
         return tagMapper.getTagsByCompanyId(companyId);
+    }
+
+    /**
+     * Retrieves the people associated with a company.
+     * @param companyId
+     * @return
+     */
+    public List<Person> getPersonsByCompanyId(int companyId) {
+        if (companyMapper.getCompanyById(companyId) == null) throw new ResourceNotFoundException("Company not found with id: " + companyId);
+        return personMapper.getPersonsByCompanyId(companyId);
+    }
+
+    /**
+     * Retrieves the deals associated with a company.
+     * @param companyId
+     * @return
+     */
+    public List<Deal> getDealsByCompanyId(int companyId) {
+        if (companyMapper.getCompanyById(companyId) == null) throw new ResourceNotFoundException("Company not found with id: " + companyId);
+        return dealMapper.getDealsByCompanyId(companyId);
     }
 }

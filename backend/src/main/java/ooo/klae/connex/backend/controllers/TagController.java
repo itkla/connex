@@ -9,6 +9,9 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import ooo.klae.connex.backend.beans.Company;
+import ooo.klae.connex.backend.beans.Deal;
+import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.beans.Tag;
 import ooo.klae.connex.backend.services.TagService;
 
@@ -77,5 +80,35 @@ public class TagController {
     @DeleteMapping("/{id}")
     public void deleteTag(@PathVariable int id) {
         tagService.delete(id);
+    }
+
+    /**
+     * GET endpoint to retrieve deals associated with a tag.
+     * @param id
+     * @return
+     */
+    @GetMapping("/{id}/deals")
+    public List<Deal> getDealsForTag(@PathVariable int id) {
+        return tagService.getDealsByTagId(id);
+    }
+
+    /**
+     * GET endpoint to retrieve people associated with a tag.
+     * @param id
+     * @return
+     */
+    @GetMapping("/{id}/people")
+    public List<Person> getPeopleForTag(@PathVariable int id) {
+        return tagService.getPersonsByTagId(id);
+    }
+
+    /**
+     * GET endpoint to retrieve companies associated with a tag.
+     * @param id
+     * @return
+     */
+    @GetMapping("/{id}/companies")
+    public List<Company> getCompaniesForTag(@PathVariable int id) {
+        return tagService.getCompaniesByTagId(id);
     }
 }
