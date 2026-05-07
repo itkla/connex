@@ -82,16 +82,31 @@ public class TagController {
         tagService.delete(id);
     }
 
+    /**
+     * GET endpoint to retrieve deals associated with a tag.
+     * @param id
+     * @return
+     */
     @GetMapping("/{id}/deals")
     public List<Deal> getDealsForTag(@PathVariable int id) {
         return tagService.getDealsByTagId(id);
     }
 
+    /**
+     * GET endpoint to retrieve people associated with a tag.
+     * @param id
+     * @return
+     */
     @GetMapping("/{id}/people")
     public List<Person> getPeopleForTag(@PathVariable int id) {
         return tagService.getPersonsByTagId(id);
     }
 
+    /**
+     * GET endpoint to retrieve companies associated with a tag.
+     * @param id
+     * @return
+     */
     @GetMapping("/{id}/companies")
     public List<Company> getCompaniesForTag(@PathVariable int id) {
         return tagService.getCompaniesByTagId(id);

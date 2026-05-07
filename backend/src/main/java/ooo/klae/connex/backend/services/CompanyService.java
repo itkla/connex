@@ -93,22 +93,43 @@ public class CompanyService {
         companyMapper.delete(id);
     }
 
+    /**
+     * Retrieves the tags associated with a company.
+     * @param companyId
+     * @return
+     */
     public List<Tag> getTagsByCompanyId(int companyId) {
         if (companyMapper.getCompanyById(companyId) == null) throw new ResourceNotFoundException("Company not found with id: " + companyId);
         return tagMapper.getTagsByCompanyId(companyId);
     }
 
+    /**
+     * Adds a tag to a company.
+     * @param companyId
+     * @param tagId
+     */
     public void addTag(int companyId, int tagId) {
         if (companyMapper.getCompanyById(companyId) == null) throw new ResourceNotFoundException("Company not found with id: " + companyId);
         if (tagMapper.getTagById(tagId) == null) throw new ResourceNotFoundException("Tag not found with id: " + tagId);
         companyMapper.addTag(companyId, tagId);
     }
 
+    /**
+     * Removes a tag from a company.
+     * @param companyId
+     * @param tagId
+     */
     public void removeTag(int companyId, int tagId) {
         if (companyMapper.getCompanyById(companyId) == null) throw new ResourceNotFoundException("Company not found with id: " + companyId);
         companyMapper.removeTag(companyId, tagId);
     }
 
+    /**
+     * Replaces the tags associated with a company.
+     * @param companyId
+     * @param tagIds
+     * @return
+     */
     @Transactional
     public List<Tag> replaceTags(int companyId, List<Integer> tagIds) {
         if (companyMapper.getCompanyById(companyId) == null) throw new ResourceNotFoundException("Company not found with id: " + companyId);
@@ -117,11 +138,21 @@ public class CompanyService {
         return tagMapper.getTagsByCompanyId(companyId);
     }
 
+    /**
+     * Retrieves the people associated with a company.
+     * @param companyId
+     * @return
+     */
     public List<Person> getPersonsByCompanyId(int companyId) {
         if (companyMapper.getCompanyById(companyId) == null) throw new ResourceNotFoundException("Company not found with id: " + companyId);
         return personMapper.getPersonsByCompanyId(companyId);
     }
 
+    /**
+     * Retrieves the deals associated with a company.
+     * @param companyId
+     * @return
+     */
     public List<Deal> getDealsByCompanyId(int companyId) {
         if (companyMapper.getCompanyById(companyId) == null) throw new ResourceNotFoundException("Company not found with id: " + companyId);
         return dealMapper.getDealsByCompanyId(companyId);

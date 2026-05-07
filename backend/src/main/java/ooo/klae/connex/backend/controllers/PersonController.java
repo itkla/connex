@@ -133,21 +133,41 @@ public class PersonController {
         return personService.replaceTags(id, tagIds);
     }
 
+    /**
+     * GET endpoint to retrieve deals associated with a person.
+     * @param id
+     * @return
+     */
     @GetMapping("/{id}/deals")
     public List<Deal> getDealsForPerson(@PathVariable int id) {
         return personService.getDealsByPersonId(id);
     }
 
+    /**
+     * GET endpoint to retrieve activities associated with a person.
+     * @param id
+     * @return
+     */
     @GetMapping("/{id}/activities")
     public List<Activity> getActivitiesForPerson(@PathVariable int id) {
         return personService.getActivitiesByPersonId(id);
     }
 
+    /**
+     * GET endpoint to retrieve notes associated with a person.
+     * @param id
+     * @return
+     */
     @GetMapping("/{id}/notes")
     public List<Note> getNotesForPerson(@PathVariable int id) {
         return personService.getNotesByPersonId(id);
     }
 
+    /**
+     * GET endpoint to retrieve tasks associated with a person.
+     * @param id
+     * @return
+     */
     @GetMapping("/{id}/tasks")
     public List<Task> getTasksForPerson(@PathVariable int id) {
         return personService.getTasksByPersonId(id);

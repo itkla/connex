@@ -125,11 +125,21 @@ public class CompanyController {
         return companyService.replaceTags(id, tagIds);
     }
 
+    /**
+     * GET endpoint to retrieve people associated with a company.
+     * @param id
+     * @return
+     */
     @GetMapping("/{id}/people")
     public List<Person> getPeopleForCompany(@PathVariable int id) {
         return companyService.getPersonsByCompanyId(id);
     }
 
+    /**
+     * GET endpoint to retrieve deals associated with a company.
+     * @param id
+     * @return
+     */
     @GetMapping("/{id}/deals")
     public List<Deal> getDealsForCompany(@PathVariable int id) {
         return companyService.getDealsByCompanyId(id);

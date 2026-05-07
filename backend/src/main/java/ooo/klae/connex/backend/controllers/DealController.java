@@ -177,16 +177,31 @@ public class DealController {
         return dealService.replacePeople(id, people);
     }
 
+    /**
+     * GET endpoint to retrieve activities associated with a deal.
+     * @param id
+     * @return
+     */
     @GetMapping("/{id}/activities")
     public List<Activity> getActivitiesForDeal(@PathVariable int id) {
         return dealService.getActivitiesByDealId(id);
     }
 
+    /**
+     * GET endpoint to retrieve notes associated with a deal.
+     * @param id
+     * @return
+     */
     @GetMapping("/{id}/notes")
     public List<Note> getNotesForDeal(@PathVariable int id) {
         return dealService.getNotesByDealId(id);
     }
 
+    /**
+     * GET endpoint to retrieve tasks associated with a deal.
+     * @param id
+     * @return
+     */
     @GetMapping("/{id}/tasks")
     public List<Task> getTasksForDeal(@PathVariable int id) {
         return dealService.getTasksByDealId(id);

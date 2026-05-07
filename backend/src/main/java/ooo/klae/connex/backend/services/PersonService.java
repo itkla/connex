@@ -99,22 +99,43 @@ public class PersonService {
         personMapper.delete(id);
     }
 
+    /**
+     * Retrieves the tags associated with a person.
+     * @param personId
+     * @return
+     */
     public List<Tag> getTagsByPersonId(int personId) {
         if (personMapper.getPersonById(personId) == null) throw new ResourceNotFoundException("Person not found with id: " + personId);
         return tagMapper.getTagsByPersonId(personId);
     }
 
+    /**
+     * Adds a tag to a person.
+     * @param personId
+     * @param tagId
+     */
     public void addTag(int personId, int tagId) {
         if (personMapper.getPersonById(personId) == null) throw new ResourceNotFoundException("Person not found with id: " + personId);
         if (tagMapper.getTagById(tagId) == null) throw new ResourceNotFoundException("Tag not found with id: " + tagId);
         personMapper.addTag(personId, tagId);
     }
 
+    /**
+     * Removes a tag from a person.
+     * @param personId
+     * @param tagId
+     */
     public void removeTag(int personId, int tagId) {
         if (personMapper.getPersonById(personId) == null) throw new ResourceNotFoundException("Person not found with id: " + personId);
         personMapper.removeTag(personId, tagId);
     }
 
+    /**
+     * Replaces the tags associated with a person.
+     * @param personId
+     * @param tagIds
+     * @return
+     */
     @Transactional
     public List<Tag> replaceTags(int personId, List<Integer> tagIds) {
         if (personMapper.getPersonById(personId) == null) throw new ResourceNotFoundException("Person not found with id: " + personId);
@@ -123,21 +144,41 @@ public class PersonService {
         return tagMapper.getTagsByPersonId(personId);
     }
 
+    /**
+     * Retrieves the deals associated with a person.
+     * @param personId
+     * @return
+     */
     public List<Deal> getDealsByPersonId(int personId) {
         if (personMapper.getPersonById(personId) == null) throw new ResourceNotFoundException("Person not found with id: " + personId);
         return dealMapper.getDealsByPersonId(personId);
     }
 
+    /**
+     * Retrieves the activities associated with a person.
+     * @param personId
+     * @return
+     */
     public List<Activity> getActivitiesByPersonId(int personId) {
         if (personMapper.getPersonById(personId) == null) throw new ResourceNotFoundException("Person not found with id: " + personId);
         return activityMapper.getActivitiesByPersonId(personId);
     }
 
+    /**
+     * Retrieves the notes associated with a person.
+     * @param personId
+     * @return
+     */
     public List<Note> getNotesByPersonId(int personId) {
         if (personMapper.getPersonById(personId) == null) throw new ResourceNotFoundException("Person not found with id: " + personId);
         return noteMapper.getNotesByPersonId(personId);
     }
 
+    /**
+     * Retrieves the tasks associated with a person.
+     * @param personId
+     * @return
+     */
     public List<Task> getTasksByPersonId(int personId) {
         if (personMapper.getPersonById(personId) == null) throw new ResourceNotFoundException("Person not found with id: " + personId);
         return taskMapper.getTasksByPersonId(personId);
