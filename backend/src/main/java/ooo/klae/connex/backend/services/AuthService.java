@@ -13,6 +13,7 @@ import org.springframework.stereotype.Service;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.dto.LoginDto;
 import ooo.klae.connex.backend.dto.RegisterDto;
+import ooo.klae.connex.backend.exceptions.DuplicateResourceException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.UserMapper;
 
@@ -41,7 +42,7 @@ public class AuthService {
      */
     public User register(RegisterDto request) {
         if (userMapper.getUserByUsername(request.getUsername()) != null) {
-            throw new IllegalArgumentException("Username already taken: " + request.getUsername());
+            throw new DuplicateResourceException("Username already taken: " + request.getUsername());
         }
         User user = new User();
         user.setUsername(request.getUsername());
