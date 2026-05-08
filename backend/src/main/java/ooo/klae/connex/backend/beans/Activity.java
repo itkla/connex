@@ -1,5 +1,9 @@
 package ooo.klae.connex.backend.beans;
 
+import com.fasterxml.jackson.annotation.JsonIdentityInfo;
+import com.fasterxml.jackson.annotation.JsonIdentityReference;
+import com.fasterxml.jackson.annotation.ObjectIdGenerators;
+
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
@@ -11,6 +15,7 @@ import lombok.NoArgsConstructor;
  * DO NOT modify the class structure without also updating the database schema in {@code schema.sql} and the MyBatis mappings in {@code ActivityMapper.xml}.
  */
 
+@JsonIdentityInfo(generator = ObjectIdGenerators.PropertyGenerator.class, property = "id", scope = Activity.class)
 @Data
 @NoArgsConstructor
 public class Activity {
@@ -18,8 +23,11 @@ public class Activity {
     private String type; // e.g. "call", "email", "meeting"
     private String subject; 
     private String notes; 
+    @JsonIdentityReference(alwaysAsId = true)
     private Person person; // target
+    @JsonIdentityReference(alwaysAsId = true)
     private Deal deal; // related deal
+    @JsonIdentityReference(alwaysAsId = true)
     private User createdBy; // user who created the activity object
     private String timestamp;
 

@@ -1,5 +1,8 @@
 package ooo.klae.connex.backend.beans;
 
+import com.fasterxml.jackson.annotation.JsonIdentityInfo;
+import com.fasterxml.jackson.annotation.ObjectIdGenerators;
+
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
@@ -9,6 +12,7 @@ import lombok.NoArgsConstructor;
  * Mapped via {@code PipelineMapper} / {@code PipelineMapper.xml}.
  */
 
+@JsonIdentityInfo(generator = ObjectIdGenerators.PropertyGenerator.class, property = "id", scope = Pipeline.class)
 @Data
 @NoArgsConstructor
 public class Pipeline {

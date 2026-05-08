@@ -68,11 +68,11 @@
     SELECT <include refid="dealColumns"/> FROM deal WHERE stage_id = #{stageId}
   </select>
 
-  <select id="getDealsByCompanyId" resultMap="DealResult">
+  <select id="getDealsByCompanyId" resultMap="DealFullResult">
     SELECT <include refid="dealColumns"/> FROM deal WHERE company_id = #{companyId}
   </select>
 
-  <select id="getDealsByPersonId" resultMap="DealResult">
+  <select id="getDealsByPersonId" resultMap="DealFullResult">
     SELECT <include refid="qualifiedDealColumns"/>
     FROM deal d
     JOIN deal_person dp ON dp.deal_id = d.id

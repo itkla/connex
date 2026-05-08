@@ -15,6 +15,8 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
 
+import java.util.Map;
+
 import lombok.RequiredArgsConstructor;
 
 /**
@@ -31,24 +33,24 @@ public class AuthController {
 
     /**
      * POST endpoint for user registration.
-     * @param request
-     * @return
+     * Does not establish a session — the client must call {@code /login} after.
      */
     @PostMapping("/register")
-    public User register(@Valid @RequestBody RegisterDto request) {
-        return authService.register(request);
+    public Map<String, String> register(@Valid @RequestBody RegisterDto request, HttpServletRequest httpRequest, HttpServletResponse httpResponse) {
+        authService.register(request);
+        authService.login(new LoginDto(request.getUsername(), request.getPassword()), httpRequest, httpResponse);
+        return Map.of("message", "Registration successful");
     }
 
     /**
      * POST endpoint for user login (assertion).
-     * @param request
-     * @param httpRequest
-     * @param httpResponse
-     * @return
+     * Authenticates the user and establishes a session. Profile data is
+     * available via {@code GET /api/auth/me} once the session cookie is set.
      */
     @PostMapping("/login")
-    public User login(@Valid @RequestBody LoginDto request, HttpServletRequest httpRequest, HttpServletResponse httpResponse) {
-        return authService.login(request, httpRequest, httpResponse);
+    public Map<String, String> login(@Valid @RequestBody LoginDto request, HttpServletRequest httpRequest, HttpServletResponse httpResponse) {
+        authService.login(request, httpRequest, httpResponse);
+        return Map.of("message", "Login successful");
     }
 
     /**

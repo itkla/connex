@@ -1,5 +1,9 @@
 package ooo.klae.connex.backend.beans;
 
+import com.fasterxml.jackson.annotation.JsonIdentityInfo;
+import com.fasterxml.jackson.annotation.JsonIdentityReference;
+import com.fasterxml.jackson.annotation.ObjectIdGenerators;
+
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
@@ -9,11 +13,13 @@ import lombok.NoArgsConstructor;
  * Shares its mapper with Pipeline: {@code PipelineMapper} / {@code PipelineMapper.xml}.
  */
 
+@JsonIdentityInfo(generator = ObjectIdGenerators.PropertyGenerator.class, property = "id", scope = Stage.class)
 @Data
 @NoArgsConstructor
 public class Stage {
     private int id;
     private String name;
+    @JsonIdentityReference(alwaysAsId = true)
     private Pipeline pipeline;
     private int position; // zero-based index of this stage within its pipeline
 

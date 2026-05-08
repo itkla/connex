@@ -32,7 +32,7 @@
     SELECT <include refid="personColumns"/> FROM person ORDER BY name
   </select>
 
-  <select id="getPersonsByCompanyId" resultMap="PersonResult">
+  <select id="getPersonsByCompanyId" resultMap="PersonFullResult">
     SELECT <include refid="personColumns"/> FROM person
     WHERE company_id = #{companyId} ORDER BY name
   </select>
