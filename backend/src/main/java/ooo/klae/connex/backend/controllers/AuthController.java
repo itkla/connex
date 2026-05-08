@@ -33,12 +33,13 @@ public class AuthController {
 
     /**
      * POST endpoint for user registration.
-     * @param request
-     * @return
+     * Does not establish a session — the client must call {@code /login} after.
      */
     @PostMapping("/register")
-    public User register(@Valid @RequestBody RegisterDto request) {
-        return authService.register(request);
+    public Map<String, String> register(@Valid @RequestBody RegisterDto request, HttpServletRequest httpRequest, HttpServletResponse httpResponse) {
+        authService.register(request);
+        authService.login(new LoginDto(request.getUsername(), request.getPassword()), httpRequest, httpResponse);
+        return Map.of("message", "Registration successful");
     }
 
     /**
