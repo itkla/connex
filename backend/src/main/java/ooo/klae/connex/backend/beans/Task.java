@@ -1,5 +1,9 @@
 package ooo.klae.connex.backend.beans;
 
+import com.fasterxml.jackson.annotation.JsonIdentityInfo;
+import com.fasterxml.jackson.annotation.JsonIdentityReference;
+import com.fasterxml.jackson.annotation.ObjectIdGenerators;
+
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
@@ -9,6 +13,7 @@ import lombok.NoArgsConstructor;
  * Mapped via {@code TaskMapper} / {@code TaskMapper.xml}.
  */
 
+@JsonIdentityInfo(generator = ObjectIdGenerators.PropertyGenerator.class, property = "id", scope = Task.class)
 @Data
 @NoArgsConstructor
 public class Task {
@@ -16,8 +21,11 @@ public class Task {
     private String description;
     private boolean completed;
     private String dueDate;
+    @JsonIdentityReference(alwaysAsId = true)
     private User assignedTo;
+    @JsonIdentityReference(alwaysAsId = true)
     private Person person; // target contact
+    @JsonIdentityReference(alwaysAsId = true)
     private Deal deal;
     private String createdAt;
     private String updatedAt;

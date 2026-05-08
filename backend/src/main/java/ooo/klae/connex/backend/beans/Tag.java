@@ -1,5 +1,8 @@
 package ooo.klae.connex.backend.beans;
 
+import com.fasterxml.jackson.annotation.JsonIdentityInfo;
+import com.fasterxml.jackson.annotation.ObjectIdGenerators;
+
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
@@ -8,6 +11,7 @@ import lombok.NoArgsConstructor;
  * Tags are many-to-many with the records they label; no dedicated mapper — managed inline by each entity's mapper.
  */
 
+@JsonIdentityInfo(generator = ObjectIdGenerators.PropertyGenerator.class, property = "id", scope = Tag.class)
 @Data
 @NoArgsConstructor
 public class Tag {

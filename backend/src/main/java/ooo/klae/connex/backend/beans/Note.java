@@ -1,5 +1,9 @@
 package ooo.klae.connex.backend.beans;
 
+import com.fasterxml.jackson.annotation.JsonIdentityInfo;
+import com.fasterxml.jackson.annotation.JsonIdentityReference;
+import com.fasterxml.jackson.annotation.ObjectIdGenerators;
+
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
@@ -9,13 +13,17 @@ import lombok.NoArgsConstructor;
  * Mapped via {@code NoteMapper} / {@code NoteMapper.xml}.
  */
 
+@JsonIdentityInfo(generator = ObjectIdGenerators.PropertyGenerator.class, property = "id", scope = Note.class)
 @Data
 @NoArgsConstructor
 public class Note {
     private int id;
     private String content;
+    @JsonIdentityReference(alwaysAsId = true)
     private User author;
+    @JsonIdentityReference(alwaysAsId = true)
     private Person person;
+    @JsonIdentityReference(alwaysAsId = true)
     private Deal deal;
     private String createdAt;
     private String updatedAt;

@@ -1,5 +1,9 @@
 package ooo.klae.connex.backend.beans;
 
+import com.fasterxml.jackson.annotation.JsonIdentityInfo;
+import com.fasterxml.jackson.annotation.JsonIdentityReference;
+import com.fasterxml.jackson.annotation.ObjectIdGenerators;
+
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
@@ -11,6 +15,7 @@ import lombok.NoArgsConstructor;
  * Mapped via {@code DealMapper} / {@code DealMapper.xml}.
  */
 
+@JsonIdentityInfo(generator = ObjectIdGenerators.PropertyGenerator.class, property = "id", scope = Deal.class)
 @Data
 @NoArgsConstructor
 public class Deal {
@@ -18,8 +23,11 @@ public class Deal {
     private String name;
     private double value;
     private String currency; // e.g. "JPY"
+    @JsonIdentityReference(alwaysAsId = true)
     private Pipeline pipeline;
+    @JsonIdentityReference(alwaysAsId = true)
     private Stage stage;
+    @JsonIdentityReference(alwaysAsId = true)
     private Company company;
     private DealPerson[] people;
     private Activity[] activities;
