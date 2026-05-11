@@ -16,7 +16,7 @@ const ProfileCard: React.FC<ProfileCardProps> = ({
             <div className="flex items-center gap-4 px-6 pt-6 pb-4">
                 <div className="h-14 w-14 shrink-0 rounded-full bg-neutral-300" />
                 <div>
-                    <div className="text-xl font-medium text-black">John Pork</div>
+                    <div className="text-xl font-medium text-black">{name}</div>
                     <div className="text-base text-neutral-500">Voice Co. Ltd.</div>
                 </div>
             </div>

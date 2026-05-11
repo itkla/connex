@@ -1,6 +1,8 @@
 const API_BASE =
   process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080";
 
+// Auth
+
 export type User = {
   id: number;
   username: string;
@@ -42,6 +44,18 @@ async function postJson<T>(path: string, body: unknown): Promise<T> {
   return res.json();
 }
 
+async function getJson<T>(path: string, body: unknown = undefined): Promise<T> {
+  const res = await fetch(`${API_BASE}${path}`, {
+    method: "GET",
+    credentials: "include",
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(text || `Request failed (${res.status})`);
+  }
+  return res.json();
+}
+
 /**
  * Logs in a user with the provided credentials.
  * 
@@ -62,4 +76,14 @@ export function login(payload: LoginPayload) {
  */
 export function register(payload: RegisterPayload) {
   return postJson<User>("/api/auth/register", payload);
+}
+
+/**
+ * Retrieves the currently authenticated user's profile.
+ * 
+ * @returns A promise that resolves to the authenticated user's profile information
+ * @throws An error if the profile retrieval request fails, including the response text if available
+ */
+export function me() {
+  return getJson<User>("/api/auth/me");
 }
