@@ -1,26 +1,26 @@
 package ooo.klae.connex.backend.controllers;
 
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RequestParam;
-import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RestController;
 
-import ooo.klae.connex.backend.services.CompanyService;
 import ooo.klae.connex.backend.beans.Company;
-import ooo.klae.connex.backend.beans.Deal;
-import ooo.klae.connex.backend.beans.Person;
-import ooo.klae.connex.backend.beans.Tag;
+import ooo.klae.connex.backend.dto.CompanyDto;
+import ooo.klae.connex.backend.dto.DealDto;
+import ooo.klae.connex.backend.dto.PersonDto;
+import ooo.klae.connex.backend.dto.TagDto;
+import ooo.klae.connex.backend.services.CompanyService;
+
 import java.util.List;
 
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestBody;
-import org.springframework.web.bind.annotation.PutMapping;
-
-
-
 
 /**
  * REST controller for {@code Company} CRUD operations.
@@ -38,9 +38,9 @@ public class CompanyController {
      * @return
      */
     @GetMapping
-    public List<Company> getAllCompanies(@RequestParam(required = false) Integer tagId) {
-        if (tagId != null) return companyService.getCompaniesByTagId(tagId);
-        return companyService.getAllCompanies();
+    public List<CompanyDto> getAllCompanies(@RequestParam(required = false) Integer tagId) {
+        List<Company> companies = (tagId != null) ? companyService.getCompaniesByTagId(tagId) : companyService.getAllCompanies();
+        return companies.stream().map(CompanyDto::from).toList();
     }
 
     /**
@@ -49,8 +49,8 @@ public class CompanyController {
      * @return
      */
     @GetMapping("/{id}")
-    public Company oneCompany(@PathVariable int id) {
-        return companyService.getCompanyById(id);
+    public CompanyDto oneCompany(@PathVariable int id) {
+        return CompanyDto.from(companyService.getCompanyById(id));
     }
 
     /**
@@ -59,8 +59,8 @@ public class CompanyController {
      * @return
      */
     @PostMapping
-    public Company createCompany(@RequestBody Company company) {
-        return companyService.createCompany(company);
+    public CompanyDto createCompany(@Valid @RequestBody CompanyDto dto) {
+        return CompanyDto.from(companyService.createCompany(dto.toBean()));
     }
 
     /**
@@ -70,9 +70,8 @@ public class CompanyController {
      * @return
      */
     @PutMapping("/{id}")
-    public Company updateCompany(@PathVariable int id, @RequestBody Company company) {
-        company.setId(id);
-        return companyService.updateCompany(id, company);
+    public CompanyDto updateCompany(@PathVariable int id, @Valid @RequestBody CompanyDto dto) {
+        return CompanyDto.from(companyService.updateCompany(id, dto.toBean()));
     }
 
     /**
@@ -90,8 +89,8 @@ public class CompanyController {
      * @return
      */
     @GetMapping("/{id}/tags")
-    public List<Tag> getTagsForCompany(@PathVariable int id) {
-        return companyService.getTagsByCompanyId(id);
+    public List<TagDto> getTagsForCompany(@PathVariable int id) {
+        return companyService.getTagsByCompanyId(id).stream().map(TagDto::from).toList();
     }
 
     /**
@@ -121,8 +120,8 @@ public class CompanyController {
      * @return List of tags
      */
     @PutMapping("/{id}/tags")
-    public List<Tag> replaceTagsForCompany(@PathVariable int id, @RequestBody List<Integer> tagIds) {
-        return companyService.replaceTags(id, tagIds);
+    public List<TagDto> replaceTagsForCompany(@PathVariable int id, @RequestBody List<Integer> tagIds) {
+        return companyService.replaceTags(id, tagIds).stream().map(TagDto::from).toList();
     }
 
     /**
@@ -131,8 +130,8 @@ public class CompanyController {
      * @return
      */
     @GetMapping("/{id}/people")
-    public List<Person> getPeopleForCompany(@PathVariable int id) {
-        return companyService.getPersonsByCompanyId(id);
+    public List<PersonDto> getPeopleForCompany(@PathVariable int id) {
+        return companyService.getPersonsByCompanyId(id).stream().map(PersonDto::from).toList();
     }
 
     /**
@@ -141,7 +140,7 @@ public class CompanyController {
      * @return
      */
     @GetMapping("/{id}/deals")
-    public List<Deal> getDealsForCompany(@PathVariable int id) {
-        return companyService.getDealsByCompanyId(id);
+    public List<DealDto> getDealsForCompany(@PathVariable int id) {
+        return companyService.getDealsByCompanyId(id).stream().map(DealDto::from).toList();
     }
 }

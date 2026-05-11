@@ -9,20 +9,20 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
-import ooo.klae.connex.backend.beans.Activity;
-import ooo.klae.connex.backend.beans.Note;
-import ooo.klae.connex.backend.beans.Task;
-import ooo.klae.connex.backend.beans.User;
+import ooo.klae.connex.backend.dto.ActivityDto;
+import ooo.klae.connex.backend.dto.NoteDto;
+import ooo.klae.connex.backend.dto.TaskDto;
+import ooo.klae.connex.backend.dto.UserDto;
 import ooo.klae.connex.backend.services.UserService;
 
 import java.util.List;
 
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 
 /**
  * REST controller for managing {@code User} records (Connex account holders).
  * Exposes endpoints for reading and updating the current user's profile.
- * Delegates to {@code UserService}.
  */
 
 @RestController
@@ -36,8 +36,8 @@ public class UserController {
      * @return
      */
     @GetMapping
-    public List<User> getAllUsers() {
-        return userService.getAllUsers();
+    public List<UserDto> getAllUsers() {
+        return userService.getAllUsers().stream().map(UserDto::from).toList();
     }
 
     /**
@@ -46,18 +46,18 @@ public class UserController {
      * @return
      */
     @GetMapping("/{id}")
-    public User getUserById(@PathVariable int id) {
-        return userService.getUserById(id);
+    public UserDto getUserById(@PathVariable int id) {
+        return UserDto.from(userService.getUserById(id));
     }
 
     /**
      * POST endpoint to create a new user.
-     * @param user
+     * @param dto
      * @return
      */
     @PostMapping
-    public User createUser(@RequestBody User user) {
-        return userService.create(user);
+    public UserDto createUser(@Valid @RequestBody UserDto dto) {
+        return UserDto.from(userService.create(dto.toBean()));
     }
 
     /**
@@ -67,8 +67,8 @@ public class UserController {
      * @return
      */
     @PutMapping("/{id}")
-    public User updateUser(@PathVariable int id, @RequestBody User user) {
-        return userService.update(id, user);
+    public UserDto updateUser(@PathVariable int id, @Valid @RequestBody UserDto dto) {
+        return UserDto.from(userService.update(id, dto.toBean()));
     }
 
     /**
@@ -86,8 +86,8 @@ public class UserController {
      * @return
      */
     @GetMapping("/{id}/activities")
-    public List<Activity> getActivitiesForUser(@PathVariable int id) {
-        return userService.getActivitiesByUserId(id);
+    public List<ActivityDto> getActivitiesForUser(@PathVariable int id) {
+        return userService.getActivitiesByUserId(id).stream().map(ActivityDto::from).toList();
     }
 
     /**
@@ -96,8 +96,8 @@ public class UserController {
      * @return
      */
     @GetMapping("/{id}/tasks")
-    public List<Task> getTasksForUser(@PathVariable int id) {
-        return userService.getTasksByUserId(id);
+    public List<TaskDto> getTasksForUser(@PathVariable int id) {
+        return userService.getTasksByUserId(id).stream().map(TaskDto::from).toList();
     }
 
     /**
@@ -106,7 +106,7 @@ public class UserController {
      * @return
      */
     @GetMapping("/{id}/notes")
-    public List<Note> getNotesForUser(@PathVariable int id) {
-        return userService.getNotesByUserId(id);
+    public List<NoteDto> getNotesForUser(@PathVariable int id) {
+        return userService.getNotesByUserId(id).stream().map(NoteDto::from).toList();
     }
 }

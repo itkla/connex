@@ -11,10 +11,12 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import ooo.klae.connex.backend.beans.Note;
+import ooo.klae.connex.backend.dto.NoteDto;
 import ooo.klae.connex.backend.services.NoteService;
 
 import java.util.List;
 
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 
 /**
@@ -32,18 +34,21 @@ public class NoteController {
      * GET endpoint to retrieve notes, with optional filtering by personId or dealId.
      * @param personId
      * @param dealId
+     * @param authorId
      * @return
      */
     @GetMapping
-    public List<Note> getNotes(
+    public List<NoteDto> getNotes(
         @RequestParam(required = false) Integer personId,
         @RequestParam(required = false) Integer dealId,
         @RequestParam(required = false) Integer authorId
     ) {
-        if (personId != null) return noteService.getNotesByPersonId(personId);
-        if (dealId != null)   return noteService.getNotesByDealId(dealId);
-        if (authorId != null) return noteService.getNotesByAuthorId(authorId);
-        return noteService.getAllNotes();
+        List<Note> notes;
+        if (personId != null) notes = noteService.getNotesByPersonId(personId);
+        else if (dealId != null) notes = noteService.getNotesByDealId(dealId);
+        else if (authorId != null) notes = noteService.getNotesByAuthorId(authorId);
+        else notes = noteService.getAllNotes();
+        return notes.stream().map(NoteDto::from).toList();
     }
 
     /**
@@ -52,8 +57,8 @@ public class NoteController {
      * @return
      */
     @GetMapping("/{id}")
-    public Note getNoteById(@PathVariable int id) {
-        return noteService.getNoteById(id);
+    public NoteDto getNoteById(@PathVariable int id) {
+        return NoteDto.from(noteService.getNoteById(id));
     }
 
     /**
@@ -62,8 +67,8 @@ public class NoteController {
      * @return
      */
     @PostMapping
-    public Note createNote(@RequestBody Note note) {
-        return noteService.create(note);
+    public NoteDto createNote(@Valid @RequestBody NoteDto dto) {
+        return NoteDto.from(noteService.create(dto.toBean()));
     }
 
     /**
@@ -73,8 +78,8 @@ public class NoteController {
      * @return
      */
     @PutMapping("/{id}")
-    public Note updateNote(@PathVariable int id, @RequestBody Note note) {
-        return noteService.update(id, note);
+    public NoteDto updateNote(@PathVariable int id, @Valid @RequestBody NoteDto dto) {
+        return NoteDto.from(noteService.update(id, dto.toBean()));
     }
 
     /**

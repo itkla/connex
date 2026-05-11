@@ -10,16 +10,18 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
-import ooo.klae.connex.backend.beans.Activity;
 import ooo.klae.connex.backend.beans.Deal;
 import ooo.klae.connex.backend.beans.DealPerson;
-import ooo.klae.connex.backend.beans.Note;
-import ooo.klae.connex.backend.beans.Tag;
-import ooo.klae.connex.backend.beans.Task;
+import ooo.klae.connex.backend.dto.ActivityDto;
+import ooo.klae.connex.backend.dto.DealDto;
+import ooo.klae.connex.backend.dto.NoteDto;
+import ooo.klae.connex.backend.dto.TagDto;
+import ooo.klae.connex.backend.dto.TaskDto;
 import ooo.klae.connex.backend.services.DealService;
 
 import java.util.List;
 
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 
 /**
@@ -43,19 +45,21 @@ public class DealController {
      * @return
      */
     @GetMapping
-    public List<Deal> getDeals(
+    public List<DealDto> getDeals(
         @RequestParam(required = false) Integer pipelineId,
         @RequestParam(required = false) Integer stageId,
         @RequestParam(required = false) Integer companyId,
         @RequestParam(required = false) Integer personId,
         @RequestParam(required = false) Integer tagId
     ) {
-        if (stageId != null)    return dealService.getDealsByStageId(stageId);
-        if (pipelineId != null) return dealService.getDealsByPipelineId(pipelineId);
-        if (companyId != null)  return dealService.getDealsByCompanyId(companyId);
-        if (personId != null)   return dealService.getDealsByPersonId(personId);
-        if (tagId != null)      return dealService.getDealsByTagId(tagId);
-        return dealService.getAllDeals();
+        List<Deal> deals;
+        if (stageId != null)         deals = dealService.getDealsByStageId(stageId);
+        else if (pipelineId != null) deals = dealService.getDealsByPipelineId(pipelineId);
+        else if (companyId != null)  deals = dealService.getDealsByCompanyId(companyId);
+        else if (personId != null)   deals = dealService.getDealsByPersonId(personId);
+        else if (tagId != null)      deals = dealService.getDealsByTagId(tagId);
+        else                         deals = dealService.getAllDeals();
+        return deals.stream().map(DealDto::from).toList();
     }
 
     /**
@@ -64,8 +68,8 @@ public class DealController {
      * @return
      */
     @GetMapping("/{id}")
-    public Deal getDealById(@PathVariable int id) {
-        return dealService.getDealById(id);
+    public DealDto getDealById(@PathVariable int id) {
+        return DealDto.from(dealService.getDealById(id));
     }
 
     /**
@@ -74,8 +78,8 @@ public class DealController {
      * @return
      */
     @PostMapping
-    public Deal createDeal(@RequestBody Deal deal) {
-        return dealService.create(deal);
+    public DealDto createDeal(@Valid @RequestBody DealDto dto) {
+        return DealDto.from(dealService.create(dto.toBean()));
     }
 
     /**
@@ -85,8 +89,8 @@ public class DealController {
      * @return
      */
     @PutMapping("/{id}")
-    public Deal updateDeal(@PathVariable int id, @RequestBody Deal deal) {
-        return dealService.update(id, deal);
+    public DealDto updateDeal(@PathVariable int id, @Valid @RequestBody DealDto dto) {
+        return DealDto.from(dealService.update(id, dto.toBean()));
     }
 
     /**
@@ -104,8 +108,8 @@ public class DealController {
      * @return
      */
     @GetMapping("/{id}/tags")
-    public List<Tag> getTagsForDeal(@PathVariable int id) {
-        return dealService.getTagsByDealId(id);
+    public List<TagDto> getTagsForDeal(@PathVariable int id) {
+        return dealService.getTagsByDealId(id).stream().map(TagDto::from).toList();
     }
 
     /**
@@ -138,18 +142,33 @@ public class DealController {
         return dealService.getPeopleByDealId(id);
     }
 
+    /**
+     * POST endpoint to add a person to a deal.
+     * @param id
+     * @param personId
+     * @param role
+     */
     @PostMapping("/{id}/people/{personId}")
-    public void addPersonToDeal(@PathVariable int id, @PathVariable int personId,
-                                @RequestParam(required = false) String role) {
+    public void addPersonToDeal(@PathVariable int id, @PathVariable int personId, @RequestParam(required = false) String role) {
         dealService.addPerson(id, personId, role);
     }
 
+    /**
+     * PUT endpoint to update the role of a person on a deal.
+     * @param id
+     * @param personId
+     * @param role
+     */
     @PutMapping("/{id}/people/{personId}")
-    public void updatePersonRoleOnDeal(@PathVariable int id, @PathVariable int personId,
-                                       @RequestParam(required = false) String role) {
+    public void updatePersonRoleOnDeal(@PathVariable int id, @PathVariable int personId, @RequestParam(required = false) String role) {
         dealService.updatePersonRole(id, personId, role);
     }
 
+    /**
+     * DELETE endpoint to remove a person from a deal.
+     * @param id
+     * @param personId
+     */
     @DeleteMapping("/{id}/people/{personId}")
     public void removePersonFromDeal(@PathVariable int id, @PathVariable int personId) {
         dealService.removePerson(id, personId);
@@ -162,8 +181,8 @@ public class DealController {
      * @return
      */
     @PutMapping("/{id}/tags")
-    public List<Tag> replaceTagsForDeal(@PathVariable int id, @RequestBody List<Integer> tagIds) {
-        return dealService.replaceTags(id, tagIds);
+    public List<TagDto> replaceTagsForDeal(@PathVariable int id, @RequestBody List<Integer> tagIds) {
+        return dealService.replaceTags(id, tagIds).stream().map(TagDto::from).toList();
     }
 
     /**
@@ -183,8 +202,8 @@ public class DealController {
      * @return
      */
     @GetMapping("/{id}/activities")
-    public List<Activity> getActivitiesForDeal(@PathVariable int id) {
-        return dealService.getActivitiesByDealId(id);
+    public List<ActivityDto> getActivitiesForDeal(@PathVariable int id) {
+        return dealService.getActivitiesByDealId(id).stream().map(ActivityDto::from).toList();
     }
 
     /**
@@ -193,8 +212,8 @@ public class DealController {
      * @return
      */
     @GetMapping("/{id}/notes")
-    public List<Note> getNotesForDeal(@PathVariable int id) {
-        return dealService.getNotesByDealId(id);
+    public List<NoteDto> getNotesForDeal(@PathVariable int id) {
+        return dealService.getNotesByDealId(id).stream().map(NoteDto::from).toList();
     }
 
     /**
@@ -203,7 +222,7 @@ public class DealController {
      * @return
      */
     @GetMapping("/{id}/tasks")
-    public List<Task> getTasksForDeal(@PathVariable int id) {
-        return dealService.getTasksByDealId(id);
+    public List<TaskDto> getTasksForDeal(@PathVariable int id) {
+        return dealService.getTasksByDealId(id).stream().map(TaskDto::from).toList();
     }
 }

@@ -11,14 +11,18 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import ooo.klae.connex.backend.beans.Task;
+import ooo.klae.connex.backend.dto.TaskDto;
 import ooo.klae.connex.backend.services.TaskService;
 
 import java.util.List;
 
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 
 /**
  * REST controller for {@code Task} CRUD operations.
+ * A Task is a to-do assigned to a {@code User}, optionally linked to a {@code Person} and/or
+ * {@code Deal}.
  * Accepts and returns {@code TaskDto}. Delegates to {@code TaskService}.
  */
 
@@ -36,15 +40,17 @@ public class TaskController {
      * @return
      */
     @GetMapping
-    public List<Task> getTasks(
+    public List<TaskDto> getTasks(
         @RequestParam(required = false) Integer assignedToId,
         @RequestParam(required = false) Integer personId,
         @RequestParam(required = false) Integer dealId
     ) {
-        if (assignedToId != null) return taskService.getTasksByAssignedToId(assignedToId);
-        if (personId != null)     return taskService.getTasksByPersonId(personId);
-        if (dealId != null)       return taskService.getTasksByDealId(dealId);
-        return taskService.getAllTasks();
+        List<Task> tasks;
+        if (assignedToId != null) tasks = taskService.getTasksByAssignedToId(assignedToId);
+        else if (personId != null) tasks = taskService.getTasksByPersonId(personId);
+        else if (dealId != null) tasks = taskService.getTasksByDealId(dealId);
+        else tasks = taskService.getAllTasks();
+        return tasks.stream().map(TaskDto::from).toList();
     }
 
     /**
@@ -53,31 +59,29 @@ public class TaskController {
      * @return
      */
     @GetMapping("/{id}")
-    public Task getTaskById(@PathVariable int id) {
-        return taskService.getTaskById(id);
+    public TaskDto getTaskById(@PathVariable int id) {
+        return TaskDto.from(taskService.getTaskById(id));
     }
-
-    // TODO: add filtering by companyId, userId, etc. once those concepts are implemented
 
     /**
      * POST endpoint to create a new task.
-     * @param task
+     * @param dto
      * @return
      */
     @PostMapping
-    public Task createTask(@RequestBody Task task) {
-        return taskService.create(task);
+    public TaskDto createTask(@Valid @RequestBody TaskDto dto) {
+        return TaskDto.from(taskService.create(dto.toBean()));
     }
 
     /**
      * PUT endpoint to update an existing task.
      * @param id
-     * @param task
+     * @param dto
      * @return
      */
     @PutMapping("/{id}")
-    public Task updateTask(@PathVariable int id, @RequestBody Task task) {
-        return taskService.update(id, task);
+    public TaskDto updateTask(@PathVariable int id, @Valid @RequestBody TaskDto dto) {
+        return TaskDto.from(taskService.update(id, dto.toBean()));
     }
 
     /**
