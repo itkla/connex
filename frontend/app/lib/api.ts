@@ -28,6 +28,20 @@ export type AuthResponse = {
     message: string;
 };
 
+export type ApiFieldErrors = Record<string, string>;
+
+export class ApiError extends Error {
+    status: number;
+    fieldErrors?: ApiFieldErrors;
+
+    constructor(message: string, status: number, fieldErrors?: ApiFieldErrors) {
+        super(message);
+        this.name = "ApiError";
+        this.status = status;
+        this.fieldErrors = fieldErrors;
+    }
+}
+
 async function requestJson<T>(
     path: string,
     init: RequestInit = {},
@@ -42,7 +56,7 @@ async function requestJson<T>(
     });
 
     if (!res.ok) {
-        throw new Error(await getErrorMessage(res));
+        throw await getApiError(res);
     }
 
     const text = await res.text();
@@ -54,18 +68,39 @@ async function requestJson<T>(
     return JSON.parse(text) as T;
 }
 
-async function getErrorMessage(res: Response): Promise<string> {
+function isStringRecord(value: unknown): value is Record<string, string> {
+    return (
+        typeof value === "object" &&
+        value !== null &&
+        !Array.isArray(value) &&
+        Object.values(value).every((entry) => typeof entry === "string")
+    );
+}
+
+async function getApiError(res: Response): Promise<ApiError> {
     const text = await res.text().catch(() => "");
 
     if (!text) {
-        return `Request failed (${res.status})`;
+        return new ApiError(`Request failed (${res.status})`, res.status);
     }
 
     try {
-        const data = JSON.parse(text) as { message?: string; error?: string };
-        return data.message ?? data.error ?? text;
+        const data = JSON.parse(text) as unknown;
+
+        if (isStringRecord(data)) {
+            const { message, error, ...fieldErrors } = data;
+            const fields = Object.keys(fieldErrors).length > 0 ? fieldErrors : undefined;
+
+            return new ApiError(
+                message ?? error ?? "Please fix the highlighted fields.",
+                res.status,
+                fields,
+            );
+        }
+
+        return new ApiError(text, res.status);
     } catch {
-        return text;
+        return new ApiError(text, res.status);
     }
 }
 

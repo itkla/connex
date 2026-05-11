@@ -42,8 +42,13 @@ public class AuthService {
      */
     public User register(RegisterDto request) {
         if (userMapper.getUserByUsername(request.getUsername()) != null) {
-            throw new DuplicateResourceException("Username already taken: " + request.getUsername());
+            throw new DuplicateResourceException("username", "Username is already taken");
         }
+
+        if (userMapper.getUserByEmail(request.getEmail()) != null) {
+            throw new DuplicateResourceException("email", "Email is already registered");
+        }
+
         User user = new User();
         user.setUsername(request.getUsername());
         user.setDisplayName(request.getDisplayName());

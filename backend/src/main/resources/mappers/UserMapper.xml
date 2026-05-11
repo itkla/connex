@@ -18,6 +18,11 @@
     FROM app_user WHERE username = #{username}
   </select>
 
+  <select id="getUserByEmail" resultType="User">
+    SELECT id, username, display_name, email, password_hash, created_at, updated_at
+    FROM app_user WHERE email = #{email}
+  </select>
+
   <insert id="insert" useGeneratedKeys="true" keyProperty="id">
     INSERT INTO app_user (username, display_name, email, password_hash)
     VALUES (#{username}, #{displayName}, #{email}, #{passwordHash})

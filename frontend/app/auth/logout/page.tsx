@@ -49,7 +49,9 @@ export default function LogoutPage() {
         //     <p className="text-base text-black">Signing out...</p>
         // </div>
         <div className="flex min-h-screen items-center justify-center bg-white px-6">
-            <LoaderCircle className="size-4 animate-spin" />
+            <span className="flex justify-center items-center w-full">
+                <LoaderCircle className="size-4 animate-spin text-white" />
+            </span>
             <p className="text-base text-black">Signing out</p>
         </div>
     );

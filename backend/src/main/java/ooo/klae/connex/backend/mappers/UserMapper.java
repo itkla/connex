@@ -14,6 +14,7 @@ public interface UserMapper {
     List<User> getAllUsers();
     User getUserById(int id);
     User getUserByUsername(String username);
+    User getUserByEmail(String email);
     int insert(User user);
     int update(User user);
     int delete(int id);
