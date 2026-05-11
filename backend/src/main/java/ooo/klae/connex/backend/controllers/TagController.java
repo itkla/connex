@@ -9,14 +9,15 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
-import ooo.klae.connex.backend.beans.Company;
-import ooo.klae.connex.backend.beans.Deal;
-import ooo.klae.connex.backend.beans.Person;
-import ooo.klae.connex.backend.beans.Tag;
+import ooo.klae.connex.backend.dto.CompanyDto;
+import ooo.klae.connex.backend.dto.DealDto;
+import ooo.klae.connex.backend.dto.PersonDto;
+import ooo.klae.connex.backend.dto.TagDto;
 import ooo.klae.connex.backend.services.TagService;
 
 import java.util.List;
 
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 
 /**
@@ -32,12 +33,11 @@ public class TagController {
     private final TagService tagService;
 
     /**
-     * GET endpoint to retrieve all tags.
-     * @return
+     * Retrieves all tags, ordered by {@code name}.
      */
     @GetMapping
-    public List<Tag> getAllTags() {
-        return tagService.getAllTags();
+    public List<TagDto> getAllTags() {
+        return tagService.getAllTags().stream().map(TagDto::from).toList();
     }
 
     /**
@@ -46,35 +46,34 @@ public class TagController {
      * @return
      */
     @GetMapping("/{id}")
-    public Tag getTagById(@PathVariable int id) {
-        return tagService.getTagById(id);
+    public TagDto getTagById(@PathVariable int id) {
+        return TagDto.from(tagService.getTagById(id));
     }
 
-    //TODO: add filtering by companyId, userId, etc. once those concepts are implemented
-
     /**
-     * 
-     * @param tag
+     * POST endpoint to create a new tag.
+     * @param dto
      * @return
      */
     @PostMapping
-    public Tag createTag(@RequestBody Tag tag) {
-        return tagService.create(tag);
+    public TagDto createTag(@Valid @RequestBody TagDto dto) {
+        return TagDto.from(tagService.create(dto.toBean()));
     }
 
     /**
      * PUT endpoint to update an existing tag.
      * @param id
-     * @param tag
+     * @param dto
      * @return
      */
     @PutMapping("/{id}")
-    public Tag updateTag(@PathVariable int id, @RequestBody Tag tag) {
-        return tagService.update(id, tag);
+    public TagDto updateTag(@PathVariable int id, @Valid @RequestBody TagDto dto) {
+        return TagDto.from(tagService.update(id, dto.toBean()));
     }
 
     /**
      * DELETE endpoint to delete a tag by ID.
+     * Cascades to all junction rows ({@code person_tag}, {@code company_tag}, {@code deal_tag}).
      * @param id
      */
     @DeleteMapping("/{id}")
@@ -83,23 +82,25 @@ public class TagController {
     }
 
     /**
-     * GET endpoint to retrieve deals associated with a tag.
+     * GET endpoint to retrieve deals tagged with this tag.
      * @param id
      * @return
+     * The inverse side of {@code GET /api/deals?tagId=X}.
      */
     @GetMapping("/{id}/deals")
-    public List<Deal> getDealsForTag(@PathVariable int id) {
-        return tagService.getDealsByTagId(id);
+    public List<DealDto> getDealsForTag(@PathVariable int id) {
+        return tagService.getDealsByTagId(id).stream().map(DealDto::from).toList();
     }
 
     /**
-     * GET endpoint to retrieve people associated with a tag.
+     * GET endpoint to retrieve people tagged with this tag.
      * @param id
      * @return
+     * The inverse side of {@code GET /api/persons?tagId=X}.
      */
     @GetMapping("/{id}/people")
-    public List<Person> getPeopleForTag(@PathVariable int id) {
-        return tagService.getPersonsByTagId(id);
+    public List<PersonDto> getPeopleForTag(@PathVariable int id) {
+        return tagService.getPersonsByTagId(id).stream().map(PersonDto::from).toList();
     }
 
     /**
@@ -108,7 +109,7 @@ public class TagController {
      * @return
      */
     @GetMapping("/{id}/companies")
-    public List<Company> getCompaniesForTag(@PathVariable int id) {
-        return tagService.getCompaniesByTagId(id);
+    public List<CompanyDto> getCompaniesForTag(@PathVariable int id) {
+        return tagService.getCompaniesByTagId(id).stream().map(CompanyDto::from).toList();
     }
 }

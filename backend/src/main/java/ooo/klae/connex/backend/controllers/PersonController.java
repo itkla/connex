@@ -10,16 +10,18 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
-import ooo.klae.connex.backend.beans.Activity;
-import ooo.klae.connex.backend.beans.Deal;
-import ooo.klae.connex.backend.beans.Note;
 import ooo.klae.connex.backend.beans.Person;
-import ooo.klae.connex.backend.beans.Tag;
-import ooo.klae.connex.backend.beans.Task;
+import ooo.klae.connex.backend.dto.ActivityDto;
+import ooo.klae.connex.backend.dto.DealDto;
+import ooo.klae.connex.backend.dto.NoteDto;
+import ooo.klae.connex.backend.dto.PersonDto;
+import ooo.klae.connex.backend.dto.TagDto;
+import ooo.klae.connex.backend.dto.TaskDto;
 import ooo.klae.connex.backend.services.PersonService;
 
 import java.util.List;
 
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 
 /**
@@ -41,15 +43,17 @@ public class PersonController {
      * @return
      */
     @GetMapping
-    public List<Person> getPersons(
+    public List<PersonDto> getPersons(
         @RequestParam(required = false) Integer companyId,
         @RequestParam(required = false) Integer tagId,
         @RequestParam(required = false) Integer dealId
     ) {
-        if (companyId != null) return personService.getPersonsByCompanyId(companyId);
-        if (tagId != null)     return personService.getPersonsByTagId(tagId);
-        if (dealId != null)    return personService.getPersonsByDealId(dealId);
-        return personService.getAllPersons();
+        List<Person> persons;
+        if (companyId != null) persons = personService.getPersonsByCompanyId(companyId);
+        else if (tagId != null) persons = personService.getPersonsByTagId(tagId);
+        else if (dealId != null) persons = personService.getPersonsByDealId(dealId);
+        else persons = personService.getAllPersons();
+        return persons.stream().map(PersonDto::from).toList();
     }
 
     /**
@@ -58,29 +62,29 @@ public class PersonController {
      * @return
      */
     @GetMapping("/{id}")
-    public Person getPersonById(@PathVariable int id) {
-        return personService.getPersonById(id);
+    public PersonDto getPersonById(@PathVariable int id) {
+        return PersonDto.from(personService.getPersonById(id));
     }
 
     /**
      * POST endpoint to create a new person.
-     * @param person
+     * @param dto
      * @return
      */
     @PostMapping
-    public Person createPerson(@RequestBody Person person) {
-        return personService.create(person);
+    public PersonDto createPerson(@Valid @RequestBody PersonDto dto) {
+        return PersonDto.from(personService.create(dto.toBean()));
     }
 
     /**
      * PUT endpoint to update an existing person.
      * @param id
-     * @param person
+     * @param dto
      * @return
      */
     @PutMapping("/{id}")
-    public Person updatePerson(@PathVariable int id, @RequestBody Person person) {
-        return personService.update(id, person);
+    public PersonDto updatePerson(@PathVariable int id, @Valid @RequestBody PersonDto dto) {
+        return PersonDto.from(personService.update(id, dto.toBean()));
     }
 
     /**
@@ -98,8 +102,8 @@ public class PersonController {
      * @return personService.getTagsByPersonId(id);
     */
     @GetMapping("/{id}/tags")
-    public List<Tag> getTagsForPerson(@PathVariable int id) {
-        return personService.getTagsByPersonId(id);
+    public List<TagDto> getTagsForPerson(@PathVariable int id) {
+        return personService.getTagsByPersonId(id).stream().map(TagDto::from).toList();
     }
 
     /**
@@ -129,8 +133,8 @@ public class PersonController {
      * @return
      */
     @PutMapping("/{id}/tags")
-    public List<Tag> replaceTagsForPerson(@PathVariable int id, @RequestBody List<Integer> tagIds) {
-        return personService.replaceTags(id, tagIds);
+    public List<TagDto> replaceTagsForPerson(@PathVariable int id, @RequestBody List<Integer> tagIds) {
+        return personService.replaceTags(id, tagIds).stream().map(TagDto::from).toList();
     }
 
     /**
@@ -139,8 +143,8 @@ public class PersonController {
      * @return
      */
     @GetMapping("/{id}/deals")
-    public List<Deal> getDealsForPerson(@PathVariable int id) {
-        return personService.getDealsByPersonId(id);
+    public List<DealDto> getDealsForPerson(@PathVariable int id) {
+        return personService.getDealsByPersonId(id).stream().map(DealDto::from).toList();
     }
 
     /**
@@ -149,8 +153,8 @@ public class PersonController {
      * @return
      */
     @GetMapping("/{id}/activities")
-    public List<Activity> getActivitiesForPerson(@PathVariable int id) {
-        return personService.getActivitiesByPersonId(id);
+    public List<ActivityDto> getActivitiesForPerson(@PathVariable int id) {
+        return personService.getActivitiesByPersonId(id).stream().map(ActivityDto::from).toList();
     }
 
     /**
@@ -159,8 +163,8 @@ public class PersonController {
      * @return
      */
     @GetMapping("/{id}/notes")
-    public List<Note> getNotesForPerson(@PathVariable int id) {
-        return personService.getNotesByPersonId(id);
+    public List<NoteDto> getNotesForPerson(@PathVariable int id) {
+        return personService.getNotesByPersonId(id).stream().map(NoteDto::from).toList();
     }
 
     /**
@@ -169,7 +173,7 @@ public class PersonController {
      * @return
      */
     @GetMapping("/{id}/tasks")
-    public List<Task> getTasksForPerson(@PathVariable int id) {
-        return personService.getTasksByPersonId(id);
+    public List<TaskDto> getTasksForPerson(@PathVariable int id) {
+        return personService.getTasksByPersonId(id).stream().map(TaskDto::from).toList();
     }
 }

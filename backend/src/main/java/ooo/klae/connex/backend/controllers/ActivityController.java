@@ -11,10 +11,12 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import ooo.klae.connex.backend.beans.Activity;
+import ooo.klae.connex.backend.dto.ActivityDto;
 import ooo.klae.connex.backend.services.ActivityService;
 
 import java.util.List;
 
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 
 /**
@@ -36,15 +38,17 @@ public class ActivityController {
      * @return
      */
     @GetMapping
-    public List<Activity> getActivities(
+    public List<ActivityDto> getActivities(
         @RequestParam(required = false) Integer personId,
         @RequestParam(required = false) Integer dealId,
         @RequestParam(required = false) Integer createdById
     ) {
-        if (personId != null) return activityService.getActivitiesByPersonId(personId);
-        if (dealId != null) return activityService.getActivitiesByDealId(dealId);
-        if (createdById != null) return activityService.getActivitiesByCreatedById(createdById);
-        return activityService.getAllActivities();
+        List<Activity> activities;
+        if (personId != null) activities = activityService.getActivitiesByPersonId(personId);
+        else if (dealId != null) activities = activityService.getActivitiesByDealId(dealId);
+        else if (createdById != null) activities = activityService.getActivitiesByCreatedById(createdById);
+        else activities = activityService.getAllActivities();
+        return activities.stream().map(ActivityDto::from).toList();
     }
 
     /**
@@ -53,8 +57,8 @@ public class ActivityController {
      * @return
      */
     @GetMapping("/{id}")
-    public Activity getActivityById(@PathVariable int id) {
-        return activityService.getActivityById(id);
+    public ActivityDto getActivityById(@PathVariable int id) {
+        return ActivityDto.from(activityService.getActivityById(id));
     }
 
     /**
@@ -63,8 +67,8 @@ public class ActivityController {
      * @return
      */
     @PostMapping
-    public Activity createActivity(@RequestBody Activity activity) {
-        return activityService.create(activity);
+    public ActivityDto createActivity(@Valid @RequestBody ActivityDto dto) {
+        return ActivityDto.from(activityService.create(dto.toBean()));
     }
 
     /**
@@ -74,8 +78,8 @@ public class ActivityController {
      * @return
      */
     @PutMapping("/{id}")
-    public Activity updateActivity(@PathVariable int id, @RequestBody Activity activity) {
-        return activityService.update(id, activity);
+    public ActivityDto updateActivity(@PathVariable int id, @Valid @RequestBody ActivityDto dto) {
+        return ActivityDto.from(activityService.update(id, dto.toBean()));
     }
 
     /**

@@ -21,7 +21,7 @@ export default function Home() {
         </div>
         <a
           href="#get-started"
-          className="rounded-xl bg-[#73D200] px-6 py-3 text-base font-medium text-white shadow-sm transition hover:bg-[#5da600]"
+          className="rounded-xl bg-[#73D200] px-6 py-3 text-base font-medium text-white transition hover:bg-[#5da600]"
         >
           Get started
         </a>
@@ -36,7 +36,7 @@ export default function Home() {
           <div className="mt-12">
             <a
               href="#get-started"
-              className="inline-flex items-center justify-center rounded-xl bg-[#73D200] px-10 py-4 text-lg font-medium text-white shadow-sm transition hover:bg-[#5da600]"
+              className="inline-flex items-center justify-center rounded-xl bg-[#73D200] px-10 py-4 text-lg font-medium text-white shadow-md transition hover:bg-[#5da600]"
             >
               Get started <ArrowRightCircleIcon className="ml-2 h-5 w-5" />
             </a>

@@ -9,13 +9,14 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
-import ooo.klae.connex.backend.beans.Deal;
-import ooo.klae.connex.backend.beans.Pipeline;
-import ooo.klae.connex.backend.beans.Stage;
+import ooo.klae.connex.backend.dto.DealDto;
+import ooo.klae.connex.backend.dto.PipelineDto;
+import ooo.klae.connex.backend.dto.StageDto;
 import ooo.klae.connex.backend.services.PipelineService;
 
 import java.util.List;
 
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 
 /**
@@ -35,11 +36,9 @@ public class PipelineController {
      * @return
      */
     @GetMapping
-    public List<Pipeline> getAllPipelines() {
-        return pipelineService.getAllPipelines();
+    public List<PipelineDto> getAllPipelines() {
+        return pipelineService.getAllPipelines().stream().map(PipelineDto::from).toList();
     }
-
-    //TODO: add filtering by companyId, userId, etc. once those concepts are implemented
 
     /**
      * GET endpoint to retrieve a single pipeline by ID.
@@ -47,29 +46,29 @@ public class PipelineController {
      * @return
      */
     @GetMapping("/{id}")
-    public Pipeline getPipelineById(@PathVariable int id) {
-        return pipelineService.getPipelineById(id);
+    public PipelineDto getPipelineById(@PathVariable int id) {
+        return PipelineDto.from(pipelineService.getPipelineById(id));
     }
 
     /**
      * POST endpoint to create a new pipeline.
-     * @param pipeline
+     * @param dto
      * @return
      */
     @PostMapping
-    public Pipeline createPipeline(@RequestBody Pipeline pipeline) {
-        return pipelineService.createPipeline(pipeline);
+    public PipelineDto createPipeline(@Valid @RequestBody PipelineDto dto) {
+        return PipelineDto.from(pipelineService.createPipeline(dto.toBean()));
     }
 
     /**
      * PUT endpoint to update an existing pipeline.
      * @param id
-     * @param pipeline
+     * @param dto
      * @return
      */
     @PutMapping("/{id}")
-    public Pipeline updatePipeline(@PathVariable int id, @RequestBody Pipeline pipeline) {
-        return pipelineService.updatePipeline(id, pipeline);
+    public PipelineDto updatePipeline(@PathVariable int id, @Valid @RequestBody PipelineDto dto) {
+        return PipelineDto.from(pipelineService.updatePipeline(id, dto.toBean()));
     }
 
     /**
@@ -82,13 +81,13 @@ public class PipelineController {
     }
 
     /**
-     * GET endpoint to retrieve stages for a given pipeline ID.
+     * GET endpoint to retrieve the stages of a pipeline, ordered by {@code position} ascending.
      * @param pipelineId
      * @return
      */
     @GetMapping("/{pipelineId}/stages")
-    public List<Stage> getStagesByPipelineId(@PathVariable int pipelineId) {
-        return pipelineService.getStagesByPipelineId(pipelineId);
+    public List<StageDto> getStagesByPipelineId(@PathVariable int pipelineId) {
+        return pipelineService.getStagesByPipelineId(pipelineId).stream().map(StageDto::from).toList();
     }
 
     /**
@@ -97,34 +96,36 @@ public class PipelineController {
      * @return
      */
     @GetMapping("/stages/{id}")
-    public Stage getStageById(@PathVariable int id) {
-        return pipelineService.getStageById(id);
+    public StageDto getStageById(@PathVariable int id) {
+        return StageDto.from(pipelineService.getStageById(id));
     }
 
     /**
      * POST endpoint to create a new stage within a pipeline.
      * @param pipelineId
-     * @param stage
+     * @param dto
      * @return
      */
     @PostMapping("/{pipelineId}/stages")
-    public Stage createStage(@PathVariable int pipelineId, @RequestBody Stage stage) {
-        return pipelineService.createStage(pipelineId, stage);
+    public StageDto createStage(@PathVariable int pipelineId, @Valid @RequestBody StageDto dto) {
+        return StageDto.from(pipelineService.createStage(pipelineId, dto.toBean()));
     }
 
     /**
      * PUT endpoint to update an existing stage.
      * @param id
-     * @param stage
+     * @param dto
      * @return
      */
     @PutMapping("/stages/{id}")
-    public Stage updateStage(@PathVariable int id, @RequestBody Stage stage) {
-        return pipelineService.updateStage(id, stage);
+    public StageDto updateStage(@PathVariable int id, @Valid @RequestBody StageDto dto) {
+        return StageDto.from(pipelineService.updateStage(id, dto.toBean()));
     }
 
     /**
      * DELETE endpoint to delete a stage by ID.
+     * Cannot be deleted while deals reference it
+     * ({@code ON DELETE RESTRICT} on {@code deal.stage_id}).
      * @param id
      */
     @DeleteMapping("/stages/{id}")
@@ -138,17 +139,18 @@ public class PipelineController {
      * @return
      */
     @GetMapping("/{id}/deals")
-    public List<Deal> getDealsForPipeline(@PathVariable int id) {
-        return pipelineService.getDealsByPipelineId(id);
+    public List<DealDto> getDealsForPipeline(@PathVariable int id) {
+        return pipelineService.getDealsByPipelineId(id).stream().map(DealDto::from).toList();
     }
 
     /**
      * GET endpoint to retrieve deals associated with a stage.
+     * Useful for rendering a single column of a kanban board.
      * @param id
      * @return
      */
     @GetMapping("/stages/{id}/deals")
-    public List<Deal> getDealsForStage(@PathVariable int id) {
-        return pipelineService.getDealsByStageId(id);
+    public List<DealDto> getDealsForStage(@PathVariable int id) {
+        return pipelineService.getDealsByStageId(id).stream().map(DealDto::from).toList();
     }
 }
