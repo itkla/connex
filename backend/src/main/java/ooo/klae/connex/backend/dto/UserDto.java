@@ -32,6 +32,10 @@ public class UserDto {
 
     private String createdAt;
     private String updatedAt;
+    private String lastLoginAt;
+
+    @Size(max = 2048)
+    private String profilePictureUrl;
 
     public static UserDto from(User u) {
         if (u == null) return null;
@@ -42,6 +46,8 @@ public class UserDto {
         dto.email = u.getEmail();
         dto.createdAt = u.getCreatedAt();
         dto.updatedAt = u.getUpdatedAt();
+        dto.lastLoginAt = u.getLastLoginAt();
+        dto.profilePictureUrl = u.getProfilePictureUrl();
         return dto;
     }
 
@@ -53,6 +59,8 @@ public class UserDto {
         u.setEmail(email);
         u.setCreatedAt(createdAt);
         u.setUpdatedAt(updatedAt);
+        u.setLastLoginAt(lastLoginAt);
+        u.setProfilePictureUrl(profilePictureUrl);
         return u;
     }
 }

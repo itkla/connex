@@ -38,6 +38,8 @@ CREATE TABLE app_user (
     display_name    VARCHAR(128) NOT NULL COMMENT 'Display name for UI',
     email           VARCHAR(255) NOT NULL UNIQUE COMMENT 'Email address',
     password_hash   VARCHAR(255) COMMENT 'Hashed password',
+    last_login_at   DATETIME COMMENT 'Most recent login timestamp',
+    profile_picture_url VARCHAR(2048) COMMENT 'Profile picture URL',
     created_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT 'Creation timestamp',
     updated_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT 'Last update timestamp'
 ) DEFAULT CHARSET=utf8mb4 COMMENT='Application users';

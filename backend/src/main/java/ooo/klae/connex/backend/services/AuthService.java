@@ -69,11 +69,19 @@ public class AuthService {
         Authentication authentication = authenticationManager.authenticate(
             new UsernamePasswordAuthenticationToken(request.getUsername(), request.getPassword())
         );
+        User user = (User) authentication.getPrincipal();
+        userMapper.updateLastLoginAt(user.getId());
+        User refreshedUser = userMapper.getUserById(user.getId());
+
         SecurityContext context = SecurityContextHolder.createEmptyContext();
-        context.setAuthentication(authentication);
+        context.setAuthentication(new UsernamePasswordAuthenticationToken(
+            refreshedUser,
+            authentication.getCredentials(),
+            authentication.getAuthorities()
+        ));
         SecurityContextHolder.setContext(context);
         securityContextRepository.saveContext(context, httpRequest, httpResponse);
-        return (User) authentication.getPrincipal();
+        return refreshedUser;
     }
 
     /**

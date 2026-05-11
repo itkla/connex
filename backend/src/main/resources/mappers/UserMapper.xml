@@ -3,29 +3,33 @@
         "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
 <mapper namespace="ooo.klae.connex.backend.mappers.UserMapper">
 
+  <sql id="userColumns">
+    id, username, display_name, email, password_hash, last_login_at, profile_picture_url, created_at, updated_at
+  </sql>
+
   <select id="getAllUsers" resultType="User">
-    SELECT id, username, display_name, email, password_hash, created_at, updated_at
+    SELECT <include refid="userColumns"/>
     FROM app_user
   </select>
 
   <select id="getUserById" resultType="User">
-    SELECT id, username, display_name, email, password_hash, created_at, updated_at
+    SELECT <include refid="userColumns"/>
     FROM app_user WHERE id = #{id}
   </select>
 
   <select id="getUserByUsername" resultType="User">
-    SELECT id, username, display_name, email, password_hash, created_at, updated_at
+    SELECT <include refid="userColumns"/>
     FROM app_user WHERE username = #{username}
   </select>
 
   <select id="getUserByEmail" resultType="User">
-    SELECT id, username, display_name, email, password_hash, created_at, updated_at
+    SELECT <include refid="userColumns"/>
     FROM app_user WHERE email = #{email}
   </select>
 
   <insert id="insert" useGeneratedKeys="true" keyProperty="id">
-    INSERT INTO app_user (username, display_name, email, password_hash)
-    VALUES (#{username}, #{displayName}, #{email}, #{passwordHash})
+    INSERT INTO app_user (username, display_name, email, password_hash, profile_picture_url)
+    VALUES (#{username}, #{displayName}, #{email}, #{passwordHash}, #{profilePictureUrl})
   </insert>
 
   <update id="update">
@@ -33,7 +37,20 @@
     SET username = #{username},
         display_name = #{displayName},
         email = #{email},
-        password_hash = #{passwordHash}
+        password_hash = #{passwordHash},
+        profile_picture_url = #{profilePictureUrl}
+    WHERE id = #{id}
+  </update>
+
+  <update id="updateLastLoginAt">
+    UPDATE app_user
+    SET last_login_at = CURRENT_TIMESTAMP
+    WHERE id = #{id}
+  </update>
+
+  <update id="updateProfilePictureUrl">
+    UPDATE app_user
+    SET profile_picture_url = #{profilePictureUrl}
     WHERE id = #{id}
   </update>
 
