@@ -1,4 +1,5 @@
 // import Image from "next/image";
+import Link from "next/link";
 import ProfileCard from "./components/ProfileCard";
 import { ArrowRightCircleIcon } from "@heroicons/react/16/solid";
 
@@ -7,9 +8,9 @@ export default function Home() {
     <div className="min-h-screen bg-white max-w-full">
       <header className="flex items-center justify-between px-8 py-6">
         <div className="flex items-center gap-12">
-          <a href="/" className="text-2xl font-bold tracking-tight text-black">
+          <Link href="/" className="text-2xl font-bold tracking-tight text-black">
             CONNEX
-          </a>
+          </Link>
           <nav className="hidden items-center gap-8 md:flex">
             <a href="#pricing" className="text-base text-black hover:text-neutral-600">
               Pricing
