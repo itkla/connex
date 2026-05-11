@@ -2,8 +2,15 @@
 import Link from "next/link";
 import ProfileCard from "./components/ProfileCard";
 import { ArrowRightCircleIcon } from "@heroicons/react/16/solid";
+import { headers } from 'next/headers';
+import { getCurrentUserFromCookie } from "@/app/lib/api";
 
-export default function Home() {
+export default async function Home() {
+  const cookie = (await headers()).get('cookie');
+  const user = await getCurrentUserFromCookie(cookie);
+  const ctaHref = user ? "/dashboard" : "/auth/login";
+  const ctaLabel = user ? "Dashboard" : "Get started";
+
   return (
     <div className="min-h-screen bg-white max-w-full">
       <header className="flex items-center justify-between px-8 py-6">
@@ -20,12 +27,12 @@ export default function Home() {
             </a>
           </nav>
         </div>
-        <a
-          href="#get-started"
+        <Link
+          href={ctaHref}
           className="rounded-xl bg-[#73D200] px-6 py-3 text-base font-medium text-white transition hover:bg-[#5da600]"
         >
-          Get started
-        </a>
+          {ctaLabel}
+        </Link>
       </header>
 
       <main className="mx-auto grid max-w-7xl grid-cols-1 items-center gap-12 px-8 pt-12 pb-24 lg:grid-cols-2 lg:gap-16 lg:pt-24">
@@ -35,12 +42,12 @@ export default function Home() {
             Clients
           </h1>
           <div className="mt-12">
-            <a
-              href="#get-started"
+            <Link
+              href={ctaHref}
               className="inline-flex items-center justify-center rounded-xl bg-[#73D200] px-10 py-4 text-lg font-medium text-white shadow-md transition hover:bg-[#5da600]"
             >
-              Get started <ArrowRightCircleIcon className="ml-2 h-5 w-5" />
-            </a>
+              {ctaLabel} <ArrowRightCircleIcon className="ml-2 h-5 w-5" />
+            </Link>
           </div>
         </section>
 

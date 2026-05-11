@@ -39,7 +39,7 @@ public class AuthController {
     public Map<String, String> register(@Valid @RequestBody RegisterDto request, HttpServletRequest httpRequest, HttpServletResponse httpResponse) {
         authService.register(request);
         authService.login(new LoginDto(request.getUsername(), request.getPassword()), httpRequest, httpResponse);
-        return Map.of("message", "Registration successful");
+        return Map.of("message", "You are now registered and logged in");
     }
 
     /**
@@ -50,7 +50,7 @@ public class AuthController {
     @PostMapping("/login")
     public Map<String, String> login(@Valid @RequestBody LoginDto request, HttpServletRequest httpRequest, HttpServletResponse httpResponse) {
         authService.login(request, httpRequest, httpResponse);
-        return Map.of("message", "Login successful");
+        return Map.of("message", "You are now logged in");
     }
 
     /**

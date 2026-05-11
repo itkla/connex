@@ -1,59 +1,83 @@
 const API_BASE =
-  process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080";
+    typeof window === "undefined"
+        ? process.env.API_URL ?? process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080"
+        : "";
 
 // Auth
 
 export type User = {
-  id: number;
-  username: string;
-  displayName: string;
-  email: string;
+    id: number;
+    username: string;
+    displayName: string;
+    email: string;
 };
 
 export type LoginPayload = {
-  username: string;
-  password: string;
+    username: string;
+    password: string;
 };
 
 export type RegisterPayload = {
-  username: string;
-  password: string;
-  displayName: string;
-  email: string;
+    username: string;
+    password: string;
+    displayName: string;
+    email: string;
 };
 
-/**
-* Helper function to make POST requests with JSON body and parse JSON response.
-* Throws an error if the response is not ok, including the response text if available.
-* 
-* @param path - The API endpoint path (e.g., "/api/auth/login")
-* @param body - The request payload to be sent as JSON
-* @returns A promise that resolves to the parsed JSON response of type T
-*/
-async function postJson<T>(path: string, body: unknown): Promise<T> {
-  const res = await fetch(`${API_BASE}${path}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    credentials: "include",
-    body: JSON.stringify(body),
-  });
-  if (!res.ok) {
-    const text = await res.text().catch(() => "");
-    throw new Error(text || `Request failed (${res.status})`);
-  }
-  return res.json();
+export type AuthResponse = {
+    message: string;
+};
+
+async function requestJson<T>(
+    path: string,
+    init: RequestInit = {},
+): Promise<T> {
+    const res = await fetch(`${API_BASE}${path}`, {
+        ...init,
+        credentials: "include",
+        headers: {
+            ...(init.body ? { "Content-Type": "application/json" } : {}),
+            ...init.headers,
+        },
+    });
+
+    if (!res.ok) {
+        throw new Error(await getErrorMessage(res));
+    }
+
+    const text = await res.text();
+
+    if (!text) {
+        return undefined as T;
+    }
+
+    return JSON.parse(text) as T;
 }
 
-async function getJson<T>(path: string, body: unknown = undefined): Promise<T> {
-  const res = await fetch(`${API_BASE}${path}`, {
-    method: "GET",
-    credentials: "include",
-  });
-  if (!res.ok) {
+async function getErrorMessage(res: Response): Promise<string> {
     const text = await res.text().catch(() => "");
-    throw new Error(text || `Request failed (${res.status})`);
-  }
-  return res.json();
+
+    if (!text) {
+        return `Request failed (${res.status})`;
+    }
+
+    try {
+        const data = JSON.parse(text) as { message?: string; error?: string };
+        return data.message ?? data.error ?? text;
+    } catch {
+        return text;
+    }
+}
+
+async function postJson<T>(path: string, body: unknown = {}): Promise<T> {
+    return requestJson<T>(path, {
+        method: "POST",
+        body: JSON.stringify(body),
+    });
+}
+
+async function getJson<T>(path: string, init: RequestInit = {}): Promise<T> {
+    return requestJson<T>(path, { ...init, method: "GET" });
 }
 
 /**
@@ -64,18 +88,17 @@ async function getJson<T>(path: string, body: unknown = undefined): Promise<T> {
  * @throws An error if the login request fails, including the response text if available
  */
 export function login(payload: LoginPayload) {
-  return postJson<User>("/api/auth/login", payload);
+    return postJson<AuthResponse>("/api/auth/login", payload);
 }
 
 /**
- * Registers a new user with the provided information.
+ * POST endpoint to register a new user.
  * 
- * @param payload - An object containing the user's registration details
- * @returns A promise that resolves to the newly registered user's information
- * @throws An error if the registration request fails, including the response text if available
+ * @param payload
+ * @return
  */
 export function register(payload: RegisterPayload) {
-  return postJson<User>("/api/auth/register", payload);
+    return postJson<AuthResponse>("/api/auth/register", payload);
 }
 
 /**
@@ -84,6 +107,25 @@ export function register(payload: RegisterPayload) {
  * @returns A promise that resolves to the authenticated user's profile information
  * @throws An error if the profile retrieval request fails, including the response text if available
  */
-export function me() {
-  return getJson<User>("/api/auth/me");
+export function me(init: RequestInit = {}) {
+    return getJson<User>("/api/auth/me", init);
+}
+
+export async function getCurrentUserFromCookie(cookie: string | null) {
+    if (!cookie) {
+        return null;
+    }
+
+    try {
+        return await me({
+            headers: { cookie },
+            cache: "no-store",
+        });
+    } catch {
+        return null;
+    }
+}
+
+export function logout() {
+    return postJson<void>("/api/auth/logout");
 }
