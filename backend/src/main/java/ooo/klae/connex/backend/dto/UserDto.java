@@ -2,6 +2,7 @@ package ooo.klae.connex.backend.dto;
 
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 
 import lombok.AllArgsConstructor;
@@ -19,6 +20,7 @@ public class UserDto {
 
     @NotBlank
     @Size(min = 3, max = 64)
+    @Pattern(regexp = "^[a-zA-Z0-9._-]+$", message = "Username must contain only letters, numbers, dots, underscores, and hyphens")
     private String username;
 
     @NotBlank
@@ -28,6 +30,7 @@ public class UserDto {
     @NotBlank
     @Email
     @Size(max = 255)
+    @Pattern(regexp = "^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$", message = "Email must be a valid email address")
     private String email;
 
     private String createdAt;
