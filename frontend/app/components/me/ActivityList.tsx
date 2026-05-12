@@ -1,0 +1,36 @@
+// NOTE: not used in /me page anymore, but might be used in other pages so im keeping it
+
+import { Activity } from "@/app/lib/api";
+import EmptyState from "./EmptyState";
+import { timeOf, formatShortDate } from "@/app/lib/utils";
+
+export default function ActivityList({ activities }: { activities: Activity[] }) {
+    if (activities.length === 0) {
+        return <EmptyState message="No activities logged yet." />;
+    }
+
+    const sorted = [...activities].sort(
+        (a, b) => timeOf(b.timestamp) - timeOf(a.timestamp),
+    );
+    const recent = sorted.slice(0, 5);
+
+    return (
+        <ul className="divide-y divide-neutral-200">
+            {recent.map((activity) => (
+                <li key={activity.id} className="flex flex-col gap-1 px-6 py-3">
+                    <div className="flex items-start justify-between gap-4">
+                        <span className="text-sm text-black">{activity.subject}</span>
+                        {activity.timestamp ? (
+                            <span className="shrink-0 text-xs text-neutral-500">
+                                {formatShortDate(activity.timestamp)}
+                            </span>
+                        ) : null}
+                    </div>
+                    <span className="text-xs tracking-wide text-neutral-500 uppercase">
+                        {activity.type}
+                    </span>
+                </li>
+            ))}
+        </ul>
+    );
+}

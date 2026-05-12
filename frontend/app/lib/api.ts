@@ -3,14 +3,76 @@ const API_BASE =
         ? process.env.API_URL ?? process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080"
         : "";
 
-// Auth
-
 export type User = {
     id: number;
     username: string;
     displayName: string;
     email: string;
+    createdAt: string;
+    updatedAt: string;
+    lastLoginAt?: string;
+    profilePictureUrl?: string;
 };
+
+async function requestJson<T>(
+    path: string,
+    init: RequestInit = {},
+): Promise<T> {
+    const res = await fetch(`${API_BASE}${path}`, {
+        ...init,
+        credentials: "include",
+        headers: {
+            ...(init.body ? { "Content-Type": "application/json" } : {}),
+            ...init.headers,
+        },
+    });
+
+    if (!res.ok) {
+        throw await getApiError(res);
+    }
+
+    const text = await res.text();
+
+    if (!text) {
+        return undefined as T;
+    }
+
+    return JSON.parse(text) as T;
+}
+
+async function postJson<T>(path: string, body: unknown = {}): Promise<T> {
+    return requestJson<T>(path, {
+        method: "POST",
+        body: JSON.stringify(body),
+    });
+}
+
+async function getJson<T>(path: string, init: RequestInit = {}): Promise<T> {
+    return requestJson<T>(path, { ...init, method: "GET" });
+}
+
+async function putJson<T>(path: string, body: unknown = {}): Promise<T> {
+    return requestJson<T>(path, {
+        method: "PUT",
+        body: JSON.stringify(body),
+    });
+}
+
+async function safeWithCookie<T>(
+    fetcher: (init: RequestInit) => Promise<T[]>,
+    cookie: string | null,
+): Promise<T[]> {
+    if (!cookie) return [];
+    try {
+        return await fetcher({ headers: { cookie }, cache: "no-store" });
+    } catch {
+        return [];
+    }
+}
+
+/*
+* == Authentication
+*/
 
 export type LoginPayload = {
     username: string;
@@ -40,32 +102,6 @@ export class ApiError extends Error {
         this.status = status;
         this.fieldErrors = fieldErrors;
     }
-}
-
-async function requestJson<T>(
-    path: string,
-    init: RequestInit = {},
-): Promise<T> {
-    const res = await fetch(`${API_BASE}${path}`, {
-        ...init,
-        credentials: "include",
-        headers: {
-            ...(init.body ? { "Content-Type": "application/json" } : {}),
-            ...init.headers,
-        },
-    });
-
-    if (!res.ok) {
-        throw await getApiError(res);
-    }
-
-    const text = await res.text();
-
-    if (!text) {
-        return undefined as T;
-    }
-
-    return JSON.parse(text) as T;
 }
 
 function isStringRecord(value: unknown): value is Record<string, string> {
@@ -104,16 +140,6 @@ async function getApiError(res: Response): Promise<ApiError> {
     }
 }
 
-async function postJson<T>(path: string, body: unknown = {}): Promise<T> {
-    return requestJson<T>(path, {
-        method: "POST",
-        body: JSON.stringify(body),
-    });
-}
-
-async function getJson<T>(path: string, init: RequestInit = {}): Promise<T> {
-    return requestJson<T>(path, { ...init, method: "GET" });
-}
 
 /**
  * Logs in a user with the provided credentials.
@@ -163,4 +189,80 @@ export async function getCurrentUserFromCookie(cookie: string | null) {
 
 export function logout() {
     return postJson<void>("/api/auth/logout");
+}
+
+/*
+* == User profile management
+*/
+
+export type UpdateUserPayload = {
+    username: string;
+    displayName: string;
+    email: string;
+    profilePictureUrl?: string;
+};
+
+export function updateUser(id: number, payload: UpdateUserPayload) {
+    return putJson<User>(`/api/users/${id}`, payload);
+}
+
+/*
+* == User-associated records
+*/
+
+export type Task = {
+    id: number;
+    description: string;
+    completed: boolean;
+    dueDate?: string;
+    assignedTo: number;
+    person?: number | null;
+    deal?: number | null;
+    createdAt: string;
+    updatedAt: string;
+};
+
+export type Activity = {
+    id: number;
+    type: string;
+    subject: string;
+    notes?: string;
+    person?: number | null;
+    deal?: number | null;
+    createdBy: number;
+    timestamp?: string;
+};
+
+export type Note = {
+    id: number;
+    content: string;
+    author: number;
+    person?: number | null;
+    deal?: number | null;
+    createdAt: string;
+    updatedAt: string;
+};
+
+export function getUserTasks(id: number, init: RequestInit = {}) {
+    return getJson<Task[]>(`/api/users/${id}/tasks`, init);
+}
+
+export function getUserActivities(id: number, init: RequestInit = {}) {
+    return getJson<Activity[]>(`/api/users/${id}/activities`, init);
+}
+
+export function getUserNotes(id: number, init: RequestInit = {}) {
+    return getJson<Note[]>(`/api/users/${id}/notes`, init);
+}
+
+export function getUserTasksFromCookie(id: number, cookie: string | null) {
+    return safeWithCookie<Task>((init) => getUserTasks(id, init), cookie);
+}
+
+export function getUserActivitiesFromCookie(id: number, cookie: string | null) {
+    return safeWithCookie<Activity>((init) => getUserActivities(id, init), cookie);
+}
+
+export function getUserNotesFromCookie(id: number, cookie: string | null) {
+    return safeWithCookie<Note>((init) => getUserNotes(id, init), cookie);
 }
