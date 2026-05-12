@@ -1,14 +1,14 @@
--- Password hash for every user below is "password123".
+-- Password hash for every user below is "L3tme!n!".
 
 USE connexdb;
 
 -- app_user
 INSERT INTO app_user (id, username, display_name, email, password_hash) VALUES
-    (1, 'alice',   'Alice Anderson', 'alice@connex.test',   '$2a$10$N.zmdr9k7uOCQb376NoUnuTJ8iAt6Z5EHsM8lE9lBOsl7iKTVEFDa'),
-    (2, 'bob',     'Bob Brown',      'bob@connex.test',     '$2a$10$N.zmdr9k7uOCQb376NoUnuTJ8iAt6Z5EHsM8lE9lBOsl7iKTVEFDa'),
-    (3, 'carol',   'Carol Chen',     'carol@connex.test',   '$2a$10$N.zmdr9k7uOCQb376NoUnuTJ8iAt6Z5EHsM8lE9lBOsl7iKTVEFDa'),
-    (4, 'dave',    'Dave Davis',     'dave@connex.test',    '$2a$10$N.zmdr9k7uOCQb376NoUnuTJ8iAt6Z5EHsM8lE9lBOsl7iKTVEFDa'),
-    (5, 'eve',     'Eve Edwards',    'eve@connex.test',     '$2a$10$N.zmdr9k7uOCQb376NoUnuTJ8iAt6Z5EHsM8lE9lBOsl7iKTVEFDa');
+    (1, 'alice',   'Alice Anderson', 'alice@connex.test',   '$2a$10$fjpXXw/Y3WgsJz7gHEhrJuIi6c660HFpkPz/QlbPT9hPeG1VmAkxm'),
+    (2, 'bob',     'Bob Brown',      'bob@connex.test',     '$2a$10$fjpXXw/Y3WgsJz7gHEhrJuIi6c660HFpkPz/QlbPT9hPeG1VmAkxm'),
+    (3, 'carol',   'Carol Chen',     'carol@connex.test',   '$2a$10$fjpXXw/Y3WgsJz7gHEhrJuIi6c660HFpkPz/QlbPT9hPeG1VmAkxm'),
+    (4, 'dave',    'Dave Davis',     'dave@connex.test',    '$2a$10$fjpXXw/Y3WgsJz7gHEhrJuIi6c660HFpkPz/QlbPT9hPeG1VmAkxm'),
+    (5, 'eve',     'Eve Edwards',    'eve@connex.test',     '$2a$10$fjpXXw/Y3WgsJz7gHEhrJuIi6c660HFpkPz/QlbPT9hPeG1VmAkxm');
 
 -- company
 INSERT INTO company (id, name, website, industry, phone, address) VALUES
