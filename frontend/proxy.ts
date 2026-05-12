@@ -11,6 +11,9 @@ export async function proxy(request: NextRequest) {
         return NextResponse.next();
     }
 
+    // Add route matching for /me to check authentication
+    const isMeRoute = pathname.startsWith('/me');
+
     const cookie = request.headers.get('cookie');
     const user = await getCurrentUserFromCookie(cookie);
 
@@ -20,11 +23,16 @@ export async function proxy(request: NextRequest) {
             : NextResponse.next();
     }
 
+    if (isMeRoute) {
+        return NextResponse.next();
+    }
+
     return isDashboardRoute
         ? NextResponse.next()
         : NextResponse.redirect(new URL('/dashboard', request.url));
+        
 }
 
 export const config = {
-    matcher: ['/auth/:path*', '/dashboard/:path*'],
+    matcher: ['/auth/:path*', '/dashboard/:path*', '/me/:path*'],
 }

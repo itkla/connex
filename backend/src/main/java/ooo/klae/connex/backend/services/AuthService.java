@@ -69,11 +69,19 @@ public class AuthService {
         Authentication authentication = authenticationManager.authenticate(
             new UsernamePasswordAuthenticationToken(request.getUsername(), request.getPassword())
         );
+        User user = (User) authentication.getPrincipal();
+        userMapper.updateLastLoginAt(user.getId());
+        User refreshedUser = userMapper.getUserById(user.getId());
+
         SecurityContext context = SecurityContextHolder.createEmptyContext();
-        context.setAuthentication(authentication);
+        context.setAuthentication(new UsernamePasswordAuthenticationToken(
+            refreshedUser,
+            authentication.getCredentials(),
+            authentication.getAuthorities()
+        ));
         SecurityContextHolder.setContext(context);
         securityContextRepository.saveContext(context, httpRequest, httpResponse);
-        return (User) authentication.getPrincipal();
+        return refreshedUser;
     }
 
     /**
@@ -82,9 +90,16 @@ public class AuthService {
      */
     public User getCurrentUser() {
         Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
-        if (authentication == null || !authentication.isAuthenticated() || !(authentication.getPrincipal() instanceof User)) {
+        if (authentication == null || !authentication.isAuthenticated() || !(authentication.getPrincipal() instanceof User principal)) {
             throw new ResourceNotFoundException("Not authenticated");
         }
-        return (User) authentication.getPrincipal();
+
+        // handles cases where the user updates their info but is not returned
+        // reduntant if the user is not updated; just returns the same value
+        User fresh = userMapper.getUserById(principal.getId());
+        if (fresh == null) {
+            throw new ResourceNotFoundException("Not authenticated");
+        }
+        return fresh;
     }
 }

@@ -34,8 +34,10 @@ public class User implements org.springframework.security.core.userdetails.UserD
     private String passwordHash; // can be null
     private String createdAt;
     private String updatedAt;
+    private String lastLoginAt;
+    private String profilePictureUrl;
 
-    public User(int id, String username, String displayName, String email, String passwordHash, String createdAt, String updatedAt) {
+    public User(int id, String username, String displayName, String email, String passwordHash, String createdAt, String updatedAt, String lastLoginAt, String profilePictureUrl) {
         this.id = id;
         this.username = username;
         this.displayName = displayName;
@@ -43,6 +45,8 @@ public class User implements org.springframework.security.core.userdetails.UserD
         this.passwordHash = passwordHash;
         this.createdAt = createdAt;
         this.updatedAt = updatedAt;
+        this.lastLoginAt = lastLoginAt;
+        this.profilePictureUrl = profilePictureUrl;
     }
 
     // Getters and setters
@@ -104,6 +108,22 @@ public class User implements org.springframework.security.core.userdetails.UserD
 
     public void setUpdatedAt(String updatedAt) {
         this.updatedAt = updatedAt;
+    }
+
+    public String getLastLoginAt() {
+        return lastLoginAt;
+    }
+
+    public void setLastLoginAt(String lastLoginAt) {
+        this.lastLoginAt = lastLoginAt;
+    }
+
+    public String getProfilePictureUrl() {
+        return profilePictureUrl;
+    }
+
+    public void setProfilePictureUrl(String profilePictureUrl) {
+        this.profilePictureUrl = profilePictureUrl;
     }
 
     @Override
