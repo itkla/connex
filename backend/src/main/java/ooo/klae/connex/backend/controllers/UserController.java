@@ -109,4 +109,15 @@ public class UserController {
     public List<NoteDto> getNotesForUser(@PathVariable int id) {
         return userService.getNotesByUserId(id).stream().map(NoteDto::from).toList();
     }
+
+    /**
+     * PUT endpoint to update the profile picture of a user.
+     * @param id
+     * @param profilePictureUrl
+     * @return
+     */
+    @PutMapping("/{id}/profile-picture")
+    public UserDto updateProfilePicture(@PathVariable int id, @RequestBody String profilePictureUrl) {
+        return UserDto.from(userService.updateProfilePictureUrl(id, profilePictureUrl));
+    }
 }

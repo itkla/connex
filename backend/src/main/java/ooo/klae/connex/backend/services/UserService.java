@@ -102,4 +102,16 @@ public class UserService implements UserDetailsService {
         if (userMapper.getUserById(userId) == null) throw new ResourceNotFoundException("User not found with id: " + userId);
         return noteMapper.getNotesByAuthorId(userId);
     }
+
+    /**
+     * Updates the profile picture of a user.
+     * @param userId
+     * @param profilePictureUrl
+     * @return
+     */
+    public User updateProfilePictureUrl(int userId, String profilePictureUrl) {
+        if (userMapper.getUserById(userId) == null) throw new ResourceNotFoundException("User not found with id: " + userId);
+        userMapper.updateProfilePictureUrl(userId, profilePictureUrl);
+        return userMapper.getUserById(userId);
+    }
 }
