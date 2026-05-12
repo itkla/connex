@@ -15,7 +15,7 @@ import ooo.klae.connex.backend.beans.User;
 @AllArgsConstructor
 public class UserDto {
 
-    private int id;
+    private Integer id;
 
     @NotBlank
     @Size(min = 3, max = 64)
@@ -53,7 +53,8 @@ public class UserDto {
 
     public User toBean() {
         User u = new User();
-        u.setId(id);
+        // u.setId(id);
+        if (id != null) u.setId(id);
         u.setUsername(username);
         u.setDisplayName(displayName);
         u.setEmail(email);

@@ -90,9 +90,16 @@ public class AuthService {
      */
     public User getCurrentUser() {
         Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
-        if (authentication == null || !authentication.isAuthenticated() || !(authentication.getPrincipal() instanceof User)) {
+        if (authentication == null || !authentication.isAuthenticated() || !(authentication.getPrincipal() instanceof User principal)) {
             throw new ResourceNotFoundException("Not authenticated");
         }
-        return (User) authentication.getPrincipal();
+
+        // handles cases where the user updates their info but is not returned
+        // reduntant if the user is not updated; just returns the same value
+        User fresh = userMapper.getUserById(principal.getId());
+        if (fresh == null) {
+            throw new ResourceNotFoundException("Not authenticated");
+        }
+        return fresh;
     }
 }
