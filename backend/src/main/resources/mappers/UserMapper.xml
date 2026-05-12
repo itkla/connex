@@ -34,11 +34,13 @@
 
   <update id="update">
     UPDATE app_user
-    SET username = #{username},
-        display_name = #{displayName},
-        email = #{email},
-        password_hash = #{passwordHash},
-        profile_picture_url = #{profilePictureUrl}
+    <set>
+      username = #{username},
+      display_name = #{displayName},
+      email = #{email},
+      profile_picture_url = #{profilePictureUrl},
+      <if test="passwordHash != null">password_hash = #{passwordHash},</if>
+    </set>
     WHERE id = #{id}
   </update>
 
