@@ -50,7 +50,7 @@ export default async function MePage() {
     const randomGreeting = greetings[Math.floor(Math.random() * greetings.length)];
 
     return (
-        <div className="min-h-screen bg-white px-6 pt-20 pb-12 md:flex md:h-screen md:flex-col md:overflow-hidden">
+        <div className="min-h-screen bg-white px-6 pt-12 pb-12 md:flex md:h-screen md:flex-col md:overflow-hidden">
             <div className="mx-auto w-full max-w-5xl md:flex md:min-h-0 md:flex-1 md:flex-col">
                 <header className="flex items-center gap-6">
                     {user.profilePictureUrl ? (
