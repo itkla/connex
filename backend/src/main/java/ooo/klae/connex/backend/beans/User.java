@@ -36,6 +36,12 @@ public class User implements org.springframework.security.core.userdetails.UserD
     private String updatedAt;
     private String lastLoginAt;
     private String profilePictureUrl;
+    private String department;
+    private String title;
+    private String employeeId;
+    private String phoneNumber;
+    // private String address;
+    // private Note[] notes;
 
     public User(int id, String username, String displayName, String email, String passwordHash, String createdAt, String updatedAt, String lastLoginAt, String profilePictureUrl) {
         this.id = id;

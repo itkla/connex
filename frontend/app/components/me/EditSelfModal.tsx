@@ -48,7 +48,7 @@ export default function EditSelfModal({ user }: Props) {
     async function uploadProfilePicture(file: File): Promise<string> {
         const formData = new FormData();
         formData.append('profilePicture', file);
-        const res = await fetch('/frontend-api/users/me/profile-picture', {
+        const res = await fetch('/api/users/me/profile-picture', {
             method: 'PUT',
             body: formData,
         });

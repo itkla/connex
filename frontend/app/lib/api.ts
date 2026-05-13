@@ -3,6 +3,8 @@ const API_BASE =
         ? process.env.API_URL ?? process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080"
         : "";
 
+
+// Types
 export type User = {
     id: number;
     username: string;
@@ -12,6 +14,113 @@ export type User = {
     updatedAt: string;
     lastLoginAt?: string;
     profilePictureUrl?: string;
+};
+
+export type LoginPayload = {
+    username: string;
+    password: string;
+};
+
+export type RegisterPayload = {
+    username: string;
+    password: string;
+    displayName: string;
+    email: string;
+};
+
+export type AuthResponse = {
+    message: string;
+};
+
+export type UpdateUserPayload = {
+    username: string;
+    displayName: string;
+    email: string;
+    profilePictureUrl?: string;
+};
+
+export type Task = {
+    id: number;
+    description: string;
+    completed: boolean;
+    dueDate?: string;
+    assignedTo: number;
+    person?: number | null;
+    deal?: number | null;
+    createdAt: string;
+    updatedAt: string;
+};
+
+export type Activity = {
+    id: number;
+    type: string;
+    subject: string;
+    notes?: string;
+    person?: number | null;
+    deal?: number | null;
+    createdBy: number;
+    timestamp?: string;
+};
+
+export type Note = {
+    id: number;
+    content: string;
+    author: number;
+    person?: number | null;
+    deal?: number | null;
+    createdAt: string;
+    updatedAt: string;
+};
+
+export type Company = {
+    id: number;
+    name: string;
+    website: string;
+    industry: string;
+    phone: string;
+    address: string;
+    createdAt: string;
+    updatedAt: string;
+};
+
+export type Contact = {
+    id: number;
+    name: string;
+    email: string;
+    phone: string;
+    company: number;
+    title: string;
+    createdAt: string;
+    updatedAt: string;
+};
+
+export type Deal = {
+    id: number;
+    name: string;
+    value: number;
+    currency: string;
+    pipeline: number;
+    stage: number;
+    company: number;
+    expectedCloseDate: string;
+    closedAt: string;
+    createdAt: string;
+    updatedAt: string;
+};
+
+export type Pipeline = {
+    id: number;
+    name: string;
+    createdAt: string;
+    updatedAt: string;
+};
+
+export type Tag = {
+    id: number;
+    name: string;
+    color: string;
+    createdAt: string;
+    updatedAt: string;
 };
 
 async function requestJson<T>(
@@ -73,22 +182,6 @@ async function safeWithCookie<T>(
 /*
 * == Authentication
 */
-
-export type LoginPayload = {
-    username: string;
-    password: string;
-};
-
-export type RegisterPayload = {
-    username: string;
-    password: string;
-    displayName: string;
-    email: string;
-};
-
-export type AuthResponse = {
-    message: string;
-};
 
 export type ApiFieldErrors = Record<string, string>;
 
@@ -195,13 +288,6 @@ export function logout() {
 * == User profile management
 */
 
-export type UpdateUserPayload = {
-    username: string;
-    displayName: string;
-    email: string;
-    profilePictureUrl?: string;
-};
-
 export function updateUser(id: number, payload: UpdateUserPayload) {
     return putJson<User>(`/api/users/${id}`, payload);
 }
@@ -209,39 +295,6 @@ export function updateUser(id: number, payload: UpdateUserPayload) {
 /*
 * == User-associated records
 */
-
-export type Task = {
-    id: number;
-    description: string;
-    completed: boolean;
-    dueDate?: string;
-    assignedTo: number;
-    person?: number | null;
-    deal?: number | null;
-    createdAt: string;
-    updatedAt: string;
-};
-
-export type Activity = {
-    id: number;
-    type: string;
-    subject: string;
-    notes?: string;
-    person?: number | null;
-    deal?: number | null;
-    createdBy: number;
-    timestamp?: string;
-};
-
-export type Note = {
-    id: number;
-    content: string;
-    author: number;
-    person?: number | null;
-    deal?: number | null;
-    createdAt: string;
-    updatedAt: string;
-};
 
 export function getUserTasks(id: number, init: RequestInit = {}) {
     return getJson<Task[]>(`/api/users/${id}/tasks`, init);
@@ -265,4 +318,101 @@ export function getUserActivitiesFromCookie(id: number, cookie: string | null) {
 
 export function getUserNotesFromCookie(id: number, cookie: string | null) {
     return safeWithCookie<Note>((init) => getUserNotes(id, init), cookie);
+}
+
+/*
+* == Task management
+*/
+
+export function getTasks(init: RequestInit = {}) { // get all tasks for all users
+    return getJson<Task[]>(`/api/tasks`, init);
+}
+
+export function getTasksFromCookie(cookie: string | null) { // authenticate then get all tasks
+    return safeWithCookie<Task>((init) => getTasks(init), cookie);
+}
+
+/*
+* == Activity management
+*/
+
+export function getActivities(init: RequestInit = {}) { // get all activities for all users
+    return getJson<Activity[]>(`/api/activities`, init);
+}
+
+export function getActivitiesFromCookie(cookie: string | null) { // authenticate then get all activities
+    return safeWithCookie<Activity>((init) => getActivities(init), cookie);
+}
+
+/*
+* == Note management
+*/
+
+// get all notes for all users
+export function getNotes(init: RequestInit = {}) {
+    return getJson<Note[]>(`/api/notes`, init);
+}
+
+export function getNotesFromCookie(cookie: string | null) { // authenticate then get all notes
+    return safeWithCookie<Note>((init) => getNotes(init), cookie);
+}
+
+/*
+* == Company management
+*/
+
+export function getCompanies(init: RequestInit = {}) {
+    return getJson<Company[]>(`/api/companies`, init);
+}
+
+export function getCompaniesFromCookie(cookie: string | null) {
+    return safeWithCookie<Company>((init) => getCompanies(init), cookie);
+}
+
+/*
+* == Contact management
+*/
+
+export function getContacts(init: RequestInit = {}) {
+    return getJson<Contact[]>(`/api/persons`, init);
+}
+
+export function getContactsFromCookie(cookie: string | null) {
+    return safeWithCookie<Contact>((init) => getContacts(init), cookie);
+}
+
+/*
+* == Deal management
+*/
+
+export function getDeals(init: RequestInit = {}) {
+    return getJson<Deal[]>(`/api/deals`, init);
+}
+
+export function getDealsFromCookie(cookie: string | null) {
+    return safeWithCookie<Deal>((init) => getDeals(init), cookie);
+}
+
+/*
+* == Pipeline management
+*/
+
+export function getPipelines(init: RequestInit = {}) {
+    return getJson<Pipeline[]>(`/api/pipelines`, init);
+}
+
+export function getPipelinesFromCookie(cookie: string | null) {
+    return safeWithCookie<Pipeline>((init) => getPipelines(init), cookie);
+}
+
+/*
+* == Tag management
+*/
+
+export function getTags(init: RequestInit = {}) {
+    return getJson<Tag[]>(`/api/tags`, init);
+}
+
+export function getTagsFromCookie(cookie: string | null) {
+    return safeWithCookie<Tag>((init) => getTags(init), cookie);
 }
