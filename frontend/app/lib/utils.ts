@@ -49,3 +49,19 @@ export function formatDateTime(value?: string) {
         timeStyle: 'short',
     }).format(date);
 }
+
+export function formatCompactCurrency(value: number, currency = 'USD') {
+    try {
+        return new Intl.NumberFormat('en', {
+            notation: 'compact',
+            maximumFractionDigits: 1,
+            style: 'currency',
+            currency,
+        }).format(value);
+    } catch {
+        return new Intl.NumberFormat('en', {
+            notation: 'compact',
+            maximumFractionDigits: 1,
+        }).format(value);
+    }
+}
