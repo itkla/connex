@@ -134,14 +134,17 @@ export default function Timeline({
     tasks,
     activities,
     notes,
+    limit,
 }: {
     tasks: Task[];
     activities: Activity[];
     notes: Note[];
+    limit?: number;
 }) {
     const entries = buildTimeline(tasks, activities, notes);
+    const visible = limit ? entries.slice(0, limit) : entries;
 
-    if (entries.length === 0) {
+    if (visible.length === 0) {
         return (
             <p className="px-6 py-12 text-center text-sm text-neutral-500">
                 Nothing recent yet.
@@ -151,7 +154,7 @@ export default function Timeline({
 
     return (
         <ul className="divide-y divide-neutral-200">
-            {entries.map((entry) => (
+            {visible.map((entry) => (
                 <TimelineRow key={entryKey(entry)} entry={entry} />
             ))}
         </ul>
