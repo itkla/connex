@@ -13,7 +13,7 @@ export default async function AppLayout({
     const cookie = (await headers()).get('cookie');
     const user = await getCurrentUserFromCookie(cookie);
 
-    if (!user) {
+    if (!user) { // Sidebar expects the user object to not be null, so even though this auth check is handled by the proxy, we need to satisfy that condition
         redirect('/auth/login');
     }
 

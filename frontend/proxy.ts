@@ -1,38 +1,50 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 
-import { getCurrentUserFromCookie } from './app/lib/api';
+const PROTECTED_PREFIXES = [
+    '/dashboard',
+    '/me',
+    '/records',
+    '/library',
+    '/activity',
+];
 
-export async function proxy(request: NextRequest) {
-    const { pathname } = request.nextUrl;
-    const isDashboardRoute = pathname.startsWith('/dashboard');
+const SESSION_COOKIE = 'JSESSIONID';
+
+function isProtectedPath(pathname: string) {
+    return PROTECTED_PREFIXES.some(
+        (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`),
+    );
+}
+
+export function proxy(request: NextRequest) {
+    const { pathname, search } = request.nextUrl;
+    const hasSession = request.cookies.has(SESSION_COOKIE);
 
     if (pathname === '/auth/logout') {
         return NextResponse.next();
     }
 
-    // Add route matching for /me to check authentication
-    const isMeRoute = pathname.startsWith('/me');
-
-    const cookie = request.headers.get('cookie');
-    const user = await getCurrentUserFromCookie(cookie);
-
-    if (!user) {
-        return isDashboardRoute
-            ? NextResponse.redirect(new URL('/auth/login', request.url))
-            : NextResponse.next();
+    if (hasSession && pathname.startsWith('/auth/')) {
+        return NextResponse.redirect(new URL('/dashboard', request.url));
     }
 
-    if (isMeRoute) {
-        return NextResponse.next();
+    if (!hasSession && isProtectedPath(pathname)) {
+        const loginUrl = new URL('/auth/login', request.url);
+        loginUrl.searchParams.set('redirect', pathname + search);
+        return NextResponse.redirect(loginUrl);
     }
 
-    return isDashboardRoute
-        ? NextResponse.next()
-        : NextResponse.redirect(new URL('/dashboard', request.url));
-        
+    return NextResponse.next();
 }
 
 export const config = {
-    matcher: ['/auth/:path*', '/dashboard/:path*', '/me/:path*'],
-}
+    matcher: [
+        '/auth/:path*',
+        '/dashboard/:path*',
+        '/me/:path*',
+        '/records/:path*',
+        '/library/:path*',
+        '/activity/:path*',
+    ],
+};

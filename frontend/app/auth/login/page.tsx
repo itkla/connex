@@ -1,5 +1,10 @@
 import { AuthForm } from "@/app/components/AuthForm";
 
-export default function LoginPage() {
-    return <AuthForm mode="login" />;
+export default async function LoginPage({
+    searchParams,
+}: {
+    searchParams: Promise<{ redirect: string }>;
+}) {
+    const { redirect } = await searchParams;
+    return <AuthForm mode="login" redirectUrl={redirect ?? null} />;
 }
