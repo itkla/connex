@@ -32,6 +32,7 @@ public class Person {
     private Note[] notes;
     private String createdAt;
     private String updatedAt;
+    private String imageUrl;
 
     public int getId() {
         return id;
@@ -135,5 +136,13 @@ public class Person {
 
     public void setUpdatedAt(String updatedAt) {
         this.updatedAt = updatedAt;
+    }
+
+    public String getImageUrl() {
+        return imageUrl;
+    }
+
+    public void setImageUrl(String imageUrl) {
+        this.imageUrl = imageUrl;
     }
 }
