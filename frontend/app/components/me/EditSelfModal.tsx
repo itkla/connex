@@ -19,7 +19,8 @@ import {
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 
-import { ApiError, updateUser, type User } from '@/app/lib/api';
+import { ApiError, updateUser } from '@/app/lib/api';
+import { type User } from '@/app/lib/types';
 
 const inputClass = 'w-full rounded-xl bg-neutral-100 px-4 py-2.5 text-base text-black placeholder-neutral-500 outline-none ring-1 ring-black/5 transition focus:ring-2 focus:ring-brand';
 
