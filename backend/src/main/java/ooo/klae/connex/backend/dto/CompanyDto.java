@@ -1,5 +1,7 @@
 package ooo.klae.connex.backend.dto;
 
+import java.util.Arrays;
+
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
 
@@ -8,6 +10,9 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 
 import ooo.klae.connex.backend.beans.Company;
+import ooo.klae.connex.backend.beans.Deal;
+import ooo.klae.connex.backend.beans.Person;
+import ooo.klae.connex.backend.beans.Tag;
 
 @Data
 @NoArgsConstructor
@@ -32,6 +37,12 @@ public class CompanyDto {
     @Size(max = 512)
     private String address;
 
+    private String logoUrl;
+
+    private int[] personIds;
+    private int[] dealIds;
+    private int[] tagIds;
+
     private String createdAt;
     private String updatedAt;
 
@@ -44,8 +55,12 @@ public class CompanyDto {
         dto.industry = c.getIndustry();
         dto.phone = c.getPhone();
         dto.address = c.getAddress();
+        dto.personIds = c.getPeople() == null ? null : Arrays.stream(c.getPeople()).mapToInt(Person::getId).toArray();
+        dto.dealIds = c.getDeals() == null ? null : Arrays.stream(c.getDeals()).mapToInt(Deal::getId).toArray();
+        dto.tagIds = c.getTags() == null ? null : Arrays.stream(c.getTags()).mapToInt(Tag::getId).toArray();
         dto.createdAt = c.getCreatedAt();
         dto.updatedAt = c.getUpdatedAt();
+        dto.logoUrl = c.getLogoUrl();
         return dto;
     }
 
@@ -59,6 +74,7 @@ public class CompanyDto {
         c.setAddress(address);
         c.setCreatedAt(createdAt);
         c.setUpdatedAt(updatedAt);
+        c.setLogoUrl(logoUrl);
         return c;
     }
 }
