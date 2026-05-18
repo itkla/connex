@@ -4,7 +4,7 @@
 <mapper namespace="ooo.klae.connex.backend.mappers.CompanyMapper">
 
   <sql id="companyColumns">
-    id, name, website, industry, phone, address, created_at, updated_at
+    id, name, website, industry, phone, address, created_at, updated_at, logo_url
   </sql>
 
   <resultMap id="CompanyFullResult" type="Company">
@@ -14,6 +14,7 @@
     <result property="industry" column="industry"/>
     <result property="phone" column="phone"/>
     <result property="address" column="address"/>
+    <result property="logoUrl" column="logo_url"/>
     <result property="createdAt" column="created_at"/>
     <result property="updatedAt" column="updated_at"/>
     <collection property="people" ofType="Person" column="id" select="ooo.klae.connex.backend.mappers.PersonMapper.getPersonsByCompanyId"/>
@@ -27,7 +28,7 @@
 
   <select id="getCompaniesByTagId" resultType="Company">
     SELECT
-      c.id, c.name, c.website, c.industry, c.phone, c.address, c.created_at, c.updated_at
+      c.id, c.name, c.website, c.industry, c.phone, c.address, c.created_at, c.updated_at, c.logo_url
     FROM company c
     JOIN company_tag ct ON ct.company_id = c.id
     WHERE ct.tag_id = #{tagId}
@@ -39,8 +40,8 @@
   </select>
 
   <insert id="insert" useGeneratedKeys="true" keyProperty="id">
-    INSERT INTO company (name, website, industry, phone, address)
-    VALUES (#{name}, #{website}, #{industry}, #{phone}, #{address})
+    INSERT INTO company (name, website, industry, phone, address, logo_url)
+    VALUES (#{name}, #{website}, #{industry}, #{phone}, #{address}, #{logoUrl})
   </insert>
 
   <update id="update">
@@ -49,7 +50,8 @@
         website = #{website},
         industry = #{industry},
         phone = #{phone},
-        address = #{address}
+        address = #{address},
+        logo_url = #{logoUrl}
     WHERE id = #{id}
   </update>
 
