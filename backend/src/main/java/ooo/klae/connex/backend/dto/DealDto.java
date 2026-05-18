@@ -1,5 +1,7 @@
 package ooo.klae.connex.backend.dto;
 
+import java.util.Arrays;
+
 import com.fasterxml.jackson.annotation.JsonIdentityReference;
 
 import jakarta.validation.constraints.NotBlank;
@@ -11,10 +13,14 @@ import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+import ooo.klae.connex.backend.beans.Activity;
 import ooo.klae.connex.backend.beans.Company;
 import ooo.klae.connex.backend.beans.Deal;
+import ooo.klae.connex.backend.beans.Note;
 import ooo.klae.connex.backend.beans.Pipeline;
 import ooo.klae.connex.backend.beans.Stage;
+import ooo.klae.connex.backend.beans.Tag;
+import ooo.klae.connex.backend.beans.Task;
 
 @Data
 @NoArgsConstructor
@@ -51,6 +57,12 @@ public class DealDto {
     @Size(max = 32)
     private String closedAt;
 
+    private int[] personIds;
+    private int[] activityIds;
+    private int[] noteIds;
+    private int[] taskIds;
+    private int[] tagIds;
+
     private String createdAt;
     private String updatedAt;
 
@@ -66,6 +78,15 @@ public class DealDto {
         dto.company = d.getCompany();
         dto.expectedCloseDate = d.getExpectedCloseDate();
         dto.closedAt = d.getClosedAt();
+
+        // Hunter's note: i genuinely forgot how i made this. stackoverflow? idk but it's hard to read but once you understand it it works
+        dto.personIds = d.getPeople() == null ? null : Arrays.stream(d.getPeople())
+            .filter(dp -> dp.getPerson() != null) // if person in lookup not null map
+            .mapToInt(dp -> dp.getPerson().getId()).toArray(); // is each person from getPeople null? yes : no, then map to array of person ids.map each person's deals so each person has an array of deal ids || null
+        dto.activityIds = d.getActivities() == null ? null : Arrays.stream(d.getActivities()).mapToInt(Activity::getId).toArray();
+        dto.noteIds = d.getNotes() == null ? null : Arrays.stream(d.getNotes()).mapToInt(Note::getId).toArray();
+        dto.taskIds = d.getTasks() == null ? null : Arrays.stream(d.getTasks()).mapToInt(Task::getId).toArray();
+        dto.tagIds = d.getTags() == null ? null : Arrays.stream(d.getTags()).mapToInt(Tag::getId).toArray();
         dto.createdAt = d.getCreatedAt();
         dto.updatedAt = d.getUpdatedAt();
         return dto;

@@ -1,5 +1,7 @@
 package ooo.klae.connex.backend.dto;
 
+import java.util.Arrays;
+
 import com.fasterxml.jackson.annotation.JsonIdentityReference;
 
 import jakarta.validation.constraints.NotBlank;
@@ -10,6 +12,7 @@ import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+import ooo.klae.connex.backend.beans.Deal;
 import ooo.klae.connex.backend.beans.Pipeline;
 import ooo.klae.connex.backend.beans.Stage;
 
@@ -30,6 +33,8 @@ public class StageDto {
     @PositiveOrZero
     private int position;
 
+    private int[] dealIds;
+
     public static StageDto from(Stage s) {
         if (s == null) return null;
         StageDto dto = new StageDto();
@@ -37,6 +42,7 @@ public class StageDto {
         dto.name = s.getName();
         dto.pipeline = s.getPipeline();
         dto.position = s.getPosition();
+        dto.dealIds = s.getDeals() == null ? null : Arrays.stream(s.getDeals()).mapToInt(Deal::getId).toArray(); // is getDeals null? yes : no, then map to array of deal ids
         return dto;
     }
 
