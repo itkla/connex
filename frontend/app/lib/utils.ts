@@ -65,3 +65,13 @@ export function formatCompactCurrency(value: number, currency = 'USD') {
         }).format(value);
     }
 }
+
+export function copyToClipboard(value: string, label: string) {
+    try {
+        navigator.clipboard.writeText(value);
+        return true;
+    } catch {
+        console.error(`Failed to copy ${label.toLowerCase()}`);
+        return false;
+    }
+}   

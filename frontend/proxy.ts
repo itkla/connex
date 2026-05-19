@@ -18,14 +18,14 @@ function isProtectedPath(pathname: string) {
 }
 
 export function proxy(request: NextRequest) {
-    const { pathname, search } = request.nextUrl;
+    const { pathname, search, searchParams } = request.nextUrl;
     const hasSession = request.cookies.has(SESSION_COOKIE);
 
     if (pathname === '/auth/logout') {
         return NextResponse.next();
     }
 
-    if (hasSession && pathname.startsWith('/auth/')) {
+    if (hasSession && pathname.startsWith('/auth/') && !searchParams.has('redirect')) {
         return NextResponse.redirect(new URL('/dashboard', request.url));
     }
 
@@ -35,7 +35,9 @@ export function proxy(request: NextRequest) {
         return NextResponse.redirect(loginUrl);
     }
 
-    return NextResponse.next();
+    const requestHeaders = new Headers(request.headers);
+    requestHeaders.set('x-pathname', pathname + search);
+    return NextResponse.next({ request: { headers: requestHeaders } });
 }
 
 export const config = {

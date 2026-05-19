@@ -1,9 +1,10 @@
 import { headers } from "next/headers";
 import { getContactsFromCookie, getCurrentUserFromCookie } from "@/app/lib/api";
+import { type Contact } from "@/app/lib/types";
 import { redirect } from "next/navigation";
+import ContactsBrowser from "@/app/components/records/ContactsBrowser";
 
 export default async function ContactsPage() {
-
     const cookie = (await headers()).get('cookie');
     const user = await getCurrentUserFromCookie(cookie);
 
@@ -11,17 +12,7 @@ export default async function ContactsPage() {
         redirect('/auth/login');
     }
 
-    // query api for contact list
-    const contacts = await getContactsFromCookie(cookie); 
+    const contacts: Contact[] = await getContactsFromCookie(cookie);
 
-    return (
-        <div>
-            <h1>Contacts</h1>
-            <ul>
-                {contacts.map((contact) => (
-                    <li key={contact.id}>{contact.name}</li>
-                ))}
-            </ul>
-        </div>
-    );
+    return <ContactsBrowser contacts={contacts} />;
 }
