@@ -11,15 +11,15 @@ INSERT INTO app_user (id, username, display_name, email, password_hash) VALUES
     (5, 'eve',     'Eve Edwards',    'eve@connex.test',     '$2a$10$fjpXXw/Y3WgsJz7gHEhrJuIi6c660HFpkPz/QlbPT9hPeG1VmAkxm');
 
 -- company
-INSERT INTO company (id, name, website, industry, phone, address) VALUES
-    (1, 'Acme Corp',            'https://acme.example.com',     'Manufacturing',     '+1-415-555-0101', '1 Acme Way, San Francisco, CA'),
-    (2, 'Globex Inc',            'https://globex.example.com',   'Technology',        '+1-212-555-0102', '500 Globex Plaza, New York, NY'),
-    (3, 'Initech',               'https://initech.example.com',  'Software',          '+1-512-555-0103', '88 Initech Blvd, Austin, TX'),
-    (4, 'Soylent Corp',          'https://soylent.example.com',  'Food & Beverage',   '+1-310-555-0104', '12 Green St, Los Angeles, CA'),
-    (5, 'Umbrella Corporation',  'https://umbrella.example.com', 'Pharmaceuticals',   '+1-206-555-0105', '7 Raccoon Ave, Seattle, WA'),
-    (6, 'Stark Industries',      'https://stark.example.com',    'Aerospace',         '+1-646-555-0106', '10880 Malibu Pt, Malibu, CA'),
-    (7, 'Wayne Enterprises',     'https://wayne.example.com',    'Conglomerate',      '+1-201-555-0107', '1007 Mountain Dr, Gotham, NJ'),
-    (8, 'Cyberdyne Systems',     'https://cyberdyne.example.com','Robotics',          '+1-408-555-0108', '18144 El Camino Real, Sunnyvale, CA');
+INSERT INTO company (id, name, website, industry, phone, address, logo_url) VALUES
+    (1, 'Acme Corp',            'https://acme.example.com',     'Manufacturing',     '+1-415-555-0101', '1 Acme Way, San Francisco, CA', null),
+    (2, 'Globex Inc',            'https://globex.example.com',   'Technology',        '+1-212-555-0102', '500 Globex Plaza, New York, NY', null),
+    (3, 'Initech',               'https://initech.example.com',  'Software',          '+1-512-555-0103', '88 Initech Blvd, Austin, TX', null),
+    (4, 'Soylent Corp',          'https://soylent.example.com',  'Food & Beverage',   '+1-310-555-0104', '12 Green St, Los Angeles, CA', null),
+    (5, 'Umbrella Corporation',  'https://umbrella.example.com', 'Pharmaceuticals',   '+1-206-555-0105', '7 Raccoon Ave, Seattle, WA', null),
+    (6, 'Stark Industries',      'https://stark.example.com',    'Aerospace',         '+1-646-555-0106', '10880 Malibu Pt, Malibu, CA', null),
+    (7, 'Wayne Enterprises',     'https://wayne.example.com',    'Conglomerate',      '+1-201-555-0107', '1007 Mountain Dr, Gotham, NJ', null),
+    (8, 'Cyberdyne Systems',     'https://cyberdyne.example.com','Robotics',          '+1-408-555-0108', '18144 El Camino Real, Sunnyvale, CA', null);
 
 -- pipeline
 INSERT INTO pipeline (id, name) VALUES
@@ -53,22 +53,22 @@ INSERT INTO tag (id, name, color) VALUES
     (10, 'Executive',      '#B8860B');
 
 -- person  (mix of with-company and unaffiliated contacts)
-INSERT INTO person (id, name, email, phone, company_id, title) VALUES
-    (1,  'Wile E. Coyote',       'wile@acme.example.com',         '+1-415-555-1101', 1,    'Head of R&D'),
-    (2,  'Road Runner',          'rr@acme.example.com',           '+1-415-555-1102', 1,    'Logistics Lead'),
-    (3,  'Hank Scorpio',         'hank@globex.example.com',       '+1-212-555-1103', 2,    'CEO'),
-    (4,  'Bill Lumbergh',        'bill@initech.example.com',      '+1-512-555-1104', 3,    'VP of Operations'),
-    (5,  'Peter Gibbons',        'peter@initech.example.com',     '+1-512-555-1105', 3,    'Software Engineer'),
-    (6,  'Michael Bolton',       'michael@initech.example.com',   '+1-512-555-1106', 3,    'Software Engineer'),
-    (7,  'Samir Nagheenanajar',  'samir@initech.example.com',     '+1-512-555-1107', 3,    'Software Engineer'),
-    (8,  'Sheev Soylent',        'sheev@soylent.example.com',     '+1-310-555-1108', 4,    'Director of Sourcing'),
-    (9,  'Albert Wesker',        'wesker@umbrella.example.com',   '+1-206-555-1109', 5,    'Chief Scientist'),
-    (10, 'Tony Stark',           'tony@stark.example.com',        '+1-646-555-1110', 6,    'CEO / CTO'),
-    (11, 'Pepper Potts',         'pepper@stark.example.com',      '+1-646-555-1111', 6,    'COO'),
-    (12, 'Lucius Fox',           'lucius@wayne.example.com',      '+1-201-555-1112', 7,    'CEO'),
-    (13, 'Miles Dyson',          'miles@cyberdyne.example.com',   '+1-408-555-1113', 8,    'Director of Special Projects'),
-    (14, 'Independent Imani',    'imani@freelance.test',          '+1-555-000-1114', NULL, 'Independent Consultant'),
-    (15, 'Solo Sven',            'sven@freelance.test',           '+1-555-000-1115', NULL, 'Freelancer');
+INSERT INTO person (id, name, email, phone, company_id, title, image_url) VALUES
+    (1,  'Wile E. Coyote',       'wile@acme.example.com',         '+1-415-555-1101', 1,    'Head of R&D', "https://images.unsplash.com/photo-1595211877493-41a4e5f236b3?q=80&w=715&auto=format&fit=crop&ixlib=rb-4.1.0&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D"),
+    (2,  'Road Runner',          'rr@acme.example.com',           '+1-415-555-1102', 1,    'Logistics Lead', null),
+    (3,  'Hank Scorpio',         'hank@globex.example.com',       '+1-212-555-1103', 2,    'CEO', null),
+    (4,  'Bill Lumbergh',        'bill@initech.example.com',      '+1-512-555-1104', 3,    'VP of Operations', null),
+    (5,  'Peter Gibbons',        'peter@initech.example.com',     '+1-512-555-1105', 3,    'Software Engineer', null),
+    (6,  'Michael Bolton',       'michael@initech.example.com',   '+1-512-555-1106', 3,    'Software Engineer', null),
+    (7,  'Samir Nagheenanajar',  'samir@initech.example.com',     '+1-512-555-1107', 3,    'Software Engineer', null),
+    (8,  'Sheev Soylent',        'sheev@soylent.example.com',     '+1-310-555-1108', 4,    'Director of Sourcing', null),
+    (9,  'Albert Wesker',        'wesker@umbrella.example.com',   '+1-206-555-1109', 5,    'Chief Scientist', null),
+    (10, 'Tony Stark',           'tony@stark.example.com',        '+1-646-555-1110', 6,    'CEO / CTO', null),
+    (11, 'Pepper Potts',         'pepper@stark.example.com',      '+1-646-555-1111', 6,    'COO', null),
+    (12, 'Lucius Fox',           'lucius@wayne.example.com',      '+1-201-555-1112', 7,    'CEO', null),
+    (13, 'Miles Dyson',          'miles@cyberdyne.example.com',   '+1-408-555-1113', 8,    'Director of Special Projects', null),
+    (14, 'Independent Imani',    'imani@freelance.test',          '+1-555-000-1114', NULL, 'Independent Consultant', null),
+    (15, 'Solo Sven',            'sven@freelance.test',           '+1-555-000-1115', NULL, 'Freelancer', null);
 
 -- deal
 INSERT INTO deal (id, name, value, currency, pipeline_id, stage_id, company_id, expected_close_date, closed_at) VALUES

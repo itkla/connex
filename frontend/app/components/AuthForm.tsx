@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { redirect, useRouter } from "next/navigation";
 import { useState } from "react";
 import { toast } from "sonner";
 
@@ -96,7 +96,7 @@ function getAuthErrorMessage(
     return error.message;
 }
 
-export function AuthForm({ mode }: { mode: AuthMode }) {
+export function AuthForm({ mode, redirectUrl }: { mode: AuthMode, redirectUrl: string | null }) {
     const router = useRouter();
     const config = FORM_CONFIG[mode];
     const [values, setValues] = useState<Record<FieldKey, string>>({
@@ -150,7 +150,12 @@ export function AuthForm({ mode }: { mode: AuthMode }) {
                     color: "white",
                 }
             });
-            router.replace("/dashboard");
+            // router.replace("/dashboard");
+            if (redirectUrl) {
+                router.push(redirectUrl);
+            } else {
+                router.replace("/dashboard");
+            }   
             router.refresh();
         } catch (err) {
             const nextFieldErrors = err instanceof ApiError ? pickFieldErrors(err.fieldErrors) : {};

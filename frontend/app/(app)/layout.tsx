@@ -10,11 +10,13 @@ export default async function AppLayout({
     children: React.ReactNode;
 }>) {
 
-    const cookie = (await headers()).get('cookie');
+    const headerList = await headers();
+    const cookie = headerList.get('cookie');
     const user = await getCurrentUserFromCookie(cookie);
 
-    if (!user) {
-        redirect('/auth/login');
+    if (!user) { // Sidebar expects the user object to not be null, so even though this auth check is handled by the proxy, we need to satisfy that condition. note to hunter: leave it as-is for now
+        const pathname = headerList.get('x-pathname') ?? '/dashboard';
+        redirect(`/auth/login?redirect=${encodeURIComponent(pathname)}`);
     }
 
     return (

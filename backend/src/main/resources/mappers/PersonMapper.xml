@@ -11,8 +11,11 @@
     <result property="title"     column="title"/>
     <result property="createdAt" column="created_at"/>
     <result property="updatedAt" column="updated_at"/>
-    <association property="company" javaType="Company">
+    <result property="imageUrl" column="image_url"/>
+    <association property="company" javaType="Company" notNullColumn="company_id">
       <id property="id" column="company_id"/>
+      <result property="name" column="company_name"/>
+      <result property="logoUrl" column="company_logo_url"/>
     </association>
   </resultMap>
 
@@ -25,63 +28,79 @@
   </resultMap>
 
   <sql id="personColumns">
-    id, name, email, phone, company_id, title, created_at, updated_at
+    p.id, p.name, p.email, p.phone, p.company_id, p.title, p.created_at, p.updated_at, p.image_url
+  </sql>
+
+  <sql id="companyJoinColumns">
+    c.name AS company_name, c.logo_url AS company_logo_url
+  </sql>
+
+  <sql id="companyJoin">
+    LEFT JOIN company c ON c.id = p.company_id
   </sql>
 
   <select id="getAllPersons" resultMap="PersonResult">
-    SELECT <include refid="personColumns"/> FROM person ORDER BY name
+    SELECT <include refid="personColumns"/>, <include refid="companyJoinColumns"/>
+    FROM person p
+    <include refid="companyJoin"/>
+    ORDER BY p.name
   </select>
 
   <select id="getPersonsByCompanyId" resultMap="PersonFullResult">
-    SELECT <include refid="personColumns"/> FROM person
-    WHERE company_id = #{companyId} ORDER BY name
+    SELECT <include refid="personColumns"/>, <include refid="companyJoinColumns"/>
+    FROM person p
+    <include refid="companyJoin"/>
+    WHERE p.company_id = #{companyId} ORDER BY p.name
   </select>
 
   <select id="getPersonsByTagId" resultMap="PersonResult">
-    SELECT
-      p.id, p.name, p.email, p.phone, p.company_id, p.title, p.created_at, p.updated_at
+    SELECT <include refid="personColumns"/>, <include refid="companyJoinColumns"/>
     FROM person p
+    <include refid="companyJoin"/>
     JOIN person_tag pt ON pt.person_id = p.id
     WHERE pt.tag_id = #{tagId}
     ORDER BY p.name
   </select>
 
   <select id="getPersonsByDealId" resultMap="PersonResult">
-    SELECT
-      p.id, p.name, p.email, p.phone, p.company_id, p.title, p.created_at, p.updated_at
+    SELECT <include refid="personColumns"/>, <include refid="companyJoinColumns"/>
     FROM person p
+    <include refid="companyJoin"/>
     JOIN deal_person dp ON dp.person_id = p.id
     WHERE dp.deal_id = #{dealId}
     ORDER BY p.name
   </select>
 
   <select id="getPersonById" resultMap="PersonFullResult">
-    SELECT <include refid="personColumns"/> FROM person WHERE id = #{id}
+    SELECT <include refid="personColumns"/>, <include refid="companyJoinColumns"/>
+    FROM person p
+    <include refid="companyJoin"/>
+    WHERE p.id = #{id}
   </select>
 
   <insert id="insert" useGeneratedKeys="true" keyProperty="id">
-    INSERT INTO person (name, email, phone, company_id, title)
+    INSERT INTO person (name, email, phone, company_id, title, image_url)
     VALUES (
       #{name}, #{email}, #{phone},
       <choose>
         <when test="company != null">#{company.id}</when>
         <otherwise>NULL</otherwise>
       </choose>,
-      #{title}
+      #{title},
+      #{imageUrl}
     )
   </insert>
 
   <update id="update">
     UPDATE person
-    SET name = #{name},
-        email = #{email},
-        phone = #{phone},
-        company_id =
-          <choose>
-            <when test="company != null">#{company.id}</when>
-            <otherwise>NULL</otherwise>
-          </choose>,
-        title = #{title}
+    <set>
+      <if test="name != null">name = #{name},</if>
+      <if test="email != null">email = #{email},</if>
+      <if test="phone != null">phone = #{phone},</if>
+      <if test="title != null">title = #{title},</if>
+      <if test="company != null">company_id = #{company.id},</if>
+      <if test="imageUrl != null">image_url = #{imageUrl},</if>
+    </set>
     WHERE id = #{id}
   </update>
 

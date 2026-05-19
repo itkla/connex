@@ -3,11 +3,20 @@
         "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
 <mapper namespace="ooo.klae.connex.backend.mappers.TagMapper">
 
+  <resultMap id="TagFullResult" type="Tag">
+    <id property="id" column="id"/>
+    <result property="name" column="name"/>
+    <result property="color" column="color"/>
+    <collection property="people" ofType="Person" column="id" select="ooo.klae.connex.backend.mappers.PersonMapper.getPersonsByTagId"/>
+    <collection property="companies" ofType="Company" column="id" select="ooo.klae.connex.backend.mappers.CompanyMapper.getCompaniesByTagId"/>
+    <collection property="deals" ofType="Deal" column="id" select="ooo.klae.connex.backend.mappers.DealMapper.getDealsByTagId"/>
+  </resultMap>
+
   <select id="getAllTags" resultType="Tag">
     SELECT id, name, color FROM tag ORDER BY name
   </select>
 
-  <select id="getTagById" resultType="Tag">
+  <select id="getTagById" resultMap="TagFullResult">
     SELECT id, name, color FROM tag WHERE id = #{id}
   </select>
 

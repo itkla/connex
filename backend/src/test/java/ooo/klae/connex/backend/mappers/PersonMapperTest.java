@@ -67,11 +67,12 @@ class PersonMapperTest extends AbstractMapperTest {
     }
 
     /**
-     * Updates a person and checks if the new values are persisted.
+     * Updates a person and checks if the new values are persisted
      */
     @Test
     void update_persistsNewValues() {
-        Person person = newPerson(newCompany());
+        Company company = newCompany();
+        Person person = newPerson(company);
         person.setName("Renamed Person");
         person.setTitle("Director");
         person.setCompany(null);
@@ -81,9 +82,8 @@ class PersonMapperTest extends AbstractMapperTest {
         Person found = personMapper.getPersonById(person.getId());
         assertEquals("Renamed Person", found.getName());
         assertEquals("Director", found.getTitle());
-
-        // PersonResult always materializes a Company association keyed on company_id
-        assertTrue(found.getCompany() == null || found.getCompany().getId() == 0);
+        assertNotNull(found.getCompany());
+        assertEquals(company.getId(), found.getCompany().getId());
     }
 
     /**

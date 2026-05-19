@@ -25,6 +25,7 @@ public class Company {
     private Person[] people; // associated contacts
     private Deal[] deals; // associated deals
     private Tag[] tags;
+    private String logoUrl;
     private String createdAt;
     private String updatedAt;
 
@@ -114,5 +115,13 @@ public class Company {
 
     public void setUpdatedAt(String updatedAt) {
         this.updatedAt = updatedAt;
+    }
+
+    public String getLogoUrl() {
+        return logoUrl;
+    }
+
+    public void setLogoUrl(String logoUrl) {
+        this.logoUrl = logoUrl;
     }
 }

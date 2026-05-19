@@ -3,125 +3,8 @@ const API_BASE =
         ? process.env.API_URL ?? process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080"
         : "";
 
-
+import * as Types from '@/app/lib/types';
 // Types
-export type User = {
-    id: number;
-    username: string;
-    displayName: string;
-    email: string;
-    createdAt: string;
-    updatedAt: string;
-    lastLoginAt?: string;
-    profilePictureUrl?: string;
-};
-
-export type LoginPayload = {
-    username: string;
-    password: string;
-};
-
-export type RegisterPayload = {
-    username: string;
-    password: string;
-    displayName: string;
-    email: string;
-};
-
-export type AuthResponse = {
-    message: string;
-};
-
-export type UpdateUserPayload = {
-    username: string;
-    displayName: string;
-    email: string;
-    profilePictureUrl?: string;
-};
-
-export type Task = {
-    id: number;
-    description: string;
-    completed: boolean;
-    dueDate?: string;
-    assignedTo: number;
-    person?: number | null;
-    deal?: number | null;
-    createdAt: string;
-    updatedAt: string;
-};
-
-export type Activity = {
-    id: number;
-    type: string;
-    subject: string;
-    notes?: string;
-    person?: number | null;
-    deal?: number | null;
-    createdBy: number;
-    timestamp?: string;
-};
-
-export type Note = {
-    id: number;
-    content: string;
-    author: number;
-    person?: number | null;
-    deal?: number | null;
-    createdAt: string;
-    updatedAt: string;
-};
-
-export type Company = {
-    id: number;
-    name: string;
-    website: string;
-    industry: string;
-    phone: string;
-    address: string;
-    createdAt: string;
-    updatedAt: string;
-};
-
-export type Contact = {
-    id: number;
-    name: string;
-    email: string;
-    phone: string;
-    company: number;
-    title: string;
-    createdAt: string;
-    updatedAt: string;
-};
-
-export type Deal = {
-    id: number;
-    name: string;
-    value: number;
-    currency: string;
-    pipeline: number;
-    stage: number;
-    company: number;
-    expectedCloseDate: string;
-    closedAt: string;
-    createdAt: string;
-    updatedAt: string;
-};
-
-export type Pipeline = {
-    id: number;
-    name: string;
-    createdAt: string;
-    updatedAt: string;
-};
-
-export type Tag = {
-    id: number;
-    name: string;
-    color: string;
-    createdAt: string;
-    updatedAt: string;
-};
 
 async function requestJson<T>(
     path: string,
@@ -164,6 +47,13 @@ async function putJson<T>(path: string, body: unknown = {}): Promise<T> {
     return requestJson<T>(path, {
         method: "PUT",
         body: JSON.stringify(body),
+    });
+}
+
+async function deleteJson<T>(path: string, init: RequestInit = {}): Promise<T> {
+    return requestJson<T>(path, {
+        method: "DELETE",
+        ...init,
     });
 }
 
@@ -241,8 +131,8 @@ async function getApiError(res: Response): Promise<ApiError> {
  * @returns A promise that resolves to the logged-in user's information
  * @throws An error if the login request fails, including the response text if available
  */
-export function login(payload: LoginPayload) {
-    return postJson<AuthResponse>("/api/auth/login", payload);
+export function login(payload: Types.LoginPayload) {
+    return postJson<Types.AuthResponse>("/api/auth/login", payload);
 }
 
 /**
@@ -251,8 +141,8 @@ export function login(payload: LoginPayload) {
  * @param payload
  * @return
  */
-export function register(payload: RegisterPayload) {
-    return postJson<AuthResponse>("/api/auth/register", payload);
+export function register(payload: Types.RegisterPayload) {
+    return postJson<Types.AuthResponse>("/api/auth/register", payload);
 }
 
 /**
@@ -262,7 +152,7 @@ export function register(payload: RegisterPayload) {
  * @throws An error if the profile retrieval request fails, including the response text if available
  */
 export function me(init: RequestInit = {}) {
-    return getJson<User>("/api/auth/me", init);
+    return getJson<Types.User>("/api/auth/me", init);
 }
 
 export async function getCurrentUserFromCookie(cookie: string | null) {
@@ -288,8 +178,8 @@ export function logout() {
 * == User profile management
 */
 
-export function updateUser(id: number, payload: UpdateUserPayload) {
-    return putJson<User>(`/api/users/${id}`, payload);
+export function updateUser(id: number, payload: Types.UpdateUserPayload) {
+    return putJson<Types.User>(`/api/users/${id}`, payload);
 }
 
 /*
@@ -297,27 +187,27 @@ export function updateUser(id: number, payload: UpdateUserPayload) {
 */
 
 export function getUserTasks(id: number, init: RequestInit = {}) {
-    return getJson<Task[]>(`/api/users/${id}/tasks`, init);
+    return getJson<Types.Task[]>(`/api/users/${id}/tasks`, init);
 }
 
 export function getUserActivities(id: number, init: RequestInit = {}) {
-    return getJson<Activity[]>(`/api/users/${id}/activities`, init);
+    return getJson<Types.Activity[]>(`/api/users/${id}/activities`, init);
 }
 
 export function getUserNotes(id: number, init: RequestInit = {}) {
-    return getJson<Note[]>(`/api/users/${id}/notes`, init);
+    return getJson<Types.Note[]>(`/api/users/${id}/notes`, init);
 }
 
 export function getUserTasksFromCookie(id: number, cookie: string | null) {
-    return safeWithCookie<Task>((init) => getUserTasks(id, init), cookie);
+    return safeWithCookie<Types.Task>((init) => getUserTasks(id, init), cookie);
 }
 
 export function getUserActivitiesFromCookie(id: number, cookie: string | null) {
-    return safeWithCookie<Activity>((init) => getUserActivities(id, init), cookie);
+    return safeWithCookie<Types.Activity>((init) => getUserActivities(id, init), cookie);
 }
 
 export function getUserNotesFromCookie(id: number, cookie: string | null) {
-    return safeWithCookie<Note>((init) => getUserNotes(id, init), cookie);
+    return safeWithCookie<Types.Note>((init) => getUserNotes(id, init), cookie);
 }
 
 /*
@@ -325,11 +215,11 @@ export function getUserNotesFromCookie(id: number, cookie: string | null) {
 */
 
 export function getTasks(init: RequestInit = {}) { // get all tasks for all users
-    return getJson<Task[]>(`/api/tasks`, init);
+    return getJson<Types.Task[]>(`/api/tasks`, init);
 }
 
 export function getTasksFromCookie(cookie: string | null) { // authenticate then get all tasks
-    return safeWithCookie<Task>((init) => getTasks(init), cookie);
+    return safeWithCookie<Types.Task>((init) => getTasks(init), cookie);
 }
 
 /*
@@ -337,11 +227,11 @@ export function getTasksFromCookie(cookie: string | null) { // authenticate then
 */
 
 export function getActivities(init: RequestInit = {}) { // get all activities for all users
-    return getJson<Activity[]>(`/api/activities`, init);
+    return getJson<Types.Activity[]>(`/api/activities`, init);
 }
 
 export function getActivitiesFromCookie(cookie: string | null) { // authenticate then get all activities
-    return safeWithCookie<Activity>((init) => getActivities(init), cookie);
+    return safeWithCookie<Types.Activity>((init) => getActivities(init), cookie);
 }
 
 /*
@@ -350,11 +240,11 @@ export function getActivitiesFromCookie(cookie: string | null) { // authenticate
 
 // get all notes for all users
 export function getNotes(init: RequestInit = {}) {
-    return getJson<Note[]>(`/api/notes`, init);
+    return getJson<Types.Note[]>(`/api/notes`, init);
 }
 
 export function getNotesFromCookie(cookie: string | null) { // authenticate then get all notes
-    return safeWithCookie<Note>((init) => getNotes(init), cookie);
+    return safeWithCookie<Types.Note>((init) => getNotes(init), cookie);
 }
 
 /*
@@ -362,11 +252,11 @@ export function getNotesFromCookie(cookie: string | null) { // authenticate then
 */
 
 export function getCompanies(init: RequestInit = {}) {
-    return getJson<Company[]>(`/api/companies`, init);
+    return getJson<Types.Company[]>(`/api/companies`, init);
 }
 
 export function getCompaniesFromCookie(cookie: string | null) {
-    return safeWithCookie<Company>((init) => getCompanies(init), cookie);
+    return safeWithCookie<Types.Company>((init) => getCompanies(init), cookie);
 }
 
 /*
@@ -374,11 +264,35 @@ export function getCompaniesFromCookie(cookie: string | null) {
 */
 
 export function getContacts(init: RequestInit = {}) {
-    return getJson<Contact[]>(`/api/persons`, init);
+    return getJson<Types.Contact[]>(`/api/persons`, init);
 }
 
 export function getContactsFromCookie(cookie: string | null) {
-    return safeWithCookie<Contact>((init) => getContacts(init), cookie);
+    return safeWithCookie<Types.Contact>((init) => getContacts(init), cookie);
+}
+
+export function getContactById(id: number, init: RequestInit = {}) {
+    return getJson<Types.Contact>(`/api/persons/${id}`, init);
+}
+
+// export function getContactFromCookie(id: number, cookie: string | null) {
+//     return safeWithCookie<Contact>((init) => getContactById(id, init), cookie);
+// }
+
+export function createContact(payload: Types.CreateContactPayload) {
+    return postJson<Types.Contact>(`/api/persons`, payload);
+}
+
+export function deleteContact(id: number, init: RequestInit = {}) {
+    return deleteJson<void[]>(`/api/persons/${id}`, init);
+}
+
+export function updateContact(id: number, payload: Types.UpdateContactPayload) {
+    return putJson<Types.Contact>(`/api/persons/${id}`, payload);
+}
+
+export function deleteContactFromCookie(id: number, cookie: string | null) {
+    return safeWithCookie<void>((init) => deleteContact(id, init), cookie);
 }
 
 /*
@@ -386,11 +300,11 @@ export function getContactsFromCookie(cookie: string | null) {
 */
 
 export function getDeals(init: RequestInit = {}) {
-    return getJson<Deal[]>(`/api/deals`, init);
+    return getJson<Types.Deal[]>(`/api/deals`, init);
 }
 
 export function getDealsFromCookie(cookie: string | null) {
-    return safeWithCookie<Deal>((init) => getDeals(init), cookie);
+    return safeWithCookie<Types.Deal>((init) => getDeals(init), cookie);
 }
 
 /*
@@ -398,11 +312,11 @@ export function getDealsFromCookie(cookie: string | null) {
 */
 
 export function getPipelines(init: RequestInit = {}) {
-    return getJson<Pipeline[]>(`/api/pipelines`, init);
+    return getJson<Types.Pipeline[]>(`/api/pipelines`, init);
 }
 
 export function getPipelinesFromCookie(cookie: string | null) {
-    return safeWithCookie<Pipeline>((init) => getPipelines(init), cookie);
+    return safeWithCookie<Types.Pipeline>((init) => getPipelines(init), cookie);
 }
 
 /*
@@ -410,9 +324,9 @@ export function getPipelinesFromCookie(cookie: string | null) {
 */
 
 export function getTags(init: RequestInit = {}) {
-    return getJson<Tag[]>(`/api/tags`, init);
+    return getJson<Types.Tag[]>(`/api/tags`, init);
 }
 
 export function getTagsFromCookie(cookie: string | null) {
-    return safeWithCookie<Tag>((init) => getTags(init), cookie);
+    return safeWithCookie<Types.Tag>((init) => getTags(init), cookie);
 }

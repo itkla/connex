@@ -55,6 +55,7 @@ CREATE TABLE company (
     industry    VARCHAR(128) COMMENT 'Industry',
     phone       VARCHAR(64) COMMENT 'Phone number',
     address     VARCHAR(512) COMMENT 'Address',
+    logo_url    VARCHAR(2048) COMMENT 'Logo URL',
     created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT 'Creation timestamp',
     updated_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT 'Last update timestamp'
 ) DEFAULT CHARSET=utf8mb4 COMMENT='Companies';
@@ -91,6 +92,7 @@ CREATE TABLE person (
     phone       VARCHAR(64) COMMENT 'Person phone',
     company_id  INT COMMENT 'Company ID',
     title       VARCHAR(128) COMMENT 'Person title',
+    image_url   VARCHAR(2048) COMMENT 'Person image URL',
     created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT 'Creation timestamp',
     updated_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT 'Last update timestamp',
     CONSTRAINT fk_person_company FOREIGN KEY (company_id) REFERENCES company(id) ON DELETE SET NULL,

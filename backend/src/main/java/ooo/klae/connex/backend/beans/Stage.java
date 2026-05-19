@@ -22,6 +22,7 @@ public class Stage {
     @JsonIdentityReference(alwaysAsId = true)
     private Pipeline pipeline;
     private int position; // zero-based index of this stage within its pipeline
+    private Deal[] deals; // deals currently in this stage
 
     public int getId() {
         return id;
@@ -53,5 +54,13 @@ public class Stage {
 
     public void setPosition(int position) {
         this.position = position;
+    }
+
+    public Deal[] getDeals() {
+        return deals;
+    }
+
+    public void setDeals(Deal[] deals) {
+        this.deals = deals;
     }
 }
