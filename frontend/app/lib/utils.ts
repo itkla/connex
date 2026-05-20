@@ -74,4 +74,18 @@ export function copyToClipboard(value: string, label: string) {
         console.error(`Failed to copy ${label.toLowerCase()}`);
         return false;
     }
-}   
+}
+
+export async function uploadContactPicture(contactId: number, file: File): Promise<string> {
+    const formData = new FormData();
+    formData.append('contactPicture', file);
+    const res = await fetch(`/api/contacts/profile-picture?contactId=${contactId}`, {
+        method: 'PUT',
+        body: formData,
+    });
+    if (!res.ok) {
+        throw new Error('Failed to upload contact picture');
+    }
+    const data = (await res.json()) as { imageUrl: string };
+    return data.imageUrl;
+}

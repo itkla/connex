@@ -1,4 +1,4 @@
-import { type Activity, type Note, type Task } from "@/app/lib/api";
+import { type Activity, type Note, type Task } from "@/app/lib/types";
 import { formatShortDate, timeOf } from "@/app/lib/utils";
 import { CheckIcon } from "@heroicons/react/24/outline";
 

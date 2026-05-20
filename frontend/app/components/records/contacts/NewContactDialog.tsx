@@ -8,7 +8,7 @@ import { Label } from '@/components/ui/label';
 import { type Company, type CreateContactPayload } from '@/app/lib/types';
 import { ChangeEvent, Dispatch, SetStateAction, useEffect, useState, type WheelEvent } from 'react';
 import { CameraIcon } from '@heroicons/react/24/outline';
-
+import { uploadContactPicture } from '@/app/lib/utils';
 const inputClass = 'w-full rounded-lg bg-neutral-100 px-3 py-2 text-sm text-black placeholder-neutral-500 outline-none ring-1 ring-black/5 transition focus:ring-2 focus:ring-brand';
 
 type Props = {

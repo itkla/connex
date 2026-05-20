@@ -5,8 +5,9 @@ import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { ButtonGroup } from '@/components/ui/button-group';
 import { toast } from 'sonner';
-import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from '@/components/ui/dropdown-menu';
+import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
 import { PlusIcon, FunnelIcon, TrashIcon, PencilIcon, EllipsisVerticalIcon, EyeIcon } from '@heroicons/react/24/solid';
+import { BuildingOffice2Icon, NoSymbolIcon } from '@heroicons/react/24/outline';
 import {
     MagnifyingGlassIcon,
     Squares2X2Icon,
@@ -18,6 +19,7 @@ import { deleteContact, updateContact, createContact, getCompanies } from '@/app
 import { type Contact, type UpdateContactPayload, type Company, type CreateContactPayload } from '@/app/lib/types';
 import NewContactDialog from '@/app/components/records/contacts/NewContactDialog';
 import DeleteContactDialog from '@/app/components/records/contacts/DeleteContactDialog';
+import ChangeCompanyDialog from '@/app/components/records/contacts/ChangeCompanyDialog';
 import QuickEditSheet, { type ContactDraft } from '@/app/components/records/contacts/QuickEditSheet';
 
 function toDraft(c: Contact): ContactDraft {
@@ -95,6 +97,8 @@ export default function ContactsBrowser({ contacts }: { contacts: Contact[] }) {
     const [editSheetOpen, setEditSheetOpen] = useState(false);
     const [drafts, setDrafts] = useState<Record<number, ContactDraft>>({});
     const [isSaving, setIsSaving] = useState(false);
+    const [changeCompanyOpen, setChangeCompanyOpen] = useState(false);
+    const [isClearingCompany, setIsClearingCompany] = useState(false);
 
     const selectedContacts = useMemo(
         () => contacts.filter((c) => selectedIds.has(c.id)),
@@ -202,6 +206,8 @@ export default function ContactsBrowser({ contacts }: { contacts: Contact[] }) {
                         email: d.email.trim() || undefined,
                         phone: d.phone.trim() || undefined,
                         title: d.title.trim() || undefined,
+                        companyId: c.companyId ?? c.company?.id ?? null,
+                        imageUrl: c.imageUrl || undefined,
                     };
                     return updateContact(c.id, payload);
                 }),
@@ -220,6 +226,38 @@ export default function ContactsBrowser({ contacts }: { contacts: Contact[] }) {
             });
         } finally {
             setIsSaving(false);
+        }
+    };
+
+    const bulkRemoveFromCompany = async () => {
+        const affected = selectedContacts.filter((c) => c.companyId || c.company);
+        if (affected.length === 0) {
+            toast.info('None of the selected contacts have a company');
+            return;
+        }
+        setIsClearingCompany(true);
+        try {
+            await Promise.all(affected.map((c) => updateContact(c.id, {
+                name: c.name,
+                email: c.email || undefined,
+                phone: c.phone || undefined,
+                title: c.title || undefined,
+                imageUrl: c.imageUrl || undefined,
+                companyId: null,
+            })));
+            toast.success(
+                affected.length === 1
+                    ? 'Removed from company'
+                    : `Removed ${affected.length} contacts from their companies`,
+                { style: { backgroundColor: 'var(--color-brand)', color: 'white' } },
+            );
+            router.refresh();
+        } catch (err) {
+            toast.error(err instanceof Error ? err.message : 'Failed to remove from company', {
+                style: { backgroundColor: 'var(--color-destructive)', color: 'white' },
+            });
+        } finally {
+            setIsClearingCompany(false);
         }
     };
 
@@ -351,13 +389,33 @@ export default function ContactsBrowser({ contacts }: { contacts: Contact[] }) {
                                 </DropdownMenuTrigger>
                                 <DropdownMenuContent>
                                     <DropdownMenuItem
-                                        className="text-destructive hover:bg-red-500/10 hover:bg-destructive"
+                                        onSelect={(e) => {
+                                            e.preventDefault();
+                                            setChangeCompanyOpen(true);
+                                        }}
+                                    >
+                                        <BuildingOffice2Icon />
+                                        Change company
+                                    </DropdownMenuItem>
+                                    <DropdownMenuItem
+                                        disabled={isClearingCompany}
+                                        onSelect={(e) => {
+                                            e.preventDefault();
+                                            bulkRemoveFromCompany();
+                                        }}
+                                    >
+                                        <NoSymbolIcon />
+                                        Remove from company
+                                    </DropdownMenuItem>
+                                    <DropdownMenuSeparator />
+                                    <DropdownMenuItem
+                                        variant="destructive"
                                         onSelect={(e) => {
                                             e.preventDefault();
                                             setDeleteDialogOpen(true);
                                         }}
                                     >
-                                        <TrashIcon className="size-4 text-destructive hover:text-destructive" />
+                                        <TrashIcon />
                                         Delete
                                     </DropdownMenuItem>
                                 </DropdownMenuContent>
@@ -421,6 +479,13 @@ export default function ContactsBrowser({ contacts }: { contacts: Contact[] }) {
                 selectedContacts={selectedContacts}
                 isDeleting={isDeleting}
                 confirmDelete={confirmDelete}
+            />
+
+            <ChangeCompanyDialog
+                open={changeCompanyOpen}
+                onOpenChange={setChangeCompanyOpen}
+                contacts={selectedContacts}
+                companies={companies}
             />
         </div>
     );

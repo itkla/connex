@@ -26,7 +26,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useState } from "react";
 import { DropdownMenu } from "radix-ui";
-import { type User } from "@/app/lib/api";
+import { type User } from "@/app/lib/types";
 import { BubblesIcon, PanelLeftOpenIcon } from "lucide-react";
 // import {  } from "@heroicons/react/24/solid";
 
@@ -287,5 +287,6 @@ export default function Sidebar({
                 </div>
             </aside>
         </div>
+        // TODO: if user device is mobile, turn the sidebar into a from-left drawer and render a hamburger menu icon in the top left corner of the screen to toggle the sidebar
     );
 }

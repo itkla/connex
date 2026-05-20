@@ -11,7 +11,7 @@ if (!user) {
 export default async function TasksPage() {
     const allTasks = await getTasksFromCookie(cookie);
     console.log(allTasks);
-    const userTasks = allTasks.filter((task) => task.assignedTo === user?.id);
+    const userTasks = allTasks.filter((task) => task.assignedToId === user?.id);
     return (
         <div>
             <h1>Tasks</h1>
