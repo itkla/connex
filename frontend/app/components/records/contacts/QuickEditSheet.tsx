@@ -1,6 +1,7 @@
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription, SheetFooter, SheetClose } from '@/components/ui/sheet';
 import { Button } from '@/components/ui/button';
-import { Loader2Icon } from 'lucide-react';
+import { Loader2Icon, UserIcon } from 'lucide-react';
+import { CameraIcon } from '@heroicons/react/24/outline';
 import { Label } from '@/components/ui/label';
 import { type Contact } from '@/app/lib/types';
 import type { SelectionId } from '@/app/components/records/DataRenderView';
@@ -24,6 +25,8 @@ type Props = {
     selectedContacts: Contact[];
     drafts: Record<number, ContactDraft>;
     updateDraft: (id: number, patch: Partial<ContactDraft>) => void;
+    imageFiles?: Record<number, File | null>;
+    updateImageFile?: (id: number, file: File | null) => void;
     isSaving: boolean;
     saveEdits: () => void;
 };
@@ -35,6 +38,8 @@ export default function QuickEditSheet({
     selectedContacts,
     drafts,
     updateDraft,
+    imageFiles,
+    updateImageFile,
     isSaving,
     saveEdits,
 }: Props) {
@@ -55,10 +60,39 @@ export default function QuickEditSheet({
                         {selectedContacts.map((c, idx) => {
                             const draft = drafts[c.id];
                             if (!draft) return null;
+                            const pendingImage = imageFiles?.[c.id] ?? null;
+                            const previewSrc = pendingImage
+                                ? URL.createObjectURL(pendingImage)
+                                : c.imageUrl || null;
                             return (
                                 <div key={c.id} className={idx > 0 ? 'border-t pt-6' : ''}>
                                     <div className="mb-3 flex items-center gap-3">
-                                        <ContactAvatar contact={c} type="large" />
+                                        {updateImageFile ? (
+                                            <label
+                                                htmlFor={`pfp-${c.id}`}
+                                                className="group relative flex h-16 w-16 cursor-pointer items-center justify-center overflow-hidden rounded-full bg-neutral-200 ring-1 ring-black/5 transition hover:ring-2 hover:ring-brand"
+                                            >
+                                                {previewSrc ? (
+                                                    <img src={previewSrc} alt="" className="h-full w-full object-cover" />
+                                                ) : (
+                                                    <div className="flex h-full w-full items-center justify-center bg-gray-400">
+                                                        <UserIcon className="size-10 text-white" />
+                                                    </div>
+                                                )}
+                                                <div className="absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 transition group-hover:opacity-100">
+                                                    <CameraIcon className="size-5 text-white" />
+                                                </div>
+                                                <input
+                                                    id={`pfp-${c.id}`}
+                                                    type="file"
+                                                    accept="image/*"
+                                                    onChange={(e) => updateImageFile(c.id, e.target.files?.[0] ?? null)}
+                                                    className="sr-only"
+                                                />
+                                            </label>
+                                        ) : (
+                                            <ContactAvatar contact={c} type="large" />
+                                        )}
                                         <div className="text-lg font-medium text-neutral-600">{c.name}</div>
                                     </div>
 

@@ -1,12 +1,9 @@
 package ooo.klae.connex.backend.dto;
 
-import com.fasterxml.jackson.annotation.JsonIdentityReference;
-
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
 
-import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
@@ -17,7 +14,6 @@ import ooo.klae.connex.backend.beans.User;
 
 @Data
 @NoArgsConstructor
-@AllArgsConstructor
 public class ActivityDto {
 
     private int id;
@@ -32,15 +28,21 @@ public class ActivityDto {
 
     private String notes;
 
-    @JsonIdentityReference(alwaysAsId = true)
+    // @JsonIdentityReference(alwaysAsId = true) // crashes deserialization in Jackson 3; using personId for writes
     private Person person;
 
-    @JsonIdentityReference(alwaysAsId = true)
+    private Integer personId;
+
+    // @JsonIdentityReference(alwaysAsId = true)
     private Deal deal;
 
-    @NotNull
-    @JsonIdentityReference(alwaysAsId = true)
+    private Integer dealId;
+
+    // @JsonIdentityReference(alwaysAsId = true)
     private User createdBy;
+
+    @NotNull
+    private Integer createdById;
 
     @Size(max = 32)
     private String timestamp;
@@ -53,8 +55,11 @@ public class ActivityDto {
         dto.subject = a.getSubject();
         dto.notes = a.getNotes();
         dto.person = a.getPerson();
+        dto.personId = a.getPerson() == null ? null : a.getPerson().getId();
         dto.deal = a.getDeal();
+        dto.dealId = a.getDeal() == null ? null : a.getDeal().getId();
         dto.createdBy = a.getCreatedBy();
+        dto.createdById = a.getCreatedBy() == null ? null : a.getCreatedBy().getId();
         dto.timestamp = a.getTimestamp();
         return dto;
     }
@@ -65,9 +70,27 @@ public class ActivityDto {
         a.setType(type);
         a.setSubject(subject);
         a.setNotes(notes);
-        a.setPerson(person);
-        a.setDeal(deal);
-        a.setCreatedBy(createdBy);
+        if (personId != null) {
+            Person p = new Person();
+            p.setId(personId);
+            a.setPerson(p);
+        } else {
+            a.setPerson(person);
+        }
+        if (dealId != null) {
+            Deal d = new Deal();
+            d.setId(dealId);
+            a.setDeal(d);
+        } else {
+            a.setDeal(deal);
+        }
+        if (createdById != null) {
+            User u = new User();
+            u.setId(createdById);
+            a.setCreatedBy(u);
+        } else {
+            a.setCreatedBy(createdBy);
+        }
         a.setTimestamp(timestamp);
         return a;
     }

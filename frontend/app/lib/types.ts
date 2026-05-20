@@ -42,14 +42,33 @@ export type CreateContactPayload = {
     companyId?: number;
 };
 
+export type CreateTaskPayload = {
+    description: string;
+    completed?: boolean;
+    dueDate?: string;
+    assignedToId: number;
+    personId?: number;
+    dealId?: number;
+};
+
+export type CreateActivityPayload = {
+    type: string;
+    subject: string;
+    notes?: string;
+    personId?: number;
+    dealId?: number;
+    createdById: number;
+    timestamp?: string;
+};
+
 export type Task = {
     id: number;
     description: string;
     completed: boolean;
     dueDate?: string;
-    assignedTo: number;
-    person?: number | null;
-    deal?: number | null;
+    assignedToId: number;
+    personId?: number | null;
+    dealId?: number | null;
     createdAt: string;
     updatedAt: string;
 };
@@ -59,9 +78,9 @@ export type Activity = {
     type: string;
     subject: string;
     notes?: string;
-    person?: number | null;
-    deal?: number | null;
-    createdBy: number;
+    personId?: number | null;
+    dealId?: number | null;
+    createdById: number;
     timestamp?: string;
 };
 
@@ -93,6 +112,13 @@ export type Contact = {
     email: string;
     phone: string;
     company?: Company;
+    companyId?: number;
+    tags?: Tag[];
+    tagIds?: number[];
+    deals?: Deal[];
+    tasks?: Task[];
+    activities?: Activity[];
+    notes?: Note[];
     title: string;
     imageUrl: string;
     createdAt: string;
@@ -133,6 +159,21 @@ export type UpdateContactPayload = {
     email?: string;
     phone?: string;
     title?: string;
-    companyId?: number;
+    companyId?: number | null;
     imageUrl?: string;
+};
+
+export type ContactFilters = {
+    companyId?: number;
+    tagId?: number;
+    dealId?: number;
+};
+
+export type ContactTag = {
+    id: number;
+    contactId: number;
+    tagId: number;
+    tag?: Tag;
+    createdAt: string;
+    updatedAt: string;
 };

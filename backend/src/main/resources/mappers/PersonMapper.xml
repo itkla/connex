@@ -98,7 +98,7 @@
       <if test="email != null">email = #{email},</if>
       <if test="phone != null">phone = #{phone},</if>
       <if test="title != null">title = #{title},</if>
-      <if test="company != null">company_id = #{company.id},</if>
+      company_id = <choose><when test="company != null">#{company.id}</when><otherwise>NULL</otherwise></choose>,
       <if test="imageUrl != null">image_url = #{imageUrl},</if>
     </set>
     WHERE id = #{id}

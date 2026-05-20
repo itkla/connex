@@ -59,22 +59,26 @@ public class PersonDto {
 
     public static PersonDto from(Person p) {
         if (p == null) return null;
-        PersonDto dto = new PersonDto();
-        dto.id = p.getId();
-        dto.name = p.getName();
-        dto.email = p.getEmail();
-        dto.phone = p.getPhone();
-        dto.company = p.getCompany();
-        dto.companyId = p.getCompany() == null ? null : p.getCompany().getId();
-        dto.title = p.getTitle();
-        dto.tagIds = p.getTags() == null ? null : Arrays.stream(p.getTags()).mapToInt(Tag::getId).toArray();
-        dto.dealIds = p.getDeals() == null ? null : Arrays.stream(p.getDeals()).mapToInt(Deal::getId).toArray();
-        dto.taskIds = p.getTasks() == null ? null : Arrays.stream(p.getTasks()).mapToInt(Task::getId).toArray();
-        dto.activityIds = p.getActivities() == null ? null : Arrays.stream(p.getActivities()).mapToInt(Activity::getId).toArray();
-        dto.noteIds = p.getNotes() == null ? null : Arrays.stream(p.getNotes()).mapToInt(Note::getId).toArray();
-        dto.createdAt = p.getCreatedAt();
-        dto.updatedAt = p.getUpdatedAt();
-        dto.imageUrl = p.getImageUrl();
+        return populate(new PersonDto(), p);
+    }
+
+    // if !dto, then create a new PersonDto with the values from the Person object
+    protected static <T extends PersonDto> T populate(T dto, Person p) {
+        dto.setId(p.getId());
+        dto.setName(p.getName());
+        dto.setEmail(p.getEmail());
+        dto.setPhone(p.getPhone());
+        dto.setCompany(p.getCompany());
+        dto.setCompanyId(p.getCompany() == null ? null : p.getCompany().getId());
+        dto.setTitle(p.getTitle());
+        dto.setTagIds(p.getTags() == null ? null : Arrays.stream(p.getTags()).mapToInt(Tag::getId).toArray());
+        dto.setDealIds(p.getDeals() == null ? null : Arrays.stream(p.getDeals()).mapToInt(Deal::getId).toArray());
+        dto.setTaskIds(p.getTasks() == null ? null : Arrays.stream(p.getTasks()).mapToInt(Task::getId).toArray());
+        dto.setActivityIds(p.getActivities() == null ? null : Arrays.stream(p.getActivities()).mapToInt(Activity::getId).toArray());
+        dto.setNoteIds(p.getNotes() == null ? null : Arrays.stream(p.getNotes()).mapToInt(Note::getId).toArray());
+        dto.setCreatedAt(p.getCreatedAt());
+        dto.setUpdatedAt(p.getUpdatedAt());
+        dto.setImageUrl(p.getImageUrl());
         return dto;
     }
 

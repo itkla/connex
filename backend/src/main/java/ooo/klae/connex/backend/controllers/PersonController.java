@@ -14,6 +14,7 @@ import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.dto.ActivityDto;
 import ooo.klae.connex.backend.dto.DealDto;
 import ooo.klae.connex.backend.dto.NoteDto;
+import ooo.klae.connex.backend.dto.PersonDetailDto;
 import ooo.klae.connex.backend.dto.PersonDto;
 import ooo.klae.connex.backend.dto.TagDto;
 import ooo.klae.connex.backend.dto.TaskDto;
@@ -57,13 +58,15 @@ public class PersonController {
     }
 
     /**
-     * GET endpoint to retrieve a single person by ID.
+     * GET endpoint to retrieve a single person by ID. Returns a {@link PersonDetailDto}
+     * with fully hydrated tags, deals, notes, tasks, and activities so callers don't
+     * need follow-up round-trips for the detail view.
      * @param id
      * @return
      */
     @GetMapping("/{id}")
-    public PersonDto getPersonById(@PathVariable int id) {
-        return PersonDto.from(personService.getPersonById(id));
+    public PersonDetailDto getPersonById(@PathVariable int id) {
+        return PersonDetailDto.from(personService.getPersonById(id));
     }
 
     /**

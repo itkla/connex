@@ -32,8 +32,9 @@ async function requestJson<T>(
     return JSON.parse(text) as T;
 }
 
-async function postJson<T>(path: string, body: unknown = {}): Promise<T> {
+async function postJson<T>(path: string, body: unknown = {}, init: RequestInit = {}): Promise<T> {
     return requestJson<T>(path, {
+        ...init,
         method: "POST",
         body: JSON.stringify(body),
     });
@@ -43,8 +44,9 @@ async function getJson<T>(path: string, init: RequestInit = {}): Promise<T> {
     return requestJson<T>(path, { ...init, method: "GET" });
 }
 
-async function putJson<T>(path: string, body: unknown = {}): Promise<T> {
+async function putJson<T>(path: string, body: unknown = {}, init: RequestInit = {}): Promise<T> {
     return requestJson<T>(path, {
+        ...init,
         method: "PUT",
         body: JSON.stringify(body),
     });
@@ -67,6 +69,16 @@ async function safeWithCookie<T>(
     } catch {
         return [];
     }
+}
+
+// TODO: have the backend actually do something with these filters/queries
+function buildQuery(params: Record<string, unknown>): string {
+    const search = new URLSearchParams();
+    for (const [key, value] of Object.entries(params)) {
+        if (value !== undefined && value !== null) search.set(key, String(value));
+    }
+    const qs = search.toString();
+    return qs ? `?${qs}` : "";
 }
 
 /*
@@ -182,6 +194,14 @@ export function updateUser(id: number, payload: Types.UpdateUserPayload) {
     return putJson<Types.User>(`/api/users/${id}`, payload);
 }
 
+export function getUserById(id: number, init: RequestInit = {}) {
+    return getJson<Types.User>(`/api/users/${id}`, init);
+}
+
+export function getUsers(init: RequestInit = {}) {
+    return getJson<Types.User[]>(`/api/users`, init);
+}
+
 /*
 * == User-associated records
 */
@@ -222,6 +242,10 @@ export function getTasksFromCookie(cookie: string | null) { // authenticate then
     return safeWithCookie<Types.Task>((init) => getTasks(init), cookie);
 }
 
+export function createTask(payload: Types.CreateTaskPayload, init: RequestInit = {}) {
+    return postJson<Types.Task>(`/api/tasks`, payload, init);
+}
+
 /*
 * == Activity management
 */
@@ -232,6 +256,10 @@ export function getActivities(init: RequestInit = {}) { // get all activities fo
 
 export function getActivitiesFromCookie(cookie: string | null) { // authenticate then get all activities
     return safeWithCookie<Types.Activity>((init) => getActivities(init), cookie);
+}
+
+export function createActivity(payload: Types.CreateActivityPayload, init: RequestInit = {}) {
+    return postJson<Types.Activity>(`/api/activities`, payload, init);
 }
 
 /*
@@ -263,21 +291,17 @@ export function getCompaniesFromCookie(cookie: string | null) {
 * == Contact management
 */
 
-export function getContacts(init: RequestInit = {}) {
-    return getJson<Types.Contact[]>(`/api/persons`, init);
+export function getContacts(filters: Types.ContactFilters = {}, init: RequestInit = {}) {
+    return getJson<Types.Contact[]>(`/api/persons${buildQuery(filters)}`, init);
 }
 
-export function getContactsFromCookie(cookie: string | null) {
-    return safeWithCookie<Types.Contact>((init) => getContacts(init), cookie);
+export function getContactsFromCookie(cookie: string | null, filters: Types.ContactFilters = {}) {
+    return safeWithCookie<Types.Contact>((init) => getContacts(filters, init), cookie);
 }
 
 export function getContactById(id: number, init: RequestInit = {}) {
     return getJson<Types.Contact>(`/api/persons/${id}`, init);
 }
-
-// export function getContactFromCookie(id: number, cookie: string | null) {
-//     return safeWithCookie<Contact>((init) => getContactById(id, init), cookie);
-// }
 
 export function createContact(payload: Types.CreateContactPayload) {
     return postJson<Types.Contact>(`/api/persons`, payload);
@@ -293,6 +317,62 @@ export function updateContact(id: number, payload: Types.UpdateContactPayload) {
 
 export function deleteContactFromCookie(id: number, cookie: string | null) {
     return safeWithCookie<void>((init) => deleteContact(id, init), cookie);
+}
+
+export function getContactTags(id: number, init: RequestInit = {}) {
+    return getJson<Types.Tag[]>(`/api/persons/${id}/tags`, init);
+}
+export function getContactTagsFromCookie(id: number, cookie: string | null) {
+    return safeWithCookie<Types.Tag>((init) => getContactTags(id, init), cookie);
+}
+
+export function addContactTag(id: number, tagId: number, init: RequestInit = {}) {
+    return postJson<void[]>(`/api/persons/${id}/tags/${tagId}`, {}, init);
+}
+export function addContactTagFromCookie(id: number, tagId: number, cookie: string | null) {
+    return safeWithCookie<void>((init) => addContactTag(id, tagId, init), cookie);
+}
+
+export function removeContactTag(id: number, tagId: number, init: RequestInit = {}) {
+    return deleteJson<void[]>(`/api/persons/${id}/tags/${tagId}`, init);
+}
+export function removeContactTagFromCookie(id: number, tagId: number, cookie: string | null) {
+    return safeWithCookie<void>((init) => removeContactTag(id, tagId, init), cookie);
+}
+
+export function replaceContactTags(id: number, tagIds: number[], init: RequestInit = {}) {
+    return putJson<Types.Tag[]>(`/api/persons/${id}/tags`, tagIds, init);
+}
+export function replaceContactTagsFromCookie(id: number, tagIds: number[], cookie: string | null) {
+    return safeWithCookie<Types.Tag>((init) => replaceContactTags(id, tagIds, init), cookie);
+}
+
+export function getContactDeals(id: number, init: RequestInit = {}) {
+    return getJson<Types.Deal[]>(`/api/persons/${id}/deals`, init);
+}
+export function getContactDealsFromCookie(id: number, cookie: string | null) {
+    return safeWithCookie<Types.Deal>((init) => getContactDeals(id, init), cookie);
+}
+
+export function getContactActivities(id: number, init: RequestInit = {}) {
+    return getJson<Types.Activity[]>(`/api/persons/${id}/activities`, init);
+}
+export function getContactActivitiesFromCookie(id: number, cookie: string | null) {
+    return safeWithCookie<Types.Activity>((init) => getContactActivities(id, init), cookie);
+}
+
+export function getContactNotes(id: number, init: RequestInit = {}) {
+    return getJson<Types.Note[]>(`/api/persons/${id}/notes`, init);
+}
+export function getContactNotesFromCookie(id: number, cookie: string | null) {
+    return safeWithCookie<Types.Note>((init) => getContactNotes(id, init), cookie);
+}
+
+export function getContactTasks(id: number, init: RequestInit = {}) {
+    return getJson<Types.Task[]>(`/api/persons/${id}/tasks`, init);
+}
+export function getContactTasksFromCookie(id: number, cookie: string | null) {
+    return safeWithCookie<Types.Task>((init) => getContactTasks(id, init), cookie);
 }
 
 /*
