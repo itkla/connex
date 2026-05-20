@@ -67,7 +67,7 @@ export default async function ContactPage({ params }: { params: { id: number } }
 
 
             <header className="mt-8 flex flex-wrap items-center justify-between gap-6">
-                <div className="flex items-center gap-6">
+                <div className="flex items-center gap-6 py-8">
                     <ContactAvatar contact={contact} type="xlarge" />
                     <div className="flex flex-col gap-2">
                         <div className="flex flex-row flex-wrap items-center gap-3">
