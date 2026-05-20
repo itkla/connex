@@ -29,7 +29,7 @@ export function proxy(request: NextRequest) {
         return NextResponse.redirect(new URL('/dashboard', request.url));
     }
 
-    if (!hasSession && isProtectedPath(pathname)) {
+    if (!hasSession && isProtectedPath(pathname) && pathname !== '/auth/register') {
         const loginUrl = new URL('/auth/login', request.url);
         loginUrl.searchParams.set('redirect', pathname + search);
         return NextResponse.redirect(loginUrl);
