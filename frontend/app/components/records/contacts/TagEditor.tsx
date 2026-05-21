@@ -12,20 +12,22 @@ import {
     DropdownMenuItem,
     DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { addContactTag, removeContactTag } from '@/app/lib/api';
+import { addCompanyTag, addContactTag, removeCompanyTag, removeContactTag } from '@/app/lib/api';
 import { type Tag } from '@/app/lib/types';
 
 type TagAction = { type: 'add'; tag: Tag } | { type: 'remove'; tagId: number };
 
-export default function TagEditor({
-    contactId,
-    currentTags,
-    allTags,
-}: {
-    contactId: number;
+type Props = {
     currentTags: Tag[];
     allTags: Tag[];
-}) {
+} & ({ contactId: number; companyId?: never } | { companyId: number; contactId?: never });
+
+export default function TagEditor({
+    contactId,
+    companyId,
+    currentTags,
+    allTags,
+}: Props) {
     const router = useRouter();
     const [optimisticTags, applyOptimistic] = useOptimistic<Tag[], TagAction>(
         currentTags,
@@ -38,11 +40,16 @@ export default function TagEditor({
     const currentIds = new Set(optimisticTags.map((t) => t.id));
     const availableTags = allTags.filter((t) => !currentIds.has(t.id));
 
+    const addTag = (tagId: number) =>
+        contactId != null ? addContactTag(contactId, tagId) : addCompanyTag(companyId!, tagId);
+    const removeTag = (tagId: number) =>
+        contactId != null ? removeContactTag(contactId, tagId) : removeCompanyTag(companyId!, tagId);
+
     const handleAdd = (tag: Tag) => {
         startTransition(async () => {
             applyOptimistic({ type: 'add', tag });
             try {
-                await addContactTag(contactId, tag.id);
+                await addTag(tag.id);
                 router.refresh();
             } catch (err) {
                 toast.error(err instanceof Error ? err.message : 'Failed to add tag', {
@@ -56,7 +63,7 @@ export default function TagEditor({
         startTransition(async () => {
             applyOptimistic({ type: 'remove', tagId: tag.id });
             try {
-                await removeContactTag(contactId, tag.id);
+                await removeTag(tag.id);
                 router.refresh();
             } catch (err) {
                 toast.error(err instanceof Error ? err.message : 'Failed to remove tag', {

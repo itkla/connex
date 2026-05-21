@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { ArrowRightIcon } from '@heroicons/react/24/outline';
+import { ArrowUpRightIcon } from '@heroicons/react/24/outline';
 
 import { Button } from '@/components/ui/button';
 import StatCard from '@/app/components/me/StatCard';
@@ -32,7 +32,7 @@ export default function ContactStatCard({
                             className="text-neutral-500 hover:text-black cursor-pointer"
                         >
                             <Link href={viewHref}>
-                                <ArrowRightIcon className="size-4" />
+                                <ArrowUpRightIcon className="size-4" />
                                 <span className="sr-only">View all {label}</span>
                             </Link>
                         </Button>

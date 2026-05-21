@@ -1,0 +1,103 @@
+'use client';
+
+import { type Contact, type Company, type Tag } from "@/app/lib/types";
+import ContactCard from "@/app/components/records/contacts/ContactCard";
+import { PlusIcon } from "@heroicons/react/24/outline";
+
+import NewContactDialog from "@/app/components/records/contacts/NewContactDialog";
+import { useState } from "react";
+import { useRouter } from "next/navigation";
+import { CreateContactPayload } from "@/app/lib/types";
+import { createContact, updateContact } from "@/app/lib/api";
+import { uploadContactPicture } from "@/app/lib/utils";
+import { toast } from "sonner";
+
+export default function ContactsGrid({ contacts, company, allTags }: { contacts: Contact[], company: Company, allTags: Tag[] }) {
+    const router = useRouter();
+    const [newContactDialogOpen, setNewContactDialogOpen] = useState(false);
+    const [newContactPayload, setNewContactPayload] = useState<CreateContactPayload>({
+        name: '',
+        email: '',
+        phone: '',
+        title: '',
+        companyId: company?.id,
+    });
+    const [imageFile, setImageFile] = useState<File | null>(null);
+    const [isCreating, setIsCreating] = useState(false);
+    return (
+        <>
+            <div className="mt-6 mb-3 flex h-8 items-center justify-between">
+                <h2 className="px-6 text-xs font-medium tracking-[0.12em] text-neutral-500 uppercase">
+                    Contacts
+                </h2>
+                <button onClick={() => {
+                    setNewContactDialogOpen(true);
+                }}>
+                    <PlusIcon className="size-4 text-neutral-500 hover:text-neutral-600 transition-colors duration-300 cursor-pointer" />
+                </button>
+            </div>
+            {contacts.length === 0 ? (
+                <div className="overflow-hidden rounded-2xl bg-neutral-100 ring-1 ring-black/5">
+                    <p className="px-6 py-6 text-sm text-neutral-500">No contacts associated with this company.</p>
+                </div>
+            ) : (
+                <ul className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+                    {contacts.map((contact) => (
+                        <ContactCard
+                            key={contact.id}
+                            id={contact.id}
+                            name={contact.name}
+                            title={contact.title}
+                            imageUrl={contact.imageUrl}
+                            company={contact.company?.name}
+                            companyId={contact.companyId ?? contact.company?.id}
+                            email={contact.email}
+                            tags={contact.tagIds?.map((tagId) => allTags.find((t) => t.id === tagId))?.filter((t): t is Tag => t !== undefined) ?? []}
+                            phone={contact.phone}
+                        // onQuickEdit={onQuickEdit ? () => onQuickEdit(person) : undefined}
+                        // onDelete={onDelete ? () => onDelete(person) : undefined}
+                        />
+                    ))}
+                </ul>
+            )}
+
+            <NewContactDialog 
+                newContactDialogOpen={newContactDialogOpen}
+                setNewContactDialogOpen={setNewContactDialogOpen}
+                newContactPayload={newContactPayload}
+                setNewContactPayload={setNewContactPayload}
+                imageFile={imageFile}
+                setImageFile={setImageFile}
+                companies={[company]}
+                selectedCompany={company}
+                isCreating={isCreating}
+                createNewContact={async () => {
+                    setIsCreating(true);
+                    try {
+                        const newContact = await createContact(newContactPayload);
+                        if (imageFile) {
+                            const imageUrl = await uploadContactPicture(newContact.id, imageFile);
+                            await updateContact(newContact.id, { ...newContactPayload, imageUrl });
+                        }
+                        setNewContactPayload({
+                            name: '',
+                            email: '',
+                            phone: '',
+                            title: '',
+                            companyId: company?.id,
+                        });
+                        setImageFile(null);
+                        setNewContactDialogOpen(false);
+                        toast.success('Contact created');
+                        router.refresh();
+                    } catch (error) {
+                        console.error(error);
+                        toast.error('Failed to create contact');
+                    } finally {
+                        setIsCreating(false);
+                    }
+                }}
+            />
+        </>
+    );
+}

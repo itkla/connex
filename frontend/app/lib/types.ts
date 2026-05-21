@@ -105,6 +105,9 @@ export type Company = {
     personIds?: number[];
     dealIds?: number[];
     tagIds?: number[];
+    people?: Contact[];
+    deals?: Deal[];
+    tags?: Tag[];
     createdAt: string;
     updatedAt: string;
 };

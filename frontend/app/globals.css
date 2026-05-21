@@ -57,6 +57,10 @@
   --color-brand-light: #e5f9d8;
   --color-brand-hover: #5cb000;
   --color-brand-dark: #4a9000;
+  /* --color-brand-light: var(--brand);
+
+  /* --color-brand: #0ea5e9;
+  --color-brand-light: ; */
 }
 
 :root {

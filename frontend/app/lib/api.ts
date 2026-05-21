@@ -303,6 +303,26 @@ export function deleteCompany(id: number, init: RequestInit = {}) {
     return deleteJson<void[]>(`/api/companies/${id}`, init);
 }
 
+export function getCompanyPeople(id: number, init: RequestInit = {}) {
+    return getJson<Types.Contact[]>(`/api/companies/${id}/people`, init);
+}
+
+export function getCompanyDeals(id: number, init: RequestInit = {}) {
+    return getJson<Types.Deal[]>(`/api/companies/${id}/deals`, init);
+}
+
+export function getCompanyTags(id: number, init: RequestInit = {}) {
+    return getJson<Types.Tag[]>(`/api/companies/${id}/tags`, init);
+}
+
+export function addCompanyTag(id: number, tagId: number, init: RequestInit = {}) {
+    return postJson<void[]>(`/api/companies/${id}/tags/${tagId}`, {}, init);
+}
+
+export function removeCompanyTag(id: number, tagId: number, init: RequestInit = {}) {
+    return deleteJson<void[]>(`/api/companies/${id}/tags/${tagId}`, init);
+}
+
 /*
 * == Contact management
 */
