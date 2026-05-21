@@ -4,7 +4,7 @@ import { Loader2Icon, UserIcon } from 'lucide-react';
 import { CameraIcon } from '@heroicons/react/24/outline';
 import { Label } from '@/components/ui/label';
 import { type Contact } from '@/app/lib/types';
-import type { SelectionId } from '@/app/components/records/DataRenderView';
+import type { SelectionId } from '@/app/components/records/types';
 import ContactAvatar from '@/app/components/records/contacts/ContactAvatar';
 
 // the styling from login
