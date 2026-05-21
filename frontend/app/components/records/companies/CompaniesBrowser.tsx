@@ -1,0 +1,499 @@
+'use client';
+
+import { useCallback, useMemo, useState } from 'react';
+import { useRouter } from 'next/navigation';
+import { Button } from '@/components/ui/button';
+import { ButtonGroup } from '@/components/ui/button-group';
+import { toast } from 'sonner';
+import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
+import { PlusIcon, FunnelIcon, TrashIcon, PencilIcon, EllipsisVerticalIcon, EyeIcon } from '@heroicons/react/24/solid';
+import {
+    MagnifyingGlassIcon,
+    Squares2X2Icon,
+    TableCellsIcon,
+    ChevronDownIcon,
+} from '@heroicons/react/24/outline';
+
+import RecordsRenderView from '@/app/components/records/RecordsRenderView';
+import DeleteRecordDialog from '@/app/components/records/DeleteRecordDialog';
+import { useRecordsBrowser } from '@/app/hooks/useRecordsBrowser';
+import { type ColumnDef } from '@/app/components/records/types';
+import CompanyCard from '@/app/components/records/companies/CompanyCard';
+import CompanyAvatar from '@/app/components/records/companies/CompanyAvatar';
+import NewCompanyDialog from '@/app/components/records/companies/NewCompanyDialog';
+import QuickEditCompanySheet, { type CompanyDraft } from '@/app/components/records/companies/QuickEditCompanySheet';
+import { createCompany, deleteCompany, getUsers, getTasks, getDeals, updateCompany, getActivities, getNotes } from '@/app/lib/api';
+import { uploadCompanyLogo } from '@/app/lib/utils';
+import { type Company, type CreateCompanyPayload, type UpdateCompanyPayload, type Contact, type Activity, type Note, type Task, type User, type Deal, type CompanyMetrics, type LoadStatus } from '@/app/lib/types';
+import { getContacts } from '@/app/lib/api';
+
+function toDraft(c: Company): CompanyDraft {
+    return {
+        name: c.name ?? '',
+        website: c.website ?? '',
+        industry: c.industry ?? '',
+        phone: c.phone ?? '',
+        address: c.address ?? '',
+    };
+}
+
+function diffDraft(original: CompanyDraft, draft: CompanyDraft): boolean {
+    return (
+        original.name !== draft.name ||
+        original.website !== draft.website ||
+        original.industry !== draft.industry ||
+        original.phone !== draft.phone ||
+        original.address !== draft.address
+    );
+}
+
+const searchFields = (c: Company) => [c.name, c.website, c.industry, c.phone, c.address];
+
+export default function CompaniesBrowser({ companies }: { companies: Company[] }) {
+    const router = useRouter();
+    const {
+        displayMode,
+        setDisplayMode,
+        query,
+        setQuery,
+        selectedIds,
+        setSelectedIds,
+        filteredItems: filteredCompanies,
+        selectedItems: selectedCompanies,
+        deleteDialogOpen,
+        setDeleteDialogOpen,
+    } = useRecordsBrowser<Company>({
+        items: companies,
+        storageKey: 'companies:view',
+        searchFields,
+    });
+
+    const [isDeleting, setIsDeleting] = useState(false);
+    const [editSheetOpen, setEditSheetOpen] = useState(false);
+    const [drafts, setDrafts] = useState<Record<number, CompanyDraft>>({});
+    const [isSaving, setIsSaving] = useState(false);
+
+    const emptyDraft: CreateCompanyPayload = { name: '', website: '', industry: '', phone: '', address: '' };
+    const [newDialogOpen, setNewDialogOpen] = useState(false);
+    const [isCreating, setIsCreating] = useState(false);
+    const [newPayload, setNewPayload] = useState<CreateCompanyPayload>(emptyDraft);
+    const [logoFile, setLogoFile] = useState<File | null>(null);
+
+    const [allContacts, setAllContacts] = useState<Contact[]>([]);
+    const [allDeals, setAllDeals] = useState<Deal[]>([]);
+    const [allTasks, setAllTasks] = useState<Task[]>([]);
+    const [allActivities, setAllActivities] = useState<Activity[]>([]);
+    const [allNotes, setAllNotes] = useState<Note[]>([]);
+    const [allUsers, setAllUsers] = useState<User[]>([]);
+    const [metricsStatus, setMetricsStatus] = useState<LoadStatus>('idle');
+
+    const ensureMetricsLoaded = useCallback(() => {
+        if (metricsStatus === 'loading' || metricsStatus === 'ready') return;
+        setMetricsStatus('loading');
+        Promise.all([getContacts({}), getDeals(), getTasks(), getActivities(), getNotes(), getUsers()])
+            .then(([contacts, deals, tasks, activities, notes, users]) => {
+                setAllContacts(contacts);
+                setAllDeals(deals);
+                setAllTasks(tasks);
+                setAllActivities(activities);
+                setAllNotes(notes);
+                setAllUsers(users);
+                setMetricsStatus('ready');
+            })
+            .catch((err) => {
+                console.error(err);
+                setMetricsStatus('error');
+                toast.error('Failed to load company metrics', {
+                    style: { backgroundColor: 'var(--color-destructive)', color: 'white' },
+                });
+            });
+    }, [metricsStatus]);
+
+    const closeNewDialog = (open: boolean) => {
+        setNewDialogOpen(open);
+        if (!open) {
+            setNewPayload(emptyDraft);
+            setLogoFile(null);
+        }
+    };
+
+    const createNewCompany = async () => {
+        setIsCreating(true);
+        try {
+            const created = await createCompany(newPayload);
+            if (logoFile) {
+                const logoUrl = await uploadCompanyLogo(created.id, logoFile);
+                await updateCompany(created.id, { ...newPayload, logoUrl });
+            }
+            toast.success('Company created', {
+                style: { backgroundColor: 'var(--color-brand)', color: 'white' },
+            });
+            closeNewDialog(false);
+            router.refresh();
+        } catch (err) {
+            console.error(err);
+            toast.error('Failed to create company', {
+                style: { backgroundColor: 'var(--color-destructive)', color: 'white' },
+            });
+        } finally {
+            setIsCreating(false);
+        }
+    };
+
+    const openEditSheet = () => {
+        const next: Record<number, CompanyDraft> = {};
+        for (const c of selectedCompanies) next[c.id] = toDraft(c);
+        setDrafts(next);
+        setEditSheetOpen(true);
+    };
+
+    const updateDraft = (id: number, patch: Partial<CompanyDraft>) => {
+        setDrafts((prev) => ({ ...prev, [id]: { ...prev[id], ...patch } }));
+    };
+
+    const saveEdits = async () => {
+        const changed = selectedCompanies.filter((c) => {
+            const draft = drafts[c.id];
+            return draft && diffDraft(toDraft(c), draft);
+        });
+
+        if (changed.length === 0) {
+            toast.info('No changes to save');
+            setEditSheetOpen(false);
+            return;
+        }
+
+        const invalid = changed.find((c) => !drafts[c.id].name.trim());
+        if (invalid) {
+            toast.error(`Name is required for "${invalid.name}"`);
+            return;
+        }
+
+        setIsSaving(true);
+        try {
+            await Promise.all(
+                changed.map((c) => {
+                    const d = drafts[c.id];
+                    const payload: UpdateCompanyPayload = {
+                        name: d.name.trim(),
+                        website: d.website.trim() || undefined,
+                        industry: d.industry.trim() || undefined,
+                        phone: d.phone.trim() || undefined,
+                        address: d.address.trim() || undefined,
+                        logoUrl: c.logoUrl || undefined,
+                    };
+                    return updateCompany(c.id, payload);
+                }),
+            );
+            toast.success(
+                changed.length === 1 ? 'Company updated' : `${changed.length} companies updated`,
+                { style: { backgroundColor: 'var(--color-brand)', color: 'white' } },
+            );
+            setEditSheetOpen(false);
+            router.refresh();
+        } catch (err) {
+            toast.error(err instanceof Error ? err.message : 'Failed to save', {
+                style: { backgroundColor: 'var(--color-destructive)', color: 'white' },
+            });
+        } finally {
+            setIsSaving(false);
+        }
+    };
+
+    const quickEditOne = useCallback((company: Company) => {
+        setSelectedIds(new Set([company.id]));
+        setDrafts({ [company.id]: toDraft(company) });
+        setEditSheetOpen(true);
+    }, [setSelectedIds]);
+
+    const deleteOne = useCallback((company: Company) => {
+        setSelectedIds(new Set([company.id]));
+        setDeleteDialogOpen(true);
+    }, [setSelectedIds, setDeleteDialogOpen]);
+
+    const confirmDelete = async () => {
+        if (selectedIds.size === 0) return;
+        setIsDeleting(true);
+        try {
+            await Promise.all(Array.from(selectedIds).map((id) => deleteCompany(Number(id))));
+            toast.success(
+                selectedIds.size === 1 ? 'Company deleted' : `${selectedIds.size} companies deleted`,
+                { style: { backgroundColor: 'var(--color-brand)', color: 'white' } },
+            );
+            setSelectedIds(new Set());
+            setDeleteDialogOpen(false);
+            router.refresh();
+        } catch (err) {
+            toast.error(err instanceof Error ? err.message : 'Failed to delete', {
+                style: { backgroundColor: 'var(--color-destructive)', color: 'white' },
+            });
+        } finally {
+            setIsDeleting(false);
+        }
+    };
+
+    const viewSelected = () => {
+        if (selectedCompanies.length === 1) {
+            router.push(`/records/companies/${selectedCompanies[0].id}`);
+        } else {
+            selectedCompanies.forEach((c) => window.open(`/records/companies/${c.id}`, '_blank'));
+        }
+    };
+
+    const columns: ColumnDef<Company>[] = useMemo(() => [
+        { key: 'name', label: 'Name', getSortValue: (c) => c.name ?? null },
+        {
+            key: 'website',
+            label: 'Website',
+            getSortValue: (c) => c.website ?? null,
+            copyable: { label: 'Website', getValue: (c) => c.website },
+        },
+        { key: 'industry', label: 'Industry', getSortValue: (c) => c.industry ?? null },
+        {
+            key: 'phone',
+            label: 'Phone',
+            getSortValue: (c) => c.phone ?? null,
+            copyable: { label: 'Phone', getValue: (c) => c.phone },
+        },
+        {
+            key: 'address',
+            label: 'Address',
+            getSortValue: (c) => c.address ?? null,
+            copyable: { label: 'Address', getValue: (c) => c.address },
+        },
+        {
+            key: 'createdAt',
+            label: 'Created',
+            getSortValue: (c) => (c.createdAt ? Date.parse(c.createdAt) : null),
+            render: (c) => c.createdAt,
+        },
+        {
+            key: 'updatedAt',
+            label: 'Updated',
+            getSortValue: (c) => (c.updatedAt ? Date.parse(c.updatedAt) : null),
+            render: (c) => c.updatedAt,
+        },
+    ], []);
+
+    // TODO: move processing to the backend so the frontend doesn't traverse the full tables to derive per-company metrics
+
+    const metricsByCompanyId = useMemo(() => {
+        const map = new Map<number, CompanyMetrics>();
+        for (const company of companies) {
+            const persons = allContacts.filter((c) => c.companyId === company.id);
+            const deals = allDeals.filter((d) => d.company === company.id);
+            const personIds = new Set(persons.map((c) => c.id));
+            const dealIds = new Set(deals.map((d) => d.id));
+            const tasks = allTasks.filter((t) =>
+                (t.personId != null && personIds.has(t.personId)) ||
+                (t.dealId != null && dealIds.has(t.dealId)),
+            );
+            const activities = allActivities.filter((a) =>
+                (a.personId != null && personIds.has(a.personId)) ||
+                (a.dealId != null && dealIds.has(a.dealId)),
+            );
+            const notes = allNotes.filter((n) =>
+                (n.person != null && personIds.has(n.person)) ||
+                (n.deal != null && dealIds.has(n.deal)),
+            );
+            const userIds = new Set<number>();
+            for (const t of tasks) if (t.assignedToId != null) userIds.add(t.assignedToId);
+            for (const a of activities) userIds.add(a.createdById);
+            for (const n of notes) userIds.add(n.author);
+
+            const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
+            const now = Date.now();
+            const firstWeekStart = now - 11 * WEEK_MS;
+            const weeklyEngagement = Array.from({ length: 12 }, (_, i) => ({
+                weekStart: firstWeekStart + i * WEEK_MS,
+                count: 0,
+                activities: 0,
+                tasks: 0,
+                notes: 0,
+            }));
+            const bucket = (ts: number, kind: 'activities' | 'tasks' | 'notes') => {
+                if (!Number.isFinite(ts)) return;
+                const idx = Math.floor((ts - firstWeekStart) / WEEK_MS);
+                if (idx < 0 || idx >= weeklyEngagement.length) return;
+                weeklyEngagement[idx][kind]++;
+                weeklyEngagement[idx].count++;
+            };
+            for (const a of activities) bucket(Date.parse(a.timestamp ?? ''), 'activities');
+            for (const t of tasks) bucket(Date.parse(t.createdAt ?? ''), 'tasks');
+            for (const n of notes) bucket(Date.parse(n.createdAt ?? ''), 'notes');
+
+            let pastRevenue = 0;
+            let projectedRevenue = 0;
+            for (const d of deals) {
+                const closed = d.closedAt ? Date.parse(d.closedAt) : NaN;
+                if (Number.isFinite(closed) && closed <= now) {
+                    pastRevenue += d.value ?? 0;
+                } else {
+                    projectedRevenue += d.value ?? 0;
+                }
+            }
+
+            map.set(company.id, {
+                persons,
+                relatedUsers: allUsers.filter((u) => userIds.has(u.id)),
+                pastRevenue,
+                projectedRevenue,
+                numDeals: deals.length,
+                numTasks: tasks.length,
+                numActivities: activities.length,
+                numNotes: notes.length,
+                weeklyEngagement,
+            });
+        }
+        return map;
+    }, [companies, allContacts, allDeals, allTasks, allActivities, allNotes, allUsers]);
+
+    return (
+        <div className="space-y-6">
+            <div className="flex items-center justify-between">
+                <h1 className="text-4xl font-extrabold">Companies</h1>
+                <Button className="bg-brand text-white" aria-label="Add company" onClick={() => setNewDialogOpen(true)}>
+                    <PlusIcon strokeWidth={2.5} />
+                    New
+                </Button>
+            </div>
+
+            <div className="flex items-center gap-4">
+                <button
+                    type="button"
+                    className="flex items-center gap-2 rounded-full bg-neutral-100 px-4 py-2 text-sm text-neutral-700 ring-1 ring-black/5 transition hover:bg-neutral-200"
+                >
+                    <FunnelIcon className="size-4 text-neutral-500" />
+                    <ChevronDownIcon className="size-4 text-neutral-500" />
+                </button>
+                <div
+                    role="group"
+                    aria-label="Display mode"
+                    className="inline-flex rounded-full bg-neutral-100 p-0.5 ring-1 ring-black/5"
+                >
+                    <button
+                        type="button"
+                        onClick={() => setDisplayMode('grid')}
+                        aria-label="Grid view"
+                        aria-pressed={displayMode === 'grid'}
+                        className={`flex h-7 w-7 items-center justify-center rounded-full transition ${displayMode === 'grid' ? 'bg-white text-neutral-900 shadow' : 'text-neutral-500 hover:text-neutral-700'}`}
+                    >
+                        <Squares2X2Icon className="size-4" />
+                    </button>
+                    <button
+                        type="button"
+                        onClick={() => setDisplayMode('table')}
+                        aria-label="Table view"
+                        aria-pressed={displayMode === 'table'}
+                        className={`flex h-7 w-7 items-center justify-center rounded-full transition ${displayMode === 'table' ? 'bg-white text-neutral-900 shadow' : 'text-neutral-500 hover:text-neutral-700'}`}
+                    >
+                        <TableCellsIcon className="size-4" />
+                    </button>
+                </div>
+
+                {selectedIds.size > 0 && (
+                    <div className="flex items-center gap-2">
+                        <span className="text-sm text-neutral-500">{selectedIds.size} selected</span>
+                        <ButtonGroup className="rounded-full bg-neutral-100">
+                            <Button variant="outline" size="sm" onClick={viewSelected}>
+                                <EyeIcon className="size-4" />
+                                View
+                            </Button>
+                            <Button variant="outline" size="sm" onClick={openEditSheet}>
+                                <PencilIcon className="size-4" />
+                                Quick edit
+                            </Button>
+                            <DropdownMenu>
+                                <DropdownMenuTrigger asChild>
+                                    <Button variant="outline" size="sm">
+                                        <EllipsisVerticalIcon className="size-4" />
+                                    </Button>
+                                </DropdownMenuTrigger>
+                                <DropdownMenuContent>
+                                    <DropdownMenuItem
+                                        variant="destructive"
+                                        onSelect={(e) => {
+                                            e.preventDefault();
+                                            setDeleteDialogOpen(true);
+                                        }}
+                                    >
+                                        <TrashIcon />
+                                        Delete
+                                    </DropdownMenuItem>
+                                </DropdownMenuContent>
+                            </DropdownMenu>
+                        </ButtonGroup>
+                    </div>
+                )}
+
+                <div className="relative ml-auto w-full max-w-sm">
+                    <input
+                        type="text"
+                        placeholder="Search companies"
+                        value={query}
+                        onChange={(e) => setQuery(e.target.value)}
+                        className="w-full rounded-full bg-neutral-100 px-4 py-2 pr-10 text-sm text-black placeholder-neutral-500 outline-none ring-1 ring-black/5 transition focus:ring-2 focus:ring-brand"
+                    />
+                    <MagnifyingGlassIcon className="pointer-events-none absolute right-3 top-1/2 size-4 -translate-y-1/2 text-neutral-500" />
+                </div>
+            </div>
+
+            <RecordsRenderView<Company>
+                data={filteredCompanies}
+                columns={columns}
+                renderCard={(item, { onQuickEdit, onDelete }) => (
+                    <CompanyCard
+                        company={item}
+                        metrics={metricsByCompanyId.get(item.id)}
+                        metricsStatus={metricsStatus}
+                        onFirstExpand={ensureMetricsLoaded}
+                        onQuickEdit={onQuickEdit ? () => onQuickEdit(item) : undefined}
+                        onDelete={onDelete ? () => onDelete(item) : undefined}
+                    />
+                )}
+                renderAvatar={(item) => <CompanyAvatar company={item} />}
+                detailPath={(item) => `/records/companies/${item.id}`}
+                displayMode={displayMode}
+                selectedIds={selectedIds}
+                onSelectedIdsChange={setSelectedIds}
+                onQuickEdit={quickEditOne}
+                onDelete={deleteOne}
+                gridClassName="grid grid-cols-1 gap-3 pt-8"
+                entityLabel="company"
+            />
+
+            <QuickEditCompanySheet
+                open={editSheetOpen}
+                onOpenChange={setEditSheetOpen}
+                selectedIds={selectedIds}
+                selectedCompanies={selectedCompanies}
+                drafts={drafts}
+                updateDraft={updateDraft}
+                isSaving={isSaving}
+                saveEdits={saveEdits}
+            />
+
+            <NewCompanyDialog
+                open={newDialogOpen}
+                onOpenChange={closeNewDialog}
+                payload={newPayload}
+                setPayload={setNewPayload}
+                logoFile={logoFile}
+                setLogoFile={setLogoFile}
+                isCreating={isCreating}
+                createNewCompany={createNewCompany}
+            />
+
+            <DeleteRecordDialog
+                open={deleteDialogOpen}
+                onOpenChange={setDeleteDialogOpen}
+                selectedIds={selectedIds}
+                selectedItems={selectedCompanies}
+                entityLabel="company"
+                getDisplayName={(c) => c.name}
+                isDeleting={isDeleting}
+                confirmDelete={confirmDelete}
+            />
+        </div>
+    );
+}

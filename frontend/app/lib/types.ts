@@ -102,8 +102,53 @@ export type Company = {
     phone: string;
     address: string;
     logoUrl: string;
+    personIds?: number[];
+    dealIds?: number[];
+    tagIds?: number[];
     createdAt: string;
     updatedAt: string;
+};
+
+// metrics for a company, filled via relationship traversal
+export type CompanyMetrics = {
+    persons: Contact[];
+    relatedUsers: User[];
+    pastRevenue: number;
+    projectedRevenue: number;
+    numDeals: number;
+    numTasks: number;
+    numActivities: number;
+    numNotes: number;
+    weeklyEngagement: {
+        weekStart: number;
+        count: number;
+        activities: number;
+        tasks: number;
+        notes: number;
+    }[];
+};
+
+// loading state for data fetching
+export type LoadStatus = 'idle' | 'loading' | 'ready' | 'error';
+
+// payload to create a new company
+export type CreateCompanyPayload = {
+    name: string;
+    website?: string;
+    industry?: string;
+    phone?: string;
+    address?: string;
+    logoUrl?: string;
+};
+
+// payload to update a company
+export type UpdateCompanyPayload = {
+    name?: string;
+    website?: string;
+    industry?: string;
+    phone?: string;
+    address?: string;
+    logoUrl?: string;
 };
 
 export type Contact = {

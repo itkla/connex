@@ -1,9 +1,11 @@
 import { headers } from "next/headers";
-import { getCompaniesFromCookie, getCurrentUserFromCookie } from "@/app/lib/api";
+import { getCompaniesFromCookie, getContactsFromCookie, getCurrentUserFromCookie } from "@/app/lib/api";
+import { Company, type Contact } from "@/app/lib/types";
 import { redirect } from "next/navigation";
+// import ContactsBrowser from "@/app/components/records/contacts/ContactsBrowser";
+import CompaniesBrowser from "@/app/components/records/companies/CompaniesBrowser";
 
 export default async function CompaniesPage() {
-
     const cookie = (await headers()).get('cookie');
     const user = await getCurrentUserFromCookie(cookie);
 
@@ -11,17 +13,10 @@ export default async function CompaniesPage() {
         redirect('/auth/login');
     }
 
-    // query api for company list
-    const companies = await getCompaniesFromCookie(cookie); 
+    const companies: Company[] = await getCompaniesFromCookie(cookie);
 
+    // return <ContactsBrowser contacts={contacts} />;
     return (
-        <div>
-            <h1>Companies</h1>
-            <ul>
-                {companies.map((company) => (
-                    <li key={company.id}>{company.name}</li>
-                ))}
-            </ul>
-        </div>
-    );
+        <CompaniesBrowser companies={companies} />
+    )
 }
