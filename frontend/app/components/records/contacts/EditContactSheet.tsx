@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
 
 import QuickEditSheet, { type ContactDraft } from '@/app/components/records/contacts/QuickEditSheet';
-import { updateContact } from '@/app/lib/api';
+import { getContactById, updateContact } from '@/app/lib/api';
 import { type Contact, type UpdateContactPayload } from '@/app/lib/types';
 import { uploadContactPicture } from '@/app/lib/utils';
 
@@ -81,6 +81,18 @@ export default function EditContactSheet({
                 style: { backgroundColor: 'var(--color-brand)', color: 'white' },
             });
             handleOpenChange(false);
+
+            // on success, update the form fields to reflect the updated info so that stale info isn't accidentally sent again
+            // setDraft(toDraft(contact));
+            // setImageFile(null);
+
+            // TODO: change this to optimistic ui update. we should rely on previous data to update from instead of querying the backend
+            const updatedContact = await getContactById(contact.id);
+            if (updatedContact) {
+                setDraft(toDraft(updatedContact));
+                setImageFile(null);
+            }
+
             router.refresh();
         } catch (err) {
             toast.error(err instanceof Error ? err.message : 'Failed to save', {
