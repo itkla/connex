@@ -177,7 +177,7 @@ function AvatarSection({
     );
 }
 
-type EngagementPoint = {
+export type EngagementPoint = {
     weekStart: number;
     count: number;
     activities: number;
@@ -185,7 +185,7 @@ type EngagementPoint = {
     notes: number;
 };
 
-function EngagementSparkline({ data }: { data: EngagementPoint[] }) {
+export function EngagementSparkline({ data }: { data: EngagementPoint[] }) {
     const total = data.reduce((s, d) => s + d.count, 0);
     return (
         <div className="md:col-span-2 rounded-xl bg-transparent p-3 ring-1 ring-black/5">
@@ -234,7 +234,7 @@ function EngagementSparkline({ data }: { data: EngagementPoint[] }) {
     );
 }
 
-function RevenueTiles({
+export function RevenueTiles({
     pastRevenue,
     projectedRevenue,
 }: {
