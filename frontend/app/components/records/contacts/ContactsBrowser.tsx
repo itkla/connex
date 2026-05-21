@@ -1,7 +1,7 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
-import { usePathname, useRouter, useSearchParams } from 'next/navigation';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { ButtonGroup } from '@/components/ui/button-group';
 import { toast } from 'sonner';
@@ -14,13 +14,19 @@ import {
     TableCellsIcon,
     ChevronDownIcon,
 } from '@heroicons/react/24/outline';
-import DataRenderView, { type SelectionId } from '@/app/components/records/DataRenderView';
-import { deleteContact, updateContact, createContact, getCompanies } from '@/app/lib/api';
-import { type Contact, type UpdateContactPayload, type Company, type CreateContactPayload } from '@/app/lib/types';
+
+import RecordsRenderView from '@/app/components/records/RecordsRenderView';
+import DeleteRecordDialog from '@/app/components/records/DeleteRecordDialog';
+import { useRecordsBrowser } from '@/app/hooks/useRecordsBrowser';
+import { type ColumnDef } from '@/app/components/records/types';
+import ContactCard from '@/app/components/records/contacts/ContactCard';
+import ContactAvatar from '@/app/components/records/contacts/ContactAvatar';
 import NewContactDialog from '@/app/components/records/contacts/NewContactDialog';
-import DeleteContactDialog from '@/app/components/records/contacts/DeleteContactDialog';
 import ChangeCompanyDialog from '@/app/components/records/contacts/ChangeCompanyDialog';
 import QuickEditSheet, { type ContactDraft } from '@/app/components/records/contacts/QuickEditSheet';
+import { deleteContact, updateContact, createContact, getCompanies } from '@/app/lib/api';
+import { uploadContactPicture } from '@/app/lib/utils';
+import { type Contact, type UpdateContactPayload, type Company, type CreateContactPayload } from '@/app/lib/types';
 
 function toDraft(c: Contact): ContactDraft {
     return {
@@ -28,7 +34,6 @@ function toDraft(c: Contact): ContactDraft {
         email: c.email ?? '',
         phone: c.phone ?? '',
         title: c.title ?? '',
-        // expand if 
     };
 }
 
@@ -41,57 +46,26 @@ function diffDraft(original: ContactDraft, draft: ContactDraft): boolean {
     );
 }
 
-type DisplayMode = 'grid' | 'table';
+const searchFields = (c: Contact) => [c.name, c.email, c.phone, c.title];
 
-const VIEW_STORAGE_KEY = 'contacts:view';
-
-// display mode for  the contacts browser
-function isDisplayMode(value: unknown): value is DisplayMode {
-    return value === 'grid' || value === 'table';
-}
-
-// TODO: remove the useEffects to make the page load better. for now tho keep it cuz it shows the page actually works
 export default function ContactsBrowser({ contacts }: { contacts: Contact[] }) {
     const router = useRouter();
-    const pathname = usePathname();
-    const searchParams = useSearchParams();
-
-    const urlView = searchParams.get('view');
-    const [displayMode, setDisplayMode] = useState<DisplayMode>(
-        isDisplayMode(urlView) ? urlView : 'table',
-    );
-    const [initialized, setInitialized] = useState(false);
-    const [query, setQuery] = useState('');
-    const [selectedIds, setSelectedIds] = useState<Set<SelectionId>>(new Set());
-    const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
-
-
-    useEffect(() => {
-        if (!urlView) {
-            const stored = window.localStorage.getItem(VIEW_STORAGE_KEY);
-            if (isDisplayMode(stored)) setDisplayMode(stored);
-        }
-        setInitialized(true);
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, []);
-
-    useEffect(() => {
-        if (!initialized) return;
-        window.localStorage.setItem(VIEW_STORAGE_KEY, displayMode);
-        const params = new URLSearchParams(searchParams.toString());
-        if (params.get('view') === displayMode) return;
-        params.set('view', displayMode);
-        router.replace(`${pathname}?${params.toString()}`, { scroll: false });
-    }, [displayMode, initialized, pathname, router, searchParams]);
-
-    const filteredContacts = useMemo(() => {
-        const q = query.trim().toLowerCase();
-        if (!q) return contacts;
-        return contacts.filter((c) =>
-            [c.name, c.email, c.phone, c.title]
-                .some((field) => field?.toLowerCase().includes(q))
-        );
-    }, [contacts, query]);
+    const {
+        displayMode,
+        setDisplayMode,
+        query,
+        setQuery,
+        selectedIds,
+        setSelectedIds,
+        filteredItems: filteredContacts,
+        selectedItems: selectedContacts,
+        deleteDialogOpen,
+        setDeleteDialogOpen,
+    } = useRecordsBrowser<Contact>({
+        items: contacts,
+        storageKey: 'contacts:view',
+        searchFields,
+    });
 
     const [isDeleting, setIsDeleting] = useState(false);
     const [editSheetOpen, setEditSheetOpen] = useState(false);
@@ -100,17 +74,11 @@ export default function ContactsBrowser({ contacts }: { contacts: Contact[] }) {
     const [changeCompanyOpen, setChangeCompanyOpen] = useState(false);
     const [isClearingCompany, setIsClearingCompany] = useState(false);
 
-    const selectedContacts = useMemo(
-        () => contacts.filter((c) => selectedIds.has(c.id)),
-        [contacts, selectedIds],
-    );
-
     const [companies, setCompanies] = useState<Company[]>([]);
     useEffect(() => {
         getCompanies({}).then(setCompanies).catch(() => setCompanies([]));
     }, []);
 
-    // new contact dialog form
     const emptyContactDraft: CreateContactPayload = { name: '', email: '', phone: '', title: '' };
     const [newContactDialogOpen, setNewContactDialogOpen] = useState(false);
     const [isCreating, setIsCreating] = useState(false);
@@ -121,27 +89,13 @@ export default function ContactsBrowser({ contacts }: { contacts: Contact[] }) {
         [companies, newContactPayload.companyId],
     );
 
-    useEffect(() => {
-        if (!newContactDialogOpen) {
+    const closeNewContactDialog = (open: boolean) => {
+        setNewContactDialogOpen(open);
+        if (!open) {
             setNewContactPayload(emptyContactDraft);
             setImageFile(null);
         }
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [newContactDialogOpen]);
-
-    async function uploadContactPicture(contactId: number, file: File): Promise<string> {
-        const formData = new FormData();
-        formData.append('contactPicture', file);
-        const res = await fetch(`/api/contacts/profile-picture?contactId=${contactId}`, {
-            method: 'PUT',
-            body: formData,
-        });
-        if (!res.ok) {
-            throw new Error('Failed to upload contact picture');
-        }
-        const data = (await res.json()) as { imageUrl: string };
-        return data.imageUrl;
-    }
+    };
 
     const createNewContact = async () => {
         setIsCreating(true);
@@ -157,7 +111,7 @@ export default function ContactsBrowser({ contacts }: { contacts: Contact[] }) {
             setNewContactDialogOpen(false);
             router.refresh();
         } catch (err) {
-            console.error(err instanceof Error);
+            console.error(err);
             toast.error('Failed to create contact', {
                 style: { backgroundColor: 'var(--color-destructive)', color: 'white' },
             });
@@ -166,7 +120,6 @@ export default function ContactsBrowser({ contacts }: { contacts: Contact[] }) {
         }
     };
 
-    // quick edit sheet
     const openEditSheet = () => {
         const next: Record<number, ContactDraft> = {};
         for (const c of selectedContacts) next[c.id] = toDraft(c);
@@ -214,9 +167,7 @@ export default function ContactsBrowser({ contacts }: { contacts: Contact[] }) {
             );
             toast.success(
                 changed.length === 1 ? 'Contact updated' : `${changed.length} contacts updated`,
-                {
-                    style: { backgroundColor: 'var(--color-brand)', color: 'white' },
-                },
+                { style: { backgroundColor: 'var(--color-brand)', color: 'white' } },
             );
             setEditSheetOpen(false);
             router.refresh();
@@ -261,67 +212,88 @@ export default function ContactsBrowser({ contacts }: { contacts: Contact[] }) {
         }
     };
 
-    const quickEditOneContact = (contact: Contact) => {
+    const quickEditOne = useCallback((contact: Contact) => {
         setSelectedIds(new Set([contact.id]));
         setDrafts({ [contact.id]: toDraft(contact) });
         setEditSheetOpen(true);
-    };
+    }, [setSelectedIds]);
 
-    const deleteOneContact = (contact: Contact) => {
+    const deleteOne = useCallback((contact: Contact) => {
         setSelectedIds(new Set([contact.id]));
         setDeleteDialogOpen(true);
-    };
+    }, [setSelectedIds, setDeleteDialogOpen]);
 
     const confirmDelete = async () => {
         if (selectedIds.size === 0) return;
         setIsDeleting(true);
         try {
-            await Promise.all(
-                Array.from(selectedIds).map((id) => deleteContact(Number(id))),
-            );
+            await Promise.all(Array.from(selectedIds).map((id) => deleteContact(Number(id))));
             toast.success(
-                selectedIds.size === 1
-                    ? 'Contact deleted'
-                    : `${selectedIds.size} contacts deleted`,
-                {
-                    style: {
-                        backgroundColor: "var(--color-brand)",
-                        color: "white",
-                    }
-                }
+                selectedIds.size === 1 ? 'Contact deleted' : `${selectedIds.size} contacts deleted`,
+                { style: { backgroundColor: 'var(--color-brand)', color: 'white' } },
             );
             setSelectedIds(new Set());
             setDeleteDialogOpen(false);
             router.refresh();
         } catch (err) {
             toast.error(err instanceof Error ? err.message : 'Failed to delete', {
-                style: {
-                    backgroundColor: "var(--color-destructive)",
-                    color: "white",
-                }
+                style: { backgroundColor: 'var(--color-destructive)', color: 'white' },
             });
         } finally {
             setIsDeleting(false);
         }
     };
 
-    const openContactPage = (contact: Contact[]) => {
-        // use global selectedContacts state for now.
+    const viewSelected = () => {
         if (selectedContacts.length === 1) {
             router.push(`/records/contacts/${selectedContacts[0].id}`);
         } else {
-            selectedContacts.forEach((contact) => {
-                window.open(`/records/contacts/${contact.id}`, '_blank');
-            });
+            selectedContacts.forEach((c) => window.open(`/records/contacts/${c.id}`, '_blank'));
         }
-    }
+    };
+
+    const columns: ColumnDef<Contact>[] = useMemo(() => [
+        { key: 'name', label: 'Name', getSortValue: (c) => c.name ?? null },
+        {
+            key: 'email',
+            label: 'Email',
+            getSortValue: (c) => c.email ?? null,
+            copyable: { label: 'Email', getValue: (c) => c.email },
+        },
+        {
+            key: 'phone',
+            label: 'Phone',
+            getSortValue: (c) => c.phone ?? null,
+            copyable: { label: 'Phone', getValue: (c) => c.phone },
+        },
+        {
+            key: 'company',
+            label: 'Company',
+            getSortValue: (c) => c.company?.name ?? null,
+            render: (c) => c.company?.name,
+            copyable: { label: 'Company', getValue: (c) => c.company?.name ?? '' },
+        },
+        { key: 'title', label: 'Title', getSortValue: (c) => c.title ?? null },
+        {
+            key: 'createdAt',
+            label: 'Created',
+            getSortValue: (c) => (c.createdAt ? Date.parse(c.createdAt) : null),
+            render: (c) => c.createdAt,
+        },
+        {
+            key: 'updatedAt',
+            label: 'Updated',
+            getSortValue: (c) => (c.updatedAt ? Date.parse(c.updatedAt) : null),
+            render: (c) => c.updatedAt,
+        },
+    ], []);
 
     return (
         <div className="space-y-6">
             <div className="flex items-center justify-between">
                 <h1 className="text-4xl font-extrabold">Contacts</h1>
-                <Button className="bg-brand text-white" aria-label="Add contact" onClick={() => setNewContactDialogOpen(true)} >
-                    <PlusIcon className="" strokeWidth={2.5} />
+                <Button className="bg-brand text-white" aria-label="Add contact" onClick={() => setNewContactDialogOpen(true)}>
+                    <PlusIcon strokeWidth={2.5} />
                     New
                 </Button>
             </div>
@@ -332,7 +304,6 @@ export default function ContactsBrowser({ contacts }: { contacts: Contact[] }) {
                     className="flex items-center gap-2 rounded-full bg-neutral-100 px-4 py-2 text-sm text-neutral-700 ring-1 ring-black/5 transition hover:bg-neutral-200"
                 >
                     <FunnelIcon className="size-4 text-neutral-500" />
-
                     <ChevronDownIcon className="size-4 text-neutral-500" />
                 </button>
                 <div
@@ -345,10 +316,7 @@ export default function ContactsBrowser({ contacts }: { contacts: Contact[] }) {
                         onClick={() => setDisplayMode('grid')}
                         aria-label="Grid view"
                         aria-pressed={displayMode === 'grid'}
-                        className={`flex h-7 w-7 items-center justify-center rounded-full transition ${displayMode === 'grid'
-                            ? 'bg-white text-neutral-900 shadow'
-                            : 'text-neutral-500 hover:text-neutral-700'
-                            }`}
+                        className={`flex h-7 w-7 items-center justify-center rounded-full transition ${displayMode === 'grid' ? 'bg-white text-neutral-900 shadow' : 'text-neutral-500 hover:text-neutral-700'}`}
                     >
                         <Squares2X2Icon className="size-4" />
                     </button>
@@ -357,23 +325,17 @@ export default function ContactsBrowser({ contacts }: { contacts: Contact[] }) {
                         onClick={() => setDisplayMode('table')}
                         aria-label="Table view"
                         aria-pressed={displayMode === 'table'}
-                        className={`flex h-7 w-7 items-center justify-center rounded-full transition ${displayMode === 'table'
-                            ? 'bg-white text-neutral-900 shadow'
-                            : 'text-neutral-500 hover:text-neutral-700'
-                            }`}
+                        className={`flex h-7 w-7 items-center justify-center rounded-full transition ${displayMode === 'table' ? 'bg-white text-neutral-900 shadow' : 'text-neutral-500 hover:text-neutral-700'}`}
                     >
                         <TableCellsIcon className="size-4" />
                     </button>
                 </div>
 
-                {/* if any checkbox is checked, show the selected count AND selection tools (e.g. delete, edit, view) */}
                 {selectedIds.size > 0 && (
                     <div className="flex items-center gap-2">
-                        <span className="text-sm text-neutral-500">
-                            {selectedIds.size} selected
-                        </span>
+                        <span className="text-sm text-neutral-500">{selectedIds.size} selected</span>
                         <ButtonGroup className="rounded-full bg-neutral-100">
-                            <Button variant="outline" size="sm" onClick={() => openContactPage(selectedContacts)}>
+                            <Button variant="outline" size="sm" onClick={viewSelected}>
                                 <EyeIcon className="size-4" />
                                 View
                             </Button>
@@ -422,7 +384,6 @@ export default function ContactsBrowser({ contacts }: { contacts: Contact[] }) {
                             </DropdownMenu>
                         </ButtonGroup>
                     </div>
-
                 )}
 
                 <div className="relative ml-auto w-full max-w-sm">
@@ -437,16 +398,32 @@ export default function ContactsBrowser({ contacts }: { contacts: Contact[] }) {
                 </div>
             </div>
 
-            <DataRenderView
+            <RecordsRenderView<Contact>
                 data={filteredContacts}
+                columns={columns}
+                renderCard={(item, { onQuickEdit, onDelete }) => (
+                    <ContactCard
+                        id={item.id}
+                        name={item.name}
+                        title={item.title}
+                        company={item.company?.name}
+                        email={item.email}
+                        phone={item.phone}
+                        imageUrl={item.imageUrl}
+                        onQuickEdit={onQuickEdit ? () => onQuickEdit(item) : undefined}
+                        onDelete={onDelete ? () => onDelete(item) : undefined}
+                    />
+                )}
+                renderAvatar={(item) => <ContactAvatar contact={item} />}
+                detailPath={(item) => `/records/contacts/${item.id}`}
                 displayMode={displayMode}
                 selectedIds={selectedIds}
                 onSelectedIdsChange={setSelectedIds}
-                onQuickEditContact={quickEditOneContact}
-                onDeleteContact={deleteOneContact}
+                onQuickEdit={quickEditOne}
+                onDelete={deleteOne}
+                entityLabel="contact"
             />
 
-            {/* moved quick edit sheet to contacts/QuickEditSheet.tsx */}
             <QuickEditSheet
                 editSheetOpen={editSheetOpen}
                 setEditSheetOpen={setEditSheetOpen}
@@ -457,10 +434,10 @@ export default function ContactsBrowser({ contacts }: { contacts: Contact[] }) {
                 isSaving={isSaving}
                 saveEdits={saveEdits}
             />
-            {/* moved contact creation dialog to contacts/NewContactDialog.tsx */}
+
             <NewContactDialog
                 newContactDialogOpen={newContactDialogOpen}
-                setNewContactDialogOpen={setNewContactDialogOpen}
+                setNewContactDialogOpen={closeNewContactDialog}
                 newContactPayload={newContactPayload}
                 setNewContactPayload={setNewContactPayload}
                 imageFile={imageFile}
@@ -471,12 +448,13 @@ export default function ContactsBrowser({ contacts }: { contacts: Contact[] }) {
                 createNewContact={createNewContact}
             />
 
-            {/* moved delete dialog to contacts/DeleteContactDialog.tsx */}
-            <DeleteContactDialog
-                deleteDialogOpen={deleteDialogOpen}
-                setDeleteDialogOpen={setDeleteDialogOpen}
+            <DeleteRecordDialog
+                open={deleteDialogOpen}
+                onOpenChange={setDeleteDialogOpen}
                 selectedIds={selectedIds}
-                selectedContacts={selectedContacts}
+                selectedItems={selectedContacts}
+                entityLabel="contact"
+                getDisplayName={(c) => c.name}
                 isDeleting={isDeleting}
                 confirmDelete={confirmDelete}
             />

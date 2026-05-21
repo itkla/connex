@@ -11,6 +11,7 @@ import ooo.klae.connex.backend.beans.Activity;
 import ooo.klae.connex.backend.beans.Deal;
 import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.beans.User;
+// import ooo.klae.connex.backend.util.DateTimes;
 
 @Data
 @NoArgsConstructor
@@ -91,6 +92,8 @@ public class ActivityDto {
         } else {
             a.setCreatedBy(createdBy);
         }
+        // a.setTimestamp(DateTimes.toMysqlDateTime(timestamp));
+        // assuming the frontend will format the timestamp to the correct format
         a.setTimestamp(timestamp);
         return a;
     }

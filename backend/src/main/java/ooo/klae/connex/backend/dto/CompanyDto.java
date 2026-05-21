@@ -19,7 +19,7 @@ import ooo.klae.connex.backend.beans.Tag;
 @AllArgsConstructor
 public class CompanyDto {
 
-    private int id;
+    private Integer id;
 
     @NotBlank
     @Size(max = 255)
@@ -66,7 +66,7 @@ public class CompanyDto {
 
     public Company toBean() {
         Company c = new Company();
-        c.setId(id);
+        if (id != null) c.setId(id);
         c.setName(name);
         c.setWebsite(website);
         c.setIndustry(industry);

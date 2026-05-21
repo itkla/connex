@@ -287,6 +287,22 @@ export function getCompaniesFromCookie(cookie: string | null) {
     return safeWithCookie<Types.Company>((init) => getCompanies(init), cookie);
 }
 
+export function getCompanyById(id: number, init: RequestInit = {}) {
+    return getJson<Types.Company>(`/api/companies/${id}`, init);
+}
+
+export function createCompany(payload: Types.CreateCompanyPayload) {
+    return postJson<Types.Company>(`/api/companies`, payload);
+}
+
+export function updateCompany(id: number, payload: Types.UpdateCompanyPayload) {
+    return putJson<Types.Company>(`/api/companies/${id}`, payload);
+}
+
+export function deleteCompany(id: number, init: RequestInit = {}) {
+    return deleteJson<void[]>(`/api/companies/${id}`, init);
+}
+
 /*
 * == Contact management
 */

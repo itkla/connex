@@ -20,6 +20,8 @@ import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 
+import { toMysqlDateTime } from '@/app/lib/utils';
+
 import { ApiError, createActivity } from '@/app/lib/api';
 
 const inputClass = 'w-full rounded-lg bg-neutral-100 px-3 py-2 text-sm text-black placeholder-neutral-500 outline-none ring-1 ring-black/5 transition focus:ring-2 focus:ring-brand';
@@ -50,6 +52,7 @@ export default function NewActivityDialog({
     const [type, setType] = useState<string>(ACTIVITY_TYPES[0]);
     const [subject, setSubject] = useState('');
     const [notes, setNotes] = useState('');
+    const [timestamp, setTimestamp] = useState('');
     const [submitting, setSubmitting] = useState(false);
 
     const reset = () => {
@@ -58,7 +61,7 @@ export default function NewActivityDialog({
         setNotes('');
     };
 
-    async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
+    async function handleSubmit(e: React.SubmitEvent<HTMLFormElement>) {
         e.preventDefault();
         if (!subject.trim()) {
             toast.error('Subject is required');
@@ -72,7 +75,7 @@ export default function NewActivityDialog({
                 notes: notes.trim() || undefined,
                 personId: contactId,
                 createdById: currentUserId,
-                timestamp: new Date().toISOString(),
+                timestamp: timestamp ? toMysqlDateTime(timestamp) : toMysqlDateTime(),
             });
             toast.success('Activity logged', {
                 style: { backgroundColor: 'var(--color-brand)', color: 'white' },
@@ -135,6 +138,18 @@ export default function NewActivityDialog({
                                 </option>
                             ))}
                         </select>
+                    </div>
+
+                    <div className="grid gap-2">
+                        <Label htmlFor="activity-date-time">Date and time</Label>
+                        <input
+                            id="activity-date-time"
+                            type="datetime-local"
+                            value={timestamp}
+                            onChange={(e) => setTimestamp(e.target.value)}
+                            className={inputClass}
+                        >
+                        </input>
                     </div>
 
                     <div className="grid gap-2">

@@ -1,30 +1,42 @@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogClose } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Loader2Icon } from 'lucide-react';
-import { type Contact } from '@/app/lib/types';
-import type { SelectionId } from '@/app/components/records/DataRenderView';
+import { type SelectionId } from '@/app/components/records/types';
 
-type Props = {
-    deleteDialogOpen: boolean;
-    setDeleteDialogOpen: (open: boolean) => void;
+type Props<T> = {
+    open: boolean;
+    onOpenChange: (open: boolean) => void;
     selectedIds: Set<SelectionId>;
-    selectedContacts: Contact[];
+    selectedItems: T[];
+    entityLabel: string;
+    getDisplayName?: (item: T) => string;
     isDeleting: boolean;
     confirmDelete: () => void;
 };
 
-export default function DeleteContactDialog({ deleteDialogOpen, setDeleteDialogOpen, selectedIds, selectedContacts, isDeleting, confirmDelete }: Props) {
+export default function DeleteRecordDialog<T>({
+    open,
+    onOpenChange,
+    selectedIds,
+    selectedItems,
+    entityLabel,
+    getDisplayName,
+    isDeleting,
+    confirmDelete,
+}: Props<T>) {
+    const count = selectedIds.size;
+    const single = count === 1 ? selectedItems[0] : null;
     return (
-        <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <Dialog open={open} onOpenChange={onOpenChange}>
             <DialogContent>
                 <DialogHeader>
                     <DialogTitle>
-                        {selectedIds.size === 1 ? 'Delete contact' : `Delete ${selectedIds.size} contacts`}
+                        {count === 1 ? `Delete ${entityLabel}` : `Delete ${count} ${entityLabel}s`}
                     </DialogTitle>
                     <DialogDescription>
-                        {selectedIds.size === 1 && selectedContacts[0]
-                            ? `Are you sure you want to delete "${selectedContacts[0].name}"? This action cannot be undone.`
-                            : `Are you sure you want to delete these ${selectedIds.size} contacts? This action cannot be undone.`}
+                        {single && getDisplayName
+                            ? `Are you sure you want to delete "${getDisplayName(single)}"? This action cannot be undone.`
+                            : `Are you sure you want to delete ${count === 1 ? `this ${entityLabel}` : `these ${count} ${entityLabel}s`}? This action cannot be undone.`}
                     </DialogDescription>
                 </DialogHeader>
                 <DialogFooter>
@@ -37,10 +49,10 @@ export default function DeleteContactDialog({ deleteDialogOpen, setDeleteDialogO
                         disabled={isDeleting}
                         onClick={confirmDelete}
                     >
-                        {isDeleting ? (<Loader2Icon className="size-4 animate-spin" />) : 'Delete'}
+                        {isDeleting ? <Loader2Icon className="size-4 animate-spin" /> : 'Delete'}
                     </Button>
                 </DialogFooter>
             </DialogContent>
         </Dialog>
-    )
-};
+    );
+}

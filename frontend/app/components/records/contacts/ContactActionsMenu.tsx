@@ -17,7 +17,7 @@ import { Button } from '@/components/ui/button';
 import { ButtonGroup } from '@/components/ui/button-group';
 
 import ChangeCompanyDialog from '@/app/components/records/contacts/ChangeCompanyDialog';
-import DeleteContactDialog from '@/app/components/records/contacts/DeleteContactDialog';
+import DeleteRecordDialog from '@/app/components/records/DeleteRecordDialog';
 import NewActivityDialog from '@/app/components/records/contacts/NewActivityDialog';
 import NewTaskDialog from '@/app/components/records/contacts/NewTaskDialog';
 
@@ -203,11 +203,13 @@ export default function ContactActionsMenu({
                     contacts={[contact]}
                     companies={companies}
                 />
-                <DeleteContactDialog
-                    deleteDialogOpen={deleteOpen}
-                    setDeleteDialogOpen={setDeleteOpen}
+                <DeleteRecordDialog
+                    open={deleteOpen}
+                    onOpenChange={setDeleteOpen}
                     selectedIds={new Set([contact.id])}
-                    selectedContacts={[contact]}
+                    selectedItems={[contact]}
+                    entityLabel="contact"
+                    getDisplayName={(c) => c.name}
                     isDeleting={isDeleting}
                     confirmDelete={confirmDelete}
                 />

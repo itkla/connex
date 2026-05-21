@@ -58,6 +58,7 @@ export default function ContactCard({
                 ) : (
                     <div
                         className="h-full w-full"
+                        // TODO: find something better than this
                         style={{
                             background:
                                 'linear-gradient(180deg, #cdd5dc 0%, #b6bfc6 60%, #9aa4ad 100%)',
