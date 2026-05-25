@@ -50,9 +50,9 @@ class DealMapperTest extends AbstractMapperTest {
         assertEquals(deal.getName(), found.getName());
         assertEquals(1000.0, found.getValue());
         assertEquals("JPY", found.getCurrency());
-        assertEquals(pipeline.getId(), found.getPipeline().getId());
-        assertEquals(stage.getId(), found.getStage().getId());
-        assertEquals(company.getId(), found.getCompany().getId());
+        assertEquals(pipeline.getId(), found.getPipelineId());
+        assertEquals(stage.getId(), found.getStageId());
+        assertEquals(company.getId(), found.getCompanyId());
     }
 
     /**
@@ -90,8 +90,8 @@ class DealMapperTest extends AbstractMapperTest {
         deal.setName("Renamed Deal");
         deal.setValue(2500.50);
         deal.setCurrency("JPY");
-        deal.setStage(stage2);
-        deal.setCompany(null);
+        deal.setStageId(stage2.getId());
+        deal.setCompanyId(null);
 
         dealMapper.update(deal);
 
@@ -99,8 +99,8 @@ class DealMapperTest extends AbstractMapperTest {
         assertEquals("Renamed Deal", found.getName());
         assertEquals(2500.50, found.getValue());
         assertEquals("JPY", found.getCurrency());
-        assertEquals(stage2.getId(), found.getStage().getId());
-        assertTrue(found.getCompany() == null || found.getCompany().getId() == 0);
+        assertEquals(stage2.getId(), found.getStageId());
+        assertNull(found.getCompanyId());
     }
 
     /**
