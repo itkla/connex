@@ -7,20 +7,15 @@
     <id     property="id"                column="id"/>
     <result property="name"              column="name"/>
     <result property="value"             column="value"/>
+    <result property="actualValue"       column="actual_value"/>
     <result property="currency"          column="currency"/>
+    <result property="pipelineId"        column="pipeline_id"/>
+    <result property="stageId"           column="stage_id"/>
+    <result property="companyId"         column="company_id"/>
     <result property="expectedCloseDate" column="expected_close_date"/>
     <result property="closedAt"          column="closed_at"/>
     <result property="createdAt"         column="created_at"/>
     <result property="updatedAt"         column="updated_at"/>
-    <association property="pipeline" javaType="Pipeline">
-      <id property="id" column="pipeline_id"/>
-    </association>
-    <association property="stage" javaType="Stage">
-      <id property="id" column="stage_id"/>
-    </association>
-    <association property="company" javaType="Company">
-      <id property="id" column="company_id"/>
-    </association>
   </resultMap>
 
   <resultMap id="DealFullResult" type="Deal" extends="DealResult">
@@ -47,12 +42,12 @@
   </select>
 
   <sql id="dealColumns">
-    id, name, value, currency, pipeline_id, stage_id, company_id,
+    id, name, value, actual_value, currency, pipeline_id, stage_id, company_id,
     expected_close_date, closed_at, created_at, updated_at
   </sql>
 
   <sql id="qualifiedDealColumns">
-    d.id, d.name, d.value, d.currency, d.pipeline_id, d.stage_id, d.company_id,
+    d.id, d.name, d.value, d.actual_value, d.currency, d.pipeline_id, d.stage_id, d.company_id,
     d.expected_close_date, d.closed_at, d.created_at, d.updated_at
   </sql>
 
@@ -91,14 +86,10 @@
   </select>
 
   <insert id="insert" useGeneratedKeys="true" keyProperty="id">
-    INSERT INTO deal (name, value, currency, pipeline_id, stage_id, company_id,
+    INSERT INTO deal (name, value, actual_value, currency, pipeline_id, stage_id, company_id,
                       expected_close_date, closed_at)
     VALUES (
-      #{name}, #{value}, #{currency}, #{pipeline.id}, #{stage.id},
-      <choose>
-        <when test="company != null">#{company.id}</when>
-        <otherwise>NULL</otherwise>
-      </choose>,
+      #{name}, #{value}, #{actualValue}, #{currency}, #{pipelineId}, #{stageId}, #{companyId},
       #{expectedCloseDate}, #{closedAt}
     )
   </insert>
@@ -107,14 +98,11 @@
     UPDATE deal
     SET name = #{name},
         value = #{value},
+        actual_value = #{actualValue},
         currency = #{currency},
-        pipeline_id = #{pipeline.id},
-        stage_id = #{stage.id},
-        company_id =
-          <choose>
-            <when test="company != null">#{company.id}</when>
-            <otherwise>NULL</otherwise>
-          </choose>,
+        pipeline_id = #{pipelineId},
+        stage_id = #{stageId},
+        company_id = #{companyId},
         expected_close_date = #{expectedCloseDate},
         closed_at = #{closedAt}
     WHERE id = #{id}
