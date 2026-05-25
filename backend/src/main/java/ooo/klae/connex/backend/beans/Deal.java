@@ -1,7 +1,6 @@
 package ooo.klae.connex.backend.beans;
 
 import com.fasterxml.jackson.annotation.JsonIdentityInfo;
-import com.fasterxml.jackson.annotation.JsonIdentityReference;
 import com.fasterxml.jackson.annotation.ObjectIdGenerators;
 
 import lombok.Data;
@@ -22,13 +21,11 @@ public class Deal {
     private int id;
     private String name;
     private double value;
+    private double actualValue;
     private String currency; // e.g. "JPY"
-    @JsonIdentityReference(alwaysAsId = true)
-    private Pipeline pipeline;
-    @JsonIdentityReference(alwaysAsId = true)
-    private Stage stage;
-    @JsonIdentityReference(alwaysAsId = true)
-    private Company company;
+    private Integer pipelineId;
+    private Integer stageId;
+    private Integer companyId;
     private DealPerson[] people;
     private Activity[] activities;
     private Note[] notes;
@@ -63,39 +60,20 @@ public class Deal {
         this.value = value;
     }
 
+    public double getActualValue() {
+        return actualValue;
+    }
+
+    public void setActualValue(double actualValue) {
+        this.actualValue = actualValue;
+    }
+
     public String getCurrency() {
         return currency;
     }
 
     public void setCurrency(String currency) {
         this.currency = currency;
-    }
-
-    public Pipeline getPipeline() {
-        return pipeline;
-    }
-
-    /**
-     * @params Pipeline pipeline - the sales pipeline this deal belongs to
-     */
-    public void setPipeline(Pipeline pipeline) {
-        this.pipeline = pipeline;
-    }
-
-    public Stage getStage() {
-        return stage;
-    }
-
-    public void setStage(Stage stage) {
-        this.stage = stage;
-    }
-
-    public Company getCompany() {
-        return company;
-    }
-
-    public void setCompany(Company company) {
-        this.company = company;
     }
 
     public DealPerson[] getPeople() {
@@ -168,5 +146,29 @@ public class Deal {
 
     public void setUpdatedAt(String updatedAt) {
         this.updatedAt = updatedAt;
+    }
+
+    public void setPipelineId(Integer pipelineId) {
+        this.pipelineId = pipelineId;
+    }
+
+    public void setStageId(Integer stageId) {
+        this.stageId = stageId;
+    }
+
+    public void setCompanyId(Integer companyId) {
+        this.companyId = companyId;
+    }
+
+    public Integer getPipelineId() {
+        return pipelineId;
+    }
+
+    public Integer getStageId() {
+        return stageId;
+    }
+
+    public Integer getCompanyId() {
+        return companyId;
     }
 }

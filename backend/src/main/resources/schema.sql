@@ -123,6 +123,7 @@ CREATE TABLE deal (
     id                  INT AUTO_INCREMENT PRIMARY KEY COMMENT 'Deal ID',
     name                VARCHAR(255) NOT NULL COMMENT 'Deal name',
     value               DECIMAL(15, 2) NOT NULL DEFAULT 0,
+    actual_value        DECIMAL(15, 2) NOT NULL DEFAULT 0,
     currency            VARCHAR(8) NOT NULL DEFAULT 'USD',
     pipeline_id         INT NOT NULL COMMENT 'Pipeline ID',
     stage_id            INT NOT NULL COMMENT 'Stage ID',

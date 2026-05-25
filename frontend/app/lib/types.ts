@@ -177,14 +177,38 @@ export type Deal = {
     id: number;
     name: string;
     value: number;
+    actualValue: number;
+    currency: string;
+    pipeline: number | null;
+    stage: number | null;
+    company: number | null;
+    expectedCloseDate?: string;
+    closedAt?: string;
+    createdAt: string;
+    updatedAt: string;
+};
+
+export type CreateDealPayload = {
+    name: string;
+    value: number;
     currency: string;
     pipeline: number;
     stage: number;
-    company: number;
-    expectedCloseDate: string;
-    closedAt: string;
-    createdAt: string;
-    updatedAt: string;
+    company?: number | null;
+    expectedCloseDate?: string;
+    closedAt?: string;
+};
+
+export type UpdateDealPayload = {
+    name: string;
+    value: number;
+    actualValue: number;
+    currency: string;
+    pipeline: number;
+    stage: number;
+    company?: number | null;
+    expectedCloseDate?: string | null;
+    closedAt?: string | null;
 };
 
 export type Pipeline = {
@@ -192,6 +216,13 @@ export type Pipeline = {
     name: string;
     createdAt: string;
     updatedAt: string;
+};
+
+export type Stage = {
+    id: number;
+    name: string;
+    pipeline: number;
+    position: number;
 };
 
 export type Tag = {

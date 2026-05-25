@@ -423,6 +423,70 @@ export function getDealsFromCookie(cookie: string | null) {
     return safeWithCookie<Types.Deal>((init) => getDeals(init), cookie);
 }
 
+export function getDealById(id: number, init: RequestInit = {}) {
+    return getJson<Types.Deal>(`/api/deals/${id}`, init);
+}
+
+export function createDeal(payload: Types.CreateDealPayload) {
+    return postJson<Types.Deal>(`/api/deals`, payload);
+}
+
+export function updateDeal(id: number, payload: Types.UpdateDealPayload) {
+    return putJson<Types.Deal>(`/api/deals/${id}`, payload);
+}
+
+export function deleteDeal(id: number, init: RequestInit = {}) {
+    return deleteJson<void[]>(`/api/deals/${id}`, init);
+}
+
+export function getDealPeople(id: number, init: RequestInit = {}) {
+    return getJson<Types.Contact[]>(`/api/deals/${id}/people`, init);
+}
+
+export function addDealPerson(id: number, personId: number, role: string, init: RequestInit = {}) {
+    return postJson<void[]>(`/api/deals/${id}/people/${personId}`, { role }, init);
+}
+
+export function updateDealPersonRole(id: number, personId: number, role: string, init: RequestInit = {}) {
+    return putJson<void[]>(`/api/deals/${id}/people/${personId}`, { role }, init);
+}
+
+export function removeDealPerson(id: number, personId: number, init: RequestInit = {}) {
+    return deleteJson<void[]>(`/api/deals/${id}/people/${personId}`, init);
+}
+
+export function replaceDealPeople(id: number, people: Types.Contact[], init: RequestInit = {}) {
+    return putJson<Types.Contact[]>(`/api/deals/${id}/people`, people, init);
+}
+
+export function getActivitiesForDeal(id: number, init: RequestInit = {}) {
+    return getJson<Types.Activity[]>(`/api/deals/${id}/activities`, init);
+}
+
+export function getNotesForDeal(id: number, init: RequestInit = {}) {
+    return getJson<Types.Note[]>(`/api/deals/${id}/notes`, init);
+}
+
+export function getTasksForDeal(id: number, init: RequestInit = {}) {
+    return getJson<Types.Task[]>(`/api/deals/${id}/tasks`, init);
+}
+
+export function getTagsForDeal(id: number, init: RequestInit = {}) {
+    return getJson<Types.Tag[]>(`/api/deals/${id}/tags`, init);
+}
+
+export function addTagToDeal(id: number, tagId: number, init: RequestInit = {}) {
+    return postJson<void[]>(`/api/deals/${id}/tags/${tagId}`, {}, init);
+}
+
+export function removeTagFromDeal(id: number, tagId: number, init: RequestInit = {}) {
+    return deleteJson<void[]>(`/api/deals/${id}/tags/${tagId}`, init);
+}
+
+export function replaceTagsForDeal(id: number, tagIds: number[], init: RequestInit = {}) {
+    return putJson<Types.Tag[]>(`/api/deals/${id}/tags`, tagIds, init);
+}
+
 /*
 * == Pipeline management
 */
@@ -433,6 +497,10 @@ export function getPipelines(init: RequestInit = {}) {
 
 export function getPipelinesFromCookie(cookie: string | null) {
     return safeWithCookie<Types.Pipeline>((init) => getPipelines(init), cookie);
+}
+
+export function getStagesByPipelineId(pipelineId: number, init: RequestInit = {}) {
+    return getJson<Types.Stage[]>(`/api/pipelines/${pipelineId}/stages`, init);
 }
 
 /*

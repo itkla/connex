@@ -2,8 +2,6 @@ package ooo.klae.connex.backend.dto;
 
 import java.util.Arrays;
 
-import com.fasterxml.jackson.annotation.JsonIdentityReference;
-
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.PositiveOrZero;
@@ -14,11 +12,8 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 
 import ooo.klae.connex.backend.beans.Activity;
-import ooo.klae.connex.backend.beans.Company;
 import ooo.klae.connex.backend.beans.Deal;
 import ooo.klae.connex.backend.beans.Note;
-import ooo.klae.connex.backend.beans.Pipeline;
-import ooo.klae.connex.backend.beans.Stage;
 import ooo.klae.connex.backend.beans.Tag;
 import ooo.klae.connex.backend.beans.Task;
 
@@ -27,7 +22,7 @@ import ooo.klae.connex.backend.beans.Task;
 @AllArgsConstructor
 public class DealDto {
 
-    private int id;
+    private Integer id;
 
     @NotBlank
     @Size(max = 255)
@@ -36,20 +31,20 @@ public class DealDto {
     @PositiveOrZero
     private double value;
 
+    // not annotating with @PositiveOrZero because actual value can be negative
+    private double actualValue;
+
     @NotBlank
     @Size(max = 8)
     private String currency;
 
     @NotNull
-    @JsonIdentityReference(alwaysAsId = true)
-    private Pipeline pipeline;
+    private Integer pipeline;
 
     @NotNull
-    @JsonIdentityReference(alwaysAsId = true)
-    private Stage stage;
+    private Integer stage;
 
-    @JsonIdentityReference(alwaysAsId = true)
-    private Company company;
+    private Integer company;
 
     @Size(max = 32)
     private String expectedCloseDate;
@@ -72,10 +67,11 @@ public class DealDto {
         dto.id = d.getId();
         dto.name = d.getName();
         dto.value = d.getValue();
+        dto.actualValue = d.getActualValue();
         dto.currency = d.getCurrency();
-        dto.pipeline = d.getPipeline();
-        dto.stage = d.getStage();
-        dto.company = d.getCompany();
+        dto.pipeline = d.getPipelineId();
+        dto.stage = d.getStageId();
+        dto.company = d.getCompanyId();
         dto.expectedCloseDate = d.getExpectedCloseDate();
         dto.closedAt = d.getClosedAt();
 
@@ -94,13 +90,14 @@ public class DealDto {
 
     public Deal toBean() {
         Deal d = new Deal();
-        d.setId(id);
+        if (id != null) d.setId(id);
         d.setName(name);
         d.setValue(value);
+        d.setActualValue(actualValue);
         d.setCurrency(currency);
-        d.setPipeline(pipeline);
-        d.setStage(stage);
-        d.setCompany(company);
+        d.setPipelineId(pipeline);
+        d.setStageId(stage);
+        d.setCompanyId(company);
         d.setExpectedCloseDate(expectedCloseDate);
         d.setClosedAt(closedAt);
         d.setCreatedAt(createdAt);

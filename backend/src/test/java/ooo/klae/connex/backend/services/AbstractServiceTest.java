@@ -108,9 +108,9 @@ abstract class AbstractServiceTest {
         deal.setName("Deal " + unique());
         deal.setValue(1000.0);
         deal.setCurrency("JPY");
-        deal.setPipeline(pipeline);
-        deal.setStage(stage);
-        deal.setCompany(company);
+        deal.setPipelineId(pipeline.getId());
+        deal.setStageId(stage.getId());
+        deal.setCompanyId(company.getId());
         dealMapper.insert(deal);
         return deal;
     }

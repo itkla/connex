@@ -17,7 +17,7 @@ import ooo.klae.connex.backend.beans.Stage;
 @AllArgsConstructor
 public class PipelineDto {
 
-    private int id;
+    private Integer id;
 
     @NotBlank
     @Size(max = 128)
@@ -41,7 +41,7 @@ public class PipelineDto {
 
     public Pipeline toBean() {
         Pipeline p = new Pipeline();
-        p.setId(id);
+        if (id != null) p.setId(id);
         p.setName(name);
         p.setCreatedAt(createdAt);
         p.setUpdatedAt(updatedAt);
