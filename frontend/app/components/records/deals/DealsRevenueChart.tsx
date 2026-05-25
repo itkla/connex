@@ -16,7 +16,7 @@ const MONTHS_BACK = 6;
 const MONTHS_FORWARD = 6;
 
 const chartConfig = {
-    closed: { label: 'Closed revenue', color: 'var(--color-brand)' },
+    closed: { label: 'Actual revenue', color: 'var(--color-brand)' },
     projected: { label: 'Projected revenue', color: 'var(--color-chart-2)' },
 } satisfies ChartConfig;
 
@@ -149,7 +149,7 @@ function RevenueChartTooltip({ active, payload, currency = 'USD' }: RevenueChart
                 </div>
                 <div className="flex items-center gap-1.5 text-neutral-600">
                     <span className="inline-block size-2 rounded-sm bg-brand" />
-                    Closed · {formatCompactCurrency(d.closed, currency)}
+                    Actual · {formatCompactCurrency(d.closed, currency)}
                 </div>
             </div>
         </div>
