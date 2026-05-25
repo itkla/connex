@@ -68,6 +68,18 @@ export function toMysqlDateTime(value?: string | Date | number): string {
 }
 
 /**
+ * parses a mysql datetime string to a number
+ * @param value - the mysql datetime string to parse
+ * @returns 
+ */
+export function parseMysqlDateTime(value?: string | null): number {
+    if (!value) return NaN;
+    const s = value.trim().replace(' ', 'T');
+    const hasTz = /[Zz]$|[+-]\d{2}:?\d{2}$/.test(s);
+    return Date.parse(hasTz ? s : s + 'Z');
+}
+
+/**
  * formats a value to a compact currency string (e.g. 1k, 100k, 1m, 1b)
  * 
  * NOTE: this will also format things like JPY, CNY, EUR, etc. but it'll be in english formatting (￥10,000,000 will become ￥10M and NOT 1千万円)

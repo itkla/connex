@@ -1,0 +1,214 @@
+'use client';
+
+import { Dispatch, SetStateAction, WheelEvent } from 'react';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogClose } from '@/components/ui/dialog';
+import { Button } from '@/components/ui/button';
+import { Loader2Icon } from 'lucide-react';
+import { Combobox, ComboboxItem, ComboboxList, ComboboxContent, ComboboxEmpty, ComboboxInput } from '@/components/ui/combobox';
+import { Label } from '@/components/ui/label';
+import { type Company, type CreateDealPayload, type Pipeline, type Stage } from '@/app/lib/types';
+
+const inputClass = 'w-full rounded-lg bg-neutral-100 px-3 py-2 text-sm text-black placeholder-neutral-500 outline-none ring-1 ring-black/5 transition focus:ring-2 focus:ring-brand';
+
+type Props = {
+    open: boolean;
+    onOpenChange: (open: boolean) => void;
+    payload: CreateDealPayload;
+    setPayload: Dispatch<SetStateAction<CreateDealPayload>>;
+    companies: Company[];
+    pipelines: Pipeline[];
+    stagesByPipeline: Record<number, Stage[]>;
+    isCreating: boolean;
+    createNewDeal: () => void;
+};
+
+export default function NewDealDialog({
+    open,
+    onOpenChange,
+    payload,
+    setPayload,
+    companies,
+    pipelines,
+    stagesByPipeline,
+    isCreating,
+    createNewDeal,
+}: Props) {
+    const handleListWheel = (e: WheelEvent<HTMLDivElement>) => {
+        const lineHeightPx = 16;
+        const delta = e.deltaMode === 1 ? e.deltaY * lineHeightPx : e.deltaY;
+        e.currentTarget.scrollTop += delta;
+    };
+
+    const selectedPipeline = pipelines.find((p) => p.id === payload.pipeline) ?? null;
+    const selectedCompany = companies.find((c) => c.id === payload.company) ?? null;
+    const stages = payload.pipeline ? stagesByPipeline[payload.pipeline] ?? [] : [];
+    const selectedStage = stages.find((s) => s.id === payload.stage) ?? null;
+
+    const canSubmit = !!payload.name.trim() && !!payload.pipeline && !!payload.stage && !!payload.currency.trim();
+
+    return (
+        <Dialog open={open} onOpenChange={onOpenChange}>
+            <DialogContent>
+                <DialogHeader>
+                    <DialogTitle>New deal</DialogTitle>
+                    <DialogDescription>
+                        Add a deal to your pipeline. Deals are shared with all users of this organization.
+                    </DialogDescription>
+                </DialogHeader>
+
+                <div className="grid gap-4">
+                    <div className="grid gap-1.5">
+                        <Label htmlFor="deal-name">Name</Label>
+                        <input
+                            id="deal-name"
+                            type="text"
+                            value={payload.name}
+                            onChange={(e) => setPayload((prev) => ({ ...prev, name: e.target.value }))}
+                            className={inputClass}
+                            placeholder="Acme renewal Q4"
+                            autoFocus
+                            required
+                        />
+                    </div>
+
+                    <div className="grid grid-cols-[1fr_120px] gap-3">
+                        <div className="grid gap-1.5">
+                            <Label htmlFor="deal-value">Value</Label>
+                            <input
+                                id="deal-value"
+                                type="number"
+                                min="0"
+                                step="0.01"
+                                value={Number.isFinite(payload.value) ? payload.value : 0}
+                                onChange={(e) => setPayload((prev) => ({ ...prev, value: Number(e.target.value) }))}
+                                className={inputClass}
+                                placeholder="0"
+                            />
+                        </div>
+                        <div className="grid gap-1.5">
+                            <Label htmlFor="deal-currency">Currency</Label>
+                            <input
+                                id="deal-currency"
+                                type="text"
+                                maxLength={8}
+                                value={payload.currency}
+                                onChange={(e) => setPayload((prev) => ({ ...prev, currency: e.target.value.toUpperCase() }))}
+                                className={inputClass}
+                                placeholder="USD"
+                            />
+                        </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-3">
+                        <div className="grid gap-1.5">
+                            <Label htmlFor="deal-pipeline">Pipeline</Label>
+                            <Combobox
+                                items={pipelines}
+                                itemToStringLabel={(p: Pipeline) => p.name}
+                                value={selectedPipeline}
+                                onValueChange={(p) =>
+                                    setPayload((prev) => ({
+                                        ...prev,
+                                        pipeline: (p as Pipeline | null)?.id ?? 0,
+                                        stage: 0,
+                                    }))
+                                }
+                            >
+                                <ComboboxInput id="deal-pipeline" placeholder="Select pipeline" className="ring-1 ring-black/5" />
+                                <ComboboxContent className="pointer-events-auto">
+                                    <ComboboxList onWheel={handleListWheel}>
+                                        <ComboboxEmpty>No pipelines found.</ComboboxEmpty>
+                                        {pipelines.map((p) => (
+                                            <ComboboxItem key={p.id} value={p}>
+                                                {p.name}
+                                            </ComboboxItem>
+                                        ))}
+                                    </ComboboxList>
+                                </ComboboxContent>
+                            </Combobox>
+                        </div>
+                        <div className="grid gap-1.5">
+                            <Label htmlFor="deal-stage">Stage</Label>
+                            <Combobox
+                                items={stages}
+                                itemToStringLabel={(s: Stage) => s.name}
+                                value={selectedStage}
+                                disabled={!payload.pipeline}
+                                onValueChange={(s) =>
+                                    setPayload((prev) => ({ ...prev, stage: (s as Stage | null)?.id ?? 0 }))
+                                }
+                            >
+                                <ComboboxInput
+                                    id="deal-stage"
+                                    placeholder={payload.pipeline ? 'Select stage' : 'Pick a pipeline first'}
+                                    disabled={!payload.pipeline}
+                                    className="ring-1 ring-black/5"
+                                />
+                                <ComboboxContent className="pointer-events-auto">
+                                    <ComboboxList onWheel={handleListWheel}>
+                                        <ComboboxEmpty>No stages.</ComboboxEmpty>
+                                        {stages.map((s) => (
+                                            <ComboboxItem key={s.id} value={s}>
+                                                {s.name}
+                                            </ComboboxItem>
+                                        ))}
+                                    </ComboboxList>
+                                </ComboboxContent>
+                            </Combobox>
+                        </div>
+                    </div>
+
+                    <div className="grid gap-1.5">
+                        <Label htmlFor="deal-company">Company</Label>
+                        <Combobox
+                            items={companies}
+                            itemToStringLabel={(c: Company) => c.name}
+                            value={selectedCompany}
+                            onValueChange={(c) =>
+                                setPayload((prev) => ({ ...prev, company: (c as Company | null)?.id ?? null }))
+                            }
+                        >
+                            <ComboboxInput id="deal-company" placeholder="Select company (optional)" showClear className="ring-1 ring-black/5" />
+                            <ComboboxContent className="pointer-events-auto">
+                                <ComboboxList onWheel={handleListWheel}>
+                                    <ComboboxEmpty>No companies found.</ComboboxEmpty>
+                                    {companies.map((c) => (
+                                        <ComboboxItem key={c.id} value={c}>
+                                            {c.name}
+                                        </ComboboxItem>
+                                    ))}
+                                </ComboboxList>
+                            </ComboboxContent>
+                        </Combobox>
+                    </div>
+
+                    <div className="grid gap-1.5">
+                        <Label htmlFor="deal-close">Expected close date</Label>
+                        <input
+                            id="deal-close"
+                            type="date"
+                            value={payload.expectedCloseDate ?? ''}
+                            onChange={(e) =>
+                                setPayload((prev) => ({ ...prev, expectedCloseDate: e.target.value || undefined }))
+                            }
+                            className={inputClass}
+                        />
+                    </div>
+                </div>
+
+                <DialogFooter>
+                    <DialogClose asChild>
+                        <Button variant="outline" disabled={isCreating}>Cancel</Button>
+                    </DialogClose>
+                    <Button
+                        onClick={createNewDeal}
+                        disabled={isCreating || !canSubmit}
+                        className="bg-brand text-white hover:bg-brand-dark"
+                    >
+                        {isCreating ? <Loader2Icon className="size-4 animate-spin" /> : 'Create'}
+                    </Button>
+                </DialogFooter>
+            </DialogContent>
+        </Dialog>
+    );
+}
