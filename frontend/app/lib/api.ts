@@ -513,6 +513,34 @@ export function getStagesByPipelineId(pipelineId: number, init: RequestInit = {}
     return getJson<Types.Stage[]>(`/api/pipelines/${pipelineId}/stages`, init);
 }
 
+export function createStage(pipelineId: number, payload: Types.CreateStagePayload) {
+    return postJson<Types.Stage>(`/api/pipelines/${pipelineId}/stages`, payload);
+}
+
+export function updateStage(id: number, payload: Types.UpdateStagePayload) {
+    return putJson<Types.Stage>(`/api/pipelines/stages/${id}`, payload);
+}
+
+export function deleteStage(id: number, init: RequestInit = {}) {
+    return deleteJson<void>(`/api/pipelines/stages/${id}`, init);
+}
+
+export function createPipeline(payload: Types.CreatePipelinePayload) {
+    return postJson<Types.Pipeline>(`/api/pipelines`, payload);
+}
+
+export function updatePipeline(id: number, payload: Types.UpdatePipelinePayload) {
+    return putJson<Types.Pipeline>(`/api/pipelines/${id}`, payload);
+}
+
+export function getPipelineById(id: number, init: RequestInit = {}) {
+    return getJson<Types.Pipeline>(`/api/pipelines/${id}`, init);
+}
+
+export function deletePipeline(id: number, init: RequestInit = {}) {
+    return deleteJson<void[]>(`/api/pipelines/${id}`, init);
+}
+
 /*
 * == Tag management
 */

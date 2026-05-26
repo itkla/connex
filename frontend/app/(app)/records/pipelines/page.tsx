@@ -1,9 +1,10 @@
 import { headers } from "next/headers";
-import { getPipelinesFromCookie, getCurrentUserFromCookie } from "@/app/lib/api";
 import { redirect } from "next/navigation";
+import { getPipelinesFromCookie, getCurrentUserFromCookie } from "@/app/lib/api";
+import { type Pipeline } from "@/app/lib/types";
+import PipelinesBrowser from "@/app/components/records/pipelines/PipelinesBrowser";
 
 export default async function PipelinesPage() {
-
     const cookie = (await headers()).get('cookie');
     const user = await getCurrentUserFromCookie(cookie);
 
@@ -11,31 +12,7 @@ export default async function PipelinesPage() {
         redirect('/auth/login');
     }
 
-    // query api for pipeline list
-    const pipelines = await getPipelinesFromCookie(cookie); 
+    const pipelines: Pipeline[] = await getPipelinesFromCookie(cookie);
 
-    return (
-        <div>
-            <h1>Pipelines</h1>
-            <table>
-                <thead>
-                    <tr>
-                        <th>Name</th>
-                        <th>Created At</th>
-                        <th>Updated At</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {pipelines.map((pipeline) => (
-                        <tr key={pipeline.id}>
-                            <td>{pipeline.name}</td>
-                            <td>{pipeline.createdAt}</td>
-                            <td>{pipeline.updatedAt}</td>
-                        </tr>
-                    ))}
-                </tbody>
-            </table>
-       
-        </div>
-    );
+    return <PipelinesBrowser pipelines={pipelines} />;
 }

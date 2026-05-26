@@ -219,6 +219,47 @@ export type Pipeline = {
     updatedAt: string;
 };
 
+export type CreatePipelinePayload = {
+    name?: string;
+    stages?: { name: string }[];
+};
+
+export type CreateStagePayload = {
+    name: string;
+    position: number;
+};
+
+export type UpdateStagePayload = {
+    name: string;
+    position: number;
+};
+
+export type UpdatePipelinePayload = {
+    name?: string;
+};
+
+export type PipelineMetrics = {
+    numStages: number;
+    numDeals: number;
+    relatedUsers: User[];
+    stages: StageMetrics[];
+};
+
+export type StageMetrics = {
+    stage: Stage;
+    numDeals: number;
+    numTasks: number;
+    numActivities: number;
+    numNotes: number;
+    weeklyEngagement: {
+        weekStart: number;
+        count: number;
+        activities: number;
+        tasks: number;
+        notes: number;
+    }[];
+};
+
 export type Stage = {
     id: number;
     name: string;

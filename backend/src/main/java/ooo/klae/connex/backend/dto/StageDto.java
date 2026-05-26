@@ -21,7 +21,7 @@ import ooo.klae.connex.backend.beans.Stage;
 @AllArgsConstructor
 public class StageDto {
 
-    private int id;
+    private Integer id;
 
     @NotBlank
     @Size(max = 128)
@@ -48,7 +48,8 @@ public class StageDto {
 
     public Stage toBean() {
         Stage s = new Stage();
-        s.setId(id);
+        // s.setId(id);
+        if (id != null) s.setId(id);
         s.setName(name);
         s.setPipeline(pipeline);
         s.setPosition(position);
