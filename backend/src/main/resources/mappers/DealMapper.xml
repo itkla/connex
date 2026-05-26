@@ -27,12 +27,14 @@
   </resultMap>
 
   <resultMap id="DealPersonResult" type="DealPerson">
+    <id column="deal_person_pid"/>
     <result property="role" column="role"/>
     <association property="person" javaType="Person" resultMap="ooo.klae.connex.backend.mappers.PersonMapper.PersonResult"/>
   </resultMap>
 
   <select id="getDealPeopleByDealId" resultMap="DealPersonResult">
     SELECT
+      dp.person_id AS deal_person_pid,
       p.id, p.name, p.email, p.phone, p.company_id, p.title, p.created_at, p.updated_at,
       dp.role
     FROM deal_person dp

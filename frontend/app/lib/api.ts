@@ -246,6 +246,14 @@ export function createTask(payload: Types.CreateTaskPayload, init: RequestInit =
     return postJson<Types.Task>(`/api/tasks`, payload, init);
 }
 
+export function deleteTask(id: number, init: RequestInit = {}) {
+    return deleteJson<void[]>(`/api/tasks/${id}`, init);
+}
+
+export function updateTask(id: number, payload: Types.UpdateTaskPayload, init: RequestInit = {}) {
+    return putJson<Types.Task>(`/api/tasks/${id}`, payload, init);
+}
+
 /*
 * == Activity management
 */
@@ -444,11 +452,13 @@ export function getDealPeople(id: number, init: RequestInit = {}) {
 }
 
 export function addDealPerson(id: number, personId: number, role: string, init: RequestInit = {}) {
-    return postJson<void[]>(`/api/deals/${id}/people/${personId}`, { role }, init);
+    const params = new URLSearchParams({ role });
+    return postJson<void[]>(`/api/deals/${id}/people/${personId}?${params}`, {}, init);
 }
 
 export function updateDealPersonRole(id: number, personId: number, role: string, init: RequestInit = {}) {
-    return putJson<void[]>(`/api/deals/${id}/people/${personId}`, { role }, init);
+    const params = new URLSearchParams({ role });
+    return putJson<void[]>(`/api/deals/${id}/people/${personId}?${params}`, {}, init);
 }
 
 export function removeDealPerson(id: number, personId: number, init: RequestInit = {}) {

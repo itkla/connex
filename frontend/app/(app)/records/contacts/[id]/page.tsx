@@ -185,6 +185,7 @@ export default async function ContactPage({ params }: { params: { id: number } }
                                 <NewTaskDialog
                                     contactId={contact.id}
                                     contactName={contact.name}
+                                    companyId={contact.companyId ?? contact.company?.id}
                                     currentUserId={currentUser.id}
                                 />
                             }

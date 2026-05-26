@@ -166,6 +166,7 @@ export default function DealsBrowser({ deals }: { deals: Deal[] }) {
     const emptyDraft: CreateDealPayload = {
         name: '',
         value: 0,
+        actualValue: 0,
         currency: 'USD',
         pipeline: 0,
         stage: 0,
@@ -187,6 +188,8 @@ export default function DealsBrowser({ deals }: { deals: Deal[] }) {
             await createDeal({
                 ...newPayload,
                 name: newPayload.name.trim(),
+                value: Number.isFinite(newPayload.value) ? newPayload.value : 0,
+                actualValue: Number.isFinite(newPayload.actualValue) ? newPayload.actualValue : 0,
                 currency: newPayload.currency.trim() || 'USD',
                 expectedCloseDate: newPayload.expectedCloseDate || undefined,
             });

@@ -93,6 +93,7 @@ public class DealDto {
         if (id != null) d.setId(id);
         d.setName(name);
         d.setValue(value);
+        // if (actualValue != null && actualValue != 0) d.setActualValue(actualValue);
         d.setActualValue(actualValue);
         d.setCurrency(currency);
         d.setPipelineId(pipeline);
