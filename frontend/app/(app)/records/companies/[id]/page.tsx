@@ -142,16 +142,13 @@ export default async function CompanyPage({ params }: { params: { id: number } }
 
     return (
         <div className="mx-auto w-full max-w-5xl md:flex md:min-h-0 md:flex-1 md:flex-col">
-            <div className="flex flex-row justify-between">
-                <Link
-                    href="/records/companies"
-                    className="inline-flex items-center gap-2 text-base text-brand hover:text-brand-hover w-fit"
-                >
-                    <ArrowLeftIcon className="h-4 w-4" />
-                    <span>All Companies</span>
-                </Link>
-                <CompanyActionsMenu company={company} />
-            </div>
+            <Link
+                href="/records/companies"
+                className="inline-flex items-center gap-2 text-base text-brand hover:text-brand-hover w-fit"
+            >
+                <ArrowLeftIcon className="h-4 w-4" />
+                <span>All Companies</span>
+            </Link>
 
             <header className="mt-8 flex flex-wrap items-center justify-between gap-6">
                 <div className="flex items-center gap-6 py-8">
@@ -216,7 +213,11 @@ export default async function CompanyPage({ params }: { params: { id: number } }
                 </div>
             </header>
 
-            <div className="mt-12 grid grid-cols-1 gap-8 md:grid-cols-[minmax(0,1fr)_minmax(0,2fr)] md:min-h-0 md:flex-1">
+            <div className="mt-4 flex justify-end">
+                <CompanyActionsMenu company={company} />
+            </div>
+
+            <div className="mt-8 grid grid-cols-1 gap-8 md:grid-cols-[minmax(0,1fr)_minmax(0,2fr)] md:min-h-0 md:flex-1">
                 <aside>
                     <div className="mb-3 flex h-8 items-center">
                         <h2 className="px-6 text-xs font-medium tracking-[0.12em] text-neutral-500 uppercase">
