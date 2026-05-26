@@ -43,6 +43,7 @@ export default function NewDealDialog({
     const selectedCompany = companies.find((c) => c.id === payload.company) ?? null;
     const stages = payload.pipeline ? stagesByPipeline[payload.pipeline] ?? [] : [];
     const selectedStage = stages.find((s) => s.id === payload.stage) ?? null;
+    const actualValue = Number.isFinite(payload.actualValue) ? payload.actualValue : 0;
 
     const canSubmit = !!payload.name.trim() && !!payload.pipeline && !!payload.stage && !!payload.currency.trim();
 

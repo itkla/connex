@@ -192,6 +192,7 @@ export default function ContactActionsMenu({
                 <NewTaskDialog
                     contactId={contact.id}
                     contactName={contact.name}
+                    companyId={contact.companyId ?? contact.company?.id}
                     currentUserId={currentUserId}
                     open={taskOpen}
                     onOpenChange={setTaskOpen}

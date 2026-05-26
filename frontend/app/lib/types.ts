@@ -191,6 +191,7 @@ export type Deal = {
 export type CreateDealPayload = {
     name: string;
     value: number;
+    actualValue: number;
     currency: string;
     pipeline: number;
     stage: number;
@@ -255,4 +256,13 @@ export type ContactTag = {
     tag?: Tag;
     createdAt: string;
     updatedAt: string;
+};
+
+export type UpdateTaskPayload = {
+    description?: string;
+    completed?: boolean;
+    dueDate?: string;
+    assignedToId?: number;
+    personId?: number;
+    dealId?: number;
 };
