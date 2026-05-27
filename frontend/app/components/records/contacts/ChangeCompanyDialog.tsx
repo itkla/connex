@@ -2,6 +2,7 @@
 
 import { useEffect, useState, type WheelEvent } from 'react';
 import { useRouter } from 'next/navigation';
+import { useTranslations } from 'next-intl';
 import { toast } from 'sonner';
 import { Loader2Icon } from 'lucide-react';
 
@@ -37,6 +38,7 @@ type Props = {
 
 export default function ChangeCompanyDialog({ open, onOpenChange, contacts, companies, onSuccess }: Props) {
     const router = useRouter();
+    const t = useTranslations('ContactsChangeCompanyDialog');
     const [selected, setSelected] = useState<Company | null>(null);
     const [isSaving, setIsSaving] = useState(false);
 
@@ -58,7 +60,7 @@ export default function ChangeCompanyDialog({ open, onOpenChange, contacts, comp
 
     const handleSave = async () => {
         if (!selected) {
-            toast.error('Pick a company');
+            toast.error(t('toastPickCompany'));
             return;
         }
         setIsSaving(true);
@@ -73,15 +75,15 @@ export default function ChangeCompanyDialog({ open, onOpenChange, contacts, comp
             })));
             toast.success(
                 contacts.length === 1
-                    ? `${contacts[0].name} associated with ${selected.name}`
-                    : `${contacts.length} contacts associated with ${selected.name}`,
+                    ? t('toastAssociatedSingle', { contactName: contacts[0].name, companyName: selected.name })
+                    : t('toastAssociatedMultiple', { count: contacts.length, companyName: selected.name }),
                 { style: { backgroundColor: 'var(--color-brand)', color: 'white' } },
             );
             onOpenChange(false);
             onSuccess?.();
             router.refresh();
         } catch (err) {
-            toast.error(err instanceof Error ? err.message : 'Failed to update company', {
+            toast.error(err instanceof Error ? err.message : t('toastFailedUpdate'), {
                 style: { backgroundColor: 'var(--color-destructive)', color: 'white' },
             });
         } finally {
@@ -94,27 +96,27 @@ export default function ChangeCompanyDialog({ open, onOpenChange, contacts, comp
             <DialogContent>
                 <DialogHeader>
                     <DialogTitle>
-                        {contacts.length === 1 ? 'Change company' : `Change company for ${contacts.length} contacts`}
+                        {contacts.length === 1 ? t('titleSingle') : t('titleMultiple', { count: contacts.length })}
                     </DialogTitle>
                     <DialogDescription>
                         {contacts.length === 1
-                            ? `Associate ${contacts[0].name} with a company.`
-                            : 'All selected contacts will be associated with the chosen company.'}
+                            ? t('descriptionSingle', { name: contacts[0].name })
+                            : t('descriptionMultiple')}
                     </DialogDescription>
                 </DialogHeader>
 
                 <div className="grid gap-2">
-                    <Label htmlFor="company">Company</Label>
+                    <Label htmlFor="company">{t('companyLabel')}</Label>
                     <Combobox
                         items={companies}
                         itemToStringLabel={(c: Company) => c.name}
                         value={selected}
                         onValueChange={(c) => setSelected((c as Company | null) ?? null)}
                     >
-                        <ComboboxInput id="company" placeholder="Select company" className="ring-1 ring-black/5" />
+                        <ComboboxInput id="company" placeholder={t('selectCompanyPlaceholder')} className="ring-1 ring-black/5" />
                         <ComboboxContent className="pointer-events-auto">
                             <ComboboxList onWheel={handleListWheel}>
-                                <ComboboxEmpty>No companies found.</ComboboxEmpty>
+                                <ComboboxEmpty>{t('noCompaniesFound')}</ComboboxEmpty>
                                 {companies.map((company) => (
                                     <ComboboxItem key={company.id} value={company}>
                                         {company.name}
@@ -127,14 +129,14 @@ export default function ChangeCompanyDialog({ open, onOpenChange, contacts, comp
 
                 <DialogFooter>
                     <DialogClose asChild>
-                        <Button variant="outline" disabled={isSaving}>Cancel</Button>
+                        <Button variant="outline" disabled={isSaving}>{t('cancel')}</Button>
                     </DialogClose>
                     <Button
                         onClick={handleSave}
                         disabled={isSaving || !selected}
                         className="bg-brand text-white hover:bg-brand-dark"
                     >
-                        {isSaving ? <Loader2Icon className="size-4 animate-spin" /> : 'Save'}
+                        {isSaving ? <Loader2Icon className="size-4 animate-spin" /> : t('save')}
                     </Button>
                 </DialogFooter>
             </DialogContent>

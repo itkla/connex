@@ -1,0 +1,40 @@
+{
+  "DashboardPage": {
+    "overview": "概要",
+    "companies": "会社",
+    "contacts": "コンタクト",
+    "deals": "案件",
+    "pipelines": "パイプライン",
+    "companiesDescription": "先週より会社が 1 件増えています",
+    "dealsDescription": "直近の案件は $100,000 で成約しました",
+    "pipeline": "パイプライン",
+    "tasks": "タスク",
+    "recentActivity": "最近のアクティビティ",
+    "viewAll": "すべて表示"
+  },
+  "DashboardGreeting": {
+    "workingLate": "遅くまでお疲れさまです、",
+    "goodMorning": "おはようございます、",
+    "goodAfternoon": "こんにちは、",
+    "goodEvening": "こんばんは、",
+    "nothingUrgent": "本日緊急の用件はありません。順調です。",
+    "tasksOverdue": "{count, plural, one {# 件の期限切れタスク} other {# 件の期限切れタスク}}",
+    "dealsClosingSeparator": " · {count, plural, one {今週成約予定 # 件の案件} other {今週成約予定 # 件の案件}}",
+    "dealsCount": "{count, plural, one {# 件の案件} other {# 件の案件}}",
+    "closingThisWeek": " が今週成約予定です"
+  },
+  "DashboardPipelineChart": {
+    "pipelineLabel": "パイプライン",
+    "activePipeline": "アクティブなパイプライン",
+    "summary": "オープン {openCount} 件 · 今後 {months} か月で {scheduled} 件予定"
+  },
+  "DashboardTaskSummary": {
+    "openTasks": "オープンなタスク",
+    "viewAll": "すべて表示",
+    "overdueCount": "期限切れ {count} 件",
+    "dueThisWeek": "今週期限 {count} 件",
+    "separator": " · ",
+    "noDate": "期日なし",
+    "allCaughtUp": "すべて完了しています。"
+  }
+}

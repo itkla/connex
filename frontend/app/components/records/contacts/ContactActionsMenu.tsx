@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { useTranslations } from 'next-intl';
 import { toast } from 'sonner';
 import { EllipsisVerticalIcon, PencilSquareIcon, EyeIcon, PlusIcon, ChatBubbleLeftRightIcon, DocumentTextIcon, CheckCircleIcon, PaperClipIcon } from '@heroicons/react/24/outline';
 import { BuildingOffice2Icon, NoSymbolIcon, TrashIcon } from '@heroicons/react/24/outline';
@@ -35,6 +36,7 @@ export default function ContactActionsMenu({
     currentUserId: number;
 }) {
     const router = useRouter();
+    const t = useTranslations('ContactsActionsMenu');
     const [changeOpen, setChangeOpen] = useState(false);
     const [deleteOpen, setDeleteOpen] = useState(false);
     const [isDeleting, setIsDeleting] = useState(false);
@@ -55,12 +57,12 @@ export default function ContactActionsMenu({
                 imageUrl: contact.imageUrl || undefined,
                 companyId: null,
             });
-            toast.success(`Removed ${contact.name} from ${contact.company.name}`, {
+            toast.success(t('toastRemovedFromCompany', { contactName: contact.name, companyName: contact.company.name }), {
                 style: { backgroundColor: 'var(--color-brand)', color: 'white' },
             });
             router.refresh();
         } catch (err) {
-            toast.error(err instanceof Error ? err.message : 'Failed to remove from company', {
+            toast.error(err instanceof Error ? err.message : t('toastFailedRemoveFromCompany'), {
                 style: { backgroundColor: 'var(--color-destructive)', color: 'white' },
             });
         } finally {
@@ -72,13 +74,13 @@ export default function ContactActionsMenu({
         setIsDeleting(true);
         try {
             await deleteContact(contact.id);
-            toast.success('Contact deleted', {
+            toast.success(t('toastContactDeleted'), {
                 style: { backgroundColor: 'var(--color-brand)', color: 'white' },
             });
             router.push('/records/contacts');
             router.refresh();
         } catch (err) {
-            toast.error(err instanceof Error ? err.message : 'Failed to delete', {
+            toast.error(err instanceof Error ? err.message : t('toastFailedDelete'), {
                 style: { backgroundColor: 'var(--color-destructive)', color: 'white' },
             });
             setIsDeleting(false);
@@ -91,24 +93,24 @@ export default function ContactActionsMenu({
                 <ButtonGroup orientation="horizontal">
                     <Button variant="outline" size="sm" onClick={() => setEditOpen(true)}>
                         <PencilSquareIcon className="size-4" />
-                        Edit
+                        {t('edit')}
                     </Button>
                     <Button variant="outline" size="sm">
                         <EyeIcon className="size-4" />
-                        View in map
+                        {t('viewInMap')}
                     </Button>
                 </ButtonGroup>
                 <ButtonGroup orientation="horizontal">
                     {/* // add attachments, files, pictures, business cards etc */}
                     <Button variant="outline" size="sm">
                         <PaperClipIcon className="size-4" />
-                        Add
+                        {t('add')}
                     </Button>
                     <DropdownMenu>
                         <DropdownMenuTrigger asChild>
                             <Button variant="outline" size="sm">
                                 <PlusIcon className="size-4" />
-                                New
+                                {t('new')}
                             </Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end" className="w-48">
@@ -119,11 +121,11 @@ export default function ContactActionsMenu({
                                 }}
                             >
                                 <ChatBubbleLeftRightIcon className="size-4" />
-                                <span>Add activity</span>
+                                <span>{t('addActivity')}</span>
                             </DropdownMenuItem>
                             <DropdownMenuItem disabled>
                                 <DocumentTextIcon className="size-4" />
-                                <span>Add note</span>
+                                <span>{t('addNote')}</span>
                             </DropdownMenuItem>
                             <DropdownMenuItem
                                 onSelect={(e) => {
@@ -132,7 +134,7 @@ export default function ContactActionsMenu({
                                 }}
                             >
                                 <CheckCircleIcon className="size-4" />
-                                <span>Add task</span>
+                                <span>{t('addTask')}</span>
                             </DropdownMenuItem>
                         </DropdownMenuContent>
                     </DropdownMenu>
@@ -151,7 +153,7 @@ export default function ContactActionsMenu({
                                 }}
                             >
                                 <BuildingOffice2Icon className="size-4" />
-                                <span>{contact.company ? 'Change company' : 'Associate with company'}</span>
+                                <span>{contact.company ? t('changeCompany') : t('associateWithCompany')}</span>
                             </DropdownMenuItem>
                             {contact.company ? (
                                 <DropdownMenuItem
@@ -162,7 +164,7 @@ export default function ContactActionsMenu({
                                     }}
                                 >
                                     <NoSymbolIcon className="size-4" />
-                                    <span>Remove from {contact.company.name}</span>
+                                    <span>{t('removeFromCompanyNamed', { companyName: contact.company.name })}</span>
                                 </DropdownMenuItem>
                             ) : null}
                             <DropdownMenuSeparator />
@@ -174,7 +176,7 @@ export default function ContactActionsMenu({
                                 }}
                             >
                                 <TrashIcon className="size-4" />
-                                <span>Delete</span>
+                                <span>{t('delete')}</span>
                             </DropdownMenuItem>
                         </DropdownMenuContent>
                     </DropdownMenu>

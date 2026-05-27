@@ -1,3 +1,5 @@
+import { getTranslations } from "next-intl/server";
+
 import { type Activity, type Note, type Task } from "@/app/lib/types";
 import { formatShortDate, timeOf } from "@/app/lib/utils";
 import { CheckIcon } from "@heroicons/react/24/outline";
@@ -38,11 +40,17 @@ const CHIP_CLASS: Record<TimelineEntry["kind"], string> = {
     note: "bg-neutral-200 text-neutral-700",
 };
 
+const CHIP_LABEL_KEY: Record<TimelineEntry["kind"], "chipTask" | "chipActivity" | "chipNote"> = {
+    task: "chipTask",
+    activity: "chipActivity",
+    note: "chipNote",
+};
+
 // used to render the type chip
-function TypeChip({ kind }: { kind: TimelineEntry["kind"] }) {
+function TypeChip({ kind, label }: { kind: TimelineEntry["kind"]; label: string }) {
     return (
         <span className={`inline-flex items-center rounded-md px-2 py-1 text-xs font-medium inset-ring ${CHIP_CLASS[kind]}`}>
-            <span className="mr-1">●</span>{kind}
+            <span className="mr-1">●</span>{label}
         </span>
     );
 }
@@ -62,7 +70,17 @@ function entryDate(entry: TimelineEntry): string {
 }
 
 // used to render the timeline entry
-function TimelineRow({ entry }: { entry: TimelineEntry }) {
+function TimelineRow({
+    entry,
+    labels,
+}: {
+    entry: TimelineEntry;
+    labels: {
+        completed: string;
+        due: (date: string) => string;
+        chip: Record<TimelineEntry["kind"], string>;
+    };
+}) {
     const date = entryDate(entry);
 
     let title: React.ReactNode;
@@ -79,13 +97,13 @@ function TimelineRow({ entry }: { entry: TimelineEntry }) {
             subtitle = (
                 <span className="flex items-center gap-2">
                     <CheckIcon className="h-4 w-4 text-neutral-500" />
-                    <p className="text-xs text-neutral-500">Completed</p>
+                    <p className="text-xs text-neutral-500">{labels.completed}</p>
                 </span>
             );
         } else if (task.dueDate) {
             subtitle = (
                 <p className="mt-0.5 text-xs text-neutral-500">
-                    Due {formatShortDate(task.dueDate)}
+                    {labels.due(formatShortDate(task.dueDate))}
                 </p>
             );
         }
@@ -114,7 +132,7 @@ function TimelineRow({ entry }: { entry: TimelineEntry }) {
 
     return (
         <li className="flex items-start gap-4 px-6 py-4">
-            <TypeChip kind={entry.kind} />
+            <TypeChip kind={entry.kind} label={labels.chip[entry.kind]} />
             <div className="min-w-0 flex-1">
                 <div className="flex items-start justify-between gap-3">
                     {title}
@@ -130,7 +148,7 @@ function TimelineRow({ entry }: { entry: TimelineEntry }) {
     );
 }
 
-export default function Timeline({
+export default async function Timeline({
     tasks,
     activities,
     notes,
@@ -141,21 +159,32 @@ export default function Timeline({
     notes: Note[];
     limit?: number;
 }) {
+    const t = await getTranslations("MeTimeline");
     const entries = buildTimeline(tasks, activities, notes);
     const visible = limit ? entries.slice(0, limit) : entries;
 
     if (visible.length === 0) {
         return (
             <p className="px-6 py-12 text-center text-sm text-neutral-500">
-                Nothing recent yet.
+                {t("emptyState")}
             </p>
         );
     }
 
+    const labels = {
+        completed: t("completed"),
+        due: (date: string) => t("due", { date }),
+        chip: {
+            task: t(CHIP_LABEL_KEY.task),
+            activity: t(CHIP_LABEL_KEY.activity),
+            note: t(CHIP_LABEL_KEY.note),
+        },
+    };
+
     return (
         <ul className="divide-y divide-neutral-200">
             {visible.map((entry) => (
-                <TimelineRow key={entryKey(entry)} entry={entry} />
+                <TimelineRow key={entryKey(entry)} entry={entry} labels={labels} />
             ))}
         </ul>
     );

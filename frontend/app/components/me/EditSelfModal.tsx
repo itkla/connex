@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { LoaderCircle } from 'lucide-react';
 import { PencilSquareIcon } from '@heroicons/react/16/solid';
+import { useTranslations } from 'next-intl';
 import { toast } from 'sonner';
 
 import {
@@ -29,6 +30,7 @@ type Props = {
 };
 
 export default function EditSelfModal({ user }: Props) {
+    const t = useTranslations('MeEditSelfModal');
     const router = useRouter();
     const [open, setOpen] = useState(false);
     const [username, setUsername] = useState(user.username);
@@ -76,7 +78,7 @@ export default function EditSelfModal({ user }: Props) {
 
         // if nothing changed, close the modal and stop the submission
         if (!textChanged && !pictureChanged) {
-            toast.info('No changes were made', {
+            toast.info(t('noChangesToast'), {
                 // description: 'Please make changes to your profile to update it.',
             });
             setOpen(false);
@@ -109,8 +111,8 @@ export default function EditSelfModal({ user }: Props) {
             }
 
             if (userWasUpdated) {
-                toast.success('Profile updated', {
-                    description: 'Your profile has been updated successfully.',
+                toast.success(t('profileUpdatedTitle'), {
+                    description: t('profileUpdatedDescription'),
                     style: {
                         backgroundColor: "var(--color-brand)",
                         color: "white",
@@ -119,8 +121,8 @@ export default function EditSelfModal({ user }: Props) {
                 setOpen(false);
                 router.refresh();
             } else {
-                toast.error('An error occurred while updating your profile', {
-                    description: 'Please try again.',
+                toast.error(t('errorUpdatingTitle'), {
+                    description: t('errorUpdatingDescription'),
                     style: {
                         backgroundColor: "var(--color-destructive)",
                         color: "white",
@@ -138,7 +140,7 @@ export default function EditSelfModal({ user }: Props) {
                     }
                 });
             } else {
-                toast.error(err instanceof Error ? err.message : 'Failed to update profile');
+                toast.error(err instanceof Error ? err.message : t('failedToUpdateProfile'));
             }
         } finally {
             setSubmitting(false);
@@ -158,24 +160,24 @@ export default function EditSelfModal({ user }: Props) {
                     type="button"
                     variant="ghost"
                     size="icon-sm"
-                    title="Edit profile"
+                    title={t('triggerTitle')}
                     className="text-neutral-500 hover:text-black cursor-pointer"
                 >
                     <PencilSquareIcon className="size-5" />
-                    <span className="sr-only">Edit Profile</span>
+                    <span className="sr-only">{t('triggerSrLabel')}</span>
                 </Button>
             </DialogTrigger>
             <DialogContent>
                 <DialogHeader>
-                    <DialogTitle>Edit your profile</DialogTitle>
+                    <DialogTitle>{t('dialogTitle')}</DialogTitle>
                     <DialogDescription>
-                        Update your account details. Changes save immediately.
+                        {t('dialogDescription')}
                     </DialogDescription>
                 </DialogHeader>
 
                 <form onSubmit={handleSubmit} className="grid gap-4">
                     <div className="grid gap-2">
-                        <Label htmlFor="profile-picture">Profile picture</Label>
+                        <Label htmlFor="profile-picture">{t('profilePicture')}</Label>
                         {/* TODO: hide the input field, move the preview to the left, make it clickable, and move the display name to be inline with the preview. */}
                         <div className="flex items-center gap-3">
                             <input
@@ -202,7 +204,7 @@ export default function EditSelfModal({ user }: Props) {
                     </div>
 
                     <div className="grid gap-2">
-                        <Label htmlFor="username">Username</Label>
+                        <Label htmlFor="username">{t('username')}</Label>
                         <input
                             id="username"
                             type="text"
@@ -217,7 +219,7 @@ export default function EditSelfModal({ user }: Props) {
                     </div>
 
                     <div className="grid gap-2">
-                        <Label htmlFor="displayName">Display name</Label>
+                        <Label htmlFor="displayName">{t('displayName')}</Label>
                         <input
                             id="displayName"
                             type="text"
@@ -232,7 +234,7 @@ export default function EditSelfModal({ user }: Props) {
                     </div>
 
                     <div className="grid gap-2">
-                        <Label htmlFor="email">Email</Label>
+                        <Label htmlFor="email">{t('email')}</Label>
                         <input
                             id="email"
                             type="email"
@@ -249,14 +251,14 @@ export default function EditSelfModal({ user }: Props) {
                     <DialogFooter>
                         <DialogClose asChild>
                             <Button type="button" variant="outline" disabled={submitting}>
-                                Cancel
+                                {t('cancel')}
                             </Button>
                         </DialogClose>
                         <Button type="submit" disabled={submitting}>
                             {submitting ? (
                                 <LoaderCircle className="size-4 animate-spin" />
                             ) : (
-                                'Save'
+                                t('save')
                             )}
                         </Button>
                     </DialogFooter>

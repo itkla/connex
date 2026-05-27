@@ -1,0 +1,27 @@
+{
+  "RecordsRenderView": {
+    "selectAllAria": "Select all {entityLabel}s",
+    "selectItemAria": "Select {name}",
+    "copiedToast": "{label} copied",
+    "copyFailedToast": "Failed to copy {label}"
+  },
+  "RecordsDeleteDialog": {
+    "titleSingle": "Delete {entityLabel}",
+    "titleMultiple": "Delete {count} {entityLabel}s",
+    "descriptionNamed": "Are you sure you want to delete \"{name}\"? This action cannot be undone.",
+    "descriptionSingle": "Are you sure you want to delete this {entityLabel}? This action cannot be undone.",
+    "descriptionMultiple": "Are you sure you want to delete these {count} {entityLabel}s? This action cannot be undone.",
+    "cancel": "Cancel",
+    "delete": "Delete"
+  },
+  "RecordsPipelineCard": {
+    "titleActive": "Active Pipeline",
+    "titleInactive": "Closed Pipeline",
+    "titlePrevious": "Previous Pipeline",
+    "titleDefault": "Pipeline",
+    "emptyActive": "No active deals.",
+    "emptyInactive": "No inactive deals.",
+    "emptyPrevious": "No previous deals.",
+    "emptyDefault": "No deals."
+  }
+}

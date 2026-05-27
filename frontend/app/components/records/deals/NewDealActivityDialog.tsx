@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
 import { Loader2Icon } from 'lucide-react';
+import { useTranslations } from 'next-intl';
 
 import {
     Dialog,
@@ -39,6 +40,7 @@ export default function NewDealActivityDialog({
     onOpenChange: (open: boolean) => void;
 }) {
     const router = useRouter();
+    const t = useTranslations('DealsNewActivityDialog');
     const [type, setType] = useState<string>(ACTIVITY_TYPES[0]);
     const [subject, setSubject] = useState('');
     const [notes, setNotes] = useState('');
@@ -55,7 +57,7 @@ export default function NewDealActivityDialog({
     async function handleSubmit(e: React.SubmitEvent<HTMLFormElement>) {
         e.preventDefault();
         if (!subject.trim()) {
-            toast.error('Subject is required');
+            toast.error(t('subjectRequired'));
             return;
         }
         setSubmitting(true);
@@ -68,14 +70,14 @@ export default function NewDealActivityDialog({
                 createdById: currentUserId,
                 timestamp: timestamp ? toMysqlDateTime(timestamp) : toMysqlDateTime(),
             });
-            toast.success('Activity logged', {
+            toast.success(t('activityLogged'), {
                 style: { backgroundColor: 'var(--color-brand)', color: 'white' },
             });
             onOpenChange(false);
             reset();
             router.refresh();
         } catch (err) {
-            const message = err instanceof ApiError ? err.message : err instanceof Error ? err.message : 'Failed to log activity';
+            const message = err instanceof ApiError ? err.message : err instanceof Error ? err.message : t('failedToLogActivity');
             toast.error(message, {
                 style: { backgroundColor: 'var(--color-destructive)', color: 'white' },
             });
@@ -94,15 +96,15 @@ export default function NewDealActivityDialog({
         >
             <DialogContent>
                 <DialogHeader>
-                    <DialogTitle>Log activity</DialogTitle>
+                    <DialogTitle>{t('title')}</DialogTitle>
                     <DialogDescription>
-                        Record an interaction on {dealName}.
+                        {t('description', { dealName })}
                     </DialogDescription>
                 </DialogHeader>
 
                 <form onSubmit={handleSubmit} className="grid gap-4">
                     <div className="grid gap-2">
-                        <Label htmlFor="deal-activity-type">Type</Label>
+                        <Label htmlFor="deal-activity-type">{t('type')}</Label>
                         <select
                             id="deal-activity-type"
                             value={type}
@@ -118,7 +120,7 @@ export default function NewDealActivityDialog({
                     </div>
 
                     <div className="grid gap-2">
-                        <Label htmlFor="deal-activity-date-time">Date and time</Label>
+                        <Label htmlFor="deal-activity-date-time">{t('dateTime')}</Label>
                         <input
                             id="deal-activity-date-time"
                             type="datetime-local"
@@ -129,37 +131,37 @@ export default function NewDealActivityDialog({
                     </div>
 
                     <div className="grid gap-2">
-                        <Label htmlFor="deal-activity-subject">Subject</Label>
+                        <Label htmlFor="deal-activity-subject">{t('subject')}</Label>
                         <input
                             id="deal-activity-subject"
                             type="text"
                             value={subject}
                             onChange={(e) => setSubject(e.target.value)}
                             className={inputClass}
-                            placeholder="Pricing discussion"
+                            placeholder={t('subjectPlaceholder')}
                             required
                             autoFocus
                         />
                     </div>
 
                     <div className="grid gap-2">
-                        <Label htmlFor="deal-activity-notes">Notes</Label>
+                        <Label htmlFor="deal-activity-notes">{t('notes')}</Label>
                         <Textarea
                             id="deal-activity-notes"
                             value={notes}
                             onChange={(e) => setNotes(e.target.value)}
-                            placeholder="What was discussed?"
+                            placeholder={t('notesPlaceholder')}
                         />
                     </div>
 
                     <DialogFooter>
                         <DialogClose asChild>
                             <Button type="button" variant="outline" disabled={submitting}>
-                                Cancel
+                                {t('cancel')}
                             </Button>
                         </DialogClose>
                         <Button type="submit" disabled={submitting} className="bg-brand text-white hover:bg-brand-dark">
-                            {submitting ? <Loader2Icon className="size-4 animate-spin" /> : 'Log'}
+                            {submitting ? <Loader2Icon className="size-4 animate-spin" /> : t('log')}
                         </Button>
                     </DialogFooter>
                 </form>

@@ -11,8 +11,10 @@ import { useRouter } from "next/navigation";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useState } from "react";
 import EditTaskSheet from "@/app/components/activity/tasks/EditTaskSheet";
+import { useTranslations } from "next-intl";
 
 export default function DealTaskList({ dealId, companyId, tasks }: { dealId: number, companyId?: number | null, tasks: Task[] }) {
+    const t = useTranslations('DealsTaskList');
     const openTasks = tasks.filter((task) => !task.completed);
     const [editTaskOpen, setEditTaskOpen] = useState(false);
     const [selectedTask, setSelectedTask] = useState<Task | null>(null);
@@ -20,12 +22,12 @@ export default function DealTaskList({ dealId, companyId, tasks }: { dealId: num
     const deleteThisTask = async (taskId: number) => {
         try {
             await deleteTask(taskId);
-            toast.success('Task deleted', {
+            toast.success(t('taskDeleted'), {
                 style: { backgroundColor: 'var(--color-brand)', color: 'white' },
             });
             router.refresh();
         } catch (err) {
-            toast.error(err instanceof Error ? err.message : 'Failed to delete task', {
+            toast.error(err instanceof Error ? err.message : t('failedToDeleteTask'), {
                 style: { backgroundColor: 'var(--color-destructive)', color: 'white' },
             });
         }
@@ -44,12 +46,12 @@ export default function DealTaskList({ dealId, companyId, tasks }: { dealId: num
         };
         try {
             await updateTask(taskId, payload);
-            toast.success('Task marked as complete', {
+            toast.success(t('taskMarkedAsComplete'), {
                 style: { backgroundColor: 'var(--color-brand)', color: 'white' },
             });
             router.refresh();
         } catch (err) {
-            toast.error(err instanceof Error ? err.message : 'Failed to mark task as complete', {
+            toast.error(err instanceof Error ? err.message : t('failedToMarkTaskAsComplete'), {
                 style: { backgroundColor: 'var(--color-destructive)', color: 'white' },
             });
         }
@@ -68,7 +70,7 @@ export default function DealTaskList({ dealId, companyId, tasks }: { dealId: num
                 <>
                     <div className="mb-3 mt-6 flex h-8 items-center">
                         <h2 className="px-6 text-xs font-medium uppercase tracking-[0.12em] text-neutral-500">
-                            Open tasks · {openTasks.length}
+                            {t('openTasksHeading', { count: openTasks.length })}
                         </h2>
                         <Tooltip>
                             <TooltipTrigger asChild>
@@ -76,9 +78,9 @@ export default function DealTaskList({ dealId, companyId, tasks }: { dealId: num
                             </TooltipTrigger>
                             <TooltipContent>
                                 <div className="flex flex-col gap-2">
-                                    <h2 className="text-sm font-medium">Open tasks</h2>
+                                    <h2 className="text-sm font-medium">{t('openTasks')}</h2>
                                     <p className="text-xs text-neutral-400">
-                                        A list of tasks that are associated with this deal.
+                                        {t('openTasksTooltip')}
                                     </p>
                                 </div>
                             </TooltipContent>
@@ -92,7 +94,7 @@ export default function DealTaskList({ dealId, companyId, tasks }: { dealId: num
                                         <p className="text-sm text-neutral-900">{task.description}</p>
                                         {task.dueDate ? (
                                             <p className="mt-0.5 text-xs text-neutral-500">
-                                                Due {formatDate(task.dueDate)}
+                                                {t('due', { date: formatDate(task.dueDate) })}
                                             </p>
                                         ) : null}
                                     </div>
@@ -112,20 +114,20 @@ export default function DealTaskList({ dealId, companyId, tasks }: { dealId: num
                                                 editTask(task.id);
                                             }}>
                                                 <PencilIcon className="size-4" />
-                                                Edit
+                                                {t('edit')}
                                             </DropdownMenuItem>
                                             <DropdownMenuItem onClick={() => {
                                                 markTaskAsComplete(task.id);
                                             }}>
                                                 <CheckCircleIcon className="size-4" />
-                                                Mark as complete
+                                                {t('markAsComplete')}
                                             </DropdownMenuItem>
                                             <DropdownMenuSeparator />
                                             <DropdownMenuItem variant="destructive" onClick={() => {
                                                 deleteThisTask(task.id);
                                             }}>
                                                 <TrashIcon className="size-4" />
-                                                Delete
+                                                {t('delete')}
                                             </DropdownMenuItem>
                                         </DropdownMenuContent>
                                     </DropdownMenu>

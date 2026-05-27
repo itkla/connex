@@ -3,6 +3,7 @@ import Link from 'next/link';
 import { notFound, redirect } from 'next/navigation';
 import { ArrowLeftIcon, BuildingOffice2Icon, CalendarIcon, EllipsisVerticalIcon, PencilIcon, TrashIcon, InformationCircleIcon } from '@heroicons/react/24/outline';
 import { CheckCircleIcon, XCircleIcon } from '@heroicons/react/24/solid';
+import { getTranslations } from 'next-intl/server';
 
 import {
     getActivitiesForDeal,
@@ -61,6 +62,7 @@ export default async function DealPage({ params }: { params: { id: number } }) {
     const { id } = await params;
     const cookie = (await cookies()).toString();
     const init = { headers: { cookie } } as const;
+    const t = await getTranslations('DealsPage');
 
     const [deal, currentUser, activities, notes, tasks, tags, peopleRaw, allPipelines, allCompanies] =
         await Promise.all([
@@ -140,7 +142,7 @@ export default async function DealPage({ params }: { params: { id: number } }) {
                     className="inline-flex w-fit items-center gap-2 text-base text-brand hover:text-brand-hover"
                 >
                     <ArrowLeftIcon className="h-4 w-4" />
-                    <span>All Deals</span>
+                    <span>{t('allDeals')}</span>
                 </Link>
             </div>
 
@@ -172,15 +174,15 @@ export default async function DealPage({ params }: { params: { id: number } }) {
                             <span className="inline-flex items-center gap-2 rounded-md bg-neutral-100 px-2 py-1">
                                 {pipeline.name}
                                 {currentStage ? <> · {currentStage.name}</> : null}
-                                <StatusPill outcome={outcome} />
+                                <StatusPill outcome={outcome} t={t} />
                             </span>
                         ) : (
-                            <StatusPill outcome={outcome} />
+                            <StatusPill outcome={outcome} t={t} />
                         )}
                         {deal.expectedCloseDate ? (
                             <span className="inline-flex items-center gap-1 rounded-md bg-neutral-100 px-2 py-1">
                                 <CalendarIcon className="size-3.5" />
-                                Close by {formatDate(deal.expectedCloseDate)}
+                                {t('closeBy', { date: formatDate(deal.expectedCloseDate) })}
                             </span>
                         ) : null}
                     </h3>
@@ -188,7 +190,7 @@ export default async function DealPage({ params }: { params: { id: number } }) {
 
                 <div className="flex flex-col items-end gap-2">
                     <span className="text-xs font-medium tracking-[0.12em] text-neutral-500 uppercase">
-                        {closed ? 'Actual' : 'Projected'} · {currency}
+                        {closed ? t('actual') : t('projected')} · {currency}
                     </span>
                     <div className="text-3xl font-extrabold text-neutral-900">
                         {formatCompactCurrency(closed ? deal.actualValue : deal.value, currency)}
@@ -208,7 +210,7 @@ export default async function DealPage({ params }: { params: { id: number } }) {
 
             <div className="mt-8 mb-3 flex h-8 items-center gap-1.5">
                 <h2 className="px-6 text-xs font-medium uppercase tracking-[0.12em] text-neutral-500">
-                    Pipeline progress
+                    {t('pipelineProgress')}
                 </h2>
                 {/* TODO: make the tooltips show translation lines, but that's something for after */}
                 <Tooltip>
@@ -217,9 +219,9 @@ export default async function DealPage({ params }: { params: { id: number } }) {
                     </TooltipTrigger>
                     <TooltipContent>
                         <div className="flex flex-col gap-2">
-                            <h2 className="text-sm font-medium">Pipeline progress</h2>
+                            <h2 className="text-sm font-medium">{t('pipelineProgress')}</h2>
                             <p className="text-xs text-neutral-400">
-                                Stage progression alongside how much of the expected timeline has elapsed.
+                                {t('pipelineProgressTooltip')}
                             </p>
                         </div>
                     </TooltipContent>
@@ -236,7 +238,7 @@ export default async function DealPage({ params }: { params: { id: number } }) {
 
             <div className="mt-6 mb-3 flex h-8 items-center">
                 <h2 className="px-6 text-xs font-medium uppercase tracking-[0.12em] text-neutral-500">
-                    Performance
+                    {t('performance')}
                 </h2>
                 <Tooltip>
                     <TooltipTrigger asChild>
@@ -244,27 +246,27 @@ export default async function DealPage({ params }: { params: { id: number } }) {
                     </TooltipTrigger>
                     <TooltipContent>
                         <div className="flex flex-col gap-2">
-                            <h2 className="text-sm font-medium">Performance</h2>
+                            <h2 className="text-sm font-medium">{t('performance')}</h2>
                             <p className="text-xs text-neutral-400">
-                                A measurement of the value of the deal compared to the projected value.
+                                {t('performanceTooltip')}
                             </p>
                             <ul className="list-disc list-inside text-xs text-neutral-400">
-                                <li>The projected value is the value of the deal if it were to be closed today.</li>
-                                <li>The actual value is the value of the deal after it has been closed.</li>
-                                <li>The variance is the difference between the projected value and the actual value.</li>
+                                <li>{t('performanceBulletProjected')}</li>
+                                <li>{t('performanceBulletActual')}</li>
+                                <li>{t('performanceBulletVariance')}</li>
                             </ul>
                         </div>
                     </TooltipContent>
                 </Tooltip>
             </div>
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-                <SummaryTile label="Projected value" value={formatCompactCurrency(deal.value, currency)} />
+                <SummaryTile label={t('projectedValue')} value={formatCompactCurrency(deal.value, currency)} />
                 <SummaryTile
-                    label="Actual value"
+                    label={t('actualValue')}
                     value={closed ? formatCompactCurrency(deal.actualValue, currency) : '—'}
                 />
                 <SummaryTile
-                    label="Variance"
+                    label={t('variance')}
                     value={
                         variance != null
                             ? `${variance >= 0 ? '+' : ''}${(variance * 100).toFixed(1)}%`
@@ -272,14 +274,14 @@ export default async function DealPage({ params }: { params: { id: number } }) {
                     }
                 />
                 <SummaryTile
-                    label={closed ? 'Closed' : 'Expected close'}
+                    label={closed ? t('closed') : t('expectedClose')}
                     value={closed ? formatDate(deal.closedAt) : formatDate(deal.expectedCloseDate)}
                 />
             </div>
 
             <div className="mt-6 mb-3 flex h-8 items-center">
                 <h2 className="px-6 text-xs font-medium uppercase tracking-[0.12em] text-neutral-500">
-                    Engagement
+                    {t('engagement')}
                 </h2>
                 <Tooltip>
                     <TooltipTrigger asChild>
@@ -287,9 +289,9 @@ export default async function DealPage({ params }: { params: { id: number } }) {
                     </TooltipTrigger>
                     <TooltipContent>
                         <div className="flex flex-col gap-2">
-                            <h2 className="text-sm font-medium">Performance</h2>
+                            <h2 className="text-sm font-medium">{t('performance')}</h2>
                             <p className="text-xs text-neutral-400">
-                                A breakdown of the activities, tasks, and notes associated with this deal.
+                                {t('engagementTooltip')}
                             </p>
                         </div>
                     </TooltipContent>
@@ -304,25 +306,25 @@ export default async function DealPage({ params }: { params: { id: number } }) {
                 <aside>
                     <div className="mb-3 flex h-8 items-center">
                         <h2 className="px-6 text-xs font-medium uppercase tracking-[0.12em] text-neutral-500">
-                            Details
+                            {t('details')}
                         </h2>
                     </div>
                     <dl className="divide-y divide-neutral-200 overflow-hidden rounded-2xl bg-neutral-100 ring-1 ring-black/5">
-                        <InfoRow label="Pipeline" value={pipeline?.name ?? '—'} />
-                        <InfoRow label="Stage" value={currentStage?.name ?? '—'} />
-                        <InfoRow label="Company" value={company?.name ?? '—'} />
-                        <InfoRow label="Currency" value={deal.currency ?? '—'} />
-                        <InfoRow label="Expected close" value={formatDate(deal.expectedCloseDate)} />
-                        <InfoRow label="Closed at" value={closed ? formatDate(deal.closedAt) : '—'} />
-                        <InfoRow label="Created" value={formatDate(deal.createdAt)} />
-                        <InfoRow label="Updated" value={formatDateTime(deal.updatedAt)} />
+                        <InfoRow label={t('pipeline')} value={pipeline?.name ?? '—'} />
+                        <InfoRow label={t('stage')} value={currentStage?.name ?? '—'} />
+                        <InfoRow label={t('company')} value={company?.name ?? '—'} />
+                        <InfoRow label={t('currency')} value={deal.currency ?? '—'} />
+                        <InfoRow label={t('expectedClose')} value={formatDate(deal.expectedCloseDate)} />
+                        <InfoRow label={t('closedAt')} value={closed ? formatDate(deal.closedAt) : '—'} />
+                        <InfoRow label={t('created')} value={formatDate(deal.createdAt)} />
+                        <InfoRow label={t('updated')} value={formatDateTime(deal.updatedAt)} />
                     </dl>
                 </aside>
 
                 <section className="md:flex md:min-h-0 md:flex-col">
                     <div className="mb-3 flex h-8 items-center">
                         <h2 className="px-6 text-xs font-medium uppercase tracking-[0.12em] text-neutral-500">
-                            People on this deal
+                            {t('peopleOnThisDeal')}
                             {/* <InformationCircleIcon className="size-2" /> */}
                         </h2>
                         <Tooltip>
@@ -331,12 +333,12 @@ export default async function DealPage({ params }: { params: { id: number } }) {
                             </TooltipTrigger>
                             <TooltipContent>
                                 <div className="flex flex-col gap-2">
-                                    <h2 className="text-sm font-medium">People on this deal</h2>
+                                    <h2 className="text-sm font-medium">{t('peopleOnThisDeal')}</h2>
                                     <p className="text-xs text-neutral-400">
-                                        People associated with this deal.
+                                        {t('peopleOnThisDealTooltipShort')}
                                     </p>
                                     <p>
-                                        This is a list of people associated with this deal. You can add and remove people from this list by associating and disassociating them from a task.
+                                        {t('peopleOnThisDealTooltipLong')}
                                     </p>
                                 </div>
                             </TooltipContent>
@@ -345,7 +347,7 @@ export default async function DealPage({ params }: { params: { id: number } }) {
                     <div className="overflow-hidden rounded-2xl bg-neutral-100 ring-1 ring-black/5">
                         {dealPeople.length === 0 ? (
                             <p className="px-6 py-6 text-sm text-neutral-500">
-                                No people associated with this deal.
+                                {t('noPeopleAssociated')}
                             </p>
                         ) : (
                             <ul className="divide-y divide-neutral-200">
@@ -382,7 +384,7 @@ export default async function DealPage({ params }: { params: { id: number } }) {
 
                     <div className="mb-3 mt-6 flex h-8 items-center">
                         <h2 className="px-6 text-xs font-medium uppercase tracking-[0.12em] text-neutral-500">
-                            Timeline
+                            {t('timeline')}
                         </h2>
                         <Tooltip>
                             <TooltipTrigger asChild>
@@ -390,9 +392,9 @@ export default async function DealPage({ params }: { params: { id: number } }) {
                             </TooltipTrigger>
                             <TooltipContent>
                                 <div className="flex flex-col gap-2">
-                                    <h2 className="text-sm font-medium">Timeline</h2>
+                                    <h2 className="text-sm font-medium">{t('timeline')}</h2>
                                     <p className="text-xs text-neutral-400">
-                                        A timeline of the activities, tasks, and notes associated with this deal.
+                                        {t('timelineTooltip')}
                                     </p>
                                 </div>
                             </TooltipContent>
@@ -409,31 +411,31 @@ export default async function DealPage({ params }: { params: { id: number } }) {
     );
 }
 
-function StatusPill({ outcome }: { outcome: DealOutcome }) {
+function StatusPill({ outcome, t }: { outcome: DealOutcome; t: (key: string) => string }) {
     if (outcome === 'won') {
         return (
             <span className="inline-flex items-center gap-1 rounded-full bg-brand-light px-2.5 py-0.5 text-[10px] font-medium uppercase tracking-wider text-brand-dark">
-                <CheckCircleIcon className="size-3" /> Won
+                <CheckCircleIcon className="size-3" /> {t('statusWon')}
             </span>
         );
     }
     if (outcome === 'lost') {
         return (
             <span className="inline-flex items-center gap-1 rounded-full bg-red-100 px-2.5 py-0.5 text-[10px] font-medium uppercase tracking-wider text-red-700">
-                <XCircleIcon className="size-3" /> Lost
+                <XCircleIcon className="size-3" /> {t('statusLost')}
             </span>
         );
     }
     if (outcome === 'open') {
         return (
             <span className="rounded-full bg-brand px-2.5 py-0.5 text-[10px] font-medium uppercase tracking-wider text-white">
-                Open
+                {t('statusOpen')}
             </span>
         );
     }
     return (
         <span className="rounded-full bg-neutral-200 px-2.5 py-0.5 text-[10px] font-medium uppercase tracking-wider text-neutral-600">
-            Closed
+            {t('statusClosed')}
         </span>
     );
 }

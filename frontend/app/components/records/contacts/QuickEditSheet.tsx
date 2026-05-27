@@ -2,6 +2,7 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription, SheetFo
 import { Button } from '@/components/ui/button';
 import { Loader2Icon, UserIcon } from 'lucide-react';
 import { CameraIcon } from '@heroicons/react/24/outline';
+import { useTranslations } from 'next-intl';
 import { Label } from '@/components/ui/label';
 import { type Contact } from '@/app/lib/types';
 import type { SelectionId } from '@/app/components/records/types';
@@ -43,15 +44,16 @@ export default function QuickEditSheet({
     isSaving,
     saveEdits,
 }: Props) {
+    const t = useTranslations('ContactsQuickEditSheet');
     return (
         <Sheet open={editSheetOpen} onOpenChange={setEditSheetOpen}>
             <SheetContent side="right" className="flex w-full flex-col sm:max-w-lg">
                 <SheetHeader className="border-b">
                     <SheetTitle>
-                        {selectedIds.size === 1 ? 'Quick edit contact' : `Quick edit ${selectedIds.size} contacts`}
+                        {selectedIds.size === 1 ? t('titleSingle') : t('titleMultiple', { count: selectedIds.size })}
                     </SheetTitle>
                     <SheetDescription>
-                        Update fields below. Only changed contacts will be saved.
+                        {t('description')}
                     </SheetDescription>
                 </SheetHeader>
 
@@ -98,7 +100,7 @@ export default function QuickEditSheet({
 
                                     <div className="grid gap-3">
                                         <div className="grid gap-1.5">
-                                            <Label htmlFor={`name-${c.id}`}>Name</Label>
+                                            <Label htmlFor={`name-${c.id}`}>{t('name')}</Label>
                                             <input
                                                 id={`name-${c.id}`}
                                                 type="text"
@@ -109,7 +111,7 @@ export default function QuickEditSheet({
                                             />
                                         </div>
                                         <div className="grid gap-1.5">
-                                            <Label htmlFor={`email-${c.id}`}>Email</Label>
+                                            <Label htmlFor={`email-${c.id}`}>{t('email')}</Label>
                                             <input
                                                 id={`email-${c.id}`}
                                                 type="email"
@@ -119,7 +121,7 @@ export default function QuickEditSheet({
                                             />
                                         </div>
                                         <div className="grid gap-1.5">
-                                            <Label htmlFor={`phone-${c.id}`}>Phone</Label>
+                                            <Label htmlFor={`phone-${c.id}`}>{t('phone')}</Label>
                                             <input
                                                 id={`phone-${c.id}`}
                                                 type="tel"
@@ -129,7 +131,7 @@ export default function QuickEditSheet({
                                             />
                                         </div>
                                         <div className="grid gap-1.5">
-                                            <Label htmlFor={`title-${c.id}`}>Title</Label>
+                                            <Label htmlFor={`title-${c.id}`}>{t('title')}</Label>
                                             <input
                                                 id={`title-${c.id}`}
                                                 type="text"
@@ -147,10 +149,10 @@ export default function QuickEditSheet({
 
                 <SheetFooter className="border-t">
                     <SheetClose asChild>
-                        <Button variant="outline" disabled={isSaving}>Cancel</Button>
+                        <Button variant="outline" disabled={isSaving}>{t('cancel')}</Button>
                     </SheetClose>
                     <Button onClick={saveEdits} disabled={isSaving} className="bg-brand text-white hover:bg-brand-dark">
-                        {isSaving ? <Loader2Icon className="size-4 animate-spin" /> : 'Save'}
+                        {isSaving ? <Loader2Icon className="size-4 animate-spin" /> : t('save')}
                     </Button>
                 </SheetFooter>
             </SheetContent>

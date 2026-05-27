@@ -1,6 +1,9 @@
+'use client';
+
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogClose } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Loader2Icon } from 'lucide-react';
+import { useTranslations } from 'next-intl';
 import { type SelectionId } from '@/app/components/records/types';
 
 type Props<T> = {
@@ -24,6 +27,7 @@ export default function DeleteRecordDialog<T>({
     isDeleting,
     confirmDelete,
 }: Props<T>) {
+    const t = useTranslations('RecordsDeleteDialog');
     const count = selectedIds.size;
     const single = count === 1 ? selectedItems[0] : null;
     return (
@@ -31,17 +35,19 @@ export default function DeleteRecordDialog<T>({
             <DialogContent>
                 <DialogHeader>
                     <DialogTitle>
-                        {count === 1 ? `Delete ${entityLabel}` : `Delete ${count} ${entityLabel}s`}
+                        {count === 1 ? t('titleSingle', { entityLabel }) : t('titleMultiple', { count, entityLabel })}
                     </DialogTitle>
                     <DialogDescription>
                         {single && getDisplayName
-                            ? `Are you sure you want to delete "${getDisplayName(single)}"? This action cannot be undone.`
-                            : `Are you sure you want to delete ${count === 1 ? `this ${entityLabel}` : `these ${count} ${entityLabel}s`}? This action cannot be undone.`}
+                            ? t('descriptionNamed', { name: getDisplayName(single) })
+                            : count === 1
+                                ? t('descriptionSingle', { entityLabel })
+                                : t('descriptionMultiple', { count, entityLabel })}
                     </DialogDescription>
                 </DialogHeader>
                 <DialogFooter>
                     <DialogClose asChild>
-                        <Button variant="outline" disabled={isDeleting}>Cancel</Button>
+                        <Button variant="outline" disabled={isDeleting}>{t('cancel')}</Button>
                     </DialogClose>
                     <Button
                         variant="destructive"
@@ -49,7 +55,7 @@ export default function DeleteRecordDialog<T>({
                         disabled={isDeleting}
                         onClick={confirmDelete}
                     >
-                        {isDeleting ? <Loader2Icon className="size-4 animate-spin" /> : 'Delete'}
+                        {isDeleting ? <Loader2Icon className="size-4 animate-spin" /> : t('delete')}
                     </Button>
                 </DialogFooter>
             </DialogContent>

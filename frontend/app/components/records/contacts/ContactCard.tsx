@@ -2,6 +2,7 @@
 
 import { EllipsisHorizontalIcon, EyeIcon, PencilIcon, EnvelopeIcon, PhoneIcon, TrashIcon } from '@heroicons/react/24/outline';
 import { useRouter } from 'next/navigation';
+import { useTranslations } from 'next-intl';
 import { useState } from 'react';
 import {
     DropdownMenu,
@@ -51,6 +52,7 @@ export default function ContactCard({
     onDelete,
 }: ContactCardProps) {
     const router = useRouter();
+    const t = useTranslations('ContactsCard');
     const [editSheetOpen, setEditSheetOpen] = useState(false);
     const [draft, setDraft] = useState<ContactDraft>({ name: '', email: '', phone: '', title: '' });
     const [imageFile, setImageFile] = useState<File | null>(null);
@@ -86,7 +88,7 @@ export default function ContactCard({
     async function saveInternalEdits() {
         const trimmedName = draft.name.trim();
         if (!trimmedName) {
-            toast.error('Name is required');
+            toast.error(t('toastNameRequired'));
             return;
         }
         setIsSaving(true);
@@ -103,14 +105,14 @@ export default function ContactCard({
                 payload.imageUrl = await uploadContactPicture(id, imageFile);
             }
             await updateContact(id, payload);
-            toast.success('Contact updated', {
+            toast.success(t('toastContactUpdated'), {
                 style: { backgroundColor: 'var(--color-brand)', color: 'white' },
             });
             setEditSheetOpen(false);
             setImageFile(null);
             router.refresh();
         } catch (err) {
-            toast.error(err instanceof Error ? err.message : 'Failed to save', {
+            toast.error(err instanceof Error ? err.message : t('toastFailedSave'), {
                 style: { backgroundColor: 'var(--color-destructive)', color: 'white' },
             });
         } finally {
@@ -183,7 +185,7 @@ export default function ContactCard({
                 <DropdownMenuTrigger asChild>
                     <button
                         type="button"
-                        aria-label="Contact actions"
+                        aria-label={t('actionsAria')}
                         onClick={(e) => e.stopPropagation()}
                         className="absolute bottom-3 right-3 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-white/20 text-white transition hover:bg-white/30"
                     >
@@ -193,7 +195,7 @@ export default function ContactCard({
                 <DropdownMenuContent align="end" side="bottom" className="w-48" onClick={(e) => e.stopPropagation()}>
                     <DropdownMenuItem onSelect={() => router.push(`/records/contacts/${id}`)}>
                         <EyeIcon className="size-4 text-neutral-500" />
-                        View
+                        {t('view')}
                     </DropdownMenuItem>
                     <DropdownMenuItem
                         onSelect={(e) => {
@@ -203,22 +205,22 @@ export default function ContactCard({
                         }}
                     >
                         <PencilIcon className="size-4 text-neutral-500" />
-                        Quick edit
+                        {t('quickEdit')}
                     </DropdownMenuItem>
                     {email && (
                         <DropdownMenuItem onSelect={() =>
-                            copyToClipboard(email, 'Email') ? toast.success('Email copied') : toast.error('Failed to copy email')
+                            copyToClipboard(email, 'Email') ? toast.success(t('toastEmailCopied')) : toast.error(t('toastFailedCopyEmail'))
                         }>
                             <EnvelopeIcon className="size-4 text-neutral-500" />
-                            Copy email
+                            {t('copyEmail')}
                         </DropdownMenuItem>
                     )}
                     {phone && (
                         <DropdownMenuItem onSelect={() =>
-                            copyToClipboard(phone, 'Phone') ? toast.success('Phone copied') : toast.error('Failed to copy phone')
+                            copyToClipboard(phone, 'Phone') ? toast.success(t('toastPhoneCopied')) : toast.error(t('toastFailedCopyPhone'))
                         }>
                             <PhoneIcon className="size-4 text-neutral-500" />
-                            Copy phone
+                            {t('copyPhone')}
                         </DropdownMenuItem>
                     )}
                     <DropdownMenuSeparator />
@@ -226,13 +228,13 @@ export default function ContactCard({
                         openChangeCompanyDialog();
                     }}>
                         <BuildingOffice2Icon className="size-4 text-neutral-500" />
-                        Change company
+                        {t('changeCompany')}
                     </DropdownMenuItem>
                     <DropdownMenuItem onClick={() => {
                         setRemoveFromCompanyOpen(true);
                     }}>
                         <NoSymbolIcon className="size-4 text-neutral-500" />
-                        Remove from company
+                        {t('removeFromCompany')}
                     </DropdownMenuItem>
                     <DropdownMenuSeparator />
                     <DropdownMenuItem
@@ -243,7 +245,7 @@ export default function ContactCard({
                         }}
                     >
                         <TrashIcon className="size-4 text-destructive" />
-                        Delete
+                        {t('delete')}
                     </DropdownMenuItem>
                 </DropdownMenuContent>
             </DropdownMenu>
@@ -270,7 +272,7 @@ export default function ContactCard({
             contacts={[syntheticContact]}
             companies={companies}
             onSuccess={() => {
-                toast.success('Company changed', {
+                toast.success(t('toastCompanyChanged'), {
                     style: { backgroundColor: 'var(--color-brand)', color: 'white' },
                 });
                 router.refresh();

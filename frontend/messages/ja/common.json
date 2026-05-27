@@ -1,0 +1,54 @@
+{
+  "CommonHome": {
+    "brand": "CONNEX",
+    "pricing": "料金",
+    "features": "機能",
+    "ctaDashboard": "ダッシュボード",
+    "ctaGetStarted": "はじめる",
+    "headlineBuild": "築く",
+    "headlineMeaningful": "意義ある",
+    "headlineConnections": "顧客とのつながりを"
+  },
+  "CommonSidebar": {
+    "ariaPrimarySidebar": "メインサイドバー",
+    "brand": "CONNEX",
+    "sectionOverview": "概要",
+    "sectionRecords": "レコード",
+    "sectionActivity": "アクティビティ",
+    "sectionLibrary": "ライブラリ",
+    "navDashboard": "ダッシュボード",
+    "navCalendar": "カレンダー",
+    "navMap": "マップ",
+    "navAnalytics": "分析",
+    "navInsights": "インサイト",
+    "navReports": "レポート",
+    "navCompanies": "企業",
+    "navContacts": "コンタクト",
+    "navDeals": "案件",
+    "navPipelines": "パイプライン",
+    "navActivities": "アクティビティ",
+    "navTasks": "タスク",
+    "navNotes": "メモ",
+    "navTags": "タグ",
+    "profile": "プロフィール",
+    "logOut": "ログアウト",
+    "profilePictureAlt": "{name}さんのプロフィール画像"
+  },
+  "CommonContentShell": {
+    "hideSidebar": "サイドバーを非表示",
+    "showSidebar": "サイドバーを表示"
+  },
+  "CommonSearchBar": {
+    "placeholder": "何でも検索",
+    "search": "検索"
+  },
+  "CommonProfileCard": {
+    "defaultName": "プロフィール名",
+    "defaultDescription": "ここにプロフィールの説明が入ります",
+    "companyName": "Voice Co. Ltd.",
+    "yourConnections": "あなたのつながり",
+    "sampleName": "Tahm Kench",
+    "sampleCompany": "LOL Inc.",
+    "sampleRole": "CTO"
+  }
+}

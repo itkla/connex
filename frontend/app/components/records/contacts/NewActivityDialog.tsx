@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { useTranslations } from 'next-intl';
 import { toast } from 'sonner';
 import { PlusIcon } from '@heroicons/react/24/solid';
 import { Loader2Icon } from 'lucide-react';
@@ -42,6 +43,7 @@ export default function NewActivityDialog({
     onOpenChange?: (open: boolean) => void;
 }) {
     const router = useRouter();
+    const t = useTranslations('ContactsNewActivityDialog');
     const controlled = openProp !== undefined;
     const [internalOpen, setInternalOpen] = useState(false);
     const open = controlled ? openProp : internalOpen;
@@ -64,7 +66,7 @@ export default function NewActivityDialog({
     async function handleSubmit(e: React.SubmitEvent<HTMLFormElement>) {
         e.preventDefault();
         if (!subject.trim()) {
-            toast.error('Subject is required');
+            toast.error(t('toastSubjectRequired'));
             return;
         }
         setSubmitting(true);
@@ -77,14 +79,14 @@ export default function NewActivityDialog({
                 createdById: currentUserId,
                 timestamp: timestamp ? toMysqlDateTime(timestamp) : toMysqlDateTime(),
             });
-            toast.success('Activity logged', {
+            toast.success(t('toastActivityLogged'), {
                 style: { backgroundColor: 'var(--color-brand)', color: 'white' },
             });
             setOpen(false);
             reset();
             router.refresh();
         } catch (err) {
-            const message = err instanceof ApiError ? err.message : err instanceof Error ? err.message : 'Failed to log activity';
+            const message = err instanceof ApiError ? err.message : err instanceof Error ? err.message : t('toastFailedLog');
             toast.error(message, {
                 style: { backgroundColor: 'var(--color-destructive)', color: 'white' },
             });
@@ -107,41 +109,41 @@ export default function NewActivityDialog({
                         type="button"
                         variant="ghost"
                         size="icon-sm"
-                        title="Log activity"
+                        title={t('triggerTitle')}
                         className="text-neutral-500 hover:text-black cursor-pointer"
                     >
                         <PlusIcon className="size-4" />
-                        <span className="sr-only">Log activity</span>
+                        <span className="sr-only">{t('triggerSr')}</span>
                     </Button>
                 </DialogTrigger>
             )}
             <DialogContent>
                 <DialogHeader>
-                    <DialogTitle>Log activity</DialogTitle>
+                    <DialogTitle>{t('dialogTitle')}</DialogTitle>
                     <DialogDescription>
-                        Record an interaction with {contactName}.
+                        {t('description', { contactName })}
                     </DialogDescription>
                 </DialogHeader>
 
                 <form onSubmit={handleSubmit} className="grid gap-4">
                     <div className="grid gap-2">
-                        <Label htmlFor="activity-type">Type</Label>
+                        <Label htmlFor="activity-type">{t('type')}</Label>
                         <select
                             id="activity-type"
                             value={type}
                             onChange={(e) => setType(e.target.value)}
                             className={inputClass}
                         >
-                            {ACTIVITY_TYPES.map((t) => (
-                                <option key={t} value={t}>
-                                    {t}
+                            {ACTIVITY_TYPES.map((value) => (
+                                <option key={value} value={value}>
+                                    {t(`type${value}` as 'typeCall' | 'typeEmail' | 'typeMeeting' | 'typeNote' | 'typeOther')}
                                 </option>
                             ))}
                         </select>
                     </div>
 
                     <div className="grid gap-2">
-                        <Label htmlFor="activity-date-time">Date and time</Label>
+                        <Label htmlFor="activity-date-time">{t('dateAndTime')}</Label>
                         <input
                             id="activity-date-time"
                             type="datetime-local"
@@ -153,37 +155,37 @@ export default function NewActivityDialog({
                     </div>
 
                     <div className="grid gap-2">
-                        <Label htmlFor="activity-subject">Subject</Label>
+                        <Label htmlFor="activity-subject">{t('subject')}</Label>
                         <input
                             id="activity-subject"
                             type="text"
                             value={subject}
                             onChange={(e) => setSubject(e.target.value)}
                             className={inputClass}
-                            placeholder="Intro call"
+                            placeholder={t('subjectPlaceholder')}
                             required
                             autoFocus
                         />
                     </div>
 
                     <div className="grid gap-2">
-                        <Label htmlFor="activity-notes">Notes</Label>
+                        <Label htmlFor="activity-notes">{t('notes')}</Label>
                         <Textarea
                             id="activity-notes"
                             value={notes}
                             onChange={(e) => setNotes(e.target.value)}
-                            placeholder="What was discussed?"
+                            placeholder={t('notesPlaceholder')}
                         />
                     </div>
 
                     <DialogFooter>
                         <DialogClose asChild>
                             <Button type="button" variant="outline" disabled={submitting}>
-                                Cancel
+                                {t('cancel')}
                             </Button>
                         </DialogClose>
                         <Button type="submit" disabled={submitting} className="bg-brand text-white hover:bg-brand-dark">
-                            {submitting ? <Loader2Icon className="size-4 animate-spin" /> : 'Log'}
+                            {submitting ? <Loader2Icon className="size-4 animate-spin" /> : t('log')}
                         </Button>
                     </DialogFooter>
                 </form>

@@ -2,12 +2,12 @@
 
 import Link from 'next/link';
 import { TrophyIcon } from '@heroicons/react/24/solid';
+import { useTranslations } from 'next-intl';
 
 import { type Company, type Deal } from '@/app/lib/types';
 import { formatCompactCurrency, parseMysqlDateTime } from '@/app/lib/utils';
 
 const RANK_COLORS = ['#fbbf24', '#94a3b8', '#cd7f32'] as const; // gold, silver, bronze
-const RANK_LABELS = ['1st place', '2nd place', '3rd place'] as const;
 
 function isClosed(deal: Deal): boolean {
     const t = parseMysqlDateTime(deal.closedAt);
@@ -23,6 +23,7 @@ export default function TopDeals({
     deals: Deal[];
     companyById: Map<number, Company>;
 }) {
+    const t = useTranslations('DealsTopDeals');
     const topOpen = [...deals]
         .filter((d) => !isClosed(d))
         .sort((a, b) => (b.value ?? 0) - (a.value ?? 0))
@@ -36,18 +37,20 @@ export default function TopDeals({
     return (
         <div className="grid h-64 grid-rows-2 gap-3">
             <Section
-                title="Biggest open deals"
+                title={t('biggestOpenDeals')}
                 deals={topOpen}
                 field="value"
                 companyById={companyById}
-                emptyLabel="No open deals"
+                emptyLabel={t('noOpenDeals')}
+                rankLabels={[t('firstPlace'), t('secondPlace'), t('thirdPlace')]}
             />
             <Section
-                title="Top wins"
+                title={t('topWins')}
                 deals={topWins}
                 field="actualValue"
                 companyById={companyById}
-                emptyLabel="No closed deals"
+                emptyLabel={t('noClosedDeals')}
+                rankLabels={[t('firstPlace'), t('secondPlace'), t('thirdPlace')]}
             />
         </div>
     );
@@ -59,12 +62,14 @@ function Section({
     field,
     companyById,
     emptyLabel,
+    rankLabels,
 }: {
     title: string;
     deals: Deal[];
     field: Field;
     companyById: Map<number, Company>;
     emptyLabel: string;
+    rankLabels: readonly string[];
 }) {
     return (
         <div className="min-h-0 overflow-hidden">
@@ -83,7 +88,7 @@ function Section({
                                 >
                                     <span className="flex min-w-0 items-center gap-1.5">
                                         <TrophyIcon
-                                            aria-label={RANK_LABELS[i]}
+                                            aria-label={rankLabels[i]}
                                             className="size-4 shrink-0"
                                             style={{ color: RANK_COLORS[i] }}
                                         />

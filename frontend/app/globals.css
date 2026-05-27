@@ -10,6 +10,7 @@
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
   --font-inter: var(--font-inter);
+  --font-noto-sans-jp: var(--font-noto-sans-jp);
   --font-instrument-serif: var(--font-instrument-serif);
   /* --font-heading: var(--font-instrument-serif); */
   --font-heading: var(--font-inter);

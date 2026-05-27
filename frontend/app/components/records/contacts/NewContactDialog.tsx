@@ -8,6 +8,7 @@ import { Label } from '@/components/ui/label';
 import { type Company, type CreateContactPayload } from '@/app/lib/types';
 import { ChangeEvent, Dispatch, SetStateAction, useEffect, useState, type WheelEvent } from 'react';
 import { CameraIcon } from '@heroicons/react/24/outline';
+import { useTranslations } from 'next-intl';
 import { uploadContactPicture } from '@/app/lib/utils';
 const inputClass = 'w-full rounded-lg bg-neutral-100 px-3 py-2 text-sm text-black placeholder-neutral-500 outline-none ring-1 ring-black/5 transition focus:ring-2 focus:ring-brand';
 
@@ -36,6 +37,7 @@ export default function NewContactDialog({
     isCreating,
     createNewContact,
 }: Props) {
+    const t = useTranslations('ContactsNewContactDialog');
     const [imagePreview, setImagePreview] = useState<string | null>(null);
 
     const handleListWheel = (e: WheelEvent<HTMLDivElement>) => {
@@ -69,8 +71,8 @@ export default function NewContactDialog({
         <Dialog open={newContactDialogOpen} onOpenChange={setNewContactDialogOpen}>
             <DialogContent>
                 <DialogHeader>
-                    <DialogTitle>New contact</DialogTitle>
-                    <DialogDescription>Add a person to your contacts. These contacts will be shared with all users of this organization.</DialogDescription>
+                    <DialogTitle>{t('dialogTitle')}</DialogTitle>
+                    <DialogDescription>{t('description')}</DialogDescription>
                 </DialogHeader>
 
                 <div className="flex justify-center">
@@ -99,58 +101,58 @@ export default function NewContactDialog({
 
                 <div className="grid gap-4">
                     <div className="grid gap-1.5">
-                        <Label htmlFor="name">Name</Label>
+                        <Label htmlFor="name">{t('name')}</Label>
                         <input
                             id="name"
                             type="text"
                             value={newContactPayload.name}
                             onChange={(e) => setNewContactPayload((prev) => ({ ...prev, name: e.target.value }))}
                             className={inputClass}
-                            placeholder="Jane Doe"
+                            placeholder={t('namePlaceholder')}
                             autoFocus
                             required
                         />
                     </div>
 
                     <div className="grid gap-1.5">
-                        <Label htmlFor="email">Email</Label>
+                        <Label htmlFor="email">{t('email')}</Label>
                         <input
                             id="email"
                             type="email"
                             value={newContactPayload.email}
                             onChange={(e) => setNewContactPayload((prev) => ({ ...prev, email: e.target.value }))}
                             className={inputClass}
-                            placeholder="jane@example.com"
+                            placeholder={t('emailPlaceholder')}
                         />
                     </div>
 
                     <div className="grid grid-cols-2 gap-3">
                         <div className="grid gap-1.5">
-                            <Label htmlFor="phone">Phone</Label>
+                            <Label htmlFor="phone">{t('phone')}</Label>
                             <input
                                 id="phone"
                                 type="tel"
                                 value={newContactPayload.phone}
                                 onChange={(e) => setNewContactPayload((prev) => ({ ...prev, phone: e.target.value }))}
                                 className={inputClass}
-                                placeholder="+1 555 123 4567"
+                                placeholder={t('phonePlaceholder')}
                             />
                         </div>
                         <div className="grid gap-1.5">
-                            <Label htmlFor="title">Title</Label>
+                            <Label htmlFor="title">{t('title')}</Label>
                             <input
                                 id="title"
                                 type="text"
                                 value={newContactPayload.title}
                                 onChange={(e) => setNewContactPayload((prev) => ({ ...prev, title: e.target.value }))}
                                 className={inputClass}
-                                placeholder="Product Manager"
+                                placeholder={t('titlePlaceholder')}
                             />
                         </div>
                     </div>
 
                     <div className="grid gap-1.5">
-                        <Label htmlFor="company">Company</Label>
+                        <Label htmlFor="company">{t('company')}</Label>
                         <Combobox
                             items={companies}
                             itemToStringLabel={(c: Company) => c.name}
@@ -163,10 +165,10 @@ export default function NewContactDialog({
                                 }))
                             }
                         >
-                            <ComboboxInput id="company" placeholder="Select company" className="ring-1 ring-black/5"/>
+                            <ComboboxInput id="company" placeholder={t('selectCompanyPlaceholder')} className="ring-1 ring-black/5"/>
                             <ComboboxContent className="pointer-events-auto">
                                 <ComboboxList onWheel={handleListWheel}>
-                                    <ComboboxEmpty>No companies found.</ComboboxEmpty>
+                                    <ComboboxEmpty>{t('noCompaniesFound')}</ComboboxEmpty>
                                     {companies.map((company) => (
                                         <ComboboxItem key={company.id} value={company}>
                                             {company.name}
@@ -180,14 +182,14 @@ export default function NewContactDialog({
 
                 <DialogFooter>
                     <DialogClose asChild>
-                        <Button variant="outline" disabled={isCreating}>Cancel</Button>
+                        <Button variant="outline" disabled={isCreating}>{t('cancel')}</Button>
                     </DialogClose>
                     <Button
                         onClick={createNewContact}
                         disabled={isCreating || !newContactPayload.name.trim()}
                         className="bg-brand text-white hover:bg-brand-dark"
                     >
-                        {isCreating ? <Loader2Icon className="size-4 animate-spin" /> : 'Create'}
+                        {isCreating ? <Loader2Icon className="size-4 animate-spin" /> : t('create')}
                     </Button>
                 </DialogFooter>
             </DialogContent>

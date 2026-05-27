@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { ChevronDownIcon, ChevronUpIcon, ChevronUpDownIcon } from '@heroicons/react/24/outline';
 import { Checkbox } from '@/components/ui/checkbox';
 import { toast } from 'sonner';
+import { useTranslations } from 'next-intl';
 
 import { copyToClipboard } from '@/app/lib/utils';
 import { type ColumnDef, type CardCallbacks, type DisplayMode, type SelectionId } from './types';
@@ -41,6 +42,7 @@ export default function RecordsRenderView<T extends { id: SelectionId; name?: st
     entityLabel,
 }: Props<T>) {
     const router = useRouter();
+    const t = useTranslations('RecordsRenderView');
     const [sortKey, setSortKey] = useState<string | null>(null);
     const [sortDirection, setSortDirection] = useState<SortDirection>('asc');
 
@@ -104,7 +106,7 @@ export default function RecordsRenderView<T extends { id: SelectionId; name?: st
                             <Checkbox
                                 checked={someSelected ? 'indeterminate' : allSelected}
                                 onCheckedChange={(checked) => toggleAll(checked === true)}
-                                aria-label={`Select all ${entityLabel}s`}
+                                aria-label={t('selectAllAria', { entityLabel })}
                                 className="data-[state=checked]:bg-brand data-[state=checked]:border-brand-light"
                             />
                         </th>
@@ -153,7 +155,7 @@ export default function RecordsRenderView<T extends { id: SelectionId; name?: st
                                     <Checkbox
                                         checked={isSelected}
                                         onCheckedChange={(checked) => toggleOne(item.id, checked === true)}
-                                        aria-label={`Select ${item.name ?? entityLabel}`}
+                                        aria-label={t('selectItemAria', { name: item.name ?? entityLabel })}
                                         className="data-[state=checked]:bg-brand data-[state=checked]:border-brand-light"
                                     />
                                 </td>
@@ -170,8 +172,8 @@ export default function RecordsRenderView<T extends { id: SelectionId; name?: st
                                                     e.stopPropagation();
                                                     const v = getValue(item) ?? '';
                                                     copyToClipboard(v, label)
-                                                        ? toast.success(`${label} copied`)
-                                                        : toast.error(`Failed to copy ${label.toLowerCase()}`);
+                                                        ? toast.success(t('copiedToast', { label }))
+                                                        : toast.error(t('copyFailedToast', { label: label.toLowerCase() }));
                                                 }}
                                             >
                                                 {content}

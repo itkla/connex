@@ -1,12 +1,16 @@
 // NOTE: not used in /me page anymore, but might be used in other pages so im keeping it
 
+import { getTranslations } from "next-intl/server";
+
 import { Task } from "@/app/lib/api";
 import EmptyState from "./EmptyState";
 import { timeOf, formatShortDate } from "@/app/lib/utils";
 
-export default function TaskList({ tasks }: { tasks: Task[] }) {
+export default async function TaskList({ tasks }: { tasks: Task[] }) {
+    const t = await getTranslations("MeTaskList");
+
     if (tasks.length === 0) {
-        return <EmptyState message="No tasks assigned to you yet." />;
+        return <EmptyState message={t("empty")} />;
     }
 
     // sort by completed status, then by due date, then by created at

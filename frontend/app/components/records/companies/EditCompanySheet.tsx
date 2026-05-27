@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { useTranslations } from 'next-intl';
 import { toast } from 'sonner';
 
 import QuickEditCompanySheet, { type CompanyDraft } from '@/app/components/records/companies/QuickEditCompanySheet';
@@ -39,6 +40,7 @@ export default function EditCompanySheet({
     onOpenChange: (open: boolean) => void;
 }) {
     const router = useRouter();
+    const t = useTranslations('CompaniesEditSheet');
     const [draft, setDraft] = useState<CompanyDraft>(() => toDraft(company));
     const [logoFile, setLogoFile] = useState<File | null>(null);
     const [isSaving, setIsSaving] = useState(false);
@@ -57,14 +59,14 @@ export default function EditCompanySheet({
         const logoChanged = logoFile !== null;
 
         if (!textChanged && !logoChanged) {
-            toast.info('No changes to save');
+            toast.info(t('toastNoChanges'));
             handleOpenChange(false);
             return;
         }
 
         if (!draft.name.trim()) {
             // TODO: replace this message with the validation error message from the backend
-            toast.error('Name is required');
+            toast.error(t('toastNameRequired'));
             return;
         }
 
@@ -85,7 +87,7 @@ export default function EditCompanySheet({
             };
             await updateCompany(company.id, payload);
 
-            toast.success('Company updated', {
+            toast.success(t('toastCompanyUpdated'), {
                 style: { backgroundColor: 'var(--color-brand)', color: 'white' },
             });
             handleOpenChange(false);
@@ -98,7 +100,7 @@ export default function EditCompanySheet({
 
             router.refresh();
         } catch (err) {
-            toast.error(err instanceof Error ? err.message : 'Failed to save', {
+            toast.error(err instanceof Error ? err.message : t('toastSaveFailed'), {
                 style: { backgroundColor: 'var(--color-destructive)', color: 'white' },
             });
         } finally {

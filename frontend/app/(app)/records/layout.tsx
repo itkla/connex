@@ -1,9 +1,13 @@
 import type { Metadata } from "next";
+import { getTranslations } from "next-intl/server";
 
-export const metadata: Metadata = {
-    title: "Records",
-    description: "Manage your records",
-};
+export async function generateMetadata(): Promise<Metadata> {
+    const t = await getTranslations("RecordsLayout");
+    return {
+        title: t("title"),
+        description: t("description"),
+    };
+}
 
 export default function RecordsLayout({
     children,

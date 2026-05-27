@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { useTranslations } from 'next-intl';
 import { toast } from 'sonner';
 
 import QuickEditSheet, { type ContactDraft } from '@/app/components/records/contacts/QuickEditSheet';
@@ -32,6 +33,7 @@ export default function EditContactSheet({
     onOpenChange: (open: boolean) => void;
 }) {
     const router = useRouter();
+    const t = useTranslations('ContactsEditSheet');
     const [draft, setDraft] = useState<ContactDraft>(() => toDraft(contact));
     const [imageFile, setImageFile] = useState<File | null>(null);
     const [isSaving, setIsSaving] = useState(false);
@@ -50,13 +52,13 @@ export default function EditContactSheet({
         const pictureChanged = imageFile !== null;
 
         if (!textChanged && !pictureChanged) {
-            toast.info('No changes to save');
+            toast.info(t('toastNoChanges'));
             handleOpenChange(false);
             return;
         }
 
         if (!draft.name.trim()) {
-            toast.error('Name is required');
+            toast.error(t('toastNameRequired'));
             return;
         }
 
@@ -77,7 +79,7 @@ export default function EditContactSheet({
             };
             await updateContact(contact.id, payload);
 
-            toast.success('Contact updated', {
+            toast.success(t('toastContactUpdated'), {
                 style: { backgroundColor: 'var(--color-brand)', color: 'white' },
             });
             handleOpenChange(false);
@@ -95,7 +97,7 @@ export default function EditContactSheet({
 
             router.refresh();
         } catch (err) {
-            toast.error(err instanceof Error ? err.message : 'Failed to save', {
+            toast.error(err instanceof Error ? err.message : t('toastFailedSave'), {
                 style: { backgroundColor: 'var(--color-destructive)', color: 'white' },
             });
         } finally {

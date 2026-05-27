@@ -1,0 +1,40 @@
+{
+  "DashboardPage": {
+    "overview": "Overview",
+    "companies": "Companies",
+    "contacts": "Contacts",
+    "deals": "Deals",
+    "pipelines": "Pipelines",
+    "companiesDescription": "You're up +1 company from last week",
+    "dealsDescription": "The last deal closed for $100,000",
+    "pipeline": "Pipeline",
+    "tasks": "Tasks",
+    "recentActivity": "Recent activity",
+    "viewAll": "View all"
+  },
+  "DashboardGreeting": {
+    "workingLate": "Working late,",
+    "goodMorning": "Good morning,",
+    "goodAfternoon": "Good afternoon,",
+    "goodEvening": "Good evening,",
+    "nothingUrgent": "Nothing urgent today. Smooth sailing.",
+    "tasksOverdue": "{count, plural, one {# task overdue} other {# tasks overdue}}",
+    "dealsClosingSeparator": " · {count, plural, one {# deal} other {# deals}} closing this week",
+    "dealsCount": "{count, plural, one {# deal} other {# deals}}",
+    "closingThisWeek": " closing this week"
+  },
+  "DashboardPipelineChart": {
+    "pipelineLabel": "Pipeline",
+    "activePipeline": "Active pipeline",
+    "summary": "{openCount} open · {scheduled} scheduled in next {months} months"
+  },
+  "DashboardTaskSummary": {
+    "openTasks": "Open tasks",
+    "viewAll": "View all",
+    "overdueCount": "{count} overdue",
+    "dueThisWeek": "{count} due this week",
+    "separator": " · ",
+    "noDate": "No date",
+    "allCaughtUp": "All caught up."
+  }
+}

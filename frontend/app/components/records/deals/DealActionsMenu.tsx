@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
+import { useTranslations } from 'next-intl';
 import {
     EllipsisVerticalIcon,
     PencilSquareIcon,
@@ -46,6 +47,7 @@ export default function DealActionsMenu({
     currentUserId: number;
 }) {
     const router = useRouter();
+    const t = useTranslations('DealsActionsMenu');
     const [editOpen, setEditOpen] = useState(false);
     const [activityOpen, setActivityOpen] = useState(false);
     const [taskOpen, setTaskOpen] = useState(false);
@@ -56,13 +58,13 @@ export default function DealActionsMenu({
         setIsDeleting(true);
         try {
             await deleteDeal(deal.id);
-            toast.success('Deal deleted', {
+            toast.success(t('dealDeleted'), {
                 style: { backgroundColor: 'var(--color-brand)', color: 'white' },
             });
             router.push('/records/deals');
             router.refresh();
         } catch (err) {
-            toast.error(err instanceof Error ? err.message : 'Failed to delete', {
+            toast.error(err instanceof Error ? err.message : t('failedToDelete'), {
                 style: { backgroundColor: 'var(--color-destructive)', color: 'white' },
             });
             setIsDeleting(false);
@@ -74,23 +76,23 @@ export default function DealActionsMenu({
             <ButtonGroup orientation="horizontal">
                 <Button variant="outline" size="sm" onClick={() => setEditOpen(true)}>
                     <PencilSquareIcon className="size-4" />
-                    Edit
+                    {t('edit')}
                 </Button>
                 <Button variant="outline" size="sm">
                     <EyeIcon className="size-4" />
-                    View in map
+                    {t('viewInMap')}
                 </Button>
             </ButtonGroup>
             <ButtonGroup orientation="horizontal">
                 <Button variant="outline" size="sm">
                     <PaperClipIcon className="size-4" />
-                    Add
+                    {t('add')}
                 </Button>
                 <DropdownMenu>
                     <DropdownMenuTrigger asChild>
                         <Button variant="outline" size="sm">
                             <PlusIcon className="size-4" />
-                            New
+                            {t('new')}
                         </Button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end" className="w-48">
@@ -101,11 +103,11 @@ export default function DealActionsMenu({
                             }}
                         >
                             <ChatBubbleLeftRightIcon className="size-4" />
-                            <span>Add activity</span>
+                            <span>{t('addActivity')}</span>
                         </DropdownMenuItem>
                         <DropdownMenuItem disabled>
                             <DocumentTextIcon className="size-4" />
-                            <span>Add note</span>
+                            <span>{t('addNote')}</span>
                         </DropdownMenuItem>
                         <DropdownMenuItem
                             onSelect={(e) => {
@@ -114,7 +116,7 @@ export default function DealActionsMenu({
                             }}
                         >
                             <CheckCircleIcon className="size-4" />
-                            <span>Add task</span>
+                            <span>{t('addTask')}</span>
                         </DropdownMenuItem>
                     </DropdownMenuContent>
                 </DropdownMenu>
@@ -133,7 +135,7 @@ export default function DealActionsMenu({
                             }}
                         >
                             <TrashIcon className="size-4" />
-                            <span>Delete</span>
+                            <span>{t('delete')}</span>
                         </DropdownMenuItem>
                     </DropdownMenuContent>
                 </DropdownMenu>
@@ -170,7 +172,7 @@ export default function DealActionsMenu({
                 onOpenChange={setDeleteOpen}
                 selectedIds={new Set([deal.id])}
                 selectedItems={[deal]}
-                entityLabel="deal"
+                entityLabel={t('entityLabel')}
                 getDisplayName={(d) => d.name}
                 isDeleting={isDeleting}
                 confirmDelete={confirmDelete}

@@ -2,6 +2,7 @@
 
 import { Loader2Icon } from 'lucide-react';
 import { useRouter } from 'next/navigation';
+import { useTranslations } from 'next-intl';
 import { ChevronRightIcon } from '@heroicons/react/24/solid';
 import { Button } from '@/components/ui/button';
 import { type Company, type CompanyMetrics, type LoadStatus } from '@/app/lib/types';
@@ -26,6 +27,7 @@ interface CompanyCardProps {
 export default function CompanyCard({ company, metrics, metricsStatus, onFirstExpand }: CompanyCardProps) {
     const [isExpanded, setIsExpanded] = useState(false);
     const router = useRouter();
+    const t = useTranslations('CompaniesCard');
 
     const open = () => router.push(`/records/companies/${company.id}`);
     const toggleExpand = () => {
@@ -59,7 +61,7 @@ export default function CompanyCard({ company, metrics, metricsStatus, onFirstEx
                         e.stopPropagation();
                         open();
                     }}
-                    aria-label="Open company page"
+                    aria-label={t('openCompanyAriaLabel')}
                     className="w-12 h-12 shrink-0 bg-neutral-200 hover:bg-neutral-300 outline-none border-none shadow-none"
                 >
                     <ChevronRightIcon className="size-4" />
@@ -71,13 +73,13 @@ export default function CompanyCard({ company, metrics, metricsStatus, onFirstEx
                     {metricsStatus === 'loading' && (
                         <div className="flex items-center justify-center py-4 text-sm text-neutral-500">
                             <Loader2Icon className="size-4 animate-spin mr-2" />
-                            Loading metrics…
+                            {t('loadingMetrics')}
                         </div>
                     )}
 
                     {metricsStatus === 'error' && (
                         <div className="flex items-center justify-between py-2 text-sm">
-                            <span className="text-destructive">Failed to load metrics.</span>
+                            <span className="text-destructive">{t('metricsLoadFailed')}</span>
                             <Button
                                 variant="outline"
                                 size="sm"
@@ -86,7 +88,7 @@ export default function CompanyCard({ company, metrics, metricsStatus, onFirstEx
                                     onFirstExpand?.();
                                 }}
                             >
-                                Retry
+                                {t('retry')}
                             </Button>
                         </div>
                     )}
@@ -94,8 +96,8 @@ export default function CompanyCard({ company, metrics, metricsStatus, onFirstEx
                     {metricsStatus === 'ready' && metrics && (
                         <>
                             <div className="flex flex-wrap items-start gap-8">
-                                <AvatarSection label="Employees" people={metrics.persons} fallbackKey="name" imageKey="imageUrl" />
-                                <AvatarSection label="Relations" people={metrics.relatedUsers} fallbackKey="displayName" imageKey="profilePictureUrl" />
+                                <AvatarSection kind="employees" label={t('employees')} people={metrics.persons} fallbackKey="name" imageKey="imageUrl" />
+                                <AvatarSection kind="relations" label={t('relations')} people={metrics.relatedUsers} fallbackKey="displayName" imageKey="profilePictureUrl" />
                             </div>
 
                             <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
@@ -122,11 +124,13 @@ type AvatarSubject = {
 };
 
 function AvatarSection({
+    kind,
     label,
     people,
     fallbackKey,
     imageKey,
 }: {
+    kind: 'employees' | 'relations';
     label: string;
     people: AvatarSubject[];
     fallbackKey: 'name' | 'displayName';
@@ -139,16 +143,17 @@ function AvatarSection({
     const router = useRouter();
 
     const handleClick = (id: number) => {
-        if (label === 'Employees') {
+        if (kind === 'employees') {
             router.push(`/records/contacts/${id}`);
         } else {
             router.push(`/users/${id}`);
         }
     };
+    const t = useTranslations('CompaniesCard');
     return (
         <div>
             <p className="text-xs font-medium tracking-[0.12em] text-neutral-500 uppercase mb-2">
-                {label} ({people.length})
+                {t('labelWithCount', { label, count: people.length })}
             </p>
             <AvatarGroup>
                 {visible.map((p) => {
@@ -186,12 +191,13 @@ export type EngagementPoint = {
 };
 
 export function EngagementSparkline({ data }: { data: EngagementPoint[] }) {
+    const t = useTranslations('CompaniesCard');
     const total = data.reduce((s, d) => s + d.count, 0);
     return (
         <div className="md:col-span-2 rounded-xl bg-transparent p-3 ring-1 ring-black/5">
-            <p className="text-xs uppercase tracking-wider text-neutral-500">Engagement · 12w</p>
+            <p className="text-xs uppercase tracking-wider text-neutral-500">{t('engagement12w')}</p>
             {total === 0 ? (
-                <p className="text-xs text-neutral-400 mt-3">No engagement in the last 12 weeks</p>
+                <p className="text-xs text-neutral-400 mt-3">{t('noEngagement')}</p>
             ) : (
                 <div className="h-28 mt-1">
                     <ResponsiveContainer width="100%" height="100%">
@@ -241,16 +247,17 @@ export function RevenueTiles({
     pastRevenue: number;
     projectedRevenue: number;
 }) {
+    const t = useTranslations('CompaniesCard');
     return (
         <div className="space-y-2">
             <div className="rounded-xl bg-transparent p-3 ring-1 ring-black/5">
-                <p className="text-xs uppercase tracking-wider text-neutral-500">Closed revenue</p>
+                <p className="text-xs uppercase tracking-wider text-neutral-500">{t('closedRevenue')}</p>
                 <p className="mt-1 text-lg font-semibold text-neutral-900">
                     {formatCompactCurrency(pastRevenue)}
                 </p>
             </div>
             <div className="rounded-xl bg-transparent p-3 ring-1 ring-black/5">
-                <p className="text-xs uppercase tracking-wider text-neutral-500">Projected</p>
+                <p className="text-xs uppercase tracking-wider text-neutral-500">{t('projected')}</p>
                 <p className="mt-1 text-lg font-semibold text-neutral-900">
                     {formatCompactCurrency(projectedRevenue)}
                 </p>
@@ -265,6 +272,7 @@ interface EngagementTooltipProps {
 }
 
 function EngagementTooltip({ active, payload }: EngagementTooltipProps) {
+    const t = useTranslations('CompaniesCard');
     if (!active || !payload?.length) return null;
     const d = payload[0].payload;
     return (
@@ -275,15 +283,15 @@ function EngagementTooltip({ active, payload }: EngagementTooltipProps) {
             <div className="space-y-0.5">
                 <div className="flex items-center gap-1.5 text-neutral-600">
                     <span className="inline-block size-2 rounded-sm bg-brand" />
-                    Activities · {d.activities}
+                    {t('tooltipActivities', { count: d.activities })}
                 </div>
                 <div className="flex items-center gap-1.5 text-neutral-600">
                     <span className="inline-block size-2 rounded-sm bg-amber-500" />
-                    Tasks · {d.tasks}
+                    {t('tooltipTasks', { count: d.tasks })}
                 </div>
                 <div className="flex items-center gap-1.5 text-neutral-600">
                     <span className="inline-block size-2 rounded-sm bg-emerald-500" />
-                    Notes · {d.notes}
+                    {t('tooltipNotes', { count: d.notes })}
                 </div>
             </div>
         </div>

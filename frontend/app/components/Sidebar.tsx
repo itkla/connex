@@ -20,6 +20,7 @@ import {
     ChartBarIcon,
     ChartPieIcon,
     PresentationChartLineIcon,
+    GlobeAltIcon,
 } from "@heroicons/react/24/outline";
 import Image from "next/image";
 import Link from "next/link";
@@ -28,6 +29,8 @@ import { useState } from "react";
 import { DropdownMenu } from "radix-ui";
 import { type User } from "@/app/lib/types";
 import { BubblesIcon, PanelLeftOpenIcon } from "lucide-react";
+import { useTranslations } from "next-intl";
+import { DropdownMenuItem, DropdownMenuPortal, DropdownMenuSub, DropdownMenuSubContent, DropdownMenuSubTrigger } from "@/components/ui/dropdown-menu";
 // import {  } from "@heroicons/react/24/solid";
 
 type NavItem = {
@@ -42,42 +45,45 @@ type NavSection = {
     items: NavItem[];
 };
 
-const sections: NavSection[] = [
-    {
-        label: "Overview",
-        items: [
-            { label: "Dashboard", href: "/dashboard", icon: HomeIcon },
-            { label: "Calendar", href: "/dashboard/calendar", icon: CalendarIcon, disabled: true },
-            { label: "Map", href: "/dashboard/map", icon: BubblesIcon, disabled: true },
-            { label: "Analytics", href: "/dashboard/analytics", icon: ChartBarIcon, disabled: true },
-            { label: "Insights", href: "/dashboard/insights", icon: ChartPieIcon, disabled: true },
-            { label: "Reports", href: "/dashboard/reports", icon: PresentationChartLineIcon, disabled: true }
-        ]
-    },
-    {
-        label: "Records",
-        items: [
-            { label: "Companies", href: "/records/companies", icon: BuildingOffice2Icon },
-            { label: "Contacts", href: "/records/contacts", icon: UsersIcon },
-            { label: "Deals", href: "/records/deals", icon: BriefcaseIcon },
-            { label: "Pipelines", href: "/records/pipelines", icon: FunnelIcon },
-        ],
-    },
-    {
-        label: "Activity",
-        items: [
-            { label: "Activities", href: "/activity", icon: ChatBubbleLeftRightIcon },
-            { label: "Tasks", href: "/activity/tasks", icon: CheckCircleIcon },
-            { label: "Notes", href: "/activity/notes", icon: DocumentTextIcon },
-        ],
-    },
-    {
-        label: "Library",
-        items: [
-            { label: "Tags", href: "/library/tags", icon: TagIcon },
-        ],
-    },
-];
+function useSections(): NavSection[] {
+    const t = useTranslations("CommonSidebar");
+    return [
+        {
+            label: t("sectionOverview"),
+            items: [
+                { label: t("navDashboard"), href: "/dashboard", icon: HomeIcon },
+                { label: t("navCalendar"), href: "/dashboard/calendar", icon: CalendarIcon, disabled: true },
+                { label: t("navMap"), href: "/dashboard/map", icon: BubblesIcon, disabled: true },
+                { label: t("navAnalytics"), href: "/dashboard/analytics", icon: ChartBarIcon, disabled: true },
+                { label: t("navInsights"), href: "/dashboard/insights", icon: ChartPieIcon, disabled: true },
+                { label: t("navReports"), href: "/dashboard/reports", icon: PresentationChartLineIcon, disabled: true }
+            ]
+        },
+        {
+            label: t("sectionRecords"),
+            items: [
+                { label: t("navCompanies"), href: "/records/companies", icon: BuildingOffice2Icon },
+                { label: t("navContacts"), href: "/records/contacts", icon: UsersIcon },
+                { label: t("navDeals"), href: "/records/deals", icon: BriefcaseIcon },
+                { label: t("navPipelines"), href: "/records/pipelines", icon: FunnelIcon },
+            ],
+        },
+        {
+            label: t("sectionActivity"),
+            items: [
+                { label: t("navActivities"), href: "/activity", icon: ChatBubbleLeftRightIcon },
+                { label: t("navTasks"), href: "/activity/tasks", icon: CheckCircleIcon },
+                { label: t("navNotes"), href: "/activity/notes", icon: DocumentTextIcon },
+            ],
+        },
+        {
+            label: t("sectionLibrary"),
+            items: [
+                { label: t("navTags"), href: "/library/tags", icon: TagIcon },
+            ],
+        },
+    ];
+}
 
 function isActive(pathname: string, href: string): boolean {
     if (href === "/dashboard") return pathname === "/dashboard";
@@ -136,16 +142,14 @@ function NavLink({ item, active }: { item: NavItem; active: boolean }) {
             <Link
                 href={item.disabled ? "#" : item.href}
                 aria-current={active ? "page" : undefined}
-                className={`group flex items-center gap-3 rounded-md px-3 py-2 text-sm transition ${
-                    active
-                        ? "bg-brand-light text-brand-dark font-medium"
-                        : "font-light text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
-                }`}
+                className={`group flex items-center gap-3 rounded-md px-3 py-2 text-sm transition ${active
+                    ? "bg-brand-light text-brand-dark font-medium"
+                    : "font-light text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+                    }`}
             >
                 <Icon
-                    className={`size-4 shrink-0 ${
-                        active ? "text-brand-dark" : "text-neutral-500 group-hover:text-current"
-                    }`}
+                    className={`size-4 shrink-0 ${active ? "text-brand-dark" : "text-neutral-500 group-hover:text-current"
+                        }`}
                 />
                 <span>{item.label}</span>
             </Link>
@@ -154,12 +158,13 @@ function NavLink({ item, active }: { item: NavItem; active: boolean }) {
 }
 
 function UserAvatar({ user, size = 32 }: { user: User; size?: number }) {
+    const t = useTranslations("CommonSidebar");
     const initials = user.displayName?.slice(0, 1).toUpperCase() ?? "?";
     if (user.profilePictureUrl) {
         return (
             <Image
                 src={user.profilePictureUrl}
-                alt={`${user.displayName}'s profile picture`}
+                alt={t("profilePictureAlt", { name: user.displayName ?? "" })}
                 width={size}
                 height={size}
                 className="shrink-0 rounded-full object-cover ring-1 ring-black/5"
@@ -179,6 +184,7 @@ function UserAvatar({ user, size = 32 }: { user: User; size?: number }) {
 }
 
 function UserMenu({ user, onLogout }: { user: User; onLogout: () => void }) {
+    const t = useTranslations("CommonSidebar");
     return (
         <DropdownMenu.Root>
             <DropdownMenu.Trigger asChild>
@@ -223,8 +229,30 @@ function UserMenu({ user, onLogout }: { user: User; onLogout: () => void }) {
                             className="flex cursor-pointer items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-none data-[highlighted]:bg-brand-light data-[highlighted]:text-brand-dark"
                         >
                             <UserCircleIcon className="size-4" />
-                            Profile
+                            {t("profile")}
                         </Link>
+                    </DropdownMenu.Item>
+                    <DropdownMenu.Item asChild>
+                        <DropdownMenuSub>
+                            <DropdownMenuSubTrigger onClick={() => {
+                            }}>
+                                <GlobeAltIcon className="size-4" />
+                                Language
+                                <DropdownMenuPortal>
+                                    <DropdownMenuSubContent>
+                                        {/* // set cookie to store the language for next-intl */}
+                                        <DropdownMenuItem onClick={() => {
+                                            document.cookie = "NEXT_LOCALE=en; path=/";
+                                            window.location.reload();
+                                        }}>English</DropdownMenuItem>
+                                        <DropdownMenuItem onClick={() => {
+                                            document.cookie = "NEXT_LOCALE=ja; path=/";
+                                            window.location.reload();
+                                        }}>日本語</DropdownMenuItem>
+                                    </DropdownMenuSubContent>
+                                </DropdownMenuPortal>
+                            </DropdownMenuSubTrigger>
+                        </DropdownMenuSub>
                     </DropdownMenu.Item>
                     {/* <DropdownMenu.Separator className="my-1 h-px bg-sidebar-border" /> */}
                     <DropdownMenu.Item
@@ -235,7 +263,7 @@ function UserMenu({ user, onLogout }: { user: User; onLogout: () => void }) {
                         className="flex cursor-pointer items-center gap-2 rounded-sm px-2 py-1.5 text-sm text-red-600 outline-none data-[highlighted]:bg-red-50 data-[highlighted]:text-red-700"
                     >
                         <ArrowRightStartOnRectangleIcon className="size-4" />
-                        Log out
+                        {t("logOut")}
                     </DropdownMenu.Item>
                 </DropdownMenu.Content>
             </DropdownMenu.Portal>
@@ -252,6 +280,8 @@ export default function Sidebar({
 }) {
     const pathname = usePathname() ?? "";
     const router = useRouter();
+    const t = useTranslations("CommonSidebar");
+    const sections = useSections();
 
     async function handleLogout() {
         try {
@@ -265,11 +295,11 @@ export default function Sidebar({
         <div className="p-2 h-screen">
             <aside
                 className={`flex flex-col min-h-0 ${className ?? ""}`}
-                aria-label="Primary sidebar"
+                aria-label={t("ariaPrimarySidebar")}
             >
                 {/* TODO: make this section a menu so that the user can select the organization they want to use */}
                 <header className="mb-6 shrink-0">
-                    <h1 className="text-2xl font-bold tracking-tight">{process.env.ORG_NAME ?? "CONNEX"}</h1>
+                    <h1 className="text-2xl font-bold tracking-tight">{process.env.ORG_NAME ?? t("brand")}</h1>
                 </header>
 
                 <nav className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto pr-1">

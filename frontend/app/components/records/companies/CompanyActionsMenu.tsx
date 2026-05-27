@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { useTranslations } from 'next-intl';
 import { toast } from 'sonner';
 import { EllipsisVerticalIcon, PencilSquareIcon, EyeIcon, PaperClipIcon, TrashIcon, PlusIcon, UserIcon, BriefcaseIcon, BoltIcon } from '@heroicons/react/24/outline';
 
@@ -28,6 +29,7 @@ export default function CompanyActionsMenu({
     company: Company;
 }) {
     const router = useRouter();
+    const t = useTranslations('CompaniesActionsMenu');
     const [deleteOpen, setDeleteOpen] = useState(false);
     const [isDeleting, setIsDeleting] = useState(false);
     const [editOpen, setEditOpen] = useState(false);
@@ -49,13 +51,13 @@ export default function CompanyActionsMenu({
         setIsDeleting(true);
         try {
             await deleteCompany(company.id);
-            toast.success('Company deleted', {
+            toast.success(t('toastCompanyDeleted'), {
                 style: { backgroundColor: 'var(--color-brand)', color: 'white' },
             });
             router.push('/records/companies');
             router.refresh();
         } catch (err) {
-            toast.error(err instanceof Error ? err.message : 'Failed to delete', {
+            toast.error(err instanceof Error ? err.message : t('toastDeleteFailed'), {
                 style: { backgroundColor: 'var(--color-destructive)', color: 'white' },
             });
             setIsDeleting(false);
@@ -71,14 +73,14 @@ export default function CompanyActionsMenu({
                 const imageUrl = await uploadContactPicture(newContact.id, imageFile);
                 await updateContact(newContact.id, { ...newContactPayload, imageUrl });
             }
-            toast.success('Contact created', {
+            toast.success(t('toastContactCreated'), {
                 style: { backgroundColor: 'var(--color-brand)', color: 'white' },
             });
             setNewContactDialogOpen(false);
             router.refresh();
         } catch (err) {
             console.error(err);
-            toast.error('Failed to create contact', {
+            toast.error(t('toastCreateContactFailed'), {
                 style: { backgroundColor: 'var(--color-destructive)', color: 'white' },
             });
         } finally {
@@ -90,23 +92,23 @@ export default function CompanyActionsMenu({
             <ButtonGroup orientation="horizontal">
                 <Button variant="outline" size="sm" onClick={() => setEditOpen(true)}>
                     <PencilSquareIcon className="size-4" />
-                    Edit
+                    {t('edit')}
                 </Button>
                 <Button variant="outline" size="sm">
                     <EyeIcon className="size-4" />
-                    View in map
+                    {t('viewInMap')}
                 </Button>
             </ButtonGroup>
             <ButtonGroup orientation="horizontal">
                 <Button variant="outline" size="sm">
                     <PaperClipIcon className="size-4" />
-                    Add
+                    {t('add')}
                 </Button>
                 <DropdownMenu>
                     <DropdownMenuTrigger asChild>
                         <Button variant="outline" size="sm">
                             <PlusIcon className="size-4" />
-                            New
+                            {t('new')}
                         </Button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end" className="w-48">
@@ -116,15 +118,15 @@ export default function CompanyActionsMenu({
                             showNewContactDialog();
                         }}>
                             <UserIcon className="size-4" />
-                            New contact
+                            {t('newContact')}
                         </DropdownMenuItem>
                         <DropdownMenuItem>
                             <BriefcaseIcon className="size-4" />
-                            New deal
+                            {t('newDeal')}
                         </DropdownMenuItem>
                         <DropdownMenuItem>
                             <BoltIcon className="size-4" />
-                            New pipeline
+                            {t('newPipeline')}
                         </DropdownMenuItem>
                     </DropdownMenuContent>
                 </DropdownMenu>
@@ -143,7 +145,7 @@ export default function CompanyActionsMenu({
                             }}
                         >
                             <TrashIcon className="size-4" />
-                            <span>Delete</span>
+                            <span>{t('delete')}</span>
                         </DropdownMenuItem>
                     </DropdownMenuContent>
                 </DropdownMenu>
@@ -156,7 +158,7 @@ export default function CompanyActionsMenu({
                 onOpenChange={setDeleteOpen}
                 selectedIds={new Set([company.id])}
                 selectedItems={[company]}
-                entityLabel="company"
+                entityLabel={t('entityLabel')}
                 getDisplayName={(c) => c.name}
                 isDeleting={isDeleting}
                 confirmDelete={confirmDelete}

@@ -4,6 +4,7 @@ import { cookies } from "next/headers";
 import Link from "next/link";
 import { Suspense } from "react";
 import { notFound, redirect } from "next/navigation";
+import { getTranslations } from "next-intl/server";
 import { ArrowLeftIcon, UserIcon, PlusIcon } from "@heroicons/react/24/outline";
 import PipelineCard from "@/app/components/records/PipelineCard";
 import NewContactDialog from "@/app/components/records/contacts/NewContactDialog";
@@ -44,6 +45,7 @@ export default async function CompanyPage({ params }: { params: { id: number } }
     const { id } = await params;
     const cookie = (await cookies()).toString();
     const init = { headers: { cookie } } as const;
+    const t = await getTranslations("CompaniesDetail");
 
     const [
         company,
@@ -147,7 +149,7 @@ export default async function CompanyPage({ params }: { params: { id: number } }
                 className="inline-flex items-center gap-2 text-base text-brand hover:text-brand-hover w-fit"
             >
                 <ArrowLeftIcon className="h-4 w-4" />
-                <span>All Companies</span>
+                <span>{t("backToAll")}</span>
             </Link>
 
             <header className="mt-8 flex flex-wrap items-center justify-between gap-6">
@@ -179,10 +181,10 @@ export default async function CompanyPage({ params }: { params: { id: number } }
 
                 <div className="flex flex-col items-end gap-2">
                     <span className="text-xs font-medium tracking-[0.12em] text-neutral-500 uppercase">
-                        Past Relations
+                        {t("pastRelations")}
                     </span>
                     {interactionUsers.length === 0 ? (
-                        <span className="text-xs text-neutral-400">No recorded interactions</span>
+                        <span className="text-xs text-neutral-400">{t("noRecordedInteractions")}</span>
                     ) : (
                         <AvatarGroup>
                             {interactionUsers.map((user) => (
@@ -221,61 +223,61 @@ export default async function CompanyPage({ params }: { params: { id: number } }
                 <aside>
                     <div className="mb-3 flex h-8 items-center">
                         <h2 className="px-6 text-xs font-medium tracking-[0.12em] text-neutral-500 uppercase">
-                            Profile
+                            {t("profile")}
                         </h2>
                     </div>
                     <dl className="divide-y divide-neutral-200 overflow-hidden rounded-2xl bg-neutral-100 ring-1 ring-black/5">
-                        <InfoRow label="Website" value={company.website ?? ''} />
-                        <InfoRow label="Phone" value={company.phone ?? ''} />
-                        <InfoRow label="Address" value={company.address ?? ''} />
-                        <InfoRow label="Industry" value={company.industry ?? ''} />
-                        <InfoRow label="Added" value={formatDate(company.createdAt)} />
-                        <InfoRow label="Updated" value={formatDateTime(company.updatedAt)} />
+                        <InfoRow label={t("website")} value={company.website ?? ''} />
+                        <InfoRow label={t("phone")} value={company.phone ?? ''} />
+                        <InfoRow label={t("address")} value={company.address ?? ''} />
+                        <InfoRow label={t("industry")} value={company.industry ?? ''} />
+                        <InfoRow label={t("added")} value={formatDate(company.createdAt)} />
+                        <InfoRow label={t("updated")} value={formatDateTime(company.updatedAt)} />
                     </dl>
                 </aside>
 
                 <section className="md:flex md:min-h-0 md:flex-col">
                     <div className="mb-3 flex h-8 items-center">
                         <h2 className="px-6 text-xs font-medium tracking-[0.12em] text-neutral-500 uppercase">
-                            Their Activity
+                            {t("theirActivity")}
                         </h2>
                     </div>
                     <div className="grid grid-cols-3 gap-3">
-                        <Suspense fallback={<div>Loading...</div>}>
+                        <Suspense fallback={<div>{t("loading")}</div>}>
                             <ContactStatCard
-                                label="Activities"
+                                label={t("activities")}
                                 value={activities.length}
-                                subtitle={notes.length > 0 ? `${notes.length} notes` : undefined}
+                                subtitle={notes.length > 0 ? t("notesSubtitle", { count: notes.length }) : undefined}
                                 viewHref={`/activity?companyId=${company.id}`}
                             />
                         </Suspense>
-                        <Suspense fallback={<div>Loading...</div>}>
+                        <Suspense fallback={<div>{t("loading")}</div>}>
                             <ContactStatCard
-                                label="Tasks"
+                                label={t("tasks")}
                                 value={tasks.length}
-                                subtitle={tasks.length > 0 ? `${openTasks} open` : undefined}
+                                subtitle={tasks.length > 0 ? t("openTasksSubtitle", { count: openTasks }) : undefined}
                                 viewHref={`/activity/tasks?companyId=${company.id}`}
                             />
                         </Suspense>
-                        <Suspense fallback={<div>Loading...</div>}>
+                        <Suspense fallback={<div>{t("loading")}</div>}>
                             <ContactStatCard
-                                label="Deals"
+                                label={t("deals")}
                                 value={deals.length}
-                                subtitle={deals.length > 0 ? `${deals.length} deals` : undefined}
+                                subtitle={deals.length > 0 ? t("dealsSubtitle", { count: deals.length }) : undefined}
                                 viewHref={`/activity/deals?companyId=${company.id}`}
                             />
                         </Suspense>
                     </div>
 
                     <div className="mt-6 grid grid-cols-1 gap-3 md:grid-cols-3">
-                        <Suspense fallback={<div>Loading...</div>}>
+                        <Suspense fallback={<div>{t("loading")}</div>}>
                             <EngagementSparkline data={weeklyEngagement} />
                             <RevenueTiles pastRevenue={pastRevenue} projectedRevenue={projectedRevenue} />
                         </Suspense>
                     </div>
 
                     {/* pipeline goes here */}
-                    <Suspense fallback={<div>Loading...</div>}>
+                    <Suspense fallback={<div>{t("loading")}</div>}>
                         <PipelineCard deals={deals} render="active" />
                     </Suspense>
 
@@ -339,7 +341,7 @@ export default async function CompanyPage({ params }: { params: { id: number } }
 
                     <div className="mt-6 mb-3 flex h-8 items-center">
                         <h2 className="px-6 text-xs font-medium tracking-[0.12em] text-neutral-500 uppercase">
-                            Timeline
+                            {t("timeline")}
                         </h2>
                     </div>
                     <div className="overflow-hidden rounded-2xl bg-white ring-1 ring-black/5 md:flex md:min-h-0 md:flex-1 md:flex-col">

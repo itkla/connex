@@ -2,6 +2,7 @@
 
 import { startTransition, useOptimistic } from 'react';
 import { useRouter } from 'next/navigation';
+import { useTranslations } from 'next-intl';
 import { toast } from 'sonner';
 import { PlusIcon, XMarkIcon } from '@heroicons/react/24/outline';
 
@@ -29,6 +30,7 @@ export default function TagEditor({
     allTags,
 }: Props) {
     const router = useRouter();
+    const t = useTranslations('ContactsTagEditor');
     const [optimisticTags, applyOptimistic] = useOptimistic<Tag[], TagAction>(
         currentTags,
         (state, action) => {
@@ -52,7 +54,7 @@ export default function TagEditor({
                 await addTag(tag.id);
                 router.refresh();
             } catch (err) {
-                toast.error(err instanceof Error ? err.message : 'Failed to add tag', {
+                toast.error(err instanceof Error ? err.message : t('toastFailedAdd'), {
                     style: { backgroundColor: 'var(--color-destructive)', color: 'white' },
                 });
             }
@@ -66,7 +68,7 @@ export default function TagEditor({
                 await removeTag(tag.id);
                 router.refresh();
             } catch (err) {
-                toast.error(err instanceof Error ? err.message : 'Failed to remove tag', {
+                toast.error(err instanceof Error ? err.message : t('toastFailedRemove'), {
                     style: { backgroundColor: 'var(--color-destructive)', color: 'white' },
                 });
             }
@@ -85,7 +87,7 @@ export default function TagEditor({
                     {tag.name}
                     <button
                         type="button"
-                        aria-label={`Remove ${tag.name}`}
+                        aria-label={t('removeAria', { name: tag.name })}
                         onClick={() => handleRemove(tag)}
                         className="-mr-0.5 hidden h-3.5 w-3.5 items-center justify-center rounded-full transition group-hover/tag:inline-flex hover:bg-black/20"
                     >
@@ -98,11 +100,11 @@ export default function TagEditor({
                     <DropdownMenuTrigger asChild>
                         <button
                             type="button"
-                            aria-label="Add tag"
+                            aria-label={t('addTagAria')}
                             className="inline-flex items-center gap-1 rounded-4xl border border-dashed border-neutral-300 px-2 py-0.5 text-xs text-neutral-500 transition hover:border-neutral-400 hover:text-neutral-700"
                         >
                             <PlusIcon className="size-3" />
-                            Tag
+                            {t('tag')}
                         </button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="start">

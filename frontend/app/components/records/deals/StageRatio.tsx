@@ -2,6 +2,7 @@
 
 import { useMemo, useEffect, useState } from 'react';
 import { Pie, PieChart, Tooltip as RechartsTooltip } from 'recharts';
+import { useTranslations } from 'next-intl';
 
 import {
     ChartContainer,
@@ -46,6 +47,7 @@ type PipelineDatum = { name: string; status: DealStatus; value: number; total: n
 type StageDatum = { name: string; pipelineName: string; status: DealStatus; value: number; total: number; currency: string; fill: string };
 
 export default function StageRatio({ deals }: { deals: Deal[] }) {
+    const t = useTranslations('DealsStageRatio');
     const [pipelines, setPipelines] = useState<Pipeline[]>([]);
     const [stagesByPipeline, setStagesByPipeline] = useState<Record<number, Stage[]>>({});
 
@@ -147,7 +149,13 @@ export default function StageRatio({ deals }: { deals: Deal[] }) {
             <PieChart>
                 <RechartsTooltip
                     cursor={{ fill: 'var(--color-brand)', fillOpacity: 0.05 }}
-                    content={<StageRatioTooltip />}
+                    content={
+                        <StageRatioTooltip
+                            openLabel={t('open')}
+                            closedLabel={t('closed')}
+                            dealsLabel={(value) => t('deals', { value })}
+                        />
+                    }
                 />
                 <Pie
                     data={pipelineData}
@@ -178,13 +186,16 @@ export default function StageRatio({ deals }: { deals: Deal[] }) {
 interface StageRatioTooltipProps {
     active?: boolean;
     payload?: Array<{ payload: PipelineDatum | StageDatum }>;
+    openLabel?: string;
+    closedLabel?: string;
+    dealsLabel?: (value: number) => string;
 }
 
-function StageRatioTooltip({ active, payload }: StageRatioTooltipProps) {
+function StageRatioTooltip({ active, payload, openLabel, closedLabel, dealsLabel }: StageRatioTooltipProps) {
     if (!active || !payload?.length) return null;
     const d = payload[0].payload;
     const isStage = 'pipelineName' in d;
-    const statusLabel = d.status === 'closed' ? 'Closed' : 'Open';
+    const statusLabel = d.status === 'closed' ? (closedLabel ?? 'Closed') : (openLabel ?? 'Open');
     const title = isStage
         ? `${d.pipelineName} · ${d.name} · ${statusLabel}`
         : `${d.name} · ${statusLabel}`;
@@ -196,7 +207,7 @@ function StageRatioTooltip({ active, payload }: StageRatioTooltipProps) {
                     className="inline-block size-2 rounded-sm"
                     style={{ backgroundColor: d.fill }}
                 />
-                {d.value} {d.value === 1 ? 'deal' : 'deals'} · {formatCompactCurrency(d.total, d.currency)}
+                {dealsLabel ? dealsLabel(d.value) : `${d.value} ${d.value === 1 ? 'deal' : 'deals'}`} · {formatCompactCurrency(d.total, d.currency)}
             </div>
         </div>
     );

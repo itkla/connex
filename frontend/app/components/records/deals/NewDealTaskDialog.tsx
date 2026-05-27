@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
 import { Loader2Icon } from 'lucide-react';
 import { UserIcon } from '@heroicons/react/24/outline';
+import { useTranslations } from 'next-intl';
 
 import {
     Dialog,
@@ -42,6 +43,7 @@ export default function NewDealTaskDialog({
     onOpenChange: (open: boolean) => void;
 }) {
     const router = useRouter();
+    const t = useTranslations('DealsNewTaskDialog');
     const [description, setDescription] = useState('');
     const [dueDate, setDueDate] = useState('');
     const [submitting, setSubmitting] = useState(false);
@@ -67,7 +69,7 @@ export default function NewDealTaskDialog({
     async function handleSubmit(e: React.SubmitEvent<HTMLFormElement>) {
         e.preventDefault();
         if (!description.trim()) {
-            toast.error('Description is required');
+            toast.error(t('descriptionRequired'));
             return;
         }
         setSubmitting(true);
@@ -82,17 +84,17 @@ export default function NewDealTaskDialog({
             });
             if (personId != null) {
                 await addDealPerson(dealId, personId, '').catch(() => {
-                    toast.warning('Task created, but failed to link contact to deal');
+                    toast.warning(t('taskCreatedButFailedToLink'));
                 });
             }
-            toast.success('Task added', {
+            toast.success(t('taskAdded'), {
                 style: { backgroundColor: 'var(--color-brand)', color: 'white' },
             });
             onOpenChange(false);
             reset();
             router.refresh();
         } catch (err) {
-            const message = err instanceof ApiError ? err.message : err instanceof Error ? err.message : 'Failed to create task';
+            const message = err instanceof ApiError ? err.message : err instanceof Error ? err.message : t('failedToCreateTask');
             toast.error(message, {
                 style: { backgroundColor: 'var(--color-destructive)', color: 'white' },
             });
@@ -120,18 +122,18 @@ export default function NewDealTaskDialog({
         >
             <DialogContent>
                 <DialogHeader>
-                    <DialogTitle>New task</DialogTitle>
+                    <DialogTitle>{t('title')}</DialogTitle>
                     <DialogDescription>
-                        Add a task linked to {dealName}. Assigned to you by default.
+                        {t('description', { dealName })}
                     </DialogDescription>
                 </DialogHeader>
 
                 <form onSubmit={handleSubmit} className="grid gap-4">
                     <div className="grid gap-2">
-                        <Label htmlFor="deal-task-assigned-to">Assigned to</Label>
+                        <Label htmlFor="deal-task-assigned-to">{t('assignedTo')}</Label>
                         <Select value={assignedToId.toString()} onValueChange={(value) => setAssignedToId(parseInt(value))}>
                             <SelectTrigger className={inputClass}>
-                                <SelectValue placeholder="Select user" />
+                                <SelectValue placeholder={t('selectUser')} />
                             </SelectTrigger>
                             <SelectContent>
                                 {users.map((user) => (
@@ -150,10 +152,10 @@ export default function NewDealTaskDialog({
                     </div>
 
                     <div className="grid gap-2">
-                        <Label htmlFor="deal-task-contact">Contact</Label>
+                        <Label htmlFor="deal-task-contact">{t('contact')}</Label>
                         <Select value={contactId} onValueChange={(value) => setContactId(value)}>
                             <SelectTrigger className={inputClass}>
-                                <SelectValue placeholder="Select contact" />
+                                <SelectValue placeholder={t('selectContact')} />
                             </SelectTrigger>
                             <SelectContent>
                                 {contacts.map((contact) => (
@@ -172,19 +174,19 @@ export default function NewDealTaskDialog({
                     </div>
 
                     <div className="grid gap-2">
-                        <Label htmlFor="deal-task-description">Description</Label>
+                        <Label htmlFor="deal-task-description">{t('descriptionLabel')}</Label>
                         <Textarea
                             id="deal-task-description"
                             value={description}
                             onChange={(e) => setDescription(e.target.value)}
-                            placeholder="Send revised proposal…"
+                            placeholder={t('descriptionPlaceholder')}
                             required
                             autoFocus
                         />
                     </div>
 
                     <div className="grid gap-2">
-                        <Label htmlFor="deal-task-due">Due date</Label>
+                        <Label htmlFor="deal-task-due">{t('dueDate')}</Label>
                         <input
                             id="deal-task-due"
                             type="date"
@@ -197,11 +199,11 @@ export default function NewDealTaskDialog({
                     <DialogFooter>
                         <DialogClose asChild>
                             <Button type="button" variant="outline" disabled={submitting}>
-                                Cancel
+                                {t('cancel')}
                             </Button>
                         </DialogClose>
                         <Button type="submit" disabled={submitting} className="bg-brand text-white hover:bg-brand-dark">
-                            {submitting ? <Loader2Icon className="size-4 animate-spin" /> : 'Create'}
+                            {submitting ? <Loader2Icon className="size-4 animate-spin" /> : t('create')}
                         </Button>
                     </DialogFooter>
                 </form>

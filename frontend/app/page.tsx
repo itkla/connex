@@ -4,26 +4,28 @@ import ProfileCard from "./components/ProfileCard";
 import { ArrowRightCircleIcon } from "@heroicons/react/16/solid";
 import { headers } from 'next/headers';
 import { getCurrentUserFromCookie } from "@/app/lib/api";
+import { getTranslations } from "next-intl/server";
 
 export default async function Home() {
   const cookie = (await headers()).get('cookie');
   const user = await getCurrentUserFromCookie(cookie);
+  const t = await getTranslations("CommonHome");
   const ctaHref = user ? "/dashboard" : "/auth/login";
-  const ctaLabel = user ? "Dashboard" : "Get started";
+  const ctaLabel = user ? t("ctaDashboard") : t("ctaGetStarted");
 
   return (
     <div className="min-h-screen bg-white max-w-full">
       <header className="flex items-center justify-between px-8 py-6">
         <div className="flex items-center gap-12">
           <Link href="/" className="text-2xl font-bold tracking-tight text-black">
-            CONNEX
+            {t("brand")}
           </Link>
           <nav className="hidden items-center gap-8 md:flex">
             <a href="#pricing" className="text-base text-black hover:text-neutral-600">
-              Pricing
+              {t("pricing")}
             </a>
             <a href="#features" className="text-base text-black hover:text-neutral-600">
-              Features
+              {t("features")}
             </a>
           </nav>
         </div>
@@ -38,8 +40,7 @@ export default async function Home() {
       <main className="mx-auto grid max-w-7xl grid-cols-1 items-center gap-12 px-8 pt-12 pb-24 lg:grid-cols-2 lg:gap-16 lg:pt-24">
         <section className="max-w-4xl">
           <h1 className="font-['Instrument_Serif'] text-6xl leading-[1.05] tracking-tight text-black sm:text-7xl lg:text-[88px]">
-            Build <em className="italic">Meaningful</em> Connections with your
-            Clients
+            {t("headlineBuild")} <em className="italic">{t("headlineMeaningful")}</em> {t("headlineConnections")}
           </h1>
           <div className="mt-12">
             <Link

@@ -1,12 +1,13 @@
+import { getTranslations } from 'next-intl/server';
 import { type User } from '@/app/lib/api';
 
-function timeOfDayGreeting(): string {
+function timeOfDayGreetingKey(): 'workingLate' | 'goodMorning' | 'goodAfternoon' | 'goodEvening' {
     const h = new Date().getHours();
-    if (h < 5) return 'Working late,';
-    if (h < 12) return 'Good morning,';
-    if (h < 17) return 'Good afternoon,';
-    if (h < 21) return 'Good evening,';
-    return 'Working late,';
+    if (h < 5) return 'workingLate';
+    if (h < 12) return 'goodMorning';
+    if (h < 17) return 'goodAfternoon';
+    if (h < 21) return 'goodEvening';
+    return 'workingLate';
 }
 
 function todayLabel(): string {
@@ -17,7 +18,7 @@ function todayLabel(): string {
     }).format(new Date());
 }
 
-export default function Greeting({
+export default async function Greeting({
     user,
     overdueTasks,
     closingSoon,
@@ -26,22 +27,23 @@ export default function Greeting({
     overdueTasks: number;
     closingSoon: number;
 }) {
+    const t = await getTranslations('DashboardGreeting');
     const firstName = user.displayName?.split(' ')[0] ?? user.displayName;
 
     let callout: React.ReactNode = (
         <span className="text-neutral-500">
-            Nothing urgent today. Smooth sailing.
+            {t('nothingUrgent')}
         </span>
     );
     if (overdueTasks > 0) {
         callout = (
             <span className="text-neutral-700">
                 <span className="text-red-600 font-medium">
-                    {overdueTasks} task{overdueTasks === 1 ? '' : 's'} overdue
+                    {t('tasksOverdue', { count: overdueTasks })}
                 </span>
                 {closingSoon > 0 ? (
                     <span className="text-neutral-500">
-                        {' '}· {closingSoon} deal{closingSoon === 1 ? '' : 's'} closing this week
+                        {t('dealsClosingSeparator', { count: closingSoon })}
                     </span>
                 ) : null}
             </span>
@@ -50,9 +52,9 @@ export default function Greeting({
         callout = (
             <span className="text-neutral-700">
                 <span className="text-brand-dark font-medium">
-                    {closingSoon} deal{closingSoon === 1 ? '' : 's'}
+                    {t('dealsCount', { count: closingSoon })}
                 </span>
-                <span className="text-neutral-500"> closing this week</span>
+                <span className="text-neutral-500">{t('closingThisWeek')}</span>
             </span>
         );
     }
@@ -61,7 +63,7 @@ export default function Greeting({
         <header className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
             <h1 className="leading-tight tracking-tight">
                 <span className="block text-2xl font-medium text-neutral-500">
-                    {timeOfDayGreeting()}
+                    {t(timeOfDayGreetingKey())}
                 </span>
                 <span className="mt-1 block text-4xl font-extrabold tracking-tight text-black md:text-5xl">
                     {firstName}

@@ -4,6 +4,7 @@ import { type Company, type Tag, type Contact, type User } from "@/app/lib/types
 import { cookies } from "next/headers";
 import Link from "next/link";
 import { ArrowLeftIcon, UserIcon } from "@heroicons/react/24/outline";
+import { getTranslations } from "next-intl/server";
 
 import ContactActionsMenu from "@/app/components/records/contacts/ContactActionsMenu";
 import ContactAvatar from "@/app/components/records/contacts/ContactAvatar";
@@ -21,6 +22,7 @@ export default async function ContactPage({ params }: { params: { id: number } }
     const { id } = await params;
     const cookie = (await cookies()).toString();
     const init = { headers: { cookie } } as const;
+    const t = await getTranslations("ContactsPage");
 
     const [contact, currentUser, allTags, allCompanies] = await Promise.all([
         getContactById(id, init) as Promise<Contact>,
@@ -60,7 +62,7 @@ export default async function ContactPage({ params }: { params: { id: number } }
                     className="inline-flex items-center gap-2 text-base text-brand hover:text-brand-hover w-fit"
                 >
                     <ArrowLeftIcon className="h-4 w-4" />
-                    <span>All Contacts</span>
+                    <span>{t("allContacts")}</span>
                 </Link>
                 <ContactActionsMenu contact={contact} companies={allCompanies} currentUserId={currentUser.id} />
             </div>
@@ -103,10 +105,10 @@ export default async function ContactPage({ params }: { params: { id: number } }
 
                 <div className="flex flex-col items-end gap-2">
                     <span className="text-xs font-medium tracking-[0.12em] text-neutral-500 uppercase">
-                        Relations
+                        {t("relations")}
                     </span>
                     {interactionUsers.length === 0 ? (
-                        <span className="text-xs text-neutral-400">No recorded interactions</span>
+                        <span className="text-xs text-neutral-400">{t("noRecordedInteractions")}</span>
                     ) : (
                         <AvatarGroup>
                             {interactionUsers.map((user) => (
@@ -144,30 +146,30 @@ export default async function ContactPage({ params }: { params: { id: number } }
                 <aside>
                     <div className="mb-3 flex h-8 items-center">
                         <h2 className="px-6 text-xs font-medium tracking-[0.12em] text-neutral-500 uppercase">
-                            Profile
+                            {t("profile")}
                         </h2>
                     </div>
                     <dl className="divide-y divide-neutral-200 overflow-hidden rounded-2xl bg-neutral-100 ring-1 ring-black/5">
-                        <InfoRow label="Email" value={contact.email ?? ''} />
-                        <InfoRow label="Phone" value={contact.phone ?? ''} />
-                        <InfoRow label="Title" value={contact.title ?? ''} />
-                        <InfoRow label="Company" value={contact.company?.name ?? '—'} />
-                        <InfoRow label="Added" value={formatDate(contact.createdAt)} />
-                        <InfoRow label="Updated" value={formatDateTime(contact.updatedAt)} />
+                        <InfoRow label={t("email")} value={contact.email ?? ''} />
+                        <InfoRow label={t("phone")} value={contact.phone ?? ''} />
+                        <InfoRow label={t("title")} value={contact.title ?? ''} />
+                        <InfoRow label={t("company")} value={contact.company?.name ?? t("companyPlaceholder")} />
+                        <InfoRow label={t("added")} value={formatDate(contact.createdAt)} />
+                        <InfoRow label={t("updated")} value={formatDateTime(contact.updatedAt)} />
                     </dl>
                 </aside>
 
                 <section className="md:flex md:min-h-0 md:flex-col">
                     <div className="mb-3 flex h-8 items-center">
                         <h2 className="px-6 text-xs font-medium tracking-[0.12em] text-neutral-500 uppercase">
-                            Their Activity
+                            {t("theirActivity")}
                         </h2>
                     </div>
                     <div className="grid grid-cols-3 gap-3">
                         <ContactStatCard
-                            label="Activities"
+                            label={t("activities")}
                             value={activities.length}
-                            subtitle={notes.length > 0 ? `${notes.length} notes` : undefined}
+                            subtitle={notes.length > 0 ? t("notesCount", { count: notes.length }) : undefined}
                             addAction={
                                 <NewActivityDialog
                                     contactId={contact.id}
@@ -178,9 +180,9 @@ export default async function ContactPage({ params }: { params: { id: number } }
                             viewHref={`/activity?contactId=${contact.id}`}
                         />
                         <ContactStatCard
-                            label="Tasks"
+                            label={t("tasks")}
                             value={tasks.length}
-                            subtitle={tasks.length > 0 ? `${openTasks} open` : undefined}
+                            subtitle={tasks.length > 0 ? t("openCount", { count: openTasks }) : undefined}
                             addAction={
                                 <NewTaskDialog
                                     contactId={contact.id}
@@ -192,21 +194,21 @@ export default async function ContactPage({ params }: { params: { id: number } }
                             viewHref={`/activity/tasks?contactId=${contact.id}`}
                         />
                         <ContactStatCard
-                            label="Deals"
+                            label={t("deals")}
                             value={deals.length}
-                            subtitle={deals.length > 0 ? `${deals.length} deals` : undefined}
+                            subtitle={deals.length > 0 ? t("dealsCount", { count: deals.length }) : undefined}
                             viewHref={`/activity/deals?contactId=${contact.id}`}
                         />
                     </div>
 
                     <div className="mt-6 mb-3 flex h-8 items-center">
                         <h2 className="px-6 text-xs font-medium tracking-[0.12em] text-neutral-500 uppercase">
-                            Active Pipeline
+                            {t("activePipeline")}
                         </h2>
                     </div>
                     <div className="overflow-hidden rounded-2xl bg-neutral-100 ring-1 ring-black/5">
                         {deals.length === 0 ? (
-                            <p className="px-6 py-6 text-sm text-neutral-500">No active deals.</p>
+                            <p className="px-6 py-6 text-sm text-neutral-500">{t("noActiveDeals")}</p>
                         ) : (
                             <ul className="divide-y divide-neutral-200">
                                 {deals.map((deal) => (
@@ -230,7 +232,7 @@ export default async function ContactPage({ params }: { params: { id: number } }
 
                     <div className="mt-6 mb-3 flex h-8 items-center">
                         <h2 className="px-6 text-xs font-medium tracking-[0.12em] text-neutral-500 uppercase">
-                            Timeline
+                            {t("timeline")}
                         </h2>
                     </div>
                     <div className="overflow-hidden rounded-2xl bg-white ring-1 ring-black/5 md:flex md:min-h-0 md:flex-1 md:flex-col">

@@ -1,0 +1,61 @@
+{
+  "MePage": {
+    "greetingHello": "こんにちは、",
+    "greetingHi": "やあ、",
+    "greetingHey": "ねえ、",
+    "greetingGoodDay": "ごきげんよう、",
+    "greetingGoodMorning": "おはようございます、",
+    "greetingGoodAfternoon": "こんにちは、",
+    "greetingGoodEvening": "こんばんは、",
+    "greetingHowdy": "どうも、",
+    "greetingWhatsUp": "どう、",
+    "profilePictureAlt": "{name} のプロフィール画像",
+    "profilePicturePlaceholderAriaLabel": "プロフィール画像のプレースホルダー",
+    "profile": "プロフィール",
+    "username": "ユーザー名",
+    "email": "メール",
+    "lastLogin": "最終ログイン",
+    "memberSince": "登録日",
+    "backToDashboard": "ダッシュボードへ戻る",
+    "myActivity": "自分のアクティビティ",
+    "tasks": "タスク",
+    "activities": "アクティビティ",
+    "notes": "メモ",
+    "openCount": "未完了 {count} 件"
+  },
+  "MeActivityList": {
+    "empty": "アクティビティはまだ記録されていません。"
+  },
+  "MeEditSelfModal": {
+    "triggerTitle": "プロフィールを編集",
+    "triggerSrLabel": "プロフィールを編集",
+    "dialogTitle": "プロフィールの編集",
+    "dialogDescription": "アカウント情報を更新します。変更は即座に保存されます。",
+    "profilePicture": "プロフィール画像",
+    "username": "ユーザー名",
+    "displayName": "表示名",
+    "email": "メール",
+    "cancel": "キャンセル",
+    "save": "保存",
+    "noChangesToast": "変更はありませんでした",
+    "profileUpdatedTitle": "プロフィールを更新しました",
+    "profileUpdatedDescription": "プロフィールを正常に更新しました。",
+    "errorUpdatingTitle": "プロフィールの更新中にエラーが発生しました",
+    "errorUpdatingDescription": "もう一度お試しください。",
+    "failedToUpdateProfile": "プロフィールを更新できませんでした"
+  },
+  "MeNoteList": {
+    "empty": "メモはまだ作成されていません。"
+  },
+  "MeTaskList": {
+    "empty": "割り当てられているタスクはまだありません。"
+  },
+  "MeTimeline": {
+    "completed": "完了",
+    "due": "期限: {date}",
+    "chipTask": "タスク",
+    "chipActivity": "アクティビティ",
+    "chipNote": "メモ",
+    "emptyState": "最近のアクティビティはまだありません。"
+  }
+}

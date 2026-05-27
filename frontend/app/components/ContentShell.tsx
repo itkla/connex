@@ -4,6 +4,7 @@ import { useState } from "react";
 import { PanelLeftCloseIcon, PanelLeftOpenIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import SearchBar from "@/app/components/SearchBar";
+import { useTranslations } from "next-intl";
 
 export default function ContentShell({
     sidebar,
@@ -13,6 +14,7 @@ export default function ContentShell({
     children: React.ReactNode;
 }) {
     const [open, setOpen] = useState(true);
+    const t = useTranslations("CommonContentShell");
 
     return (
         <div className="flex h-screen">
@@ -24,7 +26,7 @@ export default function ContentShell({
                         variant="ghost"
                         size="icon"
                         onClick={() => setOpen((o) => !o)}
-                        aria-label={open ? "Hide sidebar" : "Show sidebar"}
+                        aria-label={open ? t("hideSidebar") : t("showSidebar")}
                         aria-expanded={open}
                         className="absolute left-6 "
                     >

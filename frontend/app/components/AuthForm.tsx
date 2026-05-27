@@ -4,6 +4,7 @@ import Link from "next/link";
 import { redirect, useRouter } from "next/navigation";
 import { useState } from "react";
 import { toast } from "sonner";
+import { useTranslations } from "next-intl";
 
 import { ApiError, login, register as registerUser } from "@/app/lib/api";
 import { LoaderCircle } from "lucide-react";
@@ -14,53 +15,31 @@ type FieldErrors = Partial<Record<FieldKey, string>>;
 
 const FIELD_KEYS = ["username", "email", "displayName", "password"] as const;
 
-const FORM_CONFIG: Record<
-    AuthMode,
-    {
-        heading: string;
-        submitLabel: string;
-        successMessage: string;
-        fields: FieldKey[];
-        altHref: string;
-        altLabel: string;
-    }
-> = {
-    login: {
-        heading: "Sign in to",
-        submitLabel: "Sign in",
-        successMessage: "You are now logged in",
-        fields: ["username", "password"],
-        altHref: "/auth/register",
-        altLabel: "Create an account",
-    },
-    register: {
-        heading: "Sign up for",
-        submitLabel: "Create account",
-        successMessage: "Account created successfully",
-        fields: ["username", "email", "displayName", "password"],
-        altHref: "/auth/login",
-        altLabel: "Sign in instead",
-    },
+const FORM_FIELDS: Record<AuthMode, FieldKey[]> = {
+    login: ["username", "password"],
+    register: ["username", "email", "displayName", "password"],
+};
+
+const ALT_HREF: Record<AuthMode, string> = {
+    login: "/auth/register",
+    register: "/auth/login",
 };
 
 const FIELD_META: Record<
     FieldKey,
-    { type: string; placeholder: string; autoComplete: string }
+    { type: string; autoComplete: string }
 > = {
     username: {
         type: "text",
-        placeholder: "Username",
         autoComplete: "username",
     },
-    email: { type: "email", placeholder: "Email", autoComplete: "email" },
+    email: { type: "email", autoComplete: "email" },
     displayName: {
         type: "text",
-        placeholder: "Name",
         autoComplete: "name",
     },
     password: {
         type: "password",
-        placeholder: "Password",
         autoComplete: "current-password",
     },
 };
@@ -79,26 +58,22 @@ function pickFieldErrors(errors?: Record<string, string>): FieldErrors {
     }, {});
 }
 
-function getAuthErrorMessage(
-    error: ApiError,
-    mode: AuthMode,
-    hasFieldErrors: boolean,
-) {
-    if (mode === "login" && error.status === 401) {
-        return "Invalid username or password";
-    }
-
-    if (hasFieldErrors) {
-        // return "Please fix the highlighted fields.";
-        return "There is an error in the form. Please check and correct the highlighted fields.";
-    }
-
-    return error.message;
-}
-
 export function AuthForm({ mode, redirectUrl }: { mode: AuthMode, redirectUrl: string | null }) {
     const router = useRouter();
-    const config = FORM_CONFIG[mode];
+    const tForm = useTranslations("AuthForm");
+    const tMode = useTranslations(mode === "login" ? "AuthLogin" : "AuthRegister");
+    const tLogin = useTranslations("AuthLogin");
+
+    const fields = FORM_FIELDS[mode];
+    const altHref = ALT_HREF[mode];
+
+    const fieldPlaceholders: Record<FieldKey, string> = {
+        username: tForm("placeholderUsername"),
+        email: tForm("placeholderEmail"),
+        displayName: tForm("placeholderDisplayName"),
+        password: tForm("placeholderPassword"),
+    };
+
     const [values, setValues] = useState<Record<FieldKey, string>>({
         username: "",
         email: "",
@@ -123,6 +98,21 @@ export function AuthForm({ mode, redirectUrl }: { mode: AuthMode, redirectUrl: s
         });
     }
 
+    function getAuthErrorMessage(
+        err: ApiError,
+        hasFieldErrors: boolean,
+    ) {
+        if (mode === "login" && err.status === 401) {
+            return tLogin("invalidCredentials");
+        }
+
+        if (hasFieldErrors) {
+            return tForm("formHasErrors");
+        }
+
+        return err.message;
+    }
+
     async function onSubmit(e: React.SubmitEvent<HTMLFormElement>) {
         e.preventDefault();
         setError(null);
@@ -144,7 +134,7 @@ export function AuthForm({ mode, redirectUrl }: { mode: AuthMode, redirectUrl: s
                 });
             }
 
-            toast.success(config.successMessage, {
+            toast.success(tMode("successMessage"), {
                 style: {
                     backgroundColor: "var(--color-brand)",
                     color: "white",
@@ -155,12 +145,12 @@ export function AuthForm({ mode, redirectUrl }: { mode: AuthMode, redirectUrl: s
                 router.push(redirectUrl);
             } else {
                 router.replace("/dashboard");
-            }   
+            }
             router.refresh();
         } catch (err) {
             const nextFieldErrors = err instanceof ApiError ? pickFieldErrors(err.fieldErrors) : {};
             const hasFieldErrors = Object.keys(nextFieldErrors).length > 0;
-            const message = err instanceof ApiError ? getAuthErrorMessage(err, mode, hasFieldErrors) : "Something went wrong";
+            const message = err instanceof ApiError ? getAuthErrorMessage(err, hasFieldErrors) : tForm("genericError");
 
             setError(message);
             setFieldErrors(nextFieldErrors);
@@ -182,15 +172,15 @@ export function AuthForm({ mode, redirectUrl }: { mode: AuthMode, redirectUrl: s
             <div className="w-full max-w-md">
                 <h1 className="text-center leading-tight tracking-tight">
                     <span className="block font-['Instrument_Serif'] text-5xl text-black">
-                        {config.heading}
+                        {tMode("heading")}
                     </span>
                     <span className="mt-2 block text-5xl font-extrabold tracking-tight text-black">
-                        <Link href="/">CONNEX</Link>
+                        <Link href="/">{tForm("brand")}</Link>
                     </span>
                 </h1>
 
                 <form className="mt-12 space-y-3" onSubmit={onSubmit} noValidate>
-                    {config.fields.map((key) => {
+                    {fields.map((key) => {
                         const meta = FIELD_META[key];
                         const autoComplete = key === "password" && mode === "register" ? "new-password" : meta.autoComplete;
                         const fieldError = fieldErrors[key];
@@ -202,7 +192,7 @@ export function AuthForm({ mode, redirectUrl }: { mode: AuthMode, redirectUrl: s
                                     type={meta.type}
                                     value={values[key]}
                                     onChange={(e) => setField(key, e.target.value)}
-                                    placeholder={meta.placeholder}
+                                    placeholder={fieldPlaceholders[key]}
                                     autoComplete={autoComplete}
                                     required
                                     aria-invalid={Boolean(fieldError)}
@@ -238,18 +228,18 @@ export function AuthForm({ mode, redirectUrl }: { mode: AuthMode, redirectUrl: s
                                 </span>
                             )
                             : hasFieldErrors
-                                ? "Please resolve the errors"
-                                : config.submitLabel}
+                                ? tForm("resolveErrors")
+                                : tMode("submitLabel")}
                     </button>
 
                     <hr className="mx-auto mt-6 w-3/5 border-neutral-200" />
 
                     <div className="mt-6 text-center">
                         <Link
-                            href={config.altHref}
+                            href={altHref}
                             className="text-base text-brand hover:text-brand-hover"
                         >
-                            {config.altLabel}
+                            {tMode("altLabel")}
                         </Link>
                     </div>
                 </form>

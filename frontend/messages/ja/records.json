@@ -1,0 +1,47 @@
+{
+  "RecordsRenderView": {
+    "selectAllAria": "すべての {entityLabel} を選択",
+    "selectItemAria": "{name} を選択",
+    "copiedToast": "{label} をコピーしました",
+    "copyFailedToast": "{label} のコピーに失敗しました"
+  },
+  "RecordsDeleteDialog": {
+    "titleSingle": "{entityLabel} を削除",
+    "titleMultiple": "{count} 件の {entityLabel} を削除",
+    "descriptionNamed": "「{name}」を削除してもよろしいですか？この操作は取り消せません。",
+    "descriptionSingle": "この {entityLabel} を削除してもよろしいですか？この操作は取り消せません。",
+    "descriptionMultiple": "これら {count} 件の {entityLabel} を削除してもよろしいですか？この操作は取り消せません。",
+    "cancel": "キャンセル",
+    "delete": "削除"
+  },
+  "RecordsPipelineCard": {
+    "titleActive": "アクティブなパイプライン",
+    "titleInactive": "クローズしたパイプライン",
+    "titlePrevious": "過去のパイプライン",
+    "titleDefault": "パイプライン",
+    "emptyActive": "アクティブな案件はありません。",
+    "emptyInactive": "クローズした案件はありません。",
+    "emptyPrevious": "過去の案件はありません。",
+    "emptyDefault": "案件はありません。"
+  },
+  "RecordsLayout": {
+    "title": "レコード",
+    "description": "レコードを管理"
+  },
+  "RecordsDealsLayout": {
+    "title": "レコード / 案件",
+    "description": "案件を管理"
+  },
+  "RecordsPipelinesLayout": {
+    "title": "レコード / パイプライン",
+    "description": "パイプラインを管理"
+  },
+  "RecordsContactsLayout": {
+    "title": "レコード / コンタクト",
+    "description": "コンタクトを管理"
+  },
+  "RecordsCompaniesLayout": {
+    "title": "レコード / 企業",
+    "description": "企業を管理"
+  }
+}

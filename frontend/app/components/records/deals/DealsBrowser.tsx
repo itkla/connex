@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
+import { useTranslations } from 'next-intl';
 import { Button } from '@/components/ui/button';
 import { ButtonGroup } from '@/components/ui/button-group';
 import { toast } from 'sonner';
@@ -86,6 +87,7 @@ function isClosed(deal: Deal): boolean {
 
 export default function DealsBrowser({ deals }: { deals: Deal[] }) {
     const router = useRouter();
+    const t = useTranslations('DealsBrowser');
 
     const [companies, setCompanies] = useState<Company[]>([]);
     const [pipelines, setPipelines] = useState<Pipeline[]>([]);
@@ -193,14 +195,14 @@ export default function DealsBrowser({ deals }: { deals: Deal[] }) {
                 currency: newPayload.currency.trim() || 'USD',
                 expectedCloseDate: newPayload.expectedCloseDate || undefined,
             });
-            toast.success('Deal created', {
+            toast.success(t('dealCreated'), {
                 style: { backgroundColor: 'var(--color-brand)', color: 'white' },
             });
             closeNewDialog(false);
             router.refresh();
         } catch (err) {
             console.error(err);
-            toast.error(err instanceof Error ? err.message : 'Failed to create deal', {
+            toast.error(err instanceof Error ? err.message : t('failedToCreateDeal'), {
                 style: { backgroundColor: 'var(--color-destructive)', color: 'white' },
             });
         } finally {
@@ -226,7 +228,7 @@ export default function DealsBrowser({ deals }: { deals: Deal[] }) {
         });
 
         if (changed.length === 0) {
-            toast.info('No changes to save');
+            toast.info(t('noChangesToSave'));
             setEditSheetOpen(false);
             return;
         }
@@ -236,7 +238,7 @@ export default function DealsBrowser({ deals }: { deals: Deal[] }) {
             return !draft.name.trim() || !draft.pipeline || !draft.stage || !draft.currency.trim();
         });
         if (invalid) {
-            toast.error(`Name, pipeline, stage and currency are required for "${invalid.name}"`);
+            toast.error(t('validationRequired', { name: invalid.name }));
             return;
         }
 
@@ -260,13 +262,13 @@ export default function DealsBrowser({ deals }: { deals: Deal[] }) {
                 }),
             );
             toast.success(
-                changed.length === 1 ? 'Deal updated' : `${changed.length} deals updated`,
+                changed.length === 1 ? t('dealUpdated') : t('dealsUpdated', { count: changed.length }),
                 { style: { backgroundColor: 'var(--color-brand)', color: 'white' } },
             );
             setEditSheetOpen(false);
             router.refresh();
         } catch (err) {
-            toast.error(err instanceof Error ? err.message : 'Failed to save', {
+            toast.error(err instanceof Error ? err.message : t('failedToSave'), {
                 style: { backgroundColor: 'var(--color-destructive)', color: 'white' },
             });
         } finally {
@@ -291,14 +293,14 @@ export default function DealsBrowser({ deals }: { deals: Deal[] }) {
         try {
             await Promise.all(Array.from(selectedIds).map((id) => deleteDeal(Number(id))));
             toast.success(
-                selectedIds.size === 1 ? 'Deal deleted' : `${selectedIds.size} deals deleted`,
+                selectedIds.size === 1 ? t('dealDeleted') : t('dealsDeleted', { count: selectedIds.size }),
                 { style: { backgroundColor: 'var(--color-brand)', color: 'white' } },
             );
             setSelectedIds(new Set());
             setDeleteDialogOpen(false);
             router.refresh();
         } catch (err) {
-            toast.error(err instanceof Error ? err.message : 'Failed to delete', {
+            toast.error(err instanceof Error ? err.message : t('failedToDelete'), {
                 style: { backgroundColor: 'var(--color-destructive)', color: 'white' },
             });
         } finally {
@@ -316,7 +318,7 @@ export default function DealsBrowser({ deals }: { deals: Deal[] }) {
 
     const toggleDealStatus = useCallback(async (deal: Deal, closed: boolean) => {
         if (deal.pipeline == null || deal.stage == null) {
-            toast.error('Cannot change status: deal is missing pipeline or stage');
+            toast.error(t('cannotChangeStatus'));
             return;
         }
         try {
@@ -331,16 +333,16 @@ export default function DealsBrowser({ deals }: { deals: Deal[] }) {
                 expectedCloseDate: deal.expectedCloseDate,
                 closedAt: closed ? toMysqlDateTime(new Date().toISOString()) : null,
             });
-            toast.success(closed ? 'Deal closed' : 'Deal reopened', {
+            toast.success(closed ? t('dealClosed') : t('dealReopened'), {
                 style: { backgroundColor: 'var(--color-brand)', color: 'white' },
             });
             router.refresh();
         } catch (err) {
-            toast.error(err instanceof Error ? err.message : 'Failed to update status', {
+            toast.error(err instanceof Error ? err.message : t('failedToUpdateStatus'), {
                 style: { backgroundColor: 'var(--color-destructive)', color: 'white' },
             });
         }
-    }, [router]);
+    }, [router, t]);
 
     const summary = useMemo(() => {
         let openCount = 0;
@@ -365,47 +367,47 @@ export default function DealsBrowser({ deals }: { deals: Deal[] }) {
     }, [deals]);
 
     const columns: ColumnDef<Deal>[] = useMemo(() => [
-        { key: 'name', label: 'Name', getSortValue: (d) => d.name ?? null },
+        { key: 'name', label: t('columnName'), getSortValue: (d) => d.name ?? null },
         {
             key: 'value',
-            label: 'Value',
+            label: t('columnValue'),
             getSortValue: (d) => d.value ?? null,
             render: (d) => formatCompactCurrency(d.value ?? 0, d.currency || 'USD'),
         },
         {
             key: 'actualValue',
-            label: 'Actual value',
+            label: t('columnActualValue'),
             getSortValue: (d) => d.actualValue ?? null,
             render: (d) => formatCompactCurrency(d.actualValue ?? 0, d.currency || 'USD'),
         },
         {
             key: 'company',
-            label: 'Company',
+            label: t('columnCompany'),
             getSortValue: (d) => (d.company != null ? companyById.get(d.company)?.name ?? null : null),
             render: (d) => (d.company != null ? <Link href={`/records/companies/${d.company}`} className="text-brand hover:text-brand-dark hover:underline transition-colors transition-duration-300 transition-ease-in-out">{companyById.get(d.company)?.name}</Link> : ''),
         },
         {
             key: 'pipeline',
-            label: 'Pipeline',
+            label: t('columnPipeline'),
             getSortValue: (d) => (d.pipeline != null ? pipelineById.get(d.pipeline)?.name ?? null : null),
             render: (d) => (d.pipeline != null ? pipelineById.get(d.pipeline)?.name : ''),
         },
         {
             key: 'stage',
-            label: 'Stage',
+            label: t('columnStage'),
             getSortValue: (d) => (d.stage != null ? stageById.get(d.stage)?.name ?? null : null),
             render: (d) => (d.stage != null ? stageById.get(d.stage)?.name : ''),
         },
         {
             key: 'expectedCloseDate',
-            label: 'Expected close',
+            label: t('columnExpectedClose'),
             getSortValue: (d) => (d.expectedCloseDate ? Date.parse(d.expectedCloseDate) : null),
             // render: (d) => formatShortDate(d.expectedCloseDate),
             render: (d) => formatDateTime(d.expectedCloseDate),
         },
         {
             key: 'status',
-            label: 'Status',
+            label: t('columnStatus'),
             getSortValue: (d) => (isClosed(d) ? 1 : 0),
             render: (d) => {
                 const closed = isClosed(d);
@@ -418,18 +420,18 @@ export default function DealsBrowser({ deals }: { deals: Deal[] }) {
                                 className="inline-flex items-center gap-1 rounded-full bg-neutral-100 px-2 py-0.5 text-xs ring-1 ring-black/5 transition hover:bg-neutral-200"
                             >
                                 <span className={closed ? 'text-red-500' : 'text-emerald-300'}>●</span>
-                                {closed ? 'Closed' : 'Open'}
+                                {closed ? t('statusClosed') : t('statusOpen')}
                                 <ChevronDownIcon className="size-3 text-neutral-400" />
                             </button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="start" onClick={(e) => e.stopPropagation()}>
                             <DropdownMenuItem disabled={!closed} onSelect={() => toggleDealStatus(d, false)}>
                                 <span className="text-emerald-300">●</span>
-                                Mark open
+                                {t('markOpen')}
                             </DropdownMenuItem>
                             <DropdownMenuItem disabled={closed} onSelect={() => toggleDealStatus(d, true)}>
                                 <span className="text-red-500">●</span>
-                                Mark closed
+                                {t('markClosed')}
                             </DropdownMenuItem>
                         </DropdownMenuContent>
                     </DropdownMenu>
@@ -438,33 +440,33 @@ export default function DealsBrowser({ deals }: { deals: Deal[] }) {
         },
         {
             key: 'updatedAt',
-            label: 'Updated',
+            label: t('columnUpdated'),
             getSortValue: (d) => (d.updatedAt ? Date.parse(d.updatedAt) : null),
             render: (d) => formatDateTime(d.updatedAt),
         },
-    ], [companyById, pipelineById, stageById, toggleDealStatus]);
+    ], [companyById, pipelineById, stageById, toggleDealStatus, t]);
 
     return (
         <div className="space-y-6">
             <div className="flex items-center justify-between">
-                <h1 className="text-4xl font-extrabold">Deals</h1>
-                <Button className="bg-brand text-white" aria-label="Add deal" onClick={() => setNewDialogOpen(true)}>
+                <h1 className="text-4xl font-extrabold">{t('title')}</h1>
+                <Button className="bg-brand text-white" aria-label={t('addDeal')} onClick={() => setNewDialogOpen(true)}>
                     <PlusIcon strokeWidth={2.5} />
-                    New
+                    {t('newButton')}
                 </Button>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                <SummaryTile className="sm:col-span-2" label="Revenue trend" value={<DealsRevenueChart deals={deals} />} />
-                <SummaryTile label="Stage ratio" value={<StageRatio deals={deals} />} />
+                <SummaryTile className="sm:col-span-2" label={t('revenueTrend')} value={<DealsRevenueChart deals={deals} />} />
+                <SummaryTile label={t('stageRatio')} value={<StageRatio deals={deals} />} />
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
-                <SummaryTile label="Projected pipeline" value={formatCompactCurrency(summary.openValue, 'USD')} />
-                <SummaryTile label="Actual revenue" value={formatCompactCurrency(summary.closedActualValue, 'USD')} />
-                <SummaryTile label="Open deals" value={String(summary.openCount)} />
+                <SummaryTile label={t('projectedPipeline')} value={formatCompactCurrency(summary.openValue, 'USD')} />
+                <SummaryTile label={t('actualRevenue')} value={formatCompactCurrency(summary.closedActualValue, 'USD')} />
+                <SummaryTile label={t('openDeals')} value={String(summary.openCount)} />
                 <SummaryTile
-                    label="Forecast accuracy"
+                    label={t('forecastAccuracy')}
                     value={summary.forecastAccuracy != null ? `${Math.round(summary.forecastAccuracy * 100)}%` : '—'}
                 />
             </div>
@@ -472,10 +474,10 @@ export default function DealsBrowser({ deals }: { deals: Deal[] }) {
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <SummaryTile
                     className="sm:col-span-2"
-                    label="Open deal aging"
+                    label={t('openDealAging')}
                     value={<DealsAging deals={deals} stageById={stageById} />}
                 />
-                <SummaryTile label="Top deals" value={<TopDeals deals={deals} companyById={companyById} />} />
+                <SummaryTile label={t('topDeals')} value={<TopDeals deals={deals} companyById={companyById} />} />
             </div>
 
             <div className="flex items-center gap-4">
@@ -488,13 +490,13 @@ export default function DealsBrowser({ deals }: { deals: Deal[] }) {
                 </button>
                 <div
                     role="group"
-                    aria-label="Display mode"
+                    aria-label={t('displayMode')}
                     className="inline-flex rounded-full bg-neutral-100 p-0.5 ring-1 ring-black/5"
                 >
                     {/* <button
                         type="button"
                         onClick={() => setDisplayMode('grid')}
-                        aria-label="Grid view"
+                        aria-label={t('gridView')}
                         aria-pressed={displayMode === 'grid'}
                         className={`flex h-7 w-7 items-center justify-center rounded-full transition ${displayMode === 'grid' ? 'bg-white text-neutral-900 shadow' : 'text-neutral-500 hover:text-neutral-700'}`}
                     >
@@ -503,7 +505,7 @@ export default function DealsBrowser({ deals }: { deals: Deal[] }) {
                     <button
                         type="button"
                         onClick={() => setDisplayMode('table')}
-                        aria-label="Table view"
+                        aria-label={t('tableView')}
                         aria-pressed={displayMode === 'table'}
                         className={`flex h-7 w-7 items-center justify-center rounded-full transition ${displayMode === 'table' ? 'bg-white text-neutral-900 shadow' : 'text-neutral-500 hover:text-neutral-700'}`}
                     >
@@ -513,15 +515,15 @@ export default function DealsBrowser({ deals }: { deals: Deal[] }) {
 
                 {selectedIds.size > 0 && (
                     <div className="flex items-center gap-2">
-                        <span className="text-sm text-neutral-500">{selectedIds.size} selected</span>
+                        <span className="text-sm text-neutral-500">{t('selectedCount', { count: selectedIds.size })}</span>
                         <ButtonGroup className="rounded-full bg-neutral-100">
                             <Button variant="outline" size="sm" onClick={viewSelected}>
                                 <EyeIcon className="size-4" />
-                                View
+                                {t('view')}
                             </Button>
                             <Button variant="outline" size="sm" onClick={openEditSheet}>
                                 <PencilIcon className="size-4" />
-                                Quick edit
+                                {t('quickEdit')}
                             </Button>
                             <DropdownMenu>
                                 <DropdownMenuTrigger asChild>
@@ -538,7 +540,7 @@ export default function DealsBrowser({ deals }: { deals: Deal[] }) {
                                         }}
                                     >
                                         <TrashIcon />
-                                        Delete
+                                        {t('delete')}
                                     </DropdownMenuItem>
                                 </DropdownMenuContent>
                             </DropdownMenu>
@@ -549,7 +551,7 @@ export default function DealsBrowser({ deals }: { deals: Deal[] }) {
                 <div className="relative ml-auto w-full max-w-sm">
                     <input
                         type="text"
-                        placeholder="Search deals"
+                        placeholder={t('searchPlaceholder')}
                         value={query}
                         onChange={(e) => setQuery(e.target.value)}
                         className="w-full rounded-full bg-neutral-100 px-4 py-2 pr-10 text-sm text-black placeholder-neutral-500 outline-none ring-1 ring-black/5 transition focus:ring-2 focus:ring-brand"
@@ -577,19 +579,19 @@ export default function DealsBrowser({ deals }: { deals: Deal[] }) {
                     const contact = contactByDealId.get(item.id);
                     return (
                         <ContactAvatar
-                            contact={contact ?? { id: 0, name: 'Freelancer', imageUrl: '', email: '', phone: '', title: '', createdAt: '', updatedAt: '' }}
+                            contact={contact ?? { id: 0, name: t('freelancer'), imageUrl: '', email: '', phone: '', title: '', createdAt: '', updatedAt: '' }}
                             type="large"
                         />
                     );
                 }}
                 detailPath={(item) => `/records/deals/${item.id}`}
-                displayMode={displayMode}   
+                displayMode={displayMode}
                 selectedIds={selectedIds}
                 onSelectedIdsChange={setSelectedIds}
                 onQuickEdit={quickEditOne}
                 onDelete={deleteOne}
                 gridClassName="grid grid-cols-1 gap-3 pt-8"
-                entityLabel="deal"
+                entityLabel={t('entityLabel')}
             />
 
             <QuickEditDealSheet
@@ -623,7 +625,7 @@ export default function DealsBrowser({ deals }: { deals: Deal[] }) {
                 onOpenChange={setDeleteDialogOpen}
                 selectedIds={selectedIds}
                 selectedItems={selectedDeals}
-                entityLabel="deal"
+                entityLabel={t('entityLabel')}
                 getDisplayName={(d) => d.name}
                 isDeleting={isDeleting}
                 confirmDelete={confirmDelete}

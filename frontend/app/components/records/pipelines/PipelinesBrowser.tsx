@@ -2,6 +2,7 @@
 
 import { useCallback, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { useTranslations } from 'next-intl';
 import { Button } from '@/components/ui/button';
 import { ButtonGroup } from '@/components/ui/button-group';
 import { toast } from 'sonner';
@@ -73,6 +74,7 @@ const searchFields = (p: Pipeline) => [p.name];
 
 export default function PipelinesBrowser({ pipelines }: { pipelines: Pipeline[] }) {
     const router = useRouter();
+    const t = useTranslations('PipelinesBrowser');
     const {
         displayMode,
         setDisplayMode,
@@ -131,11 +133,11 @@ export default function PipelinesBrowser({ pipelines }: { pipelines: Pipeline[] 
             .catch((err) => {
                 console.error(err);
                 setMetricsStatus('error');
-                toast.error('Failed to load pipeline metrics', {
+                toast.error(t('failedToLoadMetrics'), {
                     style: { backgroundColor: 'var(--color-destructive)', color: 'white' },
                 });
             });
-    }, [metricsStatus, pipelines]);
+    }, [metricsStatus, pipelines, t]);
 
     const closeNewPipelineDialog = (open: boolean) => {
         setNewPipelineDialogOpen(open);
@@ -161,16 +163,16 @@ export default function PipelinesBrowser({ pipelines }: { pipelines: Pipeline[] 
                 const failed = results.filter((r) => r.status === 'rejected').length;
                 if (failed > 0) {
                     console.error('Some stages failed to create', results);
-                    toast.error(`Pipeline created, but ${failed} of ${stageNames.length} stages failed`, {
+                    toast.error(t('pipelineCreatedWithFailedStages', { failed, total: stageNames.length }), {
                         style: { backgroundColor: 'var(--color-destructive)', color: 'white' },
                     });
                 } else {
-                    toast.success('Pipeline created', {
+                    toast.success(t('pipelineCreated'), {
                         style: { backgroundColor: 'var(--color-brand)', color: 'white' },
                     });
                 }
             } else {
-                toast.success('Pipeline created', {
+                toast.success(t('pipelineCreated'), {
                     style: { backgroundColor: 'var(--color-brand)', color: 'white' },
                 });
             }
@@ -180,7 +182,7 @@ export default function PipelinesBrowser({ pipelines }: { pipelines: Pipeline[] 
             router.refresh();
         } catch (err) {
             console.error(err);
-            toast.error('Failed to create pipeline', {
+            toast.error(t('failedToCreate'), {
                 style: { backgroundColor: 'var(--color-destructive)', color: 'white' },
             });
         } finally {
@@ -251,14 +253,14 @@ export default function PipelinesBrowser({ pipelines }: { pipelines: Pipeline[] 
         });
 
         if (changed.length === 0) {
-            toast.info('No changes to save');
+            toast.info(t('noChangesToSave'));
             setEditSheetOpen(false);
             return;
         }
 
         const invalidName = changed.find((p) => !drafts[p.id].name.trim());
         if (invalidName) {
-            toast.error(`Name is required for "${invalidName.name}"`);
+            toast.error(t('nameRequiredFor', { name: invalidName.name }));
             return;
         }
 
@@ -266,7 +268,7 @@ export default function PipelinesBrowser({ pipelines }: { pipelines: Pipeline[] 
             drafts[p.id].stages.some((s) => !s.name.trim()),
         );
         if (invalidStage) {
-            toast.error(`Stage names cannot be empty in "${invalidStage.name}"`);
+            toast.error(t('stageNamesEmptyIn', { name: invalidStage.name }));
             return;
         }
 
@@ -314,7 +316,7 @@ export default function PipelinesBrowser({ pipelines }: { pipelines: Pipeline[] 
                 }),
             );
             toast.success(
-                changed.length === 1 ? 'Pipeline updated' : `${changed.length} pipelines updated`,
+                changed.length === 1 ? t('pipelineUpdated') : t('pipelinesUpdated', { count: changed.length }),
                 { style: { backgroundColor: 'var(--color-brand)', color: 'white' } },
             );
             setEditSheetOpen(false);
@@ -322,7 +324,7 @@ export default function PipelinesBrowser({ pipelines }: { pipelines: Pipeline[] 
             setStagesByPipeline(new Map());
             router.refresh();
         } catch (err) {
-            toast.error(err instanceof Error ? err.message : 'Failed to save', {
+            toast.error(err instanceof Error ? err.message : t('failedToSave'), {
                 style: { backgroundColor: 'var(--color-destructive)', color: 'white' },
             });
         } finally {
@@ -348,14 +350,14 @@ export default function PipelinesBrowser({ pipelines }: { pipelines: Pipeline[] 
         try {
             await Promise.all(Array.from(selectedIds).map((id) => deletePipeline(Number(id))));
             toast.success(
-                selectedIds.size === 1 ? 'Pipeline deleted' : `${selectedIds.size} pipelines deleted`,
+                selectedIds.size === 1 ? t('pipelineDeleted') : t('pipelinesDeleted', { count: selectedIds.size }),
                 { style: { backgroundColor: 'var(--color-brand)', color: 'white' } },
             );
             setSelectedIds(new Set());
             setDeleteDialogOpen(false);
             router.refresh();
         } catch (err) {
-            toast.error(err instanceof Error ? err.message : 'Failed to delete', {
+            toast.error(err instanceof Error ? err.message : t('failedToDelete'), {
                 style: { backgroundColor: 'var(--color-destructive)', color: 'white' },
             });
         } finally {
@@ -372,20 +374,20 @@ export default function PipelinesBrowser({ pipelines }: { pipelines: Pipeline[] 
     };
 
     const columns: ColumnDef<Pipeline>[] = useMemo(() => [
-        { key: 'name', label: 'Name', getSortValue: (p) => p.name ?? null },
+        { key: 'name', label: t('columnName'), getSortValue: (p) => p.name ?? null },
         {
             key: 'createdAt',
-            label: 'Created',
+            label: t('columnCreated'),
             getSortValue: (p) => (p.createdAt ? Date.parse(p.createdAt) : null),
             render: (p) => p.createdAt,
         },
         {
             key: 'updatedAt',
-            label: 'Updated',
+            label: t('columnUpdated'),
             getSortValue: (p) => (p.updatedAt ? Date.parse(p.updatedAt) : null),
             render: (p) => p.updatedAt,
         },
-    ], []);
+    ], [t]);
 
     const metricsByPipelineId = useMemo(() => {
         const map = new Map<number, PipelineMetrics>();
@@ -466,10 +468,10 @@ export default function PipelinesBrowser({ pipelines }: { pipelines: Pipeline[] 
     return (
         <div className="space-y-6">
             <div className="flex items-center justify-between">
-                <h1 className="text-4xl font-extrabold">Pipelines</h1>
-                <Button className="bg-brand text-white" aria-label="Add pipeline" onClick={() => setNewPipelineDialogOpen(true)}>
+                <h1 className="text-4xl font-extrabold">{t('title')}</h1>
+                <Button className="bg-brand text-white" aria-label={t('addPipelineAriaLabel')} onClick={() => setNewPipelineDialogOpen(true)}>
                     <PlusIcon strokeWidth={2.5} />
-                    New
+                    {t('new')}
                 </Button>
             </div>
 
@@ -483,13 +485,13 @@ export default function PipelinesBrowser({ pipelines }: { pipelines: Pipeline[] 
                 </button>
                 <div
                     role="group"
-                    aria-label="Display mode"
+                    aria-label={t('displayModeAriaLabel')}
                     className="inline-flex rounded-full bg-neutral-100 p-0.5 ring-1 ring-black/5"
                 >
                     <button
                         type="button"
                         onClick={() => setDisplayMode('grid')}
-                        aria-label="Grid view"
+                        aria-label={t('gridViewAriaLabel')}
                         aria-pressed={displayMode === 'grid'}
                         className={`flex h-7 w-7 items-center justify-center rounded-full transition ${displayMode === 'grid' ? 'bg-white text-neutral-900 shadow' : 'text-neutral-500 hover:text-neutral-700'}`}
                     >
@@ -508,7 +510,7 @@ export default function PipelinesBrowser({ pipelines }: { pipelines: Pipeline[] 
 
                 {selectedIds.size > 0 && (
                     <div className="flex items-center gap-2">
-                        <span className="text-sm text-neutral-500">{selectedIds.size} selected</span>
+                        <span className="text-sm text-neutral-500">{t('selectedCount', { count: selectedIds.size })}</span>
                         <ButtonGroup className="rounded-full bg-neutral-100">
                             {/* <Button variant="outline" size="sm" onClick={viewSelected}>
                                 <EyeIcon className="size-4" />
@@ -516,7 +518,7 @@ export default function PipelinesBrowser({ pipelines }: { pipelines: Pipeline[] 
                             </Button> */}
                             <Button variant="outline" size="sm" onClick={openEditSheet}>
                                 <PencilIcon className="size-4" />
-                                Quick edit
+                                {t('quickEdit')}
                             </Button>
                             <DropdownMenu>
                                 <DropdownMenuTrigger asChild>
@@ -533,7 +535,7 @@ export default function PipelinesBrowser({ pipelines }: { pipelines: Pipeline[] 
                                         }}
                                     >
                                         <TrashIcon />
-                                        Delete
+                                        {t('delete')}
                                     </DropdownMenuItem>
                                 </DropdownMenuContent>
                             </DropdownMenu>
@@ -544,7 +546,7 @@ export default function PipelinesBrowser({ pipelines }: { pipelines: Pipeline[] 
                 <div className="relative ml-auto w-full max-w-sm">
                     <input
                         type="text"
-                        placeholder="Search pipelines"
+                        placeholder={t('searchPlaceholder')}
                         value={query}
                         onChange={(e) => setQuery(e.target.value)}
                         className="w-full rounded-full bg-neutral-100 px-4 py-2 pr-10 text-sm text-black placeholder-neutral-500 outline-none ring-1 ring-black/5 transition focus:ring-2 focus:ring-brand"
@@ -573,7 +575,7 @@ export default function PipelinesBrowser({ pipelines }: { pipelines: Pipeline[] 
                 onQuickEdit={quickEditOne}
                 onDelete={deleteOne}
                 gridClassName="grid grid-cols-1 gap-3 pt-8"
-                entityLabel="pipeline"
+                entityLabel={t('entityLabel')}
             />
 
             <QuickEditPipelineSheet
@@ -604,7 +606,7 @@ export default function PipelinesBrowser({ pipelines }: { pipelines: Pipeline[] 
                 onOpenChange={setDeleteDialogOpen}
                 selectedIds={selectedIds}
                 selectedItems={selectedPipelines}
-                entityLabel="pipeline"
+                entityLabel={t('entityLabel')}
                 getDisplayName={(p) => p.name}
                 isDeleting={isDeleting}
                 confirmDelete={confirmDelete}

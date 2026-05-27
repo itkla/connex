@@ -1,0 +1,61 @@
+{
+  "MePage": {
+    "greetingHello": "Hello,",
+    "greetingHi": "Hi,",
+    "greetingHey": "Hey,",
+    "greetingGoodDay": "Good day,",
+    "greetingGoodMorning": "Good morning,",
+    "greetingGoodAfternoon": "Good afternoon,",
+    "greetingGoodEvening": "Good evening,",
+    "greetingHowdy": "Howdy,",
+    "greetingWhatsUp": "What's up,",
+    "profilePictureAlt": "{name}'s profile picture",
+    "profilePicturePlaceholderAriaLabel": "Profile picture placeholder",
+    "profile": "Profile",
+    "username": "Username",
+    "email": "Email",
+    "lastLogin": "Last login",
+    "memberSince": "Member since",
+    "backToDashboard": "Back to dashboard",
+    "myActivity": "My Activity",
+    "tasks": "Tasks",
+    "activities": "Activities",
+    "notes": "Notes",
+    "openCount": "{count} open"
+  },
+  "MeActivityList": {
+    "empty": "No activities logged yet."
+  },
+  "MeEditSelfModal": {
+    "triggerTitle": "Edit profile",
+    "triggerSrLabel": "Edit Profile",
+    "dialogTitle": "Edit your profile",
+    "dialogDescription": "Update your account details. Changes save immediately.",
+    "profilePicture": "Profile picture",
+    "username": "Username",
+    "displayName": "Display name",
+    "email": "Email",
+    "cancel": "Cancel",
+    "save": "Save",
+    "noChangesToast": "No changes were made",
+    "profileUpdatedTitle": "Profile updated",
+    "profileUpdatedDescription": "Your profile has been updated successfully.",
+    "errorUpdatingTitle": "An error occurred while updating your profile",
+    "errorUpdatingDescription": "Please try again.",
+    "failedToUpdateProfile": "Failed to update profile"
+  },
+  "MeNoteList": {
+    "empty": "No notes authored yet."
+  },
+  "MeTaskList": {
+    "empty": "No tasks assigned to you yet."
+  },
+  "MeTimeline": {
+    "completed": "Completed",
+    "due": "Due {date}",
+    "chipTask": "task",
+    "chipActivity": "activity",
+    "chipNote": "note",
+    "emptyState": "Nothing recent yet."
+  }
+}

@@ -1,12 +1,16 @@
 // NOTE: again, not used anymore but keeping it just in case
 
+import { getTranslations } from "next-intl/server";
+
 import { Note } from "@/app/lib/api";
 import EmptyState from "./EmptyState";
 import { timeOf, formatShortDate } from "@/app/lib/utils";
 
-export default function NoteList({ notes }: { notes: Note[] }) {
+export default async function NoteList({ notes }: { notes: Note[] }) {
+    const t = await getTranslations("MeNoteList");
+
     if (notes.length === 0) {
-        return <EmptyState message="No notes authored yet." />;
+        return <EmptyState message={t("empty")} />;
     }
 
     const sorted = [...notes].sort((a, b) => timeOf(b.createdAt) - timeOf(a.createdAt));

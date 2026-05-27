@@ -11,9 +11,11 @@ import { CreateContactPayload } from "@/app/lib/types";
 import { createContact, updateContact } from "@/app/lib/api";
 import { uploadContactPicture } from "@/app/lib/utils";
 import { toast } from "sonner";
+import { useTranslations } from "next-intl";
 
 export default function ContactsGrid({ contacts, company, allTags }: { contacts: Contact[], company: Company, allTags: Tag[] }) {
     const router = useRouter();
+    const t = useTranslations('CompaniesContactsGrid');
     const [newContactDialogOpen, setNewContactDialogOpen] = useState(false);
     const [newContactPayload, setNewContactPayload] = useState<CreateContactPayload>({
         name: '',
@@ -28,7 +30,7 @@ export default function ContactsGrid({ contacts, company, allTags }: { contacts:
         <>
             <div className="mt-6 mb-3 flex h-8 items-center justify-between">
                 <h2 className="px-6 text-xs font-medium tracking-[0.12em] text-neutral-500 uppercase">
-                    Contacts
+                    {t('contacts')}
                 </h2>
                 <button onClick={() => {
                     setNewContactDialogOpen(true);
@@ -38,7 +40,7 @@ export default function ContactsGrid({ contacts, company, allTags }: { contacts:
             </div>
             {contacts.length === 0 ? (
                 <div className="overflow-hidden rounded-2xl bg-neutral-100 ring-1 ring-black/5">
-                    <p className="px-6 py-6 text-sm text-neutral-500">No contacts associated with this company.</p>
+                    <p className="px-6 py-6 text-sm text-neutral-500">{t('noContacts')}</p>
                 </div>
             ) : (
                 <ul className="grid grid-cols-2 gap-3 sm:grid-cols-3">
@@ -88,11 +90,11 @@ export default function ContactsGrid({ contacts, company, allTags }: { contacts:
                         });
                         setImageFile(null);
                         setNewContactDialogOpen(false);
-                        toast.success('Contact created');
+                        toast.success(t('toastContactCreated'));
                         router.refresh();
                     } catch (error) {
                         console.error(error);
-                        toast.error('Failed to create contact');
+                        toast.error(t('toastCreateContactFailed'));
                     } finally {
                         setIsCreating(false);
                     }

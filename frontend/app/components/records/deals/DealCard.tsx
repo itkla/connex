@@ -1,6 +1,7 @@
 'use client';
 
 import { useRouter } from 'next/navigation';
+import { useTranslations } from 'next-intl';
 import {
     DropdownMenu,
     DropdownMenuTrigger,
@@ -44,8 +45,10 @@ function dealStatus(deal: Deal): 'open' | 'closed' {
 
 export default function DealCard({ deal, company, pipeline, stage, onQuickEdit, onDelete }: DealCardProps) {
     const router = useRouter();
+    const t = useTranslations('DealsCard');
     const open = () => router.push(`/records/deals/${deal.id}`);
     const status = dealStatus(deal);
+    const statusLabel = status === 'closed' ? t('statusClosed') : t('statusOpen');
 
     // get the associated contact for the deal
     // let associatedContact: Contact | undefined;
@@ -87,7 +90,7 @@ export default function DealCard({ deal, company, pipeline, stage, onQuickEdit, 
                                 : 'shrink-0 rounded-full bg-brand-light px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-brand-dark'
                         }
                     >
-                        {status}
+                        {statusLabel}
                     </span>
                     {/* <span>
                             {switch}
@@ -133,7 +136,7 @@ export default function DealCard({ deal, company, pipeline, stage, onQuickEdit, 
                 <DropdownMenuTrigger asChild>
                     <button
                         type="button"
-                        aria-label="Deal actions"
+                        aria-label={t('dealActions')}
                         onClick={(e) => e.stopPropagation()}
                         className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-neutral-200 text-neutral-600 transition hover:bg-neutral-300"
                     >
@@ -143,7 +146,7 @@ export default function DealCard({ deal, company, pipeline, stage, onQuickEdit, 
                 <DropdownMenuContent align="end" onClick={(e) => e.stopPropagation()}>
                     <DropdownMenuItem onSelect={open}>
                         <EyeIcon className="size-4 text-neutral-500" />
-                        View
+                        {t('view')}
                     </DropdownMenuItem>
                     {onQuickEdit && (
                         <DropdownMenuItem
@@ -153,7 +156,7 @@ export default function DealCard({ deal, company, pipeline, stage, onQuickEdit, 
                             }}
                         >
                             <PencilIcon className="size-4 text-neutral-500" />
-                            Quick edit
+                            {t('quickEdit')}
                         </DropdownMenuItem>
                     )}
                     {onDelete && (
@@ -167,7 +170,7 @@ export default function DealCard({ deal, company, pipeline, stage, onQuickEdit, 
                                 }}
                             >
                                 <TrashIcon className="size-4" />
-                                Delete
+                                {t('delete')}
                             </DropdownMenuItem>
                         </>
                     )}
@@ -177,7 +180,7 @@ export default function DealCard({ deal, company, pipeline, stage, onQuickEdit, 
             <Button
                 variant="outline"
                 size="sm"
-                aria-label="Open deal page"
+                aria-label={t('openDealPage')}
                 onClick={(e) => {
                     e.stopPropagation();
                     open();

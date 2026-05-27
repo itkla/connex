@@ -1,0 +1,38 @@
+{
+  "ActivityPage": {
+    "title": "アクティビティ",
+    "allActivities": "すべてのアクティビティ"
+  },
+  "ActivityNotes": {
+    "title": "メモ",
+    "myNotes": "自分のメモ",
+    "allNotes": "すべてのメモ"
+  },
+  "ActivityTasks": {
+    "title": "タスク",
+    "myTasks": "自分のタスク",
+    "allTasks": "タスク一覧"
+  },
+  "ActivityEditTaskSheet": {
+    "title": "タスクを編集",
+    "description": "下のフィールドを更新して保存してください。",
+    "descriptionLabel": "説明",
+    "assignedToLabel": "担当者",
+    "selectUserPlaceholder": "ユーザーを選択",
+    "contactLabel": "コンタクト",
+    "selectContactPlaceholder": "コンタクトを選択",
+    "noCompanyLinkedPlaceholder": "会社の紐付けなし",
+    "noContact": "コンタクトなし",
+    "dueDateLabel": "期限日",
+    "completedLabel": "完了",
+    "cancel": "キャンセル",
+    "save": "保存",
+    "descriptionRequired": "説明は必須です",
+    "taskUpdated": "タスクを更新しました",
+    "updateFailed": "タスクを更新できませんでした"
+  },
+  "ActivityLibraryTags": {
+    "title": "タグ",
+    "allTags": "すべてのタグ"
+  }
+}

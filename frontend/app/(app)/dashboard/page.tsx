@@ -1,6 +1,7 @@
 import { headers } from 'next/headers';
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
+import { getTranslations } from 'next-intl/server';
 import {
     BriefcaseIcon,
     BuildingOffice2Icon,
@@ -30,6 +31,7 @@ import Timeline from '@/app/components/me/Timeline';
 const DAY = 1000 * 60 * 60 * 24;
 
 export default async function Dashboard() {
+    const t = await getTranslations('DashboardPage');
 
     // TODO: move this somewhere else, or use the user object from layout.tsx
     const cookie = (await headers()).get('cookie');
@@ -74,30 +76,30 @@ export default async function Dashboard() {
                 />
 
                 <section>
-                    <SectionHeader title="Overview" />
+                    <SectionHeader title={t('overview')} />
                     <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
                         <OverviewCard
-                            label="Companies"
+                            label={t('companies')}
                             value={companies.length}
                             icon={BuildingOffice2Icon}
                             href="/records/companies"
-                            description="You're up +1 company from last week"
+                            description={t('companiesDescription')}
                         />
                         <OverviewCard
-                            label="Contacts"
+                            label={t('contacts')}
                             value={contacts.length}
                             icon={UsersIcon}
                             href="/records/contacts"
                         />
                         <OverviewCard
-                            label="Deals"
+                            label={t('deals')}
                             value={deals.length}
                             icon={BriefcaseIcon}
                             href="/records/deals"
-                            description="The last deal closed for $100,000"
+                            description={t('dealsDescription')}
                         />
                         <OverviewCard
-                            label="Pipelines"
+                            label={t('pipelines')}
                             value={pipelines.length}
                             icon={FunnelIcon}
                             href="/records/pipelines"
@@ -107,24 +109,24 @@ export default async function Dashboard() {
 
                 <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
                     <section className="flex flex-col">
-                        <SectionHeader title="Pipeline" />
+                        <SectionHeader title={t('pipeline')} />
                         <PipelineChart deals={deals} />
                     </section>
                     <section className="flex flex-col">
-                        <SectionHeader title="Tasks" />
+                        <SectionHeader title={t('tasks')} />
                         <TaskSummary tasks={tasks} />
                     </section>
                 </div>
 
                 <section>
                     <SectionHeader
-                        title="Recent activity"
+                        title={t('recentActivity')}
                         action={
                             <Link
                                 href="/activity"
                                 className="text-xs text-brand hover:text-brand-hover"
                             >
-                                View all
+                                {t('viewAll')}
                             </Link>
                         }
                     />

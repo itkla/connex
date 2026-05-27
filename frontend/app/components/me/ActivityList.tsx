@@ -1,12 +1,16 @@
 // NOTE: not used in /me page anymore, but might be used in other pages so im keeping it
 
-import { Activity } from "@/app/lib/api";
+import { getTranslations } from "next-intl/server";
+
+import { type Activity } from "@/app/lib/types";
 import EmptyState from "./EmptyState";
 import { timeOf, formatShortDate } from "@/app/lib/utils";
 
-export default function ActivityList({ activities }: { activities: Activity[] }) {
+export default async function ActivityList({ activities }: { activities: Activity[] }) {
+    const t = await getTranslations("MeActivityList");
+
     if (activities.length === 0) {
-        return <EmptyState message="No activities logged yet." />;
+        return <EmptyState message={t("empty")} />;
     }
 
     const sorted = [...activities].sort(

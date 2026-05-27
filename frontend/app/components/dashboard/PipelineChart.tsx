@@ -1,6 +1,7 @@
 'use client';
 
 import * as React from 'react';
+import { useTranslations } from 'next-intl';
 import { Bar, BarChart, CartesianGrid, XAxis, YAxis } from 'recharts';
 
 import {
@@ -14,13 +15,6 @@ import { formatCompactCurrency, timeOf } from '@/app/lib/utils';
 
 //originally 6, but i think 12 is more realistic/ helpful
 const MONTHS_AHEAD = 12;
-
-const chartConfig = {
-    value: {
-        label: 'Pipeline',
-        color: 'var(--color-chart-3)',
-    },
-} satisfies ChartConfig;
 
 type Bucket = { key: string; label: string; value: number };
 
@@ -57,6 +51,7 @@ function buildBuckets(deals: Deal[], now: number): Bucket[] {
 }
 
 export default function PipelineChart({ deals }: { deals: Deal[] }) {
+    const t = useTranslations('DashboardPipelineChart');
     const now = React.useMemo(() => Date.now(), []);
     const openDeals = React.useMemo(
         () => deals.filter((d) => !d.closedAt),
@@ -68,16 +63,27 @@ export default function PipelineChart({ deals }: { deals: Deal[] }) {
     const currency = openDeals.find((d) => d.currency)?.currency ?? 'USD';
     const scheduledValue = data.reduce((sum, b) => sum + b.value, 0);
 
+    const chartConfig = {
+        value: {
+            label: t('pipelineLabel'),
+            color: 'var(--color-chart-3)',
+        },
+    } satisfies ChartConfig;
+
     return (
         <div className="flex h-full flex-col rounded-2xl bg-white p-6 ring-1 ring-black/5">
             <span className="text-xs font-medium tracking-[0.12em] text-neutral-500 uppercase">
-                Active pipeline
+                {t('activePipeline')}
             </span>
             <span className="mt-3 text-5xl leading-none text-black tabular-nums">
                 {formatCompactCurrency(pipelineValue, currency)}
             </span>
             <p className="mt-2 text-sm text-neutral-500">
-                {openDeals.length} open · {formatCompactCurrency(scheduledValue, currency)} scheduled in next {MONTHS_AHEAD} months
+                {t('summary', {
+                    openCount: openDeals.length,
+                    scheduled: formatCompactCurrency(scheduledValue, currency),
+                    months: MONTHS_AHEAD,
+                })}
             </p>
             <div className="mt-6 flex-1 border-t border-neutral-200 pt-4">
                 <ChartContainer

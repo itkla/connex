@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
+import { useTranslations } from 'next-intl';
 
 import QuickEditDealSheet, { type DealDraft } from '@/app/components/records/deals/QuickEditDealSheet';
 import { updateDeal } from '@/app/lib/api';
@@ -38,6 +39,7 @@ export default function EditDealSheet({
     stagesByPipeline: Record<number, Stage[]>;
 }) {
     const router = useRouter();
+    const t = useTranslations('DealsEditSheet');
     const [draft, setDraft] = useState<DealDraft>(() => toDraft(deal));
     const [isSaving, setIsSaving] = useState(false);
 
@@ -48,11 +50,11 @@ export default function EditDealSheet({
 
     const saveEdits = async () => {
         if (!draft.name.trim()) {
-            toast.error('Name is required');
+            toast.error(t('nameRequired'));
             return;
         }
         if (!draft.pipeline || !draft.stage) {
-            toast.error('Pipeline and stage are required');
+            toast.error(t('pipelineStageRequired'));
             return;
         }
 
@@ -70,13 +72,13 @@ export default function EditDealSheet({
                 closedAt: draft.closedAt || null,
             };
             await updateDeal(deal.id, payload);
-            toast.success('Deal updated', {
+            toast.success(t('dealUpdated'), {
                 style: { backgroundColor: 'var(--color-brand)', color: 'white' },
             });
             handleOpenChange(false);
             router.refresh();
         } catch (err) {
-            toast.error(err instanceof Error ? err.message : 'Failed to save', {
+            toast.error(err instanceof Error ? err.message : t('failedToSave'), {
                 style: { backgroundColor: 'var(--color-destructive)', color: 'white' },
             });
         } finally {

@@ -2,6 +2,7 @@
 
 import { useCallback, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { useTranslations } from 'next-intl';
 import { Button } from '@/components/ui/button';
 import { ButtonGroup } from '@/components/ui/button-group';
 import { toast } from 'sonner';
@@ -51,6 +52,7 @@ const searchFields = (c: Company) => [c.name, c.website, c.industry, c.phone, c.
 
 export default function CompaniesBrowser({ companies }: { companies: Company[] }) {
     const router = useRouter();
+    const t = useTranslations('CompaniesBrowser');
     const {
         displayMode,
         setDisplayMode,
@@ -103,11 +105,11 @@ export default function CompaniesBrowser({ companies }: { companies: Company[] }
             .catch((err) => {
                 console.error(err);
                 setMetricsStatus('error');
-                toast.error('Failed to load company metrics', {
+                toast.error(t('toastMetricsLoadFailed'), {
                     style: { backgroundColor: 'var(--color-destructive)', color: 'white' },
                 });
             });
-    }, [metricsStatus]);
+    }, [metricsStatus, t]);
 
     const closeNewDialog = (open: boolean) => {
         setNewDialogOpen(open);
@@ -125,14 +127,14 @@ export default function CompaniesBrowser({ companies }: { companies: Company[] }
                 const logoUrl = await uploadCompanyLogo(created.id, logoFile);
                 await updateCompany(created.id, { ...newPayload, logoUrl });
             }
-            toast.success('Company created', {
+            toast.success(t('toastCompanyCreated'), {
                 style: { backgroundColor: 'var(--color-brand)', color: 'white' },
             });
             closeNewDialog(false);
             router.refresh();
         } catch (err) {
             console.error(err);
-            toast.error('Failed to create company', {
+            toast.error(t('toastCreateFailed'), {
                 style: { backgroundColor: 'var(--color-destructive)', color: 'white' },
             });
         } finally {
@@ -158,14 +160,14 @@ export default function CompaniesBrowser({ companies }: { companies: Company[] }
         });
 
         if (changed.length === 0) {
-            toast.info('No changes to save');
+            toast.info(t('toastNoChanges'));
             setEditSheetOpen(false);
             return;
         }
 
         const invalid = changed.find((c) => !drafts[c.id].name.trim());
         if (invalid) {
-            toast.error(`Name is required for "${invalid.name}"`);
+            toast.error(t('toastNameRequired', { name: invalid.name }));
             return;
         }
 
@@ -186,13 +188,13 @@ export default function CompaniesBrowser({ companies }: { companies: Company[] }
                 }),
             );
             toast.success(
-                changed.length === 1 ? 'Company updated' : `${changed.length} companies updated`,
+                changed.length === 1 ? t('toastCompanyUpdated') : t('toastCompaniesUpdated', { count: changed.length }),
                 { style: { backgroundColor: 'var(--color-brand)', color: 'white' } },
             );
             setEditSheetOpen(false);
             router.refresh();
         } catch (err) {
-            toast.error(err instanceof Error ? err.message : 'Failed to save', {
+            toast.error(err instanceof Error ? err.message : t('toastSaveFailed'), {
                 style: { backgroundColor: 'var(--color-destructive)', color: 'white' },
             });
         } finally {
@@ -217,14 +219,14 @@ export default function CompaniesBrowser({ companies }: { companies: Company[] }
         try {
             await Promise.all(Array.from(selectedIds).map((id) => deleteCompany(Number(id))));
             toast.success(
-                selectedIds.size === 1 ? 'Company deleted' : `${selectedIds.size} companies deleted`,
+                selectedIds.size === 1 ? t('toastCompanyDeleted') : t('toastCompaniesDeleted', { count: selectedIds.size }),
                 { style: { backgroundColor: 'var(--color-brand)', color: 'white' } },
             );
             setSelectedIds(new Set());
             setDeleteDialogOpen(false);
             router.refresh();
         } catch (err) {
-            toast.error(err instanceof Error ? err.message : 'Failed to delete', {
+            toast.error(err instanceof Error ? err.message : t('toastDeleteFailed'), {
                 style: { backgroundColor: 'var(--color-destructive)', color: 'white' },
             });
         } finally {
@@ -241,39 +243,39 @@ export default function CompaniesBrowser({ companies }: { companies: Company[] }
     };
 
     const columns: ColumnDef<Company>[] = useMemo(() => [
-        { key: 'name', label: 'Name', getSortValue: (c) => c.name ?? null },
+        { key: 'name', label: t('columnName'), getSortValue: (c) => c.name ?? null },
         {
             key: 'website',
-            label: 'Website',
+            label: t('columnWebsite'),
             getSortValue: (c) => c.website ?? null,
-            copyable: { label: 'Website', getValue: (c) => c.website },
+            copyable: { label: t('columnWebsite'), getValue: (c) => c.website },
         },
-        { key: 'industry', label: 'Industry', getSortValue: (c) => c.industry ?? null },
+        { key: 'industry', label: t('columnIndustry'), getSortValue: (c) => c.industry ?? null },
         {
             key: 'phone',
-            label: 'Phone',
+            label: t('columnPhone'),
             getSortValue: (c) => c.phone ?? null,
-            copyable: { label: 'Phone', getValue: (c) => c.phone },
+            copyable: { label: t('columnPhone'), getValue: (c) => c.phone },
         },
         {
             key: 'address',
-            label: 'Address',
+            label: t('columnAddress'),
             getSortValue: (c) => c.address ?? null,
-            copyable: { label: 'Address', getValue: (c) => c.address },
+            copyable: { label: t('columnAddress'), getValue: (c) => c.address },
         },
         {
             key: 'createdAt',
-            label: 'Created',
+            label: t('columnCreated'),
             getSortValue: (c) => (c.createdAt ? Date.parse(c.createdAt) : null),
             render: (c) => c.createdAt,
         },
         {
             key: 'updatedAt',
-            label: 'Updated',
+            label: t('columnUpdated'),
             getSortValue: (c) => (c.updatedAt ? Date.parse(c.updatedAt) : null),
             render: (c) => c.updatedAt,
         },
-    ], []);
+    ], [t]);
 
     // TODO: move processing to the backend so the frontend doesn't traverse the full tables to derive per-company metrics
 
@@ -351,10 +353,10 @@ export default function CompaniesBrowser({ companies }: { companies: Company[] }
     return (
         <div className="space-y-6">
             <div className="flex items-center justify-between">
-                <h1 className="text-4xl font-extrabold">Companies</h1>
-                <Button className="bg-brand text-white" aria-label="Add company" onClick={() => setNewDialogOpen(true)}>
+                <h1 className="text-4xl font-extrabold">{t('title')}</h1>
+                <Button className="bg-brand text-white" aria-label={t('addCompanyAriaLabel')} onClick={() => setNewDialogOpen(true)}>
                     <PlusIcon strokeWidth={2.5} />
-                    New
+                    {t('new')}
                 </Button>
             </div>
 
@@ -368,13 +370,13 @@ export default function CompaniesBrowser({ companies }: { companies: Company[] }
                 </button>
                 <div
                     role="group"
-                    aria-label="Display mode"
+                    aria-label={t('displayModeAriaLabel')}
                     className="inline-flex rounded-full bg-neutral-100 p-0.5 ring-1 ring-black/5"
                 >
                     <button
                         type="button"
                         onClick={() => setDisplayMode('grid')}
-                        aria-label="Grid view"
+                        aria-label={t('gridViewAriaLabel')}
                         aria-pressed={displayMode === 'grid'}
                         className={`flex h-7 w-7 items-center justify-center rounded-full transition ${displayMode === 'grid' ? 'bg-white text-neutral-900 shadow' : 'text-neutral-500 hover:text-neutral-700'}`}
                     >
@@ -383,7 +385,7 @@ export default function CompaniesBrowser({ companies }: { companies: Company[] }
                     <button
                         type="button"
                         onClick={() => setDisplayMode('table')}
-                        aria-label="Table view"
+                        aria-label={t('tableViewAriaLabel')}
                         aria-pressed={displayMode === 'table'}
                         className={`flex h-7 w-7 items-center justify-center rounded-full transition ${displayMode === 'table' ? 'bg-white text-neutral-900 shadow' : 'text-neutral-500 hover:text-neutral-700'}`}
                     >
@@ -393,15 +395,15 @@ export default function CompaniesBrowser({ companies }: { companies: Company[] }
 
                 {selectedIds.size > 0 && (
                     <div className="flex items-center gap-2">
-                        <span className="text-sm text-neutral-500">{selectedIds.size} selected</span>
+                        <span className="text-sm text-neutral-500">{t('selectedCount', { count: selectedIds.size })}</span>
                         <ButtonGroup className="rounded-full bg-neutral-100">
                             <Button variant="outline" size="sm" onClick={viewSelected}>
                                 <EyeIcon className="size-4" />
-                                View
+                                {t('view')}
                             </Button>
                             <Button variant="outline" size="sm" onClick={openEditSheet}>
                                 <PencilIcon className="size-4" />
-                                Quick edit
+                                {t('quickEdit')}
                             </Button>
                             <DropdownMenu>
                                 <DropdownMenuTrigger asChild>
@@ -418,7 +420,7 @@ export default function CompaniesBrowser({ companies }: { companies: Company[] }
                                         }}
                                     >
                                         <TrashIcon />
-                                        Delete
+                                        {t('delete')}
                                     </DropdownMenuItem>
                                 </DropdownMenuContent>
                             </DropdownMenu>
@@ -429,7 +431,7 @@ export default function CompaniesBrowser({ companies }: { companies: Company[] }
                 <div className="relative ml-auto w-full max-w-sm">
                     <input
                         type="text"
-                        placeholder="Search companies"
+                        placeholder={t('searchPlaceholder')}
                         value={query}
                         onChange={(e) => setQuery(e.target.value)}
                         className="w-full rounded-full bg-neutral-100 px-4 py-2 pr-10 text-sm text-black placeholder-neutral-500 outline-none ring-1 ring-black/5 transition focus:ring-2 focus:ring-brand"
@@ -459,7 +461,7 @@ export default function CompaniesBrowser({ companies }: { companies: Company[] }
                 onQuickEdit={quickEditOne}
                 onDelete={deleteOne}
                 gridClassName="grid grid-cols-1 gap-3 pt-8"
-                entityLabel="company"
+                entityLabel={t('entityLabel')}
             />
 
             <QuickEditCompanySheet
@@ -489,7 +491,7 @@ export default function CompaniesBrowser({ companies }: { companies: Company[] }
                 onOpenChange={setDeleteDialogOpen}
                 selectedIds={selectedIds}
                 selectedItems={selectedCompanies}
-                entityLabel="company"
+                entityLabel={t('entityLabel')}
                 getDisplayName={(c) => c.name}
                 isDeleting={isDeleting}
                 confirmDelete={confirmDelete}

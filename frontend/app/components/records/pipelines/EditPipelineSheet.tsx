@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
+import { useTranslations } from 'next-intl';
 
 import { createStage, deleteStage, getStagesByPipelineId, updatePipeline, updateStage } from '@/app/lib/api';
 import { Pipeline, Stage, UpdatePipelinePayload } from '@/app/lib/types';
@@ -39,6 +40,7 @@ export default function EditPipelineSheet({
     onOpenChange: (open: boolean) => void;
 }) {
     const router = useRouter();
+    const t = useTranslations('PipelinesEditSheet');
     const [draft, setDraft] = useState<PipelineDraft>(() => toDraft(pipeline, stages));
     const [isSaving, setIsSaving] = useState(false);
 
@@ -65,16 +67,16 @@ export default function EditPipelineSheet({
     const saveEdits = async () => {
         const original = toDraft(pipeline, stages);
         if (!diffDraft(original, draft)) {
-            toast.info('No changes to save');
+            toast.info(t('noChangesToSave'));
             handleOpenChange(false);
             return;
         }
         if (!draft.name.trim()) {
-            toast.error('Name is required');
+            toast.error(t('nameRequired'));
             return;
         }
         if (draft.stages.some((s) => !s.name.trim())) {
-            toast.error('Stage names cannot be empty');
+            toast.error(t('stageNamesEmpty'));
             return;
         }
 
@@ -109,7 +111,7 @@ export default function EditPipelineSheet({
                 }
             }
 
-            toast.success('Pipeline updated', {
+            toast.success(t('pipelineUpdated'), {
                 style: { backgroundColor: 'var(--color-brand)', color: 'white' },
             });
             handleOpenChange(false);
@@ -118,7 +120,7 @@ export default function EditPipelineSheet({
             setDraft(toDraft(pipeline, fresh));
             router.refresh();
         } catch (err) {
-            toast.error(err instanceof Error ? err.message : 'Failed to save', {
+            toast.error(err instanceof Error ? err.message : t('failedToSave'), {
                 style: { backgroundColor: 'var(--color-destructive)', color: 'white' },
             });
         } finally {

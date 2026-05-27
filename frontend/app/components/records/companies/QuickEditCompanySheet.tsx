@@ -1,3 +1,5 @@
+'use client';
+
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription, SheetFooter, SheetClose } from '@/components/ui/sheet';
 import { Button } from '@/components/ui/button';
 import { Loader2Icon } from 'lucide-react';
@@ -6,6 +8,7 @@ import { Label } from '@/components/ui/label';
 import { type Company } from '@/app/lib/types';
 import { type SelectionId } from '@/app/components/records/types';
 import CompanyAvatar from '@/app/components/records/companies/CompanyAvatar';
+import { useTranslations } from 'next-intl';
 
 // const inputClass = 'w-full rounded-lg bg-neutral-100 px-3 py-2 text-sm text-black placeholder-neutral-500 outline-none ring-1 ring-black/5 transition focus:ring-2 focus:ring-brand';
 
@@ -42,15 +45,16 @@ export default function QuickEditCompanySheet({
     isSaving,
     saveEdits,
 }: Props) {
+    const t = useTranslations('CompaniesQuickEditSheet');
     return (
         <Sheet open={open} onOpenChange={onOpenChange}>
             <SheetContent side="right" className="flex w-full flex-col sm:max-w-lg">
                 <SheetHeader className="border-b">
                     <SheetTitle>
-                        {selectedIds.size === 1 ? 'Quick edit company' : `Quick edit ${selectedIds.size} companies`}
+                        {selectedIds.size === 1 ? t('titleSingle') : t('titleMultiple', { count: selectedIds.size })}
                     </SheetTitle>
                     <SheetDescription>
-                        Update fields below. Only changed companies will be saved.
+                        {t('description')}
                     </SheetDescription>
                 </SheetHeader>
 
@@ -115,7 +119,7 @@ export default function QuickEditCompanySheet({
 
                                     <div className="grid gap-3">
                                         <div className="grid gap-1.5">
-                                            <Label htmlFor={`name-${c.id}`}>Name</Label>
+                                            <Label htmlFor={`name-${c.id}`}>{t('labelName')}</Label>
                                             <input
                                                 id={`name-${c.id}`}
                                                 type="text"
@@ -126,7 +130,7 @@ export default function QuickEditCompanySheet({
                                             />
                                         </div>
                                         <div className="grid gap-1.5">
-                                            <Label htmlFor={`website-${c.id}`}>Website</Label>
+                                            <Label htmlFor={`website-${c.id}`}>{t('labelWebsite')}</Label>
                                             <input
                                                 id={`website-${c.id}`}
                                                 type="url"
@@ -136,7 +140,7 @@ export default function QuickEditCompanySheet({
                                             />
                                         </div>
                                         <div className="grid gap-1.5">
-                                            <Label htmlFor={`industry-${c.id}`}>Industry</Label>
+                                            <Label htmlFor={`industry-${c.id}`}>{t('labelIndustry')}</Label>
                                             <input
                                                 id={`industry-${c.id}`}
                                                 type="text"
@@ -146,7 +150,7 @@ export default function QuickEditCompanySheet({
                                             />
                                         </div>
                                         <div className="grid gap-1.5">
-                                            <Label htmlFor={`phone-${c.id}`}>Phone</Label>
+                                            <Label htmlFor={`phone-${c.id}`}>{t('labelPhone')}</Label>
                                             <input
                                                 id={`phone-${c.id}`}
                                                 type="tel"
@@ -156,7 +160,7 @@ export default function QuickEditCompanySheet({
                                             />
                                         </div>
                                         <div className="grid gap-1.5">
-                                            <Label htmlFor={`address-${c.id}`}>Address</Label>
+                                            <Label htmlFor={`address-${c.id}`}>{t('labelAddress')}</Label>
                                             <input
                                                 id={`address-${c.id}`}
                                                 type="text"
@@ -174,10 +178,10 @@ export default function QuickEditCompanySheet({
 
                 <SheetFooter className="border-t">
                     <SheetClose asChild>
-                        <Button variant="outline" disabled={isSaving}>Cancel</Button>
+                        <Button variant="outline" disabled={isSaving}>{t('cancel')}</Button>
                     </SheetClose>
                     <Button onClick={saveEdits} disabled={isSaving} className="bg-brand text-white hover:bg-brand-dark">
-                        {isSaving ? <Loader2Icon className="size-4 animate-spin" /> : 'Save'}
+                        {isSaving ? <Loader2Icon className="size-4 animate-spin" /> : t('save')}
                     </Button>
                 </SheetFooter>
             </SheetContent>

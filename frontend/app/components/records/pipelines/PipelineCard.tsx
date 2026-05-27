@@ -30,6 +30,7 @@ import type { LoadStatus, Pipeline, PipelineMetrics, Stage, User } from '@/app/l
 import Chip from '@/app/components/Chip';
 import Link from 'next/link';
 import { cn } from '@/lib/utils';
+import { useTranslations } from 'next-intl';
 
 interface PipelineCardProps {
     pipeline: Pipeline;
@@ -49,6 +50,7 @@ export default function PipelineCard({
     onDelete,
 }: PipelineCardProps) {
     const router = useRouter();
+    const t = useTranslations('PipelinesCard');
     const [isExpanded, setIsExpanded] = useState(false);
 
     const open = () => router.push(`/records/pipelines/${pipeline.id}`);
@@ -80,7 +82,7 @@ export default function PipelineCard({
                     <DropdownMenuTrigger asChild>
                         <button
                             type="button"
-                            aria-label="Pipeline actions"
+                            aria-label={t('actionsAriaLabel')}
                             onClick={(e) => e.stopPropagation()}
                             className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-neutral-200 text-neutral-700 transition hover:bg-neutral-300"
                         >
@@ -105,7 +107,7 @@ export default function PipelineCard({
                                 }}
                             >
                                 <PencilIcon className="size-4 text-neutral-500" />
-                                Quick edit
+                                {t('quickEdit')}
                             </DropdownMenuItem>
                         )}
                         {onDelete && (
@@ -119,7 +121,7 @@ export default function PipelineCard({
                                     }}
                                 >
                                     <TrashIcon className="size-4 text-destructive" />
-                                    Delete
+                                    {t('delete')}
                                 </DropdownMenuItem>
                             </>
                         )}
@@ -145,13 +147,13 @@ export default function PipelineCard({
                     {metricsStatus === 'loading' && (
                         <div className="flex items-center justify-center py-4 text-sm text-neutral-500">
                             <Loader2Icon className="size-4 animate-spin mr-2" />
-                            Loading metrics…
+                            {t('loadingMetrics')}
                         </div>
                     )}
 
                     {metricsStatus === 'error' && (
                         <div className="flex items-center justify-between py-2 text-sm">
-                            <span className="text-destructive">Failed to load metrics.</span>
+                            <span className="text-destructive">{t('failedToLoadMetrics')}</span>
                             <Button
                                 variant="outline"
                                 size="sm"
@@ -160,15 +162,15 @@ export default function PipelineCard({
                                     onFirstExpand?.();
                                 }}
                             >
-                                Retry
+                                {t('retry')}
                             </Button>
                         </div>
                     )}
 
                     {metricsStatus === 'ready' && metrics && (
                         <div className="flex flex-wrap items-start gap-8">
-                            <CountTile label="Stages" value={metrics.numStages} />
-                            <Link href={`/records/deals?pipelineId=${pipeline.id}`} className=""><CountTile className="hover:text-brand transition-colors duration-300 transition-ease-in-out" label="Deals" value={metrics.numDeals} /></Link>
+                            <CountTile label={t('stages')} value={metrics.numStages} />
+                            <Link href={`/records/deals?pipelineId=${pipeline.id}`} className=""><CountTile className="hover:text-brand transition-colors duration-300 transition-ease-in-out" label={t('deals')} value={metrics.numDeals} /></Link>
                             <RelatedUsersSection users={metrics.relatedUsers} />
                             <AssociatedStagesSection stages={stages} />
                         </div>
@@ -192,20 +194,21 @@ function CountTile({ label, value, className }: { label: string; value: number; 
 
 function RelatedUsersSection({ users }: { users: User[] }) {
     const router = useRouter();
+    const t = useTranslations('PipelinesCard');
     const visible = users.slice(0, 5);
     const overflow = users.length - visible.length;
 
     return (
         <div>
             <p className="text-xs font-medium tracking-[0.12em] text-neutral-500 uppercase mb-2">
-                Relations ({users.length})
+                {t('relations', { count: users.length })}
             </p>
             {users.length === 0 ? (
-                <p className="text-xs text-neutral-400">No related users</p>
+                <p className="text-xs text-neutral-400">{t('noRelatedUsers')}</p>
             ) : (
                 <AvatarGroup>
                     {visible.map((u) => {
-                        const fallback = (u.displayName ?? '?').charAt(0);
+                        const fallback = (u.displayName ?? t('unknownUser')).charAt(0);
                         return (
                             <Tooltip key={u.id}>
                                 <TooltipTrigger asChild>
@@ -218,7 +221,7 @@ function RelatedUsersSection({ users }: { users: User[] }) {
                                     </Avatar>
                                 </TooltipTrigger>
                                 <TooltipContent side="bottom" align="center">
-                                    {u.displayName ?? '?'}
+                                    {u.displayName ?? t('unknownUser')}
                                 </TooltipContent>
                             </Tooltip>
                         );
@@ -235,10 +238,11 @@ function RelatedUsersSection({ users }: { users: User[] }) {
 }
 
 function AssociatedStagesSection({ stages }: { stages: Stage[] }) {
+    const t = useTranslations('PipelinesCard');
     return (
         <div>
             <p className="text-xs font-medium tracking-[0.12em] text-neutral-500 uppercase mb-2">
-                Associated stages ({stages.length})
+                {t('associatedStages', { count: stages.length })}
             </p>
             <div className="flex flex-wrap items-start gap-2">
                 {stages.map((s) => (

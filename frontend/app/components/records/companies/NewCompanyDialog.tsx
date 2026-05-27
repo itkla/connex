@@ -7,6 +7,7 @@ import { Label } from '@/components/ui/label';
 import { type CreateCompanyPayload } from '@/app/lib/types';
 import { ChangeEvent, Dispatch, SetStateAction, useEffect, useState } from 'react';
 import { CameraIcon } from '@heroicons/react/24/outline';
+import { useTranslations } from 'next-intl';
 
 const inputClass = 'w-full rounded-lg bg-neutral-100 px-3 py-2 text-sm text-black placeholder-neutral-500 outline-none ring-1 ring-black/5 transition focus:ring-2 focus:ring-brand';
 
@@ -31,6 +32,7 @@ export default function NewCompanyDialog({
     isCreating,
     createNewCompany,
 }: Props) {
+    const t = useTranslations('CompaniesNewDialog');
     const [logoPreview, setLogoPreview] = useState<string | null>(null);
 
     useEffect(() => {
@@ -58,9 +60,9 @@ export default function NewCompanyDialog({
         <Dialog open={open} onOpenChange={onOpenChange}>
             <DialogContent>
                 <DialogHeader>
-                    <DialogTitle>New company</DialogTitle>
+                    <DialogTitle>{t('title')}</DialogTitle>
                     <DialogDescription>
-                        Add a company to your records. These companies will be shared with all users of this organization.
+                        {t('description')}
                     </DialogDescription>
                 </DialogHeader>
 
@@ -89,79 +91,79 @@ export default function NewCompanyDialog({
 
                 <div className="grid gap-4">
                     <div className="grid gap-1.5">
-                        <Label htmlFor="company-name">Name</Label>
+                        <Label htmlFor="company-name">{t('labelName')}</Label>
                         <input
                             id="company-name"
                             type="text"
                             value={payload.name}
                             onChange={(e) => setPayload((prev) => ({ ...prev, name: e.target.value }))}
                             className={inputClass}
-                            placeholder="Acme Corp"
+                            placeholder={t('placeholderName')}
                             autoFocus
                             required
                         />
                     </div>
 
                     <div className="grid gap-1.5">
-                        <Label htmlFor="company-website">Website</Label>
+                        <Label htmlFor="company-website">{t('labelWebsite')}</Label>
                         <input
                             id="company-website"
                             type="url"
                             value={payload.website ?? ''}
                             onChange={(e) => setPayload((prev) => ({ ...prev, website: e.target.value }))}
                             className={inputClass}
-                            placeholder="https://acme.com"
+                            placeholder={t('placeholderWebsite')}
                         />
                     </div>
 
                     <div className="grid grid-cols-2 gap-3">
                         <div className="grid gap-1.5">
-                            <Label htmlFor="company-industry">Industry</Label>
+                            <Label htmlFor="company-industry">{t('labelIndustry')}</Label>
                             <input
                                 id="company-industry"
                                 type="text"
                                 value={payload.industry ?? ''}
                                 onChange={(e) => setPayload((prev) => ({ ...prev, industry: e.target.value }))}
                                 className={inputClass}
-                                placeholder="Software"
+                                placeholder={t('placeholderIndustry')}
                             />
                         </div>
                         <div className="grid gap-1.5">
-                            <Label htmlFor="company-phone">Phone</Label>
+                            <Label htmlFor="company-phone">{t('labelPhone')}</Label>
                             <input
                                 id="company-phone"
                                 type="tel"
                                 value={payload.phone ?? ''}
                                 onChange={(e) => setPayload((prev) => ({ ...prev, phone: e.target.value }))}
                                 className={inputClass}
-                                placeholder="+1 555 123 4567"
+                                placeholder={t('placeholderPhone')}
                             />
                         </div>
                     </div>
 
                     <div className="grid gap-1.5">
-                        <Label htmlFor="company-address">Address</Label>
+                        <Label htmlFor="company-address">{t('labelAddress')}</Label>
                         <input
                             id="company-address"
                             type="text"
                             value={payload.address ?? ''}
                             onChange={(e) => setPayload((prev) => ({ ...prev, address: e.target.value }))}
                             className={inputClass}
-                            placeholder="123 Main St"
+                            placeholder={t('placeholderAddress')}
                         />
                     </div>
                 </div>
 
                 <DialogFooter>
                     <DialogClose asChild>
-                        <Button variant="outline" disabled={isCreating}>Cancel</Button>
+                        <Button variant="outline" disabled={isCreating}>{t('cancel')}</Button>
                     </DialogClose>
                     <Button
                         onClick={createNewCompany}
                         disabled={isCreating || !payload.name.trim()}
                         className="bg-brand text-white hover:bg-brand-dark"
                     >
-                        {isCreating ? <Loader2Icon className="size-4 animate-spin" /> : 'Create'}
+                        {isCreating ? <Loader2Icon className="size-4 animate-spin" /> : t('create')}
                     </Button>
                 </DialogFooter>
             </DialogContent>

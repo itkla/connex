@@ -1,6 +1,7 @@
 'use client';
 
 import { Dispatch, SetStateAction, WheelEvent } from 'react';
+import { useTranslations } from 'next-intl';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogClose } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Loader2Icon } from 'lucide-react';
@@ -33,6 +34,7 @@ export default function NewDealDialog({
     isCreating,
     createNewDeal,
 }: Props) {
+    const t = useTranslations('DealsNewDialog');
     const handleListWheel = (e: WheelEvent<HTMLDivElement>) => {
         const lineHeightPx = 16;
         const delta = e.deltaMode === 1 ? e.deltaY * lineHeightPx : e.deltaY;
@@ -51,22 +53,22 @@ export default function NewDealDialog({
         <Dialog open={open} onOpenChange={onOpenChange}>
             <DialogContent>
                 <DialogHeader>
-                    <DialogTitle>New deal</DialogTitle>
+                    <DialogTitle>{t('title')}</DialogTitle>
                     <DialogDescription>
-                        Add a deal to your pipeline. Deals are shared with all users of this organization.
+                        {t('description')}
                     </DialogDescription>
                 </DialogHeader>
 
                 <div className="grid gap-4">
                     <div className="grid gap-1.5">
-                        <Label htmlFor="deal-name">Name</Label>
+                        <Label htmlFor="deal-name">{t('name')}</Label>
                         <input
                             id="deal-name"
                             type="text"
                             value={payload.name}
                             onChange={(e) => setPayload((prev) => ({ ...prev, name: e.target.value }))}
                             className={inputClass}
-                            placeholder="Acme renewal Q4"
+                            placeholder={t('namePlaceholder')}
                             autoFocus
                             required
                         />
@@ -74,7 +76,7 @@ export default function NewDealDialog({
 
                     <div className="grid grid-cols-[1fr_120px] gap-3">
                         <div className="grid gap-1.5">
-                            <Label htmlFor="deal-value">Value</Label>
+                            <Label htmlFor="deal-value">{t('value')}</Label>
                             <input
                                 id="deal-value"
                                 type="number"
@@ -87,7 +89,7 @@ export default function NewDealDialog({
                             />
                         </div>
                         <div className="grid gap-1.5">
-                            <Label htmlFor="deal-currency">Currency</Label>
+                            <Label htmlFor="deal-currency">{t('currency')}</Label>
                             <input
                                 id="deal-currency"
                                 type="text"
@@ -102,7 +104,7 @@ export default function NewDealDialog({
 
                     <div className="grid grid-cols-2 gap-3">
                         <div className="grid gap-1.5">
-                            <Label htmlFor="deal-pipeline">Pipeline</Label>
+                            <Label htmlFor="deal-pipeline">{t('pipeline')}</Label>
                             <Combobox
                                 items={pipelines}
                                 itemToStringLabel={(p: Pipeline) => p.name}
@@ -115,10 +117,10 @@ export default function NewDealDialog({
                                     }))
                                 }
                             >
-                                <ComboboxInput id="deal-pipeline" placeholder="Select pipeline" className="ring-1 ring-black/5" />
+                                <ComboboxInput id="deal-pipeline" placeholder={t('selectPipeline')} className="ring-1 ring-black/5" />
                                 <ComboboxContent className="pointer-events-auto">
                                     <ComboboxList onWheel={handleListWheel}>
-                                        <ComboboxEmpty>No pipelines found.</ComboboxEmpty>
+                                        <ComboboxEmpty>{t('noPipelinesFound')}</ComboboxEmpty>
                                         {pipelines.map((p) => (
                                             <ComboboxItem key={p.id} value={p}>
                                                 {p.name}
@@ -129,7 +131,7 @@ export default function NewDealDialog({
                             </Combobox>
                         </div>
                         <div className="grid gap-1.5">
-                            <Label htmlFor="deal-stage">Stage</Label>
+                            <Label htmlFor="deal-stage">{t('stage')}</Label>
                             <Combobox
                                 items={stages}
                                 itemToStringLabel={(s: Stage) => s.name}
@@ -141,13 +143,13 @@ export default function NewDealDialog({
                             >
                                 <ComboboxInput
                                     id="deal-stage"
-                                    placeholder={payload.pipeline ? 'Select stage' : 'Pick a pipeline first'}
+                                    placeholder={payload.pipeline ? t('selectStage') : t('pickPipelineFirst')}
                                     disabled={!payload.pipeline}
                                     className="ring-1 ring-black/5"
                                 />
                                 <ComboboxContent className="pointer-events-auto">
                                     <ComboboxList onWheel={handleListWheel}>
-                                        <ComboboxEmpty>No stages.</ComboboxEmpty>
+                                        <ComboboxEmpty>{t('noStages')}</ComboboxEmpty>
                                         {stages.map((s) => (
                                             <ComboboxItem key={s.id} value={s}>
                                                 {s.name}
@@ -160,7 +162,7 @@ export default function NewDealDialog({
                     </div>
 
                     <div className="grid gap-1.5">
-                        <Label htmlFor="deal-company">Company</Label>
+                        <Label htmlFor="deal-company">{t('company')}</Label>
                         <Combobox
                             items={companies}
                             itemToStringLabel={(c: Company) => c.name}
@@ -169,10 +171,10 @@ export default function NewDealDialog({
                                 setPayload((prev) => ({ ...prev, company: (c as Company | null)?.id ?? null }))
                             }
                         >
-                            <ComboboxInput id="deal-company" placeholder="Select company (optional)" showClear className="ring-1 ring-black/5" />
+                            <ComboboxInput id="deal-company" placeholder={t('selectCompanyOptional')} showClear className="ring-1 ring-black/5" />
                             <ComboboxContent className="pointer-events-auto">
                                 <ComboboxList onWheel={handleListWheel}>
-                                    <ComboboxEmpty>No companies found.</ComboboxEmpty>
+                                    <ComboboxEmpty>{t('noCompaniesFound')}</ComboboxEmpty>
                                     {companies.map((c) => (
                                         <ComboboxItem key={c.id} value={c}>
                                             {c.name}
@@ -184,7 +186,7 @@ export default function NewDealDialog({
                     </div>
 
                     <div className="grid gap-1.5">
-                        <Label htmlFor="deal-close">Expected close date</Label>
+                        <Label htmlFor="deal-close">{t('expectedCloseDate')}</Label>
                         <input
                             id="deal-close"
                             type="date"
@@ -199,14 +201,14 @@ export default function NewDealDialog({
 
                 <DialogFooter>
                     <DialogClose asChild>
-                        <Button variant="outline" disabled={isCreating}>Cancel</Button>
+                        <Button variant="outline" disabled={isCreating}>{t('cancel')}</Button>
                     </DialogClose>
                     <Button
                         onClick={createNewDeal}
                         disabled={isCreating || !canSubmit}
                         className="bg-brand text-white hover:bg-brand-dark"
                     >
-                        {isCreating ? <Loader2Icon className="size-4 animate-spin" /> : 'Create'}
+                        {isCreating ? <Loader2Icon className="size-4 animate-spin" /> : t('create')}
                     </Button>
                 </DialogFooter>
             </DialogContent>

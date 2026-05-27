@@ -2,6 +2,7 @@
 
 import * as React from 'react';
 import { CartesianGrid, Line, LineChart, ReferenceLine, XAxis, YAxis, Tooltip as RechartsTooltip } from 'recharts';
+import { useTranslations } from 'next-intl';
 
 import {
     ChartContainer,
@@ -14,11 +15,6 @@ import { formatCompactCurrency, timeOf } from '@/app/lib/utils';
 
 const MONTHS_BACK = 6;
 const MONTHS_FORWARD = 6;
-
-const chartConfig = {
-    closed: { label: 'Actual revenue', color: 'var(--color-brand)' },
-    projected: { label: 'Projected revenue', color: 'var(--color-chart-2)' },
-} satisfies ChartConfig;
 
 type Bucket = { key: string; label: string; closed: number; projected: number };
 
@@ -71,8 +67,17 @@ function buildBuckets(deals: Deal[], now: number) {
 }
 
 export default function DealsRevenueChart({ deals }: { deals: Deal[] }) {
+    const t = useTranslations('DealsRevenueChart');
     const now = React.useMemo(() => Date.now(), []);
     const { data, todayLabel, currency } = React.useMemo(() => buildBuckets(deals, now), [deals, now]);
+    const chartConfig = React.useMemo(
+        () =>
+            ({
+                closed: { label: t('actualRevenue'), color: 'var(--color-brand)' },
+                projected: { label: t('projectedRevenue'), color: 'var(--color-chart-2)' },
+            }) satisfies ChartConfig,
+        [t],
+    );
 
     return (
         <ChartContainer config={chartConfig} className="aspect-auto h-64 w-full">
@@ -95,14 +100,20 @@ export default function DealsRevenueChart({ deals }: { deals: Deal[] }) {
                 />
                 <RechartsTooltip
                     cursor={{ stroke: 'var(--color-brand)', strokeOpacity: 0.3, strokeWidth: 1 }}
-                    content={<RevenueChartTooltip currency={currency} />}
+                    content={
+                        <RevenueChartTooltip
+                            currency={currency}
+                            projectedLabel={(amount) => t('projectedAmount', { amount })}
+                            actualLabel={(amount) => t('actualAmount', { amount })}
+                        />
+                    }
                 />
                 {todayLabel != null && (
                     <ReferenceLine
                         x={todayLabel}
                         stroke="#a3a3a3"
                         strokeDasharray="4 4"
-                        label={{ value: 'Today', position: 'top', fontSize: 10, fill: '#737373' }}
+                        label={{ value: t('today'), position: 'top', fontSize: 10, fill: '#737373' }}
                     />
                 )}
                 <Line
@@ -132,11 +143,15 @@ interface RevenueChartTooltipProps {
     active?: boolean;
     payload?: Array<{ payload: Bucket }>;
     currency?: string;
+    projectedLabel?: (amount: string) => string;
+    actualLabel?: (amount: string) => string;
 }
 
-function RevenueChartTooltip({ active, payload, currency = 'USD' }: RevenueChartTooltipProps) {
+function RevenueChartTooltip({ active, payload, currency = 'USD', projectedLabel, actualLabel }: RevenueChartTooltipProps) {
     if (!active || !payload?.length) return null;
     const d = payload[0].payload;
+    const projectedAmount = formatCompactCurrency(d.projected, currency);
+    const actualAmount = formatCompactCurrency(d.closed, currency);
     return (
         <div className="rounded-md bg-white p-2 text-xs ring-1 ring-black/5 shadow-md">
             <div className="font-medium text-neutral-700 mb-1.5">
@@ -145,11 +160,11 @@ function RevenueChartTooltip({ active, payload, currency = 'USD' }: RevenueChart
             <div className="space-y-0.5">
                 <div className="flex items-center gap-1.5 text-neutral-600">
                     <span className="inline-block size-2 rounded-sm" style={{ backgroundColor: 'var(--color-chart-2)' }} />
-                    Projected · {formatCompactCurrency(d.projected, currency)}
+                    {projectedLabel ? projectedLabel(projectedAmount) : `Projected · ${projectedAmount}`}
                 </div>
                 <div className="flex items-center gap-1.5 text-neutral-600">
                     <span className="inline-block size-2 rounded-sm bg-brand" />
-                    Actual · {formatCompactCurrency(d.closed, currency)}
+                    {actualLabel ? actualLabel(actualAmount) : `Actual · ${actualAmount}`}
                 </div>
             </div>
         </div>

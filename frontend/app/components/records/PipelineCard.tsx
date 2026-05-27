@@ -1,22 +1,29 @@
 import Link from "next/link";
+import { getTranslations } from "next-intl/server";
 import { formatCompactCurrency } from "@/app/lib/utils";
 import { type Deal } from "@/app/lib/types";
 
-export default function PipelineCard({ deals, render = "active" }: { deals: Deal[], render?: "active" | "inactive" | "previous"
+export default async function PipelineCard({ deals, render = "active" }: { deals: Deal[], render?: "active" | "inactive" | "previous"
  }   ) {
+    const t = await getTranslations('RecordsPipelineCard');
     let title = "";
+    let emptyMessage = "";
     switch (render) {
         case "active":
-            title = "Active Pipeline";
+            title = t('titleActive');
+            emptyMessage = t('emptyActive');
             break;
         case "inactive":
-            title = "Closed Pipeline";
+            title = t('titleInactive');
+            emptyMessage = t('emptyInactive');
             break;
         case "previous":
-            title = "Previous Pipeline";
+            title = t('titlePrevious');
+            emptyMessage = t('emptyPrevious');
             break;
         default:
-            title = "Pipeline";
+            title = t('titleDefault');
+            emptyMessage = t('emptyDefault');
             break;
     }
     return (
@@ -30,7 +37,7 @@ export default function PipelineCard({ deals, render = "active" }: { deals: Deal
             </div>
             <div className="overflow-hidden rounded-2xl bg-neutral-100 ring-1 ring-black/5">
                 {deals.length === 0 ? (
-                    <p className="px-6 py-6 text-sm text-neutral-500">No {render} deals.</p>
+                    <p className="px-6 py-6 text-sm text-neutral-500">{emptyMessage}</p>
                 ) : (
                     <ul className="divide-y divide-neutral-200">
                         {deals.map((deal) => (

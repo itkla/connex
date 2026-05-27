@@ -1,0 +1,38 @@
+{
+  "ActivityPage": {
+    "title": "Activity",
+    "allActivities": "All Activities"
+  },
+  "ActivityNotes": {
+    "title": "Notes",
+    "myNotes": "My Notes",
+    "allNotes": "All Notes"
+  },
+  "ActivityTasks": {
+    "title": "Tasks",
+    "myTasks": "My Tasks",
+    "allTasks": "All Tasks"
+  },
+  "ActivityEditTaskSheet": {
+    "title": "Edit task",
+    "description": "Update fields below and save.",
+    "descriptionLabel": "Description",
+    "assignedToLabel": "Assigned to",
+    "selectUserPlaceholder": "Select user",
+    "contactLabel": "Contact",
+    "selectContactPlaceholder": "Select contact",
+    "noCompanyLinkedPlaceholder": "No company linked",
+    "noContact": "No contact",
+    "dueDateLabel": "Due date",
+    "completedLabel": "Completed",
+    "cancel": "Cancel",
+    "save": "Save",
+    "descriptionRequired": "Description is required",
+    "taskUpdated": "Task updated",
+    "updateFailed": "Failed to update task"
+  },
+  "ActivityLibraryTags": {
+    "title": "Tags",
+    "allTags": "All Tags"
+  }
+}

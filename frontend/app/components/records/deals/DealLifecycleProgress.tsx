@@ -1,5 +1,6 @@
 import { Fragment, type CSSProperties } from 'react';
 import { CheckIcon, XMarkIcon } from '@heroicons/react/24/solid';
+import { getTranslations } from 'next-intl/server';
 
 import { type Stage } from '@/app/lib/types';
 import { formatDate, parseMysqlDateTime } from '@/app/lib/utils';
@@ -10,7 +11,7 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 
 type ScheduleTone = 'early' | 'late' | 'neutral';
 
-export default function DealLifecycleProgress({
+export default async function DealLifecycleProgress({
     stages,
     currentStageId,
     outcome,
@@ -25,6 +26,7 @@ export default function DealLifecycleProgress({
     expectedCloseDate?: string;
     closedAt?: string;
 }) {
+    const t = await getTranslations('DealsLifecycleProgress');
     const sorted = [...stages].sort((a, b) => a.position - b.position);
     const filtered = sorted.filter((s) => {
         const c = classifyStage(s.name);
@@ -85,21 +87,21 @@ export default function DealLifecycleProgress({
         if (!hasTime) return null;
         if (isClosed) {
             if (closedVsExpected == null) return null;
-            if (closedVsExpected === 0) return { text: 'On time', tone: 'neutral' };
+            if (closedVsExpected === 0) return { text: t('onTime'), tone: 'neutral' };
             return closedVsExpected > 0
-                ? { text: `${closedVsExpected}d late`, tone: 'late' }
-                : { text: `${-closedVsExpected}d early`, tone: 'early' };
+                ? { text: t('daysLate', { days: closedVsExpected }), tone: 'late' }
+                : { text: t('daysEarly', { days: -closedVsExpected }), tone: 'early' };
         }
         if (scheduleDays != null) {
-            if (scheduleDays === 0) return { text: 'On track', tone: 'neutral' };
+            if (scheduleDays === 0) return { text: t('onTrack'), tone: 'neutral' };
             return scheduleDays > 0
-                ? { text: `${scheduleDays}d behind`, tone: 'late' }
-                : { text: `${-scheduleDays}d ahead`, tone: 'early' };
+                ? { text: t('daysBehind', { days: scheduleDays }), tone: 'late' }
+                : { text: t('daysAhead', { days: -scheduleDays }), tone: 'early' };
         }
         if (daysToExpected != null) {
             return daysToExpected >= 0
-                ? { text: `${daysToExpected}d left`, tone: 'neutral' }
-                : { text: `${-daysToExpected}d overdue`, tone: 'late' };
+                ? { text: t('daysLeft', { days: daysToExpected }), tone: 'neutral' }
+                : { text: t('daysOverdue', { days: -daysToExpected }), tone: 'late' };
         }
         return null;
     })();
@@ -150,14 +152,14 @@ export default function DealLifecycleProgress({
                             />
                         </TooltipTrigger>
                         <TooltipContent>
-                            <p>Today · day {daysOpen} of {daysToExpected}</p>
+                            <p>{t('todayDay', { daysOpen, daysToExpected: daysToExpected ?? 0 })}</p>
                         </TooltipContent>
                     </Tooltip>
                 ) : null}
                 {isClosed && closedPct != null ? (
                     <div
-                        title={`Closed ${formatDate(closedAt)}`}
-                        aria-label={`Closed ${formatDate(closedAt)}`}
+                        title={t('closedOn', { date: formatDate(closedAt) })}
+                        aria-label={t('closedOn', { date: formatDate(closedAt) })}
                         className={`absolute top-4 z-0 size-3 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-white shadow-sm sm:size-3.5 ${isWon ? 'bg-green-500' : isLost ? 'bg-red-500' : 'bg-neutral-700'}`}
                         style={{ left: `${closedPct}%` }}
                     />
@@ -249,7 +251,7 @@ export default function DealLifecycleProgress({
 
             <div className="mt-4 flex items-start justify-between gap-3 text-[10px] leading-tight text-neutral-500 sm:text-[11px]">
                 <div className="flex min-w-0 flex-col items-start">
-                    <span className="font-medium text-neutral-700">Created</span>
+                    <span className="font-medium text-neutral-700">{t('created')}</span>
                     <span>{formatDate(createdAt)}</span>
                 </div>
                 {expectedCloseDate || (isClosed && closedAt) ? (
@@ -270,7 +272,7 @@ export default function DealLifecycleProgress({
                             <span
                                 className={`font-medium ${isClosed ? closedNameClass : 'text-neutral-700'}`}
                             >
-                                {isClosed ? 'Closed' : 'Expected close'}
+                                {isClosed ? t('closed') : t('expectedClose')}
                             </span>
                             <span>
                                 {formatDate(isClosed && closedAt ? closedAt : expectedCloseDate)}

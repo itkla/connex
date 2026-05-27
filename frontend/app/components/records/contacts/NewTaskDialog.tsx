@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { useTranslations } from 'next-intl';
 import { toast } from 'sonner';
 import { PlusIcon } from '@heroicons/react/24/solid';
 import { Loader2Icon } from 'lucide-react';
@@ -45,6 +46,7 @@ export default function NewTaskDialog({
     onOpenChange?: (open: boolean) => void;
 }) {
     const router = useRouter();
+    const t = useTranslations('ContactsNewTaskDialog');
     const controlled = openProp !== undefined;
     const [internalOpen, setInternalOpen] = useState(false);
     const open = controlled ? openProp : internalOpen;
@@ -70,7 +72,7 @@ export default function NewTaskDialog({
     async function handleSubmit(e: React.SubmitEvent<HTMLFormElement>) {
         e.preventDefault();
         if (!description.trim()) {
-            toast.error('Description is required');
+            toast.error(t('toastDescriptionRequired'));
             return;
         }
         setSubmitting(true);
@@ -86,14 +88,14 @@ export default function NewTaskDialog({
             if (selectedDealId) {
                 await addDealPerson(selectedDealId, contactId, 'Contact');
             }
-            toast.success('Task added', {
+            toast.success(t('toastTaskAdded'), {
                 style: { backgroundColor: 'var(--color-brand)', color: 'white' },
             });
             setOpen(false);
             reset();
             router.refresh();
         } catch (err) {
-            const message = err instanceof ApiError ? err.message : err instanceof Error ? err.message : 'Failed to create task';
+            const message = err instanceof ApiError ? err.message : err instanceof Error ? err.message : t('toastFailedCreate');
             toast.error(message, {
                 style: { backgroundColor: 'var(--color-destructive)', color: 'white' },
             });
@@ -118,7 +120,7 @@ export default function NewTaskDialog({
             const companyDeals = await getCompanyDeals(companyId);
             setDeals(companyDeals);
         } catch (err) {
-            const message = err instanceof ApiError ? err.message : err instanceof Error ? err.message : 'Failed to load deals';
+            const message = err instanceof ApiError ? err.message : err instanceof Error ? err.message : t('toastFailedLoadDeals');
             toast.error(message, {
                 style: { backgroundColor: 'var(--color-destructive)', color: 'white' },
             });
@@ -150,28 +152,28 @@ export default function NewTaskDialog({
                         type="button"
                         variant="ghost"
                         size="icon-sm"
-                        title="Add task"
+                        title={t('triggerTitle')}
                         className="text-neutral-500 hover:text-black cursor-pointer"
                     >
                         <PlusIcon className="size-4" />
-                        <span className="sr-only">Add task</span>
+                        <span className="sr-only">{t('triggerSr')}</span>
                     </Button>
                 </DialogTrigger>
             )}
             <DialogContent>
                 <DialogHeader>
-                    <DialogTitle>New task</DialogTitle>
+                    <DialogTitle>{t('dialogTitle')}</DialogTitle>
                     <DialogDescription>
-                        Add a task linked to {contactName}. Assigned to you by default.
+                        {t('description', { contactName })}
                     </DialogDescription>
                 </DialogHeader>
 
                 <form onSubmit={handleSubmit} className="grid gap-4">
                     <div className="grid gap-2">
-                        <Label htmlFor="task-assigned-to">Assigned to</Label>
+                        <Label htmlFor="task-assigned-to">{t('assignedTo')}</Label>
                         <Select value={assignedToId.toString()} onValueChange={(value) => setAssignedToId(parseInt(value))}>
                             <SelectTrigger className={inputClass}>
-                                <SelectValue placeholder="Select user" />
+                                <SelectValue placeholder={t('selectUserPlaceholder')} />
                             </SelectTrigger>
                             <SelectContent>
                                 {/* <SelectItem value={currentUserId.toString()}>You</SelectItem> */}
@@ -191,7 +193,7 @@ export default function NewTaskDialog({
                         </Select>
                     </div>
                     <div className="grid gap-2">
-                        <Label htmlFor="task-deal">Deal</Label>
+                        <Label htmlFor="task-deal">{t('deal')}</Label>
                         <Select
                             value={dealId}
                             onValueChange={setDealId}
@@ -201,15 +203,15 @@ export default function NewTaskDialog({
                                 <SelectValue
                                     placeholder={
                                         !companyId
-                                            ? 'Assign a company to link deals'
+                                            ? t('assignCompanyToLinkDealsPlaceholder')
                                             : loadingDeals
-                                              ? 'Loading deals…'
-                                              : 'No deal'
+                                              ? t('loadingDealsPlaceholder')
+                                              : t('noDealPlaceholder')
                                     }
                                 />
                             </SelectTrigger>
                             <SelectContent>
-                                <SelectItem value="none">No deal</SelectItem>
+                                <SelectItem value="none">{t('noDeal')}</SelectItem>
                                 {deals.map((deal) => (
                                     <SelectItem key={deal.id} value={deal.id.toString()}>
                                         {deal.name}
@@ -219,19 +221,19 @@ export default function NewTaskDialog({
                         </Select>
                     </div>
                     <div className="grid gap-2">
-                        <Label htmlFor="task-description">Description</Label>
+                        <Label htmlFor="task-description">{t('descriptionField')}</Label>
                         <Textarea
                             id="task-description"
                             value={description}
                             onChange={(e) => setDescription(e.target.value)}
-                            placeholder="Follow up on proposal…"
+                            placeholder={t('descriptionPlaceholder')}
                             required
                             autoFocus
                         />
                     </div>
 
                     <div className="grid gap-2">
-                        <Label htmlFor="task-due">Due date</Label>
+                        <Label htmlFor="task-due">{t('dueDate')}</Label>
                         <input
                             id="task-due"
                             type="date"
@@ -244,11 +246,11 @@ export default function NewTaskDialog({
                     <DialogFooter>
                         <DialogClose asChild>
                             <Button type="button" variant="outline" disabled={submitting}>
-                                Cancel
+                                {t('cancel')}
                             </Button>
                         </DialogClose>
                         <Button type="submit" disabled={submitting} className="bg-brand text-white hover:bg-brand-dark">
-                            {submitting ? <Loader2Icon className="size-4 animate-spin" /> : 'Create'}
+                            {submitting ? <Loader2Icon className="size-4 animate-spin" /> : t('create')}
                         </Button>
                     </DialogFooter>
                 </form>

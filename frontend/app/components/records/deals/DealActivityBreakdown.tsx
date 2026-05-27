@@ -1,6 +1,7 @@
 'use client';
 
 import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip as RechartsTooltip } from 'recharts';
+import { useTranslations } from 'next-intl';
 
 import { type Activity } from '@/app/lib/types';
 
@@ -16,6 +17,7 @@ const TYPE_COLORS: Record<string, string> = {
 type Slice = { type: string; value: number; color: string };
 
 export default function DealActivityBreakdown({ activities }: { activities: Activity[] }) {
+    const t = useTranslations('DealsActivityBreakdown');
     const counts = new Map<string, number>();
     for (const a of activities) {
         const key = a.type?.trim() || 'Other';
@@ -29,9 +31,9 @@ export default function DealActivityBreakdown({ activities }: { activities: Acti
 
     return (
         <div className="rounded-xl bg-transparent p-3 ring-1 ring-black/5">
-            <p className="text-xs uppercase tracking-wider text-neutral-500">Activity mix</p>
+            <p className="text-xs uppercase tracking-wider text-neutral-500">{t('activityMix')}</p>
             {total === 0 ? (
-                <p className="mt-3 text-xs text-neutral-400">No activities yet</p>
+                <p className="mt-3 text-xs text-neutral-400">{t('noActivitiesYet')}</p>
             ) : (
                 <div className="mt-1 flex items-center gap-4">
                     <div className="relative h-28 w-28 shrink-0">
@@ -55,7 +57,7 @@ export default function DealActivityBreakdown({ activities }: { activities: Acti
                         </ResponsiveContainer>
                         <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
                             <span className="text-lg font-semibold text-neutral-900">{total}</span>
-                            <span className="text-[10px] uppercase tracking-wider text-neutral-500">total</span>
+                            <span className="text-[10px] uppercase tracking-wider text-neutral-500">{t('total')}</span>
                         </div>
                     </div>
                     <ul className="min-w-0 flex-1 space-y-1 text-xs">

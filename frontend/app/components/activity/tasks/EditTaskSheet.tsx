@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { useTranslations } from 'next-intl';
 import { toast } from 'sonner';
 import { Loader2Icon } from 'lucide-react';
 import { UserIcon } from '@heroicons/react/24/outline';
@@ -71,6 +72,7 @@ export default function EditTaskSheet({
     companyId?: number | null;
 }) {
     const router = useRouter();
+    const t = useTranslations('ActivityEditTaskSheet');
     const [draft, setDraft] = useState<TaskDraft>(() => toDraft(task));
     const [users, setUsers] = useState<User[]>([]);
     const [contacts, setContacts] = useState<Contact[]>([]);
@@ -96,7 +98,7 @@ export default function EditTaskSheet({
 
     const saveUpdates = async () => {
         if (!draft.description.trim()) {
-            toast.error('Description is required');
+            toast.error(t('descriptionRequired'));
             return;
         }
         setIsSaving(true);
@@ -109,13 +111,13 @@ export default function EditTaskSheet({
                 completed: draft.completed,
             };
             await updateTask(task.id, payload);
-            toast.success('Task updated', {
+            toast.success(t('taskUpdated'), {
                 style: { backgroundColor: 'var(--color-brand)', color: 'white' },
             });
             handleOpenChange(false);
             router.refresh();
         } catch (err) {
-            const message = err instanceof ApiError ? err.message : err instanceof Error ? err.message : 'Failed to update task';
+            const message = err instanceof ApiError ? err.message : err instanceof Error ? err.message : t('updateFailed');
             toast.error(message, {
                 style: { backgroundColor: 'var(--color-destructive)', color: 'white' },
             });
@@ -128,14 +130,14 @@ export default function EditTaskSheet({
         <Sheet open={open} onOpenChange={handleOpenChange}>
             <SheetContent side="right" className="flex w-full flex-col sm:max-w-lg">
                 <SheetHeader className="border-b">
-                    <SheetTitle>Edit task</SheetTitle>
-                    <SheetDescription>Update fields below and save.</SheetDescription>
+                    <SheetTitle>{t('title')}</SheetTitle>
+                    <SheetDescription>{t('description')}</SheetDescription>
                 </SheetHeader>
 
                 <div className="flex-1 overflow-y-auto px-4 py-2">
                     <div className="grid gap-4 pt-6">
                         <div className="grid gap-1.5">
-                            <Label htmlFor="task-description">Description</Label>
+                            <Label htmlFor="task-description">{t('descriptionLabel')}</Label>
                             <Textarea
                                 id="task-description"
                                 value={draft.description}
@@ -146,13 +148,13 @@ export default function EditTaskSheet({
                         </div>
 
                         <div className="grid gap-1.5">
-                            <Label htmlFor="task-assigned-to">Assigned to</Label>
+                            <Label htmlFor="task-assigned-to">{t('assignedToLabel')}</Label>
                             <Select
                                 value={draft.assignedToId ? draft.assignedToId.toString() : ''}
                                 onValueChange={(value) => setDraft((d) => ({ ...d, assignedToId: parseInt(value) }))}
                             >
                                 <SelectTrigger id="task-assigned-to" className={inputClass}>
-                                    <SelectValue placeholder="Select user" />
+                                    <SelectValue placeholder={t('selectUserPlaceholder')} />
                                 </SelectTrigger>
                                 <SelectContent>
                                     {users.map((user) => (
@@ -171,17 +173,17 @@ export default function EditTaskSheet({
                         </div>
 
                         <div className="grid gap-1.5">
-                            <Label htmlFor="task-contact">Contact</Label>
+                            <Label htmlFor="task-contact">{t('contactLabel')}</Label>
                             <Select
                                 value={draft.personId}
                                 onValueChange={(value) => setDraft((d) => ({ ...d, personId: value }))}
                                 disabled={!companyId}
                             >
                                 <SelectTrigger id="task-contact" className={inputClass}>
-                                    <SelectValue placeholder={companyId ? 'Select contact' : 'No company linked'} />
+                                    <SelectValue placeholder={companyId ? t('selectContactPlaceholder') : t('noCompanyLinkedPlaceholder')} />
                                 </SelectTrigger>
                                 <SelectContent>
-                                    <SelectItem value="none">No contact</SelectItem>
+                                    <SelectItem value="none">{t('noContact')}</SelectItem>
                                     {contacts.map((contact) => (
                                         <SelectItem key={contact.id} value={contact.id.toString()}>
                                             <Avatar>
@@ -198,7 +200,7 @@ export default function EditTaskSheet({
                         </div>
 
                         <div className="grid gap-1.5">
-                            <Label htmlFor="task-due">Due date</Label>
+                            <Label htmlFor="task-due">{t('dueDateLabel')}</Label>
                             <input
                                 id="task-due"
                                 type="date"
@@ -214,17 +216,17 @@ export default function EditTaskSheet({
                                 checked={draft.completed}
                                 onCheckedChange={(checked) => setDraft((d) => ({ ...d, completed: checked === true }))}
                             />
-                            <Label htmlFor="task-completed">Completed</Label>
+                            <Label htmlFor="task-completed">{t('completedLabel')}</Label>
                         </div>
                     </div>
                 </div>
 
                 <SheetFooter className="border-t">
                     <SheetClose asChild>
-                        <Button variant="outline" disabled={isSaving}>Cancel</Button>
+                        <Button variant="outline" disabled={isSaving}>{t('cancel')}</Button>
                     </SheetClose>
                     <Button onClick={saveUpdates} disabled={isSaving} className="bg-brand text-white hover:bg-brand-dark">
-                        {isSaving ? <Loader2Icon className="size-4 animate-spin" /> : 'Save'}
+                        {isSaving ? <Loader2Icon className="size-4 animate-spin" /> : t('save')}
                     </Button>
                 </SheetFooter>
             </SheetContent>

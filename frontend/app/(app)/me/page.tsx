@@ -3,6 +3,7 @@ import { redirect } from 'next/navigation';
 import Image from 'next/image';
 import Link from 'next/link';
 import { ArrowLeftIcon } from '@heroicons/react/24/outline';
+import { getTranslations } from 'next-intl/server';
 import { Skeleton } from '@/components/ui/skeleton'; // TODO: add skeleton loaders to render before the PRomises resolve
 
 import {
@@ -19,6 +20,7 @@ import Timeline from '@/app/components/me/Timeline';
 import EditSelfModal from '@/app/components/me/EditSelfModal';
 
 export default async function MePage() {
+    const t = await getTranslations('MePage');
     // TODO: move this block to a separate component OR put it into a lib/hook
     const cookie = (await headers()).get('cookie');
     const user = await getCurrentUserFromCookie(cookie);
@@ -37,15 +39,15 @@ export default async function MePage() {
     const openTasks = tasks.filter((t) => !t.completed).length;
 
     const greetings = [
-        "Hello,",
-        "Hi,",
-        "Hey,",
-        "Good day,",
-        "Good morning,",
-        "Good afternoon,",
-        "Good evening,",
-        "Howdy,",
-        "What's up,",
+        t('greetingHello'),
+        t('greetingHi'),
+        t('greetingHey'),
+        t('greetingGoodDay'),
+        t('greetingGoodMorning'),
+        t('greetingGoodAfternoon'),
+        t('greetingGoodEvening'),
+        t('greetingHowdy'),
+        t('greetingWhatsUp'),
     ];
     const randomGreeting = greetings[Math.floor(Math.random() * greetings.length)];
 
@@ -56,14 +58,14 @@ export default async function MePage() {
                     {user.profilePictureUrl ? (
                         <Image
                             src={user.profilePictureUrl}
-                            alt={`${user.displayName}'s profile picture`}
+                            alt={t('profilePictureAlt', { name: user.displayName })}
                             width={96}
                             height={96}
                             className="h-24 w-24 shrink-0 rounded-full object-cover shadow-[0_20px_50px_-15px_rgba(0,0,0,0.15)] ring-1 ring-black/5"
                         />
                     ) : (
                         <div
-                            aria-label="Profile picture placeholder"
+                            aria-label={t('profilePicturePlaceholderAriaLabel')}
                             className="flex h-24 w-24 shrink-0 items-center justify-center rounded-full bg-brand-light text-4xl text-brand-dark ring-1 ring-black/5"
                         >
                             {initials}
@@ -83,25 +85,25 @@ export default async function MePage() {
                     <aside>
                         <div className="mb-3 flex h-8 items-center justify-between">
                             <h2 className="px-6 text-xs font-medium tracking-[0.12em] text-neutral-500 uppercase">
-                                Profile
+                                {t('profile')}
                             </h2>
                             <EditSelfModal user={user} />
                         </div>
                         <dl className="divide-y divide-neutral-200 overflow-hidden rounded-2xl bg-neutral-100 ring-1 ring-black/5">
                             <InfoRow
-                                label="Username"
+                                label={t('username')}
                                 value={`@${user.username}`}
                             />
                             <InfoRow
-                                label="Email"
+                                label={t('email')}
                                 value={user.email ?? ''}
                             />
                             <InfoRow
-                                label="Last login"
+                                label={t('lastLogin')}
                                 value={formatDateTime(user.lastLoginAt)}
                             />
                             <InfoRow
-                                label="Member since"
+                                label={t('memberSince')}
                                 value={formatDate(user.createdAt)}
                             />
                         </dl>
@@ -114,7 +116,7 @@ export default async function MePage() {
                             >
                                 <span className="flex items-center gap-2">
                                     <ArrowLeftIcon className="h-4 w-4" />
-                                    Back to dashboard
+                                    {t('backToDashboard')}
                                 </span>
                             </Link>
                         </div>
@@ -123,21 +125,21 @@ export default async function MePage() {
                     <section className="md:flex md:min-h-0 md:flex-col">
                         <div className="mb-3 flex h-8 items-center">
                             <h2 className="px-6 text-xs font-medium tracking-[0.12em] text-neutral-500 uppercase">
-                                My Activity
+                                {t('myActivity')}
                             </h2>
                         </div>
 
                         <div className="grid grid-cols-3 gap-3">
                             <StatCard
-                                label="Tasks"
+                                label={t('tasks')}
                                 value={tasks.length}
-                                subtitle={`${openTasks} open`}
+                                subtitle={t('openCount', { count: openTasks })}
                             />
                             <StatCard
-                                label="Activities"
+                                label={t('activities')}
                                 value={activities.length}
                             />
-                            <StatCard label="Notes" value={notes.length} />
+                            <StatCard label={t('notes')} value={notes.length} />
                         </div>
 
                         <div className="mt-6 overflow-hidden rounded-2xl bg-white ring-1 ring-black/5 md:flex md:min-h-0 md:flex-1 md:flex-col">

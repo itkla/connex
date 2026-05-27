@@ -1,3 +1,5 @@
+'use client';
+
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription, SheetFooter, SheetClose } from '@/components/ui/sheet';
 import { Button } from '@/components/ui/button';
 import { Loader2Icon } from 'lucide-react';
@@ -5,6 +7,7 @@ import { PlusIcon, XMarkIcon } from '@heroicons/react/24/outline';
 import { Label } from '@/components/ui/label';
 import { type Pipeline } from '@/app/lib/types';
 import { type SelectionId } from '@/app/components/records/types';
+import { useTranslations } from 'next-intl';
 
 export type PipelineStageDraft = {
     id: number | null;
@@ -43,15 +46,16 @@ export default function QuickEditPipelineSheet({
     isSaving,
     saveEdits,
 }: Props) {
+    const t = useTranslations('PipelinesQuickEditSheet');
     return (
         <Sheet open={open} onOpenChange={onOpenChange}>
             <SheetContent side="right" className="flex w-full flex-col sm:max-w-lg">
                 <SheetHeader className="border-b">
                     <SheetTitle>
-                        {selectedIds.size === 1 ? 'Quick edit pipeline' : `Quick edit ${selectedIds.size} pipelines`}
+                        {selectedIds.size === 1 ? t('titleSingle') : t('titleMultiple', { count: selectedIds.size })}
                     </SheetTitle>
                     <SheetDescription>
-                        Update fields below. Only changed pipelines will be saved. New stages are appended; reordering is not yet supported.
+                        {t('description')}
                     </SheetDescription>
                 </SheetHeader>
 
@@ -68,7 +72,7 @@ export default function QuickEditPipelineSheet({
 
                                     <div className="grid gap-3">
                                         <div className="grid gap-1.5">
-                                            <Label htmlFor={`name-${p.id}`}>Name</Label>
+                                            <Label htmlFor={`name-${p.id}`}>{t('name')}</Label>
                                             <input
                                                 id={`name-${p.id}`}
                                                 type="text"
@@ -80,7 +84,7 @@ export default function QuickEditPipelineSheet({
                                         </div>
 
                                         <div className="grid gap-1.5">
-                                            <Label>Stages</Label>
+                                            <Label>{t('stages')}</Label>
                                             <div className="flex flex-col gap-2">
                                                 {draft.stages.map((s, i) => (
                                                     <div
@@ -92,11 +96,11 @@ export default function QuickEditPipelineSheet({
                                                             value={s.name}
                                                             onChange={(e) => updateStageName(p.id, i, e.target.value)}
                                                             className="connex-input flex-1"
-                                                            placeholder="Stage name"
+                                                            placeholder={t('stageNamePlaceholder')}
                                                         />
                                                         <button
                                                             type="button"
-                                                            aria-label="Remove stage"
+                                                            aria-label={t('removeStageAriaLabel')}
                                                             onClick={() => removeStage(p.id, i)}
                                                             className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-neutral-100 text-neutral-500 transition hover:bg-neutral-200 hover:text-destructive"
                                                         >
@@ -110,7 +114,7 @@ export default function QuickEditPipelineSheet({
                                                     className="flex items-center gap-2 self-start rounded-full bg-neutral-100 px-3 py-1.5 text-sm text-neutral-700 ring-1 ring-black/5 transition hover:bg-neutral-200"
                                                 >
                                                     <PlusIcon className="size-4" />
-                                                    Add stage
+                                                    {t('addStage')}
                                                 </button>
                                             </div>
                                         </div>
@@ -123,10 +127,10 @@ export default function QuickEditPipelineSheet({
 
                 <SheetFooter className="border-t">
                     <SheetClose asChild>
-                        <Button variant="outline" disabled={isSaving}>Cancel</Button>
+                        <Button variant="outline" disabled={isSaving}>{t('cancel')}</Button>
                     </SheetClose>
                     <Button onClick={saveEdits} disabled={isSaving} className="bg-brand text-white hover:bg-brand-dark">
-                        {isSaving ? <Loader2Icon className="size-4 animate-spin" /> : 'Save'}
+                        {isSaving ? <Loader2Icon className="size-4 animate-spin" /> : t('save')}
                     </Button>
                 </SheetFooter>
             </SheetContent>

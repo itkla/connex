@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { useTranslations } from 'next-intl';
 import { Button } from '@/components/ui/button';
 import { ButtonGroup } from '@/components/ui/button-group';
 import { toast } from 'sonner';
@@ -50,6 +51,7 @@ const searchFields = (c: Contact) => [c.name, c.email, c.phone, c.title];
 
 export default function ContactsBrowser({ contacts }: { contacts: Contact[] }) {
     const router = useRouter();
+    const t = useTranslations('ContactsBrowser');
     const {
         displayMode,
         setDisplayMode,
@@ -105,14 +107,14 @@ export default function ContactsBrowser({ contacts }: { contacts: Contact[] }) {
                 const imageUrl = await uploadContactPicture(newContact.id, imageFile);
                 await updateContact(newContact.id, { ...newContactPayload, imageUrl });
             }
-            toast.success('Contact created', {
+            toast.success(t('toastContactCreated'), {
                 style: { backgroundColor: 'var(--color-brand)', color: 'white' },
             });
             setNewContactDialogOpen(false);
             router.refresh();
         } catch (err) {
             console.error(err);
-            toast.error('Failed to create contact', {
+            toast.error(t('toastFailedCreate'), {
                 style: { backgroundColor: 'var(--color-destructive)', color: 'white' },
             });
         } finally {
@@ -138,14 +140,14 @@ export default function ContactsBrowser({ contacts }: { contacts: Contact[] }) {
         });
 
         if (changed.length === 0) {
-            toast.info('No changes to save');
+            toast.info(t('toastNoChangesToSave'));
             setEditSheetOpen(false);
             return;
         }
 
         const invalid = changed.find((c) => !drafts[c.id].name.trim());
         if (invalid) {
-            toast.error(`Name is required for "${invalid.name}"`);
+            toast.error(t('toastNameRequiredForX', { name: invalid.name }));
             return;
         }
 
@@ -166,13 +168,13 @@ export default function ContactsBrowser({ contacts }: { contacts: Contact[] }) {
                 }),
             );
             toast.success(
-                changed.length === 1 ? 'Contact updated' : `${changed.length} contacts updated`,
+                changed.length === 1 ? t('toastContactUpdated') : t('toastContactsUpdated', { count: changed.length }),
                 { style: { backgroundColor: 'var(--color-brand)', color: 'white' } },
             );
             setEditSheetOpen(false);
             router.refresh();
         } catch (err) {
-            toast.error(err instanceof Error ? err.message : 'Failed to save', {
+            toast.error(err instanceof Error ? err.message : t('toastFailedSave'), {
                 style: { backgroundColor: 'var(--color-destructive)', color: 'white' },
             });
         } finally {
@@ -183,7 +185,7 @@ export default function ContactsBrowser({ contacts }: { contacts: Contact[] }) {
     const bulkRemoveFromCompany = async () => {
         const affected = selectedContacts.filter((c) => c.companyId || c.company);
         if (affected.length === 0) {
-            toast.info('None of the selected contacts have a company');
+            toast.info(t('toastNoneHaveCompany'));
             return;
         }
         setIsClearingCompany(true);
@@ -198,13 +200,13 @@ export default function ContactsBrowser({ contacts }: { contacts: Contact[] }) {
             })));
             toast.success(
                 affected.length === 1
-                    ? 'Removed from company'
-                    : `Removed ${affected.length} contacts from their companies`,
+                    ? t('toastRemovedFromCompany')
+                    : t('toastRemovedNContactsFromCompanies', { count: affected.length }),
                 { style: { backgroundColor: 'var(--color-brand)', color: 'white' } },
             );
             router.refresh();
         } catch (err) {
-            toast.error(err instanceof Error ? err.message : 'Failed to remove from company', {
+            toast.error(err instanceof Error ? err.message : t('toastFailedRemoveFromCompany'), {
                 style: { backgroundColor: 'var(--color-destructive)', color: 'white' },
             });
         } finally {
@@ -229,14 +231,14 @@ export default function ContactsBrowser({ contacts }: { contacts: Contact[] }) {
         try {
             await Promise.all(Array.from(selectedIds).map((id) => deleteContact(Number(id))));
             toast.success(
-                selectedIds.size === 1 ? 'Contact deleted' : `${selectedIds.size} contacts deleted`,
+                selectedIds.size === 1 ? t('toastContactDeleted') : t('toastContactsDeleted', { count: selectedIds.size }),
                 { style: { backgroundColor: 'var(--color-brand)', color: 'white' } },
             );
             setSelectedIds(new Set());
             setDeleteDialogOpen(false);
             router.refresh();
         } catch (err) {
-            toast.error(err instanceof Error ? err.message : 'Failed to delete', {
+            toast.error(err instanceof Error ? err.message : t('toastFailedDelete'), {
                 style: { backgroundColor: 'var(--color-destructive)', color: 'white' },
             });
         } finally {
@@ -253,48 +255,48 @@ export default function ContactsBrowser({ contacts }: { contacts: Contact[] }) {
     };
 
     const columns: ColumnDef<Contact>[] = useMemo(() => [
-        { key: 'name', label: 'Name', getSortValue: (c) => c.name ?? null },
+        { key: 'name', label: t('columnName'), getSortValue: (c) => c.name ?? null },
         {
             key: 'email',
-            label: 'Email',
+            label: t('columnEmail'),
             getSortValue: (c) => c.email ?? null,
-            copyable: { label: 'Email', getValue: (c) => c.email },
+            copyable: { label: t('copyableEmail'), getValue: (c) => c.email },
         },
         {
             key: 'phone',
-            label: 'Phone',
+            label: t('columnPhone'),
             getSortValue: (c) => c.phone ?? null,
-            copyable: { label: 'Phone', getValue: (c) => c.phone },
+            copyable: { label: t('copyablePhone'), getValue: (c) => c.phone },
         },
         {
             key: 'company',
-            label: 'Company',
+            label: t('columnCompany'),
             getSortValue: (c) => c.company?.name ?? null,
             render: (c) => c.company?.name,
-            copyable: { label: 'Company', getValue: (c) => c.company?.name ?? '' },
+            copyable: { label: t('copyableCompany'), getValue: (c) => c.company?.name ?? '' },
         },
-        { key: 'title', label: 'Title', getSortValue: (c) => c.title ?? null },
+        { key: 'title', label: t('columnTitle'), getSortValue: (c) => c.title ?? null },
         {
             key: 'createdAt',
-            label: 'Created',
+            label: t('columnCreated'),
             getSortValue: (c) => (c.createdAt ? Date.parse(c.createdAt) : null),
             render: (c) => c.createdAt,
         },
         {
             key: 'updatedAt',
-            label: 'Updated',
+            label: t('columnUpdated'),
             getSortValue: (c) => (c.updatedAt ? Date.parse(c.updatedAt) : null),
             render: (c) => c.updatedAt,
         },
-    ], []);
+    ], [t]);
 
     return (
         <div className="space-y-6">
             <div className="flex items-center justify-between">
-                <h1 className="text-4xl font-extrabold">Contacts</h1>
-                <Button className="bg-brand text-white" aria-label="Add contact" onClick={() => setNewContactDialogOpen(true)}>
+                <h1 className="text-4xl font-extrabold">{t('heading')}</h1>
+                <Button className="bg-brand text-white" aria-label={t('newAria')} onClick={() => setNewContactDialogOpen(true)}>
                     <PlusIcon strokeWidth={2.5} />
-                    New
+                    {t('new')}
                 </Button>
             </div>
 
@@ -308,13 +310,13 @@ export default function ContactsBrowser({ contacts }: { contacts: Contact[] }) {
                 </button>
                 <div
                     role="group"
-                    aria-label="Display mode"
+                    aria-label={t('displayModeAria')}
                     className="inline-flex rounded-full bg-neutral-100 p-0.5 ring-1 ring-black/5"
                 >
                     <button
                         type="button"
                         onClick={() => setDisplayMode('grid')}
-                        aria-label="Grid view"
+                        aria-label={t('gridViewAria')}
                         aria-pressed={displayMode === 'grid'}
                         className={`flex h-7 w-7 items-center justify-center rounded-full transition ${displayMode === 'grid' ? 'bg-white text-neutral-900 shadow' : 'text-neutral-500 hover:text-neutral-700'}`}
                     >
@@ -323,7 +325,7 @@ export default function ContactsBrowser({ contacts }: { contacts: Contact[] }) {
                     <button
                         type="button"
                         onClick={() => setDisplayMode('table')}
-                        aria-label="Table view"
+                        aria-label={t('tableViewAria')}
                         aria-pressed={displayMode === 'table'}
                         className={`flex h-7 w-7 items-center justify-center rounded-full transition ${displayMode === 'table' ? 'bg-white text-neutral-900 shadow' : 'text-neutral-500 hover:text-neutral-700'}`}
                     >
@@ -333,15 +335,15 @@ export default function ContactsBrowser({ contacts }: { contacts: Contact[] }) {
 
                 {selectedIds.size > 0 && (
                     <div className="flex items-center gap-2">
-                        <span className="text-sm text-neutral-500">{selectedIds.size} selected</span>
+                        <span className="text-sm text-neutral-500">{t('selectedCount', { count: selectedIds.size })}</span>
                         <ButtonGroup className="rounded-full bg-neutral-100">
                             <Button variant="outline" size="sm" onClick={viewSelected}>
                                 <EyeIcon className="size-4" />
-                                View
+                                {t('view')}
                             </Button>
                             <Button variant="outline" size="sm" onClick={openEditSheet}>
                                 <PencilIcon className="size-4" />
-                                Quick edit
+                                {t('quickEdit')}
                             </Button>
                             <DropdownMenu>
                                 <DropdownMenuTrigger asChild>
@@ -357,7 +359,7 @@ export default function ContactsBrowser({ contacts }: { contacts: Contact[] }) {
                                         }}
                                     >
                                         <BuildingOffice2Icon />
-                                        Change company
+                                        {t('changeCompany')}
                                     </DropdownMenuItem>
                                     <DropdownMenuItem
                                         disabled={isClearingCompany}
@@ -367,7 +369,7 @@ export default function ContactsBrowser({ contacts }: { contacts: Contact[] }) {
                                         }}
                                     >
                                         <NoSymbolIcon />
-                                        Remove from company
+                                        {t('removeFromCompany')}
                                     </DropdownMenuItem>
                                     <DropdownMenuSeparator />
                                     <DropdownMenuItem
@@ -378,7 +380,7 @@ export default function ContactsBrowser({ contacts }: { contacts: Contact[] }) {
                                         }}
                                     >
                                         <TrashIcon />
-                                        Delete
+                                        {t('delete')}
                                     </DropdownMenuItem>
                                 </DropdownMenuContent>
                             </DropdownMenu>
@@ -389,7 +391,7 @@ export default function ContactsBrowser({ contacts }: { contacts: Contact[] }) {
                 <div className="relative ml-auto w-full max-w-sm">
                     <input
                         type="text"
-                        placeholder="Search contacts"
+                        placeholder={t('searchPlaceholder')}
                         value={query}
                         onChange={(e) => setQuery(e.target.value)}
                         className="w-full rounded-full bg-neutral-100 px-4 py-2 pr-10 text-sm text-black placeholder-neutral-500 outline-none ring-1 ring-black/5 transition focus:ring-2 focus:ring-brand"

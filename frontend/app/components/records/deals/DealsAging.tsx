@@ -2,23 +2,21 @@
 
 import { useMemo } from 'react';
 import { Bar, BarChart, CartesianGrid, XAxis, YAxis, Tooltip as RechartsTooltip } from 'recharts';
+import { useTranslations } from 'next-intl';
 
 import { ChartContainer, ChartLegend, ChartLegendContent, type ChartConfig } from '@/components/ui/chart';
 import { type Deal, type Stage } from '@/app/lib/types';
 import { parseMysqlDateTime } from '@/app/lib/utils';
 
 const BUCKETS = [
-    { key: 'fresh', label: '0-7d', max: 7, color: '#22c55e' },
-    { key: 'active', label: '8-30d', max: 30, color: '#84cc16' },
-    { key: 'aging', label: '31-60d', max: 60, color: '#f59e0b' },
-    { key: 'stalled', label: '60+d', max: Infinity, color: '#ef4444' },
+    { key: 'fresh', labelKey: 'bucketFresh', max: 7, color: '#22c55e' },
+    { key: 'active', labelKey: 'bucketActive', max: 30, color: '#84cc16' },
+    { key: 'aging', labelKey: 'bucketAging', max: 60, color: '#f59e0b' },
+    { key: 'stalled', labelKey: 'bucketStalled', max: Infinity, color: '#ef4444' },
 ] as const;
 
 type BucketKey = (typeof BUCKETS)[number]['key'];
-
-const chartConfig: ChartConfig = Object.fromEntries(
-    BUCKETS.map((b) => [b.key, { label: b.label, color: b.color }]),
-);
+type BucketLabelKey = (typeof BUCKETS)[number]['labelKey'];
 
 function isClosed(deal: Deal): boolean {
     const t = parseMysqlDateTime(deal.closedAt);
@@ -41,6 +39,11 @@ function bucketFor(days: number): BucketKey {
 type Row = { stage: string } & Record<BucketKey, number>;
 
 export default function DealsAging({ deals, stageById }: { deals: Deal[]; stageById: Map<number, Stage> }) {
+    const t = useTranslations('DealsAging');
+    const chartConfig: ChartConfig = useMemo(
+        () => Object.fromEntries(BUCKETS.map((b) => [b.key, { label: t(b.labelKey), color: b.color }])),
+        [t],
+    );
     const data = useMemo<Row[]>(() => {
         const byStage = new Map<string, Row>();
         for (const deal of deals) {
@@ -63,7 +66,7 @@ export default function DealsAging({ deals, stageById }: { deals: Deal[]; stageB
     if (data.length === 0) {
         return (
             <div className="flex h-64 items-center justify-center text-sm text-neutral-500">
-                No open deals to age
+                {t('noOpenDealsToAge')}
             </div>
         );
     }
@@ -89,7 +92,12 @@ export default function DealsAging({ deals, stageById }: { deals: Deal[]; stageB
                 />
                 <RechartsTooltip
                     cursor={{ fill: 'var(--color-brand)', fillOpacity: 0.05 }}
-                    content={<AgingTooltip />}
+                    content={
+                        <AgingTooltip
+                            bucketLabel={(key) => t(BUCKETS.find((b) => b.key === key)?.labelKey ?? 'bucketFresh')}
+                            dealsLabel={(value) => t('deals', { value })}
+                        />
+                    }
                 />
                 {BUCKETS.map((b) => (
                     <Bar key={b.key} dataKey={b.key} stackId="age" fill={b.color} />
@@ -103,9 +111,11 @@ export default function DealsAging({ deals, stageById }: { deals: Deal[]; stageB
 interface AgingTooltipProps {
     active?: boolean;
     payload?: Array<{ payload: Row; value: number; dataKey: string; fill: string }>;
+    bucketLabel?: (key: BucketKey) => string;
+    dealsLabel?: (value: number) => string;
 }
 
-function AgingTooltip({ active, payload }: AgingTooltipProps) {
+function AgingTooltip({ active, payload, bucketLabel, dealsLabel }: AgingTooltipProps) {
     if (!active || !payload?.length) return null;
     const row = payload[0].payload;
     return (
@@ -117,8 +127,7 @@ function AgingTooltip({ active, payload }: AgingTooltipProps) {
                     .map((p) => (
                         <div key={p.dataKey} className="flex items-center gap-1.5 text-neutral-600">
                             <span className="inline-block size-2 rounded-sm" style={{ backgroundColor: p.fill }} />
-                            {BUCKETS.find((b) => b.key === p.dataKey)?.label} · {p.value}{' '}
-                            {p.value === 1 ? 'deal' : 'deals'}
+                            {bucketLabel ? bucketLabel(p.dataKey as BucketKey) : p.dataKey} · {dealsLabel ? dealsLabel(p.value) : p.value}
                         </div>
                     ))}
             </div>

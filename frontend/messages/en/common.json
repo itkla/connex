@@ -1,0 +1,54 @@
+{
+  "CommonHome": {
+    "brand": "CONNEX",
+    "pricing": "Pricing",
+    "features": "Features",
+    "ctaDashboard": "Dashboard",
+    "ctaGetStarted": "Get started",
+    "headlineBuild": "Build",
+    "headlineMeaningful": "Meaningful",
+    "headlineConnections": "Connections with your Clients"
+  },
+  "CommonSidebar": {
+    "ariaPrimarySidebar": "Primary sidebar",
+    "brand": "CONNEX",
+    "sectionOverview": "Overview",
+    "sectionRecords": "Records",
+    "sectionActivity": "Activity",
+    "sectionLibrary": "Library",
+    "navDashboard": "Dashboard",
+    "navCalendar": "Calendar",
+    "navMap": "Map",
+    "navAnalytics": "Analytics",
+    "navInsights": "Insights",
+    "navReports": "Reports",
+    "navCompanies": "Companies",
+    "navContacts": "Contacts",
+    "navDeals": "Deals",
+    "navPipelines": "Pipelines",
+    "navActivities": "Activities",
+    "navTasks": "Tasks",
+    "navNotes": "Notes",
+    "navTags": "Tags",
+    "profile": "Profile",
+    "logOut": "Log out",
+    "profilePictureAlt": "{name}'s profile picture"
+  },
+  "CommonContentShell": {
+    "hideSidebar": "Hide sidebar",
+    "showSidebar": "Show sidebar"
+  },
+  "CommonSearchBar": {
+    "placeholder": "Search for anything",
+    "search": "Search"
+  },
+  "CommonProfileCard": {
+    "defaultName": "Profile Name",
+    "defaultDescription": "Profile description goes here",
+    "companyName": "Voice Co. Ltd.",
+    "yourConnections": "Your Connections",
+    "sampleName": "Tahm Kench",
+    "sampleCompany": "LOL Inc.",
+    "sampleRole": "CTO"
+  }
+}

@@ -1,5 +1,7 @@
 import type { Metadata } from "next";
-import { Inter, Instrument_Serif } from "next/font/google";
+import { Inter, Instrument_Serif, Noto_Sans_JP } from "next/font/google";
+import { NextIntlClientProvider } from "next-intl";
+import { getLocale } from "next-intl/server";
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import "./globals.css";
@@ -20,23 +22,33 @@ const instrumentSerif = Instrument_Serif({
   subsets: ["latin"],
 });
 
+const notoSansJP = Noto_Sans_JP({
+  weight: "400",
+  variable: "--font-noto-sans-jp",
+  subsets: ["latin"],
+});
+
 export const metadata: Metadata = {
   title: "Connex",
   description: "Build Meaningful Connections with your Clients",
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  const locale = await getLocale();
+
   return (
     <html
-      lang="en"
-      className={`${inter.variable} ${instrumentSerif.variable} h-full antialiased`}
+      lang={locale}
+      className={`${inter.variable} ${instrumentSerif.variable} ${notoSansJP.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col">
-        <TooltipProvider>{children}</TooltipProvider> 
+        <NextIntlClientProvider>
+          <TooltipProvider>{children}</TooltipProvider>
+        </NextIntlClientProvider>
         <Toaster position="top-center" />
       </body>
     </html>
