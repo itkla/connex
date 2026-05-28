@@ -283,6 +283,18 @@ export function getNotesFromCookie(cookie: string | null) { // authenticate then
     return safeWithCookie<Types.Note>((init) => getNotes(init), cookie);
 }
 
+export function createNote(payload: Types.CreateNotePayload, init: RequestInit = {}) {
+    return postJson<Types.Note>(`/api/notes`, payload);
+}
+
+export function updateNote(id: number, payload: Types.UpdateNotePayload, init: RequestInit = {}) {
+    return putJson<Types.Note>(`/api/notes/${id}`, payload);
+}
+
+export function deleteNote(id: number, init: RequestInit = {}) {
+    return deleteJson<void[]>(`/api/notes/${id}`, init);
+}
+
 /*
 * == Company management
 */

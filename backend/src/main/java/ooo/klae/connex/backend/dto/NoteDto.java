@@ -1,7 +1,5 @@
 package ooo.klae.connex.backend.dto;
 
-import com.fasterxml.jackson.annotation.JsonIdentityReference;
-
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
@@ -15,26 +13,29 @@ import ooo.klae.connex.backend.beans.Note;
 import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.beans.User;
 
+/**
+ * Wire shape for Note. Linked entities are exchanged as plain ids — the FE has
+ * never needed the embedded objects, and accepting bare ids avoids the Jackson
+ * ObjectId resolver having to find a User/Person/Deal in the same JSON tree
+ * during deserialization.
+ */
 @Data
 @NoArgsConstructor
 @AllArgsConstructor
 public class NoteDto {
 
-    private int id;
+    private Integer id;
 
     @NotBlank
     @Size(max = 4000)
     private String content;
 
     @NotNull
-    @JsonIdentityReference(alwaysAsId = true)
-    private User author;
+    private Integer author;
 
-    @JsonIdentityReference(alwaysAsId = true)
-    private Person person;
+    private Integer person;
 
-    @JsonIdentityReference(alwaysAsId = true)
-    private Deal deal;
+    private Integer deal;
 
     private String createdAt;
     private String updatedAt;
@@ -44,9 +45,9 @@ public class NoteDto {
         NoteDto dto = new NoteDto();
         dto.id = n.getId();
         dto.content = n.getContent();
-        dto.author = n.getAuthor();
-        dto.person = n.getPerson();
-        dto.deal = n.getDeal();
+        dto.author = n.getAuthor() != null ? n.getAuthor().getId() : null;
+        dto.person = n.getPerson() != null ? n.getPerson().getId() : null;
+        dto.deal = n.getDeal() != null ? n.getDeal().getId() : null;
         dto.createdAt = n.getCreatedAt();
         dto.updatedAt = n.getUpdatedAt();
         return dto;
@@ -54,11 +55,23 @@ public class NoteDto {
 
     public Note toBean() {
         Note n = new Note();
-        n.setId(id);
+        if (id != null) n.setId(id);
         n.setContent(content);
-        n.setAuthor(author);
-        n.setPerson(person);
-        n.setDeal(deal);
+        if (author != null) {
+            User u = new User();
+            u.setId(author);
+            n.setAuthor(u);
+        }
+        if (person != null) {
+            Person p = new Person();
+            p.setId(person);
+            n.setPerson(p);
+        }
+        if (deal != null) {
+            Deal d = new Deal();
+            d.setId(deal);
+            n.setDeal(d);
+        }
         n.setCreatedAt(createdAt);
         n.setUpdatedAt(updatedAt);
         return n;

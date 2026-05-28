@@ -94,6 +94,27 @@ export type Note = {
     updatedAt: string;
 };
 
+export type NoteDraft = {
+    content: string;
+    author: number;
+    person?: number | null;
+    deal?: number | null;
+};
+
+export type CreateNotePayload = {
+    content: string;
+    author: number;
+    person?: number | null;
+    deal?: number | null;
+};
+
+export type UpdateNotePayload = {
+    content?: string;
+    author?: number;
+    person?: number | null;
+    deal?: number | null;
+};
+
 export type Company = {
     id: number;
     name: string;
