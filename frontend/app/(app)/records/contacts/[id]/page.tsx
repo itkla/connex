@@ -1,6 +1,6 @@
-import { getCompanies, getContactById, getCurrentUserFromCookie, getTags, getUserById } from "@/app/lib/api";
+import { getCompanies, getContactById, getContacts, getCurrentUserFromCookie, getDeals, getTags, getUserById } from "@/app/lib/api";
 import { notFound, redirect } from "next/navigation";
-import { type Company, type Tag, type Contact, type User } from "@/app/lib/types";
+import { type Company, type Deal, type Tag, type Contact, type User } from "@/app/lib/types";
 import { cookies } from "next/headers";
 import Link from "next/link";
 import { ArrowLeftIcon, UserIcon } from "@heroicons/react/24/outline";
@@ -24,11 +24,13 @@ export default async function ContactPage({ params }: { params: { id: number } }
     const init = { headers: { cookie } } as const;
     const t = await getTranslations("ContactsPage");
 
-    const [contact, currentUser, allTags, allCompanies] = await Promise.all([
+    const [contact, currentUser, allTags, allCompanies, allPersons, allDeals] = await Promise.all([
         getContactById(id, init) as Promise<Contact>,
         getCurrentUserFromCookie((await cookies()).toString()),
         getTags(init).catch(() => [] as Tag[]),
         getCompanies(init).catch(() => [] as Company[]),
+        getContacts({}, init).catch(() => [] as Contact[]),
+        getDeals(init).catch(() => [] as Deal[]),
     ]);
     if (!contact) {
         console.error(`Contact not found: ${id}`);
@@ -64,7 +66,6 @@ export default async function ContactPage({ params }: { params: { id: number } }
                     <ArrowLeftIcon className="h-4 w-4" />
                     <span>{t("allContacts")}</span>
                 </Link>
-                <ContactActionsMenu contact={contact} companies={allCompanies} currentUserId={currentUser.id} />
             </div>
 
 
@@ -141,6 +142,16 @@ export default async function ContactPage({ params }: { params: { id: number } }
                     )}
                 </div>
             </header>
+
+            <div className="mt-4 flex justify-end">
+                <ContactActionsMenu
+                    contact={contact}
+                    companies={allCompanies}
+                    currentUserId={currentUser.id}
+                    persons={allPersons}
+                    deals={allDeals}
+                />
+            </div>
 
             <div className="mt-12 grid grid-cols-1 gap-8 md:grid-cols-[minmax(0,1fr)_minmax(0,2fr)] md:min-h-0 md:flex-1">
                 <aside>

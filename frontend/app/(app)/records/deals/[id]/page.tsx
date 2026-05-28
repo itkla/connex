@@ -10,9 +10,11 @@ import {
     getCompanies,
     getCompanyById,
     getContactById,
+    getContacts,
     getCurrentUserFromCookie,
     getDealById,
     getDealPeople,
+    getDeals,
     getNotesForDeal,
     getPipelines,
     getStagesByPipelineId,
@@ -25,6 +27,7 @@ import {
     type Activity,
     type Company,
     type Contact,
+    type Deal,
     type Note,
     type Pipeline,
     type Stage,
@@ -64,7 +67,7 @@ export default async function DealPage({ params }: { params: { id: number } }) {
     const init = { headers: { cookie } } as const;
     const t = await getTranslations('DealsPage');
 
-    const [deal, currentUser, activities, notes, tasks, tags, peopleRaw, allPipelines, allCompanies] =
+    const [deal, currentUser, activities, notes, tasks, tags, peopleRaw, allPipelines, allCompanies, allPersons, allDeals] =
         await Promise.all([
             getDealById(id, init).catch(() => null),
             getCurrentUserFromCookie(cookie),
@@ -75,6 +78,8 @@ export default async function DealPage({ params }: { params: { id: number } }) {
             getDealPeople(id, init).catch(() => []) as Promise<unknown>,
             getPipelines(init).catch(() => [] as Pipeline[]),
             getCompanies(init).catch(() => [] as Company[]),
+            getContacts({}, init).catch(() => [] as Contact[]),
+            getDeals(init).catch(() => [] as Deal[]),
         ]);
 
     if (!deal) notFound();
@@ -205,6 +210,8 @@ export default async function DealPage({ params }: { params: { id: number } }) {
                     pipelines={allPipelines}
                     stagesByPipeline={stagesByPipeline}
                     currentUserId={currentUser.id}
+                    persons={allPersons}
+                    deals={allDeals}
                 />
             </div>
 
