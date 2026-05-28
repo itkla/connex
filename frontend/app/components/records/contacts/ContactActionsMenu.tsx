@@ -95,7 +95,11 @@ export default function ContactActionsMenu({
                         <PencilSquareIcon className="size-4" />
                         {t('edit')}
                     </Button>
-                    <Button variant="outline" size="sm">
+                    <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => router.push(`/overview/map?contactId=${contact.id}`)}
+                    >
                         <EyeIcon className="size-4" />
                         {t('viewInMap')}
                     </Button>

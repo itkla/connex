@@ -52,11 +52,11 @@ function useSections(): NavSection[] {
             label: t("sectionOverview"),
             items: [
                 { label: t("navDashboard"), href: "/dashboard", icon: HomeIcon },
-                { label: t("navCalendar"), href: "/dashboard/calendar", icon: CalendarIcon, disabled: true },
-                { label: t("navMap"), href: "/dashboard/map", icon: BubblesIcon, disabled: true },
-                { label: t("navAnalytics"), href: "/dashboard/analytics", icon: ChartBarIcon, disabled: true },
-                { label: t("navInsights"), href: "/dashboard/insights", icon: ChartPieIcon, disabled: true },
-                { label: t("navReports"), href: "/dashboard/reports", icon: PresentationChartLineIcon, disabled: true }
+                { label: t("navCalendar"), href: "/overview/calendar", icon: CalendarIcon, disabled: true },
+                { label: t("navMap"), href: "/overview/map", icon: MapIcon, disabled: false },
+                { label: t("navAnalytics"), href: "/overview/analytics", icon: ChartBarIcon, disabled: true },
+                { label: t("navInsights"), href: "/overview/insights", icon: ChartPieIcon, disabled: true },
+                { label: t("navReports"), href: "/overview/reports", icon: PresentationChartLineIcon, disabled: true }
             ]
         },
         {

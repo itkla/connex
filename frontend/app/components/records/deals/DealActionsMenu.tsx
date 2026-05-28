@@ -78,7 +78,12 @@ export default function DealActionsMenu({
                     <PencilSquareIcon className="size-4" />
                     {t('edit')}
                 </Button>
-                <Button variant="outline" size="sm">
+                <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={deal.company == null}
+                    onClick={() => deal.company != null && router.push(`/overview/map?companyId=${deal.company}`)}
+                >
                     <EyeIcon className="size-4" />
                     {t('viewInMap')}
                 </Button>
