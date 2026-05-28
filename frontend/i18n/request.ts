@@ -21,6 +21,7 @@ const namespaces = [
     "contacts",
     "deals",
     "pipelines",
+    "map",
 ] as const;
 
 async function loadMessages(locale: Locale) {

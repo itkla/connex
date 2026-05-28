@@ -23,5 +23,25 @@
     "emptyInactive": "No inactive deals.",
     "emptyPrevious": "No previous deals.",
     "emptyDefault": "No deals."
+  },
+  "RecordsLayout": {
+    "title": "Records",
+    "description": "Manage records"
+  },
+  "RecordsDealsLayout": {
+    "title": "Records / Deals",
+    "description": "Manage deals"
+  },
+  "RecordsPipelinesLayout": {
+    "title": "Records / Pipelines",
+    "description": "Manage pipelines"
+  },
+  "RecordsContactsLayout": {
+    "title": "Records / Contacts",
+    "description": "Manage contacts"
+  },
+  "RecordsCompaniesLayout": {
+    "title": "Records / Companies",
+    "description": "Manage companies"
   }
 }

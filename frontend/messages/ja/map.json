@@ -1,0 +1,32 @@
+{
+    "MapPage": {
+        "title": "関係地図"
+    },
+    "CompanyNode": {
+        "title": "企業ノード"
+    },
+    "ContactNode": {
+        "title": "コンタクトノード"
+    },
+    "Legend": {
+        "title": "凡例",
+        "nodes": {
+            "yourOrganization": "あなたの組織",
+            "teamMember": "チームメンバー",
+            "clientCompany": "クライアント企業",
+            "contactActive": "コンタクト (アクティブ)",
+            "contactInactive": "コンタクト (非アクティブ)"
+        },
+        "connections": {
+            "orgMembership": "組織メンバー",
+            "relationshipDeals": "関係 (案件)",
+            "companyToContact": "うちの企業 → コンタクト",
+            "knownNoDeals": "既知, 案件なし"
+        },
+        "dealStatus": {
+            "activeOpen": "アクティブ / オープン",
+            "closedWon": "クローズ 受注済み",
+            "closedLost": "クローズ 失注済み"
+        }
+    }
+}

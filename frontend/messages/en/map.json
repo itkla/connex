@@ -1,0 +1,32 @@
+{
+    "MapPage": {
+        "title": "Relationship Map"
+    },
+    "CompanyNode": {
+        "title": "Company Node"
+    },
+    "ContactNode": {
+        "title": "Contact Node"
+    },
+    "Legend": {
+        "title": "Legend",
+        "nodes": {
+            "yourOrganization": "Your Organization",
+            "teamMember": "Team Member",
+            "clientCompany": "Client Company",
+            "contactActive": "Contact (Active)",
+            "contactInactive": "Contact (Inactive)"
+        },
+        "connections": {
+            "orgMembership": "Org Membership",
+            "relationshipDeals": "Relationship (Deals)",
+            "companyToContact": "Company → Contact",
+            "knownNoDeals": "Known, no deals"
+        },
+        "dealStatus": {
+            "activeOpen": "Active / Open",
+            "closedWon": "Closed Won",
+            "closedLost": "Closed Lost"
+        }
+    }
+}
