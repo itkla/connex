@@ -18,7 +18,9 @@ import {
     getNotesFromCookie,
     getPipelinesFromCookie,
     getTasksFromCookie,
+    getUsers,
 } from '@/app/lib/api';
+import type { User } from '@/app/lib/types';
 import { timeOf } from '@/app/lib/utils';
 
 import Greeting from '@/app/components/dashboard/Greeting';
@@ -41,7 +43,8 @@ export default async function Dashboard() {
         redirect('/auth/login');
     }
 
-    const [companies, contacts, deals, pipelines, tasks, activities, notes] =
+    const init = { headers: { cookie: cookie ?? '' } } as const;
+    const [companies, contacts, deals, pipelines, tasks, activities, notes, users] =
         await Promise.all([
             getCompaniesFromCookie(cookie),
             getContactsFromCookie(cookie),
@@ -50,6 +53,7 @@ export default async function Dashboard() {
             getTasksFromCookie(cookie),
             getActivitiesFromCookie(cookie),
             getNotesFromCookie(cookie),
+            getUsers(init).catch(() => [] as User[]),
         ]);
 
     // TODO: move this to it's own separate component so it can be reused elsewhere
@@ -135,6 +139,10 @@ export default async function Dashboard() {
                             tasks={tasks}
                             activities={activities}
                             notes={notes}
+                            users={users}
+                            persons={contacts}
+                            deals={deals}
+                            currentUserId={user.id}
                             limit={8}
                         />
                     </div>

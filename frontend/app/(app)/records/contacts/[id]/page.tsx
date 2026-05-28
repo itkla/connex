@@ -248,7 +248,16 @@ export default async function ContactPage({ params }: { params: { id: number } }
                     </div>
                     <div className="overflow-hidden rounded-2xl bg-white ring-1 ring-black/5 md:flex md:min-h-0 md:flex-1 md:flex-col">
                         <div className="md:min-h-0 md:flex-1 md:overflow-y-auto md:[-webkit-mask-image:linear-gradient(to_bottom,transparent_0,black_24px)] md:[mask-image:linear-gradient(to_bottom,transparent_0,black_24px)]">
-                            <Timeline tasks={tasks} activities={activities} notes={notes} />
+                            <Timeline
+                                tasks={tasks}
+                                activities={activities}
+                                notes={notes}
+                                users={interactionUsers}
+                                persons={allPersons}
+                                deals={allDeals}
+                                currentUserId={currentUser.id}
+                                companyId={contact.companyId ?? contact.company?.id ?? null}
+                            />
                         </div>
                     </div>
                 </section>

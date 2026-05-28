@@ -56,6 +56,13 @@
     "chipTask": "タスク",
     "chipActivity": "アクティビティ",
     "chipNote": "メモ",
-    "emptyState": "最近のアクティビティはまだありません。"
+    "emptyState": "最近のアクティビティはまだありません。",
+    "edit": "編集",
+    "delete": "削除",
+    "actionsAria": "行の操作",
+    "taskDeleted": "タスクを削除しました",
+    "activityDeleted": "アクティビティを削除しました",
+    "noteDeleted": "メモを削除しました",
+    "deleteFailed": "削除できませんでした"
   }
 }

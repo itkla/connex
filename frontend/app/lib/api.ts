@@ -270,6 +270,14 @@ export function createActivity(payload: Types.CreateActivityPayload, init: Reque
     return postJson<Types.Activity>(`/api/activities`, payload, init);
 }
 
+export function updateActivity(id: number, payload: Types.UpdateActivityPayload, init: RequestInit = {}) {
+    return putJson<Types.Activity>(`/api/activities/${id}`, payload, init);
+}
+
+export function deleteActivity(id: number, init: RequestInit = {}) {
+    return deleteJson<void[]>(`/api/activities/${id}`, init);
+}
+
 /*
 * == Note management
 */

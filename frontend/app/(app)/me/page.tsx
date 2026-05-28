@@ -7,11 +7,15 @@ import { getTranslations } from 'next-intl/server';
 import { Skeleton } from '@/components/ui/skeleton'; // TODO: add skeleton loaders to render before the PRomises resolve
 
 import {
+    getContacts,
     getCurrentUserFromCookie,
+    getDeals,
     getUserActivitiesFromCookie,
     getUserNotesFromCookie,
     getUserTasksFromCookie,
+    getUsers,
 } from '@/app/lib/api';
+import type { Contact, Deal, User } from '@/app/lib/types';
 import { formatDate, formatDateTime } from '@/app/lib/utils';
 
 import InfoRow from '@/app/components/me/InfoRow';
@@ -29,10 +33,14 @@ export default async function MePage() {
         redirect('/auth/login');
     }
 
-    const [tasks, activities, notes] = await Promise.all([
+    const init = { headers: { cookie: cookie ?? '' } } as const;
+    const [tasks, activities, notes, users, persons, deals] = await Promise.all([
         getUserTasksFromCookie(user.id, cookie),
         getUserActivitiesFromCookie(user.id, cookie),
         getUserNotesFromCookie(user.id, cookie),
+        getUsers(init).catch(() => [] as User[]),
+        getContacts({}, init).catch(() => [] as Contact[]),
+        getDeals(init).catch(() => [] as Deal[]),
     ]);
 
     const initials = user.displayName?.slice(0, 1).toUpperCase() ?? '?';
@@ -148,6 +156,10 @@ export default async function MePage() {
                                     tasks={tasks}
                                     activities={activities}
                                     notes={notes}
+                                    users={users}
+                                    persons={persons}
+                                    deals={deals}
+                                    currentUserId={user.id}
                                 />
                             </div>
                         </div>
