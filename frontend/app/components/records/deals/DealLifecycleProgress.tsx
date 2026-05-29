@@ -46,26 +46,18 @@ export default async function DealLifecycleProgress({
     const isLost = outcome === 'lost';
 
     const hasTime = Number.isFinite(startMs);
-    const candidates = hasTime ? [nowMs] : [];
-    if (hasTime && Number.isFinite(expectedMs)) candidates.push(expectedMs);
-    if (hasTime && Number.isFinite(closedMs)) candidates.push(closedMs);
-    const barEnd = candidates.length ? Math.max(...candidates) : 0;
-    const span = hasTime ? Math.max(barEnd - startMs, DAY_MS) : 0;
-    const pct = (t: number) =>
-        hasTime ? Math.max(0, Math.min(100, ((t - startMs) / span) * 100)) : 0;
+    const hasPlan = hasTime && Number.isFinite(expectedMs) && expectedMs > startMs;
+    const plannedSpan = hasPlan ? expectedMs - startMs : 0;
+    const timePct = (t: number) =>
+        hasPlan ? Math.max(0, Math.min(100, ((t - startMs) / plannedSpan) * 100)) : 0;
+    const nowPct = timePct(nowMs);
+    const trackLeft = (p: number) => `calc(1rem + ${p / 100} * (100% - 2rem))`;
 
-    const expectedPct = Number.isFinite(expectedMs) ? pct(expectedMs) : null;
-    const closedPct = Number.isFinite(closedMs) ? pct(closedMs) : null;
-    const nowPct = pct(nowMs);
-
-    const lastStagePct = expectedPct ?? 100;
     const stagePct = (i: number) =>
-        filtered.length <= 1 ? lastStagePct / 2 : (i / (filtered.length - 1)) * lastStagePct;
+        filtered.length <= 1 ? 50 : (i / (filtered.length - 1)) * 100;
 
     const currentStagePct = currentIdx >= 0 ? stagePct(currentIdx) : null;
-    const progressEnd = isClosed
-        ? closedPct ?? lastStagePct
-        : currentStagePct ?? 0;
+    const progressEnd = currentStagePct ?? (isClosed ? 100 : 0);
     const progressColor = isWon ? 'bg-green-500' : isLost ? 'bg-red-500' : 'bg-brand';
 
     const daysOpen = hasTime ? Math.round((nowMs - startMs) / DAY_MS) : 0;
@@ -78,8 +70,8 @@ export default async function DealLifecycleProgress({
             : null;
 
     let scheduleDays: number | null = null;
-    if (!isClosed && currentStagePct != null && hasTime && Number.isFinite(expectedMs)) {
-        const expectedAtCurrentStage = startMs + (currentStagePct / 100) * span;
+    if (!isClosed && currentStagePct != null && hasPlan) {
+        const expectedAtCurrentStage = startMs + (currentStagePct / 100) * plannedSpan;
         scheduleDays = Math.round((nowMs - expectedAtCurrentStage) / DAY_MS);
     }
 
@@ -134,33 +126,18 @@ export default async function DealLifecycleProgress({
                     style={{ width: `${progressEnd}%` }}
                 />
 
-                {hasTime && !isClosed ? (
-                    // <div
-                    //     title={`Today · day ${daysOpen}`}
-                    //     aria-label={`Today · day ${daysOpen}`}
-                    //     className="absolute top-4 z-0 size-3 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-white bg-brand shadow-sm sm:size-3.5"
-                    //     style={{ left: `${nowPct}%` }}
-                    // />
+                {!isClosed && hasPlan ? (
                     <Tooltip>
                         <TooltipTrigger asChild>
-                            {/* <span className="text-xs text-neutral-500">Today · day {daysOpen}</span> */}
                             <div
                                 className="absolute top-4 z-0 size-3 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-white bg-brand shadow-sm sm:size-3.5"
-                                style={{ left: `${nowPct}%` }}
+                                style={{ left: trackLeft(nowPct) }}
                             />
                         </TooltipTrigger>
                         <TooltipContent>
                             <p>{t('todayDay', { daysOpen, daysToExpected: daysToExpected ?? 0 })}</p>
                         </TooltipContent>
                     </Tooltip>
-                ) : null}
-                {isClosed && closedPct != null ? (
-                    <div
-                        title={t('closedOn', { date: formatDate(closedAt) })}
-                        aria-label={t('closedOn', { date: formatDate(closedAt) })}
-                        className={`absolute top-4 z-0 size-3 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-white shadow-sm sm:size-3.5 ${isWon ? 'bg-green-500' : isLost ? 'bg-red-500' : 'bg-neutral-700'}`}
-                        style={{ left: `${closedPct}%` }}
-                    />
                 ) : null}
 
                 {filtered.map((stage, i) => {
