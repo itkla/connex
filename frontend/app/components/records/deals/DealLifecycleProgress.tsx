@@ -121,8 +121,6 @@ export default async function DealLifecycleProgress({
             ? 'text-red-700'
             : 'text-neutral-700';
 
-    const rightAnchorPct = isClosed && closedPct != null ? closedPct : lastStagePct;
-
     return (
         <div className="rounded-2xl bg-neutral-100 p-4 ring-1 ring-black/5 sm:p-6">
             <div className="relative h-14 sm:h-16">
@@ -250,7 +248,7 @@ export default async function DealLifecycleProgress({
             </div>
 
             <div className="mt-4 flex items-start justify-between gap-3 text-[10px] leading-tight text-neutral-500 sm:text-[11px]">
-                <div className="flex min-w-0 flex-col items-start">
+                <div className="flex shrink-0 flex-col items-start whitespace-nowrap">
                     <span className="font-medium text-neutral-700">{t('created')}</span>
                     <span>{formatDate(createdAt)}</span>
                 </div>
@@ -265,10 +263,7 @@ export default async function DealLifecycleProgress({
                                 </span>
                             ) : null}
                         </div>
-                        <div
-                            className="flex min-w-0 flex-col items-end"
-                            style={{ marginRight: `${Math.max(0, 100 - rightAnchorPct)}%` }}
-                        >
+                        <div className="flex shrink-0 flex-col items-end whitespace-nowrap">
                             <span
                                 className={`font-medium ${isClosed ? closedNameClass : 'text-neutral-700'}`}
                             >
