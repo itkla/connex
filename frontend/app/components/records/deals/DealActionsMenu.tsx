@@ -170,6 +170,7 @@ export default function DealActionsMenu({
                 dealId={deal.id}
                 dealName={deal.name}
                 currentUserId={currentUserId}
+                deal={deal}
                 open={activityOpen}
                 onOpenChange={setActivityOpen}
             />

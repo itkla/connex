@@ -168,10 +168,13 @@
   "DealsNewActivityDialog": {
     "subjectRequired": "Subject is required",
     "activityLogged": "Activity logged",
+    "activityLoggedButFailedToLink": "Activity logged, but failed to link contact to deal",
     "failedToLogActivity": "Failed to log activity",
     "title": "Log activity",
     "description": "Record an interaction on {dealName}.",
     "type": "Type",
+    "contact": "Contact",
+    "selectContact": "Select contact",
     "dateTime": "Date and time",
     "subject": "Subject",
     "subjectPlaceholder": "Pricing discussion",

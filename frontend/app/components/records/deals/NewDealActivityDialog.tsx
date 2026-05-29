@@ -1,9 +1,10 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
 import { Loader2Icon } from 'lucide-react';
+import { UserIcon } from '@heroicons/react/24/outline';
 import { useTranslations } from 'next-intl';
 
 import {
@@ -18,8 +19,11 @@ import {
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
+import { Select, SelectItem, SelectContent, SelectValue, SelectTrigger } from '@/components/ui/select';
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 
-import { ApiError, createActivity } from '@/app/lib/api';
+import { addDealPerson, ApiError, createActivity, getCompanyPeople } from '@/app/lib/api';
+import { type Contact, type Deal } from '@/app/lib/types';
 import { toMysqlDateTime } from '@/app/lib/utils';
 
 const inputClass = 'w-full rounded-lg bg-neutral-100 px-3 py-2 text-sm text-black placeholder-neutral-500 outline-none ring-1 ring-black/5 transition focus:ring-2 focus:ring-brand';
@@ -30,12 +34,14 @@ export default function NewDealActivityDialog({
     dealId,
     dealName,
     currentUserId,
+    deal,
     open,
     onOpenChange,
 }: {
     dealId: number;
     dealName: string;
     currentUserId: number;
+    deal: Deal;
     open: boolean;
     onOpenChange: (open: boolean) => void;
 }) {
@@ -45,6 +51,8 @@ export default function NewDealActivityDialog({
     const [subject, setSubject] = useState('');
     const [notes, setNotes] = useState('');
     const [timestamp, setTimestamp] = useState('');
+    const [contactId, setContactId] = useState('');
+    const [contacts, setContacts] = useState<Contact[]>([]);
     const [submitting, setSubmitting] = useState(false);
 
     const reset = () => {
@@ -52,6 +60,7 @@ export default function NewDealActivityDialog({
         setSubject('');
         setNotes('');
         setTimestamp('');
+        setContactId('');
     };
 
     async function handleSubmit(e: React.SubmitEvent<HTMLFormElement>) {
@@ -62,14 +71,21 @@ export default function NewDealActivityDialog({
         }
         setSubmitting(true);
         try {
+            const personId = contactId ? parseInt(contactId) : undefined;
             await createActivity({
                 type,
                 subject: subject.trim(),
                 notes: notes.trim() || undefined,
                 dealId,
+                personId,
                 createdById: currentUserId,
                 timestamp: timestamp ? toMysqlDateTime(timestamp) : toMysqlDateTime(),
             });
+            if (personId != null) {
+                await addDealPerson(dealId, personId, '').catch(() => {
+                    toast.warning(t('activityLoggedButFailedToLink'));
+                });
+            }
             toast.success(t('activityLogged'), {
                 style: { backgroundColor: 'var(--color-brand)', color: 'white' },
             });
@@ -85,6 +101,11 @@ export default function NewDealActivityDialog({
             setSubmitting(false);
         }
     }
+
+    useEffect(() => {
+        // get all contacts from the company associated with the deal
+        getCompanyPeople(deal.company ?? 0).then(setContacts).catch(() => setContacts([]));
+    }, []);
 
     return (
         <Dialog
@@ -117,6 +138,28 @@ export default function NewDealActivityDialog({
                                 </option>
                             ))}
                         </select>
+                    </div>
+
+                    <div className="grid gap-2">
+                        <Label htmlFor="deal-activity-contact">{t('contact')}</Label>
+                        <Select value={contactId} onValueChange={(value) => setContactId(value)}>
+                            <SelectTrigger className={inputClass}>
+                                <SelectValue placeholder={t('selectContact')} />
+                            </SelectTrigger>
+                            <SelectContent>
+                                {contacts.map((contact) => (
+                                    <SelectItem key={contact.id} value={contact.id.toString()}>
+                                        <Avatar>
+                                            <AvatarImage src={contact.imageUrl} />
+                                            <AvatarFallback>
+                                                <UserIcon className="size-4" />
+                                            </AvatarFallback>
+                                        </Avatar>
+                                        {contact.name}
+                                    </SelectItem>
+                                ))}
+                            </SelectContent>
+                        </Select>
                     </div>
 
                     <div className="grid gap-2">

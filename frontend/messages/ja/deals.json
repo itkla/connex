@@ -168,10 +168,13 @@
   "DealsNewActivityDialog": {
     "subjectRequired": "件名は必須です",
     "activityLogged": "アクティビティを記録しました",
+    "activityLoggedButFailedToLink": "アクティビティを記録しましたが、コンタクトを案件に紐付けできませんでした",
     "failedToLogActivity": "アクティビティを記録できませんでした",
     "title": "アクティビティを記録",
     "description": "{dealName} のやり取りを記録します。",
     "type": "種別",
+    "contact": "コンタクト",
+    "selectContact": "コンタクトを選択",
     "dateTime": "日時",
     "subject": "件名",
     "subjectPlaceholder": "価格に関する打ち合わせ",
