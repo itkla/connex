@@ -21,19 +21,24 @@ import ChangeCompanyDialog from '@/app/components/records/contacts/ChangeCompany
 import DeleteRecordDialog from '@/app/components/records/DeleteRecordDialog';
 import NewActivityDialog from '@/app/components/records/contacts/NewActivityDialog';
 import NewTaskDialog from '@/app/components/records/contacts/NewTaskDialog';
+import NewNoteDialog from '@/app/components/activity/notes/NoteDialog';
 
 import { deleteContact, updateContact } from '@/app/lib/api';
-import { type Company, type Contact } from '@/app/lib/types';
+import { type Company, type Contact, type Deal } from '@/app/lib/types';
 import EditContactSheet from '@/app/components/records/contacts/EditContactSheet';
 
 export default function ContactActionsMenu({
     contact,
     companies,
     currentUserId,
+    persons = [],
+    deals = [],
 }: {
     contact: Contact;
     companies: Company[];
     currentUserId: number;
+    persons?: Contact[];
+    deals?: Deal[];
 }) {
     const router = useRouter();
     const t = useTranslations('ContactsActionsMenu');
@@ -44,7 +49,7 @@ export default function ContactActionsMenu({
     const [editOpen, setEditOpen] = useState(false);
     const [activityOpen, setActivityOpen] = useState(false);
     const [taskOpen, setTaskOpen] = useState(false);
-
+    const [noteOpen, setNoteOpen] = useState(false);
     const handleRemoveCompany = async () => {
         if (!contact.company) return;
         setRemovingCompany(true);
@@ -127,7 +132,12 @@ export default function ContactActionsMenu({
                                 <ChatBubbleLeftRightIcon className="size-4" />
                                 <span>{t('addActivity')}</span>
                             </DropdownMenuItem>
-                            <DropdownMenuItem disabled>
+                            <DropdownMenuItem 
+                                onSelect={(e) => {
+                                    e.preventDefault();
+                                    setNoteOpen(true);
+                                }}
+                            >
                                 <DocumentTextIcon className="size-4" />
                                 <span>{t('addNote')}</span>
                             </DropdownMenuItem>
@@ -202,6 +212,16 @@ export default function ContactActionsMenu({
                     currentUserId={currentUserId}
                     open={taskOpen}
                     onOpenChange={setTaskOpen}
+                />
+
+                <NewNoteDialog
+                    persons={persons.length > 0 ? persons : [contact]}
+                    deals={deals}
+                    defaultPerson={contact}
+                    note={null}
+                    currentUserId={currentUserId}
+                    open={noteOpen}
+                    onOpenChange={setNoteOpen}
                 />
 
                 <ChangeCompanyDialog

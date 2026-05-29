@@ -51,6 +51,9 @@ export type CreateTaskPayload = {
     dealId?: number;
 };
 
+export type ACTIVITY_TYPES = ['Call', 'Email', 'Meeting', 'Note', 'Other'];
+
+
 export type CreateActivityPayload = {
     type: string;
     subject: string;
@@ -58,6 +61,16 @@ export type CreateActivityPayload = {
     personId?: number;
     dealId?: number;
     createdById: number;
+    timestamp?: string;
+};
+
+export type UpdateActivityPayload = {
+    type: string;
+    subject: string;
+    createdById: number;
+    notes?: string;
+    personId?: number | null;
+    dealId?: number | null;
     timestamp?: string;
 };
 
@@ -92,6 +105,27 @@ export type Note = {
     deal?: number | null;
     createdAt: string;
     updatedAt: string;
+};
+
+export type NoteDraft = {
+    content: string;
+    author: number;
+    person?: number | null;
+    deal?: number | null;
+};
+
+export type CreateNotePayload = {
+    content: string;
+    author: number;
+    person?: number | null;
+    deal?: number | null;
+};
+
+export type UpdateNotePayload = {
+    content?: string;
+    author?: number;
+    person?: number | null;
+    deal?: number | null;
 };
 
 export type Company = {

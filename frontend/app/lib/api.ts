@@ -270,6 +270,14 @@ export function createActivity(payload: Types.CreateActivityPayload, init: Reque
     return postJson<Types.Activity>(`/api/activities`, payload, init);
 }
 
+export function updateActivity(id: number, payload: Types.UpdateActivityPayload, init: RequestInit = {}) {
+    return putJson<Types.Activity>(`/api/activities/${id}`, payload, init);
+}
+
+export function deleteActivity(id: number, init: RequestInit = {}) {
+    return deleteJson<void[]>(`/api/activities/${id}`, init);
+}
+
 /*
 * == Note management
 */
@@ -281,6 +289,18 @@ export function getNotes(init: RequestInit = {}) {
 
 export function getNotesFromCookie(cookie: string | null) { // authenticate then get all notes
     return safeWithCookie<Types.Note>((init) => getNotes(init), cookie);
+}
+
+export function createNote(payload: Types.CreateNotePayload, init: RequestInit = {}) {
+    return postJson<Types.Note>(`/api/notes`, payload);
+}
+
+export function updateNote(id: number, payload: Types.UpdateNotePayload, init: RequestInit = {}) {
+    return putJson<Types.Note>(`/api/notes/${id}`, payload);
+}
+
+export function deleteNote(id: number, init: RequestInit = {}) {
+    return deleteJson<void[]>(`/api/notes/${id}`, init);
 }
 
 /*

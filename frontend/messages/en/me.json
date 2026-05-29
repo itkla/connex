@@ -56,6 +56,13 @@
     "chipTask": "task",
     "chipActivity": "activity",
     "chipNote": "note",
-    "emptyState": "Nothing recent yet."
+    "emptyState": "Nothing recent yet.",
+    "edit": "Edit",
+    "delete": "Delete",
+    "actionsAria": "Row actions",
+    "taskDeleted": "Task deleted",
+    "activityDeleted": "Activity deleted",
+    "noteDeleted": "Note deleted",
+    "deleteFailed": "Failed to delete"
   }
 }

@@ -29,9 +29,10 @@ import DeleteRecordDialog from '@/app/components/records/DeleteRecordDialog';
 import EditDealSheet from '@/app/components/records/deals/EditDealSheet';
 import NewDealActivityDialog from '@/app/components/records/deals/NewDealActivityDialog';
 import NewDealTaskDialog from '@/app/components/records/deals/NewDealTaskDialog';
+import NoteDialog from '@/app/components/activity/notes/NoteDialog';
 
 import { deleteDeal } from '@/app/lib/api';
-import { type Company, type Deal, type Pipeline, type Stage } from '@/app/lib/types';
+import { type Company, type Contact, type Deal, type Pipeline, type Stage } from '@/app/lib/types';
 
 export default function DealActionsMenu({
     deal,
@@ -39,18 +40,23 @@ export default function DealActionsMenu({
     pipelines,
     stagesByPipeline,
     currentUserId,
+    persons = [],
+    deals = [],
 }: {
     deal: Deal;
     companies: Company[];
     pipelines: Pipeline[];
     stagesByPipeline: Record<number, Stage[]>;
     currentUserId: number;
+    persons?: Contact[];
+    deals?: Deal[];
 }) {
     const router = useRouter();
     const t = useTranslations('DealsActionsMenu');
     const [editOpen, setEditOpen] = useState(false);
     const [activityOpen, setActivityOpen] = useState(false);
     const [taskOpen, setTaskOpen] = useState(false);
+    const [noteOpen, setNoteOpen] = useState(false);
     const [deleteOpen, setDeleteOpen] = useState(false);
     const [isDeleting, setIsDeleting] = useState(false);
 
@@ -110,7 +116,12 @@ export default function DealActionsMenu({
                             <ChatBubbleLeftRightIcon className="size-4" />
                             <span>{t('addActivity')}</span>
                         </DropdownMenuItem>
-                        <DropdownMenuItem disabled>
+                        <DropdownMenuItem
+                            onSelect={(e) => {
+                                e.preventDefault();
+                                setNoteOpen(true);
+                            }}
+                        >
                             <DocumentTextIcon className="size-4" />
                             <span>{t('addNote')}</span>
                         </DropdownMenuItem>
@@ -170,6 +181,16 @@ export default function DealActionsMenu({
                 currentUserId={currentUserId}
                 open={taskOpen}
                 onOpenChange={setTaskOpen}
+            />
+
+            <NoteDialog
+                open={noteOpen}
+                onOpenChange={setNoteOpen}
+                note={null}
+                persons={persons}
+                deals={deals.length > 0 ? deals : [deal]}
+                defaultDeal={deal}
+                currentUserId={currentUserId}
             />
 
             <DeleteRecordDialog

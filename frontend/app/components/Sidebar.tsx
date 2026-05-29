@@ -52,7 +52,7 @@ function useSections(): NavSection[] {
             label: t("sectionOverview"),
             items: [
                 { label: t("navDashboard"), href: "/dashboard", icon: HomeIcon },
-                { label: t("navCalendar"), href: "/overview/calendar", icon: CalendarIcon, disabled: true },
+                { label: t("navCalendar"), href: "/overview/calendar", icon: CalendarIcon, disabled: false },
                 { label: t("navMap"), href: "/overview/map", icon: MapIcon, disabled: false },
                 { label: t("navAnalytics"), href: "/overview/analytics", icon: ChartBarIcon, disabled: true },
                 { label: t("navInsights"), href: "/overview/insights", icon: ChartPieIcon, disabled: true },

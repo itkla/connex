@@ -1,0 +1,13 @@
+{
+  "Calendar": {
+    "title": "Calendar",
+    "prev": "Previous month",
+    "next": "Next month",
+    "today": "Today",
+    "itemTask": "Task",
+    "itemActivity": "Activity",
+    "itemDeal": "Deal",
+    "itemNote": "Note",
+    "emptyDay": "No items"
+  }
+}

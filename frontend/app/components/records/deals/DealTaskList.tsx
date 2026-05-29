@@ -1,6 +1,6 @@
 'use client';
 
-import { Task, UpdateTaskPayload } from "@/app/lib/types";
+import { Deal, Task, UpdateTaskPayload } from "@/app/lib/types";
 import { DropdownMenu, DropdownMenuItem, DropdownMenuContent, DropdownMenuTrigger, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
 import { Button } from "@/components/ui/button";
 import { EllipsisVerticalIcon, PencilIcon, CheckCircleIcon, TrashIcon, InformationCircleIcon } from "@heroicons/react/24/outline";
@@ -13,7 +13,7 @@ import { useState } from "react";
 import EditTaskSheet from "@/app/components/activity/tasks/EditTaskSheet";
 import { useTranslations } from "next-intl";
 
-export default function DealTaskList({ dealId, companyId, tasks }: { dealId: number, companyId?: number | null, tasks: Task[] }) {
+export default function DealTaskList({ dealId, companyId, tasks, deals }: { dealId: number, companyId?: number | null, tasks: Task[], deals: Deal[] }) {
     const t = useTranslations('DealsTaskList');
     const openTasks = tasks.filter((task) => !task.completed);
     const [editTaskOpen, setEditTaskOpen] = useState(false);
@@ -150,6 +150,7 @@ export default function DealTaskList({ dealId, companyId, tasks }: { dealId: num
                     }}
                     task={selectedTask}
                     companyId={companyId}
+                    deals={deals}
                 />
             )}
 

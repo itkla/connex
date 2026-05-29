@@ -17,7 +17,8 @@ interface Props<T extends { id: SelectionId; name?: string }> {
     columns: ColumnDef<T>[];
     renderCard: (item: T, callbacks: CardCallbacks<T>) => ReactNode;
     renderAvatar?: (item: T) => ReactNode;
-    detailPath: (item: T) => string;
+    detailPath?: (item: T) => string;
+    onRowClick?: (item: T) => void;
     displayMode: DisplayMode;
     selectedIds: Set<SelectionId>;
     onSelectedIdsChange: (ids: Set<SelectionId>) => void;
@@ -33,6 +34,7 @@ export default function RecordsRenderView<T extends { id: SelectionId; name?: st
     renderCard,
     renderAvatar,
     detailPath,
+    onRowClick,
     displayMode,
     selectedIds,
     onSelectedIdsChange,
@@ -148,8 +150,11 @@ export default function RecordsRenderView<T extends { id: SelectionId; name?: st
                             <tr
                                 key={item.id}
                                 data-state={isSelected ? 'selected' : undefined}
-                                className="border-b border-gray-200 hover:bg-brand-light transition-colors duration-300 cursor-pointer data-[state=selected]:bg-brand-light/60"
-                                onClick={() => router.push(detailPath(item))}
+                                className={`border-b border-gray-200 hover:bg-brand-light transition-colors duration-300 data-[state=selected]:bg-brand-light/60 ${onRowClick || detailPath ? 'cursor-pointer' : ''}`}
+                                onClick={() => {
+                                    if (onRowClick) onRowClick(item);
+                                    else if (detailPath) router.push(detailPath(item));
+                                }}
                             >
                                 <td className="px-4 py-2" onClick={(e) => e.stopPropagation()}>
                                     <Checkbox

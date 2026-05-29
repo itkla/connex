@@ -10,14 +10,17 @@ import {
     getCompanies,
     getCompanyById,
     getContactById,
+    getContacts,
     getCurrentUserFromCookie,
     getDealById,
     getDealPeople,
+    getDeals,
     getNotesForDeal,
     getPipelines,
     getStagesByPipelineId,
     getTagsForDeal,
     getTasksForDeal,
+    getUsers,
     deleteTask,
     updateTask,
 } from '@/app/lib/api';
@@ -25,11 +28,13 @@ import {
     type Activity,
     type Company,
     type Contact,
+    type Deal,
     type Note,
     type Pipeline,
     type Stage,
     type Tag,
     type Task,
+    type User,
 } from '@/app/lib/types';
 import {
     formatCompactCurrency,
@@ -64,7 +69,7 @@ export default async function DealPage({ params }: { params: { id: number } }) {
     const init = { headers: { cookie } } as const;
     const t = await getTranslations('DealsPage');
 
-    const [deal, currentUser, activities, notes, tasks, tags, peopleRaw, allPipelines, allCompanies] =
+    const [deal, currentUser, activities, notes, tasks, tags, peopleRaw, allPipelines, allCompanies, allPersons, allDeals, allUsers] =
         await Promise.all([
             getDealById(id, init).catch(() => null),
             getCurrentUserFromCookie(cookie),
@@ -75,6 +80,9 @@ export default async function DealPage({ params }: { params: { id: number } }) {
             getDealPeople(id, init).catch(() => []) as Promise<unknown>,
             getPipelines(init).catch(() => [] as Pipeline[]),
             getCompanies(init).catch(() => [] as Company[]),
+            getContacts({}, init).catch(() => [] as Contact[]),
+            getDeals(init).catch(() => [] as Deal[]),
+            getUsers(init).catch(() => [] as User[]),
         ]);
 
     if (!deal) notFound();
@@ -205,6 +213,8 @@ export default async function DealPage({ params }: { params: { id: number } }) {
                     pipelines={allPipelines}
                     stagesByPipeline={stagesByPipeline}
                     currentUserId={currentUser.id}
+                    persons={allPersons}
+                    deals={allDeals}
                 />
             </div>
 
@@ -380,7 +390,7 @@ export default async function DealPage({ params }: { params: { id: number } }) {
                         )}
                     </div>
 
-                    <DealTaskList dealId={deal.id} companyId={deal.company} tasks={tasks} />
+                    <DealTaskList dealId={deal.id} companyId={deal.company} tasks={tasks} deals={allDeals} />
 
                     <div className="mb-3 mt-6 flex h-8 items-center">
                         <h2 className="px-6 text-xs font-medium uppercase tracking-[0.12em] text-neutral-500">
@@ -402,7 +412,16 @@ export default async function DealPage({ params }: { params: { id: number } }) {
                     </div>
                     <div className="overflow-hidden rounded-2xl bg-white ring-1 ring-black/5 md:flex md:min-h-0 md:flex-1 md:flex-col">
                         <div className="md:min-h-0 md:flex-1 md:overflow-y-auto md:[-webkit-mask-image:linear-gradient(to_bottom,transparent_0,black_24px)] md:[mask-image:linear-gradient(to_bottom,transparent_0,black_24px)]">
-                            <Timeline tasks={tasks} activities={activities} notes={notes} />
+                            <Timeline
+                                tasks={tasks}
+                                activities={activities}
+                                notes={notes}
+                                users={allUsers}
+                                persons={allPersons}
+                                deals={allDeals}
+                                currentUserId={currentUser.id}
+                                companyId={deal.company ?? null}
+                            />
                         </div>
                     </div>
                 </section>
