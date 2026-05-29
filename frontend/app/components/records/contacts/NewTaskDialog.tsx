@@ -22,6 +22,7 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 
 import { ApiError, addDealPerson, createTask, getCompanyDeals, getUsers } from '@/app/lib/api';
+import { toastError, toastSuccess } from '@/app/lib/toast';
 import { Deal, User } from '@/app/lib/types';
 import { Select, SelectItem, SelectContent, SelectValue, SelectTrigger } from '@/components/ui/select';
 import RecordSelect from '@/app/components/records/RecordSelect';
@@ -86,17 +87,13 @@ export default function NewTaskDialog({
             if (selectedDealId) {
                 await addDealPerson(selectedDealId, contactId, 'Contact');
             }
-            toast.success(t('toastTaskAdded'), {
-                style: { backgroundColor: 'var(--color-brand)', color: 'white' },
-            });
+            toastSuccess(t('toastTaskAdded'));
             setOpen(false);
             reset();
             router.refresh();
         } catch (err) {
             const message = err instanceof ApiError ? err.message : err instanceof Error ? err.message : t('toastFailedCreate');
-            toast.error(message, {
-                style: { backgroundColor: 'var(--color-destructive)', color: 'white' },
-            });
+            toastError(message);
         } finally {
             setSubmitting(false);
         }
@@ -119,9 +116,7 @@ export default function NewTaskDialog({
             setDeals(companyDeals);
         } catch (err) {
             const message = err instanceof ApiError ? err.message : err instanceof Error ? err.message : t('toastFailedLoadDeals');
-            toast.error(message, {
-                style: { backgroundColor: 'var(--color-destructive)', color: 'white' },
-            });
+            toastError(message);
             setDeals([]);
         } finally {
             setLoadingDeals(false);

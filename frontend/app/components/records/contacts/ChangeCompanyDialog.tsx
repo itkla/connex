@@ -4,6 +4,7 @@ import { useEffect, useState, type WheelEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { toast } from 'sonner';
+import { toastError, toastSuccess } from '@/app/lib/toast';
 import { Loader2Icon } from 'lucide-react';
 
 import {
@@ -73,19 +74,16 @@ export default function ChangeCompanyDialog({ open, onOpenChange, contacts, comp
                 imageUrl: c.imageUrl || undefined,
                 companyId: selected.id,
             })));
-            toast.success(
+            toastSuccess(
                 contacts.length === 1
                     ? t('toastAssociatedSingle', { contactName: contacts[0].name, companyName: selected.name })
                     : t('toastAssociatedMultiple', { count: contacts.length, companyName: selected.name }),
-                { style: { backgroundColor: 'var(--color-brand)', color: 'white' } },
             );
             onOpenChange(false);
             onSuccess?.();
             router.refresh();
         } catch (err) {
-            toast.error(err instanceof Error ? err.message : t('toastFailedUpdate'), {
-                style: { backgroundColor: 'var(--color-destructive)', color: 'white' },
-            });
+            toastError(err instanceof Error ? err.message : t('toastFailedUpdate'));
         } finally {
             setIsSaving(false);
         }

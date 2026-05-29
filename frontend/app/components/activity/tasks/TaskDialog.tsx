@@ -3,7 +3,7 @@
 import { useEffect, useState, type WheelEvent, type SubmitEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
-import { toast } from 'sonner';
+import { toastError, toastSuccess } from '@/app/lib/toast';
 import { Loader2Icon } from 'lucide-react';
 
 import {
@@ -83,9 +83,7 @@ export default function TaskDialog({
         e.preventDefault();
         const trimmed = description.trim();
         if (!trimmed) {
-            toast.error(t('toastDescriptionRequired'), {
-                style: { backgroundColor: 'var(--color-destructive)', color: 'white' },
-            });
+            toastError(t('toastDescriptionRequired'));
             return;
         }
         const assignedToId = assignee?.id ?? currentUserId;
@@ -98,9 +96,7 @@ export default function TaskDialog({
                 personId: selectedPerson?.id ?? undefined,
                 dealId: selectedDeal?.id ?? undefined,
             });
-            toast.success(t('toastCreated'), {
-                style: { backgroundColor: 'var(--color-brand)', color: 'white' },
-            });
+            toastSuccess(t('toastCreated'));
             onOpenChange(false);
             router.refresh();
         } catch (err) {
@@ -110,9 +106,7 @@ export default function TaskDialog({
                     : err instanceof Error
                       ? err.message
                       : t('toastFailedCreate');
-            toast.error(message, {
-                style: { backgroundColor: 'var(--color-destructive)', color: 'white' },
-            });
+            toastError(message);
         } finally {
             setSubmitting(false);
         }

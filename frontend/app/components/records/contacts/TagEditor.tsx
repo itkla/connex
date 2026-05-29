@@ -3,7 +3,7 @@
 import { startTransition, useOptimistic } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
-import { toast } from 'sonner';
+import { toastError } from '@/app/lib/toast';
 import { PlusIcon, XMarkIcon } from '@heroicons/react/24/outline';
 
 import { Badge } from '@/components/ui/badge';
@@ -54,9 +54,7 @@ export default function TagEditor({
                 await addTag(tag.id);
                 router.refresh();
             } catch (err) {
-                toast.error(err instanceof Error ? err.message : t('toastFailedAdd'), {
-                    style: { backgroundColor: 'var(--color-destructive)', color: 'white' },
-                });
+                toastError(err instanceof Error ? err.message : t('toastFailedAdd'));
             }
         });
     };
@@ -68,9 +66,7 @@ export default function TagEditor({
                 await removeTag(tag.id);
                 router.refresh();
             } catch (err) {
-                toast.error(err instanceof Error ? err.message : t('toastFailedRemove'), {
-                    style: { backgroundColor: 'var(--color-destructive)', color: 'white' },
-                });
+                toastError(err instanceof Error ? err.message : t('toastFailedRemove'));
             }
         });
     };

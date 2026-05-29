@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
+import { toastError, toastSuccess } from '@/app/lib/toast';
 import { useTranslations } from 'next-intl';
 
 import QuickEditDealSheet, { type DealDraft } from '@/app/components/records/deals/QuickEditDealSheet';
@@ -72,15 +73,11 @@ export default function EditDealSheet({
                 closedAt: draft.closedAt || null,
             };
             await updateDeal(deal.id, payload);
-            toast.success(t('dealUpdated'), {
-                style: { backgroundColor: 'var(--color-brand)', color: 'white' },
-            });
+            toastSuccess(t('dealUpdated'));
             handleOpenChange(false);
             router.refresh();
         } catch (err) {
-            toast.error(err instanceof Error ? err.message : t('failedToSave'), {
-                style: { backgroundColor: 'var(--color-destructive)', color: 'white' },
-            });
+            toastError(err instanceof Error ? err.message : t('failedToSave'));
         } finally {
             setIsSaving(false);
         }

@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState, type ComponentType } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
-import { toast } from 'sonner';
+import { toastError } from '@/app/lib/toast';
 import Link from 'next/link';
 import {
     MagnifyingGlassIcon,
@@ -221,9 +221,7 @@ export default function TasksBrowser({ tasks, persons, deals, users, currentUser
             await updateTask(task.id, { completed: next });
             router.refresh();
         } catch (err) {
-            toast.error(err instanceof Error ? err.message : t('toastFailedUpdate'), {
-                style: { backgroundColor: 'var(--color-destructive)', color: 'white' },
-            });
+            toastError(err instanceof Error ? err.message : t('toastFailedUpdate'));
         } finally {
             setPendingToggle((prev) => {
                 const n = new Set(prev);

@@ -6,6 +6,7 @@ import { useTranslations } from 'next-intl';
 import { Button } from '@/components/ui/button';
 import { ButtonGroup } from '@/components/ui/button-group';
 import { toast } from 'sonner';
+import { toastError, toastSuccess } from '@/app/lib/toast';
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
 import { PlusIcon, FunnelIcon, TrashIcon, PencilIcon, EllipsisVerticalIcon, EyeIcon } from '@heroicons/react/24/solid';
 import {
@@ -105,9 +106,7 @@ export default function CompaniesBrowser({ companies }: { companies: Company[] }
             .catch((err) => {
                 console.error(err);
                 setMetricsStatus('error');
-                toast.error(t('toastMetricsLoadFailed'), {
-                    style: { backgroundColor: 'var(--color-destructive)', color: 'white' },
-                });
+                toastError(t('toastMetricsLoadFailed'));
             });
     }, [metricsStatus, t]);
 
@@ -127,16 +126,12 @@ export default function CompaniesBrowser({ companies }: { companies: Company[] }
                 const logoUrl = await uploadCompanyLogo(created.id, logoFile);
                 await updateCompany(created.id, { ...newPayload, logoUrl });
             }
-            toast.success(t('toastCompanyCreated'), {
-                style: { backgroundColor: 'var(--color-brand)', color: 'white' },
-            });
+            toastSuccess(t('toastCompanyCreated'));
             closeNewDialog(false);
             router.refresh();
         } catch (err) {
             console.error(err);
-            toast.error(t('toastCreateFailed'), {
-                style: { backgroundColor: 'var(--color-destructive)', color: 'white' },
-            });
+            toastError(t('toastCreateFailed'));
         } finally {
             setIsCreating(false);
         }
@@ -187,16 +182,13 @@ export default function CompaniesBrowser({ companies }: { companies: Company[] }
                     return updateCompany(c.id, payload);
                 }),
             );
-            toast.success(
+            toastSuccess(
                 changed.length === 1 ? t('toastCompanyUpdated') : t('toastCompaniesUpdated', { count: changed.length }),
-                { style: { backgroundColor: 'var(--color-brand)', color: 'white' } },
             );
             setEditSheetOpen(false);
             router.refresh();
         } catch (err) {
-            toast.error(err instanceof Error ? err.message : t('toastSaveFailed'), {
-                style: { backgroundColor: 'var(--color-destructive)', color: 'white' },
-            });
+            toastError(err instanceof Error ? err.message : t('toastSaveFailed'));
         } finally {
             setIsSaving(false);
         }
@@ -218,17 +210,14 @@ export default function CompaniesBrowser({ companies }: { companies: Company[] }
         setIsDeleting(true);
         try {
             await Promise.all(Array.from(selectedIds).map((id) => deleteCompany(Number(id))));
-            toast.success(
+            toastSuccess(
                 selectedIds.size === 1 ? t('toastCompanyDeleted') : t('toastCompaniesDeleted', { count: selectedIds.size }),
-                { style: { backgroundColor: 'var(--color-brand)', color: 'white' } },
             );
             setSelectedIds(new Set());
             setDeleteDialogOpen(false);
             router.refresh();
         } catch (err) {
-            toast.error(err instanceof Error ? err.message : t('toastDeleteFailed'), {
-                style: { backgroundColor: 'var(--color-destructive)', color: 'white' },
-            });
+            toastError(err instanceof Error ? err.message : t('toastDeleteFailed'));
         } finally {
             setIsDeleting(false);
         }

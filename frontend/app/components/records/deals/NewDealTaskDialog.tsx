@@ -21,6 +21,7 @@ import { Textarea } from '@/components/ui/textarea';
 import RecordSelect from '@/app/components/records/RecordSelect';
 
 import { addDealPerson, ApiError, createTask, getCompanyPeople, getUsers } from '@/app/lib/api';
+import { toastError, toastSuccess } from '@/app/lib/toast';
 import { type Contact, type Deal, type User } from '@/app/lib/types';
 
 const inputClass = 'w-full rounded-lg bg-neutral-100 px-3 py-2 text-sm text-black placeholder-neutral-500 outline-none ring-1 ring-black/5 transition focus:ring-2 focus:ring-brand';
@@ -85,17 +86,13 @@ export default function NewDealTaskDialog({
                     toast.warning(t('taskCreatedButFailedToLink'));
                 });
             }
-            toast.success(t('taskAdded'), {
-                style: { backgroundColor: 'var(--color-brand)', color: 'white' },
-            });
+            toastSuccess(t('taskAdded'));
             onOpenChange(false);
             reset();
             router.refresh();
         } catch (err) {
             const message = err instanceof ApiError ? err.message : err instanceof Error ? err.message : t('failedToCreateTask');
-            toast.error(message, {
-                style: { backgroundColor: 'var(--color-destructive)', color: 'white' },
-            });
+            toastError(message);
         } finally {
             setSubmitting(false);
         }

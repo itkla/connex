@@ -5,7 +5,7 @@ import { DropdownMenu, DropdownMenuItem, DropdownMenuContent, DropdownMenuTrigge
 import { Button } from "@/components/ui/button";
 import { EllipsisVerticalIcon, PencilIcon, CheckCircleIcon, TrashIcon, InformationCircleIcon } from "@heroicons/react/24/outline";
 import { formatDate } from "@/app/lib/utils";
-import { toast } from "sonner";
+import { toastError, toastSuccess } from "@/app/lib/toast";
 import { deleteTask, updateTask } from "@/app/lib/api";
 import { useRouter } from "next/navigation";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -22,14 +22,10 @@ export default function DealTaskList({ dealId, companyId, tasks, deals }: { deal
     const deleteThisTask = async (taskId: number) => {
         try {
             await deleteTask(taskId);
-            toast.success(t('taskDeleted'), {
-                style: { backgroundColor: 'var(--color-brand)', color: 'white' },
-            });
+            toastSuccess(t('taskDeleted'));
             router.refresh();
         } catch (err) {
-            toast.error(err instanceof Error ? err.message : t('failedToDeleteTask'), {
-                style: { backgroundColor: 'var(--color-destructive)', color: 'white' },
-            });
+            toastError(err instanceof Error ? err.message : t('failedToDeleteTask'));
         }
     };
 
@@ -46,14 +42,10 @@ export default function DealTaskList({ dealId, companyId, tasks, deals }: { deal
         };
         try {
             await updateTask(taskId, payload);
-            toast.success(t('taskMarkedAsComplete'), {
-                style: { backgroundColor: 'var(--color-brand)', color: 'white' },
-            });
+            toastSuccess(t('taskMarkedAsComplete'));
             router.refresh();
         } catch (err) {
-            toast.error(err instanceof Error ? err.message : t('failedToMarkTaskAsComplete'), {
-                style: { backgroundColor: 'var(--color-destructive)', color: 'white' },
-            });
+            toastError(err instanceof Error ? err.message : t('failedToMarkTaskAsComplete'));
         }
     };
 

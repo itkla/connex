@@ -6,6 +6,7 @@ import { useTranslations } from 'next-intl';
 import { Button } from '@/components/ui/button';
 import { ButtonGroup } from '@/components/ui/button-group';
 import { toast } from 'sonner';
+import { toastError, toastSuccess } from '@/app/lib/toast';
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from '@/components/ui/dropdown-menu';
 import { PlusIcon, FunnelIcon, TrashIcon, PencilIcon, EllipsisVerticalIcon, EyeIcon } from '@heroicons/react/24/solid';
 import {
@@ -133,9 +134,7 @@ export default function PipelinesBrowser({ pipelines }: { pipelines: Pipeline[] 
             .catch((err) => {
                 console.error(err);
                 setMetricsStatus('error');
-                toast.error(t('failedToLoadMetrics'), {
-                    style: { backgroundColor: 'var(--color-destructive)', color: 'white' },
-                });
+                toastError(t('failedToLoadMetrics'));
             });
     }, [metricsStatus, pipelines, t]);
 
@@ -163,18 +162,12 @@ export default function PipelinesBrowser({ pipelines }: { pipelines: Pipeline[] 
                 const failed = results.filter((r) => r.status === 'rejected').length;
                 if (failed > 0) {
                     console.error('Some stages failed to create', results);
-                    toast.error(t('pipelineCreatedWithFailedStages', { failed, total: stageNames.length }), {
-                        style: { backgroundColor: 'var(--color-destructive)', color: 'white' },
-                    });
+                    toastError(t('pipelineCreatedWithFailedStages', { failed, total: stageNames.length }));
                 } else {
-                    toast.success(t('pipelineCreated'), {
-                        style: { backgroundColor: 'var(--color-brand)', color: 'white' },
-                    });
+                    toastSuccess(t('pipelineCreated'));
                 }
             } else {
-                toast.success(t('pipelineCreated'), {
-                    style: { backgroundColor: 'var(--color-brand)', color: 'white' },
-                });
+                toastSuccess(t('pipelineCreated'));
             }
 
             closeNewPipelineDialog(false);
@@ -182,9 +175,7 @@ export default function PipelinesBrowser({ pipelines }: { pipelines: Pipeline[] 
             router.refresh();
         } catch (err) {
             console.error(err);
-            toast.error(t('failedToCreate'), {
-                style: { backgroundColor: 'var(--color-destructive)', color: 'white' },
-            });
+            toastError(t('failedToCreate'));
         } finally {
             setIsCreating(false);
         }
@@ -315,18 +306,15 @@ export default function PipelinesBrowser({ pipelines }: { pipelines: Pipeline[] 
                     }
                 }),
             );
-            toast.success(
+            toastSuccess(
                 changed.length === 1 ? t('pipelineUpdated') : t('pipelinesUpdated', { count: changed.length }),
-                { style: { backgroundColor: 'var(--color-brand)', color: 'white' } },
             );
             setEditSheetOpen(false);
             setMetricsStatus('idle');
             setStagesByPipeline(new Map());
             router.refresh();
         } catch (err) {
-            toast.error(err instanceof Error ? err.message : t('failedToSave'), {
-                style: { backgroundColor: 'var(--color-destructive)', color: 'white' },
-            });
+            toastError(err instanceof Error ? err.message : t('failedToSave'));
         } finally {
             setIsSaving(false);
         }
@@ -349,17 +337,14 @@ export default function PipelinesBrowser({ pipelines }: { pipelines: Pipeline[] 
         setIsDeleting(true);
         try {
             await Promise.all(Array.from(selectedIds).map((id) => deletePipeline(Number(id))));
-            toast.success(
+            toastSuccess(
                 selectedIds.size === 1 ? t('pipelineDeleted') : t('pipelinesDeleted', { count: selectedIds.size }),
-                { style: { backgroundColor: 'var(--color-brand)', color: 'white' } },
             );
             setSelectedIds(new Set());
             setDeleteDialogOpen(false);
             router.refresh();
         } catch (err) {
-            toast.error(err instanceof Error ? err.message : t('failedToDelete'), {
-                style: { backgroundColor: 'var(--color-destructive)', color: 'white' },
-            });
+            toastError(err instanceof Error ? err.message : t('failedToDelete'));
         } finally {
             setIsDeleting(false);
         }

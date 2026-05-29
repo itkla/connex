@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { toast } from 'sonner';
+import { toastError, toastSuccess } from '@/app/lib/toast';
 import { useTranslations } from 'next-intl';
 import {
     EllipsisVerticalIcon,
@@ -64,15 +64,11 @@ export default function DealActionsMenu({
         setIsDeleting(true);
         try {
             await deleteDeal(deal.id);
-            toast.success(t('dealDeleted'), {
-                style: { backgroundColor: 'var(--color-brand)', color: 'white' },
-            });
+            toastSuccess(t('dealDeleted'));
             router.push('/records/deals');
             router.refresh();
         } catch (err) {
-            toast.error(err instanceof Error ? err.message : t('failedToDelete'), {
-                style: { backgroundColor: 'var(--color-destructive)', color: 'white' },
-            });
+            toastError(err instanceof Error ? err.message : t('failedToDelete'));
             setIsDeleting(false);
         }
     };

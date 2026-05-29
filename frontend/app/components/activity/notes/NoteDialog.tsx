@@ -3,7 +3,7 @@
 import { useEffect, useState, type WheelEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
-import { toast } from 'sonner';
+import { toastError, toastSuccess } from '@/app/lib/toast';
 import { Loader2Icon } from 'lucide-react';
 
 import {
@@ -83,9 +83,7 @@ export default function NoteDialog({
         e.preventDefault();
         const trimmed = content.trim();
         if (!trimmed) {
-            toast.error(t('toastContentRequired'), {
-                style: { backgroundColor: 'var(--color-destructive)', color: 'white' },
-            });
+            toastError(t('toastContentRequired'));
             return;
         }
         setSubmitting(true);
@@ -97,9 +95,7 @@ export default function NoteDialog({
                     person: selectedPerson?.id ?? null,
                     deal: selectedDeal?.id ?? null,
                 });
-                toast.success(t('toastUpdated'), {
-                    style: { backgroundColor: 'var(--color-brand)', color: 'white' },
-                });
+                toastSuccess(t('toastUpdated'));
             } else {
                 await createNote({
                     content: trimmed,
@@ -107,9 +103,7 @@ export default function NoteDialog({
                     person: selectedPerson?.id ?? null,
                     deal: selectedDeal?.id ?? null,
                 });
-                toast.success(t('toastCreated'), {
-                    style: { backgroundColor: 'var(--color-brand)', color: 'white' },
-                });
+                toastSuccess(t('toastCreated'));
             }
             onOpenChange(false);
             router.refresh();
@@ -118,9 +112,7 @@ export default function NoteDialog({
                 err instanceof ApiError ? err.message :
                 err instanceof Error ? err.message :
                 isEdit ? t('toastFailedSave') : t('toastFailedCreate');
-            toast.error(message, {
-                style: { backgroundColor: 'var(--color-destructive)', color: 'white' },
-            });
+            toastError(message);
         } finally {
             setSubmitting(false);
         }

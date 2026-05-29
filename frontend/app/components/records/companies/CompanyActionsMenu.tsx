@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
-import { toast } from 'sonner';
+import { toastError, toastSuccess } from '@/app/lib/toast';
 import { EllipsisVerticalIcon, PencilSquareIcon, EyeIcon, PaperClipIcon, TrashIcon, PlusIcon, UserIcon, BriefcaseIcon } from '@heroicons/react/24/outline';
 
 import {
@@ -89,15 +89,11 @@ export default function CompanyActionsMenu({
         setIsDeleting(true);
         try {
             await deleteCompany(company.id);
-            toast.success(t('toastCompanyDeleted'), {
-                style: { backgroundColor: 'var(--color-brand)', color: 'white' },
-            });
+            toastSuccess(t('toastCompanyDeleted'));
             router.push('/records/companies');
             router.refresh();
         } catch (err) {
-            toast.error(err instanceof Error ? err.message : t('toastDeleteFailed'), {
-                style: { backgroundColor: 'var(--color-destructive)', color: 'white' },
-            });
+            toastError(err instanceof Error ? err.message : t('toastDeleteFailed'));
             setIsDeleting(false);
         }
     };
@@ -111,16 +107,12 @@ export default function CompanyActionsMenu({
                 const imageUrl = await uploadContactPicture(newContact.id, imageFile);
                 await updateContact(newContact.id, { ...newContactPayload, imageUrl });
             }
-            toast.success(t('toastContactCreated'), {
-                style: { backgroundColor: 'var(--color-brand)', color: 'white' },
-            });
+            toastSuccess(t('toastContactCreated'));
             setNewContactDialogOpen(false);
             router.refresh();
         } catch (err) {
             console.error(err);
-            toast.error(t('toastCreateContactFailed'), {
-                style: { backgroundColor: 'var(--color-destructive)', color: 'white' },
-            });
+            toastError(t('toastCreateContactFailed'));
         } finally {
             setIsCreatingContact(false);
         }
@@ -138,16 +130,12 @@ export default function CompanyActionsMenu({
                 company: company.id,
                 expectedCloseDate: newDealPayload.expectedCloseDate || undefined,
             });
-            toast.success(t('toastDealCreated'), {
-                style: { backgroundColor: 'var(--color-brand)', color: 'white' },
-            });
+            toastSuccess(t('toastDealCreated'));
             closeNewDealDialog(false);
             router.refresh();
         } catch (err) {
             console.error(err);
-            toast.error(err instanceof Error ? err.message : t('toastCreateDealFailed'), {
-                style: { backgroundColor: 'var(--color-destructive)', color: 'white' },
-            });
+            toastError(err instanceof Error ? err.message : t('toastCreateDealFailed'));
         } finally {
             setIsCreatingDeal(false);
         }

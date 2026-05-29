@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
-import { toast } from 'sonner';
+import { toastError, toastSuccess } from '@/app/lib/toast';
 import { CheckIcon, EllipsisVerticalIcon, PencilIcon, TrashIcon, UserIcon } from '@heroicons/react/24/outline';
 
 import { type Activity, type Contact, type Deal, type Note, type Task, type User } from '@/app/lib/types';
@@ -63,25 +63,17 @@ export default function TimelineRow({
         try {
             if (entry.kind === 'task') {
                 await deleteTask(entry.task.id);
-                toast.success(t('taskDeleted'), {
-                    style: { backgroundColor: 'var(--color-brand)', color: 'white' },
-                });
+                toastSuccess(t('taskDeleted'));
             } else if (entry.kind === 'activity') {
                 await deleteActivity(entry.activity.id);
-                toast.success(t('activityDeleted'), {
-                    style: { backgroundColor: 'var(--color-brand)', color: 'white' },
-                });
+                toastSuccess(t('activityDeleted'));
             } else {
                 await deleteNote(entry.note.id);
-                toast.success(t('noteDeleted'), {
-                    style: { backgroundColor: 'var(--color-brand)', color: 'white' },
-                });
+                toastSuccess(t('noteDeleted'));
             }
             router.refresh();
         } catch (err) {
-            toast.error(err instanceof Error ? err.message : t('deleteFailed'), {
-                style: { backgroundColor: 'var(--color-destructive)', color: 'white' },
-            });
+            toastError(err instanceof Error ? err.message : t('deleteFailed'));
         }
     };
 

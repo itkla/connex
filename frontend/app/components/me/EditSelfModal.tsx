@@ -6,6 +6,7 @@ import { LoaderCircle } from 'lucide-react';
 import { PencilSquareIcon } from '@heroicons/react/16/solid';
 import { useTranslations } from 'next-intl';
 import { toast } from 'sonner';
+import { toastError, toastSuccess } from '@/app/lib/toast';
 
 import {
     Dialog,
@@ -111,34 +112,20 @@ export default function EditSelfModal({ user }: Props) {
             }
 
             if (userWasUpdated) {
-                toast.success(t('profileUpdatedTitle'), {
+                toastSuccess(t('profileUpdatedTitle'), {
                     description: t('profileUpdatedDescription'),
-                    style: {
-                        backgroundColor: "var(--color-brand)",
-                        color: "white",
-                    }
                 });
                 setOpen(false);
                 router.refresh();
             } else {
-                toast.error(t('errorUpdatingTitle'), {
+                toastError(t('errorUpdatingTitle'), {
                     description: t('errorUpdatingDescription'),
-                    style: {
-                        backgroundColor: "var(--color-destructive)",
-                        color: "white",
-                    }
                 });
             }
         } catch (err) {
             if (err instanceof ApiError) {
                 if (err.fieldErrors) setFieldErrors(err.fieldErrors);
-                toast.error(err.message, {
-                    // description: err.fieldErrors ? 'Please fix the highlighted fields.' : err.message,
-                    style: {
-                        backgroundColor: "var(--color-destructive)",
-                        color: "white",
-                    }
-                });
+                toastError(err.message);
             } else {
                 toast.error(err instanceof Error ? err.message : t('failedToUpdateProfile'));
             }

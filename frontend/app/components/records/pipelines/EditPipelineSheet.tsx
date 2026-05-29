@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
+import { toastError, toastSuccess } from '@/app/lib/toast';
 import { useTranslations } from 'next-intl';
 
 import { createStage, deleteStage, getStagesByPipelineId, updatePipeline, updateStage } from '@/app/lib/api';
@@ -111,18 +112,14 @@ export default function EditPipelineSheet({
                 }
             }
 
-            toast.success(t('pipelineUpdated'), {
-                style: { backgroundColor: 'var(--color-brand)', color: 'white' },
-            });
+            toastSuccess(t('pipelineUpdated'));
             handleOpenChange(false);
 
             const fresh = await getStagesByPipelineId(pipeline.id);
             setDraft(toDraft(pipeline, fresh));
             router.refresh();
         } catch (err) {
-            toast.error(err instanceof Error ? err.message : t('failedToSave'), {
-                style: { backgroundColor: 'var(--color-destructive)', color: 'white' },
-            });
+            toastError(err instanceof Error ? err.message : t('failedToSave'));
         } finally {
             setIsSaving(false);
         }

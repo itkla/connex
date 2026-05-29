@@ -7,6 +7,7 @@ import { useTranslations } from 'next-intl';
 import { Button } from '@/components/ui/button';
 import { ButtonGroup } from '@/components/ui/button-group';
 import { toast } from 'sonner';
+import { toastError, toastSuccess } from '@/app/lib/toast';
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from '@/components/ui/dropdown-menu';
 import { PlusIcon, FunnelIcon, TrashIcon, PencilIcon, EllipsisVerticalIcon, EyeIcon } from '@heroicons/react/24/solid';
 import {
@@ -213,16 +214,12 @@ export default function DealsBrowser({ deals }: { deals: Deal[] }) {
                 currency: newPayload.currency.trim() || 'USD',
                 expectedCloseDate: newPayload.expectedCloseDate || undefined,
             });
-            toast.success(t('dealCreated'), {
-                style: { backgroundColor: 'var(--color-brand)', color: 'white' },
-            });
+            toastSuccess(t('dealCreated'));
             closeNewDialog(false);
             router.refresh();
         } catch (err) {
             console.error(err);
-            toast.error(err instanceof Error ? err.message : t('failedToCreateDeal'), {
-                style: { backgroundColor: 'var(--color-destructive)', color: 'white' },
-            });
+            toastError(err instanceof Error ? err.message : t('failedToCreateDeal'));
         } finally {
             setIsCreating(false);
         }
@@ -279,16 +276,13 @@ export default function DealsBrowser({ deals }: { deals: Deal[] }) {
                     return updateDeal(d.id, payload);
                 }),
             );
-            toast.success(
+            toastSuccess(
                 changed.length === 1 ? t('dealUpdated') : t('dealsUpdated', { count: changed.length }),
-                { style: { backgroundColor: 'var(--color-brand)', color: 'white' } },
             );
             setEditSheetOpen(false);
             router.refresh();
         } catch (err) {
-            toast.error(err instanceof Error ? err.message : t('failedToSave'), {
-                style: { backgroundColor: 'var(--color-destructive)', color: 'white' },
-            });
+            toastError(err instanceof Error ? err.message : t('failedToSave'));
         } finally {
             setIsSaving(false);
         }
@@ -310,17 +304,14 @@ export default function DealsBrowser({ deals }: { deals: Deal[] }) {
         setIsDeleting(true);
         try {
             await Promise.all(Array.from(selectedIds).map((id) => deleteDeal(Number(id))));
-            toast.success(
+            toastSuccess(
                 selectedIds.size === 1 ? t('dealDeleted') : t('dealsDeleted', { count: selectedIds.size }),
-                { style: { backgroundColor: 'var(--color-brand)', color: 'white' } },
             );
             setSelectedIds(new Set());
             setDeleteDialogOpen(false);
             router.refresh();
         } catch (err) {
-            toast.error(err instanceof Error ? err.message : t('failedToDelete'), {
-                style: { backgroundColor: 'var(--color-destructive)', color: 'white' },
-            });
+            toastError(err instanceof Error ? err.message : t('failedToDelete'));
         } finally {
             setIsDeleting(false);
         }
@@ -351,14 +342,10 @@ export default function DealsBrowser({ deals }: { deals: Deal[] }) {
                 expectedCloseDate: deal.expectedCloseDate,
                 closedAt: closed ? toMysqlDateTime(new Date().toISOString()) : null,
             });
-            toast.success(closed ? t('dealClosed') : t('dealReopened'), {
-                style: { backgroundColor: 'var(--color-brand)', color: 'white' },
-            });
+            toastSuccess(closed ? t('dealClosed') : t('dealReopened'));
             router.refresh();
         } catch (err) {
-            toast.error(err instanceof Error ? err.message : t('failedToUpdateStatus'), {
-                style: { backgroundColor: 'var(--color-destructive)', color: 'white' },
-            });
+            toastError(err instanceof Error ? err.message : t('failedToUpdateStatus'));
         }
     }, [router, t]);
 

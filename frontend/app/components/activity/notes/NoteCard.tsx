@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useTranslations } from 'next-intl';
-import { toast } from 'sonner';
+import { toastError, toastSuccess } from '@/app/lib/toast';
 import {
     EllipsisHorizontalIcon,
     PencilIcon,
@@ -40,13 +40,9 @@ export default function NoteCard({ note, person, deal, author, onEdit, onDelete 
 
     const copyContent = () => {
         if (copyToClipboard(note.content, 'Note')) {
-            toast.success(t('toastContentCopied'), {
-                style: { backgroundColor: 'var(--color-brand)', color: 'white' },
-            });
+            toastSuccess(t('toastContentCopied'));
         } else {
-            toast.error(t('toastFailedCopy'), {
-                style: { backgroundColor: 'var(--color-destructive)', color: 'white' },
-            });
+            toastError(t('toastFailedCopy'));
         }
     };
 

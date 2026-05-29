@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { toast } from 'sonner';
+import { toastError, toastSuccess } from '@/app/lib/toast';
 
 import QuickEditCompanySheet, { type CompanyDraft } from '@/app/components/records/companies/QuickEditCompanySheet';
 import { getCompanyById, updateCompany } from '@/app/lib/api';
@@ -87,9 +88,7 @@ export default function EditCompanySheet({
             };
             await updateCompany(company.id, payload);
 
-            toast.success(t('toastCompanyUpdated'), {
-                style: { backgroundColor: 'var(--color-brand)', color: 'white' },
-            });
+            toastSuccess(t('toastCompanyUpdated'));
             handleOpenChange(false);
 
             const updatedCompany = await getCompanyById(company.id);
@@ -100,9 +99,7 @@ export default function EditCompanySheet({
 
             router.refresh();
         } catch (err) {
-            toast.error(err instanceof Error ? err.message : t('toastSaveFailed'), {
-                style: { backgroundColor: 'var(--color-destructive)', color: 'white' },
-            });
+            toastError(err instanceof Error ? err.message : t('toastSaveFailed'));
         } finally {
             setIsSaving(false);
         }

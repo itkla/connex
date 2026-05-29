@@ -21,8 +21,10 @@ import { Textarea } from '@/components/ui/textarea';
 import RecordSelect from '@/app/components/records/RecordSelect';
 
 import { addDealPerson, ApiError, createActivity, getCompanyPeople } from '@/app/lib/api';
+import { toastError, toastSuccess } from '@/app/lib/toast';
 import { type Contact, type Deal } from '@/app/lib/types';
 import { toMysqlDateTime } from '@/app/lib/utils';
+import { Select, SelectContent, SelectValue, SelectTrigger, SelectItem } from '@/components/ui/select';
 
 const inputClass = 'w-full rounded-lg bg-neutral-100 px-3 py-2 text-sm text-black placeholder-neutral-500 outline-none ring-1 ring-black/5 transition focus:ring-2 focus:ring-brand';
 
@@ -84,17 +86,13 @@ export default function NewDealActivityDialog({
                     toast.warning(t('activityLoggedButFailedToLink'));
                 });
             }
-            toast.success(t('activityLogged'), {
-                style: { backgroundColor: 'var(--color-brand)', color: 'white' },
-            });
+            toastSuccess(t('activityLogged'));
             onOpenChange(false);
             reset();
             router.refresh();
         } catch (err) {
             const message = err instanceof ApiError ? err.message : err instanceof Error ? err.message : t('failedToLogActivity');
-            toast.error(message, {
-                style: { backgroundColor: 'var(--color-destructive)', color: 'white' },
-            });
+            toastError(message);
         } finally {
             setSubmitting(false);
         }
@@ -124,7 +122,7 @@ export default function NewDealActivityDialog({
                 <form onSubmit={handleSubmit} className="grid gap-4">
                     <div className="grid gap-2">
                         <Label htmlFor="deal-activity-type">{t('type')}</Label>
-                        <select
+                        {/* <select
                             id="deal-activity-type"
                             value={type}
                             onChange={(e) => setType(e.target.value)}
@@ -135,7 +133,17 @@ export default function NewDealActivityDialog({
                                     {t}
                                 </option>
                             ))}
-                        </select>
+                        </select> */}
+                        <Select value={type} onValueChange={setType}>
+                            <SelectTrigger id="deal-activity-type" className={inputClass}>
+                                <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                                {ACTIVITY_TYPES.map((value) => (
+                                    <SelectItem key={value} value={value}>{t(`type${value}` as 'typeCall' | 'typeEmail' | 'typeMeeting' | 'typeNote' | 'typeOther')}</SelectItem>
+                                ))}
+                            </SelectContent>
+                        </Select>
                     </div>
 
                     <div className="grid gap-2">

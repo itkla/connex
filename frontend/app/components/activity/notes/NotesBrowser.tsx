@@ -4,6 +4,7 @@ import { useCallback, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { toast } from 'sonner';
+import { toastError, toastSuccess } from '@/app/lib/toast';
 import { PlusIcon, EllipsisVerticalIcon, PencilIcon, TrashIcon, FunnelIcon } from '@heroicons/react/24/solid';
 import {
     MagnifyingGlassIcon,
@@ -212,9 +213,7 @@ export default function NotesBrowser({ notes, persons, deals, users, currentUser
 
         const invalid = changed.find((n) => !drafts[n.id].content.trim());
         if (invalid) {
-            toast.error(t('toastContentRequired'), {
-                style: { backgroundColor: 'var(--color-destructive)', color: 'white' },
-            });
+            toastError(t('toastContentRequired'));
             return;
         }
 
@@ -232,18 +231,15 @@ export default function NotesBrowser({ notes, persons, deals, users, currentUser
                     return updateNote(n.id, payload);
                 }),
             );
-            toast.success(
+            toastSuccess(
                 changed.length === 1
                     ? t('toastNoteUpdated')
                     : t('toastNotesUpdated', { count: changed.length }),
-                { style: { backgroundColor: 'var(--color-brand)', color: 'white' } },
             );
             setEditSheetOpen(false);
             router.refresh();
         } catch (err) {
-            toast.error(err instanceof Error ? err.message : t('toastFailedSave'), {
-                style: { backgroundColor: 'var(--color-destructive)', color: 'white' },
-            });
+            toastError(err instanceof Error ? err.message : t('toastFailedSave'));
         } finally {
             setIsSaving(false);
         }
@@ -254,19 +250,16 @@ export default function NotesBrowser({ notes, persons, deals, users, currentUser
         setIsDeleting(true);
         try {
             await Promise.all(Array.from(selectedIds).map((id) => deleteNote(Number(id))));
-            toast.success(
+            toastSuccess(
                 selectedIds.size === 1
                     ? t('toastNoteDeleted')
                     : t('toastNotesDeleted', { count: selectedIds.size }),
-                { style: { backgroundColor: 'var(--color-brand)', color: 'white' } },
             );
             setSelectedIds(new Set());
             setDeleteDialogOpen(false);
             router.refresh();
         } catch (err) {
-            toast.error(err instanceof Error ? err.message : t('toastFailedDelete'), {
-                style: { backgroundColor: 'var(--color-destructive)', color: 'white' },
-            });
+            toastError(err instanceof Error ? err.message : t('toastFailedDelete'));
         } finally {
             setIsDeleting(false);
         }

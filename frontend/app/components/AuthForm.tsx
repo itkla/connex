@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { redirect, useRouter } from "next/navigation";
 import { useState } from "react";
-import { toast } from "sonner";
+import { toastError, toastSuccess } from "@/app/lib/toast";
 import { useTranslations } from "next-intl";
 
 import { ApiError, login, register as registerUser } from "@/app/lib/api";
@@ -134,12 +134,7 @@ export function AuthForm({ mode, redirectUrl }: { mode: AuthMode, redirectUrl: s
                 });
             }
 
-            toast.success(tMode("successMessage"), {
-                style: {
-                    backgroundColor: "var(--color-brand)",
-                    color: "white",
-                }
-            });
+            toastSuccess(tMode("successMessage"));
             // router.replace("/dashboard");
             if (redirectUrl) {
                 router.push(redirectUrl);
@@ -154,12 +149,7 @@ export function AuthForm({ mode, redirectUrl }: { mode: AuthMode, redirectUrl: s
 
             setError(message);
             setFieldErrors(nextFieldErrors);
-            toast.error(message, {
-                style: {
-                    backgroundColor: "var(--color-destructive)",
-                    color: "white",
-                }
-            });
+            toastError(message);
         } finally {
             setSubmitting(false);
         }
