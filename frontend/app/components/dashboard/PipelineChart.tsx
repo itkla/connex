@@ -10,8 +10,8 @@ import {
     ChartTooltipContent,
     type ChartConfig,
 } from '@/components/ui/chart';
-import { type Deal } from '@/app/lib/api';
-import { formatCompactCurrency, timeOf } from '@/app/lib/utils';
+import { type Deal } from '@/app/lib/types';
+import { formatCompactCurrency, parseMysqlDateTime, pickDominantCurrency } from '@/app/lib/utils';
 
 //originally 6, but i think 12 is more realistic/ helpful
 const MONTHS_AHEAD = 12;
@@ -38,10 +38,10 @@ function buildBuckets(deals: Deal[], now: number): Bucket[] {
 
     for (const deal of deals) {
         if (deal.closedAt) continue;
-        const t = timeOf(deal.expectedCloseDate);
-        if (!t) continue; // if the deal has no expected close date and it's not closed, skip it
+        const t = parseMysqlDateTime(deal.expectedCloseDate);
+        if (!Number.isFinite(t)) continue;
         const d = new Date(t);
-        const key = `${d.getFullYear()}-${d.getMonth()}`; // chart key accepts yyyy-mm, so we need to convert the date to a string
+        const key = `${d.getFullYear()}-${d.getMonth()}`;
         const idx = keyToIndex.get(key);
         if (idx === undefined) continue;
         buckets[idx].value += deal.value ?? 0;
@@ -53,14 +53,18 @@ function buildBuckets(deals: Deal[], now: number): Bucket[] {
 export default function PipelineChart({ deals }: { deals: Deal[] }) {
     const t = useTranslations('DashboardPipelineChart');
     const now = React.useMemo(() => Date.now(), []);
-    const openDeals = React.useMemo(
-        () => deals.filter((d) => !d.closedAt),
-        [deals],
+    const currency = React.useMemo(() => pickDominantCurrency(deals), [deals]);
+    const dealsInCurrency = React.useMemo(
+        () => deals.filter((d) => (d.currency || 'USD') === currency),
+        [deals, currency],
     );
-    const data = React.useMemo(() => buildBuckets(deals, now), [deals, now]);
+    const openDeals = React.useMemo(
+        () => dealsInCurrency.filter((d) => !d.closedAt),
+        [dealsInCurrency],
+    );
+    const data = React.useMemo(() => buildBuckets(dealsInCurrency, now), [dealsInCurrency, now]);
 
     const pipelineValue = openDeals.reduce((sum, d) => sum + (d.value ?? 0), 0);
-    const currency = openDeals.find((d) => d.currency)?.currency ?? 'USD';
     const scheduledValue = data.reduce((sum, b) => sum + b.value, 0);
 
     const chartConfig = {

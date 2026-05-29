@@ -152,6 +152,7 @@ export type CompanyMetrics = {
     relatedUsers: User[];
     pastRevenue: number;
     projectedRevenue: number;
+    currency: string;
     numDeals: number;
     numTasks: number;
     numActivities: number;

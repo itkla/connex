@@ -33,7 +33,7 @@ import {
     getStagesByPipelineId,
     getDealPeople,
 } from '@/app/lib/api';
-import { formatCompactCurrency, formatDateTime } from '@/app/lib/utils';
+import { formatCompactCurrency, formatDateTime, pickDominantCurrency } from '@/app/lib/utils';
 import {
     type Company,
     type CreateDealPayload,
@@ -134,6 +134,24 @@ export default function DealsBrowser({ deals }: { deals: Deal[] }) {
         }
         return m;
     }, [stagesByPipeline]);
+
+    const currencyCounts = useMemo(() => {
+        const counts = new Map<string, number>();
+        for (const d of deals) {
+            const c = d.currency || 'USD';
+            counts.set(c, (counts.get(c) ?? 0) + 1);
+        }
+        return counts;
+    }, [deals]);
+    const dominantCurrency = useMemo(() => pickDominantCurrency(deals), [deals]);
+    const [selectedCurrency, setSelectedCurrency] = useState<string | null>(null);
+    const activeCurrency = selectedCurrency && currencyCounts.has(selectedCurrency)
+        ? selectedCurrency
+        : dominantCurrency;
+    const dealsInCurrency = useMemo(
+        () => deals.filter((d) => (d.currency || 'USD') === activeCurrency),
+        [deals, activeCurrency],
+    );
     
     const searchFields = useCallback((d: Deal) => [
         d.name,
@@ -155,7 +173,7 @@ export default function DealsBrowser({ deals }: { deals: Deal[] }) {
         deleteDialogOpen,
         setDeleteDialogOpen,
     } = useRecordsBrowser<Deal>({
-        items: deals,
+        items: dealsInCurrency,
         storageKey: 'deals:view',
         searchFields,
     });
@@ -350,7 +368,7 @@ export default function DealsBrowser({ deals }: { deals: Deal[] }) {
         let closedActualValue = 0;
         let accuracyCount = 0;
         let accuracySum = 0;
-        for (const d of deals) {
+        for (const d of dealsInCurrency) {
             if (isClosed(d)) {
                 closedActualValue += d.actualValue ?? 0;
                 if ((d.value ?? 0) > 0) {
@@ -364,7 +382,7 @@ export default function DealsBrowser({ deals }: { deals: Deal[] }) {
         }
         const forecastAccuracy = accuracyCount > 0 ? accuracySum / accuracyCount : null;
         return { openCount, openValue, closedActualValue, forecastAccuracy };
-    }, [deals]);
+    }, [dealsInCurrency]);
 
     const columns: ColumnDef<Deal>[] = useMemo(() => [
         { key: 'name', label: t('columnName'), getSortValue: (d) => d.name ?? null },
@@ -450,20 +468,46 @@ export default function DealsBrowser({ deals }: { deals: Deal[] }) {
         <div className="space-y-6">
             <div className="flex items-center justify-between">
                 <h1 className="text-4xl font-extrabold">{t('title')}</h1>
-                <Button className="bg-brand text-white" aria-label={t('addDeal')} onClick={() => setNewDialogOpen(true)}>
-                    <PlusIcon strokeWidth={2.5} />
-                    {t('newButton')}
-                </Button>
+                <div className="flex items-center gap-2">
+                    {currencyCounts.size > 1 && (
+                        <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                                <button
+                                    type="button"
+                                    aria-label={t('currency')}
+                                    className="flex items-center gap-1.5 rounded-full bg-neutral-100 px-3 py-1.5 text-sm text-neutral-700 ring-1 ring-black/5 transition hover:bg-neutral-200"
+                                >
+                                    {activeCurrency}
+                                    <ChevronDownIcon className="size-3.5 text-neutral-500" />
+                                </button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end">
+                                {Array.from(currencyCounts.entries())
+                                    .sort((a, b) => b[1] - a[1])
+                                    .map(([c, n]) => (
+                                        <DropdownMenuItem key={c} onSelect={() => setSelectedCurrency(c)}>
+                                            <span className={c === activeCurrency ? 'font-semibold' : ''}>{c}</span>
+                                            <span className="ml-auto text-xs text-neutral-500">{t('currencyCount', { count: n })}</span>
+                                        </DropdownMenuItem>
+                                    ))}
+                            </DropdownMenuContent>
+                        </DropdownMenu>
+                    )}
+                    <Button className="bg-brand text-white" aria-label={t('addDeal')} onClick={() => setNewDialogOpen(true)}>
+                        <PlusIcon strokeWidth={2.5} />
+                        {t('newButton')}
+                    </Button>
+                </div>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                <SummaryTile className="sm:col-span-2" label={t('revenueTrend')} value={<DealsRevenueChart deals={deals} />} />
-                <SummaryTile label={t('stageRatio')} value={<StageRatio deals={deals} />} />
+                <SummaryTile className="sm:col-span-2" label={t('revenueTrend')} value={<DealsRevenueChart deals={dealsInCurrency} />} />
+                <SummaryTile label={t('stageRatio')} value={<StageRatio deals={dealsInCurrency} />} />
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
-                <SummaryTile label={t('projectedPipeline')} value={formatCompactCurrency(summary.openValue, 'USD')} />
-                <SummaryTile label={t('actualRevenue')} value={formatCompactCurrency(summary.closedActualValue, 'USD')} />
+                <SummaryTile label={t('projectedPipeline')} value={formatCompactCurrency(summary.openValue, activeCurrency)} />
+                <SummaryTile label={t('actualRevenue')} value={formatCompactCurrency(summary.closedActualValue, activeCurrency)} />
                 <SummaryTile label={t('openDeals')} value={String(summary.openCount)} />
                 <SummaryTile
                     label={t('forecastAccuracy')}
@@ -475,9 +519,9 @@ export default function DealsBrowser({ deals }: { deals: Deal[] }) {
                 <SummaryTile
                     className="sm:col-span-2"
                     label={t('openDealAging')}
-                    value={<DealsAging deals={deals} stageById={stageById} />}
+                    value={<DealsAging deals={dealsInCurrency} stageById={stageById} />}
                 />
-                <SummaryTile label={t('topDeals')} value={<TopDeals deals={deals} companyById={companyById} />} />
+                <SummaryTile label={t('topDeals')} value={<TopDeals deals={dealsInCurrency} companyById={companyById} />} />
             </div>
 
             <div className="flex items-center gap-4">

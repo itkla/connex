@@ -121,6 +121,8 @@
     "delete": "削除",
     "searchPlaceholder": "案件を検索",
     "freelancer": "フリーランス",
+    "currency": "通貨",
+    "currencyCount": "{count} 件",
     "columnName": "名前",
     "columnValue": "金額",
     "columnActualValue": "実績金額",

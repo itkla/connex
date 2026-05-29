@@ -24,7 +24,7 @@ import CompanyAvatar from '@/app/components/records/companies/CompanyAvatar';
 import NewCompanyDialog from '@/app/components/records/companies/NewCompanyDialog';
 import QuickEditCompanySheet, { type CompanyDraft } from '@/app/components/records/companies/QuickEditCompanySheet';
 import { createCompany, deleteCompany, getUsers, getTasks, getDeals, updateCompany, getActivities, getNotes } from '@/app/lib/api';
-import { uploadCompanyLogo } from '@/app/lib/utils';
+import { uploadCompanyLogo, pickDominantCurrency } from '@/app/lib/utils';
 import { type Company, type CreateCompanyPayload, type UpdateCompanyPayload, type Contact, type Activity, type Note, type Task, type User, type Deal, type CompanyMetrics, type LoadStatus } from '@/app/lib/types';
 import { getContacts } from '@/app/lib/api';
 
@@ -324,9 +324,11 @@ export default function CompaniesBrowser({ companies }: { companies: Company[] }
             for (const t of tasks) bucket(Date.parse(t.createdAt ?? ''), 'tasks');
             for (const n of notes) bucket(Date.parse(n.createdAt ?? ''), 'notes');
 
+            const currency = pickDominantCurrency(deals);
             let pastRevenue = 0;
             let projectedRevenue = 0;
             for (const d of deals) {
+                if ((d.currency || 'USD') !== currency) continue;
                 const closed = d.closedAt ? Date.parse(d.closedAt) : NaN;
                 if (Number.isFinite(closed) && closed <= now) {
                     pastRevenue += d.value ?? 0;
@@ -340,6 +342,7 @@ export default function CompaniesBrowser({ companies }: { companies: Company[] }
                 relatedUsers: allUsers.filter((u) => userIds.has(u.id)),
                 pastRevenue,
                 projectedRevenue,
+                currency,
                 numDeals: deals.length,
                 numTasks: tasks.length,
                 numActivities: activities.length,

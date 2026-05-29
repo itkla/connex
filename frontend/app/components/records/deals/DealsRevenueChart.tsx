@@ -11,7 +11,7 @@ import {
     type ChartConfig,
 } from '@/components/ui/chart';
 import { type Deal } from '@/app/lib/types';
-import { formatCompactCurrency, parseMysqlDateTime } from '@/app/lib/utils';
+import { formatCompactCurrency, parseMysqlDateTime, pickDominantCurrency } from '@/app/lib/utils';
 
 const MONTHS_BACK = 6;
 const MONTHS_FORWARD = 6;
@@ -45,9 +45,9 @@ function buildBuckets(deals: Deal[], now: number) {
     const todayKey = `${today.getFullYear()}-${today.getMonth()}`;
     const todayLabel = buckets[keyToIndex.get(todayKey) ?? -1]?.label ?? null;
 
-    let currency = 'USD';
+    const currency = pickDominantCurrency(deals);
     for (const deal of deals) {
-        if (deal.currency) currency = deal.currency;
+        if ((deal.currency || 'USD') !== currency) continue;
         const closedAt = parseMysqlDateTime(deal.closedAt);
         const expected = parseMysqlDateTime(deal.expectedCloseDate);
 

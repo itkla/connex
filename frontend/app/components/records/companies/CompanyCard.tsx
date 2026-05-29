@@ -105,6 +105,7 @@ export default function CompanyCard({ company, metrics, metricsStatus, onFirstEx
                                 <RevenueTiles
                                     pastRevenue={metrics.pastRevenue}
                                     projectedRevenue={metrics.projectedRevenue}
+                                    currency={metrics.currency}
                                 />
                             </div>
                         </>
@@ -243,9 +244,11 @@ export function EngagementSparkline({ data }: { data: EngagementPoint[] }) {
 export function RevenueTiles({
     pastRevenue,
     projectedRevenue,
+    currency = 'USD',
 }: {
     pastRevenue: number;
     projectedRevenue: number;
+    currency?: string;
 }) {
     const t = useTranslations('CompaniesCard');
     return (
@@ -253,13 +256,13 @@ export function RevenueTiles({
             <div className="rounded-xl bg-transparent p-3 ring-1 ring-black/5">
                 <p className="text-xs uppercase tracking-wider text-neutral-500">{t('closedRevenue')}</p>
                 <p className="mt-1 text-lg font-semibold text-neutral-900">
-                    {formatCompactCurrency(pastRevenue)}
+                    {formatCompactCurrency(pastRevenue, currency)}
                 </p>
             </div>
             <div className="rounded-xl bg-transparent p-3 ring-1 ring-black/5">
                 <p className="text-xs uppercase tracking-wider text-neutral-500">{t('projected')}</p>
                 <p className="mt-1 text-lg font-semibold text-neutral-900">
-                    {formatCompactCurrency(projectedRevenue)}
+                    {formatCompactCurrency(projectedRevenue, currency)}
                 </p>
             </div>
         </div>

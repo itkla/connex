@@ -108,7 +108,7 @@ function CompanyNodeImpl({ id, data }: NodeProps<CompanyNodeType>) {
             </div>
 
             <div className="mt-3 space-y-2">
-                <RevenueTiles pastRevenue={metrics.pastRevenue} projectedRevenue={metrics.projectedRevenue} />
+                <RevenueTiles pastRevenue={metrics.pastRevenue} projectedRevenue={metrics.projectedRevenue} currency={metrics.currency} />
                 <div className="nodrag nowheel">
                     <EngagementSparkline data={metrics.weeklyEngagement} />
                 </div>

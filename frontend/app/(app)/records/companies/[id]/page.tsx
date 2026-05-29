@@ -23,7 +23,7 @@ import {
     getUserById,
 } from "@/app/lib/api";
 import { type Activity, type Company, type Contact, type Deal, type Note, type Tag, type Task, type User } from "@/app/lib/types";
-import { formatCompactCurrency, formatDate, formatDateTime } from "@/app/lib/utils";
+import { formatCompactCurrency, formatDate, formatDateTime, pickDominantCurrency } from "@/app/lib/utils";
 
 import CompanyActionsMenu from "@/app/components/records/companies/CompanyActionsMenu";
 import CompanyAvatar from "@/app/components/records/companies/CompanyAvatar";
@@ -124,9 +124,11 @@ export default async function CompanyPage({ params }: { params: { id: number } }
     for (const t of tasks) bucket(Date.parse(t.createdAt ?? ''), 'tasks');
     for (const n of notes) bucket(Date.parse(n.createdAt ?? ''), 'notes');
 
+    const revenueCurrency = pickDominantCurrency(deals);
     let pastRevenue = 0;
     let projectedRevenue = 0;
     for (const d of deals) {
+        if ((d.currency || 'USD') !== revenueCurrency) continue;
         const closed = d.closedAt ? Date.parse(d.closedAt) : NaN;
         if (Number.isFinite(closed) && closed <= now) {
             pastRevenue += d.value ?? 0;
@@ -272,7 +274,7 @@ export default async function CompanyPage({ params }: { params: { id: number } }
                     <div className="mt-6 grid grid-cols-1 gap-3 md:grid-cols-3">
                         <Suspense fallback={<div>{t("loading")}</div>}>
                             <EngagementSparkline data={weeklyEngagement} />
-                            <RevenueTiles pastRevenue={pastRevenue} projectedRevenue={projectedRevenue} />
+                            <RevenueTiles pastRevenue={pastRevenue} projectedRevenue={projectedRevenue} currency={revenueCurrency} />
                         </Suspense>
                     </div>
 

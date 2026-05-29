@@ -79,6 +79,20 @@ export function parseMysqlDateTime(value?: string | null): number {
     return Date.parse(hasTz ? s : s + 'Z');
 }
 
+export function pickDominantCurrency(items: { currency?: string | null }[]): string {
+    const counts = new Map<string, number>();
+    for (const item of items) {
+        const c = item.currency || 'USD';
+        counts.set(c, (counts.get(c) ?? 0) + 1);
+    }
+    let best = 'USD';
+    let bestCount = 0;
+    for (const [c, n] of counts) {
+        if (n > bestCount) { best = c; bestCount = n; }
+    }
+    return best;
+}
+
 /**
  * formats a value to a compact currency string (e.g. 1k, 100k, 1m, 1b)
  * 
