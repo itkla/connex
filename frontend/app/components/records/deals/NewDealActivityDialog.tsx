@@ -4,7 +4,6 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
 import { Loader2Icon } from 'lucide-react';
-import { UserIcon } from '@heroicons/react/24/outline';
 import { useTranslations } from 'next-intl';
 
 import {
@@ -19,8 +18,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
-import { Select, SelectItem, SelectContent, SelectValue, SelectTrigger } from '@/components/ui/select';
-import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+import RecordSelect from '@/app/components/records/RecordSelect';
 
 import { addDealPerson, ApiError, createActivity, getCompanyPeople } from '@/app/lib/api';
 import { type Contact, type Deal } from '@/app/lib/types';
@@ -142,24 +140,18 @@ export default function NewDealActivityDialog({
 
                     <div className="grid gap-2">
                         <Label htmlFor="deal-activity-contact">{t('contact')}</Label>
-                        <Select value={contactId} onValueChange={(value) => setContactId(value)}>
-                            <SelectTrigger className={inputClass}>
-                                <SelectValue placeholder={t('selectContact')} />
-                            </SelectTrigger>
-                            <SelectContent>
-                                {contacts.map((contact) => (
-                                    <SelectItem key={contact.id} value={contact.id.toString()}>
-                                        <Avatar>
-                                            <AvatarImage src={contact.imageUrl} />
-                                            <AvatarFallback>
-                                                <UserIcon className="size-4" />
-                                            </AvatarFallback>
-                                        </Avatar>
-                                        {contact.name}
-                                    </SelectItem>
-                                ))}
-                            </SelectContent>
-                        </Select>
+                        <RecordSelect
+                            id="deal-activity-contact"
+                            value={contactId}
+                            onValueChange={setContactId}
+                            placeholder={t('selectContact')}
+                            className={inputClass}
+                            options={contacts.map((contact) => ({
+                                id: contact.id,
+                                label: contact.name,
+                                imageUrl: contact.imageUrl,
+                            }))}
+                        />
                     </div>
 
                     <div className="grid gap-2">

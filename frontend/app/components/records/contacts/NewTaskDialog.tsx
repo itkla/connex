@@ -24,9 +24,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { ApiError, addDealPerson, createTask, getCompanyDeals, getUsers } from '@/app/lib/api';
 import { Deal, User } from '@/app/lib/types';
 import { Select, SelectItem, SelectContent, SelectValue, SelectTrigger } from '@/components/ui/select';
-import { UserIcon } from '@heroicons/react/24/outline';
-// import UserAvatar from '@/app/components/users/UserAvatar';
-import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+import RecordSelect from '@/app/components/records/RecordSelect';
 
 const inputClass = 'w-full rounded-lg bg-neutral-100 px-3 py-2 text-sm text-black placeholder-neutral-500 outline-none ring-1 ring-black/5 transition focus:ring-2 focus:ring-brand';
 
@@ -171,26 +169,18 @@ export default function NewTaskDialog({
                 <form onSubmit={handleSubmit} className="grid gap-4">
                     <div className="grid gap-2">
                         <Label htmlFor="task-assigned-to">{t('assignedTo')}</Label>
-                        <Select value={assignedToId.toString()} onValueChange={(value) => setAssignedToId(parseInt(value))}>
-                            <SelectTrigger className={inputClass}>
-                                <SelectValue placeholder={t('selectUserPlaceholder')} />
-                            </SelectTrigger>
-                            <SelectContent>
-                                {/* <SelectItem value={currentUserId.toString()}>You</SelectItem> */}
-                                {users.map((user) => (
-                                    // console.log(user),
-                                    <SelectItem key={user.id} value={user.id.toString()}>
-                                        <Avatar>
-                                            <AvatarImage src={user.profilePictureUrl} />
-                                            <AvatarFallback>
-                                                <UserIcon className="size-4" />
-                                            </AvatarFallback>
-                                        </Avatar>
-                                        {user.displayName}
-                                    </SelectItem>
-                                ))}
-                            </SelectContent>
-                        </Select>
+                        <RecordSelect
+                            id="task-assigned-to"
+                            value={assignedToId.toString()}
+                            onValueChange={(value) => setAssignedToId(parseInt(value))}
+                            placeholder={t('selectUserPlaceholder')}
+                            className={inputClass}
+                            options={users.map((user) => ({
+                                id: user.id,
+                                label: user.displayName,
+                                imageUrl: user.profilePictureUrl,
+                            }))}
+                        />
                     </div>
                     <div className="grid gap-2">
                         <Label htmlFor="task-deal">{t('deal')}</Label>
