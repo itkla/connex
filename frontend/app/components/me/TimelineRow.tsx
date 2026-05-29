@@ -190,6 +190,7 @@ export default function TimelineRow({
                     open={editOpen}
                     onOpenChange={setEditOpen}
                     companyId={companyId}
+                    deals={deals}
                 />
             )}
             {entry.kind === 'activity' && (

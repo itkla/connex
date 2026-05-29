@@ -65,7 +65,9 @@
     "toastCompanyDeleted": "Company deleted",
     "toastDeleteFailed": "Failed to delete",
     "toastContactCreated": "Contact created",
-    "toastCreateContactFailed": "Failed to create contact"
+    "toastCreateContactFailed": "Failed to create contact",
+    "toastDealCreated": "Deal created",
+    "toastCreateDealFailed": "Failed to create deal"
   },
   "CompaniesCard": {
     "openCompanyAriaLabel": "Open company page",

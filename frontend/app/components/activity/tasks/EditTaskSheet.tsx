@@ -24,7 +24,7 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Checkbox } from '@/components/ui/checkbox';
 
 import { ApiError, getCompanyPeople, getUsers, updateTask } from '@/app/lib/api';
-import { type Contact, type Task, type UpdateTaskPayload, type User } from '@/app/lib/types';
+import { type Contact, type Deal, type Task, type UpdateTaskPayload, type User } from '@/app/lib/types';
 import { parseMysqlDateTime } from '@/app/lib/utils';
 
 const inputClass = 'w-full rounded-lg bg-neutral-100 px-3 py-2 text-sm text-black placeholder-neutral-500 outline-none ring-1 ring-black/5 transition focus:ring-2 focus:ring-brand';
@@ -36,6 +36,7 @@ type TaskDraft = {
     dueDate: string;
     assignedToId: number;
     personId: string;
+    dealId: string;
     completed: boolean;
 };
 
@@ -56,6 +57,7 @@ function toDraft(t: Task): TaskDraft {
         dueDate: toDateInputValue(t.dueDate),
         assignedToId: t.assignedToId ?? 0,
         personId: t.personId != null ? t.personId.toString() : 'none',
+        dealId: t.dealId != null ? t.dealId.toString() : 'none',
         completed: t.completed ?? false,
     };
 }
@@ -65,11 +67,13 @@ export default function EditTaskSheet({
     open,
     onOpenChange,
     companyId,
+    deals,
 }: {
     task: Task;
     open: boolean;
     onOpenChange: (open: boolean) => void;
     companyId?: number | null;
+    deals: Deal[];
 }) {
     const router = useRouter();
     const t = useTranslations('ActivityEditTaskSheet');
@@ -108,6 +112,7 @@ export default function EditTaskSheet({
                 dueDate: draft.dueDate || undefined,
                 assignedToId: draft.assignedToId,
                 personId: draft.personId !== 'none' ? parseInt(draft.personId) : undefined,
+                dealId: draft.dealId !== 'none' ? parseInt(draft.dealId) : undefined,
                 completed: draft.completed,
             };
             await updateTask(task.id, payload);
@@ -193,6 +198,26 @@ export default function EditTaskSheet({
                                                 </AvatarFallback>
                                             </Avatar>
                                             {contact.name}
+                                        </SelectItem>
+                                    ))}
+                                </SelectContent>
+                            </Select>
+                        </div>
+
+                        <div className="grid gap-1.5">
+                            <Label htmlFor="task-deal">{t('dealLabel')}</Label>
+                            <Select
+                                value={draft.dealId}
+                                onValueChange={(value) => setDraft((d) => ({ ...d, dealId: value }))}
+                            >
+                                <SelectTrigger id="task-deal" className={inputClass}>
+                                    <SelectValue placeholder={t('selectDealPlaceholder')} />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value="none">{t('noDeal')}</SelectItem>
+                                    {deals.map((deal) => (
+                                        <SelectItem key={deal.id} value={deal.id.toString()}>
+                                            {deal.name}
                                         </SelectItem>
                                     ))}
                                 </SelectContent>

@@ -1,34 +1,38 @@
-import { getTasksFromCookie, getCurrentUserFromCookie } from "@/app/lib/api";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
-import { getTranslations } from "next-intl/server";
-
-const cookie = (await headers()).get('cookie');
-const user = await getCurrentUserFromCookie(cookie);
-if (!user) {
-    redirect('/auth/login');
-}
+import {
+    getCurrentUserFromCookie,
+    getTasksFromCookie,
+    getContactsFromCookie,
+    getDealsFromCookie,
+    getUsers,
+} from "@/app/lib/api";
+import type { User } from "@/app/lib/types";
+import TasksBrowser from "@/app/components/activity/tasks/TasksBrowser";
 
 export default async function TasksPage() {
-    const t = await getTranslations("ActivityTasks");
-    const allTasks = await getTasksFromCookie(cookie);
-    console.log(allTasks);
-    const userTasks = allTasks.filter((task) => task.assignedToId === user?.id);
+    const cookie = (await headers()).get('cookie');
+    const user = await getCurrentUserFromCookie(cookie);
+    if (!user) {
+        redirect('/auth/login');
+    }
+
+    const init = cookie ? { headers: { cookie }, cache: 'no-store' as const } : undefined;
+
+    const [tasks, persons, deals, users] = await Promise.all([
+        getTasksFromCookie(cookie),
+        getContactsFromCookie(cookie),
+        getDealsFromCookie(cookie),
+        (init ? getUsers(init) : Promise.resolve([])).catch(() => [] as User[]),
+    ]);
+
     return (
-        <div>
-            <h1>{t("title")}</h1>
-            <h2>{t("myTasks")}</h2>
-            <ul>
-                {userTasks.map((task) => (
-                    <li key={task.id}>{task.description}</li>
-                ))}
-            </ul>
-            <h2>{t("allTasks")}</h2>
-            <ul>
-                {allTasks.map((task) => (
-                    <li key={task.id}>{task.description}</li>
-                ))}
-            </ul>
-        </div>
+        <TasksBrowser
+            tasks={tasks}
+            persons={persons}
+            deals={deals}
+            users={users}
+            currentUserId={user.id}
+        />
     );
 }

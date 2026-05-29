@@ -390,7 +390,7 @@ export default async function DealPage({ params }: { params: { id: number } }) {
                         )}
                     </div>
 
-                    <DealTaskList dealId={deal.id} companyId={deal.company} tasks={tasks} />
+                    <DealTaskList dealId={deal.id} companyId={deal.company} tasks={tasks} deals={allDeals} />
 
                     <div className="mb-3 mt-6 flex h-8 items-center">
                         <h2 className="px-6 text-xs font-medium uppercase tracking-[0.12em] text-neutral-500">

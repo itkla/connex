@@ -65,7 +65,9 @@
     "toastCompanyDeleted": "企業を削除しました",
     "toastDeleteFailed": "削除できませんでした",
     "toastContactCreated": "コンタクトを作成しました",
-    "toastCreateContactFailed": "コンタクトを作成できませんでした"
+    "toastCreateContactFailed": "コンタクトを作成できませんでした",
+    "toastDealCreated": "案件を作成しました",
+    "toastCreateDealFailed": "案件を作成できませんでした"
   },
   "CompaniesCard": {
     "openCompanyAriaLabel": "企業ページを開く",
