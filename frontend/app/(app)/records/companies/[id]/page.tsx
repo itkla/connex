@@ -23,7 +23,7 @@ import {
     getUserById,
 } from "@/app/lib/api";
 import { type Activity, type Company, type Contact, type Deal, type Note, type Tag, type Task, type User } from "@/app/lib/types";
-import { formatCompactCurrency, formatDate, formatDateTime, pickDominantCurrency } from "@/app/lib/utils";
+import { formatCompactCurrency, formatDate, formatDateTime, parseMysqlDateTime, pickDominantCurrency } from "@/app/lib/utils";
 
 import CompanyActionsMenu from "@/app/components/records/companies/CompanyActionsMenu";
 import CompanyAvatar from "@/app/components/records/companies/CompanyAvatar";
@@ -120,9 +120,9 @@ export default async function CompanyPage({ params }: { params: { id: number } }
         weeklyEngagement[idx][kind]++;
         weeklyEngagement[idx].count++;
     };
-    for (const a of activities) bucket(Date.parse(a.timestamp ?? ''), 'activities');
-    for (const t of tasks) bucket(Date.parse(t.createdAt ?? ''), 'tasks');
-    for (const n of notes) bucket(Date.parse(n.createdAt ?? ''), 'notes');
+    for (const a of activities) bucket(parseMysqlDateTime(a.timestamp), 'activities');
+    for (const t of tasks) bucket(parseMysqlDateTime(t.createdAt), 'tasks');
+    for (const n of notes) bucket(parseMysqlDateTime(n.createdAt), 'notes');
 
     const revenueCurrency = pickDominantCurrency(deals);
     let pastRevenue = 0;

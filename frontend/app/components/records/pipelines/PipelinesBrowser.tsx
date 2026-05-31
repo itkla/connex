@@ -37,6 +37,7 @@ import {
     updatePipeline,
     updateStage,
 } from '@/app/lib/api';
+import { parseMysqlDateTime } from '@/app/lib/utils';
 import type {
     Activity,
     CreatePipelinePayload,
@@ -426,9 +427,9 @@ export default function PipelinesBrowser({ pipelines }: { pipelines: Pipeline[] 
                     weeklyEngagement[idx][kind]++;
                     weeklyEngagement[idx].count++;
                 };
-                for (const a of activities) bucket(Date.parse(a.timestamp ?? ''), 'activities');
-                for (const t of tasks) bucket(Date.parse(t.createdAt ?? ''), 'tasks');
-                for (const n of notes) bucket(Date.parse(n.createdAt ?? ''), 'notes');
+                for (const a of activities) bucket(parseMysqlDateTime(a.timestamp), 'activities');
+                for (const t of tasks) bucket(parseMysqlDateTime(t.createdAt), 'tasks');
+                for (const n of notes) bucket(parseMysqlDateTime(n.createdAt), 'notes');
 
                 return {
                     stage,

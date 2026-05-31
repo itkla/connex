@@ -8,7 +8,7 @@ import type {
     Task,
     User,
 } from '@/app/lib/types';
-import { pickDominantCurrency } from '@/app/lib/utils';
+import { parseMysqlDateTime, pickDominantCurrency } from '@/app/lib/utils';
 
 // TODO: consolidate this with the other metric calculation functions used in the other components
 
@@ -59,9 +59,9 @@ export function computeCompanyMetrics(company: Company, lists: MetricsLists): Co
         weeklyEngagement[idx][kind]++;
         weeklyEngagement[idx].count++;
     };
-    for (const a of relActivities) bucket(Date.parse(a.timestamp ?? ''), 'activities');
-    for (const t of relTasks) bucket(Date.parse(t.createdAt ?? ''), 'tasks');
-    for (const n of relNotes) bucket(Date.parse(n.createdAt ?? ''), 'notes');
+    for (const a of relActivities) bucket(parseMysqlDateTime(a.timestamp), 'activities');
+    for (const t of relTasks) bucket(parseMysqlDateTime(t.createdAt), 'tasks');
+    for (const n of relNotes) bucket(parseMysqlDateTime(n.createdAt), 'notes');
 
     const currency = pickDominantCurrency(companyDeals);
     let pastRevenue = 0;
