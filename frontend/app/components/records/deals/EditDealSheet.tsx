@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
 import { toastError, toastSuccess } from '@/app/lib/toast';
@@ -44,10 +44,11 @@ export default function EditDealSheet({
     const [draft, setDraft] = useState<DealDraft>(() => toDraft(deal));
     const [isSaving, setIsSaving] = useState(false);
 
-    const handleOpenChange = (next: boolean) => {
-        onOpenChange(next);
-        if (!next) setDraft(toDraft(deal));
-    };
+    const wasOpen = useRef(open);
+    useEffect(() => {
+        if (open && !wasOpen.current) setDraft(toDraft(deal));
+        wasOpen.current = open;
+    }, [open, deal]);
 
     const saveEdits = async () => {
         if (!draft.name.trim()) {
@@ -74,7 +75,7 @@ export default function EditDealSheet({
             };
             await updateDeal(deal.id, payload);
             toastSuccess(t('dealUpdated'));
-            handleOpenChange(false);
+            onOpenChange(false);
             router.refresh();
         } catch (err) {
             toastError(err instanceof Error ? err.message : t('failedToSave'));
@@ -86,7 +87,7 @@ export default function EditDealSheet({
     return (
         <QuickEditDealSheet
             open={open}
-            onOpenChange={handleOpenChange}
+            onOpenChange={onOpenChange}
             selectedIds={new Set([deal.id])}
             selectedDeals={[deal]}
             drafts={{ [deal.id]: draft }}
