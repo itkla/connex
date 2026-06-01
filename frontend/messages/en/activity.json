@@ -117,7 +117,10 @@
     "dueTomorrow": "Tomorrow",
     "dueYesterday": "Yesterday",
     "ariaCompleteTask": "Mark task complete",
-    "toastFailedUpdate": "Failed to update task"
+    "toastFailedUpdate": "Failed to update task",
+    "taskUpdatedSuccess": "Task updated successfully",
+    "taskMarkedAsCompleteSuccess": "Task marked as complete",
+    "taskMarkedAsIncompleteSuccess": "Task marked as incomplete"
   },
   "ActivityTasksDialog": {
     "titleCreate": "New task",

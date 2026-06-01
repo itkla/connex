@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState, type ComponentType } from 'react';
 import { useRouter } from 'next/navigation';
 import { useLocale, useTranslations } from 'next-intl';
-import { toastError } from '@/app/lib/toast';
+import { toastError, toastSuccess } from '@/app/lib/toast';
 import Link from 'next/link';
 import {
     MagnifyingGlassIcon,
@@ -219,7 +219,15 @@ export default function TasksBrowser({ tasks, persons, deals, users, currentUser
         if (pendingToggle.has(task.id)) return;
         setPendingToggle((prev) => new Set(prev).add(task.id));
         try {
-            await updateTask(task.id, { completed: next });
+            await updateTask(task.id, {
+                description: task.description,
+                dueDate: task.dueDate,
+                assignedToId: task.assignedToId,
+                personId: task.personId ?? undefined,
+                dealId: task.dealId ?? undefined,
+                completed: next,
+            });
+            toastSuccess(next ? t('taskMarkedAsCompleteSuccess') : t('taskMarkedAsIncompleteSuccess'));
             router.refresh();
         } catch (err) {
             toastError(err instanceof Error ? err.message : t('toastFailedUpdate'));
