@@ -16,6 +16,7 @@ public interface TaskMapper {
     List<Task> getTasksByPersonId(int personId);
     List<Task> getTasksByDealId(int dealId);
     Task getTaskById(int id);
+    List<Task> search(String query);
     int insert(Task task);
     int update(Task task);
     int delete(int id);

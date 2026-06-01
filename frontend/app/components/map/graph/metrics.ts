@@ -8,6 +8,7 @@ import type {
     Task,
     User,
 } from '@/app/lib/types';
+import { parseMysqlDateTime, pickDominantCurrency } from '@/app/lib/utils';
 
 // TODO: consolidate this with the other metric calculation functions used in the other components
 
@@ -58,13 +59,15 @@ export function computeCompanyMetrics(company: Company, lists: MetricsLists): Co
         weeklyEngagement[idx][kind]++;
         weeklyEngagement[idx].count++;
     };
-    for (const a of relActivities) bucket(Date.parse(a.timestamp ?? ''), 'activities');
-    for (const t of relTasks) bucket(Date.parse(t.createdAt ?? ''), 'tasks');
-    for (const n of relNotes) bucket(Date.parse(n.createdAt ?? ''), 'notes');
+    for (const a of relActivities) bucket(parseMysqlDateTime(a.timestamp), 'activities');
+    for (const t of relTasks) bucket(parseMysqlDateTime(t.createdAt), 'tasks');
+    for (const n of relNotes) bucket(parseMysqlDateTime(n.createdAt), 'notes');
 
+    const currency = pickDominantCurrency(companyDeals);
     let pastRevenue = 0;
     let projectedRevenue = 0;
     for (const d of companyDeals) {
+        if ((d.currency || 'USD') !== currency) continue;
         const closed = d.closedAt ? Date.parse(d.closedAt) : NaN;
         if (Number.isFinite(closed) && closed <= now) pastRevenue += d.value ?? 0;
         else projectedRevenue += d.value ?? 0;
@@ -75,6 +78,7 @@ export function computeCompanyMetrics(company: Company, lists: MetricsLists): Co
         relatedUsers: users.filter((u) => userIds.has(u.id)),
         pastRevenue,
         projectedRevenue,
+        currency,
         numDeals: companyDeals.length,
         numTasks: relTasks.length,
         numActivities: relActivities.length,

@@ -3,12 +3,13 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { useTranslations } from 'next-intl';
+import { useLocale, useTranslations } from 'next-intl';
 import { Button } from '@/components/ui/button';
 import { ButtonGroup } from '@/components/ui/button-group';
 import { toast } from 'sonner';
+import { toastError, toastSuccess } from '@/app/lib/toast';
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from '@/components/ui/dropdown-menu';
-import { PlusIcon, FunnelIcon, TrashIcon, PencilIcon, EllipsisVerticalIcon, EyeIcon } from '@heroicons/react/24/solid';
+import { PlusIcon, TrashIcon, PencilIcon, EllipsisVerticalIcon, EyeIcon } from '@heroicons/react/24/solid';
 import {
     MagnifyingGlassIcon,
     Squares2X2Icon,
@@ -17,9 +18,10 @@ import {
 } from '@heroicons/react/24/outline';
 
 import RecordsRenderView from '@/app/components/records/RecordsRenderView';
+import RecordsFilterMenu from '@/app/components/records/RecordsFilterMenu';
 import DeleteRecordDialog from '@/app/components/records/DeleteRecordDialog';
 import { useRecordsBrowser } from '@/app/hooks/useRecordsBrowser';
-import { type ColumnDef } from '@/app/components/records/types';
+import { type ColumnDef, applyRecordFilters } from '@/app/components/records/types';
 import DealCard from '@/app/components/records/deals/DealCard';
 import DealAvatar from '@/app/components/records/deals/DealAvatar';
 import NewDealDialog from '@/app/components/records/deals/NewDealDialog';
@@ -33,7 +35,7 @@ import {
     getStagesByPipelineId,
     getDealPeople,
 } from '@/app/lib/api';
-import { formatCompactCurrency, formatDateTime } from '@/app/lib/utils';
+import { formatCompactCurrency, formatDateTime, pickDominantCurrency } from '@/app/lib/utils';
 import {
     type Company,
     type CreateDealPayload,
@@ -88,6 +90,7 @@ function isClosed(deal: Deal): boolean {
 export default function DealsBrowser({ deals }: { deals: Deal[] }) {
     const router = useRouter();
     const t = useTranslations('DealsBrowser');
+    const locale = useLocale();
 
     const [companies, setCompanies] = useState<Company[]>([]);
     const [pipelines, setPipelines] = useState<Pipeline[]>([]);
@@ -134,6 +137,24 @@ export default function DealsBrowser({ deals }: { deals: Deal[] }) {
         }
         return m;
     }, [stagesByPipeline]);
+
+    const currencyCounts = useMemo(() => {
+        const counts = new Map<string, number>();
+        for (const d of deals) {
+            const c = d.currency || 'USD';
+            counts.set(c, (counts.get(c) ?? 0) + 1);
+        }
+        return counts;
+    }, [deals]);
+    const dominantCurrency = useMemo(() => pickDominantCurrency(deals), [deals]);
+    const [selectedCurrency, setSelectedCurrency] = useState<string | null>(null);
+    const activeCurrency = selectedCurrency && currencyCounts.has(selectedCurrency)
+        ? selectedCurrency
+        : dominantCurrency;
+    const dealsInCurrency = useMemo(
+        () => deals.filter((d) => (d.currency || 'USD') === activeCurrency),
+        [deals, activeCurrency],
+    );
     
     const searchFields = useCallback((d: Deal) => [
         d.name,
@@ -148,6 +169,8 @@ export default function DealsBrowser({ deals }: { deals: Deal[] }) {
         setDisplayMode,
         query,
         setQuery,
+        filterState,
+        setFilterState,
         selectedIds,
         setSelectedIds,
         filteredItems: filteredDeals,
@@ -155,7 +178,7 @@ export default function DealsBrowser({ deals }: { deals: Deal[] }) {
         deleteDialogOpen,
         setDeleteDialogOpen,
     } = useRecordsBrowser<Deal>({
-        items: deals,
+        items: dealsInCurrency,
         storageKey: 'deals:view',
         searchFields,
     });
@@ -195,16 +218,12 @@ export default function DealsBrowser({ deals }: { deals: Deal[] }) {
                 currency: newPayload.currency.trim() || 'USD',
                 expectedCloseDate: newPayload.expectedCloseDate || undefined,
             });
-            toast.success(t('dealCreated'), {
-                style: { backgroundColor: 'var(--color-brand)', color: 'white' },
-            });
+            toastSuccess(t('dealCreated'));
             closeNewDialog(false);
             router.refresh();
         } catch (err) {
             console.error(err);
-            toast.error(err instanceof Error ? err.message : t('failedToCreateDeal'), {
-                style: { backgroundColor: 'var(--color-destructive)', color: 'white' },
-            });
+            toastError(err instanceof Error ? err.message : t('failedToCreateDeal'));
         } finally {
             setIsCreating(false);
         }
@@ -261,16 +280,13 @@ export default function DealsBrowser({ deals }: { deals: Deal[] }) {
                     return updateDeal(d.id, payload);
                 }),
             );
-            toast.success(
+            toastSuccess(
                 changed.length === 1 ? t('dealUpdated') : t('dealsUpdated', { count: changed.length }),
-                { style: { backgroundColor: 'var(--color-brand)', color: 'white' } },
             );
             setEditSheetOpen(false);
             router.refresh();
         } catch (err) {
-            toast.error(err instanceof Error ? err.message : t('failedToSave'), {
-                style: { backgroundColor: 'var(--color-destructive)', color: 'white' },
-            });
+            toastError(err instanceof Error ? err.message : t('failedToSave'));
         } finally {
             setIsSaving(false);
         }
@@ -292,17 +308,14 @@ export default function DealsBrowser({ deals }: { deals: Deal[] }) {
         setIsDeleting(true);
         try {
             await Promise.all(Array.from(selectedIds).map((id) => deleteDeal(Number(id))));
-            toast.success(
+            toastSuccess(
                 selectedIds.size === 1 ? t('dealDeleted') : t('dealsDeleted', { count: selectedIds.size }),
-                { style: { backgroundColor: 'var(--color-brand)', color: 'white' } },
             );
             setSelectedIds(new Set());
             setDeleteDialogOpen(false);
             router.refresh();
         } catch (err) {
-            toast.error(err instanceof Error ? err.message : t('failedToDelete'), {
-                style: { backgroundColor: 'var(--color-destructive)', color: 'white' },
-            });
+            toastError(err instanceof Error ? err.message : t('failedToDelete'));
         } finally {
             setIsDeleting(false);
         }
@@ -333,14 +346,10 @@ export default function DealsBrowser({ deals }: { deals: Deal[] }) {
                 expectedCloseDate: deal.expectedCloseDate,
                 closedAt: closed ? toMysqlDateTime(new Date().toISOString()) : null,
             });
-            toast.success(closed ? t('dealClosed') : t('dealReopened'), {
-                style: { backgroundColor: 'var(--color-brand)', color: 'white' },
-            });
+            toastSuccess(closed ? t('dealClosed') : t('dealReopened'));
             router.refresh();
         } catch (err) {
-            toast.error(err instanceof Error ? err.message : t('failedToUpdateStatus'), {
-                style: { backgroundColor: 'var(--color-destructive)', color: 'white' },
-            });
+            toastError(err instanceof Error ? err.message : t('failedToUpdateStatus'));
         }
     }, [router, t]);
 
@@ -350,7 +359,7 @@ export default function DealsBrowser({ deals }: { deals: Deal[] }) {
         let closedActualValue = 0;
         let accuracyCount = 0;
         let accuracySum = 0;
-        for (const d of deals) {
+        for (const d of dealsInCurrency) {
             if (isClosed(d)) {
                 closedActualValue += d.actualValue ?? 0;
                 if ((d.value ?? 0) > 0) {
@@ -364,7 +373,7 @@ export default function DealsBrowser({ deals }: { deals: Deal[] }) {
         }
         const forecastAccuracy = accuracyCount > 0 ? accuracySum / accuracyCount : null;
         return { openCount, openValue, closedActualValue, forecastAccuracy };
-    }, [deals]);
+    }, [dealsInCurrency]);
 
     const columns: ColumnDef<Deal>[] = useMemo(() => [
         { key: 'name', label: t('columnName'), getSortValue: (d) => d.name ?? null },
@@ -372,43 +381,50 @@ export default function DealsBrowser({ deals }: { deals: Deal[] }) {
             key: 'value',
             label: t('columnValue'),
             getSortValue: (d) => d.value ?? null,
-            render: (d) => formatCompactCurrency(d.value ?? 0, d.currency || 'USD'),
+            render: (d) => formatCompactCurrency(d.value ?? 0, d.currency || 'USD', locale),
         },
         {
             key: 'actualValue',
             label: t('columnActualValue'),
             getSortValue: (d) => d.actualValue ?? null,
-            render: (d) => formatCompactCurrency(d.actualValue ?? 0, d.currency || 'USD'),
+            render: (d) => formatCompactCurrency(d.actualValue ?? 0, d.currency || 'USD', locale),
         },
         {
             key: 'company',
             label: t('columnCompany'),
             getSortValue: (d) => (d.company != null ? companyById.get(d.company)?.name ?? null : null),
             render: (d) => (d.company != null ? <Link href={`/records/companies/${d.company}`} className="text-brand hover:text-brand-dark hover:underline transition-colors transition-duration-300 transition-ease-in-out">{companyById.get(d.company)?.name}</Link> : ''),
+            filter: { getValue: (d) => (d.company != null ? companyById.get(d.company)?.name ?? null : null), emptyLabel: t('freelancer') },
         },
         {
             key: 'pipeline',
             label: t('columnPipeline'),
             getSortValue: (d) => (d.pipeline != null ? pipelineById.get(d.pipeline)?.name ?? null : null),
             render: (d) => (d.pipeline != null ? pipelineById.get(d.pipeline)?.name : ''),
+            filter: { getValue: (d) => (d.pipeline != null ? pipelineById.get(d.pipeline)?.name ?? null : null) },
         },
         {
             key: 'stage',
             label: t('columnStage'),
             getSortValue: (d) => (d.stage != null ? stageById.get(d.stage)?.name ?? null : null),
             render: (d) => (d.stage != null ? stageById.get(d.stage)?.name : ''),
+            filter: { getValue: (d) => (d.stage != null ? stageById.get(d.stage)?.name ?? null : null) },
         },
         {
             key: 'expectedCloseDate',
             label: t('columnExpectedClose'),
             getSortValue: (d) => (d.expectedCloseDate ? Date.parse(d.expectedCloseDate) : null),
-            // render: (d) => formatShortDate(d.expectedCloseDate),
-            render: (d) => formatDateTime(d.expectedCloseDate),
+            // render: (d) => formatShortDate(d.expectedCloseDate, locale),
+            render: (d) => formatDateTime(d.expectedCloseDate, locale),
         },
         {
             key: 'status',
             label: t('columnStatus'),
             getSortValue: (d) => (isClosed(d) ? 1 : 0),
+            filter: {
+                getValue: (d) => (isClosed(d) ? 'closed' : 'open'),
+                formatValue: (v) => (v === 'closed' ? t('statusClosed') : t('statusOpen')),
+            },
             render: (d) => {
                 const closed = isClosed(d);
                 return (
@@ -419,7 +435,7 @@ export default function DealsBrowser({ deals }: { deals: Deal[] }) {
                                 onClick={(e) => e.stopPropagation()}
                                 className="inline-flex items-center gap-1 rounded-full bg-neutral-100 px-2 py-0.5 text-xs ring-1 ring-black/5 transition hover:bg-neutral-200"
                             >
-                                <span className={closed ? 'text-red-500' : 'text-emerald-300'}>●</span>
+                                <span className={closed ? 'text-gray-500' : 'text-emerald-300'}>●</span>
                                 {closed ? t('statusClosed') : t('statusOpen')}
                                 <ChevronDownIcon className="size-3 text-neutral-400" />
                             </button>
@@ -430,7 +446,7 @@ export default function DealsBrowser({ deals }: { deals: Deal[] }) {
                                 {t('markOpen')}
                             </DropdownMenuItem>
                             <DropdownMenuItem disabled={closed} onSelect={() => toggleDealStatus(d, true)}>
-                                <span className="text-red-500">●</span>
+                                <span className="text-gray-500">●</span>
                                 {t('markClosed')}
                             </DropdownMenuItem>
                         </DropdownMenuContent>
@@ -442,28 +458,59 @@ export default function DealsBrowser({ deals }: { deals: Deal[] }) {
             key: 'updatedAt',
             label: t('columnUpdated'),
             getSortValue: (d) => (d.updatedAt ? Date.parse(d.updatedAt) : null),
-            render: (d) => formatDateTime(d.updatedAt),
+            render: (d) => formatDateTime(d.updatedAt, locale),
         },
-    ], [companyById, pipelineById, stageById, toggleDealStatus, t]);
+    ], [companyById, pipelineById, stageById, toggleDealStatus, t, locale]);
+
+    const visibleDeals = useMemo(
+        () => applyRecordFilters(filteredDeals, columns, filterState),
+        [filteredDeals, columns, filterState],
+    );
 
     return (
         <div className="space-y-6">
             <div className="flex items-center justify-between">
                 <h1 className="text-4xl font-extrabold">{t('title')}</h1>
-                <Button className="bg-brand text-white" aria-label={t('addDeal')} onClick={() => setNewDialogOpen(true)}>
-                    <PlusIcon strokeWidth={2.5} />
-                    {t('newButton')}
-                </Button>
+                <div className="flex items-center gap-2">
+                    {currencyCounts.size > 1 && (
+                        <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                                <button
+                                    type="button"
+                                    aria-label={t('currency')}
+                                    className="flex items-center gap-1.5 rounded-full bg-neutral-100 px-3 py-1.5 text-sm text-neutral-700 ring-1 ring-black/5 transition hover:bg-neutral-200"
+                                >
+                                    {activeCurrency}
+                                    <ChevronDownIcon className="size-3.5 text-neutral-500" />
+                                </button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end">
+                                {Array.from(currencyCounts.entries())
+                                    .sort((a, b) => b[1] - a[1])
+                                    .map(([c, n]) => (
+                                        <DropdownMenuItem key={c} onSelect={() => setSelectedCurrency(c)}>
+                                            <span className={c === activeCurrency ? 'font-semibold' : ''}>{c}</span>
+                                            <span className="ml-auto text-xs text-neutral-500">{t('currencyCount', { count: n })}</span>
+                                        </DropdownMenuItem>
+                                    ))}
+                            </DropdownMenuContent>
+                        </DropdownMenu>
+                    )}
+                    <Button className="bg-brand text-white" aria-label={t('addDeal')} onClick={() => setNewDialogOpen(true)}>
+                        <PlusIcon strokeWidth={2.5} />
+                        {t('newButton')}
+                    </Button>
+                </div>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                <SummaryTile className="sm:col-span-2" label={t('revenueTrend')} value={<DealsRevenueChart deals={deals} />} />
-                <SummaryTile label={t('stageRatio')} value={<StageRatio deals={deals} />} />
+                <SummaryTile className="sm:col-span-2" label={t('revenueTrend')} value={<DealsRevenueChart deals={dealsInCurrency} />} />
+                <SummaryTile label={t('stageRatio')} value={<StageRatio deals={dealsInCurrency} />} />
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
-                <SummaryTile label={t('projectedPipeline')} value={formatCompactCurrency(summary.openValue, 'USD')} />
-                <SummaryTile label={t('actualRevenue')} value={formatCompactCurrency(summary.closedActualValue, 'USD')} />
+                <SummaryTile label={t('projectedPipeline')} value={formatCompactCurrency(summary.openValue, activeCurrency, locale)} />
+                <SummaryTile label={t('actualRevenue')} value={formatCompactCurrency(summary.closedActualValue, activeCurrency, locale)} />
                 <SummaryTile label={t('openDeals')} value={String(summary.openCount)} />
                 <SummaryTile
                     label={t('forecastAccuracy')}
@@ -475,19 +522,18 @@ export default function DealsBrowser({ deals }: { deals: Deal[] }) {
                 <SummaryTile
                     className="sm:col-span-2"
                     label={t('openDealAging')}
-                    value={<DealsAging deals={deals} stageById={stageById} />}
+                    value={<DealsAging deals={dealsInCurrency} stageById={stageById} />}
                 />
-                <SummaryTile label={t('topDeals')} value={<TopDeals deals={deals} companyById={companyById} />} />
+                <SummaryTile label={t('topDeals')} value={<TopDeals deals={dealsInCurrency} companyById={companyById} />} />
             </div>
 
             <div className="flex items-center gap-4">
-                <button
-                    type="button"
-                    className="flex items-center gap-2 rounded-full bg-neutral-100 px-4 py-2 text-sm text-neutral-700 ring-1 ring-black/5 transition hover:bg-neutral-200"
-                >
-                    <FunnelIcon className="size-4 text-neutral-500" />
-                    <ChevronDownIcon className="size-4 text-neutral-500" />
-                </button>
+                <RecordsFilterMenu<Deal>
+                    columns={columns}
+                    items={filteredDeals}
+                    filterState={filterState}
+                    onChange={setFilterState}
+                />
                 <div
                     role="group"
                     aria-label={t('displayMode')}
@@ -561,7 +607,7 @@ export default function DealsBrowser({ deals }: { deals: Deal[] }) {
             </div>
 
             <RecordsRenderView<Deal>
-                data={filteredDeals}
+                data={visibleDeals}
                 columns={columns}
                 renderCard={(item, { onQuickEdit, onDelete }) => (
                     <DealCard

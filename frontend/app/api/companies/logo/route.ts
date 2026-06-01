@@ -4,8 +4,16 @@ import { NextRequest, NextResponse } from "next/server";
 import path from "path";
 import fs from "fs/promises";
 
+import { getCurrentUserFromCookie } from "@/app/lib/api";
+import { headers } from "next/headers";
+
 export async function PUT(request: NextRequest) {
     const companyId = request.nextUrl.searchParams.get("companyId");
+    const cookie = (await headers()).get('cookie');
+    const user = await getCurrentUserFromCookie(cookie);
+    if (!user) {
+        return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
     if (!companyId) {
         return NextResponse.json({ error: "companyId is required" }, { status: 400 });
     }

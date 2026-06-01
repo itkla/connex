@@ -1,13 +1,14 @@
 // NOTE: not used in /me page anymore, but might be used in other pages so im keeping it
 
-import { getTranslations } from "next-intl/server";
+import { getLocale, getTranslations } from "next-intl/server";
 
-import { Task } from "@/app/lib/api";
+import { type Task } from "@/app/lib/types";
 import EmptyState from "./EmptyState";
 import { timeOf, formatShortDate } from "@/app/lib/utils";
 
 export default async function TaskList({ tasks }: { tasks: Task[] }) {
     const t = await getTranslations("MeTaskList");
+    const locale = await getLocale();
 
     if (tasks.length === 0) {
         return <EmptyState message={t("empty")} />;
@@ -40,7 +41,7 @@ export default async function TaskList({ tasks }: { tasks: Task[] }) {
                     </span>
                     {task.dueDate ? (
                         <span className="shrink-0 text-xs text-neutral-500">
-                            {formatShortDate(task.dueDate)}
+                            {formatShortDate(task.dueDate, locale)}
                         </span>
                     ) : null}
                 </li>

@@ -39,6 +39,7 @@
     "columnAddress": "住所",
     "columnCreated": "作成日",
     "columnUpdated": "更新日",
+    "filterNoIndustry": "業界なし",
     "entityLabel": "company",
     "toastMetricsLoadFailed": "企業の指標を読み込めませんでした",
     "toastCompanyCreated": "企業を作成しました",

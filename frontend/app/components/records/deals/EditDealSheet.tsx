@@ -1,8 +1,9 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
+import { toastError, toastSuccess } from '@/app/lib/toast';
 import { useTranslations } from 'next-intl';
 
 import QuickEditDealSheet, { type DealDraft } from '@/app/components/records/deals/QuickEditDealSheet';
@@ -43,10 +44,11 @@ export default function EditDealSheet({
     const [draft, setDraft] = useState<DealDraft>(() => toDraft(deal));
     const [isSaving, setIsSaving] = useState(false);
 
-    const handleOpenChange = (next: boolean) => {
-        onOpenChange(next);
-        if (!next) setDraft(toDraft(deal));
-    };
+    const wasOpen = useRef(open);
+    useEffect(() => {
+        if (open && !wasOpen.current) setDraft(toDraft(deal));
+        wasOpen.current = open;
+    }, [open, deal]);
 
     const saveEdits = async () => {
         if (!draft.name.trim()) {
@@ -72,15 +74,11 @@ export default function EditDealSheet({
                 closedAt: draft.closedAt || null,
             };
             await updateDeal(deal.id, payload);
-            toast.success(t('dealUpdated'), {
-                style: { backgroundColor: 'var(--color-brand)', color: 'white' },
-            });
-            handleOpenChange(false);
+            toastSuccess(t('dealUpdated'));
+            onOpenChange(false);
             router.refresh();
         } catch (err) {
-            toast.error(err instanceof Error ? err.message : t('failedToSave'), {
-                style: { backgroundColor: 'var(--color-destructive)', color: 'white' },
-            });
+            toastError(err instanceof Error ? err.message : t('failedToSave'));
         } finally {
             setIsSaving(false);
         }
@@ -89,7 +87,7 @@ export default function EditDealSheet({
     return (
         <QuickEditDealSheet
             open={open}
-            onOpenChange={handleOpenChange}
+            onOpenChange={onOpenChange}
             selectedIds={new Set([deal.id])}
             selectedDeals={[deal]}
             drafts={{ [deal.id]: draft }}

@@ -3,7 +3,7 @@ import { redirect } from 'next/navigation';
 import Image from 'next/image';
 import Link from 'next/link';
 import { ArrowLeftIcon } from '@heroicons/react/24/outline';
-import { getTranslations } from 'next-intl/server';
+import { getLocale, getTranslations } from 'next-intl/server';
 import { Skeleton } from '@/components/ui/skeleton'; // TODO: add skeleton loaders to render before the PRomises resolve
 
 import {
@@ -25,6 +25,7 @@ import EditSelfModal from '@/app/components/me/EditSelfModal';
 
 export default async function MePage() {
     const t = await getTranslations('MePage');
+    const locale = await getLocale();
     // TODO: move this block to a separate component OR put it into a lib/hook
     const cookie = (await headers()).get('cookie');
     const user = await getCurrentUserFromCookie(cookie);
@@ -108,11 +109,11 @@ export default async function MePage() {
                             />
                             <InfoRow
                                 label={t('lastLogin')}
-                                value={formatDateTime(user.lastLoginAt)}
+                                value={formatDateTime(user.lastLoginAt, locale)}
                             />
                             <InfoRow
                                 label={t('memberSince')}
-                                value={formatDate(user.createdAt)}
+                                value={formatDate(user.createdAt, locale)}
                             />
                         </dl>
                         {/* TODO: find a better place to put this */}

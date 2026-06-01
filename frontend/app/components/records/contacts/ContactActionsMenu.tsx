@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
-import { toast } from 'sonner';
+import { toastError, toastSuccess } from '@/app/lib/toast';
 import { EllipsisVerticalIcon, PencilSquareIcon, EyeIcon, PlusIcon, ChatBubbleLeftRightIcon, DocumentTextIcon, CheckCircleIcon, PaperClipIcon } from '@heroicons/react/24/outline';
 import { BuildingOffice2Icon, NoSymbolIcon, TrashIcon } from '@heroicons/react/24/outline';
 
@@ -62,14 +62,10 @@ export default function ContactActionsMenu({
                 imageUrl: contact.imageUrl || undefined,
                 companyId: null,
             });
-            toast.success(t('toastRemovedFromCompany', { contactName: contact.name, companyName: contact.company.name }), {
-                style: { backgroundColor: 'var(--color-brand)', color: 'white' },
-            });
+            toastSuccess(t('toastRemovedFromCompany', { contactName: contact.name, companyName: contact.company.name }));
             router.refresh();
         } catch (err) {
-            toast.error(err instanceof Error ? err.message : t('toastFailedRemoveFromCompany'), {
-                style: { backgroundColor: 'var(--color-destructive)', color: 'white' },
-            });
+            toastError(err instanceof Error ? err.message : t('toastFailedRemoveFromCompany'));
         } finally {
             setRemovingCompany(false);
         }
@@ -79,15 +75,11 @@ export default function ContactActionsMenu({
         setIsDeleting(true);
         try {
             await deleteContact(contact.id);
-            toast.success(t('toastContactDeleted'), {
-                style: { backgroundColor: 'var(--color-brand)', color: 'white' },
-            });
+            toastSuccess(t('toastContactDeleted'));
             router.push('/records/contacts');
             router.refresh();
         } catch (err) {
-            toast.error(err instanceof Error ? err.message : t('toastFailedDelete'), {
-                style: { backgroundColor: 'var(--color-destructive)', color: 'white' },
-            });
+            toastError(err instanceof Error ? err.message : t('toastFailedDelete'));
             setIsDeleting(false);
         }
     };
@@ -201,6 +193,7 @@ export default function ContactActionsMenu({
                 <NewActivityDialog
                     contactId={contact.id}
                     contactName={contact.name}
+                    companyId={contact.companyId ?? contact.company?.id}
                     currentUserId={currentUserId}
                     open={activityOpen}
                     onOpenChange={setActivityOpen}

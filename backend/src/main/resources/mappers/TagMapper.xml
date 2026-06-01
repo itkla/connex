@@ -24,6 +24,13 @@
     SELECT id, name, color FROM tag WHERE name = #{name}
   </select>
 
+  <select id="search" resultType="Tag">
+    SELECT id, name, color FROM tag
+    WHERE name LIKE #{query}
+    ORDER BY name
+    LIMIT 10
+  </select>
+
   <insert id="insert" useGeneratedKeys="true" keyProperty="id">
     INSERT INTO tag (name, color) VALUES (#{name}, #{color})
   </insert>

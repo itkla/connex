@@ -39,6 +39,13 @@
     SELECT <include refid="companyColumns"/> FROM company WHERE id = #{id}
   </select>
 
+  <select id="search" resultType="Company">
+    SELECT <include refid="companyColumns"/> FROM company
+    WHERE name LIKE #{query} OR website LIKE #{query} OR industry LIKE #{query} OR phone LIKE #{query} OR address LIKE #{query}
+    ORDER BY name
+    LIMIT 10
+  </select>
+
   <insert id="insert" useGeneratedKeys="true" keyProperty="id">
     INSERT INTO company (name, website, industry, phone, address, logo_url)
     VALUES (#{name}, #{website}, #{industry}, #{phone}, #{address}, #{logoUrl})

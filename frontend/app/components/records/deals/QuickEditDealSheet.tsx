@@ -160,9 +160,16 @@ export default function QuickEditDealSheet({
                                                     itemToStringLabel={(s: Stage) => s.name}
                                                     value={selectedStage}
                                                     disabled={!draft.pipeline}
-                                                    onValueChange={(s) =>
-                                                        updateDraft(d.id, { stage: (s as Stage | null)?.id ?? 0 })
-                                                    }
+                                                    onValueChange={(s) => {
+                                                        const stage = s as Stage | null;
+                                                        const terminal = !!stage && (stage.success || stage.failure);
+                                                        updateDraft(d.id, {
+                                                            stage: stage?.id ?? 0,
+                                                            closedAt: terminal
+                                                                ? draft.closedAt ?? toMysqlDateTime(new Date())
+                                                                : null,
+                                                        });
+                                                    }}
                                                 >
                                                     <ComboboxInput
                                                         id={`deal-stage-${d.id}`}
@@ -222,7 +229,7 @@ export default function QuickEditDealSheet({
                                         </div>
 
                                         <div className="grid gap-1.5">
-                                            <Label htmlFor={`deal-close-${d.id}`}>{t('closedQuestion')}</Label>
+                                            <Label htmlFor={`deal-closed-${d.id}`}>{t('closedQuestion')}</Label>
                                             {/* <input
                                                 id={`deal-closed-${d.id}`}
                                                 type="checkbox"

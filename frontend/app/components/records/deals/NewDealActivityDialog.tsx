@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
 import { Loader2Icon } from 'lucide-react';
@@ -18,9 +18,13 @@ import {
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
+import RecordSelect from '@/app/components/records/RecordSelect';
 
-import { ApiError, createActivity } from '@/app/lib/api';
+import { addDealPerson, ApiError, createActivity, getCompanyPeople } from '@/app/lib/api';
+import { toastError, toastSuccess } from '@/app/lib/toast';
+import { type Contact, type Deal } from '@/app/lib/types';
 import { toMysqlDateTime } from '@/app/lib/utils';
+import { Select, SelectContent, SelectValue, SelectTrigger, SelectItem } from '@/components/ui/select';
 
 const inputClass = 'w-full rounded-lg bg-neutral-100 px-3 py-2 text-sm text-black placeholder-neutral-500 outline-none ring-1 ring-black/5 transition focus:ring-2 focus:ring-brand';
 
@@ -30,12 +34,14 @@ export default function NewDealActivityDialog({
     dealId,
     dealName,
     currentUserId,
+    deal,
     open,
     onOpenChange,
 }: {
     dealId: number;
     dealName: string;
     currentUserId: number;
+    deal: Deal;
     open: boolean;
     onOpenChange: (open: boolean) => void;
 }) {
@@ -45,6 +51,8 @@ export default function NewDealActivityDialog({
     const [subject, setSubject] = useState('');
     const [notes, setNotes] = useState('');
     const [timestamp, setTimestamp] = useState('');
+    const [contactId, setContactId] = useState('');
+    const [contacts, setContacts] = useState<Contact[]>([]);
     const [submitting, setSubmitting] = useState(false);
 
     const reset = () => {
@@ -52,6 +60,7 @@ export default function NewDealActivityDialog({
         setSubject('');
         setNotes('');
         setTimestamp('');
+        setContactId('');
     };
 
     async function handleSubmit(e: React.SubmitEvent<HTMLFormElement>) {
@@ -62,29 +71,37 @@ export default function NewDealActivityDialog({
         }
         setSubmitting(true);
         try {
+            const personId = contactId ? parseInt(contactId) : undefined;
             await createActivity({
                 type,
                 subject: subject.trim(),
                 notes: notes.trim() || undefined,
                 dealId,
+                personId,
                 createdById: currentUserId,
                 timestamp: timestamp ? toMysqlDateTime(timestamp) : toMysqlDateTime(),
             });
-            toast.success(t('activityLogged'), {
-                style: { backgroundColor: 'var(--color-brand)', color: 'white' },
-            });
+            if (personId != null) {
+                await addDealPerson(dealId, personId, '').catch(() => {
+                    toast.warning(t('activityLoggedButFailedToLink'));
+                });
+            }
+            toastSuccess(t('activityLogged'));
             onOpenChange(false);
             reset();
             router.refresh();
         } catch (err) {
             const message = err instanceof ApiError ? err.message : err instanceof Error ? err.message : t('failedToLogActivity');
-            toast.error(message, {
-                style: { backgroundColor: 'var(--color-destructive)', color: 'white' },
-            });
+            toastError(message);
         } finally {
             setSubmitting(false);
         }
     }
+
+    useEffect(() => {
+        // get all contacts from the company associated with the deal
+        getCompanyPeople(deal.company ?? 0).then(setContacts).catch(() => setContacts([]));
+    }, []);
 
     return (
         <Dialog
@@ -105,7 +122,7 @@ export default function NewDealActivityDialog({
                 <form onSubmit={handleSubmit} className="grid gap-4">
                     <div className="grid gap-2">
                         <Label htmlFor="deal-activity-type">{t('type')}</Label>
-                        <select
+                        {/* <select
                             id="deal-activity-type"
                             value={type}
                             onChange={(e) => setType(e.target.value)}
@@ -116,7 +133,33 @@ export default function NewDealActivityDialog({
                                     {t}
                                 </option>
                             ))}
-                        </select>
+                        </select> */}
+                        <Select value={type} onValueChange={setType}>
+                            <SelectTrigger id="deal-activity-type" className={inputClass}>
+                                <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                                {ACTIVITY_TYPES.map((value) => (
+                                    <SelectItem key={value} value={value}>{t(`type${value}` as 'typeCall' | 'typeEmail' | 'typeMeeting' | 'typeNote' | 'typeOther')}</SelectItem>
+                                ))}
+                            </SelectContent>
+                        </Select>
+                    </div>
+
+                    <div className="grid gap-2">
+                        <Label htmlFor="deal-activity-contact">{t('contact')}</Label>
+                        <RecordSelect
+                            id="deal-activity-contact"
+                            value={contactId}
+                            onValueChange={setContactId}
+                            placeholder={t('selectContact')}
+                            className={inputClass}
+                            options={contacts.map((contact) => ({
+                                id: contact.id,
+                                label: contact.name,
+                                imageUrl: contact.imageUrl,
+                            }))}
+                        />
                     </div>
 
                     <div className="grid gap-2">

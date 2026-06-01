@@ -7,6 +7,7 @@ import ooo.klae.connex.backend.mappers.PipelineMapper;
 import ooo.klae.connex.backend.beans.Deal;
 import ooo.klae.connex.backend.beans.Pipeline;
 import ooo.klae.connex.backend.beans.Stage;
+import ooo.klae.connex.backend.exceptions.DuplicateResourceException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import java.util.List;
 
@@ -68,15 +69,30 @@ public class PipelineService {
         Pipeline pipeline = pipelineMapper.getPipelineById(pipelineId);
         if (pipeline == null) throw new ResourceNotFoundException("Pipeline not found with id: " + pipelineId);
         stage.setPipeline(pipeline);
+        assertSingleTerminalOfType(pipelineId, stage);
         pipelineMapper.insertStage(stage);
         return stage;
     }
 
     public Stage updateStage(int id, Stage stage) {
-        if (pipelineMapper.getStageById(id) == null) throw new ResourceNotFoundException("Stage not found with id: " + id);
+        Stage existing = pipelineMapper.getStageById(id);
+        if (existing == null) throw new ResourceNotFoundException("Stage not found with id: " + id);
         stage.setId(id);
+        stage.setPipeline(existing.getPipeline());
+        assertSingleTerminalOfType(existing.getPipeline().getId(), stage);
         pipelineMapper.updateStage(stage);
         return stage;
+    }
+
+    private void assertSingleTerminalOfType(int pipelineId, Stage stage) {
+        if (!stage.isSuccess() && !stage.isFailure()) return;
+        for (Stage sibling : pipelineMapper.getStagesByPipelineId(pipelineId)) {
+            if (sibling.getId() == stage.getId()) continue; // skip self on update
+            if (stage.isSuccess() && sibling.isSuccess())
+                throw new DuplicateResourceException("This pipeline already has a Won stage");
+            if (stage.isFailure() && sibling.isFailure())
+                throw new DuplicateResourceException("This pipeline already has a Lost stage");
+        }
     }
 
     public void deleteStage(int id) {

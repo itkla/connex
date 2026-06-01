@@ -1,6 +1,6 @@
 import { Fragment, type CSSProperties } from 'react';
 import { CheckIcon, XMarkIcon } from '@heroicons/react/24/solid';
-import { getTranslations } from 'next-intl/server';
+import { getLocale, getTranslations } from 'next-intl/server';
 
 import { type Stage } from '@/app/lib/types';
 import { formatDate, parseMysqlDateTime } from '@/app/lib/utils';
@@ -27,9 +27,10 @@ export default async function DealLifecycleProgress({
     closedAt?: string;
 }) {
     const t = await getTranslations('DealsLifecycleProgress');
+    const locale = await getLocale();
     const sorted = [...stages].sort((a, b) => a.position - b.position);
     const filtered = sorted.filter((s) => {
-        const c = classifyStage(s.name);
+        const c = classifyStage(s);
         if (c === 'won') return outcome !== 'lost';
         if (c === 'lost') return outcome === 'lost';
         return true;
@@ -46,26 +47,19 @@ export default async function DealLifecycleProgress({
     const isLost = outcome === 'lost';
 
     const hasTime = Number.isFinite(startMs);
-    const candidates = hasTime ? [nowMs] : [];
-    if (hasTime && Number.isFinite(expectedMs)) candidates.push(expectedMs);
-    if (hasTime && Number.isFinite(closedMs)) candidates.push(closedMs);
-    const barEnd = candidates.length ? Math.max(...candidates) : 0;
-    const span = hasTime ? Math.max(barEnd - startMs, DAY_MS) : 0;
-    const pct = (t: number) =>
-        hasTime ? Math.max(0, Math.min(100, ((t - startMs) / span) * 100)) : 0;
+    const hasPlan = hasTime && Number.isFinite(expectedMs) && expectedMs > startMs;
+    const plannedSpan = hasPlan ? expectedMs - startMs : 0;
+    const planDays = hasPlan ? Math.max(1, Math.round(plannedSpan / DAY_MS)) : 0;
+    const timePct = (t: number) =>
+        hasPlan ? Math.max(0, Math.min(100, ((t - startMs) / plannedSpan) * 100)) : 0;
+    const nowPct = timePct(nowMs);
+    const trackLeft = (p: number) => `calc(1rem + ${p / 100} * (100% - 2rem))`;
 
-    const expectedPct = Number.isFinite(expectedMs) ? pct(expectedMs) : null;
-    const closedPct = Number.isFinite(closedMs) ? pct(closedMs) : null;
-    const nowPct = pct(nowMs);
-
-    const lastStagePct = expectedPct ?? 100;
     const stagePct = (i: number) =>
-        filtered.length <= 1 ? lastStagePct / 2 : (i / (filtered.length - 1)) * lastStagePct;
+        filtered.length <= 1 ? 50 : (i / (filtered.length - 1)) * 100;
 
     const currentStagePct = currentIdx >= 0 ? stagePct(currentIdx) : null;
-    const progressEnd = isClosed
-        ? closedPct ?? lastStagePct
-        : currentStagePct ?? 0;
+    const progressEnd = currentStagePct ?? (isClosed ? 100 : 0);
     const progressColor = isWon ? 'bg-green-500' : isLost ? 'bg-red-500' : 'bg-brand';
 
     const daysOpen = hasTime ? Math.round((nowMs - startMs) / DAY_MS) : 0;
@@ -78,14 +72,15 @@ export default async function DealLifecycleProgress({
             : null;
 
     let scheduleDays: number | null = null;
-    if (!isClosed && currentStagePct != null && hasTime && Number.isFinite(expectedMs)) {
-        const expectedAtCurrentStage = startMs + (currentStagePct / 100) * span;
+    if (!isClosed && currentStagePct != null && hasPlan) {
+        const expectedAtCurrentStage = startMs + (currentStagePct / 100) * plannedSpan;
         scheduleDays = Math.round((nowMs - expectedAtCurrentStage) / DAY_MS);
     }
 
     const scheduleStatus = ((): { text: string; tone: ScheduleTone } | null => {
         if (!hasTime) return null;
         if (isClosed) {
+            // if (isLost) return null;
             if (closedVsExpected == null) return null;
             if (closedVsExpected === 0) return { text: t('onTime'), tone: 'neutral' };
             return closedVsExpected > 0
@@ -121,8 +116,6 @@ export default async function DealLifecycleProgress({
             ? 'text-red-700'
             : 'text-neutral-700';
 
-    const rightAnchorPct = isClosed && closedPct != null ? closedPct : lastStagePct;
-
     return (
         <div className="rounded-2xl bg-neutral-100 p-4 ring-1 ring-black/5 sm:p-6">
             <div className="relative h-14 sm:h-16">
@@ -136,37 +129,22 @@ export default async function DealLifecycleProgress({
                     style={{ width: `${progressEnd}%` }}
                 />
 
-                {hasTime && !isClosed ? (
-                    // <div
-                    //     title={`Today · day ${daysOpen}`}
-                    //     aria-label={`Today · day ${daysOpen}`}
-                    //     className="absolute top-4 z-0 size-3 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-white bg-brand shadow-sm sm:size-3.5"
-                    //     style={{ left: `${nowPct}%` }}
-                    // />
+                {!isClosed && hasPlan ? (
                     <Tooltip>
                         <TooltipTrigger asChild>
-                            {/* <span className="text-xs text-neutral-500">Today · day {daysOpen}</span> */}
                             <div
                                 className="absolute top-4 z-0 size-3 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-white bg-brand shadow-sm sm:size-3.5"
-                                style={{ left: `${nowPct}%` }}
+                                style={{ left: trackLeft(nowPct) }}
                             />
                         </TooltipTrigger>
                         <TooltipContent>
-                            <p>{t('todayDay', { daysOpen, daysToExpected: daysToExpected ?? 0 })}</p>
+                            <p>{t('todayDay', { daysOpen, totalDays: planDays })}</p>
                         </TooltipContent>
                     </Tooltip>
                 ) : null}
-                {isClosed && closedPct != null ? (
-                    <div
-                        title={t('closedOn', { date: formatDate(closedAt) })}
-                        aria-label={t('closedOn', { date: formatDate(closedAt) })}
-                        className={`absolute top-4 z-0 size-3 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-white shadow-sm sm:size-3.5 ${isWon ? 'bg-green-500' : isLost ? 'bg-red-500' : 'bg-neutral-700'}`}
-                        style={{ left: `${closedPct}%` }}
-                    />
-                ) : null}
 
                 {filtered.map((stage, i) => {
-                    const c = classifyStage(stage.name);
+                    const c = classifyStage(stage);
                     const isWonStage = c === 'won';
                     const isLostStage = c === 'lost';
                     const wonAchieved = isWonStage && outcome === 'won';
@@ -250,9 +228,9 @@ export default async function DealLifecycleProgress({
             </div>
 
             <div className="mt-4 flex items-start justify-between gap-3 text-[10px] leading-tight text-neutral-500 sm:text-[11px]">
-                <div className="flex min-w-0 flex-col items-start">
+                <div className="flex shrink-0 flex-col items-start whitespace-nowrap">
                     <span className="font-medium text-neutral-700">{t('created')}</span>
-                    <span>{formatDate(createdAt)}</span>
+                    <span>{formatDate(createdAt, locale)}</span>
                 </div>
                 {expectedCloseDate || (isClosed && closedAt) ? (
                     <>
@@ -265,17 +243,14 @@ export default async function DealLifecycleProgress({
                                 </span>
                             ) : null}
                         </div>
-                        <div
-                            className="flex min-w-0 flex-col items-end"
-                            style={{ marginRight: `${Math.max(0, 100 - rightAnchorPct)}%` }}
-                        >
+                        <div className="flex shrink-0 flex-col items-end whitespace-nowrap">
                             <span
                                 className={`font-medium ${isClosed ? closedNameClass : 'text-neutral-700'}`}
                             >
                                 {isClosed ? t('closed') : t('expectedClose')}
                             </span>
                             <span>
-                                {formatDate(isClosed && closedAt ? closedAt : expectedCloseDate)}
+                                {formatDate(isClosed && closedAt ? closedAt : expectedCloseDate, locale)}
                             </span>
 
                         </div>

@@ -152,6 +152,7 @@ export type CompanyMetrics = {
     relatedUsers: User[];
     pastRevenue: number;
     projectedRevenue: number;
+    currency: string;
     numDeals: number;
     numTasks: number;
     numActivities: number;
@@ -255,17 +256,21 @@ export type Pipeline = {
 
 export type CreatePipelinePayload = {
     name?: string;
-    stages?: { name: string }[];
+    stages?: { name: string; success?: boolean; failure?: boolean }[];
 };
 
 export type CreateStagePayload = {
     name: string;
     position: number;
+    success?: boolean;
+    failure?: boolean;
 };
 
 export type UpdateStagePayload = {
     name: string;
     position: number;
+    success?: boolean;
+    failure?: boolean;
 };
 
 export type UpdatePipelinePayload = {
@@ -299,6 +304,8 @@ export type Stage = {
     name: string;
     pipeline: number;
     position: number;
+    success: boolean;
+    failure: boolean;
 };
 
 export type Tag = {
@@ -340,4 +347,16 @@ export type UpdateTaskPayload = {
     assignedToId?: number;
     personId?: number;
     dealId?: number;
+};
+
+export type SearchResults = {
+    companies: Company[];
+    people: Contact[];
+    deals: Deal[];
+    pipelines: Pipeline[];
+    tags: Tag[];
+    activities: Activity[];
+    notes: Note[];
+    tasks: Task[];
+    users: User[];
 };

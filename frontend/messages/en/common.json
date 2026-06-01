@@ -16,6 +16,7 @@
     "sectionRecords": "Records",
     "sectionActivity": "Activity",
     "sectionLibrary": "Library",
+    "sectionTeam": "Team",
     "navDashboard": "Dashboard",
     "navCalendar": "Calendar",
     "navMap": "Map",
@@ -30,6 +31,7 @@
     "navTasks": "Tasks",
     "navNotes": "Notes",
     "navTags": "Tags",
+    "navUsers": "Users",
     "profile": "Profile",
     "logOut": "Log out",
     "profilePictureAlt": "{name}'s profile picture"
@@ -40,7 +42,19 @@
   },
   "CommonSearchBar": {
     "placeholder": "Search for anything",
-    "search": "Search"
+    "search": "Search",
+    "searching": "Searching...",
+    "noResults": "No results for “{query}”",
+    "resultsHeading": "Results for “{query}”",
+    "groupCompanies": "Companies",
+    "groupPeople": "Contacts",
+    "groupDeals": "Deals",
+    "groupPipelines": "Pipelines",
+    "groupTags": "Tags",
+    "groupActivities": "Activities",
+    "groupNotes": "Notes",
+    "groupTasks": "Tasks",
+    "groupUsers": "Users"
   },
   "CommonProfileCard": {
     "defaultName": "Profile Name",

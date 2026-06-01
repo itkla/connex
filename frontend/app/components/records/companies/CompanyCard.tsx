@@ -2,18 +2,16 @@
 
 import { Loader2Icon } from 'lucide-react';
 import { useRouter } from 'next/navigation';
-import { useTranslations } from 'next-intl';
+import { useLocale, useTranslations } from 'next-intl';
 import { ChevronRightIcon } from '@heroicons/react/24/solid';
 import { Button } from '@/components/ui/button';
 import { type Company, type CompanyMetrics, type LoadStatus } from '@/app/lib/types';
 import CompanyAvatar from '@/app/components/records/companies/CompanyAvatar';
 import { AvatarFallback, Avatar, AvatarGroup, AvatarGroupCount, AvatarImage } from '@/components/ui/avatar';
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Area, AreaChart, LabelList, ResponsiveContainer, Tooltip as RechartsTooltip, XAxis } from 'recharts';
 import { formatCompactCurrency } from '@/app/lib/utils';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
-
-const dateFormatter = new Intl.DateTimeFormat('en', { month: 'short', day: 'numeric' });
 
 interface CompanyCardProps {
     company: Company;
@@ -105,6 +103,7 @@ export default function CompanyCard({ company, metrics, metricsStatus, onFirstEx
                                 <RevenueTiles
                                     pastRevenue={metrics.pastRevenue}
                                     projectedRevenue={metrics.projectedRevenue}
+                                    currency={metrics.currency}
                                 />
                             </div>
                         </>
@@ -192,6 +191,11 @@ export type EngagementPoint = {
 
 export function EngagementSparkline({ data }: { data: EngagementPoint[] }) {
     const t = useTranslations('CompaniesCard');
+    const locale = useLocale();
+    const dateFormatter = useMemo(
+        () => new Intl.DateTimeFormat(locale, { month: 'short', day: 'numeric' }),
+        [locale],
+    );
     const total = data.reduce((s, d) => s + d.count, 0);
     return (
         <div className="md:col-span-2 rounded-xl bg-transparent p-3 ring-1 ring-black/5">
@@ -243,23 +247,26 @@ export function EngagementSparkline({ data }: { data: EngagementPoint[] }) {
 export function RevenueTiles({
     pastRevenue,
     projectedRevenue,
+    currency = 'USD',
 }: {
     pastRevenue: number;
     projectedRevenue: number;
+    currency?: string;
 }) {
     const t = useTranslations('CompaniesCard');
+    const locale = useLocale();
     return (
         <div className="space-y-2">
             <div className="rounded-xl bg-transparent p-3 ring-1 ring-black/5">
                 <p className="text-xs uppercase tracking-wider text-neutral-500">{t('closedRevenue')}</p>
                 <p className="mt-1 text-lg font-semibold text-neutral-900">
-                    {formatCompactCurrency(pastRevenue)}
+                    {formatCompactCurrency(pastRevenue, currency, locale)}
                 </p>
             </div>
             <div className="rounded-xl bg-transparent p-3 ring-1 ring-black/5">
                 <p className="text-xs uppercase tracking-wider text-neutral-500">{t('projected')}</p>
                 <p className="mt-1 text-lg font-semibold text-neutral-900">
-                    {formatCompactCurrency(projectedRevenue)}
+                    {formatCompactCurrency(projectedRevenue, currency, locale)}
                 </p>
             </div>
         </div>
@@ -273,6 +280,11 @@ interface EngagementTooltipProps {
 
 function EngagementTooltip({ active, payload }: EngagementTooltipProps) {
     const t = useTranslations('CompaniesCard');
+    const locale = useLocale();
+    const dateFormatter = useMemo(
+        () => new Intl.DateTimeFormat(locale, { month: 'short', day: 'numeric' }),
+        [locale],
+    );
     if (!active || !payload?.length) return null;
     const d = payload[0].payload;
     return (

@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { toast } from 'sonner';
+import { toastError, toastSuccess } from '@/app/lib/toast';
 
 import QuickEditSheet, { type ContactDraft } from '@/app/components/records/contacts/QuickEditSheet';
 import { getContactById, updateContact } from '@/app/lib/api';
@@ -79,9 +80,7 @@ export default function EditContactSheet({
             };
             await updateContact(contact.id, payload);
 
-            toast.success(t('toastContactUpdated'), {
-                style: { backgroundColor: 'var(--color-brand)', color: 'white' },
-            });
+            toastSuccess(t('toastContactUpdated'));
             handleOpenChange(false);
 
             // on success, update the form fields to reflect the updated info so that stale info isn't accidentally sent again
@@ -97,9 +96,7 @@ export default function EditContactSheet({
 
             router.refresh();
         } catch (err) {
-            toast.error(err instanceof Error ? err.message : t('toastFailedSave'), {
-                style: { backgroundColor: 'var(--color-destructive)', color: 'white' },
-            });
+            toastError(err instanceof Error ? err.message : t('toastFailedSave'));
         } finally {
             setIsSaving(false);
         }

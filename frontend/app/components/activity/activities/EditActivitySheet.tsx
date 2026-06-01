@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { toast } from 'sonner';
+import { toastError, toastSuccess } from '@/app/lib/toast';
 import { Loader2Icon } from 'lucide-react';
 
 import {
@@ -105,16 +106,12 @@ export default function EditActivitySheet({
                 dealId: draft.dealId,
             };
             await updateActivity(activity.id, payload);
-            toast.success(t('activityUpdated'), {
-                style: { backgroundColor: 'var(--color-brand)', color: 'white' },
-            });
+            toastSuccess(t('activityUpdated'));
             handleOpenChange(false);
             router.refresh();
         } catch (err) {
             const message = err instanceof ApiError ? err.message : err instanceof Error ? err.message : t('updateFailed');
-            toast.error(message, {
-                style: { backgroundColor: 'var(--color-destructive)', color: 'white' },
-            });
+            toastError(message);
         } finally {
             setIsSaving(false);
         }

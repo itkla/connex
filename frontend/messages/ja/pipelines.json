@@ -17,6 +17,8 @@
     "noChangesToSave": "保存する変更はありません",
     "nameRequiredFor": "「{name}」の名前を入力してください",
     "stageNamesEmptyIn": "「{name}」のステージ名は空にできません",
+    "singleTerminalPerType": "パイプラインには成約ステージと失注ステージをそれぞれ1つまでしか設定できません",
+    "singleTerminalPerTypeIn": "「{name}」には成約ステージと失注ステージをそれぞれ1つまでしか設定できません",
     "pipelineUpdated": "パイプラインを更新しました",
     "pipelinesUpdated": "{count} 件のパイプラインを更新しました",
     "failedToSave": "保存できませんでした",
@@ -53,6 +55,11 @@
     "stagesHint": "最初から最後の順に並べてください。ステージ名は他のパイプラインと重複しても構いませんが、このパイプライン内では一意である必要があります。",
     "stageNamePlaceholder": "ステージ名",
     "removeStageAriaLabel": "ステージを削除",
+    "stageKindAriaLabel": "ステージの種類",
+    "stageKindPlaceholder": "ステージの種類を選択",
+    "stageInProgress": "進行中",
+    "stageWon": "成約",
+    "stageLost": "失注",
     "addStage": "ステージを追加",
     "cancel": "キャンセル",
     "create": "作成"
@@ -65,6 +72,11 @@
     "stages": "ステージ",
     "stageNamePlaceholder": "ステージ名",
     "removeStageAriaLabel": "ステージを削除",
+    "stageKindAriaLabel": "ステージの種類",
+    "stageKindPlaceholder": "ステージの種類を選択",
+    "stageInProgress": "進行中",
+    "stageWon": "成約",
+    "stageLost": "失注",
     "addStage": "ステージを追加",
     "cancel": "キャンセル",
     "save": "保存"
@@ -73,6 +85,7 @@
     "noChangesToSave": "保存する変更はありません",
     "nameRequired": "名前を入力してください",
     "stageNamesEmpty": "ステージ名は空にできません",
+    "singleTerminalPerType": "パイプラインには成約ステージと失注ステージをそれぞれ1つまでしか設定できません",
     "pipelineUpdated": "パイプラインを更新しました",
     "failedToSave": "保存できませんでした"
   }

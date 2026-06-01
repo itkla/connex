@@ -13,6 +13,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { copyToClipboard } from '@/app/lib/utils';
 import { toast } from 'sonner';
+import { toastError, toastSuccess } from '@/app/lib/toast';
 
 import QuickEditSheet, { type ContactDraft } from '@/app/components/records/contacts/QuickEditSheet';
 import ChangeCompanyDialog from '@/app/components/records/contacts/ChangeCompanyDialog';
@@ -105,16 +106,12 @@ export default function ContactCard({
                 payload.imageUrl = await uploadContactPicture(id, imageFile);
             }
             await updateContact(id, payload);
-            toast.success(t('toastContactUpdated'), {
-                style: { backgroundColor: 'var(--color-brand)', color: 'white' },
-            });
+            toastSuccess(t('toastContactUpdated'));
             setEditSheetOpen(false);
             setImageFile(null);
             router.refresh();
         } catch (err) {
-            toast.error(err instanceof Error ? err.message : t('toastFailedSave'), {
-                style: { backgroundColor: 'var(--color-destructive)', color: 'white' },
-            });
+            toastError(err instanceof Error ? err.message : t('toastFailedSave'));
         } finally {
             setIsSaving(false);
         }
@@ -272,9 +269,7 @@ export default function ContactCard({
             contacts={[syntheticContact]}
             companies={companies}
             onSuccess={() => {
-                toast.success(t('toastCompanyChanged'), {
-                    style: { backgroundColor: 'var(--color-brand)', color: 'white' },
-                });
+                toastSuccess(t('toastCompanyChanged'));
                 router.refresh();
             }}
         />

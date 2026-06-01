@@ -46,6 +46,7 @@
     "copyableEmail": "Email",
     "copyablePhone": "Phone",
     "copyableCompany": "Company",
+    "filterNoCompany": "No company",
     "entityLabel": "contact",
     "toastContactCreated": "Contact created",
     "toastFailedCreate": "Failed to create contact",
@@ -141,6 +142,11 @@
     "description": "Record an interaction with {contactName}.",
     "type": "Type",
     "dateAndTime": "Date and time",
+    "deal": "Deal",
+    "assignCompanyToLinkDealsPlaceholder": "Assign a company to link deals",
+    "loadingDealsPlaceholder": "Loading deals...",
+    "noDealPlaceholder": "No deal",
+    "noDeal": "No deal",
     "subject": "Subject",
     "subjectPlaceholder": "Intro call",
     "notes": "Notes",
@@ -154,7 +160,8 @@
     "typeOther": "Other",
     "toastSubjectRequired": "Subject is required",
     "toastActivityLogged": "Activity logged",
-    "toastFailedLog": "Failed to log activity"
+    "toastFailedLog": "Failed to log activity",
+    "toastFailedLoadDeals": "Failed to load deals"
   },
   "ContactsNewContactDialog": {
     "dialogTitle": "New contact",

@@ -1,13 +1,15 @@
 // transplanted from /me 
 
-export function formatShortDate(value?: string) {
-    if (!value) return '';
+export function formatShortDate(value: string | undefined, locale: string) {
+    if (!value) {
+        return '—';
+    }
 
     const date = new Date(value);
 
     if (Number.isNaN(date.getTime())) return value;
 
-    return new Intl.DateTimeFormat('en', {
+    return new Intl.DateTimeFormat(locale, {
         month: 'short',
         day: 'numeric',
     }).format(date);
@@ -19,7 +21,7 @@ export function timeOf(value?: string) {
     return Number.isNaN(t) ? 0 : t;
 }
 
-export function formatDate(value?: string) {
+export function formatDate(value: string | undefined, locale: string) {
     if (!value) {
         return '—';
     }
@@ -30,10 +32,10 @@ export function formatDate(value?: string) {
         return value;
     }
 
-    return new Intl.DateTimeFormat('en', { dateStyle: 'long' }).format(date);
+    return new Intl.DateTimeFormat(locale, { dateStyle: 'long' }).format(date);
 }
 
-export function formatDateTime(value?: string) {
+export function formatDateTime(value: string | undefined, locale: string) {
     if (!value) {
         return 'Never';
     }
@@ -44,7 +46,7 @@ export function formatDateTime(value?: string) {
         return value;
     }
 
-    return new Intl.DateTimeFormat('en', {
+    return new Intl.DateTimeFormat(locale, {
         dateStyle: 'medium',
         timeStyle: 'short',
     }).format(date);
@@ -79,6 +81,20 @@ export function parseMysqlDateTime(value?: string | null): number {
     return Date.parse(hasTz ? s : s + 'Z');
 }
 
+export function pickDominantCurrency(items: { currency?: string | null }[]): string {
+    const counts = new Map<string, number>();
+    for (const item of items) {
+        const c = item.currency || 'USD';
+        counts.set(c, (counts.get(c) ?? 0) + 1);
+    }
+    let best = 'USD';
+    let bestCount = 0;
+    for (const [c, n] of counts) {
+        if (n > bestCount) { best = c; bestCount = n; }
+    }
+    return best;
+}
+
 /**
  * formats a value to a compact currency string (e.g. 1k, 100k, 1m, 1b)
  * 
@@ -88,20 +104,35 @@ export function parseMysqlDateTime(value?: string | null): number {
  * @param currency - the currency to format the value in
  * @returns the formatted value
  */
-export function formatCompactCurrency(value: number, currency = 'USD') {
+export function formatCompactCurrency(value: number, currency = 'USD', locale = 'en-US') {
     try {
-        return new Intl.NumberFormat('en', {
+        return new Intl.NumberFormat(locale, {
             notation: 'compact',
             maximumFractionDigits: 1,
             style: 'currency',
             currency,
         }).format(value);
     } catch {
-        return new Intl.NumberFormat('en', {
+        return new Intl.NumberFormat(locale, {
             notation: 'compact',
             maximumFractionDigits: 1,
         }).format(value);
     }
+}
+
+/**
+ * formats a value to a currency string (e.g. $1,000.00)
+ * @param value - the value to format
+ * @param currency - the currency to format the value in
+ * @param locale - the locale to format the value in
+ * @returns the formatted value
+ */
+export function formatCurrency(value: number, currency = 'USD', locale = 'en-US') {
+    // for every 3 digits, add a comma
+    return value.toLocaleString(locale, {
+        style: 'currency',
+        currency,
+    });
 }
 
 /**

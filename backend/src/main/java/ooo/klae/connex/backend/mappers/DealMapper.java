@@ -20,9 +20,12 @@ public interface DealMapper {
     List<Deal> getDealsByPersonId(int personId);
     List<Deal> getDealsByTagId(int tagId);
     Deal getDealById(int id);
+    List<Deal> search(String query);
     int insert(Deal deal);
     int update(Deal deal);
     int delete(int id);
+
+    boolean isStageTerminal(int stageId);
 
     int addTag(@Param("dealId") int dealId, @Param("tagId") int tagId);
     int removeTag(@Param("dealId") int dealId, @Param("tagId") int tagId);

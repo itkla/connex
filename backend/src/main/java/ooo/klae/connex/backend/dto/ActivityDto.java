@@ -17,7 +17,7 @@ import ooo.klae.connex.backend.beans.User;
 @NoArgsConstructor
 public class ActivityDto {
 
-    private int id;
+    private Integer id;
 
     @NotBlank
     @Size(max = 32)
@@ -67,7 +67,8 @@ public class ActivityDto {
 
     public Activity toBean() {
         Activity a = new Activity();
-        a.setId(id);
+        // a.setId(id);
+        if (id != null) a.setId(id);
         a.setType(type);
         a.setSubject(subject);
         a.setNotes(notes);

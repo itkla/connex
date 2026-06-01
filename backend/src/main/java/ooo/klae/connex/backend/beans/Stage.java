@@ -22,6 +22,8 @@ public class Stage {
     @JsonIdentityReference(alwaysAsId = true)
     private Pipeline pipeline;
     private int position; // zero-based index of this stage within its pipeline
+    private boolean success; // terminal stage: a deal reaching it is won (column is_success)
+    private boolean failure; // terminal stage: a deal reaching it is lost (column is_failure)
     private Deal[] deals; // deals currently in this stage
 
     public int getId() {

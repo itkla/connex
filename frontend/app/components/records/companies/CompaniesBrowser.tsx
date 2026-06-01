@@ -6,25 +6,26 @@ import { useTranslations } from 'next-intl';
 import { Button } from '@/components/ui/button';
 import { ButtonGroup } from '@/components/ui/button-group';
 import { toast } from 'sonner';
+import { toastError, toastSuccess } from '@/app/lib/toast';
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
-import { PlusIcon, FunnelIcon, TrashIcon, PencilIcon, EllipsisVerticalIcon, EyeIcon } from '@heroicons/react/24/solid';
+import { PlusIcon, TrashIcon, PencilIcon, EllipsisVerticalIcon, EyeIcon } from '@heroicons/react/24/solid';
 import {
     MagnifyingGlassIcon,
     Squares2X2Icon,
     TableCellsIcon,
-    ChevronDownIcon,
 } from '@heroicons/react/24/outline';
 
 import RecordsRenderView from '@/app/components/records/RecordsRenderView';
+import RecordsFilterMenu from '@/app/components/records/RecordsFilterMenu';
 import DeleteRecordDialog from '@/app/components/records/DeleteRecordDialog';
 import { useRecordsBrowser } from '@/app/hooks/useRecordsBrowser';
-import { type ColumnDef } from '@/app/components/records/types';
+import { type ColumnDef, applyRecordFilters } from '@/app/components/records/types';
 import CompanyCard from '@/app/components/records/companies/CompanyCard';
 import CompanyAvatar from '@/app/components/records/companies/CompanyAvatar';
 import NewCompanyDialog from '@/app/components/records/companies/NewCompanyDialog';
 import QuickEditCompanySheet, { type CompanyDraft } from '@/app/components/records/companies/QuickEditCompanySheet';
 import { createCompany, deleteCompany, getUsers, getTasks, getDeals, updateCompany, getActivities, getNotes } from '@/app/lib/api';
-import { uploadCompanyLogo } from '@/app/lib/utils';
+import { uploadCompanyLogo, pickDominantCurrency, parseMysqlDateTime } from '@/app/lib/utils';
 import { type Company, type CreateCompanyPayload, type UpdateCompanyPayload, type Contact, type Activity, type Note, type Task, type User, type Deal, type CompanyMetrics, type LoadStatus } from '@/app/lib/types';
 import { getContacts } from '@/app/lib/api';
 
@@ -58,6 +59,8 @@ export default function CompaniesBrowser({ companies }: { companies: Company[] }
         setDisplayMode,
         query,
         setQuery,
+        filterState,
+        setFilterState,
         selectedIds,
         setSelectedIds,
         filteredItems: filteredCompanies,
@@ -105,9 +108,7 @@ export default function CompaniesBrowser({ companies }: { companies: Company[] }
             .catch((err) => {
                 console.error(err);
                 setMetricsStatus('error');
-                toast.error(t('toastMetricsLoadFailed'), {
-                    style: { backgroundColor: 'var(--color-destructive)', color: 'white' },
-                });
+                toastError(t('toastMetricsLoadFailed'));
             });
     }, [metricsStatus, t]);
 
@@ -127,16 +128,12 @@ export default function CompaniesBrowser({ companies }: { companies: Company[] }
                 const logoUrl = await uploadCompanyLogo(created.id, logoFile);
                 await updateCompany(created.id, { ...newPayload, logoUrl });
             }
-            toast.success(t('toastCompanyCreated'), {
-                style: { backgroundColor: 'var(--color-brand)', color: 'white' },
-            });
+            toastSuccess(t('toastCompanyCreated'));
             closeNewDialog(false);
             router.refresh();
         } catch (err) {
             console.error(err);
-            toast.error(t('toastCreateFailed'), {
-                style: { backgroundColor: 'var(--color-destructive)', color: 'white' },
-            });
+            toastError(t('toastCreateFailed'));
         } finally {
             setIsCreating(false);
         }
@@ -187,16 +184,13 @@ export default function CompaniesBrowser({ companies }: { companies: Company[] }
                     return updateCompany(c.id, payload);
                 }),
             );
-            toast.success(
+            toastSuccess(
                 changed.length === 1 ? t('toastCompanyUpdated') : t('toastCompaniesUpdated', { count: changed.length }),
-                { style: { backgroundColor: 'var(--color-brand)', color: 'white' } },
             );
             setEditSheetOpen(false);
             router.refresh();
         } catch (err) {
-            toast.error(err instanceof Error ? err.message : t('toastSaveFailed'), {
-                style: { backgroundColor: 'var(--color-destructive)', color: 'white' },
-            });
+            toastError(err instanceof Error ? err.message : t('toastSaveFailed'));
         } finally {
             setIsSaving(false);
         }
@@ -218,17 +212,14 @@ export default function CompaniesBrowser({ companies }: { companies: Company[] }
         setIsDeleting(true);
         try {
             await Promise.all(Array.from(selectedIds).map((id) => deleteCompany(Number(id))));
-            toast.success(
+            toastSuccess(
                 selectedIds.size === 1 ? t('toastCompanyDeleted') : t('toastCompaniesDeleted', { count: selectedIds.size }),
-                { style: { backgroundColor: 'var(--color-brand)', color: 'white' } },
             );
             setSelectedIds(new Set());
             setDeleteDialogOpen(false);
             router.refresh();
         } catch (err) {
-            toast.error(err instanceof Error ? err.message : t('toastDeleteFailed'), {
-                style: { backgroundColor: 'var(--color-destructive)', color: 'white' },
-            });
+            toastError(err instanceof Error ? err.message : t('toastDeleteFailed'));
         } finally {
             setIsDeleting(false);
         }
@@ -250,7 +241,12 @@ export default function CompaniesBrowser({ companies }: { companies: Company[] }
             getSortValue: (c) => c.website ?? null,
             copyable: { label: t('columnWebsite'), getValue: (c) => c.website },
         },
-        { key: 'industry', label: t('columnIndustry'), getSortValue: (c) => c.industry ?? null },
+        {
+            key: 'industry',
+            label: t('columnIndustry'),
+            getSortValue: (c) => c.industry ?? null,
+            filter: { getValue: (c) => c.industry ?? null, emptyLabel: t('filterNoIndustry') },
+        },
         {
             key: 'phone',
             label: t('columnPhone'),
@@ -276,6 +272,11 @@ export default function CompaniesBrowser({ companies }: { companies: Company[] }
             render: (c) => c.updatedAt,
         },
     ], [t]);
+
+    const visibleCompanies = useMemo(
+        () => applyRecordFilters(filteredCompanies, columns, filterState),
+        [filteredCompanies, columns, filterState],
+    );
 
     // TODO: move processing to the backend so the frontend doesn't traverse the full tables to derive per-company metrics
 
@@ -320,13 +321,15 @@ export default function CompaniesBrowser({ companies }: { companies: Company[] }
                 weeklyEngagement[idx][kind]++;
                 weeklyEngagement[idx].count++;
             };
-            for (const a of activities) bucket(Date.parse(a.timestamp ?? ''), 'activities');
-            for (const t of tasks) bucket(Date.parse(t.createdAt ?? ''), 'tasks');
-            for (const n of notes) bucket(Date.parse(n.createdAt ?? ''), 'notes');
+            for (const a of activities) bucket(parseMysqlDateTime(a.timestamp), 'activities');
+            for (const t of tasks) bucket(parseMysqlDateTime(t.createdAt), 'tasks');
+            for (const n of notes) bucket(parseMysqlDateTime(n.createdAt), 'notes');
 
+            const currency = pickDominantCurrency(deals);
             let pastRevenue = 0;
             let projectedRevenue = 0;
             for (const d of deals) {
+                if ((d.currency || 'USD') !== currency) continue;
                 const closed = d.closedAt ? Date.parse(d.closedAt) : NaN;
                 if (Number.isFinite(closed) && closed <= now) {
                     pastRevenue += d.value ?? 0;
@@ -340,6 +343,7 @@ export default function CompaniesBrowser({ companies }: { companies: Company[] }
                 relatedUsers: allUsers.filter((u) => userIds.has(u.id)),
                 pastRevenue,
                 projectedRevenue,
+                currency,
                 numDeals: deals.length,
                 numTasks: tasks.length,
                 numActivities: activities.length,
@@ -361,13 +365,12 @@ export default function CompaniesBrowser({ companies }: { companies: Company[] }
             </div>
 
             <div className="flex items-center gap-4">
-                <button
-                    type="button"
-                    className="flex items-center gap-2 rounded-full bg-neutral-100 px-4 py-2 text-sm text-neutral-700 ring-1 ring-black/5 transition hover:bg-neutral-200"
-                >
-                    <FunnelIcon className="size-4 text-neutral-500" />
-                    <ChevronDownIcon className="size-4 text-neutral-500" />
-                </button>
+                <RecordsFilterMenu<Company>
+                    columns={columns}
+                    items={filteredCompanies}
+                    filterState={filterState}
+                    onChange={setFilterState}
+                />
                 <div
                     role="group"
                     aria-label={t('displayModeAriaLabel')}
@@ -441,7 +444,7 @@ export default function CompaniesBrowser({ companies }: { companies: Company[] }
             </div>
 
             <RecordsRenderView<Company>
-                data={filteredCompanies}
+                data={visibleCompanies}
                 columns={columns}
                 renderCard={(item, { onQuickEdit, onDelete }) => (
                     <CompanyCard

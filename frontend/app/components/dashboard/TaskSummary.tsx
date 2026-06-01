@@ -1,12 +1,13 @@
 import Link from 'next/link';
-import { getTranslations } from 'next-intl/server';
-import { type Task } from '@/app/lib/api';
+import { getLocale, getTranslations } from 'next-intl/server';
+import { type Task } from '@/app/lib/types';
 import { formatShortDate, timeOf } from '@/app/lib/utils';
 
 const DAY = 1000 * 60 * 60 * 24;
 
 export default async function TaskSummary({ tasks }: { tasks: Task[] }) {
     const t = await getTranslations('DashboardTaskSummary');
+    const locale = await getLocale();
     const open = tasks.filter((tk) => !tk.completed);
     const now = Date.now();
 
@@ -79,7 +80,7 @@ export default async function TaskSummary({ tasks }: { tasks: Task[] }) {
                                                 : 'text-neutral-500'
                                         }`}
                                     >
-                                        {formatShortDate(task.dueDate)}
+                                        {formatShortDate(task.dueDate, locale)}
                                     </span>
                                 ) : (
                                     <span className="shrink-0 text-xs text-neutral-400">

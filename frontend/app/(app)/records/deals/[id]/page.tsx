@@ -3,7 +3,7 @@ import Link from 'next/link';
 import { notFound, redirect } from 'next/navigation';
 import { ArrowLeftIcon, BuildingOffice2Icon, CalendarIcon, EllipsisVerticalIcon, PencilIcon, TrashIcon, InformationCircleIcon } from '@heroicons/react/24/outline';
 import { CheckCircleIcon, XCircleIcon } from '@heroicons/react/24/solid';
-import { getTranslations } from 'next-intl/server';
+import { getLocale, getTranslations } from 'next-intl/server';
 
 import {
     getActivitiesForDeal,
@@ -38,6 +38,7 @@ import {
 } from '@/app/lib/types';
 import {
     formatCompactCurrency,
+    formatCurrency,
     formatDate,
     formatDateTime,
     parseMysqlDateTime,
@@ -68,6 +69,7 @@ export default async function DealPage({ params }: { params: { id: number } }) {
     const cookie = (await cookies()).toString();
     const init = { headers: { cookie } } as const;
     const t = await getTranslations('DealsPage');
+    const locale = await getLocale();
 
     const [deal, currentUser, activities, notes, tasks, tags, peopleRaw, allPipelines, allCompanies, allPersons, allDeals, allUsers] =
         await Promise.all([
@@ -114,9 +116,8 @@ export default async function DealPage({ params }: { params: { id: number } }) {
     const pipeline = allPipelines.find((p) => p.id === deal.pipeline) ?? null;
     const currentStage = stages.find((s) => s.id === deal.stage) ?? null;
 
-    const closedAtMs = parseMysqlDateTime(deal.closedAt);
-    const closed = Number.isFinite(closedAtMs) && closedAtMs <= Date.now();
-    const outcome: DealOutcome = dealOutcome(closed, currentStage?.name);
+    const outcome: DealOutcome = dealOutcome(currentStage);
+    const closed = outcome !== 'open';
     const variance =
         closed && deal.value > 0 ? (deal.actualValue - deal.value) / deal.value : null;
     const currency = deal.currency || 'USD';
@@ -179,7 +180,7 @@ export default async function DealPage({ params }: { params: { id: number } }) {
                             </Link>
                         ) : null}
                         {pipeline ? (
-                            <span className="inline-flex items-center gap-2 rounded-md bg-neutral-100 px-2 py-1">
+                            <span className="inline-flex items-center gap-2">
                                 {pipeline.name}
                                 {currentStage ? <> · {currentStage.name}</> : null}
                                 <StatusPill outcome={outcome} t={t} />
@@ -188,9 +189,9 @@ export default async function DealPage({ params }: { params: { id: number } }) {
                             <StatusPill outcome={outcome} t={t} />
                         )}
                         {deal.expectedCloseDate ? (
-                            <span className="inline-flex items-center gap-1 rounded-md bg-neutral-100 px-2 py-1">
+                            <span className="inline-flex items-center gap-1">
                                 <CalendarIcon className="size-3.5" />
-                                {t('closeBy', { date: formatDate(deal.expectedCloseDate) })}
+                                {t('closeBy', { date: formatDate(deal.expectedCloseDate, locale) })}
                             </span>
                         ) : null}
                     </h3>
@@ -201,7 +202,7 @@ export default async function DealPage({ params }: { params: { id: number } }) {
                         {closed ? t('actual') : t('projected')} · {currency}
                     </span>
                     <div className="text-3xl font-extrabold text-neutral-900">
-                        {formatCompactCurrency(closed ? deal.actualValue : deal.value, currency)}
+                        {formatCurrency(closed ? deal.actualValue : deal.value, currency, locale)}
                     </div>
                 </div>
             </header>
@@ -270,10 +271,10 @@ export default async function DealPage({ params }: { params: { id: number } }) {
                 </Tooltip>
             </div>
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-                <SummaryTile label={t('projectedValue')} value={formatCompactCurrency(deal.value, currency)} />
+                <SummaryTile label={t('projectedValue')} value={formatCompactCurrency(deal.value, currency, locale)} />
                 <SummaryTile
                     label={t('actualValue')}
-                    value={closed ? formatCompactCurrency(deal.actualValue, currency) : '—'}
+                    value={closed ? formatCompactCurrency(deal.actualValue, currency, locale) : '—'}
                 />
                 <SummaryTile
                     label={t('variance')}
@@ -285,7 +286,7 @@ export default async function DealPage({ params }: { params: { id: number } }) {
                 />
                 <SummaryTile
                     label={closed ? t('closed') : t('expectedClose')}
-                    value={closed ? formatDate(deal.closedAt) : formatDate(deal.expectedCloseDate)}
+                    value={closed ? formatDate(deal.closedAt, locale) : formatDate(deal.expectedCloseDate, locale)}
                 />
             </div>
 
@@ -324,10 +325,10 @@ export default async function DealPage({ params }: { params: { id: number } }) {
                         <InfoRow label={t('stage')} value={currentStage?.name ?? '—'} />
                         <InfoRow label={t('company')} value={company?.name ?? '—'} />
                         <InfoRow label={t('currency')} value={deal.currency ?? '—'} />
-                        <InfoRow label={t('expectedClose')} value={formatDate(deal.expectedCloseDate)} />
-                        <InfoRow label={t('closedAt')} value={closed ? formatDate(deal.closedAt) : '—'} />
-                        <InfoRow label={t('created')} value={formatDate(deal.createdAt)} />
-                        <InfoRow label={t('updated')} value={formatDateTime(deal.updatedAt)} />
+                        <InfoRow label={t('expectedClose')} value={formatDate(deal.expectedCloseDate, locale)} />
+                        <InfoRow label={t('closedAt')} value={closed ? formatDate(deal.closedAt, locale) : '—'} />
+                        <InfoRow label={t('created')} value={formatDate(deal.createdAt, locale)} />
+                        <InfoRow label={t('updated')} value={formatDateTime(deal.updatedAt, locale)} />
                     </dl>
                 </aside>
 

@@ -1,6 +1,6 @@
 // NOTE: not used in /me page anymore, but might be used in other pages so im keeping it
 
-import { getTranslations } from "next-intl/server";
+import { getLocale, getTranslations } from "next-intl/server";
 
 import { type Activity } from "@/app/lib/types";
 import EmptyState from "./EmptyState";
@@ -8,6 +8,7 @@ import { timeOf, formatShortDate } from "@/app/lib/utils";
 
 export default async function ActivityList({ activities }: { activities: Activity[] }) {
     const t = await getTranslations("MeActivityList");
+    const locale = await getLocale();
 
     if (activities.length === 0) {
         return <EmptyState message={t("empty")} />;
@@ -26,7 +27,7 @@ export default async function ActivityList({ activities }: { activities: Activit
                         <span className="text-sm text-black">{activity.subject}</span>
                         {activity.timestamp ? (
                             <span className="shrink-0 text-xs text-neutral-500">
-                                {formatShortDate(activity.timestamp)}
+                                {formatShortDate(activity.timestamp, locale)}
                             </span>
                         ) : null}
                     </div>

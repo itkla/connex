@@ -4,8 +4,8 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { toast } from 'sonner';
+import { toastError, toastSuccess } from '@/app/lib/toast';
 import { Loader2Icon } from 'lucide-react';
-import { UserIcon } from '@heroicons/react/24/outline';
 
 import {
     Sheet,
@@ -20,7 +20,7 @@ import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+import RecordSelect from '@/app/components/records/RecordSelect';
 import { Checkbox } from '@/components/ui/checkbox';
 
 import { ApiError, getCompanyPeople, getUsers, updateTask } from '@/app/lib/api';
@@ -116,16 +116,12 @@ export default function EditTaskSheet({
                 completed: draft.completed,
             };
             await updateTask(task.id, payload);
-            toast.success(t('taskUpdated'), {
-                style: { backgroundColor: 'var(--color-brand)', color: 'white' },
-            });
+            toastSuccess(t('taskUpdated'));
             handleOpenChange(false);
             router.refresh();
         } catch (err) {
             const message = err instanceof ApiError ? err.message : err instanceof Error ? err.message : t('updateFailed');
-            toast.error(message, {
-                style: { backgroundColor: 'var(--color-destructive)', color: 'white' },
-            });
+            toastError(message);
         } finally {
             setIsSaving(false);
         }
@@ -154,54 +150,36 @@ export default function EditTaskSheet({
 
                         <div className="grid gap-1.5">
                             <Label htmlFor="task-assigned-to">{t('assignedToLabel')}</Label>
-                            <Select
+                            <RecordSelect
+                                id="task-assigned-to"
                                 value={draft.assignedToId ? draft.assignedToId.toString() : ''}
                                 onValueChange={(value) => setDraft((d) => ({ ...d, assignedToId: parseInt(value) }))}
-                            >
-                                <SelectTrigger id="task-assigned-to" className={inputClass}>
-                                    <SelectValue placeholder={t('selectUserPlaceholder')} />
-                                </SelectTrigger>
-                                <SelectContent>
-                                    {users.map((user) => (
-                                        <SelectItem key={user.id} value={user.id.toString()}>
-                                            <Avatar>
-                                                <AvatarImage src={user.profilePictureUrl} />
-                                                <AvatarFallback>
-                                                    <UserIcon className="size-4" />
-                                                </AvatarFallback>
-                                            </Avatar>
-                                            {user.displayName}
-                                        </SelectItem>
-                                    ))}
-                                </SelectContent>
-                            </Select>
+                                placeholder={t('selectUserPlaceholder')}
+                                className={inputClass}
+                                options={users.map((user) => ({
+                                    id: user.id,
+                                    label: user.displayName,
+                                    imageUrl: user.profilePictureUrl,
+                                }))}
+                            />
                         </div>
 
                         <div className="grid gap-1.5">
                             <Label htmlFor="task-contact">{t('contactLabel')}</Label>
-                            <Select
+                            <RecordSelect
+                                id="task-contact"
                                 value={draft.personId}
                                 onValueChange={(value) => setDraft((d) => ({ ...d, personId: value }))}
                                 disabled={!companyId}
-                            >
-                                <SelectTrigger id="task-contact" className={inputClass}>
-                                    <SelectValue placeholder={companyId ? t('selectContactPlaceholder') : t('noCompanyLinkedPlaceholder')} />
-                                </SelectTrigger>
-                                <SelectContent>
-                                    <SelectItem value="none">{t('noContact')}</SelectItem>
-                                    {contacts.map((contact) => (
-                                        <SelectItem key={contact.id} value={contact.id.toString()}>
-                                            <Avatar>
-                                                <AvatarImage src={contact.imageUrl} />
-                                                <AvatarFallback>
-                                                    <UserIcon className="size-4" />
-                                                </AvatarFallback>
-                                            </Avatar>
-                                            {contact.name}
-                                        </SelectItem>
-                                    ))}
-                                </SelectContent>
-                            </Select>
+                                placeholder={companyId ? t('selectContactPlaceholder') : t('noCompanyLinkedPlaceholder')}
+                                className={inputClass}
+                                noneOption={{ value: 'none', label: t('noContact') }}
+                                options={contacts.map((contact) => ({
+                                    id: contact.id,
+                                    label: contact.name,
+                                    imageUrl: contact.imageUrl,
+                                }))}
+                            />
                         </div>
 
                         <div className="grid gap-1.5">

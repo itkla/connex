@@ -13,6 +13,7 @@ import {
     HomeIcon,
     TagIcon,
     UserCircleIcon,
+    UserGroupIcon,
     UsersIcon,
     EllipsisVerticalIcon,
     CalendarIcon,
@@ -80,6 +81,12 @@ function useSections(): NavSection[] {
             label: t("sectionLibrary"),
             items: [
                 { label: t("navTags"), href: "/library/tags", icon: TagIcon },
+            ],
+        },
+        {
+            label: t("sectionTeam"),
+            items: [
+                { label: t("navUsers"), href: "/users", icon: UserGroupIcon },
             ],
         },
     ];

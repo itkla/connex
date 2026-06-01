@@ -1,5 +1,5 @@
 import type { Activity, Deal, Note, Task } from '@/app/lib/types';
-import { dealOutcome, type DealOutcome } from '@/app/components/records/deals/dealOutcome';
+import type { DealOutcome, StageClass } from '@/app/components/records/deals/dealOutcome';
 import { parseMysqlDateTime } from '@/app/lib/utils';
 import { computeCompanyMetrics } from './metrics';
 import type { AppNode, DealSummary, Graph, GraphInput, RelationEdge } from './types';
@@ -25,16 +25,10 @@ export function collectActiveContactIds(
     return s;
 }
 
-function isClosed(deal: Deal): boolean {
-    const ms = parseMysqlDateTime(deal.closedAt);
-    return Number.isFinite(ms) && ms <= Date.now();
-}
-
-function outcomeOf(deal: Deal, stageName?: string): DealOutcome {
-    const closed = isClosed(deal);
-    if (!closed) return 'open';
-    if (/fail/i.test(stageName ?? '')) return 'lost';
-    return dealOutcome(true, stageName);
+function outcomeOf(stageClass: StageClass | undefined): DealOutcome {
+    if (stageClass === 'won') return 'won';
+    if (stageClass === 'lost') return 'lost';
+    return 'open';
 }
 
 function ccColorFor(summaries: DealSummary[]): string {
@@ -48,7 +42,7 @@ function ccColorFor(summaries: DealSummary[]): string {
 }
 
 export function buildGraph(input: GraphInput): Graph {
-    const { companies, contacts, deals, users, activities, tasks, notes, stageNames, ucLabel } = input;
+    const { companies, contacts, deals, users, activities, tasks, notes, stageNames, stageClass, ucLabel } = input;
 
     const metricsLists = { contacts, deals, activities, tasks, notes, users };
     const activeContactIds = collectActiveContactIds(activities, tasks, notes);
@@ -104,7 +98,7 @@ export function buildGraph(input: GraphInput): Graph {
             return {
                 id: d.id,
                 name: d.name,
-                outcome: outcomeOf(d, stageName),
+                outcome: outcomeOf(d.stage != null ? stageClass.get(d.stage) : undefined),
                 value: d.value,
                 currency: d.currency,
                 stageName,

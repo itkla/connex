@@ -2,7 +2,7 @@
 
 import * as React from 'react';
 import { CartesianGrid, Line, LineChart, ReferenceLine, XAxis, YAxis, Tooltip as RechartsTooltip } from 'recharts';
-import { useTranslations } from 'next-intl';
+import { useLocale, useTranslations } from 'next-intl';
 
 import {
     ChartContainer,
@@ -11,21 +11,21 @@ import {
     type ChartConfig,
 } from '@/components/ui/chart';
 import { type Deal } from '@/app/lib/types';
-import { formatCompactCurrency, timeOf } from '@/app/lib/utils';
+import { formatCompactCurrency, parseMysqlDateTime, pickDominantCurrency } from '@/app/lib/utils';
 
 const MONTHS_BACK = 6;
 const MONTHS_FORWARD = 6;
 
 type Bucket = { key: string; label: string; closed: number; projected: number };
 
-function buildBuckets(deals: Deal[], now: number) {
+function buildBuckets(deals: Deal[], now: number, locale: string) {
     const start = new Date(now);
     start.setDate(1);
     start.setHours(0, 0, 0, 0);
     start.setMonth(start.getMonth() - MONTHS_BACK);
 
-    const monthLabel = new Intl.DateTimeFormat('en', { month: 'short' });
-    const monthYearLabel = new Intl.DateTimeFormat('en', { month: 'short', year: '2-digit' });
+    const monthLabel = new Intl.DateTimeFormat(locale, { month: 'short' });
+    const monthYearLabel = new Intl.DateTimeFormat(locale, { month: 'short', year: '2-digit' });
     const buckets: Bucket[] = [];
     const keyToIndex = new Map<string, number>();
 
@@ -45,18 +45,19 @@ function buildBuckets(deals: Deal[], now: number) {
     const todayKey = `${today.getFullYear()}-${today.getMonth()}`;
     const todayLabel = buckets[keyToIndex.get(todayKey) ?? -1]?.label ?? null;
 
-    let currency = 'USD';
+    const currency = pickDominantCurrency(deals);
     for (const deal of deals) {
-        if (deal.currency) currency = deal.currency;
-        const closedAt = timeOf(deal.closedAt);
-        const expected = timeOf(deal.expectedCloseDate);
+        if ((deal.currency || 'USD') !== currency) continue;
+        const closedAt = parseMysqlDateTime(deal.closedAt);
+        const expected = parseMysqlDateTime(deal.expectedCloseDate);
 
-        if (closedAt > 0 && closedAt <= now) {
-            const d = new Date(closedAt);
+        if (Number.isFinite(closedAt)) {
+            const bucketTime = Number.isFinite(expected) ? expected : closedAt;
+            const d = new Date(bucketTime);
             const idx = keyToIndex.get(`${d.getFullYear()}-${d.getMonth()}`);
             if (idx !== undefined) buckets[idx].closed += deal.actualValue ?? 0;
         }
-        if (expected > 0) {
+        if (Number.isFinite(expected)) {
             const d = new Date(expected);
             const idx = keyToIndex.get(`${d.getFullYear()}-${d.getMonth()}`);
             if (idx !== undefined) buckets[idx].projected += deal.value ?? 0;
@@ -68,8 +69,9 @@ function buildBuckets(deals: Deal[], now: number) {
 
 export default function DealsRevenueChart({ deals }: { deals: Deal[] }) {
     const t = useTranslations('DealsRevenueChart');
+    const locale = useLocale();
     const now = React.useMemo(() => Date.now(), []);
-    const { data, todayLabel, currency } = React.useMemo(() => buildBuckets(deals, now), [deals, now]);
+    const { data, todayLabel, currency } = React.useMemo(() => buildBuckets(deals, now, locale), [deals, now, locale]);
     const chartConfig = React.useMemo(
         () =>
             ({
@@ -96,7 +98,7 @@ export default function DealsRevenueChart({ deals }: { deals: Deal[] }) {
                     tickMargin={4}
                     width={56}
                     tick={{ fontSize: 11, fill: '#737373' }}
-                    tickFormatter={(v: number) => formatCompactCurrency(v, currency)}
+                    tickFormatter={(v: number) => formatCompactCurrency(v, currency, locale)}
                 />
                 <RechartsTooltip
                     cursor={{ stroke: 'var(--color-brand)', strokeOpacity: 0.3, strokeWidth: 1 }}
@@ -148,10 +150,11 @@ interface RevenueChartTooltipProps {
 }
 
 function RevenueChartTooltip({ active, payload, currency = 'USD', projectedLabel, actualLabel }: RevenueChartTooltipProps) {
+    const locale = useLocale();
     if (!active || !payload?.length) return null;
     const d = payload[0].payload;
-    const projectedAmount = formatCompactCurrency(d.projected, currency);
-    const actualAmount = formatCompactCurrency(d.closed, currency);
+    const projectedAmount = formatCompactCurrency(d.projected, currency, locale);
+    const actualAmount = formatCompactCurrency(d.closed, currency, locale);
     return (
         <div className="rounded-md bg-white p-2 text-xs ring-1 ring-black/5 shadow-md">
             <div className="font-medium text-neutral-700 mb-1.5">

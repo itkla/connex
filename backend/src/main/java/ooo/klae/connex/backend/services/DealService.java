@@ -18,6 +18,8 @@ import ooo.klae.connex.backend.beans.Tag;
 import ooo.klae.connex.backend.beans.Task;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.List;
 
 import lombok.RequiredArgsConstructor;
@@ -37,6 +39,26 @@ public class DealService {
     private final ActivityMapper activityMapper;
     private final NoteMapper noteMapper;
     private final TaskMapper taskMapper;
+
+    private static final DateTimeFormatter MYSQL_DATETIME = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
+
+    /**
+     * Keeps {@code closedAt} in sync with the deal's stage: a deal sitting on a terminal
+     * @param deal
+     * @return null
+     */
+    private void reconcileClosedAt(Deal deal) {
+        Integer stageId = deal.getStageId();
+        boolean terminal = stageId != null && dealMapper.isStageTerminal(stageId);
+        if (terminal) {
+            String closedAt = deal.getClosedAt();
+            if (closedAt == null || closedAt.isBlank()) {
+                deal.setClosedAt(LocalDateTime.now().format(MYSQL_DATETIME));
+            }
+        } else {
+            deal.setClosedAt(null);
+        }
+    }
 
     /**
      * Retrieves all {@code Deal} records.
@@ -108,6 +130,7 @@ public class DealService {
      * @return
      */
     public Deal create(Deal deal) {
+        reconcileClosedAt(deal);
         dealMapper.insert(deal);
         return deal;
     }
@@ -121,6 +144,7 @@ public class DealService {
     public Deal update(int id, Deal deal) {
         if (dealMapper.getDealById(id) == null) throw new ResourceNotFoundException("Deal not found with id: " + id);
         deal.setId(id);
+        reconcileClosedAt(deal);
         dealMapper.update(deal);
         return deal;
     }

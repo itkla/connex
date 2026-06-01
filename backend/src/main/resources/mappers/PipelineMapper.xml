@@ -7,6 +7,8 @@
     <id property="id" column="id"/>
     <result property="name" column="name"/>
     <result property="position" column="position"/>
+    <result property="success" column="is_success"/>
+    <result property="failure" column="is_failure"/>
     <association property="pipeline" javaType="Pipeline">
       <id property="id" column="pipeline_id"/>
     </association>
@@ -29,6 +31,13 @@
     SELECT id, name, created_at, updated_at FROM pipeline WHERE id = #{id}
   </select>
 
+  <select id="search" resultType="Pipeline">
+    SELECT id, name, created_at, updated_at FROM pipeline
+    WHERE name LIKE #{query}
+    ORDER BY name
+    LIMIT 10
+  </select>
+
   <insert id="insertPipeline" useGeneratedKeys="true" keyProperty="id">
     INSERT INTO pipeline (name) VALUES (#{name})
   </insert>
@@ -40,23 +49,24 @@
   <delete id="deletePipeline">DELETE FROM pipeline WHERE id = #{id}</delete>
 
   <select id="getStageById" resultMap="StageResult">
-    SELECT id, name, pipeline_id, position FROM stage WHERE id = #{id}
+    SELECT id, name, pipeline_id, position, is_success, is_failure FROM stage WHERE id = #{id}
   </select>
 
   <select id="getStagesByPipelineId" resultMap="StageResult">
-    SELECT id, name, pipeline_id, position FROM stage
+    SELECT id, name, pipeline_id, position, is_success, is_failure FROM stage
     WHERE pipeline_id = #{pipelineId}
     ORDER BY position
   </select>
 
   <insert id="insertStage" useGeneratedKeys="true" keyProperty="id">
-    INSERT INTO stage (name, pipeline_id, position)
-    VALUES (#{name}, #{pipeline.id}, #{position})
+    INSERT INTO stage (name, pipeline_id, position, is_success, is_failure)
+    VALUES (#{name}, #{pipeline.id}, #{position}, #{success}, #{failure})
   </insert>
 
   <update id="updateStage">
     UPDATE stage
-    SET name = #{name}, pipeline_id = #{pipeline.id}, position = #{position}
+    SET name = #{name}, pipeline_id = #{pipeline.id}, position = #{position},
+        is_success = #{success}, is_failure = #{failure}
     WHERE id = #{id}
   </update>
 

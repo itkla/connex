@@ -3,6 +3,7 @@ package ooo.klae.connex.backend.mappers;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -135,6 +136,26 @@ class PipelineMapperTest extends AbstractMapperTest {
         Stage found = pipelineMapper.getStageById(stage.getId());
         assertEquals("Renamed Stage", found.getName());
         assertEquals(5, found.getPosition());
+    }
+
+    /**
+     * Stages default to non-terminal, and the success/failure flags round-trip through update.
+     */
+    @Test
+    void stageTerminalFlags_defaultFalseAndPersist() {
+        Pipeline pipeline = newPipeline();
+        Stage stage = newStage(pipeline, 0);
+
+        Stage fresh = pipelineMapper.getStageById(stage.getId());
+        assertFalse(fresh.isSuccess());
+        assertFalse(fresh.isFailure());
+
+        stage.setSuccess(true);
+        pipelineMapper.updateStage(stage);
+
+        Stage updated = pipelineMapper.getStageById(stage.getId());
+        assertTrue(updated.isSuccess());
+        assertFalse(updated.isFailure());
     }
 
     /**

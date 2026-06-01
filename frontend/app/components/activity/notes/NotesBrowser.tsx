@@ -2,8 +2,9 @@
 
 import { useCallback, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { useTranslations } from 'next-intl';
+import { useLocale, useTranslations } from 'next-intl';
 import { toast } from 'sonner';
+import { toastError, toastSuccess } from '@/app/lib/toast';
 import { PlusIcon, EllipsisVerticalIcon, PencilIcon, TrashIcon, FunnelIcon } from '@heroicons/react/24/solid';
 import {
     MagnifyingGlassIcon,
@@ -70,6 +71,7 @@ function diffDraft(original: NoteDraft, draft: NoteDraft): boolean {
 export default function NotesBrowser({ notes, persons, deals, users, currentUserId }: Props) {
     const router = useRouter();
     const t = useTranslations('ActivityNotes');
+    const locale = useLocale();
 
     const personById = useMemo(() => {
         const map = new Map<number, Contact>();
@@ -212,9 +214,7 @@ export default function NotesBrowser({ notes, persons, deals, users, currentUser
 
         const invalid = changed.find((n) => !drafts[n.id].content.trim());
         if (invalid) {
-            toast.error(t('toastContentRequired'), {
-                style: { backgroundColor: 'var(--color-destructive)', color: 'white' },
-            });
+            toastError(t('toastContentRequired'));
             return;
         }
 
@@ -232,18 +232,15 @@ export default function NotesBrowser({ notes, persons, deals, users, currentUser
                     return updateNote(n.id, payload);
                 }),
             );
-            toast.success(
+            toastSuccess(
                 changed.length === 1
                     ? t('toastNoteUpdated')
                     : t('toastNotesUpdated', { count: changed.length }),
-                { style: { backgroundColor: 'var(--color-brand)', color: 'white' } },
             );
             setEditSheetOpen(false);
             router.refresh();
         } catch (err) {
-            toast.error(err instanceof Error ? err.message : t('toastFailedSave'), {
-                style: { backgroundColor: 'var(--color-destructive)', color: 'white' },
-            });
+            toastError(err instanceof Error ? err.message : t('toastFailedSave'));
         } finally {
             setIsSaving(false);
         }
@@ -254,19 +251,16 @@ export default function NotesBrowser({ notes, persons, deals, users, currentUser
         setIsDeleting(true);
         try {
             await Promise.all(Array.from(selectedIds).map((id) => deleteNote(Number(id))));
-            toast.success(
+            toastSuccess(
                 selectedIds.size === 1
                     ? t('toastNoteDeleted')
                     : t('toastNotesDeleted', { count: selectedIds.size }),
-                { style: { backgroundColor: 'var(--color-brand)', color: 'white' } },
             );
             setSelectedIds(new Set());
             setDeleteDialogOpen(false);
             router.refresh();
         } catch (err) {
-            toast.error(err instanceof Error ? err.message : t('toastFailedDelete'), {
-                style: { backgroundColor: 'var(--color-destructive)', color: 'white' },
-            });
+            toastError(err instanceof Error ? err.message : t('toastFailedDelete'));
         } finally {
             setIsDeleting(false);
         }
@@ -307,16 +301,16 @@ export default function NotesBrowser({ notes, persons, deals, users, currentUser
                 key: 'createdAt',
                 label: t('columnCreated'),
                 getSortValue: (n) => (n.createdAt ? Date.parse(n.createdAt) : null),
-                render: (n) => formatDate(n.createdAt),
+                render: (n) => formatDate(n.createdAt, locale),
             },
             {
                 key: 'updatedAt',
                 label: t('columnUpdated'),
                 getSortValue: (n) => (n.updatedAt ? Date.parse(n.updatedAt) : null),
-                render: (n) => formatDateTime(n.updatedAt),
+                render: (n) => formatDateTime(n.updatedAt, locale),
             },
         ],
-        [t, personById, dealById, userById],
+        [t, locale, personById, dealById, userById],
     );
 
     const renderRowAvatar = (n: Note) => {

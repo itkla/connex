@@ -1,13 +1,14 @@
 // NOTE: again, not used anymore but keeping it just in case
 
-import { getTranslations } from "next-intl/server";
+import { getLocale, getTranslations } from "next-intl/server";
 
-import { Note } from "@/app/lib/api";
+import { type Note } from "@/app/lib/types";
 import EmptyState from "./EmptyState";
 import { timeOf, formatShortDate } from "@/app/lib/utils";
 
 export default async function NoteList({ notes }: { notes: Note[] }) {
     const t = await getTranslations("MeNoteList");
+    const locale = await getLocale();
 
     if (notes.length === 0) {
         return <EmptyState message={t("empty")} />;
@@ -26,7 +27,7 @@ export default async function NoteList({ notes }: { notes: Note[] }) {
                         </span>
                         {note.createdAt ? (
                             <span className="shrink-0 text-xs text-neutral-500">
-                                {formatShortDate(note.createdAt)}
+                                {formatShortDate(note.createdAt, locale)}
                             </span>
                         ) : null}
                     </div>

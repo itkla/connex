@@ -17,6 +17,7 @@ public interface PersonMapper {
     List<Person> getPersonsByTagId(int tagId);
     List<Person> getPersonsByDealId(int dealId);
     Person getPersonById(int id);
+    List<Person> search(String query);
     int insert(Person person);
     int update(Person person);
     int delete(int id);

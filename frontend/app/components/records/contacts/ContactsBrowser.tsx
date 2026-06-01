@@ -6,20 +6,21 @@ import { useTranslations } from 'next-intl';
 import { Button } from '@/components/ui/button';
 import { ButtonGroup } from '@/components/ui/button-group';
 import { toast } from 'sonner';
+import { toastError, toastSuccess } from '@/app/lib/toast';
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
-import { PlusIcon, FunnelIcon, TrashIcon, PencilIcon, EllipsisVerticalIcon, EyeIcon } from '@heroicons/react/24/solid';
+import { PlusIcon, TrashIcon, PencilIcon, EllipsisVerticalIcon, EyeIcon } from '@heroicons/react/24/solid';
 import { BuildingOffice2Icon, NoSymbolIcon } from '@heroicons/react/24/outline';
 import {
     MagnifyingGlassIcon,
     Squares2X2Icon,
     TableCellsIcon,
-    ChevronDownIcon,
 } from '@heroicons/react/24/outline';
 
 import RecordsRenderView from '@/app/components/records/RecordsRenderView';
+import RecordsFilterMenu from '@/app/components/records/RecordsFilterMenu';
 import DeleteRecordDialog from '@/app/components/records/DeleteRecordDialog';
 import { useRecordsBrowser } from '@/app/hooks/useRecordsBrowser';
-import { type ColumnDef } from '@/app/components/records/types';
+import { type ColumnDef, applyRecordFilters } from '@/app/components/records/types';
 import ContactCard from '@/app/components/records/contacts/ContactCard';
 import ContactAvatar from '@/app/components/records/contacts/ContactAvatar';
 import NewContactDialog from '@/app/components/records/contacts/NewContactDialog';
@@ -57,6 +58,8 @@ export default function ContactsBrowser({ contacts }: { contacts: Contact[] }) {
         setDisplayMode,
         query,
         setQuery,
+        filterState,
+        setFilterState,
         selectedIds,
         setSelectedIds,
         filteredItems: filteredContacts,
@@ -107,16 +110,12 @@ export default function ContactsBrowser({ contacts }: { contacts: Contact[] }) {
                 const imageUrl = await uploadContactPicture(newContact.id, imageFile);
                 await updateContact(newContact.id, { ...newContactPayload, imageUrl });
             }
-            toast.success(t('toastContactCreated'), {
-                style: { backgroundColor: 'var(--color-brand)', color: 'white' },
-            });
+            toastSuccess(t('toastContactCreated'));
             setNewContactDialogOpen(false);
             router.refresh();
         } catch (err) {
             console.error(err);
-            toast.error(t('toastFailedCreate'), {
-                style: { backgroundColor: 'var(--color-destructive)', color: 'white' },
-            });
+            toastError(t('toastFailedCreate'));
         } finally {
             setIsCreating(false);
         }
@@ -167,16 +166,13 @@ export default function ContactsBrowser({ contacts }: { contacts: Contact[] }) {
                     return updateContact(c.id, payload);
                 }),
             );
-            toast.success(
+            toastSuccess(
                 changed.length === 1 ? t('toastContactUpdated') : t('toastContactsUpdated', { count: changed.length }),
-                { style: { backgroundColor: 'var(--color-brand)', color: 'white' } },
             );
             setEditSheetOpen(false);
             router.refresh();
         } catch (err) {
-            toast.error(err instanceof Error ? err.message : t('toastFailedSave'), {
-                style: { backgroundColor: 'var(--color-destructive)', color: 'white' },
-            });
+            toastError(err instanceof Error ? err.message : t('toastFailedSave'));
         } finally {
             setIsSaving(false);
         }
@@ -198,17 +194,14 @@ export default function ContactsBrowser({ contacts }: { contacts: Contact[] }) {
                 imageUrl: c.imageUrl || undefined,
                 companyId: null,
             })));
-            toast.success(
+            toastSuccess(
                 affected.length === 1
                     ? t('toastRemovedFromCompany')
                     : t('toastRemovedNContactsFromCompanies', { count: affected.length }),
-                { style: { backgroundColor: 'var(--color-brand)', color: 'white' } },
             );
             router.refresh();
         } catch (err) {
-            toast.error(err instanceof Error ? err.message : t('toastFailedRemoveFromCompany'), {
-                style: { backgroundColor: 'var(--color-destructive)', color: 'white' },
-            });
+            toastError(err instanceof Error ? err.message : t('toastFailedRemoveFromCompany'));
         } finally {
             setIsClearingCompany(false);
         }
@@ -230,17 +223,14 @@ export default function ContactsBrowser({ contacts }: { contacts: Contact[] }) {
         setIsDeleting(true);
         try {
             await Promise.all(Array.from(selectedIds).map((id) => deleteContact(Number(id))));
-            toast.success(
+            toastSuccess(
                 selectedIds.size === 1 ? t('toastContactDeleted') : t('toastContactsDeleted', { count: selectedIds.size }),
-                { style: { backgroundColor: 'var(--color-brand)', color: 'white' } },
             );
             setSelectedIds(new Set());
             setDeleteDialogOpen(false);
             router.refresh();
         } catch (err) {
-            toast.error(err instanceof Error ? err.message : t('toastFailedDelete'), {
-                style: { backgroundColor: 'var(--color-destructive)', color: 'white' },
-            });
+            toastError(err instanceof Error ? err.message : t('toastFailedDelete'));
         } finally {
             setIsDeleting(false);
         }
@@ -274,8 +264,14 @@ export default function ContactsBrowser({ contacts }: { contacts: Contact[] }) {
             getSortValue: (c) => c.company?.name ?? null,
             render: (c) => c.company?.name,
             copyable: { label: t('copyableCompany'), getValue: (c) => c.company?.name ?? '' },
+            filter: { getValue: (c) => c.company?.name ?? null, emptyLabel: t('filterNoCompany') },
         },
-        { key: 'title', label: t('columnTitle'), getSortValue: (c) => c.title ?? null },
+        {
+            key: 'title',
+            label: t('columnTitle'),
+            getSortValue: (c) => c.title ?? null,
+            filter: { getValue: (c) => c.title ?? null },
+        },
         {
             key: 'createdAt',
             label: t('columnCreated'),
@@ -290,6 +286,11 @@ export default function ContactsBrowser({ contacts }: { contacts: Contact[] }) {
         },
     ], [t]);
 
+    const visibleContacts = useMemo(
+        () => applyRecordFilters(filteredContacts, columns, filterState),
+        [filteredContacts, columns, filterState],
+    );
+
     return (
         <div className="space-y-6">
             <div className="flex items-center justify-between">
@@ -301,13 +302,12 @@ export default function ContactsBrowser({ contacts }: { contacts: Contact[] }) {
             </div>
 
             <div className="flex items-center gap-4">
-                <button
-                    type="button"
-                    className="flex items-center gap-2 rounded-full bg-neutral-100 px-4 py-2 text-sm text-neutral-700 ring-1 ring-black/5 transition hover:bg-neutral-200"
-                >
-                    <FunnelIcon className="size-4 text-neutral-500" />
-                    <ChevronDownIcon className="size-4 text-neutral-500" />
-                </button>
+                <RecordsFilterMenu<Contact>
+                    columns={columns}
+                    items={filteredContacts}
+                    filterState={filterState}
+                    onChange={setFilterState}
+                />
                 <div
                     role="group"
                     aria-label={t('displayModeAria')}
@@ -401,7 +401,7 @@ export default function ContactsBrowser({ contacts }: { contacts: Contact[] }) {
             </div>
 
             <RecordsRenderView<Contact>
-                data={filteredContacts}
+                data={visibleContacts}
                 columns={columns}
                 renderCard={(item, { onQuickEdit, onDelete }) => (
                     <ContactCard

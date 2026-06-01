@@ -2,7 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useEffect, useRef } from "react";
-import { toast } from "sonner";
+import { toastError, toastSuccess } from "@/app/lib/toast";
 import { LoaderCircle } from "lucide-react";
 import { useTranslations } from "next-intl";
 
@@ -23,20 +23,10 @@ export default function LogoutPage() {
         async function signOut() {
             try {
                 await logout();
-                toast.success(t("successMessage"), {
-                    style: {
-                        backgroundColor: "#73d200",
-                        color: "white",
-                    }
-                });
+                toastSuccess(t("successMessage"));
             } catch (err) {
                 const message = err instanceof Error ? err.message : t("errorFallback");
-                toast.error(message, {
-                    style: {
-                        backgroundColor: "--color-destructive",
-                        color: "--color-destructive-foreground",
-                    }
-                });
+                toastError(message);
             } finally {
                 router.replace("/");
                 router.refresh();

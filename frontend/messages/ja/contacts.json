@@ -46,6 +46,7 @@
     "copyableEmail": "メール",
     "copyablePhone": "電話",
     "copyableCompany": "会社",
+    "filterNoCompany": "会社なし",
     "entityLabel": "contact",
     "toastContactCreated": "コンタクトを作成しました",
     "toastFailedCreate": "コンタクトを作成できませんでした",
@@ -141,6 +142,11 @@
     "description": "{contactName} とのやり取りを記録します。",
     "type": "種別",
     "dateAndTime": "日時",
+    "deal": "案件",
+    "assignCompanyToLinkDealsPlaceholder": "案件を紐付けるには会社を設定してください",
+    "loadingDealsPlaceholder": "案件を読み込んでいます...",
+    "noDealPlaceholder": "案件なし",
+    "noDeal": "案件なし",
     "subject": "件名",
     "subjectPlaceholder": "顔合わせ",
     "notes": "メモ",
@@ -154,7 +160,8 @@
     "typeOther": "その他",
     "toastSubjectRequired": "件名は必須です",
     "toastActivityLogged": "アクティビティを記録しました",
-    "toastFailedLog": "アクティビティを記録できませんでした"
+    "toastFailedLog": "アクティビティを記録できませんでした",
+    "toastFailedLoadDeals": "案件を読み込めませんでした"
   },
   "ContactsNewContactDialog": {
     "dialogTitle": "新規コンタクト",

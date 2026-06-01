@@ -39,6 +39,7 @@
     "columnAddress": "Address",
     "columnCreated": "Created",
     "columnUpdated": "Updated",
+    "filterNoIndustry": "No industry",
     "entityLabel": "company",
     "toastMetricsLoadFailed": "Failed to load company metrics",
     "toastCompanyCreated": "Company created",

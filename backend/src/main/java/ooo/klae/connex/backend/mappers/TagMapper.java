@@ -13,6 +13,7 @@ public interface TagMapper {
     List<Tag> getAllTags();
     Tag getTagById(int id);
     Tag getTagByName(String name);
+    List<Tag> search(String query);
     int insert(Tag tag);
     int update(Tag tag);
     int delete(int id);

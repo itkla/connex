@@ -27,6 +27,14 @@
     FROM app_user WHERE email = #{email}
   </select>
 
+  <select id="search" resultType="User">
+    SELECT <include refid="userColumns"/>
+    FROM app_user
+    WHERE username LIKE #{query} OR display_name LIKE #{query} OR email LIKE #{query}
+    ORDER BY username
+    LIMIT 10
+  </select>
+
   <insert id="insert" useGeneratedKeys="true" keyProperty="id">
     INSERT INTO app_user (username, display_name, email, password_hash, profile_picture_url)
     VALUES (#{username}, #{displayName}, #{email}, #{passwordHash}, #{profilePictureUrl})

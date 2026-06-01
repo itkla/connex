@@ -2,8 +2,8 @@
 
 import { useEffect, useMemo, useState, type ComponentType } from 'react';
 import { useRouter } from 'next/navigation';
-import { useTranslations } from 'next-intl';
-import { toast } from 'sonner';
+import { useLocale, useTranslations } from 'next-intl';
+import { toastError, toastSuccess } from '@/app/lib/toast';
 import Link from 'next/link';
 import {
     MagnifyingGlassIcon,
@@ -104,7 +104,7 @@ function isInQueue(queue: Queue, task: Task, currentUserId: number): boolean {
     }
 }
 
-function formatDueDate(dueDate: string | undefined, t: (key: string) => string): string {
+function formatDueDate(dueDate: string | undefined, t: (key: string) => string, locale: string): string {
     if (!dueDate) return '';
     const ts = parseMysqlDateTime(dueDate);
     if (Number.isNaN(ts)) return '';
@@ -116,12 +116,13 @@ function formatDueDate(dueDate: string | undefined, t: (key: string) => string):
     if (diffDays === 0) return t('dueToday');
     if (diffDays === 1) return t('dueTomorrow');
     if (diffDays === -1) return t('dueYesterday');
-    return new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric' }).format(date);
+    return new Intl.DateTimeFormat(locale, { month: 'short', day: 'numeric' }).format(date);
 }
 
 export default function TasksBrowser({ tasks, persons, deals, users, currentUserId }: Props) {
     const router = useRouter();
     const t = useTranslations('ActivityTasks');
+    const locale = useLocale();
 
     const personById = useMemo(() => {
         const map = new Map<number, Contact>();
@@ -218,12 +219,18 @@ export default function TasksBrowser({ tasks, persons, deals, users, currentUser
         if (pendingToggle.has(task.id)) return;
         setPendingToggle((prev) => new Set(prev).add(task.id));
         try {
-            await updateTask(task.id, { completed: next });
+            await updateTask(task.id, {
+                description: task.description,
+                dueDate: task.dueDate,
+                assignedToId: task.assignedToId,
+                personId: task.personId ?? undefined,
+                dealId: task.dealId ?? undefined,
+                completed: next,
+            });
+            toastSuccess(next ? t('taskMarkedAsCompleteSuccess') : t('taskMarkedAsIncompleteSuccess'));
             router.refresh();
         } catch (err) {
-            toast.error(err instanceof Error ? err.message : t('toastFailedUpdate'), {
-                style: { backgroundColor: 'var(--color-destructive)', color: 'white' },
-            });
+            toastError(err instanceof Error ? err.message : t('toastFailedUpdate'));
         } finally {
             setPendingToggle((prev) => {
                 const n = new Set(prev);
@@ -318,7 +325,7 @@ export default function TasksBrowser({ tasks, persons, deals, users, currentUser
                                             onOpen={() => setEditingTask(task)}
                                             pending={pendingToggle.has(task.id)}
                                             ariaCompleteLabel={t('ariaCompleteTask')}
-                                            formatDue={(d) => formatDueDate(d, t)}
+                                            formatDue={(d) => formatDueDate(d, t, locale)}
                                         />
                                     ))}
                                 </ul>
@@ -354,7 +361,7 @@ export default function TasksBrowser({ tasks, persons, deals, users, currentUser
                                                         onOpen={() => setEditingTask(task)}
                                                         pending={pendingToggle.has(task.id)}
                                                         ariaCompleteLabel={t('ariaCompleteTask')}
-                                                        formatDue={(d) => formatDueDate(d, t)}
+                                                        formatDue={(d) => formatDueDate(d, t, locale)}
                                                     />
                                                 ))}
                                             </ul>

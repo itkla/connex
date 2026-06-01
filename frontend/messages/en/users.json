@@ -1,0 +1,53 @@
+{
+  "UsersBrowser": {
+    "heading": "Users",
+    "searchPlaceholder": "Search users",
+    "displayModeAria": "Display mode",
+    "gridViewAria": "Grid view",
+    "tableViewAria": "Table view",
+    "selectedCount": "{count} selected",
+    "view": "View",
+    "columnName": "Name",
+    "columnUsername": "Username",
+    "columnEmail": "Email",
+    "columnLastLogin": "Last login",
+    "columnMemberSince": "Member since",
+    "neverLoggedIn": "Never",
+    "entityLabel": "user"
+  },
+  "UsersPage": {
+    "allUsers": "All Users",
+    "profile": "Profile",
+    "username": "Username",
+    "email": "Email",
+    "lastLogin": "Last login",
+    "memberSince": "Member since",
+    "updated": "Updated",
+    "neverLoggedIn": "Never logged in",
+    "theirActivity": "Their Activity",
+    "activities": "Activities",
+    "tasks": "Tasks",
+    "notes": "Notes",
+    "openCount": "{count} open",
+    "notesCount": "{count} notes",
+    "timeline": "Timeline"
+  },
+  "UsersNewUserDialog": {
+    "new": "New",
+    "newAria": "Add user",
+    "dialogTitle": "New user",
+    "description": "Create an account for a team member. They can sign in with the username and password you set.",
+    "displayName": "Display name",
+    "displayNamePlaceholder": "Jane Doe",
+    "username": "Username",
+    "usernamePlaceholder": "janedoe",
+    "email": "Email",
+    "emailPlaceholder": "jane@example.com",
+    "password": "Password",
+    "passwordPlaceholder": "At least 8 characters",
+    "cancel": "Cancel",
+    "create": "Create",
+    "toastCreated": "User created",
+    "toastFailed": "Failed to create user"
+  }
+}

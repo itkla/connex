@@ -78,6 +78,16 @@
     WHERE p.id = #{id}
   </select>
 
+  <select id="search" resultMap="PersonResult">
+    SELECT <include refid="personColumns"/>, <include refid="companyJoinColumns"/>
+    FROM person p
+    <include refid="companyJoin"/>
+    WHERE p.name LIKE #{query} OR p.email LIKE #{query} OR p.phone LIKE #{query} OR p.title LIKE #{query}
+    OR c.name LIKE #{query} OR c.website LIKE #{query} OR c.industry LIKE #{query} OR c.phone LIKE #{query} OR c.address LIKE #{query}
+    ORDER BY p.name
+    LIMIT 10
+  </select>
+
   <insert id="insert" useGeneratedKeys="true" keyProperty="id">
     INSERT INTO person (name, email, phone, company_id, title, image_url)
     VALUES (
