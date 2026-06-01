@@ -15,6 +15,7 @@ public interface ActivityMapper {
     List<Activity> getActivitiesByDealId(int dealId);
     List<Activity> getActivitiesByCreatedById(int createdById);
     Activity getActivityById(int id);
+    List<Activity> search(String query);
     int insert(Activity activity);
     int update(Activity activity);
     int delete(int id);

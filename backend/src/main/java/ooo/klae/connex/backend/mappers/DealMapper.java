@@ -20,6 +20,7 @@ public interface DealMapper {
     List<Deal> getDealsByPersonId(int personId);
     List<Deal> getDealsByTagId(int tagId);
     Deal getDealById(int id);
+    List<Deal> search(String query);
     int insert(Deal deal);
     int update(Deal deal);
     int delete(int id);

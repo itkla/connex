@@ -23,6 +23,10 @@
     id, content, author_id, person_id, deal_id, created_at, updated_at
   </sql>
 
+  <sql id="qualifiedNoteColumns">
+    n.id, n.content, n.author_id, n.person_id, n.deal_id, n.created_at, n.updated_at
+  </sql>
+
   <select id="getAllNotes" resultMap="NoteResult">
     SELECT <include refid="noteColumns"/> FROM note ORDER BY created_at DESC
   </select>
@@ -44,6 +48,21 @@
 
   <select id="getNoteById" resultMap="NoteResult">
     SELECT <include refid="noteColumns"/> FROM note WHERE id = #{id}
+  </select>
+
+  <select id="search" resultMap="NoteResult">
+    SELECT <include refid="qualifiedNoteColumns"/>
+    FROM note n
+    LEFT JOIN app_user u ON u.id = n.author_id
+    LEFT JOIN person   p ON p.id = n.person_id
+    LEFT JOIN deal     d ON d.id = n.deal_id
+    WHERE n.content LIKE #{query}
+    OR u.display_name LIKE #{query}
+    OR u.username LIKE #{query}
+    OR p.name LIKE #{query}
+    OR d.name LIKE #{query}
+    ORDER BY n.created_at DESC
+    LIMIT 10
   </select>
 
   <insert id="insert" useGeneratedKeys="true" keyProperty="id">

@@ -572,3 +572,36 @@ export function getTags(init: RequestInit = {}) {
 export function getTagsFromCookie(cookie: string | null) {
     return safeWithCookie<Types.Tag>((init) => getTags(init), cookie);
 }
+
+/*
+* == Global search
+*/
+
+/**
+ * Fuzzy search across every entity type.
+ * @param query - The query to search for
+ * @param init - The request initialization options
+ * @returns A promise that resolves to the search results
+ */
+export function search(query: string, init: RequestInit = {}) {
+    return getJson<Types.SearchResults>(`/api/search?query=${encodeURIComponent(query)}`, init);
+}
+
+const EMPTY_SEARCH_RESULTS: Types.SearchResults = {
+    companies: [], people: [], deals: [], pipelines: [], tags: [], activities: [], notes: [], tasks: [], users: [],
+};
+
+/**
+ * Server-side search using the forwarded session cookie. 
+ * @param cookie - The session cookie
+ * @param query - The query to search for
+ * @returns A promise that resolves to the search results
+ */
+export async function searchFromCookie(cookie: string | null, query: string): Promise<Types.SearchResults> {
+    if (!cookie || !query.trim()) return EMPTY_SEARCH_RESULTS;
+    try {
+        return await search(query, { headers: { cookie }, cache: "no-store" });
+    } catch {
+        return EMPTY_SEARCH_RESULTS;
+    }
+}

@@ -15,6 +15,7 @@ public interface NoteMapper {
     List<Note> getNotesByDealId(int dealId);
     List<Note> getNotesByAuthorId(int authorId);
     Note getNoteById(int id);
+    List<Note> search(String query);
     int insert(Note note);
     int update(Note note);
     int delete(int id);

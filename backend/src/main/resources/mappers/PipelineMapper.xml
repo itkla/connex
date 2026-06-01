@@ -31,6 +31,13 @@
     SELECT id, name, created_at, updated_at FROM pipeline WHERE id = #{id}
   </select>
 
+  <select id="search" resultType="Pipeline">
+    SELECT id, name, created_at, updated_at FROM pipeline
+    WHERE name LIKE #{query}
+    ORDER BY name
+    LIMIT 10
+  </select>
+
   <insert id="insertPipeline" useGeneratedKeys="true" keyProperty="id">
     INSERT INTO pipeline (name) VALUES (#{name})
   </insert>

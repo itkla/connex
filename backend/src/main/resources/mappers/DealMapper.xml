@@ -87,6 +87,17 @@
     SELECT <include refid="dealColumns"/> FROM deal WHERE id = #{id}
   </select>
 
+  <select id="search" resultMap="DealResult">
+    SELECT <include refid="qualifiedDealColumns"/>
+    FROM deal d
+    LEFT JOIN company c ON c.id = d.company_id
+    WHERE d.name LIKE #{query}
+    OR d.currency LIKE #{query}
+    OR c.name LIKE #{query}
+    ORDER BY d.name
+    LIMIT 10
+  </select>
+
   <insert id="insert" useGeneratedKeys="true" keyProperty="id">
     INSERT INTO deal (name, value, actual_value, currency, pipeline_id, stage_id, company_id,
                       expected_close_date, closed_at)

@@ -47,6 +47,13 @@
     SELECT <include refid="activityColumns"/> FROM activity WHERE id = #{id}
   </select>
 
+  <select id="search" resultMap="ActivityResult">
+    SELECT <include refid="activityColumns"/> FROM activity
+    WHERE subject LIKE #{query} OR notes LIKE #{query}
+    ORDER BY timestamp DESC
+    LIMIT 10
+  </select>
+
   <insert id="insert" useGeneratedKeys="true" keyProperty="id">
     INSERT INTO activity (type, subject, notes, person_id, deal_id, created_by_id, timestamp)
     VALUES (

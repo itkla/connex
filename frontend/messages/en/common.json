@@ -40,7 +40,18 @@
   },
   "CommonSearchBar": {
     "placeholder": "Search for anything",
-    "search": "Search"
+    "search": "Search",
+    "searching": "Searching...",
+    "noResults": "No results for “{query}”",
+    "resultsHeading": "Results for “{query}”",
+    "groupCompanies": "Companies",
+    "groupPeople": "Contacts",
+    "groupDeals": "Deals",
+    "groupPipelines": "Pipelines",
+    "groupTags": "Tags",
+    "groupActivities": "Activities",
+    "groupNotes": "Notes",
+    "groupTasks": "Tasks"
   },
   "CommonProfileCard": {
     "defaultName": "Profile Name",

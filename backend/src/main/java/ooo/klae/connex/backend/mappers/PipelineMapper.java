@@ -13,6 +13,7 @@ import java.util.List;
 public interface PipelineMapper {
     List<Pipeline> getAllPipelines();
     Pipeline getPipelineById(int id);
+    List<Pipeline> search(String query);
     int insertPipeline(Pipeline pipeline);
     int updatePipeline(Pipeline pipeline);
     int deletePipeline(int id);

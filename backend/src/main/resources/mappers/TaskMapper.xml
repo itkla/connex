@@ -52,6 +52,13 @@
     SELECT <include refid="taskColumns"/> FROM task WHERE id = #{id}
   </select>
 
+  <select id="search" resultMap="TaskResult">
+    SELECT <include refid="taskColumns"/> FROM task
+    WHERE description LIKE #{query}
+    ORDER BY due_date IS NULL, due_date
+    LIMIT 10
+  </select>
+
   <insert id="insert" useGeneratedKeys="true" keyProperty="id">
     INSERT INTO task (description, completed, due_date, assigned_to_id, person_id, deal_id)
     VALUES (

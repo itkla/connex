@@ -348,3 +348,15 @@ export type UpdateTaskPayload = {
     personId?: number;
     dealId?: number;
 };
+
+export type SearchResults = {
+    companies: Company[];
+    people: Contact[];
+    deals: Deal[];
+    pipelines: Pipeline[];
+    tags: Tag[];
+    activities: Activity[];
+    notes: Note[];
+    tasks: Task[];
+    users: User[];
+};
