@@ -11,6 +11,7 @@ import {
 import { Pipeline, Stage, type Deal } from '@/app/lib/types';
 import { getPipelines, getStagesByPipelineId } from '@/app/lib/api';
 import { formatCompactCurrency, parseMysqlDateTime } from '@/app/lib/utils';
+import { classifyStage, type StageClass } from './dealOutcome';
 
 const PIPELINE_PALETTE = [
     '#0ea5e9', // sky-500
@@ -85,6 +86,16 @@ export default function StageRatio({ deals }: { deals: Deal[] }) {
         return map;
     }, [pipelines]);
 
+    const stageClassById = useMemo(() => {
+        const map = new Map<number, StageClass>();
+        Object.values(stagesByPipeline).forEach((stages) =>
+            stages.forEach((s) => map.set(s.id, classifyStage(s.name))),
+        );
+        return map;
+    }, [stagesByPipeline]);
+    
+    const closedValue = (d: Deal, won: boolean) => (won ? d.actualValue : d.value) ?? 0;
+
     const pipelineData = useMemo<PipelineDatum[]>(
         () =>
             pipelines.flatMap((pipeline) => {
@@ -95,7 +106,14 @@ export default function StageRatio({ deals }: { deals: Deal[] }) {
                     const matches = pipelineDeals.filter((d) => isClosed(d) !== open);
                     return {
                         value: matches.length,
-                        total: matches.reduce((sum, d) => sum + ((open ? d.value : d.actualValue) ?? 0), 0),
+                        total: matches.reduce(
+                            (sum, d) =>
+                                sum +
+                                (open
+                                    ? (d.value ?? 0)
+                                    : closedValue(d, d.stage != null && stageClassById.get(d.stage) === 'won')),
+                            0,
+                        ),
                     };
                 };
                 const openBucket = bucket(true);
@@ -105,7 +123,7 @@ export default function StageRatio({ deals }: { deals: Deal[] }) {
                     { name: pipeline.name, status: 'closed' as const, ...closedBucket, currency, fill: fadeColor(base) },
                 ];
             }),
-        [deals, pipelines, pipelineColorById],
+        [deals, pipelines, pipelineColorById, stageClassById],
     );
 
     const stageData = useMemo<StageDatum[]>(
@@ -115,6 +133,7 @@ export default function StageRatio({ deals }: { deals: Deal[] }) {
                 return (['open', 'closed'] as const).flatMap((status) =>
                     stages.map((stage, i) => {
                         const baseColor = colorForStage(stage.name, i, stages.length);
+                        const won = classifyStage(stage.name) === 'won';
                         const matches = deals.filter(
                             (d) => d.stage === stage.id && (status === 'closed' ? isClosed(d) : !isClosed(d)),
                         );
@@ -123,7 +142,10 @@ export default function StageRatio({ deals }: { deals: Deal[] }) {
                             pipelineName: pipeline.name,
                             status,
                             value: matches.length,
-                            total: matches.reduce((sum, d) => sum + ((status === 'closed' ? d.actualValue : d.value) ?? 0), 0),
+                            total: matches.reduce(
+                                (sum, d) => sum + (status === 'closed' ? closedValue(d, won) : (d.value ?? 0)),
+                                0,
+                            ),
                             currency: matches[0]?.currency || 'USD',
                             fill: status === 'closed' ? fadeColor(baseColor, 40) : baseColor,
                         };
