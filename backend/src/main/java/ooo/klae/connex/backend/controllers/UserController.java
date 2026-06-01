@@ -11,8 +11,10 @@ import org.springframework.web.bind.annotation.RestController;
 
 import ooo.klae.connex.backend.dto.ActivityDto;
 import ooo.klae.connex.backend.dto.NoteDto;
+import ooo.klae.connex.backend.dto.RegisterDto;
 import ooo.klae.connex.backend.dto.TaskDto;
 import ooo.klae.connex.backend.dto.UserDto;
+import ooo.klae.connex.backend.services.AuthService;
 import ooo.klae.connex.backend.services.UserService;
 
 import java.util.List;
@@ -30,6 +32,7 @@ import lombok.RequiredArgsConstructor;
 @RequiredArgsConstructor
 public class UserController {
     private final UserService userService;
+    private final AuthService authService;
 
     /**
      * GET endpoint to retrieve all users. This will return *all* users, not necessarily just the current user
@@ -56,8 +59,8 @@ public class UserController {
      * @return
      */
     @PostMapping
-    public UserDto createUser(@Valid @RequestBody UserDto dto) {
-        return UserDto.from(userService.create(dto.toBean()));
+    public UserDto createUser(@Valid @RequestBody RegisterDto dto) {
+        return UserDto.from(authService.register(dto));
     }
 
     /**
