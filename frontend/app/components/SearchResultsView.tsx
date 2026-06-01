@@ -13,6 +13,7 @@ import {
 } from "@heroicons/react/24/outline";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import CompanyAvatar from "@/app/components/records/companies/CompanyAvatar";
+import UserAvatar from "@/app/components/records/users/UserAvatar";
 import type { SearchResults } from "@/app/lib/types";
 
 type IconType = React.ComponentType<{ className?: string }>;
@@ -43,7 +44,6 @@ export default function SearchResultsView({
 }) {
     const t = useTranslations("CommonSearchBar");
 
-    // mirrors the dropdown's grouping (see SearchBar.tsx), rendered as a fuller
     const groups: Group[] = [];
     const add = <T,>(
         key: string,
@@ -54,6 +54,14 @@ export default function SearchResultsView({
         if (items?.length) groups.push({ key, heading, rows: items.map(toRow) });
     };
 
+    // TODO: reorder the groups based on relevancy, rather than hardcoded order
+    add("users", t("groupUsers"), results.users, (u) => ({
+        key: `user-${u.id}`,
+        href: `/users/${u.id}`,
+        leading: <UserAvatar user={u} type="small" />,
+        label: u.displayName,
+        subtitle: u.email || `@${u.username}`,
+    }));
     add("companies", t("groupCompanies"), results.companies, (c) => ({
         key: `company-${c.id}`,
         href: `/records/companies/${c.id}`,

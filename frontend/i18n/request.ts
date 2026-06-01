@@ -21,6 +21,7 @@ const namespaces = [
     "contacts",
     "deals",
     "pipelines",
+    "users",
     "map",
     "calendar",
 ] as const;

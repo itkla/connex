@@ -16,6 +16,7 @@
     "sectionRecords": "レコード",
     "sectionActivity": "アクティビティ",
     "sectionLibrary": "ライブラリ",
+    "sectionTeam": "チーム",
     "navDashboard": "ダッシュボード",
     "navCalendar": "カレンダー",
     "navMap": "マップ",
@@ -30,6 +31,7 @@
     "navTasks": "タスク",
     "navNotes": "メモ",
     "navTags": "タグ",
+    "navUsers": "ユーザー",
     "profile": "プロフィール",
     "logOut": "ログアウト",
     "profilePictureAlt": "{name}さんのプロフィール画像"
@@ -51,7 +53,8 @@
     "groupTags": "タグ",
     "groupActivities": "アクティビティ",
     "groupNotes": "メモ",
-    "groupTasks": "タスク"
+    "groupTasks": "タスク",
+    "groupUsers": "ユーザー"
   },
   "CommonProfileCard": {
     "defaultName": "プロフィール名",

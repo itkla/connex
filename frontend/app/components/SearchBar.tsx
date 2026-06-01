@@ -11,11 +11,14 @@ import {
     TagIcon,
     BoltIcon,
     DocumentTextIcon,
-    CheckCircleIcon,
+    CheckCircleIcon
 } from "@heroicons/react/24/outline";
+import { Loader2Icon } from "lucide-react";
+
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import CompanyAvatar from "@/app/components/records/companies/CompanyAvatar";
+import UserAvatar from "@/app/components/records/users/UserAvatar";
 import { search as searchApi } from "@/app/lib/api";
 import type { SearchResults } from "@/app/lib/types";
 import { cn } from "@/lib/utils";
@@ -71,6 +74,7 @@ export default function SearchBar() {
     }, [urlQuery]);
 
     useEffect(() => {
+        /* eslint-disable react-hooks/set-state-in-effect */
         if (!open || trimmed.length < MIN_QUERY_LENGTH) {
             setResults(null);
             setLoading(false);
@@ -132,6 +136,13 @@ export default function SearchBar() {
             });
         };
 
+        addGroup("users", t("groupUsers"), results.users, (u) => ({
+            key: `user-${u.id}`,
+            href: `/users/${u.id}`,
+            leading: <UserAvatar user={u} type="small" />,
+            label: u.displayName,
+            subtitle: u.email || `@${u.username}`,
+        }));
         addGroup("companies", t("groupCompanies"), results.companies, (c) => ({
             key: `company-${c.id}`,
             href: `/records/companies/${c.id}`,
@@ -292,7 +303,8 @@ export default function SearchBar() {
                     role="listbox"
                 >
                     {loading && !hasResults && (
-                        <p className="px-3 py-2 text-sm text-neutral-500">{t("searching")}</p>
+                        // <p className="px-3 py-2 text-sm text-neutral-500">{t("searching")}</p>
+                        <Loader2Icon className="size-5 text-neutral-500 animate-spin flex justify-center items-center" />
                     )}
 
                     {!loading && !hasResults && (

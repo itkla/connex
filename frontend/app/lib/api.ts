@@ -194,6 +194,10 @@ export function updateUser(id: number, payload: Types.UpdateUserPayload) {
     return putJson<Types.User>(`/api/users/${id}`, payload);
 }
 
+export function createUser(payload: Types.RegisterPayload) {
+    return postJson<Types.User>(`/api/users`, payload);
+}
+
 export function getUserById(id: number, init: RequestInit = {}) {
     return getJson<Types.User>(`/api/users/${id}`, init);
 }

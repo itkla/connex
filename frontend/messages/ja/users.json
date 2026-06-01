@@ -1,0 +1,53 @@
+{
+  "UsersBrowser": {
+    "heading": "ユーザー",
+    "searchPlaceholder": "ユーザーを検索",
+    "displayModeAria": "表示モード",
+    "gridViewAria": "グリッド表示",
+    "tableViewAria": "テーブル表示",
+    "selectedCount": "{count}件選択中",
+    "view": "表示",
+    "columnName": "名前",
+    "columnUsername": "ユーザー名",
+    "columnEmail": "メール",
+    "columnLastLogin": "最終ログイン",
+    "columnMemberSince": "登録日",
+    "neverLoggedIn": "なし",
+    "entityLabel": "ユーザー"
+  },
+  "UsersPage": {
+    "allUsers": "すべてのユーザー",
+    "profile": "プロフィール",
+    "username": "ユーザー名",
+    "email": "メール",
+    "lastLogin": "最終ログイン",
+    "memberSince": "登録日",
+    "updated": "更新日",
+    "neverLoggedIn": "ログイン履歴なし",
+    "theirActivity": "アクティビティ",
+    "activities": "アクティビティ",
+    "tasks": "タスク",
+    "notes": "メモ",
+    "openCount": "未完了{count}件",
+    "notesCount": "メモ{count}件",
+    "timeline": "タイムライン"
+  },
+  "UsersNewUserDialog": {
+    "new": "新規",
+    "newAria": "ユーザーを追加",
+    "dialogTitle": "新規ユーザー",
+    "description": "チームメンバーのアカウントを作成します。設定したユーザー名とパスワードでログインできます。",
+    "displayName": "表示名",
+    "displayNamePlaceholder": "山田 太郎",
+    "username": "ユーザー名",
+    "usernamePlaceholder": "taro",
+    "email": "メール",
+    "emailPlaceholder": "taro@example.com",
+    "password": "パスワード",
+    "passwordPlaceholder": "8文字以上",
+    "cancel": "キャンセル",
+    "create": "作成",
+    "toastCreated": "ユーザーを作成しました",
+    "toastFailed": "ユーザーの作成に失敗しました"
+  }
+}

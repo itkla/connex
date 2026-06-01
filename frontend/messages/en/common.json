@@ -16,6 +16,7 @@
     "sectionRecords": "Records",
     "sectionActivity": "Activity",
     "sectionLibrary": "Library",
+    "sectionTeam": "Team",
     "navDashboard": "Dashboard",
     "navCalendar": "Calendar",
     "navMap": "Map",
@@ -30,6 +31,7 @@
     "navTasks": "Tasks",
     "navNotes": "Notes",
     "navTags": "Tags",
+    "navUsers": "Users",
     "profile": "Profile",
     "logOut": "Log out",
     "profilePictureAlt": "{name}'s profile picture"
@@ -51,7 +53,8 @@
     "groupTags": "Tags",
     "groupActivities": "Activities",
     "groupNotes": "Notes",
-    "groupTasks": "Tasks"
+    "groupTasks": "Tasks",
+    "groupUsers": "Users"
   },
   "CommonProfileCard": {
     "defaultName": "Profile Name",
