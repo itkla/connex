@@ -222,7 +222,7 @@ export default function QuickEditDealSheet({
                                         </div>
 
                                         <div className="grid gap-1.5">
-                                            <Label htmlFor={`deal-close-${d.id}`}>{t('closedQuestion')}</Label>
+                                            <Label htmlFor={`deal-closed-${d.id}`}>{t('closedQuestion')}</Label>
                                             {/* <input
                                                 id={`deal-closed-${d.id}`}
                                                 type="checkbox"

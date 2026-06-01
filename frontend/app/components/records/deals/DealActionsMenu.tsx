@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { toast } from 'sonner';
 import { toastError, toastSuccess } from '@/app/lib/toast';
 import { useTranslations } from 'next-intl';
 import {
@@ -13,6 +14,7 @@ import {
     ChatBubbleLeftRightIcon,
     DocumentTextIcon,
     CheckCircleIcon,
+    ArrowUturnLeftIcon,
     TrashIcon,
 } from '@heroicons/react/24/outline';
 
@@ -31,8 +33,14 @@ import NewDealActivityDialog from '@/app/components/records/deals/NewDealActivit
 import NewDealTaskDialog from '@/app/components/records/deals/NewDealTaskDialog';
 import NoteDialog from '@/app/components/activity/notes/NoteDialog';
 
-import { deleteDeal } from '@/app/lib/api';
+import { deleteDeal, updateDeal } from '@/app/lib/api';
+import { toMysqlDateTime, parseMysqlDateTime } from '@/app/lib/utils';
 import { type Company, type Contact, type Deal, type Pipeline, type Stage } from '@/app/lib/types';
+
+function isClosed(deal: Deal): boolean {
+    const t = parseMysqlDateTime(deal.closedAt);
+    return Number.isFinite(t) && t <= Date.now();
+}
 
 export default function DealActionsMenu({
     deal,
@@ -59,6 +67,36 @@ export default function DealActionsMenu({
     const [noteOpen, setNoteOpen] = useState(false);
     const [deleteOpen, setDeleteOpen] = useState(false);
     const [isDeleting, setIsDeleting] = useState(false);
+    const [isUpdatingStatus, setIsUpdatingStatus] = useState(false);
+
+    const closed = isClosed(deal);
+
+    const toggleDealStatus = async (close: boolean) => {
+        if (deal.pipeline == null || deal.stage == null) {
+            toast.error(t('cannotChangeStatus'));
+            return;
+        }
+        setIsUpdatingStatus(true);
+        try {
+            await updateDeal(deal.id, {
+                name: deal.name,
+                value: deal.value,
+                actualValue: deal.actualValue ?? 0,
+                currency: deal.currency,
+                pipeline: deal.pipeline,
+                stage: deal.stage,
+                company: deal.company ?? null,
+                expectedCloseDate: deal.expectedCloseDate,
+                closedAt: close ? toMysqlDateTime(new Date().toISOString()) : null,
+            });
+            toastSuccess(close ? t('dealClosed') : t('dealReopened'));
+            router.refresh();
+        } catch (err) {
+            toastError(err instanceof Error ? err.message : t('failedToUpdateStatus'));
+        } finally {
+            setIsUpdatingStatus(false);
+        }
+    };
 
     const confirmDelete = async () => {
         setIsDeleting(true);
@@ -139,6 +177,20 @@ export default function DealActionsMenu({
                         </Button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end" className="w-48">
+                        <DropdownMenuItem
+                            disabled={isUpdatingStatus}
+                            onSelect={(e) => {
+                                e.preventDefault();
+                                toggleDealStatus(!closed);
+                            }}
+                        >
+                            {closed ? (
+                                <ArrowUturnLeftIcon className="size-4" />
+                            ) : (
+                                <CheckCircleIcon className="size-4" />
+                            )}
+                            <span>{closed ? t('markOpen') : t('markClosed')}</span>
+                        </DropdownMenuItem>
                         <DropdownMenuItem
                             variant="destructive"
                             onSelect={(e) => {

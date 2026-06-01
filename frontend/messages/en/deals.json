@@ -45,10 +45,16 @@
     "addActivity": "Add activity",
     "addNote": "Add note",
     "addTask": "Add task",
+    "markClosed": "Mark closed",
+    "markOpen": "Mark open",
     "delete": "Delete",
     "entityLabel": "deal",
     "dealDeleted": "Deal deleted",
-    "failedToDelete": "Failed to delete"
+    "failedToDelete": "Failed to delete",
+    "cannotChangeStatus": "Cannot change status: deal is missing pipeline or stage",
+    "dealClosed": "Deal closed",
+    "dealReopened": "Deal reopened",
+    "failedToUpdateStatus": "Failed to update status"
   },
   "DealsActivityBreakdown": {
     "activityMix": "Activity mix",

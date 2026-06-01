@@ -45,10 +45,16 @@
     "addActivity": "アクティビティを追加",
     "addNote": "メモを追加",
     "addTask": "タスクを追加",
+    "markClosed": "決着にする",
+    "markOpen": "進行中に戻す",
     "delete": "削除",
     "entityLabel": "案件",
     "dealDeleted": "案件を削除しました",
-    "failedToDelete": "削除できませんでした"
+    "failedToDelete": "削除できませんでした",
+    "cannotChangeStatus": "ステータスを変更できません: パイプラインまたはステージが未設定です",
+    "dealClosed": "案件を決着にしました",
+    "dealReopened": "案件を進行中に戻しました",
+    "failedToUpdateStatus": "ステータスを更新できませんでした"
   },
   "DealsActivityBreakdown": {
     "activityMix": "アクティビティ構成",
