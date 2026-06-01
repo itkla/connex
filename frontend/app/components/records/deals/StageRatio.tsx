@@ -2,7 +2,7 @@
 
 import { useMemo, useEffect, useState } from 'react';
 import { Pie, PieChart, Tooltip as RechartsTooltip } from 'recharts';
-import { useTranslations } from 'next-intl';
+import { useLocale, useTranslations } from 'next-intl';
 
 import {
     ChartContainer,
@@ -214,6 +214,7 @@ interface StageRatioTooltipProps {
 }
 
 function StageRatioTooltip({ active, payload, openLabel, closedLabel, dealsLabel }: StageRatioTooltipProps) {
+    const locale = useLocale();
     if (!active || !payload?.length) return null;
     const d = payload[0].payload;
     const isStage = 'pipelineName' in d;
@@ -229,7 +230,7 @@ function StageRatioTooltip({ active, payload, openLabel, closedLabel, dealsLabel
                     className="inline-block size-2 rounded-sm"
                     style={{ backgroundColor: d.fill }}
                 />
-                {dealsLabel ? dealsLabel(d.value) : `${d.value} ${d.value === 1 ? 'deal' : 'deals'}`} · {formatCompactCurrency(d.total, d.currency)}
+                {dealsLabel ? dealsLabel(d.value) : `${d.value} ${d.value === 1 ? 'deal' : 'deals'}`} · {formatCompactCurrency(d.total, d.currency, locale)}
             </div>
         </div>
     );

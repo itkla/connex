@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState, type ComponentType } from 'react';
 import { useRouter } from 'next/navigation';
-import { useTranslations } from 'next-intl';
+import { useLocale, useTranslations } from 'next-intl';
 import { toastError } from '@/app/lib/toast';
 import Link from 'next/link';
 import {
@@ -104,7 +104,7 @@ function isInQueue(queue: Queue, task: Task, currentUserId: number): boolean {
     }
 }
 
-function formatDueDate(dueDate: string | undefined, t: (key: string) => string): string {
+function formatDueDate(dueDate: string | undefined, t: (key: string) => string, locale: string): string {
     if (!dueDate) return '';
     const ts = parseMysqlDateTime(dueDate);
     if (Number.isNaN(ts)) return '';
@@ -116,12 +116,13 @@ function formatDueDate(dueDate: string | undefined, t: (key: string) => string):
     if (diffDays === 0) return t('dueToday');
     if (diffDays === 1) return t('dueTomorrow');
     if (diffDays === -1) return t('dueYesterday');
-    return new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric' }).format(date);
+    return new Intl.DateTimeFormat(locale, { month: 'short', day: 'numeric' }).format(date);
 }
 
 export default function TasksBrowser({ tasks, persons, deals, users, currentUserId }: Props) {
     const router = useRouter();
     const t = useTranslations('ActivityTasks');
+    const locale = useLocale();
 
     const personById = useMemo(() => {
         const map = new Map<number, Contact>();
@@ -316,7 +317,7 @@ export default function TasksBrowser({ tasks, persons, deals, users, currentUser
                                             onOpen={() => setEditingTask(task)}
                                             pending={pendingToggle.has(task.id)}
                                             ariaCompleteLabel={t('ariaCompleteTask')}
-                                            formatDue={(d) => formatDueDate(d, t)}
+                                            formatDue={(d) => formatDueDate(d, t, locale)}
                                         />
                                     ))}
                                 </ul>
@@ -352,7 +353,7 @@ export default function TasksBrowser({ tasks, persons, deals, users, currentUser
                                                         onOpen={() => setEditingTask(task)}
                                                         pending={pendingToggle.has(task.id)}
                                                         ariaCompleteLabel={t('ariaCompleteTask')}
-                                                        formatDue={(d) => formatDueDate(d, t)}
+                                                        formatDue={(d) => formatDueDate(d, t, locale)}
                                                     />
                                                 ))}
                                             </ul>

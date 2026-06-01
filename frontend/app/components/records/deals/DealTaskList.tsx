@@ -11,10 +11,11 @@ import { useRouter } from "next/navigation";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useState } from "react";
 import EditTaskSheet from "@/app/components/activity/tasks/EditTaskSheet";
-import { useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 
 export default function DealTaskList({ dealId, companyId, tasks, deals }: { dealId: number, companyId?: number | null, tasks: Task[], deals: Deal[] }) {
     const t = useTranslations('DealsTaskList');
+    const locale = useLocale();
     const openTasks = tasks.filter((task) => !task.completed);
     const [editTaskOpen, setEditTaskOpen] = useState(false);
     const [selectedTask, setSelectedTask] = useState<Task | null>(null);
@@ -86,7 +87,7 @@ export default function DealTaskList({ dealId, companyId, tasks, deals }: { deal
                                         <p className="text-sm text-neutral-900">{task.description}</p>
                                         {task.dueDate ? (
                                             <p className="mt-0.5 text-xs text-neutral-500">
-                                                {t('due', { date: formatDate(task.dueDate) })}
+                                                {t('due', { date: formatDate(task.dueDate, locale) })}
                                             </p>
                                         ) : null}
                                     </div>

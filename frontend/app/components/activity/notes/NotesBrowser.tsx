@@ -2,7 +2,7 @@
 
 import { useCallback, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { useTranslations } from 'next-intl';
+import { useLocale, useTranslations } from 'next-intl';
 import { toast } from 'sonner';
 import { toastError, toastSuccess } from '@/app/lib/toast';
 import { PlusIcon, EllipsisVerticalIcon, PencilIcon, TrashIcon, FunnelIcon } from '@heroicons/react/24/solid';
@@ -71,6 +71,7 @@ function diffDraft(original: NoteDraft, draft: NoteDraft): boolean {
 export default function NotesBrowser({ notes, persons, deals, users, currentUserId }: Props) {
     const router = useRouter();
     const t = useTranslations('ActivityNotes');
+    const locale = useLocale();
 
     const personById = useMemo(() => {
         const map = new Map<number, Contact>();
@@ -300,16 +301,16 @@ export default function NotesBrowser({ notes, persons, deals, users, currentUser
                 key: 'createdAt',
                 label: t('columnCreated'),
                 getSortValue: (n) => (n.createdAt ? Date.parse(n.createdAt) : null),
-                render: (n) => formatDate(n.createdAt),
+                render: (n) => formatDate(n.createdAt, locale),
             },
             {
                 key: 'updatedAt',
                 label: t('columnUpdated'),
                 getSortValue: (n) => (n.updatedAt ? Date.parse(n.updatedAt) : null),
-                render: (n) => formatDateTime(n.updatedAt),
+                render: (n) => formatDateTime(n.updatedAt, locale),
             },
         ],
-        [t, personById, dealById, userById],
+        [t, locale, personById, dealById, userById],
     );
 
     const renderRowAvatar = (n: Note) => {

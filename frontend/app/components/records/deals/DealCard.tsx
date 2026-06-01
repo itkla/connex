@@ -1,7 +1,7 @@
 'use client';
 
 import { useRouter } from 'next/navigation';
-import { useTranslations } from 'next-intl';
+import { useLocale, useTranslations } from 'next-intl';
 import {
     DropdownMenu,
     DropdownMenuTrigger,
@@ -46,6 +46,7 @@ function dealStatus(deal: Deal): 'open' | 'closed' {
 export default function DealCard({ deal, company, pipeline, stage, onQuickEdit, onDelete }: DealCardProps) {
     const router = useRouter();
     const t = useTranslations('DealsCard');
+    const locale = useLocale();
     const open = () => router.push(`/records/deals/${deal.id}`);
     const status = dealStatus(deal);
     const statusLabel = status === 'closed' ? t('statusClosed') : t('statusOpen');
@@ -115,7 +116,7 @@ export default function DealCard({ deal, company, pipeline, stage, onQuickEdit, 
                     {deal.expectedCloseDate && (
                         <span className="inline-flex items-center gap-1">
                             <CalendarIcon className="size-3.5" />
-                            {formatShortDate(deal.expectedCloseDate)}
+                            {formatShortDate(deal.expectedCloseDate, locale)}
                         </span>
                     )}
                 </div>
@@ -123,7 +124,7 @@ export default function DealCard({ deal, company, pipeline, stage, onQuickEdit, 
 
             <div className="text-right">
                 <div className="text-lg font-semibold text-neutral-900">
-                    {formatCompactCurrency(deal.value, deal.currency || 'USD')}
+                    {formatCompactCurrency(deal.value, deal.currency || 'USD', locale)}
                 </div>
                 {deal.currency && (
                     <div className="text-[10px] uppercase tracking-wider text-neutral-500">

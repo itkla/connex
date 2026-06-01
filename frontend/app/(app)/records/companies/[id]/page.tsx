@@ -4,7 +4,7 @@ import { cookies } from "next/headers";
 import Link from "next/link";
 import { Suspense } from "react";
 import { notFound, redirect } from "next/navigation";
-import { getTranslations } from "next-intl/server";
+import { getLocale, getTranslations } from "next-intl/server";
 import { ArrowLeftIcon, UserIcon, PlusIcon } from "@heroicons/react/24/outline";
 import PipelineCard from "@/app/components/records/PipelineCard";
 import NewContactDialog from "@/app/components/records/contacts/NewContactDialog";
@@ -46,6 +46,7 @@ export default async function CompanyPage({ params }: { params: { id: number } }
     const cookie = (await cookies()).toString();
     const init = { headers: { cookie } } as const;
     const t = await getTranslations("CompaniesDetail");
+    const locale = await getLocale();
 
     const [
         company,
@@ -233,8 +234,8 @@ export default async function CompanyPage({ params }: { params: { id: number } }
                         <InfoRow label={t("phone")} value={company.phone ?? ''} />
                         <InfoRow label={t("address")} value={company.address ?? ''} />
                         <InfoRow label={t("industry")} value={company.industry ?? ''} />
-                        <InfoRow label={t("added")} value={formatDate(company.createdAt)} />
-                        <InfoRow label={t("updated")} value={formatDateTime(company.updatedAt)} />
+                        <InfoRow label={t("added")} value={formatDate(company.createdAt, locale)} />
+                        <InfoRow label={t("updated")} value={formatDateTime(company.updatedAt, locale)} />
                     </dl>
                 </aside>
 

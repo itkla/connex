@@ -1,11 +1,12 @@
 import Link from "next/link";
-import { getTranslations } from "next-intl/server";
+import { getLocale, getTranslations } from "next-intl/server";
 import { formatCompactCurrency } from "@/app/lib/utils";
 import { type Deal } from "@/app/lib/types";
 
 export default async function PipelineCard({ deals, render = "active" }: { deals: Deal[], render?: "active" | "inactive" | "previous"
  }   ) {
     const t = await getTranslations('RecordsPipelineCard');
+    const locale = await getLocale();
     let title = "";
     let emptyMessage = "";
     switch (render) {
@@ -50,7 +51,7 @@ export default async function PipelineCard({ deals, render = "active" }: { deals
                                         {deal.name}
                                     </span>
                                     <span className="text-sm text-neutral-500">
-                                        {formatCompactCurrency(deal.value, deal.currency)}
+                                        {formatCompactCurrency(deal.value, deal.currency, locale)}
                                     </span>
                                 </Link>
                             </li>

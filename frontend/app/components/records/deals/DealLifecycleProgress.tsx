@@ -1,6 +1,6 @@
 import { Fragment, type CSSProperties } from 'react';
 import { CheckIcon, XMarkIcon } from '@heroicons/react/24/solid';
-import { getTranslations } from 'next-intl/server';
+import { getLocale, getTranslations } from 'next-intl/server';
 
 import { type Stage } from '@/app/lib/types';
 import { formatDate, parseMysqlDateTime } from '@/app/lib/utils';
@@ -27,6 +27,7 @@ export default async function DealLifecycleProgress({
     closedAt?: string;
 }) {
     const t = await getTranslations('DealsLifecycleProgress');
+    const locale = await getLocale();
     const sorted = [...stages].sort((a, b) => a.position - b.position);
     const filtered = sorted.filter((s) => {
         const c = classifyStage(s.name);
@@ -227,7 +228,7 @@ export default async function DealLifecycleProgress({
             <div className="mt-4 flex items-start justify-between gap-3 text-[10px] leading-tight text-neutral-500 sm:text-[11px]">
                 <div className="flex shrink-0 flex-col items-start whitespace-nowrap">
                     <span className="font-medium text-neutral-700">{t('created')}</span>
-                    <span>{formatDate(createdAt)}</span>
+                    <span>{formatDate(createdAt, locale)}</span>
                 </div>
                 {expectedCloseDate || (isClosed && closedAt) ? (
                     <>
@@ -247,7 +248,7 @@ export default async function DealLifecycleProgress({
                                 {isClosed ? t('closed') : t('expectedClose')}
                             </span>
                             <span>
-                                {formatDate(isClosed && closedAt ? closedAt : expectedCloseDate)}
+                                {formatDate(isClosed && closedAt ? closedAt : expectedCloseDate, locale)}
                             </span>
 
                         </div>

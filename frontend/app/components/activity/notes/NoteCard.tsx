@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useTranslations } from 'next-intl';
+import { useLocale, useTranslations } from 'next-intl';
 import { toastError, toastSuccess } from '@/app/lib/toast';
 import {
     EllipsisHorizontalIcon,
@@ -35,6 +35,7 @@ interface NoteCardProps {
 
 export default function NoteCard({ note, person, deal, author, onEdit, onDelete }: NoteCardProps) {
     const t = useTranslations('ActivityNotesCard');
+    const locale = useLocale();
     const updated = note.updatedAt ?? note.createdAt;
     const authorName = author?.displayName || author?.username || '';
 
@@ -109,7 +110,7 @@ export default function NoteCard({ note, person, deal, author, onEdit, onDelete 
                         </Tooltip>
                     ) : null}
                     <span className="truncate text-xs text-neutral-500">
-                        {formatShortDate(updated)}
+                        {formatShortDate(updated, locale)}
                     </span>
                 </div>
             </div>

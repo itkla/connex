@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { useTranslations } from 'next-intl';
+import { useLocale, useTranslations } from 'next-intl';
 import { Button } from '@/components/ui/button';
 import { ButtonGroup } from '@/components/ui/button-group';
 import { toast } from 'sonner';
@@ -89,6 +89,7 @@ function isClosed(deal: Deal): boolean {
 export default function DealsBrowser({ deals }: { deals: Deal[] }) {
     const router = useRouter();
     const t = useTranslations('DealsBrowser');
+    const locale = useLocale();
 
     const [companies, setCompanies] = useState<Company[]>([]);
     const [pipelines, setPipelines] = useState<Pipeline[]>([]);
@@ -377,13 +378,13 @@ export default function DealsBrowser({ deals }: { deals: Deal[] }) {
             key: 'value',
             label: t('columnValue'),
             getSortValue: (d) => d.value ?? null,
-            render: (d) => formatCompactCurrency(d.value ?? 0, d.currency || 'USD'),
+            render: (d) => formatCompactCurrency(d.value ?? 0, d.currency || 'USD', locale),
         },
         {
             key: 'actualValue',
             label: t('columnActualValue'),
             getSortValue: (d) => d.actualValue ?? null,
-            render: (d) => formatCompactCurrency(d.actualValue ?? 0, d.currency || 'USD'),
+            render: (d) => formatCompactCurrency(d.actualValue ?? 0, d.currency || 'USD', locale),
         },
         {
             key: 'company',
@@ -407,8 +408,8 @@ export default function DealsBrowser({ deals }: { deals: Deal[] }) {
             key: 'expectedCloseDate',
             label: t('columnExpectedClose'),
             getSortValue: (d) => (d.expectedCloseDate ? Date.parse(d.expectedCloseDate) : null),
-            // render: (d) => formatShortDate(d.expectedCloseDate),
-            render: (d) => formatDateTime(d.expectedCloseDate),
+            // render: (d) => formatShortDate(d.expectedCloseDate, locale),
+            render: (d) => formatDateTime(d.expectedCloseDate, locale),
         },
         {
             key: 'status',
@@ -447,9 +448,9 @@ export default function DealsBrowser({ deals }: { deals: Deal[] }) {
             key: 'updatedAt',
             label: t('columnUpdated'),
             getSortValue: (d) => (d.updatedAt ? Date.parse(d.updatedAt) : null),
-            render: (d) => formatDateTime(d.updatedAt),
+            render: (d) => formatDateTime(d.updatedAt, locale),
         },
-    ], [companyById, pipelineById, stageById, toggleDealStatus, t]);
+    ], [companyById, pipelineById, stageById, toggleDealStatus, t, locale]);
 
     return (
         <div className="space-y-6">
@@ -493,8 +494,8 @@ export default function DealsBrowser({ deals }: { deals: Deal[] }) {
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
-                <SummaryTile label={t('projectedPipeline')} value={formatCompactCurrency(summary.openValue, activeCurrency)} />
-                <SummaryTile label={t('actualRevenue')} value={formatCompactCurrency(summary.closedActualValue, activeCurrency)} />
+                <SummaryTile label={t('projectedPipeline')} value={formatCompactCurrency(summary.openValue, activeCurrency, locale)} />
+                <SummaryTile label={t('actualRevenue')} value={formatCompactCurrency(summary.closedActualValue, activeCurrency, locale)} />
                 <SummaryTile label={t('openDeals')} value={String(summary.openCount)} />
                 <SummaryTile
                     label={t('forecastAccuracy')}

@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { TrophyIcon } from '@heroicons/react/24/solid';
-import { useTranslations } from 'next-intl';
+import { useLocale, useTranslations } from 'next-intl';
 
 import { type Company, type Deal } from '@/app/lib/types';
 import { formatCompactCurrency, parseMysqlDateTime } from '@/app/lib/utils';
@@ -71,6 +71,7 @@ function Section({
     emptyLabel: string;
     rankLabels: readonly string[];
 }) {
+    const locale = useLocale();
     return (
         <div className="min-h-0 overflow-hidden">
             <h3 className="mb-1.5 text-xs uppercase tracking-wider text-neutral-500">{title}</h3>
@@ -100,7 +101,7 @@ function Section({
                                         </span>
                                     </span>
                                     <span className="shrink-0 font-medium text-neutral-700">
-                                        {formatCompactCurrency(d[field] ?? 0, d.currency || 'USD')}
+                                        {formatCompactCurrency(d[field] ?? 0, d.currency || 'USD', locale)}
                                     </span>
                                 </Link>
                             </li>

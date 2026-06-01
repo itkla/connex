@@ -1,7 +1,7 @@
 'use client';
 
 import * as React from 'react';
-import { useTranslations } from 'next-intl';
+import { useLocale, useTranslations } from 'next-intl';
 import { Bar, BarChart, CartesianGrid, XAxis, YAxis } from 'recharts';
 
 import {
@@ -18,7 +18,7 @@ const MONTHS_AHEAD = 12;
 
 type Bucket = { key: string; label: string; value: number };
 
-function buildBuckets(deals: Deal[], now: number): Bucket[] {
+function buildBuckets(deals: Deal[], now: number, locale: string): Bucket[] {
     const start = new Date(now);
     start.setDate(1);
     start.setHours(0, 0, 0, 0);
@@ -26,8 +26,8 @@ function buildBuckets(deals: Deal[], now: number): Bucket[] {
     const buckets: Bucket[] = [];
     const keyToIndex = new Map<string, number>();
 
-    // en = Jan, Feb, etc. ja = 1月, 2月, etc. right now during dev, im sticking with en so i can move fast 
-    const monthLabel = new Intl.DateTimeFormat('en', { month: 'short' });
+    // en = Jan, Feb, etc. ja = 1月, 2月, etc.
+    const monthLabel = new Intl.DateTimeFormat(locale, { month: 'short' });
 
     for (let i = 0; i < MONTHS_AHEAD; i++) {
         const d = new Date(start.getFullYear(), start.getMonth() + i, 1);
@@ -52,6 +52,7 @@ function buildBuckets(deals: Deal[], now: number): Bucket[] {
 
 export default function PipelineChart({ deals }: { deals: Deal[] }) {
     const t = useTranslations('DashboardPipelineChart');
+    const locale = useLocale();
     const now = React.useMemo(() => Date.now(), []);
     const currency = React.useMemo(() => pickDominantCurrency(deals), [deals]);
     const dealsInCurrency = React.useMemo(
@@ -62,7 +63,7 @@ export default function PipelineChart({ deals }: { deals: Deal[] }) {
         () => dealsInCurrency.filter((d) => !d.closedAt),
         [dealsInCurrency],
     );
-    const data = React.useMemo(() => buildBuckets(dealsInCurrency, now), [dealsInCurrency, now]);
+    const data = React.useMemo(() => buildBuckets(dealsInCurrency, now, locale), [dealsInCurrency, now, locale]);
 
     const pipelineValue = openDeals.reduce((sum, d) => sum + (d.value ?? 0), 0);
     const scheduledValue = data.reduce((sum, b) => sum + b.value, 0);
@@ -80,12 +81,12 @@ export default function PipelineChart({ deals }: { deals: Deal[] }) {
                 {t('activePipeline')}
             </span>
             <span className="mt-3 text-5xl leading-none text-black tabular-nums">
-                {formatCompactCurrency(pipelineValue, currency)}
+                {formatCompactCurrency(pipelineValue, currency, locale)}
             </span>
             <p className="mt-2 text-sm text-neutral-500">
                 {t('summary', {
                     openCount: openDeals.length,
-                    scheduled: formatCompactCurrency(scheduledValue, currency),
+                    scheduled: formatCompactCurrency(scheduledValue, currency, locale),
                     months: MONTHS_AHEAD,
                 })}
             </p>
@@ -111,7 +112,7 @@ export default function PipelineChart({ deals }: { deals: Deal[] }) {
                             tickMargin={4}
                             width={48}
                             tickFormatter={(v: number) =>
-                                formatCompactCurrency(v, currency)
+                                formatCompactCurrency(v, currency, locale)
                             }
                         />
                         <ChartTooltip
@@ -123,6 +124,7 @@ export default function PipelineChart({ deals }: { deals: Deal[] }) {
                                             {formatCompactCurrency(
                                                 Number(value),
                                                 currency,
+                                                locale,
                                             )}
                                         </span>
                                     )}

@@ -4,7 +4,7 @@ import { type Company, type Deal, type Tag, type Contact, type User } from "@/ap
 import { cookies } from "next/headers";
 import Link from "next/link";
 import { ArrowLeftIcon, UserIcon } from "@heroicons/react/24/outline";
-import { getTranslations } from "next-intl/server";
+import { getLocale, getTranslations } from "next-intl/server";
 
 import ContactActionsMenu from "@/app/components/records/contacts/ContactActionsMenu";
 import ContactAvatar from "@/app/components/records/contacts/ContactAvatar";
@@ -23,6 +23,7 @@ export default async function ContactPage({ params }: { params: { id: number } }
     const cookie = (await cookies()).toString();
     const init = { headers: { cookie } } as const;
     const t = await getTranslations("ContactsPage");
+    const locale = await getLocale();
 
     const [contact, currentUser, allTags, allCompanies, allPersons, allDeals] = await Promise.all([
         getContactById(id, init) as Promise<Contact>,
@@ -165,8 +166,8 @@ export default async function ContactPage({ params }: { params: { id: number } }
                         <InfoRow label={t("phone")} value={contact.phone ?? ''} />
                         <InfoRow label={t("title")} value={contact.title ?? ''} />
                         <InfoRow label={t("company")} value={contact.company?.name ?? t("companyPlaceholder")} />
-                        <InfoRow label={t("added")} value={formatDate(contact.createdAt)} />
-                        <InfoRow label={t("updated")} value={formatDateTime(contact.updatedAt)} />
+                        <InfoRow label={t("added")} value={formatDate(contact.createdAt, locale)} />
+                        <InfoRow label={t("updated")} value={formatDateTime(contact.updatedAt, locale)} />
                     </dl>
                 </aside>
 
@@ -233,7 +234,7 @@ export default async function ContactPage({ params }: { params: { id: number } }
                                                 {deal.name}
                                             </span>
                                             <span className="text-sm text-neutral-500">
-                                                {formatCompactCurrency(deal.value, deal.currency)}
+                                                {formatCompactCurrency(deal.value, deal.currency, locale)}
                                             </span>
                                         </Link>
                                     </li>
