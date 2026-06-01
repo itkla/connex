@@ -424,7 +424,7 @@ export default function DealsBrowser({ deals }: { deals: Deal[] }) {
                                 onClick={(e) => e.stopPropagation()}
                                 className="inline-flex items-center gap-1 rounded-full bg-neutral-100 px-2 py-0.5 text-xs ring-1 ring-black/5 transition hover:bg-neutral-200"
                             >
-                                <span className={closed ? 'text-red-500' : 'text-emerald-300'}>●</span>
+                                <span className={closed ? 'text-gray-500' : 'text-emerald-300'}>●</span>
                                 {closed ? t('statusClosed') : t('statusOpen')}
                                 <ChevronDownIcon className="size-3 text-neutral-400" />
                             </button>
@@ -435,7 +435,7 @@ export default function DealsBrowser({ deals }: { deals: Deal[] }) {
                                 {t('markOpen')}
                             </DropdownMenuItem>
                             <DropdownMenuItem disabled={closed} onSelect={() => toggleDealStatus(d, true)}>
-                                <span className="text-red-500">●</span>
+                                <span className="text-gray-500">●</span>
                                 {t('markClosed')}
                             </DropdownMenuItem>
                         </DropdownMenuContent>
