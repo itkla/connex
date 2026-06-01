@@ -80,6 +80,7 @@ export default async function DealLifecycleProgress({
     const scheduleStatus = ((): { text: string; tone: ScheduleTone } | null => {
         if (!hasTime) return null;
         if (isClosed) {
+            if (isLost) return null;
             if (closedVsExpected == null) return null;
             if (closedVsExpected === 0) return { text: t('onTime'), tone: 'neutral' };
             return closedVsExpected > 0
