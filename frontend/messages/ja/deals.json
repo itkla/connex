@@ -71,7 +71,7 @@
     "statusClosed": "決着"
   },
   "DealsLifecycleProgress": {
-    "todayDay": "本日 · {daysToExpected} 日中 {daysOpen} 日目",
+    "todayDay": "本日 · {totalDays} 日中 {daysOpen} 日目",
     "closedOn": "{date} に決着しました",
     "onTime": "予定どおり",
     "onTrack": "順調",

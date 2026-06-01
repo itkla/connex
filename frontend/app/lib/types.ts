@@ -256,17 +256,21 @@ export type Pipeline = {
 
 export type CreatePipelinePayload = {
     name?: string;
-    stages?: { name: string }[];
+    stages?: { name: string; success?: boolean; failure?: boolean }[];
 };
 
 export type CreateStagePayload = {
     name: string;
     position: number;
+    success?: boolean;
+    failure?: boolean;
 };
 
 export type UpdateStagePayload = {
     name: string;
     position: number;
+    success?: boolean;
+    failure?: boolean;
 };
 
 export type UpdatePipelinePayload = {
@@ -300,6 +304,8 @@ export type Stage = {
     name: string;
     pipeline: number;
     position: number;
+    success: boolean;
+    failure: boolean;
 };
 
 export type Tag = {

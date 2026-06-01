@@ -116,9 +116,8 @@ export default async function DealPage({ params }: { params: { id: number } }) {
     const pipeline = allPipelines.find((p) => p.id === deal.pipeline) ?? null;
     const currentStage = stages.find((s) => s.id === deal.stage) ?? null;
 
-    const closedAtMs = parseMysqlDateTime(deal.closedAt);
-    const closed = Number.isFinite(closedAtMs) && closedAtMs <= Date.now();
-    const outcome: DealOutcome = dealOutcome(closed, currentStage?.name);
+    const outcome: DealOutcome = dealOutcome(currentStage);
+    const closed = outcome !== 'open';
     const variance =
         closed && deal.value > 0 ? (deal.actualValue - deal.value) / deal.value : null;
     const currency = deal.currency || 'USD';

@@ -89,7 +89,7 @@ export default function StageRatio({ deals }: { deals: Deal[] }) {
     const stageClassById = useMemo(() => {
         const map = new Map<number, StageClass>();
         Object.values(stagesByPipeline).forEach((stages) =>
-            stages.forEach((s) => map.set(s.id, classifyStage(s.name))),
+            stages.forEach((s) => map.set(s.id, classifyStage(s))),
         );
         return map;
     }, [stagesByPipeline]);
@@ -133,7 +133,7 @@ export default function StageRatio({ deals }: { deals: Deal[] }) {
                 return (['open', 'closed'] as const).flatMap((status) =>
                     stages.map((stage, i) => {
                         const baseColor = colorForStage(stage.name, i, stages.length);
-                        const won = classifyStage(stage.name) === 'won';
+                        const won = classifyStage(stage) === 'won';
                         const matches = deals.filter(
                             (d) => d.stage === stage.id && (status === 'closed' ? isClosed(d) : !isClosed(d)),
                         );

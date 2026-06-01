@@ -33,6 +33,9 @@ public class StageDto {
     @PositiveOrZero
     private int position;
 
+    private boolean success;
+    private boolean failure;
+
     private int[] dealIds;
 
     public static StageDto from(Stage s) {
@@ -42,6 +45,8 @@ public class StageDto {
         dto.name = s.getName();
         dto.pipeline = s.getPipeline();
         dto.position = s.getPosition();
+        dto.success = s.isSuccess();
+        dto.failure = s.isFailure();
         dto.dealIds = s.getDeals() == null ? null : Arrays.stream(s.getDeals()).mapToInt(Deal::getId).toArray(); // is getDeals null? yes : no, then map to array of deal ids
         return dto;
     }
@@ -53,6 +58,8 @@ public class StageDto {
         s.setName(name);
         s.setPipeline(pipeline);
         s.setPosition(position);
+        s.setSuccess(success);
+        s.setFailure(failure);
         return s;
     }
 }

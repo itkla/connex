@@ -71,7 +71,7 @@
     "statusClosed": "closed"
   },
   "DealsLifecycleProgress": {
-    "todayDay": "Today · day {daysOpen} of {daysToExpected}",
+    "todayDay": "Today · day {daysOpen} of {totalDays}",
     "closedOn": "Closed {date}",
     "onTime": "On time",
     "onTrack": "On track",

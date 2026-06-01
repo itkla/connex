@@ -8,10 +8,21 @@ import { Label } from '@/components/ui/label';
 import { type Pipeline } from '@/app/lib/types';
 import { type SelectionId } from '@/app/components/records/types';
 import { useTranslations } from 'next-intl';
+import { Select, SelectTrigger, SelectContent, SelectItem, SelectValue } from '@/components/ui/select';
+
+export type StageKind = 'normal' | 'won' | 'lost';
+
+export function stageKindOf(s: { success: boolean; failure: boolean }): StageKind {
+    if (s.success) return 'won';
+    if (s.failure) return 'lost';
+    return 'normal';
+}
 
 export type PipelineStageDraft = {
     id: number | null;
     name: string;
+    success: boolean;
+    failure: boolean;
 };
 
 export type PipelineDraft = {
@@ -27,6 +38,7 @@ type Props = {
     drafts: Record<number, PipelineDraft>;
     updateDraft: (id: number, patch: Partial<PipelineDraft>) => void;
     updateStageName: (pipelineId: number, index: number, name: string) => void;
+    updateStageKind: (pipelineId: number, index: number, kind: StageKind) => void;
     addStage: (pipelineId: number) => void;
     removeStage: (pipelineId: number, index: number) => void;
     isSaving: boolean;
@@ -41,6 +53,7 @@ export default function QuickEditPipelineSheet({
     drafts,
     updateDraft,
     updateStageName,
+    updateStageKind,
     addStage,
     removeStage,
     isSaving,
@@ -98,6 +111,31 @@ export default function QuickEditPipelineSheet({
                                                             className="connex-input flex-1"
                                                             placeholder={t('stageNamePlaceholder')}
                                                         />
+                                                        {/* <select
+                                                            value={stageKindOf(s)}
+                                                            onChange={(e) => updateStageKind(p.id, i, e.target.value as StageKind)}
+                                                            className="connex-input w-28 shrink-0"
+                                                            aria-label={t('stageKindAriaLabel')}
+                                                        >
+                                                            <option value="normal">{t('stageInProgress')}</option>
+                                                            <option value="won">{t('stageWon')}</option>
+                                                            <option value="lost">{t('stageLost')}</option>
+                                                        </select> */}
+                                                        <Select
+                                                            value={stageKindOf(s)}
+                                                            onValueChange={(value) => updateStageKind(p.id, i, value as StageKind)}
+                                                            // className="connex-input w-28 shrink-0"
+                                                            aria-label={t('stageKindAriaLabel')}
+                                                        >
+                                                            <SelectTrigger>
+                                                                <SelectValue placeholder={t('stageKindPlaceholder')} />
+                                                            </SelectTrigger>
+                                                            <SelectContent>
+                                                                <SelectItem value="normal">{t('stageInProgress')}</SelectItem>
+                                                                <SelectItem value="won">{t('stageWon')}</SelectItem>
+                                                                <SelectItem value="lost">{t('stageLost')}</SelectItem>
+                                                            </SelectContent>
+                                                        </Select>
                                                         <button
                                                             type="button"
                                                             aria-label={t('removeStageAriaLabel')}

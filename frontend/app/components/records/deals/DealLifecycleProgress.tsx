@@ -30,7 +30,7 @@ export default async function DealLifecycleProgress({
     const locale = await getLocale();
     const sorted = [...stages].sort((a, b) => a.position - b.position);
     const filtered = sorted.filter((s) => {
-        const c = classifyStage(s.name);
+        const c = classifyStage(s);
         if (c === 'won') return outcome !== 'lost';
         if (c === 'lost') return outcome === 'lost';
         return true;
@@ -49,6 +49,7 @@ export default async function DealLifecycleProgress({
     const hasTime = Number.isFinite(startMs);
     const hasPlan = hasTime && Number.isFinite(expectedMs) && expectedMs > startMs;
     const plannedSpan = hasPlan ? expectedMs - startMs : 0;
+    const planDays = hasPlan ? Math.max(1, Math.round(plannedSpan / DAY_MS)) : 0;
     const timePct = (t: number) =>
         hasPlan ? Math.max(0, Math.min(100, ((t - startMs) / plannedSpan) * 100)) : 0;
     const nowPct = timePct(nowMs);
@@ -136,13 +137,13 @@ export default async function DealLifecycleProgress({
                             />
                         </TooltipTrigger>
                         <TooltipContent>
-                            <p>{t('todayDay', { daysOpen, daysToExpected: daysToExpected ?? 0 })}</p>
+                            <p>{t('todayDay', { daysOpen, totalDays: planDays })}</p>
                         </TooltipContent>
                     </Tooltip>
                 ) : null}
 
                 {filtered.map((stage, i) => {
-                    const c = classifyStage(stage.name);
+                    const c = classifyStage(stage);
                     const isWonStage = c === 'won';
                     const isLostStage = c === 'lost';
                     const wonAchieved = isWonStage && outcome === 'won';

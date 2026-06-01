@@ -8,14 +8,14 @@ import { useTranslations } from 'next-intl';
 
 import { createStage, deleteStage, getStagesByPipelineId, updatePipeline, updateStage } from '@/app/lib/api';
 import { Pipeline, Stage, UpdatePipelinePayload } from '@/app/lib/types';
-import QuickEditPipelineSheet, { type PipelineDraft } from '@/app/components/records/pipelines/QuickEditPipelineSheet';
+import QuickEditPipelineSheet, { type PipelineDraft, type StageKind } from '@/app/components/records/pipelines/QuickEditPipelineSheet';
 
 function toDraft(p: Pipeline, stages: Stage[] = []): PipelineDraft {
     return {
         name: p.name ?? '',
         stages: [...stages]
             .sort((a, b) => a.position - b.position)
-            .map((s) => ({ id: s.id, name: s.name })),
+            .map((s) => ({ id: s.id, name: s.name, success: s.success, failure: s.failure })),
     };
 }
 
@@ -25,6 +25,8 @@ function diffDraft(a: PipelineDraft, b: PipelineDraft): boolean {
     for (let i = 0; i < a.stages.length; i++) {
         if (a.stages[i].id !== b.stages[i].id) return true;
         if (a.stages[i].name !== b.stages[i].name) return true;
+        if (a.stages[i].success !== b.stages[i].success) return true;
+        if (a.stages[i].failure !== b.stages[i].failure) return true;
     }
     return false;
 }
@@ -57,8 +59,20 @@ export default function EditPipelineSheet({
         }));
     };
 
+    const updateStageKind = (_pipelineId: number, index: number, kind: StageKind) => {
+        setDraft((prev) => ({
+            ...prev,
+            stages: prev.stages.map((s, i) =>
+                i === index ? { ...s, success: kind === 'won', failure: kind === 'lost' } : s,
+            ),
+        }));
+    };
+
     const addStage = () => {
-        setDraft((prev) => ({ ...prev, stages: [...prev.stages, { id: null, name: '' }] }));
+        setDraft((prev) => ({
+            ...prev,
+            stages: [...prev.stages, { id: null, name: '', success: false, failure: false }],
+        }));
     };
 
     const removeStage = (_pipelineId: number, index: number) => {
@@ -78,6 +92,10 @@ export default function EditPipelineSheet({
         }
         if (draft.stages.some((s) => !s.name.trim())) {
             toast.error(t('stageNamesEmpty'));
+            return;
+        }
+        if (draft.stages.filter((s) => s.success).length > 1 || draft.stages.filter((s) => s.failure).length > 1) {
+            toast.error(t('singleTerminalPerType'));
             return;
         }
 
@@ -103,11 +121,11 @@ export default function EditPipelineSheet({
                 const name = s.name.trim();
                 if (s.id !== null) {
                     const orig = originalById.get(s.id);
-                    if (orig && orig.name !== name) {
-                        await updateStage(s.id, { name, position: orig.position });
+                    if (orig && (orig.name !== name || orig.success !== s.success || orig.failure !== s.failure)) {
+                        await updateStage(s.id, { name, position: orig.position, success: s.success, failure: s.failure });
                     }
                 } else {
-                    await createStage(pipeline.id, { name, position: nextNewPosition });
+                    await createStage(pipeline.id, { name, position: nextNewPosition, success: s.success, failure: s.failure });
                     nextNewPosition++;
                 }
             }
@@ -134,6 +152,7 @@ export default function EditPipelineSheet({
             drafts={{ [pipeline.id]: draft }}
             updateDraft={(_id, patch) => setDraft((prev) => ({ ...prev, ...patch }))}
             updateStageName={updateStageName}
+            updateStageKind={updateStageKind}
             addStage={addStage}
             removeStage={removeStage}
             isSaving={isSaving}

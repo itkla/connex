@@ -17,6 +17,8 @@
     "noChangesToSave": "No changes to save",
     "nameRequiredFor": "Name is required for \"{name}\"",
     "stageNamesEmptyIn": "Stage names cannot be empty in \"{name}\"",
+    "singleTerminalPerType": "A pipeline can have only one Won stage and one Lost stage",
+    "singleTerminalPerTypeIn": "\"{name}\" can have only one Won stage and one Lost stage",
     "pipelineUpdated": "Pipeline updated",
     "pipelinesUpdated": "{count} pipelines updated",
     "failedToSave": "Failed to save",
@@ -53,6 +55,11 @@
     "stagesHint": "In order from first to last. Stages may share names with stages in other pipelines, but must be unique within this one.",
     "stageNamePlaceholder": "Stage name",
     "removeStageAriaLabel": "Remove stage",
+    "stageKindAriaLabel": "Stage type",
+    "stageKindPlaceholder": "Select stage type",
+    "stageInProgress": "In progress",
+    "stageWon": "Won",
+    "stageLost": "Lost",
     "addStage": "Add stage",
     "cancel": "Cancel",
     "create": "Create"
@@ -65,6 +72,11 @@
     "stages": "Stages",
     "stageNamePlaceholder": "Stage name",
     "removeStageAriaLabel": "Remove stage",
+    "stageKindAriaLabel": "Stage type",
+    "stageKindPlaceholder": "Select stage type",
+    "stageInProgress": "In progress",
+    "stageWon": "Won",
+    "stageLost": "Lost",
     "addStage": "Add stage",
     "cancel": "Cancel",
     "save": "Save"
@@ -73,6 +85,7 @@
     "noChangesToSave": "No changes to save",
     "nameRequired": "Name is required",
     "stageNamesEmpty": "Stage names cannot be empty",
+    "singleTerminalPerType": "A pipeline can have only one Won stage and one Lost stage",
     "pipelineUpdated": "Pipeline updated",
     "failedToSave": "Failed to save"
   }

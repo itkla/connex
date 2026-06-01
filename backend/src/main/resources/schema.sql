@@ -109,7 +109,11 @@ CREATE TABLE stage (
     name        VARCHAR(128) NOT NULL COMMENT 'Stage name',
     pipeline_id INT NOT NULL COMMENT 'Pipeline ID',
     position    INT NOT NULL COMMENT 'Stage position',
+    is_success  BOOLEAN NOT NULL DEFAULT FALSE COMMENT 'Whether this stage is a success stage',
+    is_failure  BOOLEAN NOT NULL DEFAULT FALSE COMMENT 'Whether this stage is a failure stage',
     CONSTRAINT fk_stage_pipeline FOREIGN KEY (pipeline_id) REFERENCES pipeline(id) ON DELETE CASCADE,
+    -- a stage may be neither (normal/in-progress), but never both at once
+    CONSTRAINT chk_stage_terminal CHECK (NOT (is_success AND is_failure)),
     INDEX idx_stage_pipeline (pipeline_id),
     UNIQUE KEY uq_stage_pipeline_position (pipeline_id, position)
 ) DEFAULT CHARSET=utf8mb4 COMMENT='Stages';

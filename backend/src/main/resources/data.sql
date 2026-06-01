@@ -27,17 +27,17 @@ INSERT INTO pipeline (id, name) VALUES
     (2, 'Renewals Pipeline');
 
 -- stage
-INSERT INTO stage (id, name, pipeline_id, position) VALUES
-    (1, 'Lead',           1, 1),
-    (2, 'Qualified',      1, 2),
-    (3, 'Proposal',       1, 3),
-    (4, 'Negotiation',    1, 4),
-    (5, 'Closed Won',     1, 5),
-    (6, 'Closed Lost',    1, 6),
-    (7, 'Upcoming',       2, 1),
-    (8, 'In Discussion',  2, 2),
-    (9, 'Renewed',        2, 3),
-    (10, 'Churned',       2, 4);
+INSERT INTO stage (id, name, pipeline_id, position, is_success, is_failure) VALUES
+    (1, 'Lead',           1, 1, FALSE, FALSE),
+    (2, 'Qualified',      1, 2, FALSE, FALSE),
+    (3, 'Proposal',       1, 3, FALSE, FALSE),
+    (4, 'Negotiation',    1, 4, FALSE, FALSE),
+    (5, 'Closed Won',     1, 5, TRUE,  FALSE),
+    (6, 'Closed Lost',    1, 6, FALSE, TRUE),
+    (7, 'Upcoming',       2, 1, FALSE, FALSE),
+    (8, 'In Discussion',  2, 2, FALSE, FALSE),
+    (9, 'Renewed',        2, 3, TRUE,  FALSE),
+    (10, 'Churned',       2, 4, FALSE, TRUE);
 
 -- tag
 INSERT INTO tag (id, name, color) VALUES

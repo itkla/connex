@@ -6,8 +6,10 @@ import { Loader2Icon } from 'lucide-react';
 import { PlusIcon, XMarkIcon } from '@heroicons/react/24/outline';
 import { Label } from '@/components/ui/label';
 import { type CreatePipelinePayload } from '@/app/lib/types';
+import { stageKindOf, type StageKind } from '@/app/components/records/pipelines/QuickEditPipelineSheet';
 import { Dispatch, SetStateAction } from 'react';
 import { useTranslations } from 'next-intl';
+import { Select, SelectItem, SelectContent, SelectValue, SelectTrigger } from '@/components/ui/select';
 
 const inputClass = 'w-full rounded-lg bg-neutral-100 px-3 py-2 text-sm text-black placeholder-neutral-500 outline-none ring-1 ring-black/5 transition focus:ring-2 focus:ring-brand';
 
@@ -34,7 +36,15 @@ export default function NewPipelineDialog({
     const updateStageName = (index: number, name: string) => {
         setPayload((prev) => {
             const next = [...(prev.stages ?? [])];
-            next[index] = { name };
+            next[index] = { ...next[index], name };
+            return { ...prev, stages: next };
+        });
+    };
+
+    const updateStageKind = (index: number, kind: StageKind) => {
+        setPayload((prev) => {
+            const next = [...(prev.stages ?? [])];
+            next[index] = { ...next[index], success: kind === 'won', failure: kind === 'lost' };
             return { ...prev, stages: next };
         });
     };
@@ -42,7 +52,7 @@ export default function NewPipelineDialog({
     const addStage = () => {
         setPayload((prev) => ({
             ...prev,
-            stages: [...(prev.stages ?? []), { name: '' }],
+            stages: [...(prev.stages ?? []), { name: '', success: false, failure: false }],
         }));
     };
 
@@ -93,6 +103,31 @@ export default function NewPipelineDialog({
                                         className={`${inputClass} flex-1`}
                                         placeholder={t('stageNamePlaceholder')}
                                     />
+                                    {/* <select
+                                        value={stageKindOf({ success: s.success ?? false, failure: s.failure ?? false })}
+                                        onChange={(e) => updateStageKind(i, e.target.value as StageKind)}
+                                        className={`${inputClass} w-28 shrink-0`}
+                                        aria-label={t('stageKindAriaLabel')}
+                                    >
+                                        <option value="normal">{t('stageInProgress')}</option>
+                                        <option value="won">{t('stageWon')}</option>
+                                        <option value="lost">{t('stageLost')}</option>
+                                    </select> */}
+                                    <Select
+                                        value={stageKindOf({ success: s.success ?? false, failure: s.failure ?? false })}
+                                        onValueChange={(value) => updateStageKind(i, value as StageKind)}
+                                        aria-label={t('stageKindAriaLabel')}
+                                    >
+                                        <SelectTrigger>
+                                            <SelectValue placeholder={t('stageKindPlaceholder')} />
+                                        </SelectTrigger>
+
+                                        <SelectContent>
+                                            <SelectItem value="normal">{t('stageInProgress')}</SelectItem>
+                                            <SelectItem value="won">{t('stageWon')}</SelectItem>
+                                            <SelectItem value="lost">{t('stageLost')}</SelectItem>
+                                        </SelectContent>
+                                    </Select>
                                     <button
                                         type="button"
                                         aria-label={t('removeStageAriaLabel')}

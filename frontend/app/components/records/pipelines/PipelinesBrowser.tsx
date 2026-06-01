@@ -6,7 +6,7 @@ import { useTranslations } from 'next-intl';
 import { Button } from '@/components/ui/button';
 import { ButtonGroup } from '@/components/ui/button-group';
 import { toast } from 'sonner';
-import { toastError, toastSuccess } from '@/app/lib/toast';
+import { toastError, toastInfo, toastSuccess } from '@/app/lib/toast';
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from '@/components/ui/dropdown-menu';
 import { PlusIcon, FunnelIcon, TrashIcon, PencilIcon, EllipsisVerticalIcon, EyeIcon } from '@heroicons/react/24/solid';
 import {
@@ -22,7 +22,7 @@ import { useRecordsBrowser } from '@/app/hooks/useRecordsBrowser';
 import { type ColumnDef } from '@/app/components/records/types';
 import PipelineCard from '@/app/components/records/pipelines/PipelineCard';
 import NewPipelineDialog from '@/app/components/records/pipelines/NewPipelineDialog';
-import QuickEditPipelineSheet, { type PipelineDraft, type PipelineStageDraft } from '@/app/components/records/pipelines/QuickEditPipelineSheet';
+import QuickEditPipelineSheet, { type PipelineDraft, type PipelineStageDraft, type StageKind } from '@/app/components/records/pipelines/QuickEditPipelineSheet';
 import {
     createPipeline,
     createStage,
@@ -58,7 +58,7 @@ function toDraft(p: Pipeline, stages: Stage[] = []): PipelineDraft {
         name: p.name ?? '',
         stages: [...stages]
             .sort((a, b) => a.position - b.position)
-            .map((s) => ({ id: s.id, name: s.name })),
+            .map((s) => ({ id: s.id, name: s.name, success: s.success, failure: s.failure })),
     };
 }
 
@@ -68,6 +68,8 @@ function diffDraft(a: PipelineDraft, b: PipelineDraft): boolean {
     for (let i = 0; i < a.stages.length; i++) {
         if (a.stages[i].id !== b.stages[i].id) return true;
         if (a.stages[i].name !== b.stages[i].name) return true;
+        if (a.stages[i].success !== b.stages[i].success) return true;
+        if (a.stages[i].failure !== b.stages[i].failure) return true;
     }
     return false;
 }
@@ -146,24 +148,29 @@ export default function PipelinesBrowser({ pipelines }: { pipelines: Pipeline[] 
 
     const createNewPipeline = async () => {
         const { stages: rawStages, ...pipelineFields } = newPipelinePayload;
-        const stageNames = (rawStages ?? [])
-            .map((s) => s.name.trim())
-            .filter((name) => name.length > 0);
+        const validStages = (rawStages ?? [])
+            .map((s) => ({ ...s, name: s.name.trim() }))
+            .filter((s) => s.name.length > 0);
+
+        if (validStages.filter((s) => s.success).length > 1 || validStages.filter((s) => s.failure).length > 1) {
+            toastError(t('singleTerminalPerType'));
+            return;
+        }
 
         setIsCreating(true);
         try {
             const created = await createPipeline(pipelineFields);
 
-            if (stageNames.length > 0) {
+            if (validStages.length > 0) {
                 const results = await Promise.allSettled(
-                    stageNames.map((name, position) =>
-                        createStage(created.id, { name, position }),
+                    validStages.map((s, position) =>
+                        createStage(created.id, { name: s.name, position, success: s.success ?? false, failure: s.failure ?? false }),
                     ),
                 );
                 const failed = results.filter((r) => r.status === 'rejected').length;
                 if (failed > 0) {
                     console.error('Some stages failed to create', results);
-                    toastError(t('pipelineCreatedWithFailedStages', { failed, total: stageNames.length }));
+                    toastError(t('pipelineCreatedWithFailedStages', { failed, total: validStages.length }));
                 } else {
                     toastSuccess(t('pipelineCreated'));
                 }
@@ -215,13 +222,24 @@ export default function PipelinesBrowser({ pipelines }: { pipelines: Pipeline[] 
         });
     };
 
+    const updateStageKind = (pipelineId: number, index: number, kind: StageKind) => {
+        setDrafts((prev) => {
+            const current = prev[pipelineId];
+            if (!current) return prev;
+            const stages = current.stages.map((s, i) =>
+                i === index ? { ...s, success: kind === 'won', failure: kind === 'lost' } : s,
+            );
+            return { ...prev, [pipelineId]: { ...current, stages } };
+        });
+    };
+
     const addStage = (pipelineId: number) => {
         setDrafts((prev) => {
             const current = prev[pipelineId];
             if (!current) return prev;
             return {
                 ...prev,
-                [pipelineId]: { ...current, stages: [...current.stages, { id: null, name: '' }] },
+                [pipelineId]: { ...current, stages: [...current.stages, { id: null, name: '', success: false, failure: false }] },
             };
         });
     };
@@ -245,14 +263,14 @@ export default function PipelinesBrowser({ pipelines }: { pipelines: Pipeline[] 
         });
 
         if (changed.length === 0) {
-            toast.info(t('noChangesToSave'));
+            toastInfo(t('noChangesToSave'));
             setEditSheetOpen(false);
             return;
         }
 
         const invalidName = changed.find((p) => !drafts[p.id].name.trim());
         if (invalidName) {
-            toast.error(t('nameRequiredFor', { name: invalidName.name }));
+            toastError(t('nameRequiredFor', { name: invalidName.name }));
             return;
         }
 
@@ -260,7 +278,16 @@ export default function PipelinesBrowser({ pipelines }: { pipelines: Pipeline[] 
             drafts[p.id].stages.some((s) => !s.name.trim()),
         );
         if (invalidStage) {
-            toast.error(t('stageNamesEmptyIn', { name: invalidStage.name }));
+            toastError(t('stageNamesEmptyIn', { name: invalidStage.name }));
+            return;
+        }
+
+        const invalidTerminal = changed.find((p) =>
+            drafts[p.id].stages.filter((s) => s.success).length > 1 ||
+            drafts[p.id].stages.filter((s) => s.failure).length > 1,
+        );
+        if (invalidTerminal) {
+            toastError(t('singleTerminalPerTypeIn', { name: invalidTerminal.name }));
             return;
         }
 
@@ -297,11 +324,11 @@ export default function PipelinesBrowser({ pipelines }: { pipelines: Pipeline[] 
                         const name = s.name.trim();
                         if (s.id !== null) {
                             const orig = originalById.get(s.id);
-                            if (orig && orig.name !== name) {
-                                await updateStage(s.id, { name, position: orig.position });
+                            if (orig && (orig.name !== name || orig.success !== s.success || orig.failure !== s.failure)) {
+                                await updateStage(s.id, { name, position: orig.position, success: s.success, failure: s.failure });
                             }
                         } else {
-                            await createStage(p.id, { name, position: nextNewPosition });
+                            await createStage(p.id, { name, position: nextNewPosition, success: s.success, failure: s.failure });
                             nextNewPosition++;
                         }
                     }
@@ -572,6 +599,7 @@ export default function PipelinesBrowser({ pipelines }: { pipelines: Pipeline[] 
                 drafts={drafts}
                 updateDraft={updateDraft}
                 updateStageName={updateStageName}
+                updateStageKind={updateStageKind}
                 addStage={addStage}
                 removeStage={removeStage}
                 isSaving={isSaving}

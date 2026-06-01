@@ -112,6 +112,10 @@
 
   <delete id="delete">DELETE FROM deal WHERE id = #{id}</delete>
 
+  <select id="isStageTerminal" resultType="boolean">
+    SELECT (is_success OR is_failure) FROM stage WHERE id = #{stageId}
+  </select>
+
   <insert id="addTag">
     INSERT IGNORE INTO deal_tag (deal_id, tag_id)
     VALUES (#{dealId}, #{tagId})
