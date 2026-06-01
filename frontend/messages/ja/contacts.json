@@ -46,6 +46,7 @@
     "copyableEmail": "メール",
     "copyablePhone": "電話",
     "copyableCompany": "会社",
+    "filterNoCompany": "会社なし",
     "entityLabel": "contact",
     "toastContactCreated": "コンタクトを作成しました",
     "toastFailedCreate": "コンタクトを作成できませんでした",

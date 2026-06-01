@@ -46,6 +46,7 @@
     "copyableEmail": "Email",
     "copyablePhone": "Phone",
     "copyableCompany": "Company",
+    "filterNoCompany": "No company",
     "entityLabel": "contact",
     "toastContactCreated": "Contact created",
     "toastFailedCreate": "Failed to create contact",

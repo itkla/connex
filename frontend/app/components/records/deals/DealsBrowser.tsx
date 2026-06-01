@@ -9,7 +9,7 @@ import { ButtonGroup } from '@/components/ui/button-group';
 import { toast } from 'sonner';
 import { toastError, toastSuccess } from '@/app/lib/toast';
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from '@/components/ui/dropdown-menu';
-import { PlusIcon, FunnelIcon, TrashIcon, PencilIcon, EllipsisVerticalIcon, EyeIcon } from '@heroicons/react/24/solid';
+import { PlusIcon, TrashIcon, PencilIcon, EllipsisVerticalIcon, EyeIcon } from '@heroicons/react/24/solid';
 import {
     MagnifyingGlassIcon,
     Squares2X2Icon,
@@ -18,9 +18,10 @@ import {
 } from '@heroicons/react/24/outline';
 
 import RecordsRenderView from '@/app/components/records/RecordsRenderView';
+import RecordsFilterMenu from '@/app/components/records/RecordsFilterMenu';
 import DeleteRecordDialog from '@/app/components/records/DeleteRecordDialog';
 import { useRecordsBrowser } from '@/app/hooks/useRecordsBrowser';
-import { type ColumnDef } from '@/app/components/records/types';
+import { type ColumnDef, applyRecordFilters } from '@/app/components/records/types';
 import DealCard from '@/app/components/records/deals/DealCard';
 import DealAvatar from '@/app/components/records/deals/DealAvatar';
 import NewDealDialog from '@/app/components/records/deals/NewDealDialog';
@@ -168,6 +169,8 @@ export default function DealsBrowser({ deals }: { deals: Deal[] }) {
         setDisplayMode,
         query,
         setQuery,
+        filterState,
+        setFilterState,
         selectedIds,
         setSelectedIds,
         filteredItems: filteredDeals,
@@ -391,18 +394,21 @@ export default function DealsBrowser({ deals }: { deals: Deal[] }) {
             label: t('columnCompany'),
             getSortValue: (d) => (d.company != null ? companyById.get(d.company)?.name ?? null : null),
             render: (d) => (d.company != null ? <Link href={`/records/companies/${d.company}`} className="text-brand hover:text-brand-dark hover:underline transition-colors transition-duration-300 transition-ease-in-out">{companyById.get(d.company)?.name}</Link> : ''),
+            filter: { getValue: (d) => (d.company != null ? companyById.get(d.company)?.name ?? null : null), emptyLabel: t('freelancer') },
         },
         {
             key: 'pipeline',
             label: t('columnPipeline'),
             getSortValue: (d) => (d.pipeline != null ? pipelineById.get(d.pipeline)?.name ?? null : null),
             render: (d) => (d.pipeline != null ? pipelineById.get(d.pipeline)?.name : ''),
+            filter: { getValue: (d) => (d.pipeline != null ? pipelineById.get(d.pipeline)?.name ?? null : null) },
         },
         {
             key: 'stage',
             label: t('columnStage'),
             getSortValue: (d) => (d.stage != null ? stageById.get(d.stage)?.name ?? null : null),
             render: (d) => (d.stage != null ? stageById.get(d.stage)?.name : ''),
+            filter: { getValue: (d) => (d.stage != null ? stageById.get(d.stage)?.name ?? null : null) },
         },
         {
             key: 'expectedCloseDate',
@@ -415,6 +421,10 @@ export default function DealsBrowser({ deals }: { deals: Deal[] }) {
             key: 'status',
             label: t('columnStatus'),
             getSortValue: (d) => (isClosed(d) ? 1 : 0),
+            filter: {
+                getValue: (d) => (isClosed(d) ? 'closed' : 'open'),
+                formatValue: (v) => (v === 'closed' ? t('statusClosed') : t('statusOpen')),
+            },
             render: (d) => {
                 const closed = isClosed(d);
                 return (
@@ -451,6 +461,11 @@ export default function DealsBrowser({ deals }: { deals: Deal[] }) {
             render: (d) => formatDateTime(d.updatedAt, locale),
         },
     ], [companyById, pipelineById, stageById, toggleDealStatus, t, locale]);
+
+    const visibleDeals = useMemo(
+        () => applyRecordFilters(filteredDeals, columns, filterState),
+        [filteredDeals, columns, filterState],
+    );
 
     return (
         <div className="space-y-6">
@@ -513,13 +528,12 @@ export default function DealsBrowser({ deals }: { deals: Deal[] }) {
             </div>
 
             <div className="flex items-center gap-4">
-                <button
-                    type="button"
-                    className="flex items-center gap-2 rounded-full bg-neutral-100 px-4 py-2 text-sm text-neutral-700 ring-1 ring-black/5 transition hover:bg-neutral-200"
-                >
-                    <FunnelIcon className="size-4 text-neutral-500" />
-                    <ChevronDownIcon className="size-4 text-neutral-500" />
-                </button>
+                <RecordsFilterMenu<Deal>
+                    columns={columns}
+                    items={filteredDeals}
+                    filterState={filterState}
+                    onChange={setFilterState}
+                />
                 <div
                     role="group"
                     aria-label={t('displayMode')}
@@ -593,7 +607,7 @@ export default function DealsBrowser({ deals }: { deals: Deal[] }) {
             </div>
 
             <RecordsRenderView<Deal>
-                data={filteredDeals}
+                data={visibleDeals}
                 columns={columns}
                 renderCard={(item, { onQuickEdit, onDelete }) => (
                     <DealCard

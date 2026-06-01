@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
-import { type DisplayMode, type SelectionId, isDisplayMode } from '../components/records/types';
+import { type DisplayMode, type FilterState, type SelectionId, isDisplayMode } from '../components/records/types';
 
 interface UseRecordsBrowserOptions<T extends { id: SelectionId }> {
     items: T[];
@@ -32,6 +32,7 @@ export function useRecordsBrowser<T extends { id: SelectionId }>(
     );
     const [initialized, setInitialized] = useState(false);
     const [query, setQuery] = useState('');
+    const [filterState, setFilterState] = useState<FilterState>({});
     const [selectedIds, setSelectedIds] = useState<Set<SelectionId>>(new Set());
     const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
 
@@ -72,6 +73,8 @@ export function useRecordsBrowser<T extends { id: SelectionId }>(
         setDisplayMode,
         query,
         setQuery,
+        filterState,
+        setFilterState,
         selectedIds,
         setSelectedIds,
         filteredItems,

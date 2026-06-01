@@ -5,6 +5,11 @@
     "copiedToast": "{label} をコピーしました",
     "copyFailedToast": "{label} のコピーに失敗しました"
   },
+  "RecordsFilterMenu": {
+    "filterAria": "フィルター",
+    "filterBy": "絞り込み",
+    "clearAll": "すべてクリア"
+  },
   "RecordsDeleteDialog": {
     "titleSingle": "{entityLabel} を削除",
     "titleMultiple": "{count} 件の {entityLabel} を削除",

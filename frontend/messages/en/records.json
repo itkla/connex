@@ -5,6 +5,11 @@
     "copiedToast": "{label} copied",
     "copyFailedToast": "Failed to copy {label}"
   },
+  "RecordsFilterMenu": {
+    "filterAria": "Filter",
+    "filterBy": "Filter by",
+    "clearAll": "Clear all"
+  },
   "RecordsDeleteDialog": {
     "titleSingle": "Delete {entityLabel}",
     "titleMultiple": "Delete {count} {entityLabel}s",
