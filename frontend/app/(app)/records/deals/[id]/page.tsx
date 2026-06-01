@@ -180,7 +180,7 @@ export default async function DealPage({ params }: { params: { id: number } }) {
                             </Link>
                         ) : null}
                         {pipeline ? (
-                            <span className="inline-flex items-center gap-2 rounded-md bg-neutral-100 px-2 py-1">
+                            <span className="inline-flex items-center gap-2">
                                 {pipeline.name}
                                 {currentStage ? <> · {currentStage.name}</> : null}
                                 <StatusPill outcome={outcome} t={t} />
@@ -189,7 +189,7 @@ export default async function DealPage({ params }: { params: { id: number } }) {
                             <StatusPill outcome={outcome} t={t} />
                         )}
                         {deal.expectedCloseDate ? (
-                            <span className="inline-flex items-center gap-1 rounded-md bg-neutral-100 px-2 py-1">
+                            <span className="inline-flex items-center gap-1">
                                 <CalendarIcon className="size-3.5" />
                                 {t('closeBy', { date: formatDate(deal.expectedCloseDate, locale) })}
                             </span>
