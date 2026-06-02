@@ -22,7 +22,7 @@ import ContactNode from '@/app/components/map/ContactNode';
 import Legend from '@/app/components/map/Legend';
 import RelationEdge from '@/app/components/map/edges/RelationEdge';
 import { useForceLayout } from '@/app/hooks/useForceLayout';
-import { radialLayout } from '@/app/components/map/graph/layout';
+import { radialLayout } from '@/app/components/map/graph/radialLayout';
 import type { AppNode, Graph, RelationEdge as RelationEdgeType } from './graph/types';
 
 const nodeTypes = { uc: UCNode, user: UserNode, company: CompanyNode, contact: ContactNode };

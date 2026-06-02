@@ -15,7 +15,7 @@ import {
 import { useNodesInitialized, useReactFlow } from '@xyflow/react';
 import { useCallback, useEffect, useRef } from 'react';
 import { UC_ID } from '@/app/components/map/graph/buildGraph';
-import { RING_RADIUS } from '@/app/components/map/graph/layout';
+import { RING_RADIUS } from '@/app/components/map/graph/radialLayout';
 import type { AppNode, RelationEdge } from '@/app/components/map/graph/types';
 
 type SimNode = SimulationNodeDatum & { id: string; kind: string };
