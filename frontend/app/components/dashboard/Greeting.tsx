@@ -1,5 +1,5 @@
 import { getTranslations } from 'next-intl/server';
-import { type User } from '@/app/lib/api';
+import { type User } from '@/app/lib/types';
 
 function timeOfDayGreetingKey(): 'workingLate' | 'goodMorning' | 'goodAfternoon' | 'goodEvening' {
     const h = new Date().getHours();
