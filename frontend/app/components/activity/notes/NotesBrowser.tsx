@@ -3,15 +3,16 @@
 import { useCallback, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useLocale, useTranslations } from 'next-intl';
+import { AnimatePresence } from 'motion/react';
 import { toast } from 'sonner';
 import { toastError, toastSuccess } from '@/app/lib/toast';
-import { PlusIcon, EllipsisVerticalIcon, PencilIcon, TrashIcon, FunnelIcon } from '@heroicons/react/24/solid';
+import { PlusIcon, EllipsisVerticalIcon, PencilIcon, TrashIcon } from '@heroicons/react/24/solid';
 import {
     MagnifyingGlassIcon,
-    ChevronDownIcon,
     Squares2X2Icon,
     TableCellsIcon,
     UserIcon,
+    PencilSquareIcon,
 } from '@heroicons/react/24/outline';
 
 import { Button } from '@/components/ui/button';
@@ -329,11 +330,14 @@ export default function NotesBrowser({ notes, persons, deals, users, currentUser
     };
 
     return (
-        <div className="space-y-6">
-            <div className="flex items-center justify-between">
-                <h1 className="text-4xl font-extrabold">{t('title')}</h1>
+        <div className="space-y-8">
+            <div className="flex flex-wrap items-start justify-between gap-4">
+                <div>
+                    <h1 className="text-4xl font-extrabold">{t('title')}</h1>
+                    <p className="mt-1 max-w-prose text-sm text-neutral-500">{t('subtitle')}</p>
+                </div>
                 <Button
-                    className="bg-brand text-white"
+                    className="bg-brand text-white hover:bg-brand-dark"
                     aria-label={t('newAria')}
                     onClick={() => setCreating(true)}
                 >
@@ -342,14 +346,7 @@ export default function NotesBrowser({ notes, persons, deals, users, currentUser
                 </Button>
             </div>
 
-            <div className="flex items-center gap-4">
-                <button
-                    type="button"
-                    className="flex items-center gap-2 rounded-full bg-neutral-100 px-4 py-2 text-sm text-neutral-700 ring-1 ring-black/5 transition hover:bg-neutral-200"
-                >
-                    <FunnelIcon className="size-4 text-neutral-500" />
-                    <ChevronDownIcon className="size-4 text-neutral-500" />
-                </button>
+            <div className="flex flex-wrap items-center gap-3">
                 <div
                     role="group"
                     aria-label={t('displayModeAria')}
@@ -438,36 +435,49 @@ export default function NotesBrowser({ notes, persons, deals, users, currentUser
             </div>
 
             {filteredNotes.length === 0 ? (
-                <div className="rounded-2xl bg-neutral-50 px-6 py-16 text-center ring-1 ring-black/5">
-                    <p className="text-sm text-neutral-500">
+                <div className="rounded-2xl bg-white px-6 py-20 text-center ring-1 ring-black/5">
+                    <div className="mx-auto flex size-14 items-center justify-center rounded-2xl bg-brand-light text-brand-dark">
+                        <PencilSquareIcon className="size-7" />
+                    </div>
+                    <p className="mx-auto mt-5 max-w-sm text-sm font-medium text-neutral-700">
                         {notes.length === 0 ? t('empty') : t('emptyFiltered')}
                     </p>
+                    {notes.length === 0 && (
+                        <Button
+                            onClick={() => setCreating(true)}
+                            className="mt-6 bg-brand text-white hover:bg-brand-dark"
+                        >
+                            <PlusIcon strokeWidth={2.5} />
+                            {t('new')}
+                        </Button>
+                    )}
                 </div>
-            ) : displayMode === 'grid' && groupBy !== 'none' ? (
-                <div className="space-y-8 pt-2">
+            ) : displayMode === 'grid' ? (
+                <div className="space-y-8">
                     {groups.map((g) => (
                         <section key={g.id}>
-                            <div className="mb-3 flex items-center gap-2 px-2">
-                                <h2 className="text-xs font-medium uppercase tracking-[0.12em] text-neutral-500">
-                                    {g.label}
-                                </h2>
-                                {/* <span className="rounded-full bg-neutral-100 p-2 text-[10px] font-medium text-neutral-500">
-                                    {g.notes.length}
-                                </span> */}
-                                <Badge variant="outline">{g.notes.length}</Badge>
-                            </div>
+                            {g.label && (
+                                <div className="mb-3 flex items-center gap-2 px-1">
+                                    <h2 className="text-xs font-medium uppercase tracking-[0.12em] text-neutral-500">
+                                        {g.label}
+                                    </h2>
+                                    <Badge variant="outline">{g.notes.length}</Badge>
+                                </div>
+                            )}
                             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-                                {g.notes.map((note) => (
-                                    <NoteCard
-                                        key={note.id}
-                                        note={note}
-                                        person={note.person ? personById.get(note.person) : undefined}
-                                        deal={note.deal ? dealById.get(note.deal) : undefined}
-                                        author={userById.get(note.author)}
-                                        onEdit={() => openEdit(note)}
-                                        onDelete={() => requestDelete(note)}
-                                    />
-                                ))}
+                                <AnimatePresence mode="popLayout" initial={false}>
+                                    {g.notes.map((note) => (
+                                        <NoteCard
+                                            key={note.id}
+                                            note={note}
+                                            person={note.person ? personById.get(note.person) : undefined}
+                                            deal={note.deal ? dealById.get(note.deal) : undefined}
+                                            author={userById.get(note.author)}
+                                            onEdit={() => openEdit(note)}
+                                            onDelete={() => requestDelete(note)}
+                                        />
+                                    ))}
+                                </AnimatePresence>
                             </div>
                         </section>
                     ))}
@@ -493,7 +503,6 @@ export default function NotesBrowser({ notes, persons, deals, users, currentUser
                     onSelectedIdsChange={setSelectedIds}
                     onQuickEdit={openEdit}
                     onDelete={requestDelete}
-                    gridClassName="grid grid-cols-1 gap-4 pt-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"
                     entityLabel={t('entityLabel')}
                 />
             )}

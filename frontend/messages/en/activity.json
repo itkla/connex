@@ -52,6 +52,7 @@
   },
   "ActivityNotes": {
     "title": "Notes",
+    "subtitle": "Free-form notes you can link to contacts and deals to keep context with your records.",
     "myNotes": "My Notes",
     "allNotes": "All Notes",
     "new": "New",

@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { useLocale, useTranslations } from 'next-intl';
+import { motion, useReducedMotion } from 'motion/react';
 import { toastError, toastSuccess } from '@/app/lib/toast';
 import {
     EllipsisHorizontalIcon,
@@ -10,6 +11,7 @@ import {
     DocumentDuplicateIcon,
     UserIcon,
     BriefcaseIcon,
+    LockClosedIcon,
 } from '@heroicons/react/24/outline';
 
 import {
@@ -20,8 +22,7 @@ import {
     DropdownMenuSeparator,
 } from '@/components/ui/dropdown-menu';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
-import { copyToClipboard, formatShortDate } from '@/app/lib/utils';
+import { copyToClipboard, formatShortDate, formatDateTime } from '@/app/lib/utils';
 import type { Contact, Deal, Note, User } from '@/app/lib/types';
 
 interface NoteCardProps {
@@ -33,11 +34,28 @@ interface NoteCardProps {
     onDelete?: () => void;
 }
 
+const EASE_OUT: [number, number, number, number] = [0.23, 1, 0.32, 1];
+
 export default function NoteCard({ note, person, deal, author, onEdit, onDelete }: NoteCardProps) {
     const t = useTranslations('ActivityNotesCard');
     const locale = useLocale();
+    const reduce = useReducedMotion() ?? false;
     const updated = note.updatedAt ?? note.createdAt;
-    const authorName = author?.displayName || author?.username || '';
+    const authorName = author?.displayName || author?.username || t('unknownAuthor');
+    const content = (note.content ?? '').trim();
+    const breakAt = content.indexOf('\n');
+    const heading = breakAt === -1 ? content : content.slice(0, breakAt).trim();
+    const body = breakAt === -1 ? '' : content.slice(breakAt + 1).trim();
+    const hasContext = Boolean(person || deal);
+
+    const presence = reduce
+        ? { initial: { opacity: 0 }, animate: { opacity: 1 }, exit: { opacity: 0 }, transition: { duration: 0.15 } }
+        : {
+              initial: { opacity: 0, scale: 0.96 },
+              animate: { opacity: 1, scale: 1 },
+              exit: { opacity: 0, scale: 0.96 },
+              transition: { duration: 0.2, ease: EASE_OUT },
+          };
 
     const copyContent = () => {
         if (copyToClipboard(note.content, 'Note')) {
@@ -48,121 +66,134 @@ export default function NoteCard({ note, person, deal, author, onEdit, onDelete 
     };
 
     return (
-        <div
-            className="relative flex w-full min-w-0 flex-col gap-3 rounded-2xl bg-white p-4 ring-1 ring-black/5 shadow-sm transition duration-300 hover:shadow-lg hover:-translate-y-0.5 cursor-pointer"
-            onClick={() => onEdit?.()}
-        >
-            <div className="flex min-w-0 flex-wrap items-center gap-1.5 pr-9">
-                {person ? (
-                    <Link
-                        href={`/records/contacts/${person.id}`}
+        <motion.div layout={!reduce} {...presence} className="min-w-0">
+            <motion.div
+                whileHover={reduce ? undefined : { y: -2 }}
+                whileTap={reduce ? undefined : { scale: 0.99 }}
+                transition={{ duration: 0.2, ease: EASE_OUT }}
+                onClick={() => onEdit?.()}
+                className="group relative flex aspect-square w-full min-w-0 cursor-pointer flex-col overflow-hidden rounded-2xl bg-white p-4 ring-1 ring-black/5 transition-shadow duration-200 hover:shadow-lg"
+            >
+                <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                        <button
+                            type="button"
+                            aria-label={t('actionsAria')}
+                            onClick={(e) => e.stopPropagation()}
+                            className="absolute top-3 right-3 flex size-7 shrink-0 items-center justify-center rounded-full text-neutral-500 opacity-0 transition hover:bg-neutral-100 hover:text-neutral-800 focus-visible:opacity-100 group-hover:opacity-100 pointer-coarse:opacity-100 aria-expanded:bg-neutral-100 aria-expanded:text-neutral-800 aria-expanded:opacity-100"
+                        >
+                            <EllipsisHorizontalIcon className="size-4" />
+                        </button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent
+                        align="end"
+                        side="bottom"
+                        className="w-44"
                         onClick={(e) => e.stopPropagation()}
-                        className="inline-flex max-w-[12rem] items-center gap-1 rounded-full bg-brand-light/40 px-2 py-0.5 text-xs font-medium text-brand-dark transition hover:bg-brand-light"
-                        title={person.name}
                     >
-                        <UserIcon className="size-3 shrink-0" />
-                        <span className="truncate">{person.name}</span>
-                    </Link>
-                ) : null}
-                {deal ? (
-                    <Link
-                        href={`/records/deals/${deal.id}`}
-                        onClick={(e) => e.stopPropagation()}
-                        className="inline-flex max-w-[12rem] items-center gap-1 rounded-full bg-neutral-100 px-2 py-0.5 text-xs font-medium text-neutral-700 transition hover:bg-neutral-200"
-                        title={deal.name}
-                    >
-                        <BriefcaseIcon className="size-3 shrink-0" />
-                        <span className="truncate">{deal.name}</span>
-                    </Link>
-                ) : null}
-                {!person && !deal ? (
-                    <span className="inline-flex items-center rounded-full bg-neutral-50 px-2 py-0.5 text-xs font-medium text-neutral-400 ring-1 ring-inset ring-neutral-200">
-                        {t('private')}
-                    </span>
-                ) : null}
-            </div>
+                        <DropdownMenuItem
+                            onSelect={(e) => {
+                                e.preventDefault();
+                                onEdit?.();
+                            }}
+                        >
+                            <PencilIcon className="size-4 text-neutral-500" />
+                            {t('edit')}
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
+                            onSelect={(e) => {
+                                e.preventDefault();
+                                copyContent();
+                            }}
+                        >
+                            <DocumentDuplicateIcon className="size-4 text-neutral-500" />
+                            {t('copyContent')}
+                        </DropdownMenuItem>
+                        <DropdownMenuSeparator />
+                        <DropdownMenuItem
+                            className="text-destructive hover:bg-red-500/10"
+                            onSelect={(e) => {
+                                e.preventDefault();
+                                onDelete?.();
+                            }}
+                        >
+                            <TrashIcon className="size-4 text-destructive" />
+                            {t('delete')}
+                        </DropdownMenuItem>
+                    </DropdownMenuContent>
+                </DropdownMenu>
 
-            <p className="line-clamp-6 text-sm whitespace-pre-wrap text-neutral-800">
-                {note.content}
-            </p>
-
-            <div className="mt-auto flex items-center justify-between gap-2 pt-1">
-                <div className="flex min-w-0 items-center gap-2">
-                    {author ? (
-                        <Tooltip>
-                            <TooltipTrigger asChild>
-                                <Avatar size="sm" className="ring-1 ring-black/5">
-                                    {author.profilePictureUrl ? (
-                                        <AvatarImage
-                                            src={author.profilePictureUrl}
-                                            alt={authorName}
-                                        />
-                                    ) : (
-                                        <AvatarFallback>
-                                            <UserIcon className="size-3 text-neutral-500" />
-                                        </AvatarFallback>
-                                    )}
-                                </Avatar>
-                            </TooltipTrigger>
-                            <TooltipContent side="bottom" align="start">
-                                {authorName || t('unknownAuthor')}
-                            </TooltipContent>
-                        </Tooltip>
-                    ) : null}
-                    <span className="truncate text-xs text-neutral-500">
-                        {formatShortDate(updated, locale)}
-                    </span>
+                <div className="min-h-0 flex-1 overflow-y-auto pr-7">
+                    {body ? (
+                        <>
+                            <p className="text-[15px] font-semibold leading-snug break-words text-neutral-900">
+                                {heading}
+                            </p>
+                            <p className="mt-1.5 text-sm leading-relaxed break-words whitespace-pre-wrap text-neutral-600">
+                                {body}
+                            </p>
+                        </>
+                    ) : (
+                        <p className="text-sm leading-relaxed break-words whitespace-pre-wrap text-neutral-700">
+                            {heading}
+                        </p>
+                    )}
                 </div>
-            </div>
 
-            <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                    <button
-                        type="button"
-                        aria-label={t('actionsAria')}
-                        onClick={(e) => e.stopPropagation()}
-                        className="absolute top-3 right-3 flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-neutral-400 transition hover:bg-neutral-100 hover:text-neutral-700"
-                    >
-                        <EllipsisHorizontalIcon className="size-4" />
-                    </button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent
-                    align="end"
-                    side="bottom"
-                    className="w-44"
-                    onClick={(e) => e.stopPropagation()}
-                >
-                    <DropdownMenuItem
-                        onSelect={(e) => {
-                            e.preventDefault();
-                            onEdit?.();
-                        }}
-                    >
-                        <PencilIcon className="size-4 text-neutral-500" />
-                        {t('edit')}
-                    </DropdownMenuItem>
-                    <DropdownMenuItem
-                        onSelect={(e) => {
-                            e.preventDefault();
-                            copyContent();
-                        }}
-                    >
-                        <DocumentDuplicateIcon className="size-4 text-neutral-500" />
-                        {t('copyContent')}
-                    </DropdownMenuItem>
-                    <DropdownMenuSeparator />
-                    <DropdownMenuItem
-                        className="text-destructive hover:bg-red-500/10"
-                        onSelect={(e) => {
-                            e.preventDefault();
-                            onDelete?.();
-                        }}
-                    >
-                        <TrashIcon className="size-4 text-destructive" />
-                        {t('delete')}
-                    </DropdownMenuItem>
-                </DropdownMenuContent>
-            </DropdownMenu>
-        </div>
+                <div className="mt-3 shrink-0 space-y-2.5 border-t border-neutral-100 pt-3">
+                    <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+                        {person && (
+                            <Link
+                                href={`/records/contacts/${person.id}`}
+                                onClick={(e) => e.stopPropagation()}
+                                className="inline-flex max-w-[12rem] items-center gap-1 rounded-full bg-brand-light/40 px-2 py-0.5 text-xs font-medium text-brand-dark transition hover:bg-brand-light"
+                                title={person.name}
+                            >
+                                <UserIcon className="size-3 shrink-0" />
+                                <span className="truncate">{person.name}</span>
+                            </Link>
+                        )}
+                        {deal && (
+                            <Link
+                                href={`/records/deals/${deal.id}`}
+                                onClick={(e) => e.stopPropagation()}
+                                className="inline-flex max-w-[12rem] items-center gap-1 rounded-full bg-neutral-100 px-2 py-0.5 text-xs font-medium text-neutral-700 transition hover:bg-neutral-200"
+                                title={deal.name}
+                            >
+                                <BriefcaseIcon className="size-3 shrink-0" />
+                                <span className="truncate">{deal.name}</span>
+                            </Link>
+                        )}
+                        {!hasContext && (
+                            <span className="inline-flex items-center gap-1 text-xs font-medium text-neutral-500">
+                                <LockClosedIcon className="size-3 shrink-0" />
+                                {t('private')}
+                            </span>
+                        )}
+                    </div>
+
+                    <div className="flex items-center justify-between gap-2">
+                        <div className="flex min-w-0 items-center gap-2">
+                            <Avatar size="sm" className="ring-1 ring-black/5">
+                                {author?.profilePictureUrl ? (
+                                    <AvatarImage src={author.profilePictureUrl} alt={authorName} />
+                                ) : (
+                                    <AvatarFallback>
+                                        <UserIcon className="size-3 text-neutral-500" />
+                                    </AvatarFallback>
+                                )}
+                            </Avatar>
+                            <span className="truncate text-xs font-medium text-neutral-600">{authorName}</span>
+                        </div>
+                        <span
+                            className="shrink-0 text-xs text-neutral-500 tabular-nums"
+                            title={formatDateTime(updated, locale)}
+                        >
+                            {formatShortDate(updated, locale)}
+                        </span>
+                    </div>
+                </div>
+            </motion.div>
+        </motion.div>
     );
 }
