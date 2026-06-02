@@ -26,7 +26,9 @@ export async function PUT(request: NextRequest) {
 
     const fileName = `contact-${contactId}-${Date.now()}-${(contactPicture as File).name}`;
     const buffer = Buffer.from(await (contactPicture as File).arrayBuffer());
-    const publicDir = path.join(process.cwd(), "public", "contact-pictures");
+    // const publicDir = path.join(process.cwd(), "public", "contact-pictures");
+    const baseDir = process.env.CONNEX_UPLOADS_DIR ?? path.join(process.cwd(), "public");
+    const publicDir = path.join(baseDir, "contact-pictures");
     const filePath = path.join(publicDir, fileName);
 
     await fs.mkdir(publicDir, { recursive: true });

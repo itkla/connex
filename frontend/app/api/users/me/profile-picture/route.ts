@@ -23,7 +23,9 @@ export async function PUT(request: NextRequest) {
     // Extract filename and buffer
     const fileName = `user-${user.id}-${Date.now()}-${(profilePicture as File).name}`;
     const buffer = Buffer.from(await (profilePicture as File).arrayBuffer());
-    const publicDir = path.join(process.cwd(), "public", "profile-pictures");
+    // const publicDir = path.join(process.cwd(), "public", "profile-pictures");
+    const baseDir = process.env.CONNEX_UPLOADS_DIR ?? path.join(process.cwd(), "public");
+    const publicDir = path.join(baseDir, "profile-pictures");
     const filePath = path.join(publicDir, fileName);
 
     // Ensure /public/profile-pictures directory exists

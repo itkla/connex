@@ -26,7 +26,9 @@ export async function PUT(request: NextRequest) {
 
     const fileName = `company-${companyId}-${Date.now()}-${(companyLogo as File).name}`;
     const buffer = Buffer.from(await (companyLogo as File).arrayBuffer());
-    const publicDir = path.join(process.cwd(), "public", "company-logos");
+    // const publicDir = path.join(process.cwd(), "public", "company-logos");
+    const baseDir = process.env.CONNEX_UPLOADS_DIR ?? path.join(process.cwd(), "public");
+    const publicDir = path.join(baseDir, "company-logos");
     const filePath = path.join(publicDir, fileName);
 
     await fs.mkdir(publicDir, { recursive: true });
