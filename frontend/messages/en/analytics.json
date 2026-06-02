@@ -1,0 +1,94 @@
+{
+  "AnalyticsPage": {
+    "title": "Analytics",
+    "subtitle": "Revenue, pipeline, and team activity at a glance",
+    "rangeLabel": "Time range",
+    "currency": "Currency",
+    "currencyCount": "{count, plural, one {# deal} other {# deals}}",
+    "range30d": "30 days",
+    "range90d": "90 days",
+    "range12m": "12 months",
+    "revenueTitle": "Revenue",
+    "pipelineValueTitle": "Value by pipeline",
+    "stageTitle": "Pipeline by stage",
+    "winRateTitle": "Win rate",
+    "activityTitle": "Team activity",
+    "teamTitle": "Top performers",
+    "agingTitle": "Open deal aging",
+    "topDealsTitle": "Top deals",
+    "infoAria": "How this is calculated",
+    "revenueInfo": "Won revenue (realized) vs projected value of all deals, by month.",
+    "stageInfo": "Open deals in the selected pipeline, by stage. Bar = total value, number = open deals.",
+    "winRateInfo": "Deals closed this period, won vs lost. Center = win rate (won ÷ won+lost).",
+    "activityInfo": "Logged activities by type over the period, dated by timestamp.",
+    "teamInfo": "Members ranked by logged activity: activities, completed tasks, and notes.",
+    "agingInfo": "Open deals by stage and time since last update. Fresh < 7 days, stalled > 60.",
+    "topDealsInfo": "Biggest open deals by expected value; biggest wins by actual value.",
+    "pipelineValueInfo": "Won revenue this period plus current open value, per pipeline. Ranked by total; empty pipelines hidden.",
+    "emptyTitle": "No data to analyze yet",
+    "emptyBody": "As you add deals and log activity, this page fills in with revenue trends, win rates, pipeline value, and team momentum.",
+    "emptyCreateDeal": "Create a deal",
+    "emptySetupPipeline": "Set up a pipeline"
+  },
+  "AnalyticsKpis": {
+    "wonRevenue": "Won revenue",
+    "newPipeline": "New pipeline",
+    "winRate": "Win rate",
+    "avgCycle": "Avg. cycle",
+    "days": "{count}d",
+    "noBaseline": "No prior data",
+    "vsPrevious": "vs previous",
+    "infoAria": "How this is calculated",
+    "comparisonNote": "Compared with the previous period of equal length. \"No prior data\" means nothing to compare against.",
+    "wonRevenueTooltip": "Actual value of deals won this period, by close date.",
+    "newPipelineTooltip": "Expected value of all deals created this period, open or closed. Uses expected value, not the won amount.",
+    "winRateTooltip": "Won ÷ (won + lost) for deals closed this period. Deals closed with no win/lose stage aren't counted.",
+    "avgCycleTooltip": "Average days from creation to close, for deals won this period."
+  },
+  "AnalyticsRevenue": {
+    "subtitle": "Won vs projected, by month",
+    "openPipeline": "Open pipeline",
+    "actual": "Won",
+    "projected": "Projected",
+    "today": "Today",
+    "empty": "No revenue to chart yet",
+    "actualAmount": "Won · {amount}",
+    "projectedAmount": "Projected · {amount}"
+  },
+  "AnalyticsStageFunnel": {
+    "selectPipeline": "Select pipeline",
+    "subtitle": "Open deals in {pipeline}",
+    "morePipelines": "+{count} more",
+    "deals": "{count, plural, one {# deal} other {# deals}}",
+    "empty": "No open deals to chart"
+  },
+  "AnalyticsWinRate": {
+    "subtitle": "Closed deals this period",
+    "won": "Won",
+    "lost": "Lost",
+    "rate": "win rate",
+    "empty": "No deals closed this period",
+    "deals": "{count, plural, one {# deal} other {# deals}}"
+  },
+  "AnalyticsActivity": {
+    "subtitle": "Logged interactions over time",
+    "empty": "No activity logged this period",
+    "typeCall": "Calls",
+    "typeEmail": "Emails",
+    "typeMeeting": "Meetings",
+    "typeNote": "Notes",
+    "typeOther": "Other"
+  },
+  "AnalyticsTeam": {
+    "subtitle": "By logged activity this period",
+    "touches": "{count, plural, one {# touch} other {# touches}}",
+    "empty": "No team activity this period"
+  },
+  "AnalyticsPipelines": {
+    "won": "Won",
+    "open": "Open",
+    "rowSummary": "Won {won} · Open {open}",
+    "deals": "{count, plural, one {# open deal} other {# open deals}}",
+    "empty": "No pipeline activity yet"
+  }
+}

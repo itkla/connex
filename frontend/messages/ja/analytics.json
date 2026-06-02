@@ -1,0 +1,94 @@
+{
+  "AnalyticsPage": {
+    "title": "分析",
+    "subtitle": "売上・案件・チーム活動をひと目で",
+    "rangeLabel": "期間",
+    "currency": "通貨",
+    "currencyCount": "{count} 件",
+    "range30d": "30日",
+    "range90d": "90日",
+    "range12m": "12か月",
+    "revenueTitle": "売上",
+    "pipelineValueTitle": "パイプライン別の価値",
+    "stageTitle": "ステージ別パイプライン",
+    "winRateTitle": "成約率",
+    "activityTitle": "チーム活動",
+    "teamTitle": "トップパフォーマー",
+    "agingTitle": "進行中の商談の経過",
+    "topDealsTitle": "主要な商談",
+    "infoAria": "計算方法",
+    "revenueInfo": "受注済みの売上（実績）と、全商談の予定額（予想売上）を月別に比較します。",
+    "stageInfo": "選択中のパイプラインの進行中商談をステージ別に表示。バー＝予定額、数値＝件数。",
+    "winRateInfo": "今期間にクローズした商談の受注・失注。中央は成約率（受注 ÷（受注＋失注））。",
+    "activityInfo": "今期間の活動を種類別・タイムスタンプ順に表示します。",
+    "teamInfo": "活動量（活動・完了タスク・メモ）でメンバーをランキングします。",
+    "agingInfo": "進行中商談をステージと最終更新からの経過で分類。7日未満＝新規、60日超＝停滞。",
+    "topDealsInfo": "予定額の大きい進行中商談と、実績額の大きい受注商談。",
+    "pipelineValueInfo": "各パイプラインの受注額（今期間）＋進行中の予定額。合計順、商談ゼロは非表示。",
+    "emptyTitle": "分析できるデータがまだありません",
+    "emptyBody": "商談を追加し、活動を記録すると、売上の推移・成約率・パイプラインの価値・チームの勢いがここに表示されます。",
+    "emptyCreateDeal": "商談を作成",
+    "emptySetupPipeline": "パイプラインを設定"
+  },
+  "AnalyticsKpis": {
+    "wonRevenue": "受注売上",
+    "newPipeline": "新規パイプライン",
+    "winRate": "成約率",
+    "avgCycle": "平均商談期間",
+    "days": "{count}日",
+    "noBaseline": "比較データなし",
+    "vsPrevious": "前期間比",
+    "infoAria": "計算方法",
+    "comparisonNote": "同じ長さの前期間との比較です。「比較データなし」は比較対象がないことを示します。",
+    "wonRevenueTooltip": "今期間に受注した商談の実績額の合計（クローズ日で集計）。",
+    "newPipelineTooltip": "今期間に作成された全商談の予定額の合計。進行中・クローズ済みを問わず、予定額で集計します（受注額は不使用）。",
+    "winRateTooltip": "今期間にクローズした商談のうち受注の割合（受注 ÷（受注＋失注））。受注・失注以外のクローズは除外。",
+    "avgCycleTooltip": "今期間に受注した商談の、作成からクローズまでの平均日数。"
+  },
+  "AnalyticsRevenue": {
+    "subtitle": "受注と予想（月別）",
+    "openPipeline": "進行中のパイプライン",
+    "actual": "受注",
+    "projected": "予想",
+    "today": "今日",
+    "empty": "表示できる売上データがまだありません",
+    "actualAmount": "受注 · {amount}",
+    "projectedAmount": "予想 · {amount}"
+  },
+  "AnalyticsStageFunnel": {
+    "selectPipeline": "パイプラインを選択",
+    "subtitle": "{pipeline} の進行中の商談",
+    "morePipelines": "他 {count} 件",
+    "deals": "{count} 件の商談",
+    "empty": "表示できる進行中の商談がありません"
+  },
+  "AnalyticsWinRate": {
+    "subtitle": "今期間にクローズした商談",
+    "won": "受注",
+    "lost": "失注",
+    "rate": "成約率",
+    "empty": "今期間にクローズした商談はありません",
+    "deals": "{count} 件の商談"
+  },
+  "AnalyticsActivity": {
+    "subtitle": "記録された活動の推移",
+    "empty": "今期間の活動記録はありません",
+    "typeCall": "電話",
+    "typeEmail": "メール",
+    "typeMeeting": "打ち合わせ",
+    "typeNote": "メモ",
+    "typeOther": "その他"
+  },
+  "AnalyticsTeam": {
+    "subtitle": "今期間の活動量順",
+    "touches": "{count} 件",
+    "empty": "今期間のチーム活動はありません"
+  },
+  "AnalyticsPipelines": {
+    "won": "受注",
+    "open": "進行中",
+    "rowSummary": "受注 {won} · 進行中 {open}",
+    "deals": "{count} 件の進行中商談",
+    "empty": "パイプラインの活動がまだありません"
+  }
+}

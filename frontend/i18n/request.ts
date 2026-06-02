@@ -14,6 +14,7 @@ const namespaces = [
     "common",
     "auth",
     "dashboard",
+    "analytics",
     "activity",
     "me",
     "records",

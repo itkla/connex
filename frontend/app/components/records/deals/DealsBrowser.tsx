@@ -51,8 +51,6 @@ import ContactAvatar from '../contacts/ContactAvatar';
 import SummaryTile from '@/app/components/SummaryTile';
 import DealsRevenueChart from '@/app/components/records/deals/DealsRevenueChart';
 import StageRatio from '@/app/components/records/deals/StageRatio';
-import DealsAging from '@/app/components/records/deals/DealsAging';
-import TopDeals from '@/app/components/records/deals/TopDeals';
 
 function toDraft(d: Deal): DealDraft {
     return {
@@ -516,15 +514,6 @@ export default function DealsBrowser({ deals }: { deals: Deal[] }) {
                     label={t('forecastAccuracy')}
                     value={summary.forecastAccuracy != null ? `${Math.round(summary.forecastAccuracy * 100)}%` : '—'}
                 />
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                <SummaryTile
-                    className="sm:col-span-2"
-                    label={t('openDealAging')}
-                    value={<DealsAging deals={dealsInCurrency} stageById={stageById} />}
-                />
-                <SummaryTile label={t('topDeals')} value={<TopDeals deals={dealsInCurrency} companyById={companyById} />} />
             </div>
 
             <div className="flex items-center gap-4">
