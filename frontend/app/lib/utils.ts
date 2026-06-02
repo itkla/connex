@@ -190,3 +190,99 @@ export async function uploadCompanyLogo(companyId: number, file: File): Promise<
     const data = (await res.json()) as { logoUrl: string };
     return data.logoUrl;
 }
+
+/**
+ * normalizes a hex color string to a lowercase hex color string
+ * @param input - the hex color string to normalize
+ * @returns the normalized hex color string
+ */
+export function normalizeHex(input: string): string | null {
+    const value = input.trim().replace(/^#/, '');
+    if (/^[0-9a-f]{3}$/i.test(value)) {
+        const [r, g, b] = value.split('');
+        return `#${r}${r}${g}${g}${b}${b}`.toLowerCase();
+    }
+    if (/^[0-9a-f]{6}$/i.test(value)) {
+        return `#${value}`.toLowerCase();
+    }
+    return null;
+}
+
+/**
+ * converts a hex color string to an rgb object
+ * @param hex 
+ * @returns 
+ */
+function toRgb(hex: string): { r: number; g: number; b: number } {
+    const normalized = normalizeHex(hex) ?? '#000000';
+    const int = parseInt(normalized.slice(1), 16);
+    return { r: (int >> 16) & 255, g: (int >> 8) & 255, b: int & 255 };
+}
+
+/**
+ * calculates the relative luminance of a hex color string
+ * @param hex - the hex color string to calculate the relative luminance of
+ * @returns the relative luminance of the hex color string
+ */
+function relativeLuminance(hex: string): number {
+    const { r, g, b } = toRgb(hex);
+    const channel = (c: number) => {
+        const s = c / 255;
+        return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
+    };
+    return 0.2126 * channel(r) + 0.7152 * channel(g) + 0.0722 * channel(b);
+}
+
+/**
+ * calculates the readable text color for a hex color string
+ * @param hex - the hex color string to calculate the readable text color for
+ * @returns the readable text color for the hex color string
+ */
+export function readableTextColor(hex: string): string {
+    const l = relativeLuminance(hex);
+    const contrastWithWhite = 1.05 / (l + 0.05);
+    const contrastWithBlack = (l + 0.05) / 0.05;
+    return contrastWithWhite >= contrastWithBlack ? '#ffffff' : '#171717';
+}
+
+/**
+ * converts a hex color string to an hsl object
+ * @param hex - the hex color string to convert to an hsl object
+ * @returns the hsl object
+ */
+function toHsl(hex: string): { h: number; s: number; l: number } {
+    const { r, g, b } = toRgb(hex);
+    const rn = r / 255;
+    const gn = g / 255;
+    const bn = b / 255;
+    const max = Math.max(rn, gn, bn);
+    const min = Math.min(rn, gn, bn);
+    const l = (max + min) / 2;
+    const d = max - min;
+    if (d === 0) return { h: 0, s: 0, l };
+    const s = d / (1 - Math.abs(2 * l - 1));
+    let h: number;
+    if (max === rn) h = ((gn - bn) / d) % 6;
+    else if (max === gn) h = (bn - rn) / d + 2;
+    else h = (rn - gn) / d + 4;
+    h *= 60;
+    if (h < 0) h += 360;
+    return { h, s, l };
+}
+
+/**
+ * compares two hex color strings by their hue
+ * @param a - the first hex color string to compare
+ * @param b - the second hex color string to compare
+ * @returns the comparison result
+ */
+export function compareByColor(a: string, b: string): number {
+    const ha = toHsl(a);
+    const hb = toHsl(b);
+    const aGray = ha.s < 0.12;
+    const bGray = hb.s < 0.12;
+    if (aGray !== bGray) return aGray ? 1 : -1;
+    if (aGray && bGray) return hb.l - ha.l;
+    if (Math.abs(ha.h - hb.h) > 0.5) return ha.h - hb.h;
+    return hb.l - ha.l;
+}

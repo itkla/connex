@@ -577,6 +577,29 @@ export function getTagsFromCookie(cookie: string | null) {
     return safeWithCookie<Types.Tag>((init) => getTags(init), cookie);
 }
 
+export function getTagById(id: number, init: RequestInit = {}) {
+    return getJson<Types.Tag>(`/api/tags/${id}`, init);
+}
+
+export function createTag(payload: Types.CreateTagPayload) {
+    return postJson<Types.Tag>(`/api/tags`, payload);
+}
+
+export function updateTag(id: number, payload: Types.UpdateTagPayload) {
+    return putJson<Types.Tag>(`/api/tags/${id}`, payload);
+}
+
+export function deleteTag(id: number, init: RequestInit = {}) {
+    return deleteJson<void[]>(`/api/tags/${id}`, init);
+}
+
+export function getPeopleForTag(id: number, init: RequestInit = {}) {
+    return getJson<Types.Contact[]>(`/api/tags/${id}/people`, init);
+}
+
+export function getCompaniesForTag(id: number, init: RequestInit = {}) {
+    return getJson<Types.Company[]>(`/api/tags/${id}/companies`, init);
+}
 /*
 * == Global search
 */

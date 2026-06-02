@@ -20,7 +20,7 @@ import ooo.klae.connex.backend.beans.Tag;
 @AllArgsConstructor
 public class TagDto {
 
-    private int id;
+    private Integer id;
 
     @NotBlank
     @Size(max = 64)
@@ -47,7 +47,8 @@ public class TagDto {
 
     public Tag toBean() {
         Tag t = new Tag();
-        t.setId(id);
+        // t.setId(id);
+        if (id != null) t.setId(id);
         t.setName(name);
         t.setColor(color);
         return t;
