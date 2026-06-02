@@ -316,6 +316,16 @@ export type Tag = {
     updatedAt: string;
 };
 
+export type CreateTagPayload = {
+    name: string;
+    color: string;
+};
+
+export type UpdateTagPayload = {
+    name?: string;
+    color?: string;
+};
+
 export type UpdateContactPayload = {
     name?: string;
     email?: string;
