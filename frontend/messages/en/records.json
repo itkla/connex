@@ -8,7 +8,8 @@
     "clearSelection": "Clear selection",
     "rowActionsAria": "Actions for {name}",
     "quickEdit": "Quick edit",
-    "delete": "Delete"
+    "delete": "Delete",
+    "emptyState": "Nothing to show here."
   },
   "RecordsFilterMenu": {
     "filterAria": "Filter",

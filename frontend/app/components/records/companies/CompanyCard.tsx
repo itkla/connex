@@ -34,9 +34,9 @@ export default function CompanyCard({ company, metrics, metricsStatus, onFirstEx
     };
 
     return (
-        <div className="rounded-2xl bg-neutral-100 ring-1 ring-black/5 transition">
+        <div className="group rounded-2xl bg-white ring-1 ring-black/5 transition duration-200 hover:ring-black/10 hover:shadow-[0_10px_30px_-12px_rgb(0_0_0/0.18)]">
             <div
-                className="flex items-center gap-4 p-4 cursor-pointer hover:bg-neutral-200 rounded-2xl"
+                className="flex cursor-pointer items-center gap-4 rounded-2xl p-4 transition-colors hover:bg-neutral-50"
                 onClick={toggleExpand}
             >
                 <CompanyAvatar company={company} type="large" />
@@ -60,14 +60,14 @@ export default function CompanyCard({ company, metrics, metricsStatus, onFirstEx
                         open();
                     }}
                     aria-label={t('openCompanyAriaLabel')}
-                    className="w-12 h-12 shrink-0 bg-neutral-200 hover:bg-neutral-300 outline-none border-none shadow-none"
+                    className="size-10 shrink-0 border-none bg-neutral-100 text-neutral-500 shadow-none outline-none hover:bg-neutral-200 hover:text-neutral-700"
                 >
                     <ChevronRightIcon className="size-4" />
                 </Button>
             </div>
 
             {isExpanded && (
-                <div className="border-t border-black/10 p-4 space-y-4">
+                <div className="border-t border-neutral-100 p-4 space-y-4">
                     {metricsStatus === 'loading' && (
                         <div className="flex items-center justify-center py-4 text-sm text-neutral-500">
                             <Loader2Icon className="size-4 animate-spin mr-2" />

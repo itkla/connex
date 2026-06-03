@@ -8,6 +8,7 @@ import {
     ChevronUpIcon,
     ChevronUpDownIcon,
     EllipsisHorizontalIcon,
+    InboxIcon,
     PencilSquareIcon,
     TrashIcon,
     XMarkIcon,
@@ -60,7 +61,7 @@ export default function RecordsRenderView<T extends { id: SelectionId; name?: st
     onSelectedIdsChange,
     onQuickEdit,
     onDelete,
-    gridClassName = 'grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4',
+    gridClassName = 'grid gap-4 grid-cols-[repeat(auto-fill,minmax(min(100%,16rem),1fr))]',
     entityLabel,
     selectionActions,
 }: Props<T>) {
@@ -146,13 +147,39 @@ export default function RecordsRenderView<T extends { id: SelectionId; name?: st
         </AnimatePresence>
     );
 
+    if (sortedData.length === 0) {
+        return (
+            <>
+                <div className="rounded-2xl bg-white px-6 py-16 text-center ring-1 ring-black/5">
+                    <div className="mx-auto flex size-12 items-center justify-center rounded-2xl bg-neutral-100 text-neutral-400">
+                        <InboxIcon className="size-6" />
+                    </div>
+                    <p className="mx-auto mt-4 max-w-sm text-sm font-medium text-neutral-600">{t('emptyState')}</p>
+                </div>
+                {selectionBar}
+            </>
+        );
+    }
+
     if (displayMode === 'grid') {
         return (
             <>
                 <div className={gridClassName}>
-                    {sortedData.map((item) => (
-                        <div key={item.id}>{renderCard(item, { onQuickEdit, onDelete })}</div>
-                    ))}
+                    <AnimatePresence initial={false}>
+                        {sortedData.map((item) => (
+                            <motion.div
+                                key={item.id}
+                                initial={false}
+                                exit={reduce ? { opacity: 0 } : { opacity: 0, scale: 0.96, transition: { duration: 0.18, ease: EASE_OUT } }}
+                                className={cn(
+                                    'rounded-2xl',
+                                    selectedIds.has(item.id) && 'outline-2 outline-offset-2 outline-brand',
+                                )}
+                            >
+                                {renderCard(item, { onQuickEdit, onDelete })}
+                            </motion.div>
+                        ))}
+                    </AnimatePresence>
                 </div>
                 {selectionBar}
             </>

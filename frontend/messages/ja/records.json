@@ -8,7 +8,8 @@
     "clearSelection": "選択を解除",
     "rowActionsAria": "{name} の操作",
     "quickEdit": "クイック編集",
-    "delete": "削除"
+    "delete": "削除",
+    "emptyState": "表示できるものがありません。"
   },
   "RecordsFilterMenu": {
     "filterAria": "フィルター",
