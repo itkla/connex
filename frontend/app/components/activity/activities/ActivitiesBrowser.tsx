@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState, type ComponentType } from 'react';
 import { useRouter } from 'next/navigation';
 import { useLocale, useTranslations } from 'next-intl';
 import Link from 'next/link';
-import { toastError, toastSuccess } from '@/app/lib/toast';
+import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
 import {
     MagnifyingGlassIcon,
     UserIcon,
@@ -18,6 +18,7 @@ import {
     PencilIcon,
     TrashIcon,
     EllipsisHorizontalIcon,
+    InboxStackIcon,
 } from '@heroicons/react/24/outline';
 import { PlusIcon } from '@heroicons/react/24/solid';
 
@@ -35,8 +36,11 @@ import {
 import EditActivitySheet from '@/app/components/activity/activities/EditActivitySheet';
 import ActivityDialog from '@/app/components/activity/activities/ActivityDialog';
 import DeleteRecordDialog from '@/app/components/records/DeleteRecordDialog';
+import { ACTIVITY_TYPES, TYPE_META, normalizeType, type ActivityType } from '@/app/components/activity/activities/activityTypes';
 import { deleteActivity } from '@/app/lib/api';
+import { toastError, toastSuccess } from '@/app/lib/toast';
 import { parseMysqlDateTime } from '@/app/lib/utils';
+import { cn } from '@/lib/utils';
 import type { Activity, Contact, Deal, User } from '@/app/lib/types';
 
 type Props = {
@@ -48,35 +52,18 @@ type Props = {
 };
 
 type IconType = ComponentType<{ className?: string }>;
-type ActivityType = 'Call' | 'Email' | 'Meeting' | 'Note' | 'Other';
 type Filter = 'all' | ActivityType;
 
-const ACTIVITY_TYPES: ActivityType[] = ['Call', 'Email', 'Meeting', 'Note', 'Other'];
 const FILTERS: Filter[] = ['all', ...ACTIVITY_TYPES];
 const FILTER_STORAGE_KEY = 'activities:filter';
+const EASE_OUT: [number, number, number, number] = [0.23, 1, 0.32, 1];
+const DAY_MS = 24 * 60 * 60 * 1000;
+const NODE_ANCHOR = 18;
+const DATE_ANCHOR = 18;
 
-const TYPE_META: Record<ActivityType, { Icon: IconType; chip: string }> = {
-    Call: { Icon: PhoneIcon, chip: 'bg-emerald-50 text-emerald-600 ring-emerald-600/10' },
-    Email: { Icon: EnvelopeIcon, chip: 'bg-sky-50 text-sky-600 ring-sky-600/10' },
-    Meeting: { Icon: UserGroupIcon, chip: 'bg-violet-50 text-violet-600 ring-violet-600/10' },
-    Note: { Icon: PencilSquareIcon, chip: 'bg-amber-50 text-amber-600 ring-amber-600/10' },
-    Other: { Icon: SparklesIcon, chip: 'bg-neutral-100 text-neutral-500 ring-black/5' },
-};
-
-const FILTER_ICON: Record<Filter, IconType> = {
-    all: Squares2X2Icon,
-    Call: PhoneIcon,
-    Email: EnvelopeIcon,
-    Meeting: UserGroupIcon,
-    Note: PencilSquareIcon,
-    Other: SparklesIcon,
-};
-
-function normalizeType(value?: string | null): ActivityType {
-    if (!value) return 'Other';
-    const match = ACTIVITY_TYPES.find((t) => t.toLowerCase() === value.toLowerCase());
-    return match ?? 'Other';
-}
+type FeedEntry =
+    | { kind: 'date'; id: string; label: string; count: number }
+    | { kind: 'activity'; id: string; activity: Activity };
 
 function isFilter(value: unknown): value is Filter {
     return typeof value === 'string' && (FILTERS as string[]).includes(value);
@@ -103,24 +90,12 @@ export default function ActivitiesBrowser({ activities, persons, deals, users, c
     const router = useRouter();
     const t = useTranslations('ActivityPage');
     const locale = useLocale();
+    const reduce = useReducedMotion() ?? false;
+    const [now] = useState(() => Date.now());
 
-    const personById = useMemo(() => {
-        const map = new Map<number, Contact>();
-        for (const p of persons) map.set(p.id, p);
-        return map;
-    }, [persons]);
-
-    const dealById = useMemo(() => {
-        const map = new Map<number, Deal>();
-        for (const d of deals) map.set(d.id, d);
-        return map;
-    }, [deals]);
-
-    const userById = useMemo(() => {
-        const map = new Map<number, User>();
-        for (const u of users) map.set(u.id, u);
-        return map;
-    }, [users]);
+    const personById = useMemo(() => new Map(persons.map((p) => [p.id, p])), [persons]);
+    const dealById = useMemo(() => new Map(deals.map((d) => [d.id, d])), [deals]);
+    const userById = useMemo(() => new Map(users.map((u) => [u.id, u])), [users]);
 
     const [query, setQuery] = useState('');
     const [filter, setFilter] = useState<Filter>('all');
@@ -151,6 +126,21 @@ export default function ActivitiesBrowser({ activities, persons, deals, users, c
         return counts;
     }, [activities]);
 
+    const weekPulse = useMemo(() => {
+        const today = startOfDayKey(now);
+        const days = Array.from({ length: 7 }, (_, i) => ({ key: today - (6 - i) * DAY_MS, count: 0 }));
+        const index = new Map(days.map((d, i) => [d.key, i]));
+        for (const a of activities) {
+            const ts = activityTime(a);
+            if (ts === -Infinity) continue;
+            const i = index.get(startOfDayKey(ts));
+            if (i != null) days[i].count++;
+        }
+        const total = days.reduce((sum, d) => sum + d.count, 0);
+        const max = Math.max(1, ...days.map((d) => d.count));
+        return { days, total, max, today };
+    }, [activities, now]);
+
     const filtered = useMemo(() => {
         const q = query.trim().toLowerCase();
         return activities
@@ -170,10 +160,8 @@ export default function ActivitiesBrowser({ activities, persons, deals, users, c
     }, [activities, query, filter, personById, dealById, userById]);
 
     const groups = useMemo(() => {
-        const today = todayKey();
-        const dayMs = 1000 * 60 * 60 * 24;
+        const today = startOfDayKey(now);
         const map = new Map<string, { id: string; label: string; sortKey: number; items: Activity[] }>();
-
         for (const a of filtered) {
             const ts = activityTime(a);
             let id: string;
@@ -187,16 +175,25 @@ export default function ActivitiesBrowser({ activities, persons, deals, users, c
                 const dayKey = startOfDayKey(ts);
                 id = String(dayKey);
                 sortKey = dayKey;
-                const diffDays = Math.round((today - dayKey) / dayMs);
+                const diffDays = Math.round((today - dayKey) / DAY_MS);
                 if (diffDays === 0) label = t('groupToday');
                 else if (diffDays === 1) label = t('groupYesterday');
-                else label = new Intl.DateTimeFormat(locale, { dateStyle: 'full' }).format(new Date(dayKey));
+                else label = new Intl.DateTimeFormat(locale, { weekday: 'long', month: 'long', day: 'numeric' }).format(new Date(dayKey));
             }
             if (!map.has(id)) map.set(id, { id, label, sortKey, items: [] });
             map.get(id)!.items.push(a);
         }
         return Array.from(map.values()).sort((a, b) => b.sortKey - a.sortKey);
-    }, [filtered, t, locale]);
+    }, [filtered, t, locale, now]);
+
+    const entries = useMemo<FeedEntry[]>(() => {
+        const out: FeedEntry[] = [];
+        for (const g of groups) {
+            out.push({ kind: 'date', id: `date-${g.id}`, label: g.label, count: g.items.length });
+            for (const a of g.items) out.push({ kind: 'activity', id: `act-${a.id}`, activity: a });
+        }
+        return out;
+    }, [groups]);
 
     const confirmDelete = async () => {
         if (!deleting) return;
@@ -220,25 +217,27 @@ export default function ActivitiesBrowser({ activities, persons, deals, users, c
     };
 
     const isEmpty = filtered.length === 0;
-    const emptyMessage = query.trim()
-        ? t('emptyFiltered')
-        : filter !== 'all'
-          ? t('emptyFiltered')
-          : t('empty');
+    const emptyMessage = query.trim() || filter !== 'all' ? t('emptyFiltered') : t('empty');
+    const hasAny = activities.length > 0;
 
     return (
-        <div className="space-y-8">
-            <div className="flex items-center justify-between">
-                <h1 className="text-4xl font-extrabold">{t('title')}</h1>
+        <div className="mx-auto w-full max-w-5xl space-y-6">
+            <header className="flex flex-wrap items-start justify-between gap-4">
+                <div>
+                    <h1 className="text-4xl font-extrabold tracking-tight">{t('title')}</h1>
+                    <p className="mt-1 text-sm text-neutral-500">{t('subtitle')}</p>
+                </div>
                 <Button
-                    className="bg-brand text-white"
+                    className="bg-brand text-white shadow-sm transition-transform hover:bg-brand-dark active:scale-[0.98]"
                     aria-label={t('newAria')}
                     onClick={() => setCreating(true)}
                 >
                     <PlusIcon strokeWidth={2.5} />
                     {t('new')}
                 </Button>
-            </div>
+            </header>
+
+            {hasAny && <WeekPulse pulse={weekPulse} reduce={reduce} t={t} />}
 
             <div className="grid grid-cols-1 gap-6 md:grid-cols-[200px_minmax(0,1fr)] md:gap-10">
                 <aside className="md:sticky md:top-6 md:self-start">
@@ -249,17 +248,19 @@ export default function ActivitiesBrowser({ activities, persons, deals, users, c
                         {FILTERS.map((f) => (
                             <FilterButton
                                 key={f}
-                                Icon={FILTER_ICON[f]}
+                                Icon={f === 'all' ? Squares2X2Icon : TYPE_META[f].Icon}
+                                tint={f === 'all' ? undefined : TYPE_META[f].chip}
                                 label={f === 'all' ? t('filterAll') : t(`type${f}` as 'typeCall')}
                                 count={typeCounts[f]}
                                 active={filter === f}
+                                reduce={reduce}
                                 onClick={() => setFilter(f)}
                             />
                         ))}
                     </nav>
                 </aside>
 
-                <div className="min-w-0 space-y-4">
+                <div className="min-w-0 space-y-5">
                     <div className="flex items-center">
                         <div className="relative ml-auto w-full max-w-xs">
                             <input
@@ -274,40 +275,49 @@ export default function ActivitiesBrowser({ activities, persons, deals, users, c
                     </div>
 
                     {isEmpty ? (
-                        <div className="rounded-2xl bg-white px-6 py-20 text-center ring-1 ring-black/5">
-                            <p className="text-sm text-neutral-500">{emptyMessage}</p>
-                        </div>
+                        <ActivityEmptyState filtered={!!query.trim() || filter !== 'all'} message={emptyMessage} />
                     ) : (
-                        <div className="space-y-6">
-                            {groups.map((group) => (
-                                <section key={group.id}>
-                                    <h3 className="mb-2 px-1 text-xs font-semibold uppercase tracking-[0.12em] text-neutral-400">
-                                        {group.label}
-                                    </h3>
-                                    <div className="overflow-hidden rounded-2xl bg-white ring-1 ring-black/5">
-                                        <ul className="divide-y divide-neutral-100">
-                                            {group.items.map((activity) => (
-                                                <ActivityRow
-                                                    key={activity.id}
-                                                    activity={activity}
-                                                    person={activity.personId ? personById.get(activity.personId) : undefined}
-                                                    deal={activity.dealId ? dealById.get(activity.dealId) : undefined}
-                                                    creator={userById.get(activity.createdById)}
-                                                    time={formatTime(activity)}
-                                                    onOpen={() => setEditing(activity)}
-                                                    onEdit={() => setEditing(activity)}
-                                                    onDelete={() => setDeleting(activity)}
-                                                    typeLabel={t(`type${normalizeType(activity.type)}` as 'typeCall')}
-                                                    editLabel={t('edit')}
-                                                    deleteLabel={t('delete')}
-                                                    actionsAria={t('actionsAria')}
-                                                />
-                                            ))}
-                                        </ul>
-                                    </div>
-                                </section>
-                            ))}
-                        </div>
+                        <ul className="relative">
+                            <AnimatePresence initial={false} mode="popLayout">
+                                {entries.map((entry, i) => {
+                                    const connectUp = i > 0;
+                                    const connectDown = i < entries.length - 1;
+                                    if (entry.kind === 'date') {
+                                        return (
+                                            <DateMarker
+                                                key={entry.id}
+                                                reduce={reduce}
+                                                label={entry.label}
+                                                count={entry.count}
+                                                connectUp={connectUp}
+                                                connectDown={connectDown}
+                                            />
+                                        );
+                                    }
+                                    const activity = entry.activity;
+                                    return (
+                                        <TimelineRow
+                                            key={entry.id}
+                                            activity={activity}
+                                            reduce={reduce}
+                                            connectUp={connectUp}
+                                            connectDown={connectDown}
+                                            person={activity.personId ? personById.get(activity.personId) : undefined}
+                                            deal={activity.dealId ? dealById.get(activity.dealId) : undefined}
+                                            creator={userById.get(activity.createdById)}
+                                            time={formatTime(activity)}
+                                            typeLabel={t(`type${normalizeType(activity.type)}` as 'typeCall')}
+                                            onOpen={() => setEditing(activity)}
+                                            onEdit={() => setEditing(activity)}
+                                            onDelete={() => setDeleting(activity)}
+                                            editLabel={t('edit')}
+                                            deleteLabel={t('delete')}
+                                            actionsAria={t('actionsAria')}
+                                        />
+                                    );
+                                })}
+                            </AnimatePresence>
+                        </ul>
                     )}
                 </div>
             </div>
@@ -348,39 +358,96 @@ export default function ActivitiesBrowser({ activities, persons, deals, users, c
     );
 }
 
+function WeekPulse({
+    pulse,
+    reduce,
+    t,
+}: {
+    pulse: { days: { key: number; count: number }[]; total: number; max: number; today: number };
+    reduce: boolean;
+    t: ReturnType<typeof useTranslations>;
+}) {
+    return (
+        <div className="flex items-center gap-5 rounded-2xl bg-white p-4 ring-1 ring-black/5">
+            <div className="shrink-0">
+                <div className="text-2xl font-semibold tabular-nums text-neutral-900">{pulse.total}</div>
+                <div className="mt-0.5 text-xs font-medium text-neutral-500">{t('weekTotalLabel')}</div>
+            </div>
+            <div
+                className="ml-auto flex h-10 items-end gap-1.5"
+                role="img"
+                aria-label={t('weekPulseAria', { count: pulse.total })}
+            >
+                {pulse.days.map((day, i) => {
+                    const isToday = day.key === pulse.today;
+                    const height = Math.max(0.1, day.count / pulse.max) * 40;
+                    return (
+                        <motion.span
+                            key={day.key}
+                            className={cn('block w-2 rounded-full', isToday ? 'bg-brand' : 'bg-brand/35')}
+                            style={{ height, transformOrigin: 'bottom' }}
+                            initial={reduce ? false : { scaleY: 0 }}
+                            animate={{ scaleY: 1 }}
+                            transition={{ duration: reduce ? 0 : 0.5, delay: reduce ? 0 : i * 0.04, ease: EASE_OUT }}
+                        />
+                    );
+                })}
+            </div>
+        </div>
+    );
+}
+
 function FilterButton({
     Icon,
+    tint,
     label,
     count,
     active,
+    reduce,
     onClick,
 }: {
     Icon: IconType;
+    tint?: string;
     label: string;
     count: number;
     active: boolean;
+    reduce: boolean;
     onClick: () => void;
 }) {
+    const iconColor = tint ? tint.split(' ').find((c) => c.startsWith('text-')) : undefined;
     return (
         <button
             type="button"
             onClick={onClick}
             aria-current={active ? 'page' : undefined}
-            className={`flex w-full items-center justify-between rounded-lg px-3 py-2 text-sm transition ${active ? 'bg-brand-light/60 font-medium text-brand-dark' : 'text-neutral-700 hover:bg-neutral-100'}`}
+            className={cn(
+                'relative flex w-full items-center justify-between rounded-lg px-3 py-2 text-sm transition-colors',
+                active ? 'text-brand-dark' : 'text-neutral-700 hover:bg-neutral-100',
+            )}
         >
-            <span className="flex min-w-0 items-center gap-2.5">
-                <Icon className={`size-4 shrink-0 ${active ? 'text-brand-dark' : 'text-neutral-400'}`} />
-                <span className="truncate">{label}</span>
+            {active && (
+                <motion.span
+                    layoutId="activity-filter-pill"
+                    className="absolute inset-0 z-0 rounded-lg bg-brand-light/60"
+                    transition={reduce ? { duration: 0 } : { type: 'spring', stiffness: 520, damping: 42 }}
+                />
+            )}
+            <span className="relative z-10 flex min-w-0 items-center gap-2.5">
+                <Icon className={cn('size-4 shrink-0', iconColor ?? (active ? 'text-brand-dark' : 'text-neutral-400'))} />
+                <span className={cn('truncate', active && 'font-medium')}>{label}</span>
             </span>
-            <span className={`shrink-0 text-xs tabular-nums ${active ? 'text-brand-dark/70' : 'text-neutral-400'}`}>
+            <span className={cn('relative z-10 shrink-0 text-xs tabular-nums', active ? 'text-brand-dark/70' : 'text-neutral-400')}>
                 {count}
             </span>
         </button>
     );
 }
 
-type ActivityRowProps = {
+type TimelineRowProps = {
     activity: Activity;
+    reduce: boolean;
+    connectUp: boolean;
+    connectDown: boolean;
     person?: Contact;
     deal?: Deal;
     creator?: User;
@@ -394,8 +461,11 @@ type ActivityRowProps = {
     actionsAria: string;
 };
 
-function ActivityRow({
+function TimelineRow({
     activity,
+    reduce,
+    connectUp,
+    connectDown,
     person,
     deal,
     creator,
@@ -407,116 +477,188 @@ function ActivityRow({
     editLabel,
     deleteLabel,
     actionsAria,
-}: ActivityRowProps) {
+}: TimelineRowProps) {
     const meta = TYPE_META[normalizeType(activity.type)];
     const Icon = meta.Icon;
     const creatorName = creator?.displayName || creator?.username || '';
 
     return (
-        <li className="group flex cursor-pointer items-start gap-3 px-5 py-3.5 transition-colors hover:bg-neutral-50/70" onClick={onOpen}>
-            <span
-                className={`mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-full ring-1 ring-inset ${meta.chip}`}
-                aria-hidden
-            >
-                <Icon className="size-4" />
-            </span>
+        <motion.li
+            layout={!reduce}
+            initial={false}
+            exit={reduce ? { opacity: 0 } : { opacity: 0, x: 8, transition: { duration: 0.2, ease: EASE_OUT } }}
+            transition={{ duration: 0.22, ease: EASE_OUT }}
+            className="grid grid-cols-[2rem_minmax(0,1fr)] gap-3"
+        >
+            <div className="relative flex flex-col items-center">
+                <span
+                    aria-hidden
+                    className="absolute left-1/2 w-px -translate-x-1/2 bg-neutral-200"
+                    style={{
+                        top: connectUp ? 0 : NODE_ANCHOR,
+                        bottom: connectDown ? 0 : `calc(100% - ${NODE_ANCHOR}px)`,
+                    }}
+                />
+                <span
+                    className={cn('relative z-10 mt-0.5 flex size-8 items-center justify-center rounded-full ring-1 ring-inset', meta.chip)}
+                    aria-hidden
+                >
+                    <Icon className="size-4" />
+                </span>
+            </div>
 
-            <div className="min-w-0 flex-1">
-                <div className="flex min-w-0 items-start gap-2">
-                    <p className="min-w-0 flex-1 truncate text-sm font-medium text-neutral-900">
-                        <span className="text-neutral-400">{typeLabel} · </span>
-                        {activity.subject}
-                    </p>
-                    <span className="shrink-0 text-xs tabular-nums text-neutral-400">{time}</span>
+            <div className="pb-6">
+                <div
+                    className="group cursor-pointer rounded-xl px-3 py-2 transition-colors hover:bg-neutral-50"
+                    onClick={onOpen}
+                >
+                <div className="flex items-start gap-2">
+                    <div className="min-w-0 flex-1">
+                        <p className="truncate text-sm font-medium text-neutral-900">{activity.subject}</p>
+                        <p className="mt-0.5 text-xs text-neutral-400">{typeLabel}</p>
+                    </div>
+                    <div className="flex shrink-0 items-center gap-0.5">
+                        <span className="text-xs tabular-nums text-neutral-400">{time}</span>
+                        <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                                <button
+                                    type="button"
+                                    aria-label={actionsAria}
+                                    onClick={(e) => e.stopPropagation()}
+                                    className="flex size-7 shrink-0 items-center justify-center rounded-full text-neutral-400 opacity-0 transition hover:bg-neutral-100 hover:text-neutral-700 group-hover:opacity-100 focus:opacity-100 aria-expanded:opacity-100 data-[state=open]:opacity-100"
+                                >
+                                    <EllipsisHorizontalIcon className="size-4" />
+                                </button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end" side="bottom" className="w-40" onClick={(e) => e.stopPropagation()}>
+                                <DropdownMenuItem
+                                    onSelect={(e) => {
+                                        e.preventDefault();
+                                        onEdit();
+                                    }}
+                                >
+                                    <PencilIcon className="size-4 text-neutral-500" />
+                                    {editLabel}
+                                </DropdownMenuItem>
+                                <DropdownMenuSeparator />
+                                <DropdownMenuItem
+                                    className="text-destructive hover:bg-red-500/10"
+                                    onSelect={(e) => {
+                                        e.preventDefault();
+                                        onDelete();
+                                    }}
+                                >
+                                    <TrashIcon className="size-4 text-destructive" />
+                                    {deleteLabel}
+                                </DropdownMenuItem>
+                            </DropdownMenuContent>
+                        </DropdownMenu>
+                    </div>
                 </div>
 
                 {activity.notes ? (
-                    <p className="mt-0.5 line-clamp-2 text-sm text-neutral-500">{activity.notes}</p>
+                    <p className="mt-1 line-clamp-2 text-sm text-neutral-500">{activity.notes}</p>
                 ) : null}
 
-                <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
-                    {person && (
-                        <Link
-                            href={`/records/contacts/${person.id}`}
-                            onClick={(e) => e.stopPropagation()}
-                            className="inline-flex max-w-[12rem] items-center gap-1 rounded-full bg-brand-light/50 px-2 py-0.5 text-xs font-medium text-brand-dark ring-1 ring-inset ring-brand-dark/10 transition hover:bg-brand-light"
-                            title={person.name}
-                        >
-                            <UserIcon className="size-3 shrink-0" />
-                            <span className="truncate">{person.name}</span>
-                        </Link>
-                    )}
-                    {deal && (
-                        <Link
-                            href={`/records/deals/${deal.id}`}
-                            onClick={(e) => e.stopPropagation()}
-                            className="inline-flex max-w-[12rem] items-center gap-1 rounded-full bg-white px-2 py-0.5 text-xs font-medium text-neutral-700 ring-1 ring-inset ring-neutral-200 transition hover:bg-neutral-50"
-                            title={deal.name}
-                        >
-                            <BriefcaseIcon className="size-3 shrink-0" />
-                            <span className="truncate">{deal.name}</span>
-                        </Link>
-                    )}
+                {(person || deal || creator) && (
+                    <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                        {person && (
+                            <Link
+                                href={`/records/contacts/${person.id}`}
+                                onClick={(e) => e.stopPropagation()}
+                                className="inline-flex max-w-48 items-center gap-1 rounded-full bg-brand-light/50 px-2 py-0.5 text-xs font-medium text-brand-dark ring-1 ring-inset ring-brand-dark/10 transition hover:bg-brand-light"
+                                title={person.name}
+                            >
+                                <UserIcon className="size-3 shrink-0" />
+                                <span className="truncate">{person.name}</span>
+                            </Link>
+                        )}
+                        {deal && (
+                            <Link
+                                href={`/records/deals/${deal.id}`}
+                                onClick={(e) => e.stopPropagation()}
+                                className="inline-flex max-w-48 items-center gap-1 rounded-full bg-white px-2 py-0.5 text-xs font-medium text-neutral-700 ring-1 ring-inset ring-neutral-200 transition hover:bg-neutral-50"
+                                title={deal.name}
+                            >
+                                <BriefcaseIcon className="size-3 shrink-0" />
+                                <span className="truncate">{deal.name}</span>
+                            </Link>
+                        )}
+                        {creator && (
+                            <Tooltip>
+                                <TooltipTrigger asChild>
+                                    <span className="ml-auto inline-flex" onClick={(e) => e.stopPropagation()}>
+                                        <Avatar size="sm" className="ring-1 ring-black/5">
+                                            {creator.profilePictureUrl ? (
+                                                <AvatarImage src={creator.profilePictureUrl} alt={creatorName} />
+                                            ) : (
+                                                <AvatarFallback>
+                                                    <UserIcon className="size-3 text-neutral-500" />
+                                                </AvatarFallback>
+                                            )}
+                                        </Avatar>
+                                    </span>
+                                </TooltipTrigger>
+                                <TooltipContent side="bottom" align="end">
+                                    {creatorName}
+                                </TooltipContent>
+                            </Tooltip>
+                        )}
+                    </div>
+                )}
                 </div>
             </div>
+        </motion.li>
+    );
+}
 
-            <div className="flex shrink-0 items-center gap-1">
-                {creator ? (
-                    <Tooltip>
-                        <TooltipTrigger asChild>
-                            <Avatar size="sm" className="ring-1 ring-black/5">
-                                {creator.profilePictureUrl ? (
-                                    <AvatarImage src={creator.profilePictureUrl} alt={creatorName} />
-                                ) : (
-                                    <AvatarFallback>
-                                        <UserIcon className="size-3 text-neutral-500" />
-                                    </AvatarFallback>
-                                )}
-                            </Avatar>
-                        </TooltipTrigger>
-                        <TooltipContent side="bottom" align="end">
-                            {creatorName}
-                        </TooltipContent>
-                    </Tooltip>
-                ) : (
-                    <div className="size-6" />
-                )}
-
-                <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                        <button
-                            type="button"
-                            aria-label={actionsAria}
-                            onClick={(e) => e.stopPropagation()}
-                            className="flex size-7 shrink-0 items-center justify-center rounded-full text-neutral-400 opacity-0 transition hover:bg-neutral-100 hover:text-neutral-700 group-hover:opacity-100 focus:opacity-100"
-                        >
-                            <EllipsisHorizontalIcon className="size-4" />
-                        </button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end" side="bottom" className="w-40" onClick={(e) => e.stopPropagation()}>
-                        <DropdownMenuItem
-                            onSelect={(e) => {
-                                e.preventDefault();
-                                onEdit();
-                            }}
-                        >
-                            <PencilIcon className="size-4 text-neutral-500" />
-                            {editLabel}
-                        </DropdownMenuItem>
-                        <DropdownMenuSeparator />
-                        <DropdownMenuItem
-                            className="text-destructive hover:bg-red-500/10"
-                            onSelect={(e) => {
-                                e.preventDefault();
-                                onDelete();
-                            }}
-                        >
-                            <TrashIcon className="size-4 text-destructive" />
-                            {deleteLabel}
-                        </DropdownMenuItem>
-                    </DropdownMenuContent>
-                </DropdownMenu>
+function DateMarker({
+    reduce,
+    label,
+    count,
+    connectUp,
+    connectDown,
+}: {
+    reduce: boolean;
+    label: string;
+    count: number;
+    connectUp: boolean;
+    connectDown: boolean;
+}) {
+    return (
+        <motion.li
+            layout={!reduce}
+            initial={false}
+            transition={{ duration: 0.22, ease: EASE_OUT }}
+            className="grid grid-cols-[2rem_minmax(0,1fr)] gap-3"
+        >
+            <div className="relative flex flex-col items-center">
+                <span
+                    aria-hidden
+                    className="absolute left-1/2 w-px -translate-x-1/2 bg-neutral-200"
+                    style={{
+                        top: connectUp ? 0 : DATE_ANCHOR,
+                        bottom: connectDown ? 0 : `calc(100% - ${DATE_ANCHOR}px)`,
+                    }}
+                />
+                <span aria-hidden className="relative z-10 mt-3.5 size-2 rounded-full bg-neutral-300 ring-4 ring-white" />
             </div>
-        </li>
+            <div className="flex items-center gap-2 pt-2 pb-2">
+                <h3 className="text-sm font-semibold text-neutral-700">{label}</h3>
+                <span className="text-xs tabular-nums text-neutral-400">{count}</span>
+            </div>
+        </motion.li>
+    );
+}
+
+function ActivityEmptyState({ filtered, message }: { filtered: boolean; message: string }) {
+    const Icon = filtered ? MagnifyingGlassIcon : InboxStackIcon;
+    return (
+        <div className="rounded-2xl bg-white px-6 py-20 text-center ring-1 ring-black/5">
+            <div className="mx-auto flex size-14 items-center justify-center rounded-2xl bg-brand-light text-brand-dark">
+                <Icon className="size-7" strokeWidth={1.75} />
+            </div>
+            <p className="mx-auto mt-5 max-w-sm text-sm font-medium text-neutral-700">{message}</p>
+        </div>
     );
 }

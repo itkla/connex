@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { toastError, toastSuccess } from '@/app/lib/toast';
 import { Loader2Icon } from 'lucide-react';
+import { ChatBubbleLeftRightIcon } from '@heroicons/react/24/outline';
 
 import {
     Dialog,
@@ -30,9 +31,12 @@ import { Textarea } from '@/components/ui/textarea';
 
 import { ApiError, createActivity } from '@/app/lib/api';
 import { toMysqlDateTime } from '@/app/lib/utils';
+import {
+    ACTIVITY_TYPES,
+    ActivityTypePicker,
+    type ActivityType,
+} from '@/app/components/activity/activities/activityTypes';
 import type { Contact, Deal } from '@/app/lib/types';
-
-const ACTIVITY_TYPES = ['Call', 'Email', 'Meeting', 'Note', 'Other'] as const;
 
 type Props = {
     open: boolean;
@@ -65,7 +69,7 @@ export default function ActivityDialog({
     const router = useRouter();
     const t = useTranslations('ActivityCreateDialog');
 
-    const [type, setType] = useState<string>(ACTIVITY_TYPES[0]);
+    const [type, setType] = useState<ActivityType>(ACTIVITY_TYPES[0]);
     const [subject, setSubject] = useState('');
     const [notes, setNotes] = useState('');
     const [when, setWhen] = useState('');
@@ -113,11 +117,7 @@ export default function ActivityDialog({
             router.refresh();
         } catch (err) {
             const message =
-                err instanceof ApiError
-                    ? err.message
-                    : err instanceof Error
-                      ? err.message
-                      : t('toastFailedCreate');
+                err instanceof ApiError ? err.message : err instanceof Error ? err.message : t('toastFailedCreate');
             toastError(message);
         } finally {
             setSubmitting(false);
@@ -128,38 +128,25 @@ export default function ActivityDialog({
         <Dialog open={open} onOpenChange={onOpenChange}>
             <DialogContent>
                 <DialogHeader>
-                    <DialogTitle>{t('titleCreate')}</DialogTitle>
-                    <DialogDescription>{t('description')}</DialogDescription>
+                    <div className="flex items-start gap-3">
+                        <span className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-brand-light text-brand-dark">
+                            <ChatBubbleLeftRightIcon className="size-5" />
+                        </span>
+                        <div className="space-y-1">
+                            <DialogTitle>{t('titleCreate')}</DialogTitle>
+                            <DialogDescription>{t('description')}</DialogDescription>
+                        </div>
+                    </div>
                 </DialogHeader>
 
                 <form onSubmit={handleSubmit} className="grid gap-4">
-                    <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-                        <div className="grid gap-1.5">
-                            <Label htmlFor="activity-type">{t('typeLabel')}</Label>
-                            <Select value={type} onValueChange={setType}>
-                                <SelectTrigger id="activity-type" className={inputClass}>
-                                    <SelectValue />
-                                </SelectTrigger>
-                                <SelectContent>
-                                    {ACTIVITY_TYPES.map((value) => (
-                                        <SelectItem key={value} value={value}>
-                                            {t(`type${value}` as 'typeCall')}
-                                        </SelectItem>
-                                    ))}
-                                </SelectContent>
-                            </Select>
-                        </div>
-
-                        <div className="grid gap-1.5">
-                            <Label htmlFor="activity-when">{t('timestampLabel')}</Label>
-                            <input
-                                id="activity-when"
-                                type="datetime-local"
-                                value={when}
-                                onChange={(e) => setWhen(e.target.value)}
-                                className={inputClass}
-                            />
-                        </div>
+                    <div className="grid gap-1.5">
+                        <Label>{t('typeLabel')}</Label>
+                        <ActivityTypePicker
+                            value={type}
+                            onChange={setType}
+                            getLabel={(ty) => t(`type${ty}` as 'typeCall')}
+                        />
                     </div>
 
                     <div className="grid gap-1.5">
@@ -173,6 +160,17 @@ export default function ActivityDialog({
                             className={inputClass}
                             autoFocus
                             required
+                        />
+                    </div>
+
+                    <div className="grid gap-1.5">
+                        <Label htmlFor="activity-when">{t('timestampLabel')}</Label>
+                        <input
+                            id="activity-when"
+                            type="datetime-local"
+                            value={when}
+                            onChange={(e) => setWhen(e.target.value)}
+                            className={inputClass}
                         />
                     </div>
 
@@ -250,7 +248,7 @@ export default function ActivityDialog({
                         <Button
                             type="submit"
                             disabled={submitting || !subject.trim()}
-                            className="bg-brand text-white hover:bg-brand-dark"
+                            className="bg-brand text-white transition-transform hover:bg-brand-dark active:scale-[0.98]"
                         >
                             {submitting ? <Loader2Icon className="size-4 animate-spin" /> : t('create')}
                         </Button>

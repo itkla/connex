@@ -81,6 +81,13 @@ export default function UsersBrowser({ users }: { users: User[] }) {
         }
     };
 
+    const selectionActions = (
+        <Button variant="outline" size="sm" onClick={viewSelected}>
+            <EyeIcon className="size-4" />
+            {t("view")}
+        </Button>
+    );
+
     return (
         <div className="space-y-6">
             <div className="flex items-center justify-between">
@@ -114,16 +121,6 @@ export default function UsersBrowser({ users }: { users: User[] }) {
                     </button>
                 </div>
 
-                {selectedIds.size > 0 && (
-                    <div className="flex items-center gap-2">
-                        <span className="text-sm text-neutral-500">{t("selectedCount", { count: selectedIds.size })}</span>
-                        <Button variant="outline" size="sm" onClick={viewSelected}>
-                            <EyeIcon className="size-4" />
-                            {t("view")}
-                        </Button>
-                    </div>
-                )}
-
                 <div className="relative ml-auto w-full max-w-sm">
                     <input
                         type="text"
@@ -146,6 +143,7 @@ export default function UsersBrowser({ users }: { users: User[] }) {
                 selectedIds={selectedIds}
                 onSelectedIdsChange={setSelectedIds}
                 entityLabel={t("entityLabel")}
+                selectionActions={selectionActions}
             />
         </div>
     );

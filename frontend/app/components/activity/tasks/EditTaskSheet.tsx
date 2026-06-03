@@ -6,6 +6,9 @@ import { useTranslations } from 'next-intl';
 import { toast } from 'sonner';
 import { toastError, toastSuccess } from '@/app/lib/toast';
 import { Loader2Icon } from 'lucide-react';
+import { ClipboardDocumentCheckIcon } from '@heroicons/react/24/outline';
+
+import { cn } from '@/lib/utils';
 
 import {
     Sheet,
@@ -28,8 +31,6 @@ import { type Contact, type Deal, type Task, type UpdateTaskPayload, type User }
 import { parseMysqlDateTime } from '@/app/lib/utils';
 
 const inputClass = 'w-full rounded-lg bg-neutral-100 px-3 py-2 text-sm text-black placeholder-neutral-500 outline-none ring-1 ring-black/5 transition focus:ring-2 focus:ring-brand';
-
-const NO_CONTACT = 'none';
 
 type TaskDraft = {
     description: string;
@@ -94,6 +95,7 @@ export default function EditTaskSheet({
 
     useEffect(() => {
         if (!companyId) {
+            // eslint-disable-next-line react-hooks/set-state-in-effect
             setContacts([]);
             return;
         }
@@ -131,8 +133,15 @@ export default function EditTaskSheet({
         <Sheet open={open} onOpenChange={handleOpenChange}>
             <SheetContent side="right" className="flex w-full flex-col sm:max-w-lg">
                 <SheetHeader className="border-b">
-                    <SheetTitle>{t('title')}</SheetTitle>
-                    <SheetDescription>{t('description')}</SheetDescription>
+                    <div className="flex items-start gap-3">
+                        <span className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-brand-light text-brand-dark">
+                            <ClipboardDocumentCheckIcon className="size-5" />
+                        </span>
+                        <div className="space-y-1">
+                            <SheetTitle>{t('title')}</SheetTitle>
+                            <SheetDescription>{t('description')}</SheetDescription>
+                        </div>
+                    </div>
                 </SheetHeader>
 
                 <div className="flex-1 overflow-y-auto px-4 py-2">
@@ -213,13 +222,26 @@ export default function EditTaskSheet({
                             />
                         </div>
 
-                        <div className="flex items-center gap-2">
+                        <div
+                            className={cn(
+                                'flex items-center gap-2.5 rounded-lg px-3 py-2.5 ring-1 ring-inset transition-colors',
+                                draft.completed
+                                    ? 'bg-brand-light/50 ring-brand-dark/15'
+                                    : 'bg-neutral-50 ring-black/5',
+                            )}
+                        >
                             <Checkbox
                                 id="task-completed"
                                 checked={draft.completed}
                                 onCheckedChange={(checked) => setDraft((d) => ({ ...d, completed: checked === true }))}
+                                className="size-[18px] rounded-full border-neutral-300 data-[state=checked]:border-brand data-[state=checked]:bg-brand data-[state=checked]:text-white"
                             />
-                            <Label htmlFor="task-completed">{t('completedLabel')}</Label>
+                            <Label
+                                htmlFor="task-completed"
+                                className={cn('cursor-pointer text-sm font-medium', draft.completed ? 'text-brand-dark' : 'text-neutral-700')}
+                            >
+                                {t('completedLabel')}
+                            </Label>
                         </div>
                     </div>
                 </div>
@@ -228,7 +250,11 @@ export default function EditTaskSheet({
                     <SheetClose asChild>
                         <Button variant="outline" disabled={isSaving}>{t('cancel')}</Button>
                     </SheetClose>
-                    <Button onClick={saveUpdates} disabled={isSaving} className="bg-brand text-white hover:bg-brand-dark">
+                    <Button
+                        onClick={saveUpdates}
+                        disabled={isSaving}
+                        className="bg-brand text-white transition-transform hover:bg-brand-dark active:scale-[0.98]"
+                    >
                         {isSaving ? <Loader2Icon className="size-4 animate-spin" /> : t('save')}
                     </Button>
                 </SheetFooter>

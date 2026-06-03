@@ -66,16 +66,17 @@ export default function DealCard({ deal, company, pipeline, stage, onQuickEdit, 
 
     return (
         <div
-            className="group flex items-center gap-4 rounded-2xl bg-neutral-100 p-4 ring-1 ring-black/5 transition hover:bg-neutral-200 cursor-pointer"
+            className="group flex cursor-pointer items-center gap-4 rounded-2xl bg-white p-4 ring-1 ring-black/5 transition duration-200 hover:bg-neutral-50 hover:ring-black/10 hover:shadow-[0_10px_30px_-12px_rgb(0_0_0/0.18)]"
             onClick={open}
         >
             {/* if company exists, show avatar; if not, assume freelancer and show a placeholder avatar */}
-            <Suspense fallback={<span className="h-16 w-16 shrink-0 rounded-2xl bg-gradient-to-br from-brand-light to-brand-dark ring-1 ring-black/5" />}>
+            <Suspense fallback={<span className="size-16 shrink-0 rounded-2xl bg-neutral-100 ring-1 ring-black/5" />}>
             {company ? (
                 <CompanyAvatar company={company} type="large" />
             ) : (
-                <div className="h-16 w-16 shrink-0 rounded-2xl bg-gradient-to-br from-brand-light to-brand-dark ring-1 ring-black/5" />
-                // <ContactAvatar contact={associatedContact[0] ?? { id: 0, name: 'Freelancer', imageUrl: '', email: '', phone: '', title: '', createdAt: '', updatedAt: '' }} type="large" />
+                <div className="flex size-16 shrink-0 items-center justify-center rounded-2xl bg-neutral-100 text-neutral-400 ring-1 ring-black/5">
+                    <BuildingOffice2Icon className="size-7" />
+                </div>
             )}
             </Suspense>
 
@@ -139,7 +140,7 @@ export default function DealCard({ deal, company, pipeline, stage, onQuickEdit, 
                         type="button"
                         aria-label={t('dealActions')}
                         onClick={(e) => e.stopPropagation()}
-                        className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-neutral-200 text-neutral-600 transition hover:bg-neutral-300"
+                        className="flex size-8 shrink-0 items-center justify-center rounded-full text-neutral-400 opacity-0 transition hover:bg-neutral-100 hover:text-neutral-700 group-hover:opacity-100 focus:opacity-100 data-[state=open]:opacity-100"
                     >
                         <EllipsisVerticalIcon className="size-4" />
                     </button>
@@ -186,7 +187,7 @@ export default function DealCard({ deal, company, pipeline, stage, onQuickEdit, 
                     e.stopPropagation();
                     open();
                 }}
-                className="h-8 w-8 shrink-0 bg-neutral-200 hover:bg-neutral-300 border-none shadow-none"
+                className="size-8 shrink-0 border-none bg-neutral-100 text-neutral-500 shadow-none hover:bg-neutral-200 hover:text-neutral-700"
             >
                 <ChevronRightIcon className="size-4" />
             </Button>

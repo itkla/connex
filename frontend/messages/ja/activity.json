@@ -1,6 +1,9 @@
 {
   "ActivityPage": {
     "title": "アクティビティ",
+    "subtitle": "チームが記録したすべての通話・メール・ミーティングを1つのタイムラインに。",
+    "weekTotalLabel": "今週の記録",
+    "weekPulseAria": "過去7日間に記録されたアクティビティ{count}件",
     "allActivities": "すべてのアクティビティ",
     "new": "新規作成",
     "newAria": "アクティビティを記録",
@@ -137,6 +140,12 @@
   },
   "ActivityTasks": {
     "title": "タスク",
+    "subtitle": "チーム全員のフォローアップを見逃さない。",
+    "today": "今日",
+    "tasksLeft": "残り{count}件",
+    "allDoneToday": "今日の分は完了",
+    "nothingDueToday": "今日が期限のタスクはありません",
+    "doneThisWeek": "今週の完了",
     "myTasks": "自分のタスク",
     "allTasks": "タスク一覧",
     "new": "新規作成",

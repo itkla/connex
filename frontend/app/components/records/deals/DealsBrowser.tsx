@@ -465,6 +465,32 @@ export default function DealsBrowser({ deals }: { deals: Deal[] }) {
         [filteredDeals, columns, filterState],
     );
 
+    const selectionActions = (
+        <ButtonGroup className="rounded-full bg-neutral-100">
+            <Button variant="outline" size="sm" onClick={viewSelected}>
+                <EyeIcon className="size-4" />
+                {t('view')}
+            </Button>
+            <Button variant="outline" size="sm" onClick={openEditSheet}>
+                <PencilIcon className="size-4" />
+                {t('quickEdit')}
+            </Button>
+            <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                    <Button variant="outline" size="sm">
+                        <EllipsisVerticalIcon className="size-4" />
+                    </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent>
+                    <DropdownMenuItem variant="destructive" onSelect={(e) => { e.preventDefault(); setDeleteDialogOpen(true); }}>
+                        <TrashIcon />
+                        {t('delete')}
+                    </DropdownMenuItem>
+                </DropdownMenuContent>
+            </DropdownMenu>
+        </ButtonGroup>
+    );
+
     return (
         <div className="space-y-6">
             <div className="flex items-center justify-between">
@@ -548,41 +574,6 @@ export default function DealsBrowser({ deals }: { deals: Deal[] }) {
                     </button>
                 </div>
 
-                {selectedIds.size > 0 && (
-                    <div className="flex items-center gap-2">
-                        <span className="text-sm text-neutral-500">{t('selectedCount', { count: selectedIds.size })}</span>
-                        <ButtonGroup className="rounded-full bg-neutral-100">
-                            <Button variant="outline" size="sm" onClick={viewSelected}>
-                                <EyeIcon className="size-4" />
-                                {t('view')}
-                            </Button>
-                            <Button variant="outline" size="sm" onClick={openEditSheet}>
-                                <PencilIcon className="size-4" />
-                                {t('quickEdit')}
-                            </Button>
-                            <DropdownMenu>
-                                <DropdownMenuTrigger asChild>
-                                    <Button variant="outline" size="sm">
-                                        <EllipsisVerticalIcon className="size-4" />
-                                    </Button>
-                                </DropdownMenuTrigger>
-                                <DropdownMenuContent>
-                                    <DropdownMenuItem
-                                        variant="destructive"
-                                        onSelect={(e) => {
-                                            e.preventDefault();
-                                            setDeleteDialogOpen(true);
-                                        }}
-                                    >
-                                        <TrashIcon />
-                                        {t('delete')}
-                                    </DropdownMenuItem>
-                                </DropdownMenuContent>
-                            </DropdownMenu>
-                        </ButtonGroup>
-                    </div>
-                )}
-
                 <div className="relative ml-auto w-full max-w-sm">
                     <input
                         type="text"
@@ -625,8 +616,9 @@ export default function DealsBrowser({ deals }: { deals: Deal[] }) {
                 onSelectedIdsChange={setSelectedIds}
                 onQuickEdit={quickEditOne}
                 onDelete={deleteOne}
-                gridClassName="grid grid-cols-1 gap-3 pt-8"
+                gridClassName="grid grid-cols-1 gap-3"
                 entityLabel={t('entityLabel')}
+                selectionActions={selectionActions}
             />
 
             <QuickEditDealSheet

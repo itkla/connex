@@ -6,6 +6,7 @@ import { useTranslations } from 'next-intl';
 import { toast } from 'sonner';
 import { toastError, toastSuccess } from '@/app/lib/toast';
 import { Loader2Icon } from 'lucide-react';
+import { ChatBubbleLeftRightIcon } from '@heroicons/react/24/outline';
 
 import {
     Sheet,
@@ -22,17 +23,17 @@ import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
 import { ApiError, updateActivity } from '@/app/lib/api';
+import { ActivityTypePicker, normalizeType, type ActivityType } from '@/app/components/activity/activities/activityTypes';
 import { type Activity, type Contact, type Deal, type UpdateActivityPayload } from '@/app/lib/types';
 import { parseMysqlDateTime, toMysqlDateTime } from '@/app/lib/utils';
 
-const inputClass = 'w-full rounded-lg bg-neutral-100 px-3 py-2 text-sm text-black placeholder-neutral-500 outline-none ring-1 ring-black/5 transition focus:ring-2 focus:ring-brand';
+const inputClass =
+    'w-full rounded-lg bg-neutral-100 px-3 py-2 text-sm text-black placeholder-neutral-500 outline-none ring-1 ring-black/5 transition focus:ring-2 focus:ring-brand';
 
-// todo: use the lib/types.ts array instead
-const ACTIVITY_TYPES = ['Call', 'Email', 'Meeting', 'Note', 'Other'] as const;
 const NONE_VALUE = 'none';
 
 type ActivityDraft = {
-    type: string;
+    type: ActivityType;
     subject: string;
     notes: string;
     timestamp: string;
@@ -49,11 +50,11 @@ function toDatetimeLocalValue(value?: string | null): string {
     return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
-function normalizeType(value?: string | null): string {
-    if (!value) return ACTIVITY_TYPES[0];
-    const match = ACTIVITY_TYPES.find((t) => t.toLowerCase() === value.toLowerCase());
-    return match ?? ACTIVITY_TYPES[0];
-}
+// function normalizeType(value?: string | null): string {
+//     if (!value) return ACTIVITY_TYPES[0];
+//     const match = ACTIVITY_TYPES.find((t) => t.toLowerCase() === value.toLowerCase());
+//     return match ?? ACTIVITY_TYPES[0];
+// }
 
 function toDraft(a: Activity): ActivityDraft {
     return {
@@ -121,41 +122,26 @@ export default function EditActivitySheet({
         <Sheet open={open} onOpenChange={handleOpenChange}>
             <SheetContent side="right" className="flex w-full flex-col sm:max-w-lg">
                 <SheetHeader className="border-b">
-                    <SheetTitle>{t('title')}</SheetTitle>
-                    <SheetDescription>{t('description')}</SheetDescription>
+                    <div className="flex items-start gap-3">
+                        <span className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-brand-light text-brand-dark">
+                            <ChatBubbleLeftRightIcon className="size-5" />
+                        </span>
+                        <div className="space-y-1">
+                            <SheetTitle>{t('title')}</SheetTitle>
+                            <SheetDescription>{t('description')}</SheetDescription>
+                        </div>
+                    </div>
                 </SheetHeader>
 
                 <div className="flex-1 overflow-y-auto px-4 py-2">
                     <div className="grid gap-4 pt-6">
                         <div className="grid gap-1.5">
-                            <Label htmlFor="activity-type">{t('typeLabel')}</Label>
-                            {/* <select
-                                id="activity-type"
+                            <Label>{t('typeLabel')}</Label>
+                            <ActivityTypePicker
                                 value={draft.type}
-                                onChange={(e) => setDraft((d) => ({ ...d, type: e.target.value }))}
-                                className={inputClass}
-                            >
-                                {ACTIVITY_TYPES.map((value) => (
-                                    <option key={value} value={value}>
-                                        {t(`type${value}` as 'typeCall' | 'typeEmail' | 'typeMeeting' | 'typeNote' | 'typeOther')}
-                                    </option>
-                                ))}
-                            </select> */}
-                            <Select
-                                value={draft.type}
-                                onValueChange={(value) => setDraft((d) => ({ ...d, type: value }))}
-                            >
-                                <SelectTrigger id="activity-type" className={inputClass}>
-                                    <SelectValue />
-                                </SelectTrigger>
-                                <SelectContent>
-                                    {ACTIVITY_TYPES.map((value) => (
-                                        <SelectItem key={value} value={value}>
-                                            {t(`type${value}` as 'typeCall' | 'typeEmail' | 'typeMeeting' | 'typeNote' | 'typeOther')}
-                                        </SelectItem>
-                                    ))}
-                                </SelectContent>
-                            </Select>
+                                onChange={(value) => setDraft((d) => ({ ...d, type: value }))}
+                                getLabel={(ty) => t(`type${ty}` as 'typeCall')}
+                            />
                         </div>
 
                         <div className="grid gap-1.5">
@@ -186,7 +172,9 @@ export default function EditActivitySheet({
                             <Label htmlFor="activity-person">{t('personLabel')}</Label>
                             <Select
                                 value={draft.personId != null ? draft.personId.toString() : NONE_VALUE}
-                                onValueChange={(value) => setDraft((d) => ({ ...d, personId: value === NONE_VALUE ? null : Number(value) }))}
+                                onValueChange={(value) =>
+                                    setDraft((d) => ({ ...d, personId: value === NONE_VALUE ? null : Number(value) }))
+                                }
                             >
                                 <SelectTrigger id="activity-person" className={inputClass}>
                                     <SelectValue placeholder={t('selectPersonPlaceholder')} />
@@ -206,7 +194,9 @@ export default function EditActivitySheet({
                             <Label htmlFor="activity-deal">{t('dealLabel')}</Label>
                             <Select
                                 value={draft.dealId != null ? draft.dealId.toString() : NONE_VALUE}
-                                onValueChange={(value) => setDraft((d) => ({ ...d, dealId: value === NONE_VALUE ? null : Number(value) }))}
+                                onValueChange={(value) =>
+                                    setDraft((d) => ({ ...d, dealId: value === NONE_VALUE ? null : Number(value) }))
+                                }
                             >
                                 <SelectTrigger id="activity-deal" className={inputClass}>
                                     <SelectValue placeholder={t('selectDealPlaceholder')} />
@@ -235,9 +225,15 @@ export default function EditActivitySheet({
 
                 <SheetFooter className="border-t">
                     <SheetClose asChild>
-                        <Button variant="outline" disabled={isSaving}>{t('cancel')}</Button>
+                        <Button variant="outline" disabled={isSaving}>
+                            {t('cancel')}
+                        </Button>
                     </SheetClose>
-                    <Button onClick={saveUpdates} disabled={isSaving} className="bg-brand text-white hover:bg-brand-dark">
+                    <Button
+                        onClick={saveUpdates}
+                        disabled={isSaving}
+                        className="bg-brand text-white transition-transform hover:bg-brand-dark active:scale-[0.98]"
+                    >
                         {isSaving ? <Loader2Icon className="size-4 animate-spin" /> : t('save')}
                     </Button>
                 </SheetFooter>

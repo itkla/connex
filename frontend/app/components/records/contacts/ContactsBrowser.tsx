@@ -291,6 +291,44 @@ export default function ContactsBrowser({ contacts }: { contacts: Contact[] }) {
         [filteredContacts, columns, filterState],
     );
 
+    const selectionActions = (
+        <ButtonGroup className="rounded-full bg-neutral-100">
+            <Button variant="outline" size="sm" onClick={viewSelected}>
+                <EyeIcon className="size-4" />
+                {t('view')}
+            </Button>
+            <Button variant="outline" size="sm" onClick={openEditSheet}>
+                <PencilIcon className="size-4" />
+                {t('quickEdit')}
+            </Button>
+            <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                    <Button variant="outline" size="sm">
+                        <EllipsisVerticalIcon className="size-4" />
+                    </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent>
+                    <DropdownMenuItem onSelect={(e) => { e.preventDefault(); setChangeCompanyOpen(true); }}>
+                        <BuildingOffice2Icon />
+                        {t('changeCompany')}
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                        disabled={isClearingCompany}
+                        onSelect={(e) => { e.preventDefault(); bulkRemoveFromCompany(); }}
+                    >
+                        <NoSymbolIcon />
+                        {t('removeFromCompany')}
+                    </DropdownMenuItem>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem variant="destructive" onSelect={(e) => { e.preventDefault(); setDeleteDialogOpen(true); }}>
+                        <TrashIcon />
+                        {t('delete')}
+                    </DropdownMenuItem>
+                </DropdownMenuContent>
+            </DropdownMenu>
+        </ButtonGroup>
+    );
+
     return (
         <div className="space-y-6">
             <div className="flex items-center justify-between">
@@ -333,61 +371,6 @@ export default function ContactsBrowser({ contacts }: { contacts: Contact[] }) {
                     </button>
                 </div>
 
-                {selectedIds.size > 0 && (
-                    <div className="flex items-center gap-2">
-                        <span className="text-sm text-neutral-500">{t('selectedCount', { count: selectedIds.size })}</span>
-                        <ButtonGroup className="rounded-full bg-neutral-100">
-                            <Button variant="outline" size="sm" onClick={viewSelected}>
-                                <EyeIcon className="size-4" />
-                                {t('view')}
-                            </Button>
-                            <Button variant="outline" size="sm" onClick={openEditSheet}>
-                                <PencilIcon className="size-4" />
-                                {t('quickEdit')}
-                            </Button>
-                            <DropdownMenu>
-                                <DropdownMenuTrigger asChild>
-                                    <Button variant="outline" size="sm">
-                                        <EllipsisVerticalIcon className="size-4" />
-                                    </Button>
-                                </DropdownMenuTrigger>
-                                <DropdownMenuContent>
-                                    <DropdownMenuItem
-                                        onSelect={(e) => {
-                                            e.preventDefault();
-                                            setChangeCompanyOpen(true);
-                                        }}
-                                    >
-                                        <BuildingOffice2Icon />
-                                        {t('changeCompany')}
-                                    </DropdownMenuItem>
-                                    <DropdownMenuItem
-                                        disabled={isClearingCompany}
-                                        onSelect={(e) => {
-                                            e.preventDefault();
-                                            bulkRemoveFromCompany();
-                                        }}
-                                    >
-                                        <NoSymbolIcon />
-                                        {t('removeFromCompany')}
-                                    </DropdownMenuItem>
-                                    <DropdownMenuSeparator />
-                                    <DropdownMenuItem
-                                        variant="destructive"
-                                        onSelect={(e) => {
-                                            e.preventDefault();
-                                            setDeleteDialogOpen(true);
-                                        }}
-                                    >
-                                        <TrashIcon />
-                                        {t('delete')}
-                                    </DropdownMenuItem>
-                                </DropdownMenuContent>
-                            </DropdownMenu>
-                        </ButtonGroup>
-                    </div>
-                )}
-
                 <div className="relative ml-auto w-full max-w-sm">
                     <input
                         type="text"
@@ -424,6 +407,7 @@ export default function ContactsBrowser({ contacts }: { contacts: Contact[] }) {
                 onQuickEdit={quickEditOne}
                 onDelete={deleteOne}
                 entityLabel="contact"
+                selectionActions={selectionActions}
             />
 
             <QuickEditSheet
