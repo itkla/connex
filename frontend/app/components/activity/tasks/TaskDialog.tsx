@@ -1,10 +1,11 @@
 'use client';
 
-import { useEffect, useState, type WheelEvent, type SubmitEvent } from 'react';
+import { useEffect, useState, type WheelEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { toastError, toastSuccess } from '@/app/lib/toast';
 import { Loader2Icon } from 'lucide-react';
+import { ClipboardDocumentCheckIcon } from '@heroicons/react/24/outline';
 
 import {
     Dialog,
@@ -116,8 +117,15 @@ export default function TaskDialog({
         <Dialog open={open} onOpenChange={onOpenChange}>
             <DialogContent>
                 <DialogHeader>
-                    <DialogTitle>{t('titleCreate')}</DialogTitle>
-                    <DialogDescription>{t('description')}</DialogDescription>
+                    <div className="flex items-start gap-3">
+                        <span className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-brand-light text-brand-dark">
+                            <ClipboardDocumentCheckIcon className="size-5" />
+                        </span>
+                        <div className="space-y-1">
+                            <DialogTitle>{t('titleCreate')}</DialogTitle>
+                            <DialogDescription>{t('description')}</DialogDescription>
+                        </div>
+                    </div>
                 </DialogHeader>
 
                 <form onSubmit={handleSubmit} className="grid gap-4">
@@ -236,7 +244,7 @@ export default function TaskDialog({
                         <Button
                             type="submit"
                             disabled={submitting || !description.trim()}
-                            className="bg-brand text-white hover:bg-brand-dark"
+                            className="bg-brand text-white transition-transform hover:bg-brand-dark active:scale-[0.98]"
                         >
                             {submitting ? (
                                 <Loader2Icon className="size-4 animate-spin" />

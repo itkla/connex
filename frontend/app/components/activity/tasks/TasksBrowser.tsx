@@ -1,10 +1,9 @@
 'use client';
 
-import { useEffect, useMemo, useState, type ComponentType } from 'react';
-import { useRouter } from 'next/navigation';
+import { useEffect, useMemo, useRef, useState, type ComponentType } from 'react';
 import { useLocale, useTranslations } from 'next-intl';
-import { toastError, toastSuccess } from '@/app/lib/toast';
 import Link from 'next/link';
+import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
 import {
     MagnifyingGlassIcon,
     UserIcon,
@@ -15,6 +14,7 @@ import {
     UserCircleIcon,
     QueueListIcon,
     CheckCircleIcon,
+    CheckIcon,
 } from '@heroicons/react/24/outline';
 import { PlusIcon } from '@heroicons/react/24/solid';
 
@@ -26,7 +26,9 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import EditTaskSheet from '@/app/components/activity/tasks/EditTaskSheet';
 import TaskDialog from '@/app/components/activity/tasks/TaskDialog';
 import { updateTask } from '@/app/lib/api';
+import { toastError } from '@/app/lib/toast';
 import { parseMysqlDateTime } from '@/app/lib/utils';
+import { cn } from '@/lib/utils';
 import type { Contact, Deal, Task, User } from '@/app/lib/types';
 
 type Props = {
@@ -45,6 +47,9 @@ const ACTIVE_BUCKETS: Bucket[] = ['overdue', 'today', 'upcoming', 'noDate'];
 const ACTIVE_QUEUES: Queue[] = ['myOpen', 'dueToday', 'overdue', 'unassigned', 'allOpen'];
 const ALL_QUEUES: Queue[] = [...ACTIVE_QUEUES, 'completed'];
 const QUEUE_STORAGE_KEY = 'tasks:queue';
+const EASE_OUT: [number, number, number, number] = [0.23, 1, 0.32, 1];
+const COMPLETE_LINGER_MS = 230;
+const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 
 const QUEUE_ICON: Record<Queue, IconType> = {
     myOpen: InboxIcon,
@@ -104,43 +109,47 @@ function isInQueue(queue: Queue, task: Task, currentUserId: number): boolean {
     }
 }
 
-function formatDueDate(dueDate: string | undefined, t: (key: string) => string, locale: string): string {
-    if (!dueDate) return '';
+type DueTone = 'overdue' | 'today' | 'soon' | 'later';
+
+function formatDue(
+    dueDate: string | undefined,
+    t: (key: string) => string,
+    locale: string,
+): { label: string; tone: DueTone } | null {
+    if (!dueDate) return null;
     const ts = parseMysqlDateTime(dueDate);
-    if (Number.isNaN(ts)) return '';
+    if (Number.isNaN(ts)) return null;
     const date = new Date(ts);
     const today = new Date();
     today.setHours(0, 0, 0, 0);
-    const dayMs = 1000 * 60 * 60 * 24;
-    const diffDays = Math.floor((date.getTime() - today.getTime()) / dayMs);
-    if (diffDays === 0) return t('dueToday');
-    if (diffDays === 1) return t('dueTomorrow');
-    if (diffDays === -1) return t('dueYesterday');
-    return new Intl.DateTimeFormat(locale, { month: 'short', day: 'numeric' }).format(date);
+    const diffDays = Math.floor((date.getTime() - today.getTime()) / (24 * 60 * 60 * 1000));
+    if (diffDays < 0) {
+        const label = diffDays === -1 ? t('dueYesterday') : new Intl.DateTimeFormat(locale, { month: 'short', day: 'numeric' }).format(date);
+        return { label, tone: 'overdue' };
+    }
+    if (diffDays === 0) return { label: t('dueToday'), tone: 'today' };
+    if (diffDays === 1) return { label: t('dueTomorrow'), tone: 'soon' };
+    return {
+        label: new Intl.DateTimeFormat(locale, { month: 'short', day: 'numeric' }).format(date),
+        tone: diffDays <= 6 ? 'soon' : 'later',
+    };
 }
 
-export default function TasksBrowser({ tasks, persons, deals, users, currentUserId }: Props) {
-    const router = useRouter();
+export default function TasksBrowser({ tasks: initialTasks, persons, deals, users, currentUserId }: Props) {
     const t = useTranslations('ActivityTasks');
     const locale = useLocale();
+    const reduce = useReducedMotion() ?? false;
 
-    const personById = useMemo(() => {
-        const map = new Map<number, Contact>();
-        for (const p of persons) map.set(p.id, p);
-        return map;
-    }, [persons]);
+    const [now] = useState(() => Date.now());
+    const [tasks, setTasks] = useState<Task[]>(initialTasks);
+    useEffect(() => {
+        // eslint-disable-next-line react-hooks/set-state-in-effect
+        setTasks(initialTasks);
+    }, [initialTasks]);
 
-    const dealById = useMemo(() => {
-        const map = new Map<number, Deal>();
-        for (const d of deals) map.set(d.id, d);
-        return map;
-    }, [deals]);
-
-    const userById = useMemo(() => {
-        const map = new Map<number, User>();
-        for (const u of users) map.set(u.id, u);
-        return map;
-    }, [users]);
+    const personById = useMemo(() => new Map(persons.map((p) => [p.id, p])), [persons]);
+    const dealById = useMemo(() => new Map(deals.map((d) => [d.id, d])), [deals]);
+    const userById = useMemo(() => new Map(users.map((u) => [u.id, u])), [users]);
 
     const [query, setQuery] = useState('');
     const [queue, setQueue] = useState<Queue>('myOpen');
@@ -148,6 +157,8 @@ export default function TasksBrowser({ tasks, persons, deals, users, currentUser
     const [editingTask, setEditingTask] = useState<Task | null>(null);
     const [creating, setCreating] = useState(false);
     const [pendingToggle, setPendingToggle] = useState<Set<number>>(new Set());
+    const [completing, setCompleting] = useState<Set<number>>(new Set());
+    const timers = useRef<number[]>([]);
 
     useEffect(() => {
         const stored = window.localStorage.getItem(QUEUE_STORAGE_KEY);
@@ -161,14 +172,11 @@ export default function TasksBrowser({ tasks, persons, deals, users, currentUser
         window.localStorage.setItem(QUEUE_STORAGE_KEY, queue);
     }, [queue, queueInitialized]);
 
+    useEffect(() => () => timers.current.forEach((id) => window.clearTimeout(id)), []);
+
     const queueCounts = useMemo(() => {
         const counts: Record<Queue, number> = {
-            myOpen: 0,
-            dueToday: 0,
-            overdue: 0,
-            unassigned: 0,
-            allOpen: 0,
-            completed: 0,
+            myOpen: 0, dueToday: 0, overdue: 0, unassigned: 0, allOpen: 0, completed: 0,
         };
         for (const task of tasks) {
             for (const q of ALL_QUEUES) {
@@ -178,10 +186,32 @@ export default function TasksBrowser({ tasks, persons, deals, users, currentUser
         return counts;
     }, [tasks, currentUserId]);
 
+    const todayFocus = useMemo(() => {
+        const start = startOfToday();
+        const end = endOfToday();
+        let total = 0;
+        let done = 0;
+        let doneThisWeek = 0;
+        const weekAgo = now - WEEK_MS;
+        for (const task of tasks) {
+            const ts = parseMysqlDateTime(task.dueDate);
+            if (!Number.isNaN(ts) && ts >= start && ts <= end) {
+                total++;
+                if (task.completed) done++;
+            }
+            if (task.completed) {
+                const updated = parseMysqlDateTime(task.updatedAt);
+                if (!Number.isNaN(updated) && updated >= weekAgo) doneThisWeek++;
+            }
+        }
+        return { total, done, left: total - done, overdue: queueCounts.overdue, doneThisWeek };
+    }, [tasks, queueCounts.overdue, now]);
+
     const filtered = useMemo(() => {
         const q = query.trim().toLowerCase();
         return tasks.filter((task) => {
-            if (!isInQueue(queue, task, currentUserId)) return false;
+            const inQueue = isInQueue(queue, task, currentUserId) || completing.has(task.id);
+            if (!inQueue) return false;
             if (!q) return true;
             const haystacks = [
                 task.description,
@@ -191,33 +221,46 @@ export default function TasksBrowser({ tasks, persons, deals, users, currentUser
             ];
             return haystacks.some((s) => s?.toLowerCase().includes(q));
         });
-    }, [tasks, query, queue, currentUserId, personById, dealById, userById]);
+    }, [tasks, query, queue, currentUserId, personById, dealById, userById, completing]);
 
     const grouped = useMemo(() => {
-        const buckets: Record<Bucket, Task[]> = {
-            overdue: [],
-            today: [],
-            upcoming: [],
-            noDate: [],
-            completed: [],
-        };
+        const buckets: Record<Bucket, Task[]> = { overdue: [], today: [], upcoming: [], noDate: [], completed: [] };
         for (const task of filtered) {
-            buckets[bucketForTask(task)].push(task);
+            const bucket = completing.has(task.id) ? bucketForTask({ ...task, completed: false }) : bucketForTask(task);
+            buckets[bucket].push(task);
         }
         for (const key of [...ACTIVE_BUCKETS, 'completed' as const]) {
             buckets[key].sort((a, c) => dueTimestamp(a) - dueTimestamp(c));
         }
         return buckets;
-    }, [filtered]);
+    }, [filtered, completing]);
 
-    const visibleBuckets = useMemo(
-        () => ACTIVE_BUCKETS.filter((b) => grouped[b].length > 0),
-        [grouped],
-    );
+    const visibleBuckets = useMemo(() => ACTIVE_BUCKETS.filter((b) => grouped[b].length > 0), [grouped]);
+
+    const setTaskCompleted = (id: number, value: boolean) =>
+        setTasks((prev) => prev.map((task) => (task.id === id ? { ...task, completed: value } : task)));
 
     const handleToggleComplete = async (task: Task, next: boolean) => {
         if (pendingToggle.has(task.id)) return;
         setPendingToggle((prev) => new Set(prev).add(task.id));
+
+        const commitOptimistic = () => {
+            setTaskCompleted(task.id, next);
+            setCompleting((prev) => {
+                const n = new Set(prev);
+                n.delete(task.id);
+                return n;
+            });
+        };
+
+        if (next && !reduce) {
+            setCompleting((prev) => new Set(prev).add(task.id));
+            const id = window.setTimeout(commitOptimistic, COMPLETE_LINGER_MS);
+            timers.current.push(id);
+        } else {
+            commitOptimistic();
+        }
+
         try {
             await updateTask(task.id, {
                 description: task.description,
@@ -227,10 +270,14 @@ export default function TasksBrowser({ tasks, persons, deals, users, currentUser
                 dealId: task.dealId ?? undefined,
                 completed: next,
             });
-            toastSuccess(next ? t('taskMarkedAsCompleteSuccess') : t('taskMarkedAsIncompleteSuccess'));
-            router.refresh();
         } catch (err) {
             toastError(err instanceof Error ? err.message : t('toastFailedUpdate'));
+            setTaskCompleted(task.id, !next);
+            setCompleting((prev) => {
+                const n = new Set(prev);
+                n.delete(task.id);
+                return n;
+            });
         } finally {
             setPendingToggle((prev) => {
                 const n = new Set(prev);
@@ -244,25 +291,56 @@ export default function TasksBrowser({ tasks, persons, deals, users, currentUser
         ? personById.get(editingTask.personId)?.companyId ?? null
         : null;
 
+    const hasAnyTasks = tasks.length > 0;
     const isEmpty = filtered.length === 0;
     const isCompletedQueue = queue === 'completed';
-    const emptyMessage = query.trim()
-        ? t('emptyFiltered')
-        : t(`emptyQueue_${queue}` as 'emptyQueue_myOpen');
+    const emptyMessage = query.trim() ? t('emptyFiltered') : t(`emptyQueue_${queue}` as 'emptyQueue_myOpen');
+
+    const renderRow = (task: Task, bucket: Bucket) => (
+        <TaskRow
+            key={task.id}
+            task={task}
+            reduce={reduce}
+            checked={completing.has(task.id) || task.completed}
+            person={task.personId ? personById.get(task.personId) : undefined}
+            deal={task.dealId ? dealById.get(task.dealId) : undefined}
+            assignee={userById.get(task.assignedToId)}
+            bucket={bucket}
+            onToggle={(nextChecked) => handleToggleComplete(task, nextChecked)}
+            onOpen={() => setEditingTask(task)}
+            pending={pendingToggle.has(task.id)}
+            ariaCompleteLabel={t('ariaCompleteTask')}
+            due={formatDue(task.dueDate, t, locale)}
+        />
+    );
 
     return (
-        <div className="space-y-8">
-            <div className="flex items-center justify-between">
-                <h1 className="text-4xl font-extrabold">{t('title')}</h1>
+        <div className="mx-auto w-full max-w-5xl space-y-6">
+            <header className="flex flex-wrap items-start justify-between gap-4">
+                <div>
+                    <h1 className="text-4xl font-extrabold tracking-tight">{t('title')}</h1>
+                    <p className="mt-1 text-sm text-neutral-500">{t('subtitle')}</p>
+                </div>
                 <Button
-                    className="bg-brand text-white"
+                    className="bg-brand text-white shadow-sm transition-transform hover:bg-brand-dark active:scale-[0.98]"
                     aria-label={t('newAria')}
                     onClick={() => setCreating(true)}
                 >
                     <PlusIcon strokeWidth={2.5} />
                     {t('new')}
                 </Button>
-            </div>
+            </header>
+
+            {hasAnyTasks && (
+                <FocusStrip
+                    focus={todayFocus}
+                    reduce={reduce}
+                    t={t}
+                    onSelectToday={() => setQueue('dueToday')}
+                    onSelectOverdue={() => setQueue('overdue')}
+                    onSelectWeek={() => setQueue('completed')}
+                />
+            )}
 
             <div className="grid grid-cols-1 gap-6 md:grid-cols-[200px_minmax(0,1fr)] md:gap-10">
                 <aside className="md:sticky md:top-6 md:self-start">
@@ -277,6 +355,7 @@ export default function TasksBrowser({ tasks, persons, deals, users, currentUser
                                 label={t(`queue_${q}` as 'queue_myOpen')}
                                 count={queueCounts[q]}
                                 active={queue === q}
+                                reduce={reduce}
                                 onClick={() => setQueue(q)}
                             />
                         ))}
@@ -286,6 +365,7 @@ export default function TasksBrowser({ tasks, persons, deals, users, currentUser
                             label={t('queue_completed')}
                             count={queueCounts.completed}
                             active={queue === 'completed'}
+                            reduce={reduce}
                             onClick={() => setQueue('completed')}
                         />
                     </nav>
@@ -306,69 +386,43 @@ export default function TasksBrowser({ tasks, persons, deals, users, currentUser
                     </div>
 
                     {isEmpty ? (
-                        <div className="rounded-2xl bg-white px-6 py-20 text-center ring-1 ring-black/5">
-                            <p className="text-sm text-neutral-500">{emptyMessage}</p>
+                        <TaskEmptyState
+                            filtered={!!query.trim()}
+                            completed={isCompletedQueue}
+                            message={emptyMessage}
+                        />
+                    ) : isCompletedQueue ? (
+                        <div className="overflow-hidden rounded-2xl bg-white ring-1 ring-black/5">
+                            <ul className="divide-y divide-neutral-100">
+                                <AnimatePresence initial={false} mode="popLayout">
+                                    {filtered.map((task) => renderRow(task, 'completed'))}
+                                </AnimatePresence>
+                            </ul>
                         </div>
                     ) : (
                         <div className="overflow-hidden rounded-2xl bg-white ring-1 ring-black/5">
-                            {isCompletedQueue ? (
-                                <ul className="divide-y divide-neutral-100">
-                                    {filtered.map((task) => (
-                                        <TaskRow
-                                            key={task.id}
-                                            task={task}
-                                            person={task.personId ? personById.get(task.personId) : undefined}
-                                            deal={task.dealId ? dealById.get(task.dealId) : undefined}
-                                            assignee={userById.get(task.assignedToId)}
-                                            bucket="completed"
-                                            onToggle={(next) => handleToggleComplete(task, next)}
-                                            onOpen={() => setEditingTask(task)}
-                                            pending={pendingToggle.has(task.id)}
-                                            ariaCompleteLabel={t('ariaCompleteTask')}
-                                            formatDue={(d) => formatDueDate(d, t, locale)}
-                                        />
-                                    ))}
-                                </ul>
-                            ) : (
-                                visibleBuckets.map((bucket) => {
-                                    const items = grouped[bucket];
-                                    const isOverdueBucket = bucket === 'overdue';
-                                    return (
-                                        <section
-                                            key={bucket}
-                                            className="border-t border-neutral-200 first:border-t-0"
+                            {visibleBuckets.map((bucket, i) => (
+                                <section key={bucket} className={cn(i > 0 && 'border-t border-neutral-200')}>
+                                    <div className="flex items-baseline justify-between px-5 pt-4 pb-2">
+                                        <h3
+                                            className={cn(
+                                                'text-sm font-semibold',
+                                                bucket === 'overdue' ? 'text-destructive' : 'text-neutral-900',
+                                            )}
                                         >
-                                            <div className="flex items-baseline justify-between px-5 pt-4 pb-2">
-                                                <h3
-                                                    className={`text-sm font-semibold ${isOverdueBucket ? 'text-destructive' : 'text-neutral-900'}`}
-                                                >
-                                                    {t(`bucket_${bucket}` as 'bucket_overdue')}
-                                                </h3>
-                                                <span className="text-xs tabular-nums text-neutral-400">
-                                                    {items.length}
-                                                </span>
-                                            </div>
-                                            <ul className="divide-y divide-neutral-100">
-                                                {items.map((task) => (
-                                                    <TaskRow
-                                                        key={task.id}
-                                                        task={task}
-                                                        person={task.personId ? personById.get(task.personId) : undefined}
-                                                        deal={task.dealId ? dealById.get(task.dealId) : undefined}
-                                                        assignee={userById.get(task.assignedToId)}
-                                                        bucket={bucket}
-                                                        onToggle={(next) => handleToggleComplete(task, next)}
-                                                        onOpen={() => setEditingTask(task)}
-                                                        pending={pendingToggle.has(task.id)}
-                                                        ariaCompleteLabel={t('ariaCompleteTask')}
-                                                        formatDue={(d) => formatDueDate(d, t, locale)}
-                                                    />
-                                                ))}
-                                            </ul>
-                                        </section>
-                                    );
-                                })
-                            )}
+                                            {t(`bucket_${bucket}` as 'bucket_overdue')}
+                                        </h3>
+                                        <span className="text-xs tabular-nums text-neutral-400">
+                                            {grouped[bucket].length}
+                                        </span>
+                                    </div>
+                                    <ul className="divide-y divide-neutral-100">
+                                        <AnimatePresence initial={false} mode="popLayout">
+                                            {grouped[bucket].map((task) => renderRow(task, bucket))}
+                                        </AnimatePresence>
+                                    </ul>
+                                </section>
+                            ))}
                         </div>
                     )}
                 </div>
@@ -398,17 +452,111 @@ export default function TasksBrowser({ tasks, persons, deals, users, currentUser
     );
 }
 
+function ProgressRing({ value, reduce, label }: { value: number; reduce: boolean; label: string }) {
+    const size = 48;
+    const stroke = 5;
+    const r = (size - stroke) / 2;
+    const c = 2 * Math.PI * r;
+    const pct = Math.max(0, Math.min(1, value));
+    const offset = c * (1 - pct);
+    return (
+        <div className="relative shrink-0" style={{ width: size, height: size }}>
+            <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} className="-rotate-90">
+                <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="#ededed" strokeWidth={stroke} />
+                <motion.circle
+                    cx={size / 2}
+                    cy={size / 2}
+                    r={r}
+                    fill="none"
+                    stroke="var(--color-brand)"
+                    strokeWidth={stroke}
+                    strokeLinecap="round"
+                    strokeDasharray={c}
+                    initial={{ strokeDashoffset: reduce ? offset : c }}
+                    animate={{ strokeDashoffset: offset }}
+                    transition={{ duration: reduce ? 0 : 0.9, ease: EASE_OUT }}
+                />
+            </svg>
+            <span className="absolute inset-0 flex items-center justify-center font-mono text-[11px] font-medium tabular-nums text-neutral-700">
+                {label}
+            </span>
+        </div>
+    );
+}
+
+function FocusStrip({
+    focus,
+    reduce,
+    t,
+    onSelectToday,
+    onSelectOverdue,
+    onSelectWeek,
+}: {
+    focus: { total: number; done: number; left: number; overdue: number; doneThisWeek: number };
+    reduce: boolean;
+    t: ReturnType<typeof useTranslations>;
+    onSelectToday: () => void;
+    onSelectOverdue: () => void;
+    onSelectWeek: () => void;
+}) {
+    const { total, done, left, overdue, doneThisWeek } = focus;
+    const todaySub =
+        total === 0 ? t('nothingDueToday') : left === 0 ? t('allDoneToday') : t('tasksLeft', { count: left });
+
+    return (
+        <div className="grid grid-cols-3 gap-px overflow-hidden rounded-2xl bg-neutral-200 ring-1 ring-black/5">
+            <button
+                type="button"
+                onClick={onSelectToday}
+                className="flex min-h-20 items-center gap-3.5 bg-white p-4 text-left outline-none transition hover:bg-neutral-50 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand"
+            >
+                <ProgressRing
+                    value={total === 0 ? 0 : done / total}
+                    reduce={reduce}
+                    label={total === 0 ? '0' : `${done}/${total}`}
+                />
+                <span className="min-w-0">
+                    <span className="block text-sm font-semibold text-neutral-900">{t('today')}</span>
+                    <span className="mt-0.5 block truncate text-xs text-neutral-500">{todaySub}</span>
+                </span>
+            </button>
+
+            <button
+                type="button"
+                onClick={onSelectOverdue}
+                className="flex min-h-20 flex-col justify-center bg-white p-4 text-left outline-none transition hover:bg-neutral-50 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand"
+            >
+                <span className={cn('text-2xl font-semibold leading-none tabular-nums', overdue > 0 ? 'text-destructive' : 'text-neutral-300')}>
+                    {overdue}
+                </span>
+                <span className="mt-1.5 text-xs font-medium text-neutral-500">{t('queue_overdue')}</span>
+            </button>
+
+            <button
+                type="button"
+                onClick={onSelectWeek}
+                className="flex min-h-20 flex-col justify-center bg-white p-4 text-left outline-none transition hover:bg-neutral-50 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand"
+            >
+                <span className="text-2xl font-semibold leading-none tabular-nums text-neutral-900">{doneThisWeek}</span>
+                <span className="mt-1.5 text-xs font-medium text-neutral-500">{t('doneThisWeek')}</span>
+            </button>
+        </div>
+    );
+}
+
 function QueueButton({
     Icon,
     label,
     count,
     active,
+    reduce,
     onClick,
 }: {
     Icon: IconType;
     label: string;
     count: number;
     active: boolean;
+    reduce: boolean;
     onClick: () => void;
 }) {
     return (
@@ -416,25 +564,40 @@ function QueueButton({
             type="button"
             onClick={onClick}
             aria-current={active ? 'page' : undefined}
-            className={`flex w-full items-center justify-between rounded-lg px-3 py-2 text-sm transition ${active ? 'bg-brand-light/60 font-medium text-brand-dark' : 'text-neutral-700 hover:bg-neutral-100'}`}
+            className={cn(
+                'relative flex w-full items-center justify-between rounded-lg px-3 py-2 text-sm transition-colors',
+                active ? 'text-brand-dark' : 'text-neutral-700 hover:bg-neutral-100',
+            )}
         >
-            <span className="flex min-w-0 items-center gap-2.5">
-                <Icon
-                    className={`size-4 shrink-0 ${active ? 'text-brand-dark' : 'text-neutral-400'}`}
+            {active && (
+                <motion.span
+                    layoutId="task-queue-pill"
+                    className="absolute inset-0 z-0 rounded-lg bg-brand-light/60"
+                    transition={reduce ? { duration: 0 } : { type: 'spring', stiffness: 520, damping: 42 }}
                 />
-                <span className="truncate">{label}</span>
+            )}
+            <span className="relative z-10 flex min-w-0 items-center gap-2.5">
+                <Icon className={cn('size-4 shrink-0', active ? 'text-brand-dark' : 'text-neutral-400')} />
+                <span className={cn('truncate', active && 'font-medium')}>{label}</span>
             </span>
-            <span
-                className={`shrink-0 text-xs tabular-nums ${active ? 'text-brand-dark/70' : 'text-neutral-400'}`}
-            >
+            <span className={cn('relative z-10 shrink-0 text-xs tabular-nums', active ? 'text-brand-dark/70' : 'text-neutral-400')}>
                 {count}
             </span>
         </button>
     );
 }
 
+const DUE_CHIP: Record<DueTone, string> = {
+    overdue: 'bg-red-50 text-red-600 ring-red-600/10',
+    today: 'bg-brand-light/70 text-brand-dark ring-brand-dark/15',
+    soon: 'bg-neutral-100 text-neutral-600 ring-black/5',
+    later: 'bg-neutral-100 text-neutral-500 ring-black/5',
+};
+
 type TaskRowProps = {
     task: Task;
+    reduce: boolean;
+    checked: boolean;
     person?: Contact;
     deal?: Deal;
     assignee?: User;
@@ -443,11 +606,13 @@ type TaskRowProps = {
     onOpen: () => void;
     pending: boolean;
     ariaCompleteLabel: string;
-    formatDue: (dueDate: string | undefined) => string;
+    due: { label: string; tone: DueTone } | null;
 };
 
 function TaskRow({
     task,
+    reduce,
+    checked,
     person,
     deal,
     assignee,
@@ -456,29 +621,37 @@ function TaskRow({
     onOpen,
     pending,
     ariaCompleteLabel,
-    formatDue,
+    due,
 }: TaskRowProps) {
-    const isOverdue = bucket === 'overdue';
-    const isCompleted = bucket === 'completed';
-    const dueLabel = formatDue(task.dueDate);
+    const isCompletedRow = bucket === 'completed';
 
     return (
-        <li
-            className={`group flex cursor-pointer items-center gap-3 px-5 py-3 transition-colors hover:bg-neutral-50/70 ${isCompleted ? 'opacity-60' : ''}`}
+        <motion.li
+            layout={!reduce}
+            initial={false}
+            exit={reduce ? { opacity: 0 } : { opacity: 0, x: 8, transition: { duration: 0.2, ease: EASE_OUT } }}
+            transition={{ duration: 0.22, ease: EASE_OUT }}
+            className={cn(
+                'group flex cursor-pointer items-center gap-3 px-5 py-3 transition-colors hover:bg-neutral-50/80',
+                (checked || isCompletedRow) && 'opacity-55',
+            )}
             onClick={onOpen}
         >
             <div onClick={(e) => e.stopPropagation()} className="shrink-0">
                 <Checkbox
-                    checked={isCompleted}
-                    onCheckedChange={(checked) => onToggle(checked === true)}
-                    disabled={pending}
+                    checked={checked}
+                    onCheckedChange={(value) => onToggle(value === true)}
+                    disabled={pending && !checked}
                     aria-label={ariaCompleteLabel}
-                    className="size-4 rounded-full data-[state=checked]:bg-brand data-[state=checked]:border-brand"
+                    className="size-[18px] rounded-full border-neutral-300 transition data-[state=checked]:border-brand data-[state=checked]:bg-brand data-[state=checked]:text-white"
                 />
             </div>
 
             <span
-                className={`min-w-0 flex-1 truncate text-sm ${isCompleted ? 'text-neutral-400 line-through' : 'text-neutral-900'}`}
+                className={cn(
+                    'min-w-0 flex-1 truncate text-sm',
+                    checked || isCompletedRow ? 'text-neutral-400 line-through' : 'text-neutral-900',
+                )}
             >
                 {task.description}
             </span>
@@ -488,7 +661,7 @@ function TaskRow({
                     <Link
                         href={`/records/contacts/${person.id}`}
                         onClick={(e) => e.stopPropagation()}
-                        className="inline-flex max-w-[10rem] items-center gap-1 rounded-full bg-brand-light/50 px-2 py-0.5 text-xs font-medium text-brand-dark ring-1 ring-inset ring-brand-dark/10 transition hover:bg-brand-light"
+                        className="inline-flex max-w-40 items-center gap-1 rounded-full bg-brand-light/50 px-2 py-0.5 text-xs font-medium text-brand-dark ring-1 ring-inset ring-brand-dark/10 transition hover:bg-brand-light"
                         title={person.name}
                     >
                         <UserIcon className="size-3 shrink-0" />
@@ -499,7 +672,7 @@ function TaskRow({
                     <Link
                         href={`/records/deals/${deal.id}`}
                         onClick={(e) => e.stopPropagation()}
-                        className="inline-flex max-w-[10rem] items-center gap-1 rounded-full bg-white px-2 py-0.5 text-xs font-medium text-neutral-700 ring-1 ring-inset ring-neutral-200 transition hover:bg-neutral-50"
+                        className="inline-flex max-w-40 items-center gap-1 rounded-full bg-white px-2 py-0.5 text-xs font-medium text-neutral-700 ring-1 ring-inset ring-neutral-200 transition hover:bg-neutral-50"
                         title={deal.name}
                     >
                         <BriefcaseIcon className="size-3 shrink-0" />
@@ -508,11 +681,18 @@ function TaskRow({
                 )}
             </div>
 
-            <span
-                className={`w-16 shrink-0 text-right text-xs tabular-nums ${isOverdue ? 'font-medium text-destructive' : 'text-neutral-500'}`}
-            >
-                {dueLabel || <span className="text-neutral-300">—</span>}
-            </span>
+            <div className="w-18 shrink-0 text-right">
+                {due && !isCompletedRow ? (
+                    <span
+                        className={cn(
+                            'inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium tabular-nums ring-1 ring-inset',
+                            DUE_CHIP[due.tone],
+                        )}
+                    >
+                        {due.label}
+                    </span>
+                ) : null}
+            </div>
 
             <div className="shrink-0">
                 {assignee ? (
@@ -520,10 +700,7 @@ function TaskRow({
                         <TooltipTrigger asChild>
                             <Avatar size="sm" className="ring-1 ring-black/5">
                                 {assignee.profilePictureUrl ? (
-                                    <AvatarImage
-                                        src={assignee.profilePictureUrl}
-                                        alt={assignee.displayName}
-                                    />
+                                    <AvatarImage src={assignee.profilePictureUrl} alt={assignee.displayName} />
                                 ) : (
                                     <AvatarFallback>
                                         <UserIcon className="size-3 text-neutral-500" />
@@ -539,6 +716,18 @@ function TaskRow({
                     <div className="size-6" />
                 )}
             </div>
-        </li>
+        </motion.li>
+    );
+}
+
+function TaskEmptyState({ filtered, completed, message }: { filtered: boolean; completed: boolean; message: string }) {
+    const Icon = completed ? CheckCircleIcon : filtered ? MagnifyingGlassIcon : CheckIcon;
+    return (
+        <div className="rounded-2xl bg-white px-6 py-20 text-center ring-1 ring-black/5">
+            <div className="mx-auto flex size-14 items-center justify-center rounded-2xl bg-brand-light text-brand-dark">
+                <Icon className="size-7" strokeWidth={1.75} />
+            </div>
+            <p className="mx-auto mt-5 max-w-sm text-sm font-medium text-neutral-700">{message}</p>
+        </div>
     );
 }

@@ -1,6 +1,9 @@
 {
   "ActivityPage": {
     "title": "Activity",
+    "subtitle": "Every call, email, and meeting your team logs, in one timeline.",
+    "weekTotalLabel": "Logged this week",
+    "weekPulseAria": "{count} activities logged over the last 7 days",
     "allActivities": "All Activities",
     "new": "New",
     "newAria": "Log activity",
@@ -137,6 +140,12 @@
   },
   "ActivityTasks": {
     "title": "Tasks",
+    "subtitle": "Stay on top of every follow-up across your team.",
+    "today": "Today",
+    "tasksLeft": "{count} left",
+    "allDoneToday": "All done for today",
+    "nothingDueToday": "Nothing due today",
+    "doneThisWeek": "Done this week",
     "myTasks": "My Tasks",
     "allTasks": "All Tasks",
     "new": "New",
