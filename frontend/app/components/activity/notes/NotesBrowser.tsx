@@ -329,6 +329,28 @@ export default function NotesBrowser({ notes, persons, deals, users, currentUser
         );
     };
 
+    const selectionActions = (
+        <ButtonGroup className="rounded-full bg-neutral-100">
+            <Button variant="outline" size="sm" onClick={openEditSheet}>
+                <PencilIcon className="size-4" />
+                {t('quickEdit')}
+            </Button>
+            <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                    <Button variant="outline" size="sm">
+                        <EllipsisVerticalIcon className="size-4" />
+                    </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent>
+                    <DropdownMenuItem variant="destructive" onSelect={(e) => { e.preventDefault(); setDeleteDialogOpen(true); }}>
+                        <TrashIcon />
+                        {t('delete')}
+                    </DropdownMenuItem>
+                </DropdownMenuContent>
+            </DropdownMenu>
+        </ButtonGroup>
+    );
+
     return (
         <div className="space-y-8">
             <div className="flex flex-wrap items-start justify-between gap-4">
@@ -387,39 +409,6 @@ export default function NotesBrowser({ notes, persons, deals, users, currentUser
                             <SelectItem value="company">{t('groupCompany')}</SelectItem>
                         </SelectContent>
                     </Select>
-                )}
-
-                {selectedIds.size > 0 && (
-                    <div className="flex items-center gap-2">
-                        <span className="text-sm text-neutral-500">
-                            {t('selectedCount', { count: selectedIds.size })}
-                        </span>
-                        <ButtonGroup className="rounded-full bg-neutral-100">
-                            <Button variant="outline" size="sm" onClick={openEditSheet}>
-                                <PencilIcon className="size-4" />
-                                {t('quickEdit')}
-                            </Button>
-                            <DropdownMenu>
-                                <DropdownMenuTrigger asChild>
-                                    <Button variant="outline" size="sm">
-                                        <EllipsisVerticalIcon className="size-4" />
-                                    </Button>
-                                </DropdownMenuTrigger>
-                                <DropdownMenuContent>
-                                    <DropdownMenuItem
-                                        variant="destructive"
-                                        onSelect={(e) => {
-                                            e.preventDefault();
-                                            setDeleteDialogOpen(true);
-                                        }}
-                                    >
-                                        <TrashIcon />
-                                        {t('delete')}
-                                    </DropdownMenuItem>
-                                </DropdownMenuContent>
-                            </DropdownMenu>
-                        </ButtonGroup>
-                    </div>
                 )}
 
                 <div className="relative ml-auto w-full max-w-sm">
@@ -504,6 +493,7 @@ export default function NotesBrowser({ notes, persons, deals, users, currentUser
                     onQuickEdit={openEdit}
                     onDelete={requestDelete}
                     entityLabel={t('entityLabel')}
+                    selectionActions={selectionActions}
                 />
             )}
 

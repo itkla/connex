@@ -2,15 +2,34 @@
 
 import { useMemo, useState, type ReactNode } from 'react';
 import { useRouter } from 'next/navigation';
-import { ChevronDownIcon, ChevronUpIcon, ChevronUpDownIcon } from '@heroicons/react/24/outline';
+import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
+import {
+    ChevronDownIcon,
+    ChevronUpIcon,
+    ChevronUpDownIcon,
+    EllipsisHorizontalIcon,
+    PencilSquareIcon,
+    TrashIcon,
+    XMarkIcon,
+} from '@heroicons/react/24/outline';
 import { Checkbox } from '@/components/ui/checkbox';
+import {
+    DropdownMenu,
+    DropdownMenuTrigger,
+    DropdownMenuContent,
+    DropdownMenuItem,
+    DropdownMenuSeparator,
+} from '@/components/ui/dropdown-menu';
 import { toast } from 'sonner';
 import { useTranslations } from 'next-intl';
 
 import { copyToClipboard } from '@/app/lib/utils';
+import { cn } from '@/lib/utils';
 import { type ColumnDef, type CardCallbacks, type DisplayMode, type SelectionId } from './types';
 
 type SortDirection = 'asc' | 'desc';
+const EASE_OUT: [number, number, number, number] = [0.23, 1, 0.32, 1];
+const CHECKBOX_CLASS = 'size-[18px] border-neutral-300 data-[state=checked]:border-brand data-[state=checked]:bg-brand data-[state=checked]:text-white data-[state=indeterminate]:border-brand data-[state=indeterminate]:bg-brand data-[state=indeterminate]:text-white';
 
 interface Props<T extends { id: SelectionId; name?: string }> {
     data: T[];
@@ -26,6 +45,7 @@ interface Props<T extends { id: SelectionId; name?: string }> {
     onDelete?: (item: T) => void;
     gridClassName?: string;
     entityLabel: string;
+    selectionActions?: ReactNode; // pass along the react node for the selection actions
 }
 
 export default function RecordsRenderView<T extends { id: SelectionId; name?: string }>({
@@ -40,11 +60,13 @@ export default function RecordsRenderView<T extends { id: SelectionId; name?: st
     onSelectedIdsChange,
     onQuickEdit,
     onDelete,
-    gridClassName = 'grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 justify-center pt-8',
+    gridClassName = 'grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4',
     entityLabel,
+    selectionActions,
 }: Props<T>) {
     const router = useRouter();
     const t = useTranslations('RecordsRenderView');
+    const reduce = useReducedMotion() ?? false;
     const [sortKey, setSortKey] = useState<string | null>(null);
     const [sortDirection, setSortDirection] = useState<SortDirection>('asc');
 
@@ -87,115 +109,242 @@ export default function RecordsRenderView<T extends { id: SelectionId; name?: st
         onSelectedIdsChange(next);
     };
 
+    const hasRowActions = !!(onQuickEdit || onDelete);
+
+    const selectionBar = (
+        <AnimatePresence>
+            {selectionActions && selectedIds.size > 0 && (
+                <motion.div
+                    key="selection-bar"
+                    initial={reduce ? { opacity: 0 } : { opacity: 0, y: 20, scale: 0.97 }}
+                    animate={reduce ? { opacity: 1 } : { opacity: 1, y: 0, scale: 1 }}
+                    exit={reduce ? { opacity: 0 } : { opacity: 0, y: 20, scale: 0.97 }}
+                    transition={{ duration: 0.24, ease: EASE_OUT }}
+                    className="pointer-events-none fixed inset-x-0 bottom-6 z-40 flex justify-center px-4"
+                >
+                    <div className="pointer-events-auto flex items-center gap-1.5 rounded-full bg-white py-1.5 pr-1.5 pl-2 shadow-[0_8px_30px_rgb(0_0_0/0.12)] ring-1 ring-black/10">
+                        <span className="flex items-center gap-2 pr-1 pl-1">
+                            <span className="flex h-6 min-w-6 items-center justify-center rounded-full bg-brand px-1.5 text-xs font-semibold tabular-nums text-white">
+                                {selectedIds.size}
+                            </span>
+                            <span className="hidden text-sm text-neutral-600 sm:inline">{t('selectedLabel')}</span>
+                        </span>
+                        <span className="h-5 w-px shrink-0 bg-neutral-200" />
+                        {selectionActions}
+                        <span className="h-5 w-px shrink-0 bg-neutral-200" />
+                        <button
+                            type="button"
+                            onClick={() => onSelectedIdsChange(new Set())}
+                            aria-label={t('clearSelection')}
+                            className="flex size-8 shrink-0 items-center justify-center rounded-full text-neutral-500 transition hover:bg-neutral-100 hover:text-neutral-800 active:scale-95"
+                        >
+                            <XMarkIcon className="size-4" strokeWidth={2} />
+                        </button>
+                    </div>
+                </motion.div>
+            )}
+        </AnimatePresence>
+    );
+
     if (displayMode === 'grid') {
         return (
-            <div className={gridClassName}>
-                {sortedData.map((item) => (
-                    <div key={item.id}>
-                        {renderCard(item, { onQuickEdit, onDelete })}
-                    </div>
-                ))}
-            </div>
+            <>
+                <div className={gridClassName}>
+                    {sortedData.map((item) => (
+                        <div key={item.id}>{renderCard(item, { onQuickEdit, onDelete })}</div>
+                    ))}
+                </div>
+                {selectionBar}
+            </>
         );
     }
 
     return (
-        <div className="flex flex-col gap-4 justify-center pt-8">
-            <table className="w-full text-left">
-                <thead>
-                    <tr>
-                        <th className="px-4 py-2 w-10">
-                            <Checkbox
-                                checked={someSelected ? 'indeterminate' : allSelected}
-                                onCheckedChange={(checked) => toggleAll(checked === true)}
-                                aria-label={t('selectAllAria', { entityLabel })}
-                                className="data-[state=checked]:bg-brand data-[state=checked]:border-brand-light"
-                            />
-                        </th>
-                        {renderAvatar && <th className="px-4 py-2 w-10 h-10"> </th>}
-                        {columns.map((col) => {
-                            const active = sortKey === col.key;
-                            const sortable = !!col.getSortValue;
-                            const Icon = active
-                                ? sortDirection === 'asc'
-                                    ? ChevronUpIcon
-                                    : ChevronDownIcon
-                                : ChevronUpDownIcon;
-                            return (
-                                <th key={col.key} className={`px-4 py-2 ${col.widthClass ?? ''}`}>
-                                    {sortable ? (
-                                        <button
-                                            type="button"
-                                            onClick={() => handleSort(col.key)}
-                                            aria-sort={active ? (sortDirection === 'asc' ? 'ascending' : 'descending') : 'none'}
-                                            className="inline-flex items-center gap-1 font-semibold cursor-ns-resize"
-                                        >
-                                            {col.label}
-                                            <Icon className={`h-3.5 w-3.5 ${active ? '' : 'opacity-40'}`} aria-hidden="true" />
-                                        </button>
-                                    ) : (
-                                        <span className="font-semibold">{col.label}</span>
-                                    )}
-                                </th>
-                            );
-                        })}
-                    </tr>
-                </thead>
-                <tbody>
-                    {sortedData.map((item) => {
-                        const isSelected = selectedIds.has(item.id);
-
-                        // TODO: if item is company, render avatar as rounded square; if contact, render avatar as circle
-                        return (
-                            <tr
-                                key={item.id}
-                                data-state={isSelected ? 'selected' : undefined}
-                                className={`border-b border-gray-200 hover:bg-brand-light transition-colors duration-300 data-[state=selected]:bg-brand-light/60 ${onRowClick || detailPath ? 'cursor-pointer' : ''}`}
-                                onClick={() => {
-                                    if (onRowClick) onRowClick(item);
-                                    else if (detailPath) router.push(detailPath(item));
-                                }}
-                            >
-                                <td className="px-4 py-2" onClick={(e) => e.stopPropagation()}>
+        <>
+            <div className="overflow-hidden rounded-2xl bg-white ring-1 ring-black/5">
+                <div className="overflow-x-auto">
+                    <table className="w-full border-collapse text-left text-sm">
+                        <thead>
+                            <tr className="border-b border-neutral-200 bg-neutral-50/60">
+                                <th className="w-12 px-4 py-2.5">
                                     <Checkbox
-                                        checked={isSelected}
-                                        onCheckedChange={(checked) => toggleOne(item.id, checked === true)}
-                                        aria-label={t('selectItemAria', { name: item.name ?? entityLabel })}
-                                        className="data-[state=checked]:bg-brand data-[state=checked]:border-brand-light"
+                                        checked={someSelected ? 'indeterminate' : allSelected}
+                                        onCheckedChange={(checked) => toggleAll(checked === true)}
+                                        aria-label={t('selectAllAria', { entityLabel })}
+                                        className={CHECKBOX_CLASS}
                                     />
-                                </td>
-                                {renderAvatar && <td className="px-4 py-2">{renderAvatar(item)}</td>}
+                                </th>
+                                {renderAvatar && <th className="w-12 px-4 py-2.5" aria-hidden />}
                                 {columns.map((col) => {
-                                    const content = col.render ? col.render(item) : (item as unknown as Record<string, ReactNode>)[col.key];
-                                    if (col.copyable) {
-                                        const { label, getValue } = col.copyable;
-                                        return (
-                                            <td
-                                                key={col.key}
-                                                className="px-4 py-2 hover:text-brand transition-colors duration-300"
-                                                onClick={(e) => {
-                                                    e.stopPropagation();
-                                                    const v = getValue(item) ?? '';
-                                                    copyToClipboard(v, label)
-                                                        ? toast.success(t('copiedToast', { label }))
-                                                        : toast.error(t('copyFailedToast', { label: label.toLowerCase() }));
-                                                }}
-                                            >
-                                                {content}
-                                            </td>
-                                        );
-                                    }
+                                    const active = sortKey === col.key;
+                                    const sortable = !!col.getSortValue;
+                                    const Icon = active
+                                        ? sortDirection === 'asc'
+                                            ? ChevronUpIcon
+                                            : ChevronDownIcon
+                                        : ChevronUpDownIcon;
                                     return (
-                                        <td key={col.key} className="px-4 py-2">
-                                            {content}
-                                        </td>
+                                        <th
+                                            key={col.key}
+                                            aria-sort={
+                                                sortable
+                                                    ? active
+                                                        ? sortDirection === 'asc'
+                                                            ? 'ascending'
+                                                            : 'descending'
+                                                        : 'none'
+                                                    : undefined
+                                            }
+                                            className={cn(
+                                                'px-4 py-2.5 text-xs font-semibold tracking-wide whitespace-nowrap text-neutral-500 uppercase',
+                                                col.widthClass,
+                                            )}
+                                        >
+                                            {sortable ? (
+                                                <button
+                                                    type="button"
+                                                    onClick={() => handleSort(col.key)}
+                                                    className={cn(
+                                                        'inline-flex items-center gap-1 transition-colors hover:text-neutral-800',
+                                                        active && 'text-neutral-800',
+                                                    )}
+                                                >
+                                                    {col.label}
+                                                    <Icon className={cn('size-3.5', !active && 'opacity-40')} aria-hidden="true" />
+                                                </button>
+                                            ) : (
+                                                <span>{col.label}</span>
+                                            )}
+                                        </th>
                                     );
                                 })}
+                                {hasRowActions && <th className="w-12 px-4 py-2.5" aria-hidden />}
                             </tr>
-                        );
-                    })}
-                </tbody>
-            </table>
-        </div>
+                        </thead>
+                        <tbody>
+                            {sortedData.map((item) => {
+                                const isSelected = selectedIds.has(item.id);
+                                const clickable = !!(onRowClick || detailPath);
+                                return (
+                                    <tr
+                                        key={item.id}
+                                        data-state={isSelected ? 'selected' : undefined}
+                                        className={cn(
+                                            'group border-b border-neutral-100 transition-colors last:border-b-0',
+                                            clickable && 'cursor-pointer',
+                                            isSelected ? 'bg-brand-light/40 hover:bg-brand-light/55' : 'hover:bg-neutral-50',
+                                        )}
+                                        onClick={() => {
+                                            if (onRowClick) onRowClick(item);
+                                            else if (detailPath) router.push(detailPath(item));
+                                        }}
+                                    >
+                                        <td className="px-4 py-2.5" onClick={(e) => e.stopPropagation()}>
+                                            <Checkbox
+                                                checked={isSelected}
+                                                onCheckedChange={(checked) => toggleOne(item.id, checked === true)}
+                                                aria-label={t('selectItemAria', { name: item.name ?? entityLabel })}
+                                                className={CHECKBOX_CLASS}
+                                            />
+                                        </td>
+                                        {renderAvatar && <td className="px-4 py-2.5">{renderAvatar(item)}</td>}
+                                        {columns.map((col) => {
+                                            const content = col.render
+                                                ? col.render(item)
+                                                : (item as unknown as Record<string, ReactNode>)[col.key];
+                                            if (col.copyable) {
+                                                const { label, getValue } = col.copyable;
+                                                return (
+                                                    <td
+                                                        key={col.key}
+                                                        className="px-4 py-2.5 text-neutral-700 transition-colors hover:text-brand-dark"
+                                                        onClick={(e) => {
+                                                            e.stopPropagation();
+                                                            const v = getValue(item) ?? '';
+                                                            if (copyToClipboard(v, label)) {
+                                                                toast.success(t('copiedToast', { label }));
+                                                            } else {
+                                                                toast.error(t('copyFailedToast', { label: label.toLowerCase() }));
+                                                            }
+                                                        }}
+                                                    >
+                                                        {content}
+                                                    </td>
+                                                );
+                                            }
+                                            return (
+                                                <td key={col.key} className="px-4 py-2.5 text-neutral-700">
+                                                    {content}
+                                                </td>
+                                            );
+                                        })}
+                                        {hasRowActions && (
+                                            <td className="px-2 py-2.5 text-right" onClick={(e) => e.stopPropagation()}>
+                                                <RowActions
+                                                    name={item.name ?? entityLabel}
+                                                    onQuickEdit={onQuickEdit ? () => onQuickEdit(item) : undefined}
+                                                    onDelete={onDelete ? () => onDelete(item) : undefined}
+                                                    actionsAria={t('rowActionsAria', { name: item.name ?? entityLabel })}
+                                                    quickEditLabel={t('quickEdit')}
+                                                    deleteLabel={t('delete')}
+                                                />
+                                            </td>
+                                        )}
+                                    </tr>
+                                );
+                            })}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            {selectionBar}
+        </>
+    );
+}
+
+function RowActions({
+    onQuickEdit,
+    onDelete,
+    actionsAria,
+    quickEditLabel,
+    deleteLabel,
+}: {
+    name: string;
+    onQuickEdit?: () => void;
+    onDelete?: () => void;
+    actionsAria: string;
+    quickEditLabel: string;
+    deleteLabel: string;
+}) {
+    return (
+        <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+                <button
+                    type="button"
+                    aria-label={actionsAria}
+                    className="flex size-7 items-center justify-center rounded-full text-neutral-400 opacity-0 transition hover:bg-neutral-200/70 hover:text-neutral-700 group-hover:opacity-100 focus:opacity-100 focus-visible:opacity-100 data-[state=open]:opacity-100"
+                >
+                    <EllipsisHorizontalIcon className="size-5" />
+                </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-40">
+                {onQuickEdit && (
+                    <DropdownMenuItem onSelect={() => onQuickEdit()}>
+                        <PencilSquareIcon className="size-4 text-neutral-500" />
+                        {quickEditLabel}
+                    </DropdownMenuItem>
+                )}
+                {onQuickEdit && onDelete && <DropdownMenuSeparator />}
+                {onDelete && (
+                    <DropdownMenuItem
+                        className="text-destructive hover:bg-red-500/10"
+                        onSelect={() => onDelete()}
+                    >
+                        <TrashIcon className="size-4 text-destructive" />
+                        {deleteLabel}
+                    </DropdownMenuItem>
+                )}
+            </DropdownMenuContent>
+        </DropdownMenu>
     );
 }

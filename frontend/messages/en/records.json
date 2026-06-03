@@ -3,7 +3,12 @@
     "selectAllAria": "Select all {entityLabel}s",
     "selectItemAria": "Select {name}",
     "copiedToast": "{label} copied",
-    "copyFailedToast": "Failed to copy {label}"
+    "copyFailedToast": "Failed to copy {label}",
+    "selectedLabel": "selected",
+    "clearSelection": "Clear selection",
+    "rowActionsAria": "Actions for {name}",
+    "quickEdit": "Quick edit",
+    "delete": "Delete"
   },
   "RecordsFilterMenu": {
     "filterAria": "Filter",
