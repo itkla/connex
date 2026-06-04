@@ -15,6 +15,14 @@ export function formatShortDate(value: string | undefined, locale: string) {
     }).format(date);
 }
 
+/**
+ * Persists the user's locale preference.
+ * @param locale - the locale code to persist (e.g. "en", "ja")
+ */
+export function setLocaleCookie(locale: string) {
+    document.cookie = `NEXT_LOCALE=${locale};path=/;max-age=31536000;samesite=lax`;
+}
+
 export function timeOf(value?: string) {
     if (!value) return 0;
     const t = new Date(value).getTime();
