@@ -294,3 +294,17 @@ export function compareByColor(a: string, b: string): number {
     if (Math.abs(ha.h - hb.h) > 0.5) return ha.h - hb.h;
     return hb.l - ha.l;
 }
+
+/**
+ * converts a name to initials
+ * @param name - the name to convert to initials
+ * @returns the initials of the name
+ */
+export function initials(name: string) {
+    return name
+        .split(" ")
+        .map((part) => part[0])
+        .slice(0, 2)
+        .join("")
+        .toUpperCase();
+}

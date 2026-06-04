@@ -41,10 +41,11 @@ export default function LogoutPage() {
         //     <p className="text-base text-black">Signing out...</p>
         // </div>
         <div className="flex min-h-screen items-center justify-center bg-white px-6">
-            <span className="flex justify-center items-center w-full">
-                <LoaderCircle className="size-4 animate-spin text-white" />
-            </span>
-            <p className="text-base text-black">{t("signingOut")}</p>
+            <div className="flex flex-col items-center justify-center gap-4">
+                <LoaderCircle className="size-8 animate-spin text-neutral-400" />
+                <p className="text-base text-black">{t("signingOut")}</p>
+            </div>
         </div>
+   
     );
 }

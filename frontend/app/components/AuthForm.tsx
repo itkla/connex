@@ -1,13 +1,19 @@
 "use client";
 
 import Link from "next/link";
-import { redirect, useRouter } from "next/navigation";
+import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { toastError, toastSuccess } from "@/app/lib/toast";
 import { useTranslations } from "next-intl";
+import {
+    ArrowRightIcon,
+    EyeIcon,
+    EyeSlashIcon,
+} from "@heroicons/react/24/outline";
+import { LoaderCircle } from "lucide-react";
 
 import { ApiError, login, register as registerUser } from "@/app/lib/api";
-import { LoaderCircle } from "lucide-react";
+import AuthBrandPanel from "@/app/components/auth/AuthBrandPanel";
 
 type AuthMode = "login" | "register";
 type FieldKey = "username" | "email" | "displayName" | "password";
@@ -25,23 +31,11 @@ const ALT_HREF: Record<AuthMode, string> = {
     register: "/auth/login",
 };
 
-const FIELD_META: Record<
-    FieldKey,
-    { type: string; autoComplete: string }
-> = {
-    username: {
-        type: "text",
-        autoComplete: "username",
-    },
+const FIELD_META: Record<FieldKey, { type: string; autoComplete: string }> = {
+    username: { type: "text", autoComplete: "username" },
     email: { type: "email", autoComplete: "email" },
-    displayName: {
-        type: "text",
-        autoComplete: "name",
-    },
-    password: {
-        type: "password",
-        autoComplete: "current-password",
-    },
+    displayName: { type: "text", autoComplete: "name" },
+    password: { type: "password", autoComplete: "current-password" },
 };
 
 function pickFieldErrors(errors?: Record<string, string>): FieldErrors {
@@ -58,7 +52,7 @@ function pickFieldErrors(errors?: Record<string, string>): FieldErrors {
     }, {});
 }
 
-export function AuthForm({ mode, redirectUrl }: { mode: AuthMode, redirectUrl: string | null }) {
+export function AuthForm({ mode, redirectUrl }: { mode: AuthMode; redirectUrl: string | null }) {
     const router = useRouter();
     const tForm = useTranslations("AuthForm");
     const tMode = useTranslations(mode === "login" ? "AuthLogin" : "AuthRegister");
@@ -67,11 +61,11 @@ export function AuthForm({ mode, redirectUrl }: { mode: AuthMode, redirectUrl: s
     const fields = FORM_FIELDS[mode];
     const altHref = ALT_HREF[mode];
 
-    const fieldPlaceholders: Record<FieldKey, string> = {
-        username: tForm("placeholderUsername"),
-        email: tForm("placeholderEmail"),
-        displayName: tForm("placeholderDisplayName"),
-        password: tForm("placeholderPassword"),
+    const fieldLabels: Record<FieldKey, string> = {
+        username: tForm("labelUsername"),
+        email: tForm("labelEmail"),
+        displayName: tForm("labelDisplayName"),
+        password: tForm("labelPassword"),
     };
 
     const [values, setValues] = useState<Record<FieldKey, string>>({
@@ -83,6 +77,7 @@ export function AuthForm({ mode, redirectUrl }: { mode: AuthMode, redirectUrl: s
     const [error, setError] = useState<string | null>(null);
     const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
     const [submitting, setSubmitting] = useState(false);
+    const [showPassword, setShowPassword] = useState(false);
 
     function setField(key: FieldKey, value: string) {
         setValues((prev) => ({ ...prev, [key]: value }));
@@ -98,10 +93,7 @@ export function AuthForm({ mode, redirectUrl }: { mode: AuthMode, redirectUrl: s
         });
     }
 
-    function getAuthErrorMessage(
-        err: ApiError,
-        hasFieldErrors: boolean,
-    ) {
+    function getAuthErrorMessage(err: ApiError, hasFieldErrors: boolean) {
         if (mode === "login" && err.status === 401) {
             return tLogin("invalidCredentials");
         }
@@ -135,7 +127,6 @@ export function AuthForm({ mode, redirectUrl }: { mode: AuthMode, redirectUrl: s
             }
 
             toastSuccess(tMode("successMessage"));
-            // router.replace("/dashboard");
             if (redirectUrl) {
                 router.push(redirectUrl);
             } else {
@@ -145,7 +136,10 @@ export function AuthForm({ mode, redirectUrl }: { mode: AuthMode, redirectUrl: s
         } catch (err) {
             const nextFieldErrors = err instanceof ApiError ? pickFieldErrors(err.fieldErrors) : {};
             const hasFieldErrors = Object.keys(nextFieldErrors).length > 0;
-            const message = err instanceof ApiError ? getAuthErrorMessage(err, hasFieldErrors) : tForm("genericError");
+            const message =
+                err instanceof ApiError
+                    ? getAuthErrorMessage(err, hasFieldErrors)
+                    : tForm("genericError");
 
             setError(message);
             setFieldErrors(nextFieldErrors);
@@ -158,82 +152,160 @@ export function AuthForm({ mode, redirectUrl }: { mode: AuthMode, redirectUrl: s
     const hasFieldErrors = Object.keys(fieldErrors).length > 0;
 
     return (
-        <div className="flex min-h-screen items-start justify-center bg-white px-6 pt-24 pb-12">
-            <div className="w-full max-w-md">
-                <h1 className="text-center leading-tight tracking-tight">
-                    <span className="block font-['Instrument_Serif'] text-5xl text-black">
-                        {tMode("heading")}
-                    </span>
-                    <span className="mt-2 block text-5xl font-extrabold tracking-tight text-black">
-                        <Link href="/">{tForm("brand")}</Link>
-                    </span>
-                </h1>
+        <div className="min-h-[100dvh] w-full bg-white lg:grid lg:h-[100dvh] lg:grid-cols-[1fr_1.05fr] lg:grid-rows-[100dvh] lg:overflow-hidden">
+            <div className="relative flex min-h-[100dvh] flex-col px-6 py-10 sm:px-10 lg:h-full lg:min-h-0 lg:overflow-y-auto lg:px-14 lg:py-12">
+                <Link
+                    href="/"
+                    className="flex w-fit items-center gap-2.5 rounded-lg transition-opacity duration-150 ease-out hover:opacity-70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand lg:hidden"
+                >
+                    <span className="size-3 rounded-[5px] bg-brand" aria-hidden="true" />
+                    <span className="text-lg font-bold tracking-tight text-neutral-900">{tForm("brand")}</span>
+                </Link>
 
-                <form className="mt-12 space-y-3" onSubmit={onSubmit} noValidate>
-                    {fields.map((key) => {
-                        const meta = FIELD_META[key];
-                        const autoComplete = key === "password" && mode === "register" ? "new-password" : meta.autoComplete;
-                        const fieldError = fieldErrors[key];
-                        const errorId = `${mode}-${key}-error`;
-
-                        return (
-                            <div key={key} className="space-y-1">
-                                <input
-                                    type={meta.type}
-                                    value={values[key]}
-                                    onChange={(e) => setField(key, e.target.value)}
-                                    placeholder={fieldPlaceholders[key]}
-                                    autoComplete={autoComplete}
-                                    required
-                                    aria-invalid={Boolean(fieldError)}
-                                    aria-describedby={fieldError ? errorId : undefined}
-                                    className={`w-full rounded-xl bg-neutral-200 px-6 py-4 text-base text-black placeholder-neutral-500 outline-none transition focus:ring-2 focus:ring-brand focus:ring-offset-white ${fieldError ? "ring-2 ring-red-500" : ""}`}
-                                />
-                                {fieldError && (
-                                    <p id={errorId} className="px-2 text-sm text-red-600">
-                                        {fieldError}
-                                    </p>
-                                )}
-                            </div>
-                        );
-                    })}
-
-                    {error && !hasFieldErrors && (
-                        <p className="text-center text-sm text-red-600 transition">{error}</p>
-                    )}
-
-                    <button
-                        type="submit"
-                        disabled={submitting || hasFieldErrors}
-                        className={`w-full rounded-xl px-6 py-4 text-base font-medium text-white shadow-sm transition disabled:cursor-not-allowed ${
-                            hasFieldErrors
-                                ? "disabled:bg-gray-300 disabled:text-gray-500 "
-                                : "bg-brand hover:bg-brand-hover disabled:opacity-60"
-                        }`}
-                    >
-                        {submitting
-                            ? (
-                                <span className="flex justify-center items-center w-full">
-                                    <LoaderCircle className="size-4 animate-spin text-white" />
-                                </span>
-                            )
-                            : hasFieldErrors
-                                ? tForm("resolveErrors")
-                                : tMode("submitLabel")}
-                    </button>
-
-                    <hr className="mx-auto mt-6 w-3/5 border-neutral-200" />
-
-                    <div className="mt-6 text-center">
-                        <Link
-                            href={altHref}
-                            className="text-base text-brand hover:text-brand-hover"
+                <div className="flex flex-1 items-center justify-center">
+                    <div className="w-full max-w-[400px] py-10 lg:py-0">
+                        <h1 className="connex-rise font-display font-black text-[clamp(2rem,4vw,2.75rem)] leading-[1.1] tracking-[-0.01em] text-balance text-neutral-900">
+                            {tMode("title")}
+                        </h1>
+                        <p
+                            className="connex-rise mt-3 text-base leading-relaxed text-neutral-600 text-pretty"
+                            style={{ animationDelay: "60ms" }}
                         >
-                            {tMode("altLabel")}
-                        </Link>
+                            {tMode("subtitle")}
+                        </p>
+
+                        <form className="mt-9 space-y-3" onSubmit={onSubmit} noValidate>
+                            {fields.map((key, i) => {
+                                const meta = FIELD_META[key];
+                                const isPassword = key === "password";
+                                const autoComplete =
+                                    isPassword && mode === "register" ? "new-password" : meta.autoComplete;
+                                const inputType = isPassword
+                                    ? showPassword
+                                        ? "text"
+                                        : "password"
+                                    : meta.type;
+                                const fieldError = fieldErrors[key];
+                                const fieldId = `${mode}-${key}`;
+                                const errorId = `${fieldId}-error`;
+
+                                return (
+                                    <div
+                                        key={key}
+                                        className="connex-rise"
+                                        style={{ animationDelay: `${120 + i * 60}ms` }}
+                                    >
+                                        <div className="relative">
+                                            <input
+                                                id={fieldId}
+                                                type={inputType}
+                                                value={values[key]}
+                                                onChange={(e) => setField(key, e.target.value)}
+                                                placeholder=" "
+                                                autoComplete={autoComplete}
+                                                required
+                                                aria-invalid={Boolean(fieldError)}
+                                                aria-describedby={fieldError ? errorId : undefined}
+                                                className={`peer h-14 w-full rounded-xl border bg-neutral-50 px-4 pt-5 pb-1.5 text-base text-neutral-900 outline-none transition-[border-color,box-shadow,background-color] duration-150 ease-out placeholder:text-transparent focus:bg-white focus:ring-4 ${
+                                                    isPassword ? "pr-12" : ""
+                                                } ${
+                                                    fieldError
+                                                        ? "border-red-400 focus:border-red-500 focus:ring-red-500/15"
+                                                        : "border-black/10 focus:border-brand focus:ring-brand/20"
+                                                }`}
+                                            />
+                                            <label
+                                                htmlFor={fieldId}
+                                                className={`pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-base transition-all duration-150 ease-out peer-focus:top-2.5 peer-focus:translate-y-0 peer-focus:text-xs peer-[:not(:placeholder-shown)]:top-2.5 peer-[:not(:placeholder-shown)]:translate-y-0 peer-[:not(:placeholder-shown)]:text-xs ${
+                                                    fieldError
+                                                        ? "text-red-500"
+                                                        : "text-neutral-500 peer-focus:text-neutral-700"
+                                                }`}
+                                            >
+                                                {fieldLabels[key]}
+                                            </label>
+
+                                            {isPassword && (
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setShowPassword((s) => !s)}
+                                                    aria-label={
+                                                        showPassword
+                                                            ? tForm("hidePassword")
+                                                            : tForm("showPassword")
+                                                    }
+                                                    aria-pressed={showPassword}
+                                                    className="absolute right-2 top-1/2 inline-flex size-9 -translate-y-1/2 items-center justify-center rounded-lg text-neutral-400 transition-[color,transform] duration-150 ease-out hover:text-neutral-700 focus-visible:text-neutral-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand active:scale-[0.94]"
+                                                >
+                                                    {showPassword ? (
+                                                        <EyeSlashIcon className="size-5" />
+                                                    ) : (
+                                                        <EyeIcon className="size-5" />
+                                                    )}
+                                                </button>
+                                            )}
+                                        </div>
+                                        {fieldError && (
+                                            <p id={errorId} className="mt-1.5 px-1 text-sm text-red-600">
+                                                {fieldError}
+                                            </p>
+                                        )}
+                                    </div>
+                                );
+                            })}
+
+                            {error && !hasFieldErrors && (
+                                <p
+                                    role="alert"
+                                    className="rounded-xl bg-red-50 px-3.5 py-2.5 text-sm text-red-700"
+                                >
+                                    {error}
+                                </p>
+                            )}
+
+                            <button
+                                type="submit"
+                                disabled={submitting || hasFieldErrors}
+                                style={{ animationDelay: `${120 + fields.length * 60}ms` }}
+                                className={`connex-rise mt-2 flex w-full items-center justify-center gap-2 rounded-full px-6 py-3.5 text-base font-semibold transition-[transform,background-color,opacity] duration-150 ease-out active:scale-[0.98] disabled:cursor-not-allowed ${
+                                    hasFieldErrors
+                                        ? "bg-neutral-200 text-neutral-500"
+                                        : "bg-brand text-neutral-950 hover:bg-brand-hover disabled:opacity-70"
+                                }`}
+                            >
+                                {submitting ? (
+                                    <>
+                                        <LoaderCircle className="size-4 animate-spin" />
+                                        {tMode("submittingLabel")}
+                                    </>
+                                ) : hasFieldErrors ? (
+                                    tForm("resolveErrors")
+                                ) : (
+                                    <>
+                                        {tMode("submitLabel")}
+                                        <ArrowRightIcon className="size-4" />
+                                    </>
+                                )}
+                            </button>
+                        </form>
+
+                        <p
+                            className="connex-rise mt-7 text-center text-sm text-neutral-500"
+                            style={{ animationDelay: `${180 + fields.length * 60}ms` }}
+                        >
+                            {tMode("altPrompt")}{" "}
+                            <Link
+                                href={altHref}
+                                className="font-semibold text-neutral-900 underline decoration-brand decoration-2 underline-offset-4 transition-colors duration-150 ease-out hover:decoration-brand-hover"
+                            >
+                                {tMode("altLabel")}
+                            </Link>
+                        </p>
                     </div>
-                </form>
+                </div>
             </div>
+
+            <AuthBrandPanel className="hidden lg:block lg:h-full" />
         </div>
     );
 }
