@@ -8,28 +8,9 @@ import { useTranslations } from 'next-intl';
 import { type Activity, type Note, type Task, type User } from '@/app/lib/types';
 import { parseMysqlDateTime } from '@/app/lib/utils';
 import { RANGE_DAYS, type RangeKey } from '@/app/components/overview/analytics/metrics';
+import UserAvatar from '@/app/components/records/users/UserAvatar';
 
 type Standing = { user: User; touches: number };
-
-function Avatar({ user }: { user: User }) {
-    if (user.profilePictureUrl) {
-        return (
-            <Image
-                src={user.profilePictureUrl}
-                alt=""
-                width={32}
-                height={32}
-                className="size-8 shrink-0 rounded-full object-cover ring-1 ring-black/5"
-            />
-        );
-    }
-    const initials = user.displayName?.slice(0, 1).toUpperCase() ?? '?';
-    return (
-        <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-brand-light text-sm font-medium text-brand-dark ring-1 ring-black/5">
-            {initials}
-        </span>
-    );
-}
 
 export default function TeamLeaderboard({
     users,
@@ -86,7 +67,7 @@ export default function TeamLeaderboard({
                         className="group flex items-center gap-3 rounded-lg px-2 py-1.5 -mx-2 transition hover:bg-neutral-100"
                     >
                         <span className="w-4 shrink-0 text-sm tabular-nums text-neutral-500">{i + 1}</span>
-                        <Avatar user={s.user} />
+                        <UserAvatar user={s.user} type="small" />
                         <div className="min-w-0 flex-1">
                             <div className="flex items-baseline justify-between gap-2">
                                 <span className="min-w-0 truncate text-sm font-medium text-neutral-900">
