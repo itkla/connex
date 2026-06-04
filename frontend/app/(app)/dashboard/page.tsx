@@ -127,7 +127,7 @@ export default async function Dashboard() {
                         title={t('recentActivity')}
                         action={
                             <Link
-                                href="/activity"
+                                href="/activity/all"
                                 className="text-xs text-brand hover:text-brand-hover"
                             >
                                 {t('viewAll')}

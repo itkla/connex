@@ -251,7 +251,7 @@ export default async function CompanyPage({ params }: { params: { id: number } }
                                 label={t("activities")}
                                 value={activities.length}
                                 subtitle={notes.length > 0 ? t("notesSubtitle", { count: notes.length }) : undefined}
-                                viewHref={`/activity?companyId=${company.id}`}
+                                viewHref={`/activity/all?companyId=${company.id}`}
                             />
                         </Suspense>
                         <Suspense fallback={<div>{t("loading")}</div>}>

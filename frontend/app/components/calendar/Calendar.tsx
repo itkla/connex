@@ -100,7 +100,7 @@ export default function Calendar({ activities, tasks, persons, deals, notes }: P
                     sortAt: when,
                     label: activity.subject || activity.type,
                     content: activity.subject || activity.type,
-                    href: '/activity',
+                    href: '/activity/all',
                 },
                 when,
             );

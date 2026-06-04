@@ -190,7 +190,7 @@ export default async function ContactPage({ params }: { params: { id: number } }
                                     currentUserId={currentUser.id}
                                 />
                             }
-                            viewHref={`/activity?contactId=${contact.id}`}
+                            viewHref={`/activity/all?contactId=${contact.id}`}
                         />
                         <ContactStatCard
                             label={t("tasks")}

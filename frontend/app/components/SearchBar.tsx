@@ -189,7 +189,7 @@ export default function SearchBar() {
         }));
         addGroup("activities", t("groupActivities"), results.activities, (a) => ({
             key: `activity-${a.id}`,
-            href: "/activity",
+            href: "/activity/all",
             icon: BoltIcon,
             label: a.subject,
             subtitle: a.type || undefined,

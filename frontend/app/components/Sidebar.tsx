@@ -73,7 +73,7 @@ function useSections(): NavSection[] {
         {
             label: t("sectionActivity"),
             items: [
-                { label: t("navActivities"), href: "/activity", icon: ChatBubbleLeftRightIcon },
+                { label: t("navActivities"), href: "/activity/all", icon: ChatBubbleLeftRightIcon },
                 { label: t("navTasks"), href: "/activity/tasks", icon: CheckCircleIcon },
                 { label: t("navNotes"), href: "/activity/notes", icon: DocumentTextIcon },
             ],
@@ -95,6 +95,8 @@ function useSections(): NavSection[] {
 
 function isActive(pathname: string, href: string): boolean {
     if (href === "/dashboard") return pathname === "/dashboard";
+    // handle discrepancy between /activity and /activity/tasks both showing as active in the Sidebar; unintended behavior
+    // if (href === "/activity") return pathname === "/activity" || pathname.startsWith("/activity/");
     return pathname === href || pathname.startsWith(`${href}/`);
 }
 
