@@ -29,7 +29,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { useState } from "react";
 import { DropdownMenu } from "radix-ui";
 import { type User } from "@/app/lib/types";
-import { BubblesIcon, PanelLeftOpenIcon } from "lucide-react";
+// import { BubblesIcon, PanelLeftOpenIcon } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { DropdownMenuItem, DropdownMenuPortal, DropdownMenuSub, DropdownMenuSubContent, DropdownMenuSubTrigger } from "@/components/ui/dropdown-menu";
 // import {  } from "@heroicons/react/24/solid";
@@ -97,12 +97,12 @@ function isActive(pathname: string, href: string): boolean {
     return pathname === href || pathname.startsWith(`${href}/`);
 }
 
-function toggleSidebar() {
-    const sidebar = document.querySelector(".sidebar");
-    if (sidebar) {
-        sidebar.classList.toggle("hidden");
-    }
-}
+// function toggleSidebar() {
+//     const sidebar = document.querySelector(".sidebar");
+//     if (sidebar) {
+//         sidebar.classList.toggle("hidden");
+//     }
+// }
 
 function NavGroup({
     section,
@@ -324,6 +324,5 @@ export default function Sidebar({
                 </div>
             </aside>
         </div>
-        // TODO: if user device is mobile, turn the sidebar into a from-left drawer and render a hamburger menu icon in the top left corner of the screen to toggle the sidebar
     );
 }
