@@ -22,6 +22,7 @@ import InfoRow from '@/app/components/me/InfoRow';
 import StatCard from '@/app/components/me/StatCard';
 import Timeline from '@/app/components/me/Timeline';
 import EditSelfModal from '@/app/components/me/EditSelfModal';
+import UserAvatar from '@/app/components/records/users/UserAvatar';
 
 export default async function MePage() {
     const t = await getTranslations('MePage');
@@ -65,13 +66,14 @@ export default async function MePage() {
             <div className="mx-auto w-full max-w-5xl md:flex md:min-h-0 md:flex-1 md:flex-col">
                 <header className="flex items-center gap-6">
                     {user.profilePictureUrl ? (
-                        <Image
-                            src={user.profilePictureUrl}
-                            alt={t('profilePictureAlt', { name: user.displayName })}
-                            width={96}
-                            height={96}
-                            className="h-24 w-24 shrink-0 rounded-full object-cover shadow-[0_20px_50px_-15px_rgba(0,0,0,0.15)] ring-1 ring-black/5"
-                        />
+                        // <Image
+                        //     src={user.profilePictureUrl}
+                        //     alt={t('profilePictureAlt', { name: user.displayName })}
+                        //     width={96}
+                        //     height={96}
+                        //     className="h-24 w-24 shrink-0 rounded-full object-cover shadow-[0_20px_50px_-15px_rgba(0,0,0,0.15)] ring-1 ring-black/5"
+                        // />
+                        <UserAvatar user={user} type="2xlarge" />
                     ) : (
                         <div
                             aria-label={t('profilePicturePlaceholderAriaLabel')}
