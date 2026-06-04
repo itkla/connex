@@ -78,6 +78,76 @@
     WHERE p.id = #{id}
   </select>
 
+  <sql id="pageWhere">
+    <where>
+      <if test="query != null">
+        AND (p.name LIKE #{query} OR p.email LIKE #{query} OR p.phone LIKE #{query}
+          OR p.title LIKE #{query} OR c.name LIKE #{query})
+      </if>
+      <if test="(companies != null and companies.size() > 0) or noCompany">
+        AND (
+          <trim prefixOverrides="OR ">
+            <if test="companies != null and companies.size() > 0">
+              c.name IN <foreach item="cn" collection="companies" open="(" separator="," close=")">#{cn}</foreach>
+            </if>
+            <if test="noCompany">OR p.company_id IS NULL</if>
+          </trim>
+        )
+      </if>
+      <if test="titles != null and titles.size() > 0">
+        AND p.title IN <foreach item="ti" collection="titles" open="(" separator="," close=")">#{ti}</foreach>
+      </if>
+    </where>
+  </sql>
+
+  <sql id="pageOrderBy">
+    ORDER BY
+    <choose>
+      <when test="sort == 'email'">p.email</when>
+      <when test="sort == 'phone'">p.phone</when>
+      <when test="sort == 'title'">p.title</when>
+      <when test="sort == 'company'">c.name</when>
+      <when test="sort == 'createdAt'">p.created_at</when>
+      <when test="sort == 'updatedAt'">p.updated_at</when>
+      <otherwise>p.name</otherwise>
+    </choose>
+    <choose><when test="dir == 'desc'">DESC</when><otherwise>ASC</otherwise></choose>
+  </sql>
+
+  <select id="getPersonsPage" resultMap="PersonResult">
+    SELECT <include refid="personColumns"/>, <include refid="companyJoinColumns"/>
+    FROM person p
+    <include refid="companyJoin"/>
+    <include refid="pageWhere"/>
+    <include refid="pageOrderBy"/>
+    LIMIT #{limit} OFFSET #{offset}
+  </select>
+
+  <select id="countPersons" resultType="long">
+    SELECT COUNT(*)
+    FROM person p
+    <include refid="companyJoin"/>
+    <include refid="pageWhere"/>
+  </select>
+
+  <select id="distinctCompanies" resultType="string">
+    SELECT DISTINCT c.name
+    FROM person p JOIN company c ON c.id = p.company_id
+    WHERE c.name IS NOT NULL AND c.name &lt;&gt; ''
+    ORDER BY c.name
+  </select>
+
+  <select id="distinctTitles" resultType="string">
+    SELECT DISTINCT p.title
+    FROM person p
+    WHERE p.title IS NOT NULL AND p.title &lt;&gt; ''
+    ORDER BY p.title
+  </select>
+
+  <select id="hasPersonWithoutCompany" resultType="boolean">
+    SELECT EXISTS(SELECT 1 FROM person WHERE company_id IS NULL)
+  </select>
+
   <select id="search" resultMap="PersonResult">
     SELECT <include refid="personColumns"/>, <include refid="companyJoinColumns"/>
     FROM person p

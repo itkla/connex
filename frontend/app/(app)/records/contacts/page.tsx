@@ -1,6 +1,5 @@
 import { headers } from "next/headers";
-import { getContactsFromCookie, getCurrentUserFromCookie } from "@/app/lib/api";
-import { type Contact } from "@/app/lib/types";
+import { getCurrentUserFromCookie } from "@/app/lib/api";
 import { redirect } from "next/navigation";
 import ContactsBrowser from "@/app/components/records/contacts/ContactsBrowser";
 
@@ -12,7 +11,6 @@ export default async function ContactsPage() {
         redirect('/auth/login');
     }
 
-    const contacts: Contact[] = await getContactsFromCookie(cookie);
-
-    return <ContactsBrowser contacts={contacts} />;
+    // hunter's note: THIS IS A SERVER-SIDE FILTERING PAGE EXPERIMENT. the other pages use frontend server-side filtering/pagination. if this one doesn't work out, switch back to FE SSR
+    return <ContactsBrowser />;
 }

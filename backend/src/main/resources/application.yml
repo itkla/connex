@@ -8,6 +8,8 @@ spring:
         username: connexuser
         password: connexpassword
         # driver-class-name: com.mysql.cj.jdbc.Driver
+        hikari:
+            connection-init-sql: "SET time_zone = '+00:00'"
     sql:
         init:
             # mode: always

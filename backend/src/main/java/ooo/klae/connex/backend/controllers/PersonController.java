@@ -14,6 +14,8 @@ import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.dto.ActivityDto;
 import ooo.klae.connex.backend.dto.DealDto;
 import ooo.klae.connex.backend.dto.NoteDto;
+import ooo.klae.connex.backend.dto.PageResponse;
+import ooo.klae.connex.backend.dto.PersonFacets;
 import ooo.klae.connex.backend.dto.PersonDetailDto;
 import ooo.klae.connex.backend.dto.PersonDto;
 import ooo.klae.connex.backend.dto.TagDto;
@@ -58,13 +60,59 @@ public class PersonController {
     }
 
     /**
+     * GET endpoint for a paginated, searchable, sortable slice of people.
+     * Only the rows in scope are queried from the database.
+     * @param page
+     * @param size
+     * @param q
+     * @param sort
+     * @param dir
+     * @param companies
+     * @param titles
+     * @param noCompany
+     * @return
+     * @throws IllegalArgumentException if the page or size is less than 1.
+     */
+    @GetMapping("/page")
+    public PageResponse<PersonDto> getPersonsPage(
+        @RequestParam(defaultValue = "1") int page,
+        @RequestParam(defaultValue = "25") int size,
+        @RequestParam(required = false) String q,
+        @RequestParam(required = false) String sort,
+        @RequestParam(required = false) String dir,
+        @RequestParam(required = false) List<String> companies,
+        @RequestParam(required = false) List<String> titles,
+        @RequestParam(defaultValue = "false") boolean noCompany
+    ) {
+        String query = (q == null || q.isBlank()) ? null : "%" + q + "%";
+        int offset = Math.max(0, (page - 1) * size);
+        List<PersonDto> items = personService.getPersonsPage(query, sort, dir, companies, titles, noCompany, size, offset)
+            .stream().map(PersonDto::from).toList();
+        return new PageResponse<>(items, personService.countPersons(query, companies, titles, noCompany));
+    }
+
+    /**
+     * GET endpoint for the distinct filter facets (companies, titles) used by the
+     * records filter menu, computed across the whole table rather than one page.
+     * @return
+     */
+    @GetMapping("/facets")
+    public PersonFacets getPersonFacets() {
+        return new PersonFacets(
+            personService.distinctCompanies(),
+            personService.distinctTitles(),
+            personService.hasPersonWithoutCompany()
+        );
+    }
+
+    /**
      * GET endpoint to retrieve a single person by ID. Returns a {@link PersonDetailDto}
      * with fully hydrated tags, deals, notes, tasks, and activities so callers don't
      * need follow-up round-trips for the detail view.
      * @param id
      * @return
      */
-    @GetMapping("/{id}")
+    @GetMapping("/{id:\\d+}")
     public PersonDetailDto getPersonById(@PathVariable int id) {
         return PersonDetailDto.from(personService.getPersonById(id));
     }

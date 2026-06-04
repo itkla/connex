@@ -1,5 +1,30 @@
 // type definitions becaue the api.ts library was getting too bloated
 
+export type Page<T> = {
+    items: T[];
+    total: number;
+};
+
+export type PageParams = {
+    page?: number;
+    size?: number;
+    q?: string;
+    sort?: string;
+    dir?: 'asc' | 'desc';
+};
+
+export type ContactsPageParams = PageParams & {
+    companies?: string[];
+    titles?: string[];
+    noCompany?: boolean;
+};
+
+export type PersonFacets = {
+    companies: string[];
+    titles: string[];
+    hasNoCompany: boolean;
+};
+
 export type User = {
     id: number;
     username: string;

@@ -71,11 +71,15 @@ async function safeWithCookie<T>(
     }
 }
 
-// TODO: have the backend actually do something with these filters/queries
 function buildQuery(params: Record<string, unknown>): string {
     const search = new URLSearchParams();
     for (const [key, value] of Object.entries(params)) {
-        if (value !== undefined && value !== null) search.set(key, String(value));
+        if (value === undefined || value === null) continue;
+        if (Array.isArray(value)) {
+            for (const v of value) if (v !== undefined && v !== null) search.append(key, String(v));
+        } else {
+            search.set(key, String(value));
+        }
     }
     const qs = search.toString();
     return qs ? `?${qs}` : "";
@@ -365,6 +369,14 @@ export function getContacts(filters: Types.ContactFilters = {}, init: RequestIni
 
 export function getContactsFromCookie(cookie: string | null, filters: Types.ContactFilters = {}) {
     return safeWithCookie<Types.Contact>((init) => getContacts(filters, init), cookie);
+}
+
+export function getContactsPage(params: Types.ContactsPageParams = {}, init: RequestInit = {}) {
+    return getJson<Types.Page<Types.Contact>>(`/api/persons/page${buildQuery(params)}`, init);
+}
+
+export function getPersonFacets(init: RequestInit = {}) {
+    return getJson<Types.PersonFacets>(`/api/persons/facets`, init);
 }
 
 export function getContactById(id: number, init: RequestInit = {}) {

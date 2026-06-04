@@ -21,6 +21,16 @@ import {
     DropdownMenuItem,
     DropdownMenuSeparator,
 } from '@/components/ui/dropdown-menu';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import {
+    Pagination,
+    PaginationContent,
+    PaginationItem,
+    PaginationLink,
+    PaginationPrevious,
+    PaginationNext,
+    PaginationEllipsis,
+} from '@/components/ui/pagination';
 import { toast } from 'sonner';
 import { useTranslations } from 'next-intl';
 
@@ -30,6 +40,19 @@ import { type ColumnDef, type CardCallbacks, type DisplayMode, type SelectionId 
 
 type SortDirection = 'asc' | 'desc';
 const EASE_OUT: [number, number, number, number] = [0.23, 1, 0.32, 1];
+const PAGE_SIZES = [10, 25, 50, 100];
+
+function pageList(current: number, total: number): (number | 'gap')[] {
+    if (total <= 7) return Array.from({ length: total }, (_, i) => i + 1);
+    const out: (number | 'gap')[] = [1];
+    const start = Math.max(2, current - 1);
+    const end = Math.min(total - 1, current + 1);
+    if (start > 2) out.push('gap');
+    for (let i = start; i <= end; i++) out.push(i);
+    if (end < total - 1) out.push('gap');
+    out.push(total);
+    return out;
+}
 const CHECKBOX_CLASS = 'size-[18px] border-neutral-300 data-[state=checked]:border-brand data-[state=checked]:bg-brand data-[state=checked]:text-white data-[state=indeterminate]:border-brand data-[state=indeterminate]:bg-brand data-[state=indeterminate]:text-white';
 
 interface Props<T extends { id: SelectionId; name?: string }> {
@@ -47,6 +70,15 @@ interface Props<T extends { id: SelectionId; name?: string }> {
     gridClassName?: string;
     entityLabel: string;
     selectionActions?: ReactNode; // pass along the react node for the selection actions
+    pagination?: {
+        page: number;
+        pageSize: number;
+        total: number;
+        onPageChange: (page: number) => void;
+        onPageSizeChange: (size: number) => void;
+    };
+    sortState?: { key: string | null; direction: SortDirection; onSortChange: (key: string) => void };
+    loading?: boolean;
 }
 
 export default function RecordsRenderView<T extends { id: SelectionId; name?: string }>({
@@ -64,15 +96,24 @@ export default function RecordsRenderView<T extends { id: SelectionId; name?: st
     gridClassName = 'grid gap-4 grid-cols-[repeat(auto-fill,minmax(min(100%,16rem),1fr))]',
     entityLabel,
     selectionActions,
+    pagination,
+    sortState,
+    loading = false,
 }: Props<T>) {
     const router = useRouter();
     const t = useTranslations('RecordsRenderView');
     const reduce = useReducedMotion() ?? false;
     const [sortKey, setSortKey] = useState<string | null>(null);
     const [sortDirection, setSortDirection] = useState<SortDirection>('asc');
+    const [pageSize, setPageSize] = useState(25);
+    const [page, setPage] = useState(1);
+
+    const server = !!pagination;
+    const activeSortKey = server ? sortState?.key ?? null : sortKey;
+    const activeSortDirection = server ? sortState?.direction ?? 'asc' : sortDirection;
 
     const sortedData = useMemo(() => {
-        if (!sortKey) return data;
+        if (server || !sortKey) return data;
         const col = columns.find((c) => c.key === sortKey);
         if (!col?.getSortValue) return data;
         const dir = sortDirection === 'asc' ? 1 : -1;
@@ -85,15 +126,25 @@ export default function RecordsRenderView<T extends { id: SelectionId; name?: st
             if (typeof av === 'number' && typeof bv === 'number') return (av - bv) * dir;
             return String(av).localeCompare(String(bv), undefined, { sensitivity: 'base' }) * dir;
         });
-    }, [data, columns, sortKey, sortDirection]);
+    }, [server, data, columns, sortKey, sortDirection]);
 
-    const handleSort = (key: string) => {
-        if (sortKey === key) {
-            setSortDirection((d) => (d === 'asc' ? 'desc' : 'asc'));
-        } else {
-            setSortKey(key);
-            setSortDirection('asc');
-        }
+    const total = server ? pagination!.total : sortedData.length;
+    const effectivePageSize = server ? pagination!.pageSize : pageSize;
+    const pageCount = Math.max(1, Math.ceil(total / effectivePageSize));
+    const currentPage = server ? pagination!.page : Math.min(page, pageCount);
+    const pagedData = server ? sortedData : sortedData.slice((currentPage - 1) * pageSize, currentPage * pageSize);
+    const showingFrom = total === 0 ? 0 : (currentPage - 1) * effectivePageSize + 1;
+    const showingTo = Math.min(currentPage * effectivePageSize, total);
+
+    const goToPage = (p: number) => (server ? pagination!.onPageChange(p) : setPage(p));
+    const changePageSize = (s: number) => {
+        if (server) pagination!.onPageSizeChange(s);
+        else { setPageSize(s); setPage(1); }
+    };
+    const onSort = (key: string) => {
+        if (server) sortState!.onSortChange(key);
+        else if (sortKey === key) setSortDirection((d) => (d === 'asc' ? 'desc' : 'asc'));
+        else { setSortKey(key); setSortDirection('asc'); }
     };
 
     const allSelected = sortedData.length > 0 && selectedIds.size === sortedData.length;
@@ -147,7 +198,68 @@ export default function RecordsRenderView<T extends { id: SelectionId; name?: st
         </AnimatePresence>
     );
 
-    if (sortedData.length === 0) {
+    const pager = (
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex items-center gap-3 text-sm text-neutral-500">
+                <span className="tabular-nums">{t('showing', { from: showingFrom, to: showingTo, total })}</span>
+                <span className="hidden h-4 w-px bg-neutral-200 sm:block" />
+                <label className="hidden items-center gap-2 sm:flex">
+                    <span>{t('rowsPerPage')}</span>
+                    <Select value={String(effectivePageSize)} onValueChange={(v) => changePageSize(Number(v))}>
+                        <SelectTrigger size="sm" className="rounded-full"><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                            {PAGE_SIZES.map((n) => <SelectItem key={n} value={String(n)}>{n}</SelectItem>)}
+                        </SelectContent>
+                    </Select>
+                </label>
+            </div>
+            {pageCount > 1 && (
+                <Pagination className="mx-0 w-auto justify-end">
+                    <PaginationContent>
+                        <PaginationItem>
+                            <PaginationPrevious
+                                disabled={currentPage === 1}
+                                onClick={() => goToPage(currentPage - 1)}
+                                aria-label={t('previousPage')}
+                            />
+                        </PaginationItem>
+                        {pageList(currentPage, pageCount).map((it, i) =>
+                            it === 'gap' ? (
+                                <PaginationItem key={`gap-${i}`}>
+                                    <PaginationEllipsis />
+                                </PaginationItem>
+                            ) : (
+                                <PaginationItem key={it}>
+                                    <PaginationLink isActive={it === currentPage} onClick={() => goToPage(it)}>
+                                        {it}
+                                    </PaginationLink>
+                                </PaginationItem>
+                            ),
+                        )}
+                        <PaginationItem>
+                            <PaginationNext
+                                disabled={currentPage === pageCount}
+                                onClick={() => goToPage(currentPage + 1)}
+                                aria-label={t('nextPage')}
+                            />
+                        </PaginationItem>
+                    </PaginationContent>
+                </Pagination>
+            )}
+        </div>
+    );
+
+    if (loading && pagedData.length === 0) {
+        return (
+            <div className="space-y-2 rounded-2xl bg-white p-4 ring-1 ring-black/5">
+                {Array.from({ length: 6 }).map((_, i) => (
+                    <div key={i} className="h-9 animate-pulse rounded-lg bg-neutral-100" />
+                ))}
+            </div>
+        );
+    }
+
+    if (pagedData.length === 0) {
         return (
             <>
                 <div className="rounded-2xl bg-white px-6 py-16 text-center ring-1 ring-black/5">
@@ -164,9 +276,9 @@ export default function RecordsRenderView<T extends { id: SelectionId; name?: st
     if (displayMode === 'grid') {
         return (
             <>
-                <div className={gridClassName}>
+                <div className={cn(gridClassName, loading && 'opacity-60 transition-opacity')} aria-busy={loading}>
                     <AnimatePresence initial={false}>
-                        {sortedData.map((item) => (
+                        {pagedData.map((item) => (
                             <motion.div
                                 key={item.id}
                                 initial={false}
@@ -181,6 +293,7 @@ export default function RecordsRenderView<T extends { id: SelectionId; name?: st
                         ))}
                     </AnimatePresence>
                 </div>
+                {pager}
                 {selectionBar}
             </>
         );
@@ -188,7 +301,7 @@ export default function RecordsRenderView<T extends { id: SelectionId; name?: st
 
     return (
         <>
-            <div className="overflow-hidden rounded-2xl bg-white ring-1 ring-black/5">
+            <div className={cn('overflow-hidden rounded-2xl bg-white ring-1 ring-black/5', loading && 'opacity-60 transition-opacity')} aria-busy={loading}>
                 <div className="overflow-x-auto">
                     <table className="w-full border-collapse text-left text-sm">
                         <thead>
@@ -203,10 +316,10 @@ export default function RecordsRenderView<T extends { id: SelectionId; name?: st
                                 </th>
                                 {renderAvatar && <th className="w-12 px-4 py-2.5" aria-hidden />}
                                 {columns.map((col) => {
-                                    const active = sortKey === col.key;
+                                    const active = activeSortKey === col.key;
                                     const sortable = !!col.getSortValue;
                                     const Icon = active
-                                        ? sortDirection === 'asc'
+                                        ? activeSortDirection === 'asc'
                                             ? ChevronUpIcon
                                             : ChevronDownIcon
                                         : ChevronUpDownIcon;
@@ -216,7 +329,7 @@ export default function RecordsRenderView<T extends { id: SelectionId; name?: st
                                             aria-sort={
                                                 sortable
                                                     ? active
-                                                        ? sortDirection === 'asc'
+                                                        ? activeSortDirection === 'asc'
                                                             ? 'ascending'
                                                             : 'descending'
                                                         : 'none'
@@ -230,7 +343,7 @@ export default function RecordsRenderView<T extends { id: SelectionId; name?: st
                                             {sortable ? (
                                                 <button
                                                     type="button"
-                                                    onClick={() => handleSort(col.key)}
+                                                    onClick={() => onSort(col.key)}
                                                     className={cn(
                                                         'inline-flex items-center gap-1 transition-colors hover:text-neutral-800',
                                                         active && 'text-neutral-800',
@@ -249,7 +362,7 @@ export default function RecordsRenderView<T extends { id: SelectionId; name?: st
                             </tr>
                         </thead>
                         <tbody>
-                            {sortedData.map((item) => {
+                            {pagedData.map((item) => {
                                 const isSelected = selectedIds.has(item.id);
                                 const clickable = !!(onRowClick || detailPath);
                                 return (
@@ -324,6 +437,7 @@ export default function RecordsRenderView<T extends { id: SelectionId; name?: st
                     </table>
                 </div>
             </div>
+            {pager}
             {selectionBar}
         </>
     );

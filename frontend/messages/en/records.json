@@ -9,7 +9,11 @@
     "rowActionsAria": "Actions for {name}",
     "quickEdit": "Quick edit",
     "delete": "Delete",
-    "emptyState": "Nothing to show here."
+    "emptyState": "Nothing to show here.",
+    "rowsPerPage": "Rows per page",
+    "showing": "Showing {from}–{to} of {total}",
+    "previousPage": "Go to previous page",
+    "nextPage": "Go to next page"
   },
   "RecordsFilterMenu": {
     "filterAria": "Filter",

@@ -16,6 +16,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import {
     type ColumnDef,
+    type ColumnFilterFacet,
     type FilterState,
     type SelectionId,
     countActiveFilters,
@@ -25,7 +26,8 @@ import {
 
 interface Props<T extends { id: SelectionId }> {
     columns: ColumnDef<T>[];
-    items: T[];
+    items?: T[];
+    facets?: ColumnFilterFacet[];
     filterState: FilterState;
     onChange: (next: FilterState) => void;
 }
@@ -33,11 +35,15 @@ interface Props<T extends { id: SelectionId }> {
 export default function RecordsFilterMenu<T extends { id: SelectionId }>({
     columns,
     items,
+    facets: providedFacets,
     filterState,
     onChange,
 }: Props<T>) {
     const t = useTranslations('RecordsFilterMenu');
-    const facets = useMemo(() => deriveFilterOptions(columns, items), [columns, items]);
+    const facets = useMemo(
+        () => providedFacets ?? deriveFilterOptions(columns, items ?? []),
+        [providedFacets, columns, items],
+    );
     const activeCount = countActiveFilters(filterState);
 
     if (facets.length === 0) return null;

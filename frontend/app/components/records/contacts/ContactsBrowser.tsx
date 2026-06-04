@@ -20,15 +20,19 @@ import RecordsRenderView from '@/app/components/records/RecordsRenderView';
 import RecordsFilterMenu from '@/app/components/records/RecordsFilterMenu';
 import DeleteRecordDialog from '@/app/components/records/DeleteRecordDialog';
 import { useRecordsBrowser } from '@/app/hooks/useRecordsBrowser';
-import { type ColumnDef, applyRecordFilters } from '@/app/components/records/types';
+import { useServerRecords } from '@/app/hooks/useServerRecords';
+import { type ColumnDef, type ColumnFilterFacet, FILTER_EMPTY } from '@/app/components/records/types';
 import ContactCard from '@/app/components/records/contacts/ContactCard';
 import ContactAvatar from '@/app/components/records/contacts/ContactAvatar';
 import NewContactDialog from '@/app/components/records/contacts/NewContactDialog';
 import ChangeCompanyDialog from '@/app/components/records/contacts/ChangeCompanyDialog';
 import QuickEditSheet, { type ContactDraft } from '@/app/components/records/contacts/QuickEditSheet';
-import { deleteContact, updateContact, createContact, getCompanies } from '@/app/lib/api';
+import { deleteContact, updateContact, createContact, getCompanies, getContactsPage, getPersonFacets } from '@/app/lib/api';
 import { uploadContactPicture } from '@/app/lib/utils';
-import { type Contact, type UpdateContactPayload, type Company, type CreateContactPayload } from '@/app/lib/types';
+import { type Contact, type UpdateContactPayload, type Company, type CreateContactPayload, type ContactsPageParams, type PersonFacets } from '@/app/lib/types';
+
+const NO_ITEMS: Contact[] = [];
+const searchFields = (c: Contact) => [c.name, c.email, c.phone, c.title];
 
 function toDraft(c: Contact): ContactDraft {
     return {
@@ -48,29 +52,74 @@ function diffDraft(original: ContactDraft, draft: ContactDraft): boolean {
     );
 }
 
-const searchFields = (c: Contact) => [c.name, c.email, c.phone, c.title];
-
-export default function ContactsBrowser({ contacts }: { contacts: Contact[] }) {
+export default function ContactsBrowser() {
     const router = useRouter();
     const t = useTranslations('ContactsBrowser');
+
     const {
         displayMode,
         setDisplayMode,
-        query,
-        setQuery,
+        // query,
+        // setQuery,
         filterState,
         setFilterState,
         selectedIds,
         setSelectedIds,
-        filteredItems: filteredContacts,
-        selectedItems: selectedContacts,
+        // filteredItems: filteredContacts,
+        // selectedItems: selectedContacts,
         deleteDialogOpen,
         setDeleteDialogOpen,
-    } = useRecordsBrowser<Contact>({
+    } = useRecordsBrowser<Contact>({ items: NO_ITEMS, storageKey: 'contacts:view', searchFields });
+
+    const filterParams = useMemo(() => {
+        const company = filterState.company ?? [];
+        const titles = filterState.title ?? [];
+        const companies = company.filter((k) => k !== FILTER_EMPTY);
+        const params: { companies?: string[]; titles?: string[]; noCompany?: boolean } = {};
+        if (companies.length) params.companies = companies;
+        if (titles.length) params.titles = titles;
+        if (company.includes(FILTER_EMPTY)) params.noCompany = true;
+        return params;
+    }, [filterState]);
+
+    const {
         items: contacts,
-        storageKey: 'contacts:view',
-        searchFields,
-    });
+        total,
+        loading,
+        page,
+        setPage,
+        size,
+        setSize,
+        query,
+        setQuery,
+        sortKey,
+        sortDirection,
+        onSortChange,
+        reload,
+    } = useServerRecords<Contact, ContactsPageParams>(getContactsPage, filterParams);
+
+    const selectedContacts = useMemo(() => contacts.filter((c) => selectedIds.has(c.id)), [contacts, selectedIds]);
+
+    useEffect(() => { setSelectedIds(new Set()); }, [contacts, setSelectedIds]);
+
+    const [personFacets, setPersonFacets] = useState<PersonFacets | null>(null);
+    const loadFacets = useCallback(() => {
+        getPersonFacets().then(setPersonFacets).catch(() => setPersonFacets(null));
+    }, []);
+    useEffect(() => { loadFacets(); }, [loadFacets]);
+
+    const refresh = useCallback(() => { reload(); loadFacets(); }, [reload, loadFacets]);
+
+    const facets = useMemo<ColumnFilterFacet[]>(() => {
+        if (!personFacets) return [];
+        const out: ColumnFilterFacet[] = [];
+        const companyOptions = personFacets.companies.map((name) => ({ key: name, label: name }));
+        if (personFacets.hasNoCompany) companyOptions.push({ key: FILTER_EMPTY, label: t('filterNoCompany') });
+        if (companyOptions.length) out.push({ key: 'company', label: t('columnCompany'), options: companyOptions });
+        const titleOptions = personFacets.titles.map((ti) => ({ key: ti, label: ti }));
+        if (titleOptions.length) out.push({ key: 'title', label: t('columnTitle'), options: titleOptions });
+        return out;
+    }, [personFacets, t]);
 
     const [isDeleting, setIsDeleting] = useState(false);
     const [editSheetOpen, setEditSheetOpen] = useState(false);
@@ -112,7 +161,7 @@ export default function ContactsBrowser({ contacts }: { contacts: Contact[] }) {
             }
             toastSuccess(t('toastContactCreated'));
             setNewContactDialogOpen(false);
-            router.refresh();
+            refresh();
         } catch (err) {
             console.error(err);
             toastError(t('toastFailedCreate'));
@@ -170,7 +219,7 @@ export default function ContactsBrowser({ contacts }: { contacts: Contact[] }) {
                 changed.length === 1 ? t('toastContactUpdated') : t('toastContactsUpdated', { count: changed.length }),
             );
             setEditSheetOpen(false);
-            router.refresh();
+            refresh();
         } catch (err) {
             toastError(err instanceof Error ? err.message : t('toastFailedSave'));
         } finally {
@@ -199,7 +248,7 @@ export default function ContactsBrowser({ contacts }: { contacts: Contact[] }) {
                     ? t('toastRemovedFromCompany')
                     : t('toastRemovedNContactsFromCompanies', { count: affected.length }),
             );
-            router.refresh();
+            refresh();
         } catch (err) {
             toastError(err instanceof Error ? err.message : t('toastFailedRemoveFromCompany'));
         } finally {
@@ -228,7 +277,7 @@ export default function ContactsBrowser({ contacts }: { contacts: Contact[] }) {
             );
             setSelectedIds(new Set());
             setDeleteDialogOpen(false);
-            router.refresh();
+            refresh();
         } catch (err) {
             toastError(err instanceof Error ? err.message : t('toastFailedDelete'));
         } finally {
@@ -264,13 +313,13 @@ export default function ContactsBrowser({ contacts }: { contacts: Contact[] }) {
             getSortValue: (c) => c.company?.name ?? null,
             render: (c) => c.company?.name,
             copyable: { label: t('copyableCompany'), getValue: (c) => c.company?.name ?? '' },
-            filter: { getValue: (c) => c.company?.name ?? null, emptyLabel: t('filterNoCompany') },
+            // filter: { getValue: (c) => c.company?.name ?? null, emptyLabel: t('filterNoCompany') },
         },
         {
             key: 'title',
             label: t('columnTitle'),
             getSortValue: (c) => c.title ?? null,
-            filter: { getValue: (c) => c.title ?? null },
+            // filter: { getValue: (c) => c.title ?? null },
         },
         {
             key: 'createdAt',
@@ -286,10 +335,10 @@ export default function ContactsBrowser({ contacts }: { contacts: Contact[] }) {
         },
     ], [t]);
 
-    const visibleContacts = useMemo(
-        () => applyRecordFilters(filteredContacts, columns, filterState),
-        [filteredContacts, columns, filterState],
-    );
+    // const visibleContacts = useMemo(
+    //     () => applyRecordFilters(filteredContacts, columns, filterState),
+    //     [filteredContacts, columns, filterState],
+    // );
 
     const selectionActions = (
         <ButtonGroup className="rounded-full bg-neutral-100">
@@ -342,7 +391,7 @@ export default function ContactsBrowser({ contacts }: { contacts: Contact[] }) {
             <div className="flex items-center gap-4">
                 <RecordsFilterMenu<Contact>
                     columns={columns}
-                    items={filteredContacts}
+                    facets={facets}
                     filterState={filterState}
                     onChange={setFilterState}
                 />
@@ -384,7 +433,7 @@ export default function ContactsBrowser({ contacts }: { contacts: Contact[] }) {
             </div>
 
             <RecordsRenderView<Contact>
-                data={visibleContacts}
+                data={contacts}
                 columns={columns}
                 renderCard={(item, { onQuickEdit, onDelete }) => (
                     <ContactCard
@@ -408,6 +457,9 @@ export default function ContactsBrowser({ contacts }: { contacts: Contact[] }) {
                 onDelete={deleteOne}
                 entityLabel="contact"
                 selectionActions={selectionActions}
+                loading={loading}
+                pagination={{ page, pageSize: size, total, onPageChange: setPage, onPageSizeChange: setSize }}
+                sortState={{ key: sortKey, direction: sortDirection, onSortChange }}
             />
 
             <QuickEditSheet

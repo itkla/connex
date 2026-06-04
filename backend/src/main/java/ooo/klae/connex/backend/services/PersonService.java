@@ -56,6 +56,27 @@ public class PersonService {
         return personMapper.getPersonsByDealId(dealId);
     }
 
+    public List<Person> getPersonsPage(String query, String sort, String dir, List<String> companies,
+            List<String> titles, boolean noCompany, int limit, int offset) {
+        return personMapper.getPersonsPage(query, sort, dir, companies, titles, noCompany, limit, offset);
+    }
+
+    public long countPersons(String query, List<String> companies, List<String> titles, boolean noCompany) {
+        return personMapper.countPersons(query, companies, titles, noCompany);
+    }
+
+    public List<String> distinctCompanies() {
+        return personMapper.distinctCompanies();
+    }
+
+    public List<String> distinctTitles() {
+        return personMapper.distinctTitles();
+    }
+
+    public boolean hasPersonWithoutCompany() {
+        return personMapper.hasPersonWithoutCompany();
+    }
+
     /**
      * Retrieves a {@code Person} by ID, throwing a {@code ResourceNotFoundException} if not found.
      * @param id

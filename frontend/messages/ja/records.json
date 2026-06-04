@@ -9,7 +9,11 @@
     "rowActionsAria": "{name} の操作",
     "quickEdit": "クイック編集",
     "delete": "削除",
-    "emptyState": "表示できるものがありません。"
+    "emptyState": "表示できるものがありません。",
+    "rowsPerPage": "表示件数",
+    "showing": "{total} 件中 {from}–{to} 件",
+    "previousPage": "前のページへ",
+    "nextPage": "次のページへ"
   },
   "RecordsFilterMenu": {
     "filterAria": "フィルター",
