@@ -274,7 +274,7 @@ export default function Sidebar({
     }
 
     return (
-        <div className="p-2 h-screen">
+        <div className="p-2 h-dvh">
             <aside
                 className={`flex flex-col min-h-0 ${className ?? ""}`}
                 aria-label={t("ariaPrimarySidebar")}
