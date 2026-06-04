@@ -194,7 +194,7 @@ function UserMenu({ user, onLogout }: { user: User; onLogout: () => void }) {
                     className="z-50 min-w-[14rem] origin-[var(--radix-dropdown-menu-content-transform-origin)] rounded-lg border border-sidebar-border bg-popover p-1 text-popover-foreground shadow-lg data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[side=top]:slide-in-from-bottom-2 data-[side=bottom]:slide-in-from-top-2"
                 >
                     <DropdownMenu.Label className="flex items-center gap-3 px-2 py-2">
-                        <UserAvatar user={user} type="large" />
+                        <UserAvatar user={user} type="medium" />
                         <div className="min-w-0">
                             <div className="truncate text-sm font-medium">
                                 {user.displayName}
