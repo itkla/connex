@@ -24,7 +24,7 @@ export default async function Home() {
     const user = await getCurrentUserFromCookie(cookie);
     const t = await getTranslations("CommonHome");
 
-    const ctaHref = user ? "/dashboard" : "/auth/login";
+    const ctaHref = user ? "/dashboard" : "/auth/register";
     const ctaLabel = user ? t("ctaDashboard") : t("ctaGetStarted");
 
     const features = [
