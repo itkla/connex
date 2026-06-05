@@ -26,6 +26,7 @@ import { timeOf } from '@/app/lib/utils';
 import Greeting from '@/app/components/dashboard/Greeting';
 import OverviewCard from '@/app/components/dashboard/OverviewCard';
 import PipelineChart from '@/app/components/dashboard/PipelineChart';
+import Rise from '@/app/components/dashboard/Rise';
 import SectionHeader from '@/app/components/dashboard/SectionHeader';
 import TaskSummary from '@/app/components/dashboard/TaskSummary';
 import Timeline from '@/app/components/me/Timeline';
@@ -57,7 +58,7 @@ export default async function Dashboard() {
         ]);
 
     // TODO: move this to it's own separate component so it can be reused elsewhere
-    const now = Date.now();
+    const now = new Date().getTime();
     const overdueTasks = tasks.filter((t) => {
         if (t.completed) return false;
         const due = timeOf(t.dueDate);
@@ -69,20 +70,34 @@ export default async function Dashboard() {
         const t = timeOf(d.expectedCloseDate);
         return t > 0 && t - now <= 7 * DAY && t - now >= -DAY;
     }).length;
+    const dueSoon = tasks.filter((tk) => {
+        if (tk.completed) return false;
+        const due = timeOf(tk.dueDate);
+        return due >= now && due - now <= 7 * DAY;
+    }).length;
+    const upcomingActivities = activities.filter((a) => {
+        const ts = timeOf(a.timestamp);
+        return ts > now && ts - now <= 7 * DAY;
+    }).length;
 
     return (
         <div className="min-h-screen bg-white px-2 pt-8 pb-12">
             <div className="mx-auto flex w-full max-w-7xl flex-col gap-10">
-                <Greeting
-                    user={user}
-                    overdueTasks={overdueTasks}
-                    closingSoon={closingSoon}
-                />
+                <Rise>
+                    <Greeting
+                        user={user}
+                        overdueTasks={overdueTasks}
+                        dueSoon={dueSoon}
+                        closingSoon={closingSoon}
+                        upcomingActivities={upcomingActivities}
+                    />
+                </Rise>
 
                 <section>
                     <SectionHeader title={t('overview')} />
                     <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
                         <OverviewCard
+                            index={0}
                             label={t('companies')}
                             value={companies.length}
                             icon={BuildingOffice2Icon}
@@ -90,12 +105,14 @@ export default async function Dashboard() {
                             description={t('companiesDescription')}
                         />
                         <OverviewCard
+                            index={1}
                             label={t('contacts')}
                             value={contacts.length}
                             icon={UsersIcon}
                             href="/records/contacts"
                         />
                         <OverviewCard
+                            index={2}
                             label={t('deals')}
                             value={deals.length}
                             icon={BriefcaseIcon}
@@ -103,6 +120,7 @@ export default async function Dashboard() {
                             description={t('dealsDescription')}
                         />
                         <OverviewCard
+                            index={3}
                             label={t('pipelines')}
                             value={pipelines.length}
                             icon={FunnelIcon}
@@ -112,41 +130,43 @@ export default async function Dashboard() {
                 </section>
 
                 <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-                    <section className="flex flex-col">
+                    <Rise delay={0.24} className="flex flex-col">
                         <SectionHeader title={t('pipeline')} />
                         <PipelineChart deals={deals} />
-                    </section>
-                    <section className="flex flex-col">
+                    </Rise>
+                    <Rise delay={0.3} className="flex flex-col">
                         <SectionHeader title={t('tasks')} />
                         <TaskSummary tasks={tasks} />
-                    </section>
+                    </Rise>
                 </div>
 
-                <section>
-                    <SectionHeader
-                        title={t('recentActivity')}
-                        action={
-                            <Link
-                                href="/activity/all"
-                                className="text-xs text-brand hover:text-brand-hover"
-                            >
-                                {t('viewAll')}
-                            </Link>
-                        }
-                    />
-                    <div className="overflow-hidden rounded-2xl bg-white ring-1 ring-black/5">
-                        <Timeline
-                            tasks={tasks}
-                            activities={activities}
-                            notes={notes}
-                            users={users}
-                            persons={contacts}
-                            deals={deals}
-                            currentUserId={user.id}
-                            limit={8}
+                <Rise delay={0.36}>
+                    <section>
+                        <SectionHeader
+                            title={t('recentActivity')}
+                            action={
+                                <Link
+                                    href="/activity/all"
+                                    className="text-xs text-brand hover:text-brand-hover"
+                                >
+                                    {t('viewAll')}
+                                </Link>
+                            }
                         />
-                    </div>
-                </section>
+                        <div className="overflow-hidden rounded-2xl border border-black/[0.07] bg-white">
+                            <Timeline
+                                tasks={tasks}
+                                activities={activities}
+                                notes={notes}
+                                users={users}
+                                persons={contacts}
+                                deals={deals}
+                                currentUserId={user.id}
+                                limit={8}
+                            />
+                        </div>
+                    </section>
+                </Rise>
             </div>
         </div>
     );

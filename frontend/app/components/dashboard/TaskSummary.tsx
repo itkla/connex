@@ -1,7 +1,11 @@
 import Link from 'next/link';
+import { ExclamationTriangleIcon } from '@heroicons/react/16/solid';
 import { getLocale, getTranslations } from 'next-intl/server';
 import { type Task } from '@/app/lib/types';
-import { formatShortDate, timeOf } from '@/app/lib/utils';
+import { timeOf } from '@/app/lib/utils';
+import CountUp from '@/app/components/dashboard/CountUp';
+import UpcomingTasks from '@/app/components/dashboard/UpcomingTasks';
+import { Badge } from '@/components/ui/badge';
 
 const DAY = 1000 * 60 * 60 * 24;
 
@@ -9,7 +13,7 @@ export default async function TaskSummary({ tasks }: { tasks: Task[] }) {
     const t = await getTranslations('DashboardTaskSummary');
     const locale = await getLocale();
     const open = tasks.filter((tk) => !tk.completed);
-    const now = Date.now();
+    const now = new Date().getTime();
 
     // items that are > due and < now (e.g. overdue from today)
     const overdue = open.filter((tk) => {
@@ -33,7 +37,7 @@ export default async function TaskSummary({ tasks }: { tasks: Task[] }) {
         .slice(0, 4);
 
     return (
-        <div className="flex h-full flex-col rounded-2xl bg-white p-6 ring-1 ring-black/5">
+        <div className="flex h-full flex-col rounded-2xl border border-black/[0.07] bg-white p-6">
             <div className="flex items-baseline justify-between">
                 <span className="text-xs font-medium tracking-[0.12em] text-neutral-500 uppercase">
                     {t('openTasks')}
@@ -45,57 +49,17 @@ export default async function TaskSummary({ tasks }: { tasks: Task[] }) {
                     {t('viewAll')}
                 </Link>
             </div>
-            <span className="mt-3 text-5xl leading-none text-black tabular-nums">
-                {open.length}
-            </span>
-            <p className="mt-2 text-sm text-neutral-500">
+            <div className="mt-3 flex items-center gap-3">
+                <CountUp value={open.length} className="text-5xl leading-none text-neutral-900 tabular-nums" />
                 {overdue > 0 ? (
-                    <span className="text-red-600 font-medium">
+                    <Badge variant="destructive" className="gap-1 px-2.5">
+                        <ExclamationTriangleIcon />
                         {t('overdueCount', { count: overdue })}
-                    </span>
-                ) : (
-                    <span>{t('overdueCount', { count: 0 })}</span>
-                )}
-                {t('separator')}
-                {t('dueThisWeek', { count: dueSoon })}
-            </p>
-            {upcoming.length > 0 ? (
-                <ul className="mt-6 divide-y divide-neutral-200 border-t border-neutral-200">
-                    {upcoming.map((task) => {
-                        const due = timeOf(task.dueDate);
-                        const isOverdue = due > 0 && due < now;
-                        return (
-                            <li
-                                key={task.id}
-                                className="flex items-center justify-between gap-3 py-3"
-                            >
-                                <span className="line-clamp-1 text-sm text-black">
-                                    {task.description}
-                                </span>
-                                {task.dueDate ? (
-                                    <span
-                                        className={`shrink-0 text-xs ${
-                                            isOverdue
-                                                ? 'text-red-600 font-medium'
-                                                : 'text-neutral-500'
-                                        }`}
-                                    >
-                                        {formatShortDate(task.dueDate, locale)}
-                                    </span>
-                                ) : (
-                                    <span className="shrink-0 text-xs text-neutral-400">
-                                        {t('noDate')}
-                                    </span>
-                                )}
-                            </li>
-                        );
-                    })}
-                </ul>
-            ) : (
-                <p className="mt-6 border-t border-neutral-200 pt-6 text-sm text-neutral-500">
-                    {t('allCaughtUp')}
-                </p>
-            )}
+                    </Badge>
+                ) : null}
+            </div>
+            <p className="mt-2 text-sm text-neutral-500">{t('dueThisWeek', { count: dueSoon })}</p>
+            <UpcomingTasks tasks={upcoming} locale={locale} />
         </div>
     );
 }

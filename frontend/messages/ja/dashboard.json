@@ -19,6 +19,10 @@
     "goodEvening": "こんばんは、",
     "nothingUrgent": "本日緊急の用件はありません。順調です。",
     "tasksOverdue": "{count, plural, one {# 件の期限切れタスク} other {# 件の期限切れタスク}}",
+    "upcomingTitle": "今週の予定",
+    "tasksDue": "{count, plural, one {タスク # 件} other {タスク # 件}}",
+    "dealsClosing": "{count, plural, one {締切 # 件} other {締切 # 件}}",
+    "activitiesUpcoming": "{count, plural, one {予定 # 件} other {予定 # 件}}",
     "dealsClosingSeparator": " · {count, plural, one {今週成約予定 # 件の案件} other {今週成約予定 # 件の案件}}",
     "dealsCount": "{count, plural, one {# 件の案件} other {# 件の案件}}",
     "closingThisWeek": " が今週成約予定です"
@@ -26,7 +30,13 @@
   "DashboardPipelineChart": {
     "pipelineLabel": "パイプライン",
     "activePipeline": "アクティブなパイプライン",
-    "summary": "オープン {openCount} 件 · 今後 {months} か月で {scheduled} 件予定"
+    "summary": "オープン {openCount} 件 · 今後 {months} か月で {scheduled} 件予定",
+    "profit": "実績",
+    "projections": "予測",
+    "chartDescription": "実績と予測の比較",
+    "currency": "通貨",
+    "profitTooltip": "成約した案件から得られた実績売上。",
+    "projectionsTooltip": "オープン案件の予測値（予定成約日ベース）。"
   },
   "DashboardTaskSummary": {
     "openTasks": "オープンなタスク",
@@ -35,6 +45,32 @@
     "dueThisWeek": "今週期限 {count} 件",
     "separator": " · ",
     "noDate": "期日なし",
-    "allCaughtUp": "すべて完了しています。"
+    "allCaughtUp": "すべて完了しています。",
+    "taskCompleted": "タスクを完了しました",
+    "undo": "元に戻す",
+    "taskCompleteFailed": "タスクを更新できませんでした",
+    "completeAria": "タスクを完了: {description}"
+  },
+  "DashboardQuickCreate": {
+    "new": "新規",
+    "newTask": "新しいタスク",
+    "newNote": "新しいノート",
+    "taskTitle": "新しいタスク",
+    "taskDescription": "自分に割り当てるタスクを作成します。",
+    "noteTitle": "新しいノート",
+    "noteDescription": "メモを残しましょう。",
+    "descriptionField": "説明",
+    "descriptionPlaceholder": "何をしますか？",
+    "dueDate": "期日",
+    "contentField": "ノート",
+    "contentPlaceholder": "メモを入力…",
+    "cancel": "キャンセル",
+    "create": "作成",
+    "view": "表示",
+    "taskCreated": "タスクを作成しました",
+    "noteCreated": "ノートを作成しました",
+    "descriptionRequired": "説明を入力してください。",
+    "contentRequired": "内容を入力してください。",
+    "failed": "問題が発生しました。"
   }
 }

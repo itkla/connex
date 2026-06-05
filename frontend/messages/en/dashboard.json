@@ -19,6 +19,10 @@
     "goodEvening": "Good evening,",
     "nothingUrgent": "Nothing urgent today. Smooth sailing.",
     "tasksOverdue": "{count, plural, one {# task overdue} other {# tasks overdue}}",
+    "upcomingTitle": "On your radar this week",
+    "tasksDue": "{count, plural, one {# task due} other {# tasks due}}",
+    "dealsClosing": "{count, plural, one {# deadline} other {# deadlines}}",
+    "activitiesUpcoming": "{count, plural, one {# activity} other {# activities}}",
     "dealsClosingSeparator": " · {count, plural, one {# deal} other {# deals}} closing this week",
     "dealsCount": "{count, plural, one {# deal} other {# deals}}",
     "closingThisWeek": " closing this week"
@@ -26,7 +30,13 @@
   "DashboardPipelineChart": {
     "pipelineLabel": "Pipeline",
     "activePipeline": "Active pipeline",
-    "summary": "{openCount} open · {scheduled} scheduled in next {months} months"
+    "summary": "{openCount} open · {scheduled} scheduled in next {months} months",
+    "profit": "Profit",
+    "projections": "Projections",
+    "chartDescription": "Realized revenue vs forecast",
+    "currency": "Currency",
+    "profitTooltip": "Realized revenue from deals that have closed.",
+    "projectionsTooltip": "Forecasted value of open deals, by expected close date."
   },
   "DashboardTaskSummary": {
     "openTasks": "Open tasks",
@@ -35,6 +45,32 @@
     "dueThisWeek": "{count} due this week",
     "separator": " · ",
     "noDate": "No date",
-    "allCaughtUp": "All caught up."
+    "allCaughtUp": "All caught up.",
+    "taskCompleted": "Task completed",
+    "undo": "Undo",
+    "taskCompleteFailed": "Couldn't update the task",
+    "completeAria": "Complete task: {description}"
+  },
+  "DashboardQuickCreate": {
+    "new": "New",
+    "newTask": "New task",
+    "newNote": "New note",
+    "taskTitle": "New task",
+    "taskDescription": "Create a task assigned to you.",
+    "noteTitle": "New note",
+    "noteDescription": "Jot down a quick note.",
+    "descriptionField": "Description",
+    "descriptionPlaceholder": "What needs doing?",
+    "dueDate": "Due date",
+    "contentField": "Note",
+    "contentPlaceholder": "Write a note…",
+    "cancel": "Cancel",
+    "create": "Create",
+    "view": "View",
+    "taskCreated": "Task created",
+    "noteCreated": "Note created",
+    "descriptionRequired": "Add a description first.",
+    "contentRequired": "Write something first.",
+    "failed": "Something went wrong."
   }
 }
