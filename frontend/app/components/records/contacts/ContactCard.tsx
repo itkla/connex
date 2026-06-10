@@ -202,11 +202,9 @@ export default function ContactCard({
                             {t('quickEdit')}
                         </DropdownMenuItem>
                         {email && (
-                            <DropdownMenuItem onSelect={() =>
-                                copyToClipboard(email, 'Email') ? toast.success(t('toastEmailCopied')) : toast.error(t('toastFailedCopyEmail'))
-                            }>
+                            <DropdownMenuItem onSelect={() => { window.location.href = `mailto:${email}`; }}>
                                 <EnvelopeIcon className="size-4 text-neutral-500" />
-                                {t('copyEmail')}
+                                {t('sendEmail')}
                             </DropdownMenuItem>
                         )}
                         {phone && (
