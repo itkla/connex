@@ -6,15 +6,25 @@ const API_BASE =
 import * as Types from '@/app/lib/types';
 // Types
 
+function clientLocale(): string | null {
+    if (typeof document === "undefined") {
+        return null;
+    }
+    const match = document.cookie.match(/(?:^|;\s*)NEXT_LOCALE=([^;]+)/);
+    return match ? decodeURIComponent(match[1]) : null;
+}
+
 async function requestJson<T>(
     path: string,
     init: RequestInit = {},
 ): Promise<T> {
+    const locale = clientLocale();
     const res = await fetch(`${API_BASE}${path}`, {
         ...init,
         credentials: "include",
         headers: {
             ...(init.body ? { "Content-Type": "application/json" } : {}),
+            ...(locale ? { "Accept-Language": locale } : {}),
             ...init.headers,
         },
     });
@@ -101,6 +111,10 @@ export class ApiError extends Error {
         this.status = status;
         this.fieldErrors = fieldErrors;
     }
+}
+
+export function isFieldError(err: unknown): err is ApiError & { fieldErrors: ApiFieldErrors } {
+    return err instanceof ApiError && !!err.fieldErrors && Object.keys(err.fieldErrors).length > 0;
 }
 
 function isStringRecord(value: unknown): value is Record<string, string> {

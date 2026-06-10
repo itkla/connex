@@ -34,6 +34,7 @@ import {
     getPipelines,
     getStagesByPipelineId,
     getDealPeople,
+    isFieldError,
 } from '@/app/lib/api';
 import { formatCompactCurrency, formatDateTime, pickDominantCurrency } from '@/app/lib/utils';
 import {
@@ -214,12 +215,17 @@ export default function DealsBrowser({ deals }: { deals: Deal[] }) {
                 value: Number.isFinite(newPayload.value) ? newPayload.value : 0,
                 actualValue: Number.isFinite(newPayload.actualValue) ? newPayload.actualValue : 0,
                 currency: newPayload.currency.trim() || 'USD',
+                pipeline: newPayload.pipeline || null,
+                stage: newPayload.stage || null,
                 expectedCloseDate: newPayload.expectedCloseDate || undefined,
             });
             toastSuccess(t('dealCreated'));
             closeNewDialog(false);
             router.refresh();
         } catch (err) {
+            if (isFieldError(err)) {
+                throw err;
+            }
             console.error(err);
             toastError(err instanceof Error ? err.message : t('failedToCreateDeal'));
         } finally {
@@ -332,6 +338,13 @@ export default function DealsBrowser({ deals }: { deals: Deal[] }) {
             toast.error(t('cannotChangeStatus'));
             return;
         }
+        let stage = deal.stage;
+        if (!closed) {
+            const normalStages = (stagesByPipeline[deal.pipeline] ?? []).filter((s) => !s.success && !s.failure);
+            if (normalStages.length > 0) {
+                stage = normalStages.reduce((a, b) => (b.position > a.position ? b : a)).id;
+            }
+        }
         try {
             await updateDeal(deal.id, {
                 name: deal.name,
@@ -339,7 +352,7 @@ export default function DealsBrowser({ deals }: { deals: Deal[] }) {
                 actualValue: deal.actualValue ?? 0,
                 currency: deal.currency,
                 pipeline: deal.pipeline,
-                stage: deal.stage,
+                stage,
                 company: deal.company ?? null,
                 expectedCloseDate: deal.expectedCloseDate,
                 closedAt: closed ? toMysqlDateTime(new Date().toISOString()) : null,
@@ -349,7 +362,7 @@ export default function DealsBrowser({ deals }: { deals: Deal[] }) {
         } catch (err) {
             toastError(err instanceof Error ? err.message : t('failedToUpdateStatus'));
         }
-    }, [router, t]);
+    }, [router, t, stagesByPipeline]);
 
     const summary = useMemo(() => {
         let openCount = 0;

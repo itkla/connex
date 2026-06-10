@@ -10,6 +10,7 @@ import { ChangeEvent, Dispatch, SetStateAction, useEffect, useState, type WheelE
 import { CameraIcon } from '@heroicons/react/24/outline';
 import { useTranslations } from 'next-intl';
 import { uploadContactPicture } from '@/app/lib/utils';
+import { useFieldErrors } from '@/app/hooks/useFieldErrors';
 const inputClass = 'w-full rounded-lg bg-neutral-100 px-3 py-2 text-sm text-black placeholder-neutral-500 outline-none ring-1 ring-black/5 transition focus:ring-2 focus:ring-brand';
 
 type Props = {
@@ -22,7 +23,7 @@ type Props = {
     companies: Company[];
     selectedCompany: Company | null;
     isCreating: boolean;
-    createNewContact: () => void;
+    createNewContact: () => void | Promise<void>;
 };
 
 export default function NewContactDialog({
@@ -39,6 +40,16 @@ export default function NewContactDialog({
 }: Props) {
     const t = useTranslations('ContactsNewContactDialog');
     const [imagePreview, setImagePreview] = useState<string | null>(null);
+    const { fieldErrors, reset: resetFieldErrors, clearError, captureFieldErrors } = useFieldErrors();
+
+    const handleCreate = async () => {
+        resetFieldErrors();
+        try {
+            await createNewContact();
+        } catch (err) {
+            captureFieldErrors(err);
+        }
+    };
 
     const handleListWheel = (e: WheelEvent<HTMLDivElement>) => {
         const lineHeightPx = 16;
@@ -51,7 +62,8 @@ export default function NewContactDialog({
             URL.revokeObjectURL(imagePreview);
             setImagePreview(null);
         }
-    }, [newContactDialogOpen, imagePreview]);
+        if (!newContactDialogOpen) resetFieldErrors();
+    }, [newContactDialogOpen, imagePreview, resetFieldErrors]);
 
     useEffect(() => {
         return () => {
@@ -106,12 +118,19 @@ export default function NewContactDialog({
                             id="name"
                             type="text"
                             value={newContactPayload.name}
-                            onChange={(e) => setNewContactPayload((prev) => ({ ...prev, name: e.target.value }))}
-                            className={inputClass}
+                            onChange={(e) => {
+                                setNewContactPayload((prev) => ({ ...prev, name: e.target.value }));
+                                clearError('name');
+                            }}
+                            className={`${inputClass} ${fieldErrors.name ? 'ring-2 ring-red-400 focus:ring-red-500' : ''}`}
                             placeholder={t('namePlaceholder')}
+                            aria-invalid={Boolean(fieldErrors.name)}
                             autoFocus
                             required
                         />
+                        {fieldErrors.name && (
+                            <p className="px-1 text-sm text-red-600">{fieldErrors.name}</p>
+                        )}
                     </div>
 
                     <div className="grid gap-1.5">
@@ -120,10 +139,17 @@ export default function NewContactDialog({
                             id="email"
                             type="email"
                             value={newContactPayload.email}
-                            onChange={(e) => setNewContactPayload((prev) => ({ ...prev, email: e.target.value }))}
-                            className={inputClass}
+                            onChange={(e) => {
+                                setNewContactPayload((prev) => ({ ...prev, email: e.target.value }));
+                                clearError('email');
+                            }}
+                            className={`${inputClass} ${fieldErrors.email ? 'ring-2 ring-red-400 focus:ring-red-500' : ''}`}
                             placeholder={t('emailPlaceholder')}
+                            aria-invalid={Boolean(fieldErrors.email)}
                         />
+                        {fieldErrors.email && (
+                            <p className="px-1 text-sm text-red-600">{fieldErrors.email}</p>
+                        )}
                     </div>
 
                     <div className="grid grid-cols-2 gap-3">
@@ -185,8 +211,8 @@ export default function NewContactDialog({
                         <Button variant="outline" disabled={isCreating}>{t('cancel')}</Button>
                     </DialogClose>
                     <Button
-                        onClick={createNewContact}
-                        disabled={isCreating || !newContactPayload.name.trim()}
+                        onClick={handleCreate}
+                        disabled={isCreating}
                         className="bg-brand text-white hover:bg-brand-dark"
                     >
                         {isCreating ? <Loader2Icon className="size-4 animate-spin" /> : t('create')}

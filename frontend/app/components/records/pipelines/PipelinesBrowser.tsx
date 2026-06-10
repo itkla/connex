@@ -34,6 +34,7 @@ import {
     getStagesByPipelineId,
     getTasks,
     getUsers,
+    isFieldError,
     updatePipeline,
     updateStage,
 } from '@/app/lib/api';
@@ -182,6 +183,9 @@ export default function PipelinesBrowser({ pipelines }: { pipelines: Pipeline[] 
             setMetricsStatus('idle');
             router.refresh();
         } catch (err) {
+            if (isFieldError(err)) {
+                throw err;
+            }
             console.error(err);
             toastError(t('failedToCreate'));
         } finally {

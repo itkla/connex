@@ -74,6 +74,7 @@ export default async function CompanyPage({ params }: { params: { id: number } }
         console.error(`Company not found: ${id}`);
         notFound();
     }
+    const websiteUrl = company.website ? (/^https?:\/\//i.test(company.website) ? company.website : `https://${company.website}`) : undefined;
     if (!currentUser) {
         redirect('/auth/login');
     }
@@ -230,7 +231,7 @@ export default async function CompanyPage({ params }: { params: { id: number } }
                         </h2>
                     </div>
                     <dl className="divide-y divide-neutral-200 overflow-hidden rounded-2xl bg-neutral-100 ring-1 ring-black/5">
-                        <InfoRow label={t("website")} value={company.website ?? ''} />
+                        <InfoRow label={t("website")} value={company.website ?? ''} href={websiteUrl} />
                         <InfoRow label={t("phone")} value={company.phone ?? ''} />
                         <InfoRow label={t("address")} value={company.address ?? ''} />
                         <InfoRow label={t("industry")} value={company.industry ?? ''} />

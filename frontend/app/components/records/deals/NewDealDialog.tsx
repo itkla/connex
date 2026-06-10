@@ -1,7 +1,8 @@
 'use client';
 
-import { Dispatch, SetStateAction, WheelEvent } from 'react';
+import { Dispatch, SetStateAction, WheelEvent, useEffect } from 'react';
 import { useTranslations } from 'next-intl';
+import { useFieldErrors } from '@/app/hooks/useFieldErrors';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogClose } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Loader2Icon } from 'lucide-react';
@@ -20,7 +21,7 @@ type Props = {
     pipelines: Pipeline[];
     stagesByPipeline: Record<number, Stage[]>;
     isCreating: boolean;
-    createNewDeal: () => void;
+    createNewDeal: () => void | Promise<void>;
 };
 
 export default function NewDealDialog({
@@ -35,6 +36,21 @@ export default function NewDealDialog({
     createNewDeal,
 }: Props) {
     const t = useTranslations('DealsNewDialog');
+    const { fieldErrors, reset: resetFieldErrors, clearError, captureFieldErrors } = useFieldErrors();
+
+    useEffect(() => {
+        if (!open) resetFieldErrors();
+    }, [open, resetFieldErrors]);
+
+    const handleCreate = async () => {
+        resetFieldErrors();
+        try {
+            await createNewDeal();
+        } catch (err) {
+            captureFieldErrors(err);
+        }
+    };
+
     const handleListWheel = (e: WheelEvent<HTMLDivElement>) => {
         const lineHeightPx = 16;
         const delta = e.deltaMode === 1 ? e.deltaY * lineHeightPx : e.deltaY;
@@ -46,8 +62,6 @@ export default function NewDealDialog({
     const stages = payload.pipeline ? stagesByPipeline[payload.pipeline] ?? [] : [];
     const selectedStage = stages.find((s) => s.id === payload.stage) ?? null;
     const actualValue = Number.isFinite(payload.actualValue) ? payload.actualValue : 0;
-
-    const canSubmit = !!payload.name.trim() && !!payload.pipeline && !!payload.stage && !!payload.currency.trim();
 
     return (
         <Dialog open={open} onOpenChange={onOpenChange}>
@@ -66,12 +80,19 @@ export default function NewDealDialog({
                             id="deal-name"
                             type="text"
                             value={payload.name}
-                            onChange={(e) => setPayload((prev) => ({ ...prev, name: e.target.value }))}
-                            className={inputClass}
+                            onChange={(e) => {
+                                setPayload((prev) => ({ ...prev, name: e.target.value }));
+                                clearError('name');
+                            }}
+                            className={`${inputClass} ${fieldErrors.name ? 'ring-2 ring-red-400 focus:ring-red-500' : ''}`}
                             placeholder={t('namePlaceholder')}
+                            aria-invalid={Boolean(fieldErrors.name)}
                             autoFocus
                             required
                         />
+                        {fieldErrors.name && (
+                            <p className="px-1 text-sm text-red-600">{fieldErrors.name}</p>
+                        )}
                     </div>
 
                     <div className="grid grid-cols-[1fr_120px] gap-3">
@@ -83,10 +104,17 @@ export default function NewDealDialog({
                                 min="0"
                                 step="0.01"
                                 value={Number.isFinite(payload.value) ? payload.value : 0}
-                                onChange={(e) => setPayload((prev) => ({ ...prev, value: Number(e.target.value) }))}
-                                className={inputClass}
+                                onChange={(e) => {
+                                    setPayload((prev) => ({ ...prev, value: Number(e.target.value) }));
+                                    clearError('value');
+                                }}
+                                className={`${inputClass} ${fieldErrors.value ? 'ring-2 ring-red-400 focus:ring-red-500' : ''}`}
+                                aria-invalid={Boolean(fieldErrors.value)}
                                 placeholder="0"
                             />
+                            {fieldErrors.value && (
+                                <p className="px-1 text-sm text-red-600">{fieldErrors.value}</p>
+                            )}
                         </div>
                         <div className="grid gap-1.5">
                             <Label htmlFor="deal-currency">{t('currency')}</Label>
@@ -109,15 +137,22 @@ export default function NewDealDialog({
                                 items={pipelines}
                                 itemToStringLabel={(p: Pipeline) => p.name}
                                 value={selectedPipeline}
-                                onValueChange={(p) =>
+                                onValueChange={(p) => {
                                     setPayload((prev) => ({
                                         ...prev,
                                         pipeline: (p as Pipeline | null)?.id ?? 0,
                                         stage: 0,
-                                    }))
-                                }
+                                    }));
+                                    clearError('pipeline');
+                                    clearError('stage');
+                                }}
                             >
-                                <ComboboxInput id="deal-pipeline" placeholder={t('selectPipeline')} className="ring-1 ring-black/5" />
+                                <ComboboxInput
+                                    id="deal-pipeline"
+                                    placeholder={t('selectPipeline')}
+                                    aria-invalid={Boolean(fieldErrors.pipeline)}
+                                    className={`ring-1 ring-black/5 ${fieldErrors.pipeline ? 'ring-2 ring-red-400' : ''}`}
+                                />
                                 <ComboboxContent className="pointer-events-auto">
                                     <ComboboxList onWheel={handleListWheel}>
                                         <ComboboxEmpty>{t('noPipelinesFound')}</ComboboxEmpty>
@@ -129,6 +164,9 @@ export default function NewDealDialog({
                                     </ComboboxList>
                                 </ComboboxContent>
                             </Combobox>
+                            {fieldErrors.pipeline && (
+                                <p className="px-1 text-sm text-red-600">{fieldErrors.pipeline}</p>
+                            )}
                         </div>
                         <div className="grid gap-1.5">
                             <Label htmlFor="deal-stage">{t('stage')}</Label>
@@ -137,15 +175,17 @@ export default function NewDealDialog({
                                 itemToStringLabel={(s: Stage) => s.name}
                                 value={selectedStage}
                                 disabled={!payload.pipeline}
-                                onValueChange={(s) =>
-                                    setPayload((prev) => ({ ...prev, stage: (s as Stage | null)?.id ?? 0 }))
-                                }
+                                onValueChange={(s) => {
+                                    setPayload((prev) => ({ ...prev, stage: (s as Stage | null)?.id ?? 0 }));
+                                    clearError('stage');
+                                }}
                             >
                                 <ComboboxInput
                                     id="deal-stage"
                                     placeholder={payload.pipeline ? t('selectStage') : t('pickPipelineFirst')}
                                     disabled={!payload.pipeline}
-                                    className="ring-1 ring-black/5"
+                                    aria-invalid={Boolean(fieldErrors.stage)}
+                                    className={`ring-1 ring-black/5 ${fieldErrors.stage ? 'ring-2 ring-red-400' : ''}`}
                                 />
                                 <ComboboxContent className="pointer-events-auto">
                                     <ComboboxList onWheel={handleListWheel}>
@@ -158,6 +198,9 @@ export default function NewDealDialog({
                                     </ComboboxList>
                                 </ComboboxContent>
                             </Combobox>
+                            {fieldErrors.stage && (
+                                <p className="px-1 text-sm text-red-600">{fieldErrors.stage}</p>
+                            )}
                         </div>
                     </div>
 
@@ -204,8 +247,8 @@ export default function NewDealDialog({
                         <Button variant="outline" disabled={isCreating}>{t('cancel')}</Button>
                     </DialogClose>
                     <Button
-                        onClick={createNewDeal}
-                        disabled={isCreating || !canSubmit}
+                        onClick={handleCreate}
+                        disabled={isCreating}
                         className="bg-brand text-white hover:bg-brand-dark"
                     >
                         {isCreating ? <Loader2Icon className="size-4 animate-spin" /> : t('create')}

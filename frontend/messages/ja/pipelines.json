@@ -54,6 +54,7 @@
     "stages": "ステージ",
     "stagesHint": "最初から最後の順に並べてください。ステージ名は他のパイプラインと重複しても構いませんが、このパイプライン内では一意である必要があります。",
     "stageNamePlaceholder": "ステージ名",
+    "duplicateStageName": "ステージ名が重複しています。このパイプライン内では一意の名前を入力してください。",
     "removeStageAriaLabel": "ステージを削除",
     "stageKindAriaLabel": "ステージの種類",
     "stageKindPlaceholder": "ステージの種類を選択",

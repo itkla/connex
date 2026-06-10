@@ -24,7 +24,7 @@ import CompanyCard from '@/app/components/records/companies/CompanyCard';
 import CompanyAvatar from '@/app/components/records/companies/CompanyAvatar';
 import NewCompanyDialog from '@/app/components/records/companies/NewCompanyDialog';
 import QuickEditCompanySheet, { type CompanyDraft } from '@/app/components/records/companies/QuickEditCompanySheet';
-import { createCompany, deleteCompany, getUsers, getTasks, getDeals, updateCompany, getActivities, getNotes } from '@/app/lib/api';
+import { createCompany, deleteCompany, getUsers, getTasks, getDeals, updateCompany, getActivities, getNotes, isFieldError } from '@/app/lib/api';
 import { uploadCompanyLogo, pickDominantCurrency, parseMysqlDateTime } from '@/app/lib/utils';
 import { type Company, type CreateCompanyPayload, type UpdateCompanyPayload, type Contact, type Activity, type Note, type Task, type User, type Deal, type CompanyMetrics, type LoadStatus } from '@/app/lib/types';
 import { getContacts } from '@/app/lib/api';
@@ -132,6 +132,9 @@ export default function CompaniesBrowser({ companies }: { companies: Company[] }
             closeNewDialog(false);
             router.refresh();
         } catch (err) {
+            if (isFieldError(err)) {
+                throw err;
+            }
             console.error(err);
             toastError(t('toastCreateFailed'));
         } finally {

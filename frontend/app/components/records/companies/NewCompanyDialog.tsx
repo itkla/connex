@@ -8,6 +8,7 @@ import { type CreateCompanyPayload } from '@/app/lib/types';
 import { ChangeEvent, Dispatch, SetStateAction, useEffect, useState } from 'react';
 import { CameraIcon } from '@heroicons/react/24/outline';
 import { useTranslations } from 'next-intl';
+import { useFieldErrors } from '@/app/hooks/useFieldErrors';
 
 const inputClass = 'w-full rounded-lg bg-neutral-100 px-3 py-2 text-sm text-black placeholder-neutral-500 outline-none ring-1 ring-black/5 transition focus:ring-2 focus:ring-brand';
 
@@ -19,7 +20,7 @@ type Props = {
     logoFile: File | null;
     setLogoFile: Dispatch<SetStateAction<File | null>>;
     isCreating: boolean;
-    createNewCompany: () => void;
+    createNewCompany: () => void | Promise<void>;
 };
 
 export default function NewCompanyDialog({
@@ -34,13 +35,24 @@ export default function NewCompanyDialog({
 }: Props) {
     const t = useTranslations('CompaniesNewDialog');
     const [logoPreview, setLogoPreview] = useState<string | null>(null);
+    const { fieldErrors, reset: resetFieldErrors, clearError, captureFieldErrors } = useFieldErrors();
 
     useEffect(() => {
         if (!open && logoPreview) {
             URL.revokeObjectURL(logoPreview);
             setLogoPreview(null);
         }
-    }, [open, logoPreview]);
+        if (!open) resetFieldErrors();
+    }, [open, logoPreview, resetFieldErrors]);
+
+    const handleCreate = async () => {
+        resetFieldErrors();
+        try {
+            await createNewCompany();
+        } catch (err) {
+            captureFieldErrors(err);
+        }
+    };
 
     useEffect(() => {
         return () => {
@@ -96,12 +108,19 @@ export default function NewCompanyDialog({
                             id="company-name"
                             type="text"
                             value={payload.name}
-                            onChange={(e) => setPayload((prev) => ({ ...prev, name: e.target.value }))}
-                            className={inputClass}
+                            onChange={(e) => {
+                                setPayload((prev) => ({ ...prev, name: e.target.value }));
+                                clearError('name');
+                            }}
+                            className={`${inputClass} ${fieldErrors.name ? 'ring-2 ring-red-400 focus:ring-red-500' : ''}`}
                             placeholder={t('placeholderName')}
+                            aria-invalid={Boolean(fieldErrors.name)}
                             autoFocus
                             required
                         />
+                        {fieldErrors.name && (
+                            <p className="px-1 text-sm text-red-600">{fieldErrors.name}</p>
+                        )}
                     </div>
 
                     <div className="grid gap-1.5">
@@ -110,10 +129,17 @@ export default function NewCompanyDialog({
                             id="company-website"
                             type="url"
                             value={payload.website ?? ''}
-                            onChange={(e) => setPayload((prev) => ({ ...prev, website: e.target.value }))}
-                            className={inputClass}
+                            onChange={(e) => {
+                                setPayload((prev) => ({ ...prev, website: e.target.value }));
+                                clearError('website');
+                            }}
+                            className={`${inputClass} ${fieldErrors.website ? 'ring-2 ring-red-400 focus:ring-red-500' : ''}`}
+                            aria-invalid={Boolean(fieldErrors.website)}
                             placeholder={t('placeholderWebsite')}
                         />
+                        {fieldErrors.website && (
+                            <p className="px-1 text-sm text-red-600">{fieldErrors.website}</p>
+                        )}
                     </div>
 
                     <div className="grid grid-cols-2 gap-3">
@@ -159,8 +185,8 @@ export default function NewCompanyDialog({
                         <Button variant="outline" disabled={isCreating}>{t('cancel')}</Button>
                     </DialogClose>
                     <Button
-                        onClick={createNewCompany}
-                        disabled={isCreating || !payload.name.trim()}
+                        onClick={handleCreate}
+                        disabled={isCreating}
                         className="bg-brand text-white hover:bg-brand-dark"
                     >
                         {isCreating ? <Loader2Icon className="size-4 animate-spin" /> : t('create')}

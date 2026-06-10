@@ -30,6 +30,7 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 
 import { ApiError, createActivity } from '@/app/lib/api';
+import { useFieldErrors } from '@/app/hooks/useFieldErrors';
 import { toMysqlDateTime } from '@/app/lib/utils';
 import {
     ACTIVITY_TYPES,
@@ -76,6 +77,7 @@ export default function ActivityDialog({
     const [selectedPerson, setSelectedPerson] = useState<Contact | null>(null);
     const [selectedDeal, setSelectedDeal] = useState<Deal | null>(null);
     const [submitting, setSubmitting] = useState(false);
+    const { fieldErrors, reset: resetFieldErrors, clearError, captureFieldErrors } = useFieldErrors();
 
     useEffect(() => {
         if (!open) return;
@@ -86,7 +88,8 @@ export default function ActivityDialog({
         setWhen(nowLocalValue());
         setSelectedPerson(defaultPerson ?? null);
         setSelectedDeal(defaultDeal ?? null);
-    }, [open, defaultPerson, defaultDeal]);
+        resetFieldErrors();
+    }, [open, defaultPerson, defaultDeal, resetFieldErrors]);
 
     const handleListWheel = (e: WheelEvent<HTMLDivElement>) => {
         const lineHeightPx = 16;
@@ -96,16 +99,12 @@ export default function ActivityDialog({
 
     const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
         e.preventDefault();
-        const trimmed = subject.trim();
-        if (!trimmed) {
-            toastError(t('toastSubjectRequired'));
-            return;
-        }
+        resetFieldErrors();
         setSubmitting(true);
         try {
             await createActivity({
                 type,
-                subject: trimmed,
+                subject: subject.trim(),
                 notes: notes.trim() || undefined,
                 createdById: currentUserId,
                 timestamp: when ? toMysqlDateTime(when) : undefined,
@@ -116,6 +115,9 @@ export default function ActivityDialog({
             onOpenChange(false);
             router.refresh();
         } catch (err) {
+            if (captureFieldErrors(err)) {
+                return;
+            }
             const message =
                 err instanceof ApiError ? err.message : err instanceof Error ? err.message : t('toastFailedCreate');
             toastError(message);
@@ -155,12 +157,19 @@ export default function ActivityDialog({
                             id="activity-subject"
                             type="text"
                             value={subject}
-                            onChange={(e) => setSubject(e.target.value)}
+                            onChange={(e) => {
+                                setSubject(e.target.value);
+                                clearError('subject');
+                            }}
                             placeholder={t('subjectPlaceholder')}
-                            className={inputClass}
+                            className={`${inputClass} ${fieldErrors.subject ? 'ring-2 ring-red-400 focus:ring-red-500' : ''}`}
+                            aria-invalid={Boolean(fieldErrors.subject)}
                             autoFocus
                             required
                         />
+                        {fieldErrors.subject && (
+                            <p className="px-1 text-sm text-red-600">{fieldErrors.subject}</p>
+                        )}
                     </div>
 
                     <div className="grid gap-1.5">
@@ -247,7 +256,7 @@ export default function ActivityDialog({
                         </DialogClose>
                         <Button
                             type="submit"
-                            disabled={submitting || !subject.trim()}
+                            disabled={submitting}
                             className="bg-brand text-white transition-transform hover:bg-brand-dark active:scale-[0.98]"
                         >
                             {submitting ? <Loader2Icon className="size-4 animate-spin" /> : t('create')}

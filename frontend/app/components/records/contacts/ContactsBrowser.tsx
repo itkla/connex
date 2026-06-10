@@ -27,7 +27,7 @@ import ContactAvatar from '@/app/components/records/contacts/ContactAvatar';
 import NewContactDialog from '@/app/components/records/contacts/NewContactDialog';
 import ChangeCompanyDialog from '@/app/components/records/contacts/ChangeCompanyDialog';
 import QuickEditSheet, { type ContactDraft } from '@/app/components/records/contacts/QuickEditSheet';
-import { deleteContact, updateContact, createContact, getCompanies, getContactsPage, getPersonFacets } from '@/app/lib/api';
+import { deleteContact, updateContact, createContact, getCompanies, getContactsPage, getPersonFacets, isFieldError } from '@/app/lib/api';
 import { uploadContactPicture } from '@/app/lib/utils';
 import { type Contact, type UpdateContactPayload, type Company, type CreateContactPayload, type ContactsPageParams, type PersonFacets } from '@/app/lib/types';
 
@@ -163,6 +163,9 @@ export default function ContactsBrowser() {
             setNewContactDialogOpen(false);
             refresh();
         } catch (err) {
+            if (isFieldError(err)) {
+                throw err;
+            }
             console.error(err);
             toastError(t('toastFailedCreate'));
         } finally {
