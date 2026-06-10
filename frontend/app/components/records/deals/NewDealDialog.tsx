@@ -104,10 +104,17 @@ export default function NewDealDialog({
                                 min="0"
                                 step="0.01"
                                 value={Number.isFinite(payload.value) ? payload.value : 0}
-                                onChange={(e) => setPayload((prev) => ({ ...prev, value: Number(e.target.value) }))}
-                                className={inputClass}
+                                onChange={(e) => {
+                                    setPayload((prev) => ({ ...prev, value: Number(e.target.value) }));
+                                    clearError('value');
+                                }}
+                                className={`${inputClass} ${fieldErrors.value ? 'ring-2 ring-red-400 focus:ring-red-500' : ''}`}
+                                aria-invalid={Boolean(fieldErrors.value)}
                                 placeholder="0"
                             />
+                            {fieldErrors.value && (
+                                <p className="px-1 text-sm text-red-600">{fieldErrors.value}</p>
+                            )}
                         </div>
                         <div className="grid gap-1.5">
                             <Label htmlFor="deal-currency">{t('currency')}</Label>
