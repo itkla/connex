@@ -35,12 +35,22 @@ export default function NewPipelineDialog({
     const stages = payload.stages ?? [];
     const { fieldErrors, reset: resetFieldErrors, clearError, captureFieldErrors } = useFieldErrors();
 
+    const duplicateStageNames = new Set<string>();
+    const seenStageNames = new Set<string>();
+    for (const s of stages) {
+        const key = (s.name ?? '').trim().toLowerCase();
+        if (!key) continue;
+        if (seenStageNames.has(key)) duplicateStageNames.add(key);
+        else seenStageNames.add(key);
+    }
+
     useEffect(() => {
         if (!open) resetFieldErrors();
     }, [open, resetFieldErrors]);
 
     const handleCreate = async () => {
         resetFieldErrors();
+        if (duplicateStageNames.size > 0) return;
         try {
             await createNewPipeline();
         } catch (err) {
@@ -122,7 +132,8 @@ export default function NewPipelineDialog({
                                         type="text"
                                         value={s.name}
                                         onChange={(e) => updateStageName(i, e.target.value)}
-                                        className={`${inputClass} flex-1`}
+                                        className={`${inputClass} flex-1 ${duplicateStageNames.has((s.name ?? '').trim().toLowerCase()) ? 'ring-2 ring-red-400 focus:ring-red-500' : ''}`}
+                                        aria-invalid={duplicateStageNames.has((s.name ?? '').trim().toLowerCase())}
                                         placeholder={t('stageNamePlaceholder')}
                                     />
                                     {/* <select
@@ -169,6 +180,9 @@ export default function NewPipelineDialog({
                                 {t('addStage')}
                             </button>
                         </div>
+                        {duplicateStageNames.size > 0 && (
+                            <p className="px-1 text-sm text-red-600">{t('duplicateStageName')}</p>
+                        )}
                     </div>
                 </div>
 

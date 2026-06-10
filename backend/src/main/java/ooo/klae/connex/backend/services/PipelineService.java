@@ -70,6 +70,7 @@ public class PipelineService {
         if (pipeline == null) throw new ResourceNotFoundException("Pipeline not found with id: " + pipelineId);
         stage.setPipeline(pipeline);
         assertSingleTerminalOfType(pipelineId, stage);
+        assertUniqueName(pipelineId, stage);
         pipelineMapper.insertStage(stage);
         return stage;
     }
@@ -80,8 +81,19 @@ public class PipelineService {
         stage.setId(id);
         stage.setPipeline(existing.getPipeline());
         assertSingleTerminalOfType(existing.getPipeline().getId(), stage);
+        assertUniqueName(existing.getPipeline().getId(), stage);
         pipelineMapper.updateStage(stage);
         return stage;
+    }
+
+    private void assertUniqueName(int pipelineId, Stage stage) {
+        String name = stage.getName() == null ? "" : stage.getName().trim();
+        if (name.isEmpty()) return;
+        for (Stage sibling : pipelineMapper.getStagesByPipelineId(pipelineId)) {
+            if (sibling.getId() == stage.getId()) continue;
+            if (sibling.getName() != null && name.equalsIgnoreCase(sibling.getName().trim()))
+                throw new DuplicateResourceException("name", "A stage with this name already exists in this pipeline");
+        }
     }
 
     private void assertSingleTerminalOfType(int pipelineId, Stage stage) {

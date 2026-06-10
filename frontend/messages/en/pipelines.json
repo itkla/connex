@@ -54,6 +54,7 @@
     "stages": "Stages",
     "stagesHint": "In order from first to last. Stages may share names with stages in other pipelines, but must be unique within this one.",
     "stageNamePlaceholder": "Stage name",
+    "duplicateStageName": "Stage names must be unique within this pipeline.",
     "removeStageAriaLabel": "Remove stage",
     "stageKindAriaLabel": "Stage type",
     "stageKindPlaceholder": "Select stage type",
