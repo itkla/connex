@@ -76,6 +76,13 @@ export default function DealActionsMenu({
             toast.error(t('cannotChangeStatus'));
             return;
         }
+        let stage = deal.stage;
+        if (!close) {
+            const normalStages = (stagesByPipeline[deal.pipeline] ?? []).filter((s) => !s.success && !s.failure);
+            if (normalStages.length > 0) {
+                stage = normalStages.reduce((a, b) => (b.position > a.position ? b : a)).id;
+            }
+        }
         setIsUpdatingStatus(true);
         try {
             await updateDeal(deal.id, {
@@ -84,7 +91,7 @@ export default function DealActionsMenu({
                 actualValue: deal.actualValue ?? 0,
                 currency: deal.currency,
                 pipeline: deal.pipeline,
-                stage: deal.stage,
+                stage,
                 company: deal.company ?? null,
                 expectedCloseDate: deal.expectedCloseDate,
                 closedAt: close ? toMysqlDateTime(new Date().toISOString()) : null,
