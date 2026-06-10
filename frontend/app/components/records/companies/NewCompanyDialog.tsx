@@ -129,10 +129,17 @@ export default function NewCompanyDialog({
                             id="company-website"
                             type="url"
                             value={payload.website ?? ''}
-                            onChange={(e) => setPayload((prev) => ({ ...prev, website: e.target.value }))}
-                            className={inputClass}
+                            onChange={(e) => {
+                                setPayload((prev) => ({ ...prev, website: e.target.value }));
+                                clearError('website');
+                            }}
+                            className={`${inputClass} ${fieldErrors.website ? 'ring-2 ring-red-400 focus:ring-red-500' : ''}`}
+                            aria-invalid={Boolean(fieldErrors.website)}
                             placeholder={t('placeholderWebsite')}
                         />
+                        {fieldErrors.website && (
+                            <p className="px-1 text-sm text-red-600">{fieldErrors.website}</p>
+                        )}
                     </div>
 
                     <div className="grid grid-cols-2 gap-3">
