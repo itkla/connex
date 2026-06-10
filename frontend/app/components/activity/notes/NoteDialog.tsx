@@ -28,6 +28,7 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 
 import { ApiError, createNote, updateNote } from '@/app/lib/api';
+import { useFieldErrors } from '@/app/hooks/useFieldErrors';
 import type { Contact, Deal, Note } from '@/app/lib/types';
 
 type Props = {
@@ -59,6 +60,7 @@ export default function NoteDialog({
     const [selectedPerson, setSelectedPerson] = useState<Contact | null>(null);
     const [selectedDeal, setSelectedDeal] = useState<Deal | null>(null);
     const [submitting, setSubmitting] = useState(false);
+    const { fieldErrors, reset: resetFieldErrors, clearError, captureFieldErrors } = useFieldErrors();
 
     useEffect(() => {
         if (!open) return;
@@ -71,7 +73,8 @@ export default function NoteDialog({
             setSelectedPerson(defaultPerson ?? null);
             setSelectedDeal(defaultDeal ?? null);
         }
-    }, [open, note, persons, deals, defaultPerson, defaultDeal]);
+        resetFieldErrors();
+    }, [open, note, persons, deals, defaultPerson, defaultDeal, resetFieldErrors]);
 
     const handleListWheel = (e: WheelEvent<HTMLDivElement>) => {
         const lineHeightPx = 16;
@@ -81,11 +84,8 @@ export default function NoteDialog({
 
     const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
         e.preventDefault();
+        resetFieldErrors();
         const trimmed = content.trim();
-        if (!trimmed) {
-            toastError(t('toastContentRequired'));
-            return;
-        }
         setSubmitting(true);
         try {
             if (isEdit && note) {
@@ -108,6 +108,9 @@ export default function NoteDialog({
             onOpenChange(false);
             router.refresh();
         } catch (err) {
+            if (captureFieldErrors(err)) {
+                return;
+            }
             const message =
                 err instanceof ApiError ? err.message :
                 err instanceof Error ? err.message :
@@ -135,12 +138,19 @@ export default function NoteDialog({
                         <Textarea
                             id="note-content"
                             value={content}
-                            onChange={(e) => setContent(e.target.value)}
+                            onChange={(e) => {
+                                setContent(e.target.value);
+                                clearError('content');
+                            }}
                             placeholder={t('contentPlaceholder')}
                             rows={6}
+                            aria-invalid={Boolean(fieldErrors.content)}
                             autoFocus
                             required
                         />
+                        {fieldErrors.content && (
+                            <p className="px-1 text-sm text-red-600">{fieldErrors.content}</p>
+                        )}
                     </div>
 
                     <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
@@ -205,7 +215,7 @@ export default function NoteDialog({
                         </DialogClose>
                         <Button
                             type="submit"
-                            disabled={submitting || !content.trim()}
+                            disabled={submitting}
                             className="bg-brand text-white hover:bg-brand-dark"
                         >
                             {submitting ? (

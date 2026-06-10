@@ -20,7 +20,7 @@ import EditCompanySheet from '@/app/components/records/companies/EditCompanyShee
 import NewContactDialog from '@/app/components/records/contacts/NewContactDialog';
 import NewDealDialog from '@/app/components/records/deals/NewDealDialog';
 
-import { createContact, createDeal, deleteCompany, getPipelines, getStagesByPipelineId, updateContact } from '@/app/lib/api';
+import { createContact, createDeal, deleteCompany, getPipelines, getStagesByPipelineId, updateContact, isFieldError } from '@/app/lib/api';
 import { CreateContactPayload, type Company, type CreateDealPayload, type Pipeline, type Stage } from '@/app/lib/types';
 import { uploadContactPicture } from '@/app/lib/utils';
 
@@ -111,6 +111,9 @@ export default function CompanyActionsMenu({
             setNewContactDialogOpen(false);
             router.refresh();
         } catch (err) {
+            if (isFieldError(err)) {
+                throw err;
+            }
             console.error(err);
             toastError(t('toastCreateContactFailed'));
         } finally {
@@ -127,6 +130,8 @@ export default function CompanyActionsMenu({
                 value: Number.isFinite(newDealPayload.value) ? newDealPayload.value : 0,
                 actualValue: Number.isFinite(newDealPayload.actualValue) ? newDealPayload.actualValue : 0,
                 currency: newDealPayload.currency.trim() || 'USD',
+                pipeline: newDealPayload.pipeline || null,
+                stage: newDealPayload.stage || null,
                 company: company.id,
                 expectedCloseDate: newDealPayload.expectedCloseDate || undefined,
             });
@@ -134,6 +139,9 @@ export default function CompanyActionsMenu({
             closeNewDealDialog(false);
             router.refresh();
         } catch (err) {
+            if (isFieldError(err)) {
+                throw err;
+            }
             console.error(err);
             toastError(err instanceof Error ? err.message : t('toastCreateDealFailed'));
         } finally {

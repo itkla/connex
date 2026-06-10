@@ -34,6 +34,7 @@ import {
     getPipelines,
     getStagesByPipelineId,
     getDealPeople,
+    isFieldError,
 } from '@/app/lib/api';
 import { formatCompactCurrency, formatDateTime, pickDominantCurrency } from '@/app/lib/utils';
 import {
@@ -214,12 +215,17 @@ export default function DealsBrowser({ deals }: { deals: Deal[] }) {
                 value: Number.isFinite(newPayload.value) ? newPayload.value : 0,
                 actualValue: Number.isFinite(newPayload.actualValue) ? newPayload.actualValue : 0,
                 currency: newPayload.currency.trim() || 'USD',
+                pipeline: newPayload.pipeline || null,
+                stage: newPayload.stage || null,
                 expectedCloseDate: newPayload.expectedCloseDate || undefined,
             });
             toastSuccess(t('dealCreated'));
             closeNewDialog(false);
             router.refresh();
         } catch (err) {
+            if (isFieldError(err)) {
+                throw err;
+            }
             console.error(err);
             toastError(err instanceof Error ? err.message : t('failedToCreateDeal'));
         } finally {

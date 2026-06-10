@@ -29,6 +29,7 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 
 import { ApiError, createTask } from '@/app/lib/api';
+import { useFieldErrors } from '@/app/hooks/useFieldErrors';
 import type { Contact, Deal, User } from '@/app/lib/types';
 
 type Props = {
@@ -64,6 +65,7 @@ export default function TaskDialog({
     const [selectedPerson, setSelectedPerson] = useState<Contact | null>(null);
     const [selectedDeal, setSelectedDeal] = useState<Deal | null>(null);
     const [submitting, setSubmitting] = useState(false);
+    const { fieldErrors, reset: resetFieldErrors, clearError, captureFieldErrors } = useFieldErrors();
 
     useEffect(() => {
         if (!open) return;
@@ -72,7 +74,8 @@ export default function TaskDialog({
         setAssignee(users.find((u) => u.id === currentUserId) ?? null);
         setSelectedPerson(defaultPerson ?? null);
         setSelectedDeal(defaultDeal ?? null);
-    }, [open, users, currentUserId, defaultPerson, defaultDeal]);
+        resetFieldErrors();
+    }, [open, users, currentUserId, defaultPerson, defaultDeal, resetFieldErrors]);
 
     const handleListWheel = (e: WheelEvent<HTMLDivElement>) => {
         const lineHeightPx = 16;
@@ -82,16 +85,12 @@ export default function TaskDialog({
 
     const handleSubmit = async (e: React.SubmitEvent<HTMLFormElement>) => {
         e.preventDefault();
-        const trimmed = description.trim();
-        if (!trimmed) {
-            toastError(t('toastDescriptionRequired'));
-            return;
-        }
+        resetFieldErrors();
         const assignedToId = assignee?.id ?? currentUserId;
         setSubmitting(true);
         try {
             await createTask({
-                description: trimmed,
+                description: description.trim(),
                 dueDate: dueDate || undefined,
                 assignedToId,
                 personId: selectedPerson?.id ?? undefined,
@@ -101,6 +100,9 @@ export default function TaskDialog({
             onOpenChange(false);
             router.refresh();
         } catch (err) {
+            if (captureFieldErrors(err)) {
+                return;
+            }
             const message =
                 err instanceof ApiError
                     ? err.message
@@ -134,12 +136,19 @@ export default function TaskDialog({
                         <Textarea
                             id="task-description"
                             value={description}
-                            onChange={(e) => setDescription(e.target.value)}
+                            onChange={(e) => {
+                                setDescription(e.target.value);
+                                clearError('description');
+                            }}
                             placeholder={t('descriptionPlaceholder')}
                             rows={3}
+                            aria-invalid={Boolean(fieldErrors.description)}
                             autoFocus
                             required
                         />
+                        {fieldErrors.description && (
+                            <p className="px-1 text-sm text-red-600">{fieldErrors.description}</p>
+                        )}
                     </div>
 
                     <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
@@ -243,7 +252,7 @@ export default function TaskDialog({
                         </DialogClose>
                         <Button
                             type="submit"
-                            disabled={submitting || !description.trim()}
+                            disabled={submitting}
                             className="bg-brand text-white transition-transform hover:bg-brand-dark active:scale-[0.98]"
                         >
                             {submitting ? (

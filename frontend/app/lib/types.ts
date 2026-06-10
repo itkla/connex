@@ -253,8 +253,8 @@ export type CreateDealPayload = {
     value: number;
     actualValue: number;
     currency: string;
-    pipeline: number;
-    stage: number;
+    pipeline: number | null;
+    stage: number | null;
     company?: number | null;
     expectedCloseDate?: string;
     closedAt?: string;

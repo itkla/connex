@@ -8,7 +8,7 @@ import NewContactDialog from "@/app/components/records/contacts/NewContactDialog
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { CreateContactPayload } from "@/app/lib/types";
-import { createContact, updateContact } from "@/app/lib/api";
+import { createContact, updateContact, isFieldError } from "@/app/lib/api";
 import { uploadContactPicture } from "@/app/lib/utils";
 import { toast } from "sonner";
 import { useTranslations } from "next-intl";
@@ -93,6 +93,9 @@ export default function ContactsGrid({ contacts, company, allTags }: { contacts:
                         toast.success(t('toastContactCreated'));
                         router.refresh();
                     } catch (error) {
+                        if (isFieldError(error)) {
+                            throw error;
+                        }
                         console.error(error);
                         toast.error(t('toastCreateContactFailed'));
                     } finally {
