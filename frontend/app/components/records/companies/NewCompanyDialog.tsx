@@ -160,10 +160,17 @@ export default function NewCompanyDialog({
                                 id="company-phone"
                                 type="tel"
                                 value={payload.phone ?? ''}
-                                onChange={(e) => setPayload((prev) => ({ ...prev, phone: e.target.value }))}
-                                className={inputClass}
+                                onChange={(e) => {
+                                    setPayload((prev) => ({ ...prev, phone: e.target.value }));
+                                    clearError('phone');
+                                }}
+                                className={`${inputClass} ${fieldErrors.phone ? 'ring-2 ring-red-400 focus:ring-red-500' : ''}`}
                                 placeholder={t('placeholderPhone')}
+                                aria-invalid={Boolean(fieldErrors.phone)}
                             />
+                            {fieldErrors.phone && (
+                                <p className="px-1 text-sm text-red-600">{fieldErrors.phone}</p>
+                            )}
                         </div>
                     </div>
 

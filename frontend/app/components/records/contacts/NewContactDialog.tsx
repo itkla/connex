@@ -159,10 +159,17 @@ export default function NewContactDialog({
                                 id="phone"
                                 type="tel"
                                 value={newContactPayload.phone}
-                                onChange={(e) => setNewContactPayload((prev) => ({ ...prev, phone: e.target.value }))}
-                                className={inputClass}
+                                onChange={(e) => {
+                                    setNewContactPayload((prev) => ({ ...prev, phone: e.target.value }));
+                                    clearError('phone');
+                                }}
+                                className={`${inputClass} ${fieldErrors.phone ? 'ring-2 ring-red-400 focus:ring-red-500' : ''}`}
                                 placeholder={t('phonePlaceholder')}
+                                aria-invalid={Boolean(fieldErrors.phone)}
                             />
+                            {fieldErrors.phone && (
+                                <p className="px-1 text-sm text-red-600">{fieldErrors.phone}</p>
+                            )}
                         </div>
                         <div className="grid gap-1.5">
                             <Label htmlFor="title">{t('title')}</Label>
