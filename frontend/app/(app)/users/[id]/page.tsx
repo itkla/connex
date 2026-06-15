@@ -64,9 +64,9 @@ export default async function UserPage({ params }: { params: { id: number } }) {
             <header className="mt-8 flex items-center gap-6 py-8">
                 <UserAvatar user={user} type="xlarge" />
                 <div className="flex flex-col gap-2">
-                    <h1 className="text-4xl font-extrabold tracking-tight text-black">{user.displayName}</h1>
-                    <h3 className="flex flex-wrap items-center gap-2 text-sm text-neutral-500">
-                        <span className="rounded-md bg-neutral-100 px-2 py-1">@{user.username}</span>
+                    <h1 className="text-4xl font-extrabold tracking-tight text-foreground">{user.displayName}</h1>
+                    <h3 className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
+                        <span className="rounded-md bg-muted px-2 py-1">@{user.username}</span>
                         <span>{user.email}</span>
                     </h3>
                 </div>
@@ -75,11 +75,11 @@ export default async function UserPage({ params }: { params: { id: number } }) {
             <div className="mt-4 grid grid-cols-1 gap-8 md:grid-cols-[minmax(0,1fr)_minmax(0,2fr)] md:min-h-0 md:flex-1">
                 <aside>
                     <div className="mb-3 flex h-8 items-center">
-                        <h2 className="px-6 text-xs font-medium uppercase tracking-[0.12em] text-neutral-500">
+                        <h2 className="px-6 text-xs font-medium uppercase tracking-[0.12em] text-muted-foreground">
                             {t("profile")}
                         </h2>
                     </div>
-                    <dl className="divide-y divide-neutral-200 overflow-hidden rounded-2xl bg-neutral-100 ring-1 ring-black/5">
+                    <dl className="divide-y divide-border overflow-hidden rounded-2xl bg-muted ring-1 ring-border">
                         <InfoRow label={t("username")} value={`@${user.username}`} />
                         <InfoRow label={t("email")} value={user.email ?? ""} />
                         <InfoRow
@@ -93,7 +93,7 @@ export default async function UserPage({ params }: { params: { id: number } }) {
 
                 <section className="md:flex md:min-h-0 md:flex-col">
                     <div className="mb-3 flex h-8 items-center">
-                        <h2 className="px-6 text-xs font-medium uppercase tracking-[0.12em] text-neutral-500">
+                        <h2 className="px-6 text-xs font-medium uppercase tracking-[0.12em] text-muted-foreground">
                             {t("theirActivity")}
                         </h2>
                     </div>
@@ -109,11 +109,11 @@ export default async function UserPage({ params }: { params: { id: number } }) {
                     </div>
 
                     <div className="mb-3 mt-6 flex h-8 items-center">
-                        <h2 className="px-6 text-xs font-medium uppercase tracking-[0.12em] text-neutral-500">
+                        <h2 className="px-6 text-xs font-medium uppercase tracking-[0.12em] text-muted-foreground">
                             {t("timeline")}
                         </h2>
                     </div>
-                    <div className="overflow-hidden rounded-2xl bg-white ring-1 ring-black/5 md:flex md:min-h-0 md:flex-1 md:flex-col">
+                    <div className="overflow-hidden rounded-2xl bg-card ring-1 ring-border md:flex md:min-h-0 md:flex-1 md:flex-col">
                         <div className="md:min-h-0 md:flex-1 md:overflow-y-auto md:[-webkit-mask-image:linear-gradient(to_bottom,transparent_0,black_24px)] md:[mask-image:linear-gradient(to_bottom,transparent_0,black_24px)]">
                             <Timeline
                                 tasks={tasks}

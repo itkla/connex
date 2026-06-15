@@ -10,16 +10,16 @@ export default function MetricBlock({
     children: React.ReactNode;
 }) {
     return (
-        <section className="overflow-hidden rounded-2xl bg-neutral-100 ring-1 ring-black/5">
+        <section className="overflow-hidden rounded-2xl bg-muted ring-1 ring-border">
             <header className="flex items-baseline justify-between gap-4 px-6 pt-5 pb-4">
-                <h2 className="text-xs font-medium tracking-[0.12em] text-neutral-500 uppercase">
+                <h2 className="text-xs font-medium tracking-[0.12em] text-muted-foreground uppercase">
                     {label}
                 </h2>
-                <span className="font-['Instrument_Serif'] text-4xl leading-none text-black">
+                <span className="font-['Instrument_Serif'] text-4xl leading-none text-foreground">
                     {count}
                 </span>
             </header>
-            <div className="border-t border-neutral-200 bg-white">{children}</div>
+            <div className="border-t border-border bg-card">{children}</div>
         </section>
     );
 }

@@ -62,7 +62,7 @@ export default async function Timeline({
 
     if (visible.length === 0) {
         return (
-            <p className="px-6 py-12 text-center text-sm text-neutral-500">
+            <p className="px-6 py-12 text-center text-sm text-muted-foreground">
                 {t("emptyState")}
             </p>
         );
@@ -71,7 +71,7 @@ export default async function Timeline({
     const userById = new Map(users.map((u) => [u.id, u]));
 
     return (
-        <ul className="divide-y divide-neutral-200">
+        <ul className="divide-y divide-border">
             {visible.map((entry) => {
                 const authorId = entryAuthorId(entry);
                 const author = authorId != null ? userById.get(authorId) : undefined;

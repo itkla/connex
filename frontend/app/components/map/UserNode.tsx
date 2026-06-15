@@ -18,7 +18,7 @@ function UserNodeImpl({ data }: NodeProps<UserNodeType>) {
                     {name.charAt(0).toUpperCase()}
                 </AvatarFallback>
             </Avatar>
-            <span className="pointer-events-none absolute left-1/2 top-full mt-1 -translate-x-1/2 max-w-[8rem] truncate text-center text-[11px] font-medium text-neutral-700">
+            <span className="pointer-events-none absolute left-1/2 top-full mt-1 -translate-x-1/2 max-w-[8rem] truncate text-center text-[11px] font-medium text-foreground">
                 {name}
             </span>
         </div>

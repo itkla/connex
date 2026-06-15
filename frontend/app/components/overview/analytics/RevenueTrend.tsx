@@ -99,12 +99,12 @@ export default function RevenueTrend({
 
     const chartConfig = {
         won: { label: t('actual'), color: 'var(--color-brand)' },
-        projected: { label: t('projected'), color: '#a3a3a3' },
+        projected: { label: t('projected'), color: 'var(--muted-foreground)' },
     } satisfies ChartConfig;
 
     if (!hasData) {
         return (
-            <div className="flex h-72 items-center justify-center text-sm text-neutral-500">{t('empty')}</div>
+            <div className="flex h-72 items-center justify-center text-sm text-muted-foreground">{t('empty')}</div>
         );
     }
 
@@ -123,14 +123,14 @@ export default function RevenueTrend({
                     tickLine={false}
                     axisLine={false}
                     tickMargin={10}
-                    tick={{ fontSize: 11, fill: '#737373' }}
+                    tick={{ fontSize: 11, fill: 'var(--chart-axis)' }}
                 />
                 <YAxis
                     tickLine={false}
                     axisLine={false}
                     tickMargin={4}
                     width={56}
-                    tick={{ fontSize: 11, fill: '#737373' }}
+                    tick={{ fontSize: 11, fill: 'var(--chart-axis)' }}
                     tickFormatter={(v: number) => formatCompactCurrency(v, currency, locale)}
                 />
                 <RechartsTooltip
@@ -146,9 +146,9 @@ export default function RevenueTrend({
                 {todayLabel != null && (
                     <ReferenceLine
                         x={todayLabel}
-                        stroke="#d4d4d4"
+                        stroke="var(--chart-grid)"
                         strokeDasharray="4 4"
-                        label={{ value: t('today'), position: 'top', fontSize: 10, fill: '#a3a3a3' }}
+                        label={{ value: t('today'), position: 'top', fontSize: 10, fill: 'var(--muted-foreground)' }}
                     />
                 )}
                 <Area
@@ -164,7 +164,7 @@ export default function RevenueTrend({
                 <Line
                     type="monotone"
                     dataKey="projected"
-                    stroke="#a3a3a3"
+                    stroke="var(--muted-foreground)"
                     strokeWidth={2}
                     strokeDasharray="5 4"
                     dot={false}
@@ -193,15 +193,15 @@ function RevenueTooltip({
     if (!active || !payload?.length) return null;
     const d = payload[0].payload;
     return (
-        <div className="rounded-md bg-white p-2 text-xs ring-1 ring-black/5 shadow-md">
-            <div className="mb-1.5 font-medium text-neutral-700">{d.label}</div>
+        <div className="rounded-md bg-popover p-2 text-xs text-popover-foreground border border-border shadow-md">
+            <div className="mb-1.5 font-medium text-foreground">{d.label}</div>
             <div className="space-y-0.5">
-                <div className="flex items-center gap-1.5 text-neutral-600">
+                <div className="flex items-center gap-1.5 text-muted-foreground">
                     <span className="inline-block size-2 rounded-sm bg-brand" />
                     {wonLabel(formatCompactCurrency(d.won, currency, locale))}
                 </div>
-                <div className="flex items-center gap-1.5 text-neutral-600">
-                    <span className="inline-block size-2 rounded-sm" style={{ backgroundColor: '#a3a3a3' }} />
+                <div className="flex items-center gap-1.5 text-muted-foreground">
+                    <span className="inline-block size-2 rounded-sm" style={{ backgroundColor: 'var(--muted-foreground)' }} />
                     {projectedLabel(formatCompactCurrency(d.projected, currency, locale))}
                 </div>
             </div>

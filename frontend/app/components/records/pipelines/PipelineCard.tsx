@@ -67,13 +67,13 @@ export default function PipelineCard({
     }, [metrics]);
 
     return (
-        <div className="rounded-2xl bg-neutral-100 ring-1 ring-black/5 transition">
+        <div className="rounded-2xl bg-muted ring-1 ring-border transition">
             <div
-                className="flex items-center gap-4 p-4 cursor-pointer hover:bg-neutral-200 rounded-2xl"
+                className="flex items-center gap-4 p-4 cursor-pointer hover:bg-muted/60 rounded-2xl"
                 onClick={toggleExpand}
             >
                 <div className="flex-1 min-w-0">
-                    <h3 className="text-base font-semibold text-neutral-900 truncate">
+                    <h3 className="text-base font-semibold text-foreground truncate">
                         {pipeline.name}
                     </h3>
                 </div>
@@ -84,7 +84,7 @@ export default function PipelineCard({
                             type="button"
                             aria-label={t('actionsAriaLabel')}
                             onClick={(e) => e.stopPropagation()}
-                            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-neutral-200 text-neutral-700 transition hover:bg-neutral-300"
+                            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-background text-foreground transition hover:bg-background/60"
                         >
                             <EllipsisHorizontalIcon className="size-4" />
                         </button>
@@ -106,7 +106,7 @@ export default function PipelineCard({
                                     onQuickEdit();
                                 }}
                             >
-                                <PencilIcon className="size-4 text-neutral-500" />
+                                <PencilIcon className="size-4 text-muted-foreground" />
                                 {t('quickEdit')}
                             </DropdownMenuItem>
                         )}
@@ -114,7 +114,7 @@ export default function PipelineCard({
                             <>
                                 <DropdownMenuSeparator />
                                 <DropdownMenuItem
-                                    className="text-destructive hover:bg-red-500/10"
+                                    className="text-destructive hover:bg-destructive/10"
                                     onSelect={(e) => {
                                         e.preventDefault();
                                         onDelete();
@@ -143,9 +143,9 @@ export default function PipelineCard({
             </div>
 
             {isExpanded && (
-                <div className="border-t border-black/10 p-4 space-y-4">
+                <div className="border-t border-border p-4 space-y-4">
                     {metricsStatus === 'loading' && (
-                        <div className="flex items-center justify-center py-4 text-sm text-neutral-500">
+                        <div className="flex items-center justify-center py-4 text-sm text-muted-foreground">
                             <Loader2Icon className="size-4 animate-spin mr-2" />
                             {t('loadingMetrics')}
                         </div>
@@ -184,10 +184,10 @@ export default function PipelineCard({
 function CountTile({ label, value, className }: { label: string; value: number; className?: string }) {
     return (
         <div>
-            <p className="text-xs font-medium tracking-[0.12em] text-neutral-500 uppercase mb-2">
+            <p className="text-xs font-medium tracking-[0.12em] text-muted-foreground uppercase mb-2">
                 {label}
             </p>
-            <p className={cn("text-2xl font-semibold text-neutral-900", className)}>{value}</p>
+            <p className={cn("text-2xl font-semibold text-foreground", className)}>{value}</p>
         </div>
     );
 }
@@ -200,11 +200,11 @@ function RelatedUsersSection({ users }: { users: User[] }) {
 
     return (
         <div>
-            <p className="text-xs font-medium tracking-[0.12em] text-neutral-500 uppercase mb-2">
+            <p className="text-xs font-medium tracking-[0.12em] text-muted-foreground uppercase mb-2">
                 {t('relations', { count: users.length })}
             </p>
             {users.length === 0 ? (
-                <p className="text-xs text-neutral-400">{t('noRelatedUsers')}</p>
+                <p className="text-xs text-muted-foreground">{t('noRelatedUsers')}</p>
             ) : (
                 <AvatarGroup>
                     {visible.map((u) => {
@@ -213,7 +213,7 @@ function RelatedUsersSection({ users }: { users: User[] }) {
                             <Tooltip key={u.id}>
                                 <TooltipTrigger asChild>
                                     <Avatar
-                                        className="border-white w-10 h-10 cursor-pointer hover:scale-110 transition-all duration-300 bg-white"
+                                        className="border-background w-10 h-10 cursor-pointer hover:scale-110 transition-all duration-300 bg-muted"
                                         onClick={() => router.push(`/users/${u.id}`)}
                                     >
                                         <AvatarImage src={u.profilePictureUrl} className="w-10 h-10" />
@@ -227,7 +227,7 @@ function RelatedUsersSection({ users }: { users: User[] }) {
                         );
                     })}
                     {overflow > 0 && (
-                        <AvatarGroupCount className="ring-transparent bg-neutral-200 text-neutral-600 w-10 h-10">
+                        <AvatarGroupCount className="ring-transparent bg-muted text-muted-foreground w-10 h-10">
                             +{overflow}
                         </AvatarGroupCount>
                     )}
@@ -241,7 +241,7 @@ function AssociatedStagesSection({ stages }: { stages: Stage[] }) {
     const t = useTranslations('PipelinesCard');
     return (
         <div>
-            <p className="text-xs font-medium tracking-[0.12em] text-neutral-500 uppercase mb-2">
+            <p className="text-xs font-medium tracking-[0.12em] text-muted-foreground uppercase mb-2">
                 {t('associatedStages', { count: stages.length })}
             </p>
             <div className="flex flex-wrap items-start gap-2">

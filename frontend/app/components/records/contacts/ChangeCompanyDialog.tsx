@@ -111,7 +111,7 @@ export default function ChangeCompanyDialog({ open, onOpenChange, contacts, comp
                         value={selected}
                         onValueChange={(c) => setSelected((c as Company | null) ?? null)}
                     >
-                        <ComboboxInput id="company" placeholder={t('selectCompanyPlaceholder')} className="ring-1 ring-black/5" />
+                        <ComboboxInput id="company" placeholder={t('selectCompanyPlaceholder')} className="ring-1 ring-border" />
                         <ComboboxContent className="pointer-events-auto">
                             <ComboboxList onWheel={handleListWheel}>
                                 <ComboboxEmpty>{t('noCompaniesFound')}</ComboboxEmpty>

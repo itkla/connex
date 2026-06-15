@@ -10,7 +10,7 @@ import { formatCompactCurrency, parseMysqlDateTime } from '@/app/lib/utils';
 import { classOf, isClosed, RANGE_DAYS, type RangeKey } from '@/app/components/overview/analytics/metrics';
 
 const WON_COLOR = 'var(--color-brand)';
-const OPEN_COLOR = 'color-mix(in oklch, var(--color-brand) 30%, white)';
+const OPEN_COLOR = 'color-mix(in oklch, var(--color-brand) 30%, var(--card))';
 
 type Row = { id: number; name: string; won: number; open: number; openCount: number; total: number };
 
@@ -67,14 +67,14 @@ export default function PipelineValue({
     }, [deals, pipelines, classById, range, now]);
 
     if (rows.length === 0) {
-        return <div className="flex h-40 items-center justify-center text-sm text-neutral-500">{t('empty')}</div>;
+        return <div className="flex h-40 items-center justify-center text-sm text-muted-foreground">{t('empty')}</div>;
     }
 
     const maxTotal = Math.max(...rows.map((r) => r.total), 1);
 
     return (
         <div className="flex h-full flex-col">
-            <div className="mb-5 flex items-center gap-4 text-xs text-neutral-500">
+            <div className="mb-5 flex items-center gap-4 text-xs text-muted-foreground">
                 <span className="flex items-center gap-1.5">
                     <span className="size-2 rounded-sm" style={{ backgroundColor: WON_COLOR }} />
                     {t('won')}
@@ -89,18 +89,18 @@ export default function PipelineValue({
                     <li key={row.id}>
                         <Link
                             href="/records/pipelines"
-                            className="group block -mx-2 rounded-lg px-2 py-2 transition hover:bg-neutral-50"
+                            className="group block -mx-2 rounded-lg px-2 py-2 transition hover:bg-muted"
                         >
                         <div className="mb-1.5 flex items-baseline justify-between gap-3">
                             <span className="flex min-w-0 items-center gap-2">
-                                <span className="w-4 shrink-0 text-sm tabular-nums text-neutral-500">{i + 1}</span>
-                                <span className="min-w-0 truncate text-sm font-medium text-neutral-900">{row.name}</span>
+                                <span className="w-4 shrink-0 text-sm tabular-nums text-muted-foreground">{i + 1}</span>
+                                <span className="min-w-0 truncate text-sm font-medium text-foreground">{row.name}</span>
                             </span>
-                            <span className="shrink-0 text-sm font-semibold tabular-nums text-neutral-900">
+                            <span className="shrink-0 text-sm font-semibold tabular-nums text-foreground">
                                 {formatCompactCurrency(row.total, currency, locale)}
                             </span>
                         </div>
-                        <div className="flex h-7 w-full overflow-hidden rounded-md bg-neutral-100">
+                        <div className="flex h-7 w-full overflow-hidden rounded-md bg-muted">
                             <div
                                 className="h-full transition-[width] duration-500 ease-out motion-reduce:transition-none"
                                 style={{ width: `${(row.won / maxTotal) * 100}%`, backgroundColor: WON_COLOR }}
@@ -110,14 +110,14 @@ export default function PipelineValue({
                                 style={{ width: `${(row.open / maxTotal) * 100}%`, backgroundColor: OPEN_COLOR }}
                             />
                         </div>
-                        <div className="mt-1.5 flex items-center gap-2 text-xs tabular-nums text-neutral-500">
+                        <div className="mt-1.5 flex items-center gap-2 text-xs tabular-nums text-muted-foreground">
                             <span>
                                 {t('rowSummary', {
                                     won: formatCompactCurrency(row.won, currency, locale),
                                     open: formatCompactCurrency(row.open, currency, locale),
                                 })}
                             </span>
-                            <span className="text-neutral-300">·</span>
+                            <span className="text-border">·</span>
                             <span>{t('deals', { count: row.openCount })}</span>
                         </div>
                         </Link>

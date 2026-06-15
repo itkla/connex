@@ -17,7 +17,7 @@ export default function InfoTip({
                 <button
                     type="button"
                     aria-label={label}
-                    className="inline-flex shrink-0 items-center rounded-full text-neutral-400 transition-colors hover:text-neutral-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
+                    className="inline-flex shrink-0 items-center rounded-full text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
                 >
                     <InformationCircleIcon className="size-3.5" />
                 </button>
@@ -25,7 +25,7 @@ export default function InfoTip({
             <TooltipContent>
                 <div className="flex flex-col gap-2">
                     <h3 className="text-sm font-medium">{title}</h3>
-                    <div className="text-xs text-neutral-400">{body}</div>
+                    <div className="text-xs text-background/70">{body}</div>
                 </div>
             </TooltipContent>
         </Tooltip>

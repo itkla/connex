@@ -11,7 +11,7 @@ const TYPE_COLORS: Record<string, string> = {
     Email: '#0ea5e9',
     Meeting: '#10b981',
     Note: '#f59e0b',
-    Other: '#737373',
+    Other: 'var(--muted-foreground)',
 };
 
 type Slice = { type: string; value: number; color: string };
@@ -24,16 +24,16 @@ export default function DealActivityBreakdown({ activities }: { activities: Acti
         counts.set(key, (counts.get(key) ?? 0) + 1);
     }
     const data: Slice[] = Array.from(counts.entries())
-        .map(([type, value]) => ({ type, value, color: TYPE_COLORS[type] ?? '#737373' }))
+        .map(([type, value]) => ({ type, value, color: TYPE_COLORS[type] ?? 'var(--muted-foreground)' }))
         .sort((a, b) => b.value - a.value);
 
     const total = activities.length;
 
     return (
-        <div className="rounded-xl bg-transparent p-3 ring-1 ring-black/5">
-            <p className="text-xs uppercase tracking-wider text-neutral-500">{t('activityMix')}</p>
+        <div className="rounded-xl bg-transparent p-3 ring-1 ring-border">
+            <p className="text-xs uppercase tracking-wider text-muted-foreground">{t('activityMix')}</p>
             {total === 0 ? (
-                <p className="mt-3 text-xs text-neutral-400">{t('noActivitiesYet')}</p>
+                <p className="mt-3 text-xs text-muted-foreground">{t('noActivitiesYet')}</p>
             ) : (
                 <div className="mt-1 flex items-center gap-4">
                     <div className="relative h-28 w-28 shrink-0">
@@ -56,8 +56,8 @@ export default function DealActivityBreakdown({ activities }: { activities: Acti
                             </PieChart>
                         </ResponsiveContainer>
                         <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
-                            <span className="text-lg font-semibold text-neutral-900">{total}</span>
-                            <span className="text-[10px] uppercase tracking-wider text-neutral-500">{t('total')}</span>
+                            <span className="text-lg font-semibold text-foreground">{total}</span>
+                            <span className="text-[10px] uppercase tracking-wider text-muted-foreground">{t('total')}</span>
                         </div>
                     </div>
                     <ul className="min-w-0 flex-1 space-y-1 text-xs">
@@ -67,8 +67,8 @@ export default function DealActivityBreakdown({ activities }: { activities: Acti
                                     className="inline-block size-2 rounded-sm"
                                     style={{ backgroundColor: d.color }}
                                 />
-                                <span className="flex-1 truncate text-neutral-600">{d.type}</span>
-                                <span className="tabular-nums text-neutral-900">{d.value}</span>
+                                <span className="flex-1 truncate text-muted-foreground">{d.type}</span>
+                                <span className="tabular-nums text-foreground">{d.value}</span>
                             </li>
                         ))}
                     </ul>
@@ -88,9 +88,9 @@ function BreakdownTooltip({
     if (!active || !payload?.length) return null;
     const d = payload[0].payload;
     return (
-        <div className="rounded-md bg-white p-2 text-xs shadow-md ring-1 ring-black/5">
-            <div className="font-medium text-neutral-700">{d.type}</div>
-            <div className="text-neutral-600">{d.value}</div>
+        <div className="rounded-md bg-popover text-popover-foreground p-2 text-xs shadow-md border border-border">
+            <div className="font-medium text-popover-foreground">{d.type}</div>
+            <div className="text-muted-foreground">{d.value}</div>
         </div>
     );
 }

@@ -140,8 +140,8 @@ export default function AnalyticsBoard({
         <div className="mx-auto w-full max-w-7xl space-y-6 px-2 pb-12">
             <header className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
                 <div>
-                    <h1 className="text-3xl font-extrabold tracking-tight text-black md:text-4xl">{t('title')}</h1>
-                    <p className="mt-1.5 text-sm text-neutral-500">{t('subtitle')}</p>
+                    <h1 className="text-3xl font-extrabold tracking-tight text-foreground md:text-4xl">{t('title')}</h1>
+                    <p className="mt-1.5 text-sm text-muted-foreground">{t('subtitle')}</p>
                 </div>
                 {deals.length > 0 && (
                     <div className="flex items-center gap-2">
@@ -151,10 +151,10 @@ export default function AnalyticsBoard({
                                 <button
                                     type="button"
                                     aria-label={t('currency')}
-                                    className="flex items-center gap-1.5 rounded-full bg-neutral-100 px-3 py-1.5 text-xs font-medium text-neutral-700 ring-1 ring-black/5 transition hover:bg-neutral-200"
+                                    className="flex items-center gap-1.5 rounded-full bg-muted px-3 py-1.5 text-xs font-medium text-foreground ring-1 ring-border transition hover:bg-muted/80"
                                 >
                                     {currency}
-                                    <ChevronDownIcon className="size-3.5 text-neutral-500" />
+                                    <ChevronDownIcon className="size-3.5 text-muted-foreground" />
                                 </button>
                             </DropdownMenuTrigger>
                             <DropdownMenuContent align="end">
@@ -163,7 +163,7 @@ export default function AnalyticsBoard({
                                     .map(([code, count]) => (
                                         <DropdownMenuItem key={code} onSelect={() => setSelectedCurrency(code)}>
                                             <span className={code === currency ? 'font-semibold' : ''}>{code}</span>
-                                            <span className="ml-auto text-xs text-neutral-500">
+                                            <span className="ml-auto text-xs text-muted-foreground">
                                                 {t('currencyCount', { count })}
                                             </span>
                                         </DropdownMenuItem>
@@ -171,7 +171,7 @@ export default function AnalyticsBoard({
                             </DropdownMenuContent>
                         </DropdownMenu>
                     ) : deals.length > 0 ? (
-                        <span className="rounded-full bg-neutral-100 px-3 py-1.5 text-xs font-medium text-neutral-600 ring-1 ring-black/5">
+                        <span className="rounded-full bg-muted px-3 py-1.5 text-xs font-medium text-muted-foreground ring-1 ring-border">
                             {currency}
                         </span>
                     ) : null}
@@ -196,10 +196,10 @@ export default function AnalyticsBoard({
                     infoLabel={t('infoAria')}
                     action={
                         <div className="text-right">
-                            <div className="text-[10px] font-medium uppercase tracking-[0.12em] text-neutral-500">
+                            <div className="text-[10px] font-medium uppercase tracking-[0.12em] text-muted-foreground">
                                 {tRevenue('openPipeline')}
                             </div>
-                            <div className="mt-0.5 text-lg font-semibold tabular-nums text-neutral-900">
+                            <div className="mt-0.5 text-lg font-semibold tabular-nums text-foreground">
                                 {formatCompactCurrency(openPipeline, currency, locale)}
                             </div>
                         </div>

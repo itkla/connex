@@ -53,14 +53,14 @@ export default function UpcomingTasks({ tasks, locale }: { tasks: Task[]; locale
 
     if (visible.length === 0) {
         return (
-            <p className="mt-6 border-t border-neutral-200 pt-6 text-sm text-neutral-500">
+            <p className="mt-6 border-t border-border pt-6 text-sm text-muted-foreground">
                 {t('allCaughtUp')}
             </p>
         );
     }
 
     return (
-        <ul className="mt-6 divide-y divide-neutral-200 border-t border-neutral-200">
+        <ul className="mt-6 divide-y divide-border border-t border-border">
             {visible.map((task) => {
                 const due = timeOf(task.dueDate);
                 const isOverdue = due > 0 && due < now;
@@ -72,20 +72,20 @@ export default function UpcomingTasks({ tasks, locale }: { tasks: Task[]; locale
                             aria-label={t('completeAria', { description: task.description })}
                             className="size-4 shrink-0 cursor-pointer"
                         />
-                        <span className="line-clamp-1 flex-1 text-sm text-neutral-800">
+                        <span className="line-clamp-1 flex-1 text-sm text-foreground">
                             {task.description}
                         </span>
                         {task.dueDate ? (
                             <span
                                 className={cn(
                                     'shrink-0 text-xs tabular-nums',
-                                    isOverdue ? 'font-medium text-red-600' : 'text-neutral-500',
+                                    isOverdue ? 'font-medium text-destructive' : 'text-muted-foreground',
                                 )}
                             >
                                 {formatShortDate(task.dueDate, locale)}
                             </span>
                         ) : (
-                            <span className="shrink-0 text-xs text-neutral-400">{t('noDate')}</span>
+                            <span className="shrink-0 text-xs text-muted-foreground">{t('noDate')}</span>
                         )}
                     </li>
                 );

@@ -33,7 +33,7 @@ type Props = {
 };
 
 const inputClass =
-    'w-full rounded-lg bg-neutral-100 px-3 py-2 text-sm text-black placeholder-neutral-500 outline-none ring-1 ring-black/5 transition focus:ring-2 focus:ring-brand';
+    'w-full rounded-lg bg-muted px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground outline-none ring-1 ring-border transition focus:ring-2 focus:ring-brand';
 const MAX_NAME = 40;
 const EASE_OUT: [number, number, number, number] = [0.23, 1, 0.32, 1];
 
@@ -128,7 +128,7 @@ function TagForm({
                 <DialogDescription>{t('description')}</DialogDescription>
             </DialogHeader>
 
-            <div className="flex min-h-20 items-center justify-center rounded-xl bg-neutral-50 px-4 py-5 ring-1 ring-black/5">
+            <div className="flex min-h-20 items-center justify-center rounded-xl bg-muted px-4 py-5 ring-1 ring-border">
                 <motion.span
                     className="inline-flex max-w-full items-center rounded-4xl px-3 py-1 text-sm font-medium"
                     animate={{ backgroundColor: color, color: previewInk }}
@@ -171,8 +171,8 @@ function TagForm({
                                     whileTap={reduce ? undefined : { scale: 0.92 }}
                                     transition={{ duration: 0.15, ease: EASE_OUT }}
                                     style={{ backgroundColor: swatch }}
-                                    className={`flex aspect-square items-center justify-center rounded-lg ring-1 ring-inset ring-black/10 ${
-                                        selected ? 'ring-2 ring-offset-2 ring-neutral-900' : ''
+                                    className={`flex aspect-square items-center justify-center rounded-lg ring-1 ring-inset ring-border ${
+                                        selected ? 'ring-2 ring-offset-2 ring-foreground' : ''
                                     }`}
                                 >
                                     {selected && (
@@ -188,7 +188,7 @@ function TagForm({
 
                     <div className="mt-1 flex items-center gap-2">
                         <label
-                            className="relative size-9 shrink-0 cursor-pointer overflow-hidden rounded-lg ring-1 ring-inset ring-black/10"
+                            className="relative size-9 shrink-0 cursor-pointer overflow-hidden rounded-lg ring-1 ring-inset ring-border"
                             style={{ backgroundColor: hexValid ? color : '#ffffff' }}
                             title={t('customColorLabel')}
                         >

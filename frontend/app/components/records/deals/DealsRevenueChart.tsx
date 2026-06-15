@@ -76,7 +76,7 @@ export default function DealsRevenueChart({ deals }: { deals: Deal[] }) {
         () =>
             ({
                 closed: { label: t('actualRevenue'), color: 'var(--color-brand)' },
-                projected: { label: t('projectedRevenue'), color: 'var(--color-chart-2)' },
+                projected: { label: t('projectedRevenue'), color: 'var(--muted-foreground)' },
             }) satisfies ChartConfig,
         [t],
     );
@@ -90,14 +90,14 @@ export default function DealsRevenueChart({ deals }: { deals: Deal[] }) {
                     tickLine={false}
                     axisLine={false}
                     tickMargin={8}
-                    tick={{ fontSize: 11, fill: '#737373' }}
+                    tick={{ fontSize: 11, fill: 'var(--chart-axis)' }}
                 />
                 <YAxis
                     tickLine={false}
                     axisLine={false}
                     tickMargin={4}
                     width={56}
-                    tick={{ fontSize: 11, fill: '#737373' }}
+                    tick={{ fontSize: 11, fill: 'var(--chart-axis)' }}
                     tickFormatter={(v: number) => formatCompactCurrency(v, currency, locale)}
                 />
                 <RechartsTooltip
@@ -113,9 +113,9 @@ export default function DealsRevenueChart({ deals }: { deals: Deal[] }) {
                 {todayLabel != null && (
                     <ReferenceLine
                         x={todayLabel}
-                        stroke="#a3a3a3"
+                        stroke="var(--chart-grid)"
                         strokeDasharray="4 4"
-                        label={{ value: t('today'), position: 'top', fontSize: 10, fill: '#737373' }}
+                        label={{ value: t('today'), position: 'top', fontSize: 10, fill: 'var(--chart-axis)' }}
                     />
                 )}
                 <Line
@@ -156,16 +156,16 @@ function RevenueChartTooltip({ active, payload, currency = 'USD', projectedLabel
     const projectedAmount = formatCompactCurrency(d.projected, currency, locale);
     const actualAmount = formatCompactCurrency(d.closed, currency, locale);
     return (
-        <div className="rounded-md bg-white p-2 text-xs ring-1 ring-black/5 shadow-md">
-            <div className="font-medium text-neutral-700 mb-1.5">
+        <div className="rounded-md bg-popover text-popover-foreground p-2 text-xs border border-border shadow-md">
+            <div className="font-medium text-popover-foreground mb-1.5">
                 {d.label}
             </div>
             <div className="space-y-0.5">
-                <div className="flex items-center gap-1.5 text-neutral-600">
-                    <span className="inline-block size-2 rounded-sm" style={{ backgroundColor: 'var(--color-chart-2)' }} />
+                <div className="flex items-center gap-1.5 text-muted-foreground">
+                    <span className="inline-block size-2 rounded-sm" style={{ backgroundColor: 'var(--muted-foreground)' }} />
                     {projectedLabel ? projectedLabel(projectedAmount) : `Projected · ${projectedAmount}`}
                 </div>
-                <div className="flex items-center gap-1.5 text-neutral-600">
+                <div className="flex items-center gap-1.5 text-muted-foreground">
                     <span className="inline-block size-2 rounded-sm bg-brand" />
                     {actualLabel ? actualLabel(actualAmount) : `Actual · ${actualAmount}`}
                 </div>

@@ -33,15 +33,15 @@ function initialsOf(name: string): string {
 }
 
 const AVATAR_TINTS = [
-    'bg-rose-100 text-rose-700',
-    'bg-orange-100 text-orange-700',
-    'bg-amber-100 text-amber-700',
-    'bg-emerald-100 text-emerald-700',
-    'bg-teal-100 text-teal-700',
-    'bg-sky-100 text-sky-700',
-    'bg-indigo-100 text-indigo-700',
-    'bg-violet-100 text-violet-700',
-    'bg-fuchsia-100 text-fuchsia-700',
+    'bg-rose-100 text-rose-700 dark:bg-rose-950/40 dark:text-rose-300',
+    'bg-orange-100 text-orange-700 dark:bg-orange-950/40 dark:text-orange-300',
+    'bg-amber-100 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300',
+    'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300',
+    'bg-teal-100 text-teal-700 dark:bg-teal-950/40 dark:text-teal-300',
+    'bg-sky-100 text-sky-700 dark:bg-sky-950/40 dark:text-sky-300',
+    'bg-indigo-100 text-indigo-700 dark:bg-indigo-950/40 dark:text-indigo-300',
+    'bg-violet-100 text-violet-700 dark:bg-violet-950/40 dark:text-violet-300',
+    'bg-fuchsia-100 text-fuchsia-700 dark:bg-fuchsia-950/40 dark:text-fuchsia-300',
 ];
 
 function tintFor(seed: string): string {
@@ -159,7 +159,7 @@ export default function ContactCard({
     return (
         <>
         <div
-            className="group relative flex cursor-pointer flex-col overflow-hidden rounded-2xl bg-white ring-1 ring-black/5 transition duration-200 hover:-translate-y-1 hover:shadow-[0_20px_45px_-18px_rgb(0_0_0/0.32)] hover:ring-black/10"
+            className="group relative flex cursor-pointer flex-col overflow-hidden rounded-2xl bg-card ring-1 ring-border transition duration-200 hover:-translate-y-1 hover:shadow-lg dark:hover:shadow-[0_20px_45px_-18px_rgb(0_0_0/0.6)] hover:ring-border"
             onClick={openContactPage}
         >
             <div className="relative aspect-square w-full overflow-hidden">
@@ -181,14 +181,14 @@ export default function ContactCard({
                             type="button"
                             aria-label={t('actionsAria')}
                             onClick={(e) => e.stopPropagation()}
-                            className="absolute top-2 right-2 flex size-8 items-center justify-center rounded-full bg-white/85 text-neutral-700 opacity-0 ring-1 ring-black/5 backdrop-blur transition group-hover:opacity-100 hover:bg-white focus:opacity-100 focus-visible:opacity-100 data-[state=open]:opacity-100"
+                            className="absolute top-2 right-2 flex size-8 items-center justify-center rounded-full bg-card/85 text-foreground opacity-0 ring-1 ring-border backdrop-blur transition group-hover:opacity-100 hover:bg-card focus:opacity-100 focus-visible:opacity-100 data-[state=open]:opacity-100"
                         >
                             <EllipsisHorizontalIcon className="size-5" />
                         </button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end" side="bottom" className="w-48" onClick={(e) => e.stopPropagation()}>
                         <DropdownMenuItem onSelect={() => router.push(`/records/contacts/${id}`)}>
-                            <EyeIcon className="size-4 text-neutral-500" />
+                            <EyeIcon className="size-4 text-muted-foreground" />
                             {t('view')}
                         </DropdownMenuItem>
                         <DropdownMenuItem
@@ -198,12 +198,12 @@ export default function ContactCard({
                                 else openInternalQuickEdit();
                             }}
                         >
-                            <PencilIcon className="size-4 text-neutral-500" />
+                            <PencilIcon className="size-4 text-muted-foreground" />
                             {t('quickEdit')}
                         </DropdownMenuItem>
                         {email && (
                             <DropdownMenuItem onSelect={() => { window.location.href = `mailto:${email}`; }}>
-                                <EnvelopeIcon className="size-4 text-neutral-500" />
+                                <EnvelopeIcon className="size-4 text-muted-foreground" />
                                 {t('sendEmail')}
                             </DropdownMenuItem>
                         )}
@@ -211,22 +211,22 @@ export default function ContactCard({
                             <DropdownMenuItem onSelect={() =>
                                 copyToClipboard(phone, 'Phone') ? toast.success(t('toastPhoneCopied')) : toast.error(t('toastFailedCopyPhone'))
                             }>
-                                <PhoneIcon className="size-4 text-neutral-500" />
+                                <PhoneIcon className="size-4 text-muted-foreground" />
                                 {t('copyPhone')}
                             </DropdownMenuItem>
                         )}
                         <DropdownMenuSeparator />
                         <DropdownMenuItem onClick={() => openChangeCompanyDialog()}>
-                            <BuildingOffice2Icon className="size-4 text-neutral-500" />
+                            <BuildingOffice2Icon className="size-4 text-muted-foreground" />
                             {t('changeCompany')}
                         </DropdownMenuItem>
                         <DropdownMenuItem onClick={() => setRemoveFromCompanyOpen(true)}>
-                            <NoSymbolIcon className="size-4 text-neutral-500" />
+                            <NoSymbolIcon className="size-4 text-muted-foreground" />
                             {t('removeFromCompany')}
                         </DropdownMenuItem>
                         <DropdownMenuSeparator />
                         <DropdownMenuItem
-                            className="text-destructive hover:bg-red-500/10"
+                            className="text-destructive hover:bg-destructive/10"
                             onSelect={(e) => {
                                 e.preventDefault();
                                 onDelete?.();
@@ -241,13 +241,13 @@ export default function ContactCard({
 
             <div className="flex flex-col gap-2.5 p-4">
                 <div className="min-w-0">
-                    <h3 className="truncate font-semibold leading-tight text-neutral-900">{name}</h3>
-                    {title && <p className="mt-0.5 truncate text-xs text-neutral-500">{title}</p>}
+                    <h3 className="truncate font-semibold leading-tight text-foreground">{name}</h3>
+                    {title && <p className="mt-0.5 truncate text-xs text-muted-foreground">{title}</p>}
                 </div>
 
                 {company && (
-                    <span className="inline-flex max-w-full items-center gap-1.5 self-start rounded-full bg-neutral-100 px-2.5 py-1 text-xs font-medium text-neutral-600 ring-1 ring-inset ring-black/5">
-                        <BuildingOffice2Icon className="size-3.5 shrink-0 text-neutral-400" />
+                    <span className="inline-flex max-w-full items-center gap-1.5 self-start rounded-full bg-muted px-2.5 py-1 text-xs font-medium text-muted-foreground ring-1 ring-inset ring-border">
+                        <BuildingOffice2Icon className="size-3.5 shrink-0 text-muted-foreground" />
                         <span className="truncate">{company}</span>
                     </span>
                 )}

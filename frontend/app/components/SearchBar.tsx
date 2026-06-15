@@ -278,7 +278,7 @@ export default function SearchBar() {
                     onFocus={() => setOpen(true)}
                     onKeyDown={onKeyDown}
                     placeholder={t("placeholder")}
-                    className="w-full rounded-full bg-neutral-100 px-4 py-2.5 pr-10 text-base text-black placeholder-neutral-500 outline-none ring-1 ring-black/5 transition focus:ring-2 focus:ring-brand"
+                    className="w-full rounded-full bg-muted px-4 py-2.5 pr-10 text-base text-foreground placeholder:text-muted-foreground outline-none ring-1 ring-border transition focus:ring-2 focus:ring-brand"
                     role="combobox"
                     aria-expanded={showDropdown}
                     aria-controls="search-results-listbox"
@@ -291,7 +291,7 @@ export default function SearchBar() {
                     tabIndex={-1}
                     aria-label={t("search")}
                 >
-                    <MagnifyingGlassIcon className="size-5 text-neutral-500" />
+                    <MagnifyingGlassIcon className="size-5 text-muted-foreground" />
                 </Button>
             </form>
 
@@ -299,23 +299,23 @@ export default function SearchBar() {
                 <div
                     ref={listRef}
                     id="search-results-listbox"
-                    className="absolute left-0 right-0 top-full z-50 mt-2 max-h-[70vh] overflow-y-auto rounded-2xl bg-white p-2 text-black shadow-lg ring-1 ring-black/5"
+                    className="absolute left-0 right-0 top-full z-50 mt-2 max-h-[70vh] overflow-y-auto rounded-2xl bg-popover p-2 text-popover-foreground shadow-lg ring-1 ring-border"
                     role="listbox"
                 >
                     {loading && !hasResults && (
                         // <p className="px-3 py-2 text-sm text-neutral-500">{t("searching")}</p>
-                        <Loader2Icon className="size-5 text-neutral-500 animate-spin flex justify-center items-center" />
+                        <Loader2Icon className="size-5 text-muted-foreground animate-spin flex justify-center items-center" />
                     )}
 
                     {!loading && !hasResults && (
-                        <p className="px-3 py-2 text-sm text-neutral-500">
+                        <p className="px-3 py-2 text-sm text-muted-foreground">
                             {t("noResults", { query: trimmed })}
                         </p>
                     )}
 
                     {groups.map((group) => (
                         <div key={group.key} className="mb-1 last:mb-0">
-                            <p className="px-3 pb-1 pt-2 text-xs font-semibold uppercase tracking-wide text-neutral-400">
+                            <p className="px-3 pb-1 pt-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                                 {group.heading}
                             </p>
                             {group.rows.map((row) => {
@@ -329,7 +329,7 @@ export default function SearchBar() {
                                         onMouseEnter={() => setActiveIndex(row.index)}
                                         className={cn(
                                             "flex w-full items-center gap-3 rounded-xl px-3 py-2 text-left transition",
-                                            activeIndex === row.index ? "bg-neutral-100" : "hover:bg-neutral-50",
+                                            activeIndex === row.index ? "bg-muted" : "hover:bg-muted",
                                         )}
                                         role="option"
                                         aria-selected={activeIndex === row.index}
@@ -339,17 +339,17 @@ export default function SearchBar() {
                                                 row.leading
                                             ) : row.accent ? (
                                                 <span
-                                                    className="size-4 rounded-full ring-1 ring-black/10"
+                                                    className="size-4 rounded-full ring-1 ring-border"
                                                     style={{ backgroundColor: row.accent }}
                                                 />
                                             ) : Icon ? (
-                                                <Icon className="size-5 text-neutral-400" />
+                                                <Icon className="size-5 text-muted-foreground" />
                                             ) : null}
                                         </span>
                                         <span className="min-w-0 flex-1">
-                                            <span className="block truncate text-sm text-black">{row.label}</span>
+                                            <span className="block truncate text-sm text-foreground">{row.label}</span>
                                             {row.subtitle && (
-                                                <span className="block truncate text-xs text-neutral-500">
+                                                <span className="block truncate text-xs text-muted-foreground">
                                                     {row.subtitle}
                                                 </span>
                                             )}

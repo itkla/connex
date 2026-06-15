@@ -53,7 +53,7 @@ function pageList(current: number, total: number): (number | 'gap')[] {
     out.push(total);
     return out;
 }
-const CHECKBOX_CLASS = 'size-[18px] border-neutral-300 data-[state=checked]:border-brand data-[state=checked]:bg-brand data-[state=checked]:text-white data-[state=indeterminate]:border-brand data-[state=indeterminate]:bg-brand data-[state=indeterminate]:text-white';
+const CHECKBOX_CLASS = 'size-[18px] border-border data-[state=checked]:border-brand data-[state=checked]:bg-brand data-[state=checked]:text-white data-[state=indeterminate]:border-brand data-[state=indeterminate]:bg-brand data-[state=indeterminate]:text-white';
 
 interface Props<T extends { id: SelectionId; name?: string }> {
     data: T[];
@@ -174,21 +174,21 @@ export default function RecordsRenderView<T extends { id: SelectionId; name?: st
                     transition={{ duration: 0.24, ease: EASE_OUT }}
                     className="pointer-events-none fixed inset-x-0 bottom-6 z-40 flex justify-center px-4"
                 >
-                    <div className="pointer-events-auto flex items-center gap-1.5 rounded-full bg-white py-1.5 pr-1.5 pl-2 shadow-[0_8px_30px_rgb(0_0_0/0.12)] ring-1 ring-black/10">
+                    <div className="pointer-events-auto flex items-center gap-1.5 rounded-full bg-card py-1.5 pr-1.5 pl-2 shadow-lg ring-1 ring-border">
                         <span className="flex items-center gap-2 pr-1 pl-1">
                             <span className="flex h-6 min-w-6 items-center justify-center rounded-full bg-brand px-1.5 text-xs font-semibold tabular-nums text-white">
                                 {selectedIds.size}
                             </span>
-                            <span className="hidden text-sm text-neutral-600 sm:inline">{t('selectedLabel')}</span>
+                            <span className="hidden text-sm text-muted-foreground sm:inline">{t('selectedLabel')}</span>
                         </span>
-                        <span className="h-5 w-px shrink-0 bg-neutral-200" />
+                        <span className="h-5 w-px shrink-0 bg-border" />
                         {selectionActions}
-                        <span className="h-5 w-px shrink-0 bg-neutral-200" />
+                        <span className="h-5 w-px shrink-0 bg-border" />
                         <button
                             type="button"
                             onClick={() => onSelectedIdsChange(new Set())}
                             aria-label={t('clearSelection')}
-                            className="flex size-8 shrink-0 items-center justify-center rounded-full text-neutral-500 transition hover:bg-neutral-100 hover:text-neutral-800 active:scale-95"
+                            className="flex size-8 shrink-0 items-center justify-center rounded-full text-muted-foreground transition hover:bg-muted hover:text-foreground active:scale-95"
                         >
                             <XMarkIcon className="size-4" strokeWidth={2} />
                         </button>
@@ -200,9 +200,9 @@ export default function RecordsRenderView<T extends { id: SelectionId; name?: st
 
     const pager = (
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <div className="flex items-center gap-3 text-sm text-neutral-500">
+            <div className="flex items-center gap-3 text-sm text-muted-foreground">
                 <span className="tabular-nums">{t('showing', { from: showingFrom, to: showingTo, total })}</span>
-                <span className="hidden h-4 w-px bg-neutral-200 sm:block" />
+                <span className="hidden h-4 w-px bg-border sm:block" />
                 <label className="hidden items-center gap-2 sm:flex">
                     <span>{t('rowsPerPage')}</span>
                     <Select value={String(effectivePageSize)} onValueChange={(v) => changePageSize(Number(v))}>
@@ -251,9 +251,9 @@ export default function RecordsRenderView<T extends { id: SelectionId; name?: st
 
     if (loading && pagedData.length === 0) {
         return (
-            <div className="space-y-2 rounded-2xl bg-white p-4 ring-1 ring-black/5">
+            <div className="space-y-2 rounded-2xl bg-card p-4 ring-1 ring-border">
                 {Array.from({ length: 6 }).map((_, i) => (
-                    <div key={i} className="h-9 animate-pulse rounded-lg bg-neutral-100" />
+                    <div key={i} className="h-9 animate-pulse rounded-lg bg-muted" />
                 ))}
             </div>
         );
@@ -262,11 +262,11 @@ export default function RecordsRenderView<T extends { id: SelectionId; name?: st
     if (pagedData.length === 0) {
         return (
             <>
-                <div className="rounded-2xl bg-white px-6 py-16 text-center ring-1 ring-black/5">
-                    <div className="mx-auto flex size-12 items-center justify-center rounded-2xl bg-neutral-100 text-neutral-400">
+                <div className="rounded-2xl bg-card px-6 py-16 text-center ring-1 ring-border">
+                    <div className="mx-auto flex size-12 items-center justify-center rounded-2xl bg-muted text-muted-foreground">
                         <InboxIcon className="size-6" />
                     </div>
-                    <p className="mx-auto mt-4 max-w-sm text-sm font-medium text-neutral-600">{t('emptyState')}</p>
+                    <p className="mx-auto mt-4 max-w-sm text-sm font-medium text-muted-foreground">{t('emptyState')}</p>
                 </div>
                 {selectionBar}
             </>
@@ -301,11 +301,11 @@ export default function RecordsRenderView<T extends { id: SelectionId; name?: st
 
     return (
         <>
-            <div className={cn('overflow-hidden rounded-2xl bg-white ring-1 ring-black/5', loading && 'opacity-60 transition-opacity')} aria-busy={loading}>
+            <div className={cn('overflow-hidden rounded-2xl bg-card ring-1 ring-border', loading && 'opacity-60 transition-opacity')} aria-busy={loading}>
                 <div className="overflow-x-auto">
                     <table className="w-full border-collapse text-left text-sm">
                         <thead>
-                            <tr className="border-b border-neutral-200 bg-neutral-50/60">
+                            <tr className="border-b border-border bg-muted/60">
                                 <th className="w-12 px-4 py-2.5">
                                     <Checkbox
                                         checked={someSelected ? 'indeterminate' : allSelected}
@@ -336,7 +336,7 @@ export default function RecordsRenderView<T extends { id: SelectionId; name?: st
                                                     : undefined
                                             }
                                             className={cn(
-                                                'px-4 py-2.5 text-xs font-semibold tracking-wide whitespace-nowrap text-neutral-500 uppercase',
+                                                'px-4 py-2.5 text-xs font-semibold tracking-wide whitespace-nowrap text-muted-foreground uppercase',
                                                 col.widthClass,
                                             )}
                                         >
@@ -345,8 +345,8 @@ export default function RecordsRenderView<T extends { id: SelectionId; name?: st
                                                     type="button"
                                                     onClick={() => onSort(col.key)}
                                                     className={cn(
-                                                        'inline-flex items-center gap-1 transition-colors hover:text-neutral-800',
-                                                        active && 'text-neutral-800',
+                                                        'inline-flex items-center gap-1 transition-colors hover:text-foreground',
+                                                        active && 'text-foreground',
                                                     )}
                                                 >
                                                     {col.label}
@@ -370,9 +370,9 @@ export default function RecordsRenderView<T extends { id: SelectionId; name?: st
                                         key={item.id}
                                         data-state={isSelected ? 'selected' : undefined}
                                         className={cn(
-                                            'group border-b border-neutral-100 transition-colors last:border-b-0',
+                                            'group border-b border-border transition-colors last:border-b-0',
                                             clickable && 'cursor-pointer',
-                                            isSelected ? 'bg-brand-light/40 hover:bg-brand-light/55' : 'hover:bg-neutral-50',
+                                            isSelected ? 'bg-brand-light/40 hover:bg-brand-light/55' : 'hover:bg-muted',
                                         )}
                                         onClick={() => {
                                             if (onRowClick) onRowClick(item);
@@ -397,7 +397,7 @@ export default function RecordsRenderView<T extends { id: SelectionId; name?: st
                                                 return (
                                                     <td
                                                         key={col.key}
-                                                        className="px-4 py-2.5 text-neutral-700 transition-colors hover:text-brand-dark"
+                                                        className="px-4 py-2.5 text-foreground transition-colors hover:text-brand-dark"
                                                         onClick={(e) => {
                                                             e.stopPropagation();
                                                             const v = getValue(item) ?? '';
@@ -413,7 +413,7 @@ export default function RecordsRenderView<T extends { id: SelectionId; name?: st
                                                 );
                                             }
                                             return (
-                                                <td key={col.key} className="px-4 py-2.5 text-neutral-700">
+                                                <td key={col.key} className="px-4 py-2.5 text-foreground">
                                                     {content}
                                                 </td>
                                             );
@@ -463,7 +463,7 @@ function RowActions({
                 <button
                     type="button"
                     aria-label={actionsAria}
-                    className="flex size-7 items-center justify-center rounded-full text-neutral-400 opacity-0 transition hover:bg-neutral-200/70 hover:text-neutral-700 group-hover:opacity-100 focus:opacity-100 focus-visible:opacity-100 data-[state=open]:opacity-100"
+                    className="flex size-7 items-center justify-center rounded-full text-muted-foreground opacity-0 transition hover:bg-muted/70 hover:text-foreground group-hover:opacity-100 focus:opacity-100 focus-visible:opacity-100 data-[state=open]:opacity-100"
                 >
                     <EllipsisHorizontalIcon className="size-5" />
                 </button>
@@ -471,14 +471,14 @@ function RowActions({
             <DropdownMenuContent align="end" className="w-40">
                 {onQuickEdit && (
                     <DropdownMenuItem onSelect={() => onQuickEdit()}>
-                        <PencilSquareIcon className="size-4 text-neutral-500" />
+                        <PencilSquareIcon className="size-4 text-muted-foreground" />
                         {quickEditLabel}
                     </DropdownMenuItem>
                 )}
                 {onQuickEdit && onDelete && <DropdownMenuSeparator />}
                 {onDelete && (
                     <DropdownMenuItem
-                        className="text-destructive hover:bg-red-500/10"
+                        className="text-destructive hover:bg-destructive/10"
                         onSelect={() => onDelete()}
                     >
                         <TrashIcon className="size-4 text-destructive" />

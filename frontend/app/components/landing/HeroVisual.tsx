@@ -50,9 +50,9 @@ export default function HeroVisual({ labels }: { labels: Labels }) {
               };
 
     return (
-        <div className="w-full max-w-[440px] rounded-[28px] border border-black/[0.06] bg-white p-6 shadow-[0_30px_70px_-30px_rgba(15,23,42,0.35)] ring-1 ring-black/[0.02]">
+        <div className="w-full max-w-[440px] rounded-[28px] border border-border bg-card p-6 shadow-xl ring-1 ring-border">
             <div className="flex items-center justify-between">
-                <span className="text-sm font-medium text-neutral-500">{labels.connections}</span>
+                <span className="text-sm font-medium text-muted-foreground">{labels.connections}</span>
                 <span className="flex items-center gap-1.5 text-xs font-medium text-brand-dark">
                     <TrophyIcon className="size-3.5" />
                     {labels.won}
@@ -69,7 +69,7 @@ export default function HeroVisual({ labels }: { labels: Labels }) {
                 >
                     <motion.path
                         d="M50 50 C 66 40, 76 30, 82 17"
-                        stroke="#73d200"
+                        stroke="var(--color-brand)"
                         strokeWidth="1.5"
                         strokeLinecap="round"
                         vectorEffect="non-scaling-stroke"
@@ -77,7 +77,7 @@ export default function HeroVisual({ labels }: { labels: Labels }) {
                     />
                     <motion.path
                         d="M50 50 C 36 62, 26 72, 18 83"
-                        stroke="#73d200"
+                        stroke="var(--color-brand)"
                         strokeWidth="1.5"
                         strokeLinecap="round"
                         vectorEffect="non-scaling-stroke"
@@ -87,15 +87,15 @@ export default function HeroVisual({ labels }: { labels: Labels }) {
 
                 <motion.div
                     {...fade(0.1)}
-                    className="absolute left-1/2 top-1/2 w-[212px] -translate-x-1/2 -translate-y-1/2 rounded-2xl border border-black/[0.06] bg-white p-3.5 shadow-[0_18px_40px_-24px_rgba(15,23,42,0.5)]"
+                    className="absolute left-1/2 top-1/2 w-[212px] -translate-x-1/2 -translate-y-1/2 rounded-2xl border border-border bg-card p-3.5 shadow-lg"
                 >
                     <div className="flex items-center gap-3">
                         <div className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-brand-light">
                             <BuildingOffice2Icon className="size-5 text-brand-dark" />
                         </div>
                         <div className="min-w-0 flex-1">
-                            <div className="truncate text-sm font-semibold text-neutral-900">{labels.company}</div>
-                            <div className="truncate text-xs text-neutral-500">{labels.dealsOpen}</div>
+                            <div className="truncate text-sm font-semibold text-foreground">{labels.company}</div>
+                            <div className="truncate text-xs text-muted-foreground">{labels.dealsOpen}</div>
                         </div>
                         <div className="text-base font-semibold leading-none text-brand-dark">{labels.dealValue}</div>
                     </div>
@@ -103,24 +103,24 @@ export default function HeroVisual({ labels }: { labels: Labels }) {
 
                 <motion.div {...fade(0.55)} className="absolute" style={{ left: "82%", top: "17%" }}>
                     <div className="relative -translate-x-1/2 -translate-y-1/2">
-                        <span className="flex size-10 items-center justify-center rounded-full bg-neutral-900 text-xs font-semibold text-white ring-4 ring-white">
+                        <span className="flex size-10 items-center justify-center rounded-full bg-neutral-900 text-xs font-semibold text-white ring-4 ring-card dark:bg-neutral-100 dark:text-neutral-900">
                             {initials(labels.contactName1)}
                         </span>
                         <div className="absolute right-full top-1/2 mr-2 -translate-y-1/2 whitespace-nowrap text-right leading-tight">
-                            <div className="text-xs font-medium text-neutral-900">{labels.contactName1}</div>
-                            <div className="text-[11px] text-neutral-500">{labels.contactRole1}</div>
+                            <div className="text-xs font-medium text-foreground">{labels.contactName1}</div>
+                            <div className="text-[11px] text-muted-foreground">{labels.contactRole1}</div>
                         </div>
                     </div>
                 </motion.div>
 
                 <motion.div {...fade(0.7)} className="absolute" style={{ left: "18%", top: "83%" }}>
                     <div className="relative -translate-x-1/2 -translate-y-1/2">
-                        <span className="flex size-10 items-center justify-center rounded-full bg-brand text-xs font-semibold text-neutral-900 ring-4 ring-white">
+                        <span className="flex size-10 items-center justify-center rounded-full bg-brand text-xs font-semibold text-neutral-900 ring-4 ring-card">
                             {initials(labels.contactName2)}
                         </span>
                         <div className="absolute left-full top-1/2 ml-2 -translate-y-1/2 whitespace-nowrap text-left leading-tight">
-                            <div className="text-xs font-medium text-neutral-900">{labels.contactName2}</div>
-                            <div className="text-[11px] text-neutral-500">{labels.contactRole2}</div>
+                            <div className="text-xs font-medium text-foreground">{labels.contactName2}</div>
+                            <div className="text-[11px] text-muted-foreground">{labels.contactRole2}</div>
                         </div>
                     </div>
                 </motion.div>

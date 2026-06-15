@@ -34,19 +34,19 @@ export default function CompanyCard({ company, metrics, metricsStatus, onFirstEx
     };
 
     return (
-        <div className="group rounded-2xl bg-white ring-1 ring-black/5 transition duration-200 hover:ring-black/10 hover:shadow-[0_10px_30px_-12px_rgb(0_0_0/0.18)]">
+        <div className="group rounded-2xl bg-card ring-1 ring-border transition duration-200 hover:ring-border hover:shadow-lg dark:hover:shadow-[0_10px_30px_-12px_rgb(0_0_0/0.5)]">
             <div
-                className="flex cursor-pointer items-center gap-4 rounded-2xl p-4 transition-colors hover:bg-neutral-50"
+                className="flex cursor-pointer items-center gap-4 rounded-2xl p-4 transition-colors hover:bg-muted"
                 onClick={toggleExpand}
             >
                 <CompanyAvatar company={company} type="large" />
 
                 <div className="flex-1 min-w-0">
-                    <h3 className="text-base font-semibold text-neutral-900 truncate">
+                    <h3 className="text-base font-semibold text-foreground truncate">
                         {company.name}
                     </h3>
                     {company.industry && (
-                        <p className="mt-0.5 text-sm text-neutral-500 truncate">
+                        <p className="mt-0.5 text-sm text-muted-foreground truncate">
                             {company.industry}
                         </p>
                     )}
@@ -60,16 +60,16 @@ export default function CompanyCard({ company, metrics, metricsStatus, onFirstEx
                         open();
                     }}
                     aria-label={t('openCompanyAriaLabel')}
-                    className="size-10 shrink-0 border-none bg-neutral-100 text-neutral-500 shadow-none outline-none hover:bg-neutral-200 hover:text-neutral-700"
+                    className="size-10 shrink-0 border-none bg-muted text-muted-foreground shadow-none outline-none hover:bg-muted hover:text-foreground"
                 >
                     <ChevronRightIcon className="size-4" />
                 </Button>
             </div>
 
             {isExpanded && (
-                <div className="border-t border-neutral-100 p-4 space-y-4">
+                <div className="border-t border-border p-4 space-y-4">
                     {metricsStatus === 'loading' && (
-                        <div className="flex items-center justify-center py-4 text-sm text-neutral-500">
+                        <div className="flex items-center justify-center py-4 text-sm text-muted-foreground">
                             <Loader2Icon className="size-4 animate-spin mr-2" />
                             {t('loadingMetrics')}
                         </div>
@@ -151,7 +151,7 @@ function AvatarSection({
     const t = useTranslations('CompaniesCard');
     return (
         <div>
-            <p className="text-xs font-medium tracking-[0.12em] text-neutral-500 uppercase mb-2">
+            <p className="text-xs font-medium tracking-[0.12em] text-muted-foreground uppercase mb-2">
                 {t('labelWithCount', { label, count: people.length })}
             </p>
             <AvatarGroup>
@@ -160,7 +160,7 @@ function AvatarSection({
                     return (
                         <Tooltip key={p.id}>
                             <TooltipTrigger asChild>
-                                <Avatar key={p.id} className="border-white w-10 h-10 cursor-pointer hover:scale-110 transition-all duration-300 bg-white" onClick={() => handleClick(p.id)}>
+                                <Avatar key={p.id} className="border-card w-10 h-10 cursor-pointer hover:scale-110 transition-all duration-300 bg-card" onClick={() => handleClick(p.id)}>
                                     <AvatarImage src={p[imageKey]} className="w-10 h-10" />
                                     <AvatarFallback className="w-10 h-10">{fallback}</AvatarFallback>
                                 </Avatar>
@@ -172,7 +172,7 @@ function AvatarSection({
                     );
                 })}
                 {overflow > 0 && (
-                    <AvatarGroupCount className="ring-transparent bg-neutral-200 text-neutral-600 w-10 h-10">
+                    <AvatarGroupCount className="ring-transparent bg-muted text-muted-foreground w-10 h-10">
                         +{overflow}
                     </AvatarGroupCount>
                 )}
@@ -198,10 +198,10 @@ export function EngagementSparkline({ data }: { data: EngagementPoint[] }) {
     );
     const total = data.reduce((s, d) => s + d.count, 0);
     return (
-        <div className="md:col-span-2 rounded-xl bg-transparent p-3 ring-1 ring-black/5">
-            <p className="text-xs uppercase tracking-wider text-neutral-500">{t('engagement12w')}</p>
+        <div className="md:col-span-2 rounded-xl bg-transparent p-3 ring-1 ring-border">
+            <p className="text-xs uppercase tracking-wider text-muted-foreground">{t('engagement12w')}</p>
             {total === 0 ? (
-                <p className="text-xs text-neutral-400 mt-3">{t('noEngagement')}</p>
+                <p className="text-xs text-muted-foreground mt-3">{t('noEngagement')}</p>
             ) : (
                 <div className="h-28 mt-1">
                     <ResponsiveContainer width="100%" height="100%">
@@ -209,7 +209,7 @@ export function EngagementSparkline({ data }: { data: EngagementPoint[] }) {
                             <XAxis
                                 dataKey="weekStart"
                                 tickFormatter={(ts: number) => dateFormatter.format(new Date(ts))}
-                                tick={{ fontSize: 10, fill: '#737373' }}
+                                tick={{ fontSize: 10, fill: 'var(--chart-axis)' }}
                                 tickLine={false}
                                 axisLine={false}
                                 interval={1}
@@ -232,7 +232,7 @@ export function EngagementSparkline({ data }: { data: EngagementPoint[] }) {
                                     dataKey="count"
                                     position="top"
                                     fontSize={10}
-                                    fill="#404040"
+                                    fill="var(--chart-axis)"
                                     formatter={(v: unknown) => (typeof v === 'number' && v > 0 ? String(v) : '')}
                                 />
                             </Area>
@@ -257,15 +257,15 @@ export function RevenueTiles({
     const locale = useLocale();
     return (
         <div className="space-y-2">
-            <div className="rounded-xl bg-transparent p-3 ring-1 ring-black/5">
-                <p className="text-xs uppercase tracking-wider text-neutral-500">{t('closedRevenue')}</p>
-                <p className="mt-1 text-lg font-semibold text-neutral-900">
+            <div className="rounded-xl bg-transparent p-3 ring-1 ring-border">
+                <p className="text-xs uppercase tracking-wider text-muted-foreground">{t('closedRevenue')}</p>
+                <p className="mt-1 text-lg font-semibold text-foreground">
                     {formatCompactCurrency(pastRevenue, currency, locale)}
                 </p>
             </div>
-            <div className="rounded-xl bg-transparent p-3 ring-1 ring-black/5">
-                <p className="text-xs uppercase tracking-wider text-neutral-500">{t('projected')}</p>
-                <p className="mt-1 text-lg font-semibold text-neutral-900">
+            <div className="rounded-xl bg-transparent p-3 ring-1 ring-border">
+                <p className="text-xs uppercase tracking-wider text-muted-foreground">{t('projected')}</p>
+                <p className="mt-1 text-lg font-semibold text-foreground">
                     {formatCompactCurrency(projectedRevenue, currency, locale)}
                 </p>
             </div>
@@ -288,20 +288,20 @@ function EngagementTooltip({ active, payload }: EngagementTooltipProps) {
     if (!active || !payload?.length) return null;
     const d = payload[0].payload;
     return (
-        <div className="rounded-md bg-white p-2 text-xs ring-1 ring-black/5 shadow-md">
-            <div className="font-medium text-neutral-700 mb-1.5">
+        <div className="rounded-md bg-popover text-popover-foreground p-2 text-xs border border-border shadow-md">
+            <div className="font-medium text-foreground mb-1.5">
                 {dateFormatter.format(new Date(d.weekStart))}
             </div>
             <div className="space-y-0.5">
-                <div className="flex items-center gap-1.5 text-neutral-600">
+                <div className="flex items-center gap-1.5 text-muted-foreground">
                     <span className="inline-block size-2 rounded-sm bg-brand" />
                     {t('tooltipActivities', { count: d.activities })}
                 </div>
-                <div className="flex items-center gap-1.5 text-neutral-600">
+                <div className="flex items-center gap-1.5 text-muted-foreground">
                     <span className="inline-block size-2 rounded-sm bg-amber-500" />
                     {t('tooltipTasks', { count: d.tasks })}
                 </div>
-                <div className="flex items-center gap-1.5 text-neutral-600">
+                <div className="flex items-center gap-1.5 text-muted-foreground">
                     <span className="inline-block size-2 rounded-sm bg-emerald-500" />
                     {t('tooltipNotes', { count: d.notes })}
                 </div>

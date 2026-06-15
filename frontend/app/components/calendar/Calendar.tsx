@@ -30,9 +30,9 @@ type Entry = {
 
 const CHIP_CLASS: Record<EntryKind, string> = {
     task: 'bg-brand-light text-brand-dark hover:bg-brand/20',
-    activity: 'bg-blue-100 text-blue-900 hover:bg-blue-200',
-    deal: 'bg-amber-100 text-amber-900 hover:bg-amber-200',
-    note: 'bg-neutral-200 text-neutral-700 hover:bg-neutral-300',
+    activity: 'bg-blue-100 text-blue-900 hover:bg-blue-200 dark:bg-blue-950/40 dark:text-blue-300 dark:hover:bg-blue-950/60',
+    deal: 'bg-amber-100 text-amber-900 hover:bg-amber-200 dark:bg-amber-950/40 dark:text-amber-300 dark:hover:bg-amber-950/60',
+    note: 'bg-muted text-foreground hover:bg-muted/70',
 };
 
 const DAY_MS = 1000 * 60 * 60 * 24;
@@ -172,13 +172,13 @@ export default function Calendar({ activities, tasks, persons, deals, notes }: P
             <header className="flex flex-wrap items-end justify-between gap-4">
                 <div>
                     <h1 className="text-4xl font-extrabold tracking-tight">{t('title')}</h1>
-                    <p className="mt-2 text-sm text-neutral-500 tabular-nums">{monthLabel}</p>
+                    <p className="mt-2 text-sm text-muted-foreground tabular-nums">{monthLabel}</p>
                 </div>
                 <div className="flex items-center gap-2">
                     <button
                         type="button"
                         onClick={goToday}
-                        className="h-8 rounded-full bg-neutral-100 px-4 text-xs font-medium text-neutral-700 ring-1 ring-black/5 transition hover:bg-white"
+                        className="h-8 rounded-full bg-muted px-4 text-xs font-medium text-foreground ring-1 ring-border transition hover:bg-background"
                     >
                         {t('today')}
                     </button>
@@ -186,7 +186,7 @@ export default function Calendar({ activities, tasks, persons, deals, notes }: P
                         type="button"
                         onClick={goPrev}
                         aria-label={t('prev')}
-                        className="grid size-8 place-items-center rounded-full bg-neutral-100 text-neutral-700 ring-1 ring-black/5 transition hover:bg-white"
+                        className="grid size-8 place-items-center rounded-full bg-muted text-foreground ring-1 ring-border transition hover:bg-background"
                     >
                         <ChevronLeftIcon className="size-4" />
                     </button>
@@ -194,25 +194,25 @@ export default function Calendar({ activities, tasks, persons, deals, notes }: P
                         type="button"
                         onClick={goNext}
                         aria-label={t('next')}
-                        className="grid size-8 place-items-center rounded-full bg-neutral-100 text-neutral-700 ring-1 ring-black/5 transition hover:bg-white"
+                        className="grid size-8 place-items-center rounded-full bg-muted text-foreground ring-1 ring-border transition hover:bg-background"
                     >
                         <ChevronRightIcon className="size-4" />
                     </button>
                 </div>
             </header>
 
-            <div className="overflow-hidden rounded-2xl bg-neutral-100 ring-1 ring-black/5">
-                <div className="grid grid-cols-7 border-b border-black/5 bg-white">
+            <div className="overflow-hidden rounded-2xl bg-muted ring-1 ring-border">
+                <div className="grid grid-cols-7 border-b border-border bg-card">
                     {weekdayLabels.map((label) => (
                         <div
                             key={label}
-                            className="px-2 py-2 text-center text-[10px] font-semibold uppercase tracking-[0.14em] text-neutral-500"
+                            className="px-2 py-2 text-center text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground"
                         >
                             {label}
                         </div>
                     ))}
                 </div>
-                <div className="grid grid-cols-7 gap-px bg-black/5">
+                <div className="grid grid-cols-7 gap-px bg-border">
                     {cells.map((day) => {
                         const key = dateKey(day);
                         const inMonth = day.getMonth() === monthAnchor.getMonth();
@@ -236,7 +236,7 @@ export default function Calendar({ activities, tasks, persons, deals, notes }: P
                             <div
                                 key={key}
                                 className={`flex h-[140px] flex-col gap-1 p-2 ${
-                                    inMonth ? 'bg-white' : 'bg-neutral-50'
+                                    inMonth ? 'bg-card' : 'bg-muted'
                                 }`}
                             >
                                 <div className="flex items-center justify-end">
@@ -245,8 +245,8 @@ export default function Calendar({ activities, tasks, persons, deals, notes }: P
                                             isToday
                                                 ? 'bg-brand font-semibold text-white'
                                                 : inMonth
-                                                  ? 'text-neutral-700'
-                                                  : 'text-neutral-400'
+                                                  ? 'text-foreground'
+                                                  : 'text-muted-foreground'
                                         }`}
                                     >
                                         {day.getDate()}

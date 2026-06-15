@@ -62,31 +62,31 @@ export default function DealTaskList({ dealId, companyId, tasks, deals }: { deal
             {openTasks.length > 0 ? (
                 <>
                     <div className="mb-3 mt-6 flex h-8 items-center">
-                        <h2 className="px-6 text-xs font-medium uppercase tracking-[0.12em] text-neutral-500">
+                        <h2 className="px-6 text-xs font-medium uppercase tracking-[0.12em] text-muted-foreground">
                             {t('openTasksHeading', { count: openTasks.length })}
                         </h2>
                         <Tooltip>
                             <TooltipTrigger asChild>
-                                <InformationCircleIcon className="size-3 text-neutral-500" />
+                                <InformationCircleIcon className="size-3 text-muted-foreground" />
                             </TooltipTrigger>
                             <TooltipContent>
                                 <div className="flex flex-col gap-2">
                                     <h2 className="text-sm font-medium">{t('openTasks')}</h2>
-                                    <p className="text-xs text-neutral-400">
+                                    <p className="text-xs text-muted-foreground">
                                         {t('openTasksTooltip')}
                                     </p>
                                 </div>
                             </TooltipContent>
                         </Tooltip>
                     </div>
-                    <div className="overflow-hidden rounded-2xl bg-neutral-100 ring-1 ring-black/5">
-                        <ul className="divide-y divide-neutral-200">
+                    <div className="overflow-hidden rounded-2xl bg-muted ring-1 ring-border">
+                        <ul className="divide-y divide-border">
                             {openTasks.map((task) => (
                                 <li key={task.id} className="px-6 py-3 flex items-center justify-between">
                                     <div className="">
-                                        <p className="text-sm text-neutral-900">{task.description}</p>
+                                        <p className="text-sm text-foreground">{task.description}</p>
                                         {task.dueDate ? (
-                                            <p className="mt-0.5 text-xs text-neutral-500">
+                                            <p className="mt-0.5 text-xs text-muted-foreground">
                                                 {t('due', { date: formatDate(task.dueDate, locale) })}
                                             </p>
                                         ) : null}
@@ -96,7 +96,7 @@ export default function DealTaskList({ dealId, companyId, tasks, deals }: { deal
                                             <Button
                                                 variant="ghost"
                                                 size="icon"
-                                                className="p-1 h-8 w-8 rounded-full shadow-none border-none bg-transparent hover:bg-neutral-200 focus:ring-0 focus:ring-offset-0"
+                                                className="p-1 h-8 w-8 rounded-full shadow-none border-none bg-transparent hover:bg-muted focus:ring-0 focus:ring-offset-0"
                                             >
                                                 <EllipsisVerticalIcon className="size-4" />
                                             </Button>

@@ -14,6 +14,7 @@ import {
     DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { addCompanyTag, addContactTag, removeCompanyTag, removeContactTag } from '@/app/lib/api';
+import { readableTextColor } from '@/app/lib/utils';
 import { type Tag } from '@/app/lib/types';
 
 type TagAction = { type: 'add'; tag: Tag } | { type: 'remove'; tagId: number };
@@ -77,15 +78,15 @@ export default function TagEditor({
                 <Badge
                     key={tag.id}
                     variant="default"
-                    className="group/tag text-sm text-white transform duration-200"
-                    style={{ backgroundColor: tag.color }}
+                    className="group/tag text-sm transform duration-200"
+                    style={{ backgroundColor: tag.color, color: readableTextColor(tag.color) }}
                 >
                     {tag.name}
                     <button
                         type="button"
                         aria-label={t('removeAria', { name: tag.name })}
                         onClick={() => handleRemove(tag)}
-                        className="-mr-0.5 hidden h-3.5 w-3.5 items-center justify-center rounded-full transition group-hover/tag:inline-flex hover:bg-black/20"
+                        className="-mr-0.5 hidden h-3.5 w-3.5 items-center justify-center rounded-full transition group-hover/tag:inline-flex hover:bg-foreground/10"
                     >
                         <XMarkIcon className="size-3" />
                     </button>
@@ -97,7 +98,7 @@ export default function TagEditor({
                         <button
                             type="button"
                             aria-label={t('addTagAria')}
-                            className="inline-flex items-center gap-1 rounded-4xl border border-dashed border-neutral-300 px-2 py-0.5 text-xs text-neutral-500 transition hover:border-neutral-400 hover:text-neutral-700"
+                            className="inline-flex items-center gap-1 rounded-4xl border border-dashed border-border px-2 py-0.5 text-xs text-muted-foreground transition hover:border-muted-foreground hover:text-foreground"
                         >
                             <PlusIcon className="size-3" />
                             {t('tag')}

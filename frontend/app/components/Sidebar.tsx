@@ -22,6 +22,10 @@ import {
     ChartPieIcon,
     PresentationChartLineIcon,
     GlobeAltIcon,
+    SunIcon,
+    MoonIcon,
+    ComputerDesktopIcon,
+    CheckIcon,
 } from "@heroicons/react/24/outline";
 import Image from "next/image";
 import Link from "next/link";
@@ -31,6 +35,7 @@ import { DropdownMenu } from "radix-ui";
 import { type User } from "@/app/lib/types";
 // import { BubblesIcon, PanelLeftOpenIcon } from "lucide-react";
 import { useTranslations } from "next-intl";
+import { useTheme } from "next-themes";
 import { DropdownMenuItem, DropdownMenuPortal, DropdownMenuSub, DropdownMenuSubContent, DropdownMenuSubTrigger } from "@/components/ui/dropdown-menu";
 // import {  } from "@heroicons/react/24/solid";
 import UserAvatar from '@/app/components/records/users/UserAvatar';
@@ -123,7 +128,7 @@ function NavGroup({
                 onClick={() => setOpen((o) => !o)}
                 aria-expanded={open}
                 aria-controls={sectionId}
-                className="flex w-full items-center justify-between rounded-md px-3 py-1 text-xs font-medium uppercase tracking-[0.12em] text-neutral-500 transition hover:text-neutral-700"
+                className="flex w-full items-center justify-between rounded-md px-3 py-1 text-xs font-medium uppercase tracking-[0.12em] text-muted-foreground transition hover:text-foreground"
             >
                 <span>{section.label}</span>
                 <ChevronDownIcon
@@ -158,12 +163,48 @@ function NavLink({ item, active }: { item: NavItem; active: boolean }) {
                     }`}
             >
                 <Icon
-                    className={`size-4 shrink-0 ${active ? "text-brand-dark" : "text-neutral-500 group-hover:text-current"
+                    className={`size-4 shrink-0 ${active ? "text-brand-dark" : "text-muted-foreground group-hover:text-current"
                         }`}
                 />
                 <span>{item.label}</span>
             </Link>
         </li>
+    );
+}
+
+function ThemeSubmenu() {
+    const t = useTranslations("CommonSidebar");
+    const { theme, setTheme } = useTheme();
+    const options = [
+        { value: "light", label: t("themeLight"), icon: SunIcon },
+        { value: "dark", label: t("themeDark"), icon: MoonIcon },
+        { value: "system", label: t("themeSystem"), icon: ComputerDesktopIcon },
+    ];
+    const TriggerIcon =
+        theme === "dark" ? MoonIcon : theme === "system" ? ComputerDesktopIcon : SunIcon;
+    return (
+        <DropdownMenu.Item asChild>
+            <DropdownMenuSub>
+                <DropdownMenuSubTrigger>
+                    <TriggerIcon className="size-4" />
+                    {t("theme")}
+                    <DropdownMenuPortal>
+                        <DropdownMenuSubContent>
+                            {options.map((opt) => {
+                                const Icon = opt.icon;
+                                return (
+                                    <DropdownMenuItem key={opt.value} onClick={() => setTheme(opt.value)}>
+                                        <Icon className="size-4" />
+                                        {opt.label}
+                                        {theme === opt.value && <CheckIcon className="ml-auto size-4" />}
+                                    </DropdownMenuItem>
+                                );
+                            })}
+                        </DropdownMenuSubContent>
+                    </DropdownMenuPortal>
+                </DropdownMenuSubTrigger>
+            </DropdownMenuSub>
+        </DropdownMenu.Item>
     );
 }
 
@@ -181,11 +222,11 @@ function UserMenu({ user, onLogout }: { user: User; onLogout: () => void }) {
                         <div className="truncate text-sm font-medium text-sidebar-foreground">
                             {user.displayName}
                         </div>
-                        <div className="truncate text-xs text-neutral-500">
+                        <div className="truncate text-xs text-muted-foreground">
                             @{user.username}
                         </div>
                     </div>
-                    <EllipsisVerticalIcon className="size-4 shrink-0 text-neutral-500" />
+                    <EllipsisVerticalIcon className="size-4 shrink-0 text-muted-foreground" />
                 </button>
             </DropdownMenu.Trigger>
             <DropdownMenu.Portal>
@@ -201,7 +242,7 @@ function UserMenu({ user, onLogout }: { user: User; onLogout: () => void }) {
                             <div className="truncate text-sm font-medium">
                                 {user.displayName}
                             </div>
-                            <div className="truncate text-xs text-neutral-500">
+                            <div className="truncate text-xs text-muted-foreground">
                                 {user.email}
                             </div>
                         </div>
@@ -238,13 +279,14 @@ function UserMenu({ user, onLogout }: { user: User; onLogout: () => void }) {
                             </DropdownMenuSubTrigger>
                         </DropdownMenuSub>
                     </DropdownMenu.Item>
+                    <ThemeSubmenu />
                     {/* <DropdownMenu.Separator className="my-1 h-px bg-sidebar-border" /> */}
                     <DropdownMenu.Item
                         onSelect={(event) => {
                             event.preventDefault();
                             onLogout();
                         }}
-                        className="flex cursor-pointer items-center gap-2 rounded-sm px-2 py-1.5 text-sm text-red-600 outline-none data-[highlighted]:bg-red-50 data-[highlighted]:text-red-700"
+                        className="flex cursor-pointer items-center gap-2 rounded-sm px-2 py-1.5 text-sm text-destructive outline-none data-[highlighted]:bg-destructive/10 data-[highlighted]:text-destructive"
                     >
                         <ArrowRightStartOnRectangleIcon className="size-4" />
                         {t("logOut")}

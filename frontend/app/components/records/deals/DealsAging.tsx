@@ -65,7 +65,7 @@ export default function DealsAging({ deals, stageById }: { deals: Deal[]; stageB
 
     if (data.length === 0) {
         return (
-            <div className="flex h-64 items-center justify-center text-sm text-neutral-500">
+            <div className="flex h-64 items-center justify-center text-sm text-muted-foreground">
                 {t('noOpenDealsToAge')}
             </div>
         );
@@ -79,7 +79,7 @@ export default function DealsAging({ deals, stageById }: { deals: Deal[]; stageB
                     type="number"
                     tickLine={false}
                     axisLine={false}
-                    tick={{ fontSize: 11, fill: '#737373' }}
+                    tick={{ fontSize: 11, fill: 'var(--chart-axis)' }}
                     allowDecimals={false}
                 />
                 <YAxis
@@ -88,7 +88,7 @@ export default function DealsAging({ deals, stageById }: { deals: Deal[]; stageB
                     tickLine={false}
                     axisLine={false}
                     width={96}
-                    tick={{ fontSize: 11, fill: '#737373' }}
+                    tick={{ fontSize: 11, fill: 'var(--chart-axis)' }}
                 />
                 <RechartsTooltip
                     cursor={{ fill: 'var(--color-brand)', fillOpacity: 0.05 }}
@@ -119,13 +119,13 @@ function AgingTooltip({ active, payload, bucketLabel, dealsLabel }: AgingTooltip
     if (!active || !payload?.length) return null;
     const row = payload[0].payload;
     return (
-        <div className="rounded-md bg-white p-2 text-xs ring-1 ring-black/5 shadow-md">
-            <div className="font-medium text-neutral-700 mb-1.5">{row.stage}</div>
+        <div className="rounded-md bg-popover text-popover-foreground p-2 text-xs border border-border shadow-md">
+            <div className="font-medium text-popover-foreground mb-1.5">{row.stage}</div>
             <div className="space-y-0.5">
                 {payload
                     .filter((p) => p.value > 0)
                     .map((p) => (
-                        <div key={p.dataKey} className="flex items-center gap-1.5 text-neutral-600">
+                        <div key={p.dataKey} className="flex items-center gap-1.5 text-muted-foreground">
                             <span className="inline-block size-2 rounded-sm" style={{ backgroundColor: p.fill }} />
                             {bucketLabel ? bucketLabel(p.dataKey as BucketKey) : p.dataKey} · {dealsLabel ? dealsLabel(p.value) : p.value}
                         </div>

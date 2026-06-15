@@ -28,19 +28,19 @@ export default async function TaskList({ tasks }: { tasks: Task[] }) {
     const recent = sorted.slice(0, 5);
 
     return (
-        <ul className="divide-y divide-neutral-200">
+        <ul className="divide-y divide-border">
             {recent.map((task) => (
                 <li
                     key={task.id}
                     className="flex items-start justify-between gap-4 px-6 py-3"
                 >
                     <span
-                        className={`text-sm ${task.completed ? 'text-neutral-400 line-through' : 'text-black'}`}
+                        className={`text-sm ${task.completed ? 'text-muted-foreground line-through' : 'text-foreground'}`}
                     >
                         {task.description}
                     </span>
                     {task.dueDate ? (
-                        <span className="shrink-0 text-xs text-neutral-500">
+                        <span className="shrink-0 text-xs text-muted-foreground">
                             {formatShortDate(task.dueDate, locale)}
                         </span>
                     ) : null}

@@ -17,12 +17,12 @@ export default function LandingNav({ ctaHref, ctaLabel }: { ctaHref: string; cta
 
     return (
         // TODO: make this a floating navbar
-        <header className="sticky top-0 z-40 border-b border-black/[0.06] bg-white/80 backdrop-blur-md">
+        <header className="sticky top-0 z-40 border-b border-border bg-background/80 backdrop-blur-md">
             <nav className="mx-auto flex h-16 max-w-7xl items-center justify-between px-6 lg:px-8">
                 <div className="flex items-center gap-8">
                     <Link href="/" className="flex items-center gap-2.5">
                         <span className="size-3 rounded-[5px] bg-brand" aria-hidden="true" />
-                        <span className="text-lg font-bold tracking-tight text-neutral-900">{t("brand")}</span>
+                        <span className="text-lg font-bold tracking-tight text-foreground">{t("brand")}</span>
                     </Link>
 
                     <div className="hidden items-center gap-7 md:flex">
@@ -30,7 +30,7 @@ export default function LandingNav({ ctaHref, ctaLabel }: { ctaHref: string; cta
                             <a
                                 key={link.href}
                                 href={link.href}
-                                className="text-sm font-medium text-neutral-600 transition-colors hover:text-neutral-900"
+                                className="text-sm font-medium text-muted-foreground transition-colors hover:text-foreground"
                             >
                                 {link.label}
                             </a>
@@ -42,7 +42,7 @@ export default function LandingNav({ ctaHref, ctaLabel }: { ctaHref: string; cta
                     <LanguageSwitcher />
                     <Link
                         href="/auth/login"
-                        className="text-sm font-medium text-neutral-600 transition-colors hover:text-neutral-900"
+                        className="text-sm font-medium text-muted-foreground transition-colors hover:text-foreground"
                     >
                         {t("navLogin")}
                     </Link>
@@ -61,7 +61,7 @@ export default function LandingNav({ ctaHref, ctaLabel }: { ctaHref: string; cta
                         onClick={() => setOpen((o) => !o)}
                         aria-expanded={open}
                         aria-label={t("navMenu")}
-                        className="inline-flex size-9 items-center justify-center rounded-full border border-black/10 text-neutral-700 transition active:scale-[0.95]"
+                        className="inline-flex size-9 items-center justify-center rounded-full border border-border text-foreground transition active:scale-[0.95]"
                     >
                         {open ? <XMarkIcon className="size-5" /> : <Bars3Icon className="size-5" />}
                     </button>
@@ -69,14 +69,14 @@ export default function LandingNav({ ctaHref, ctaLabel }: { ctaHref: string; cta
             </nav>
 
             {open && (
-                <div className="border-t border-black/[0.06] bg-white px-6 py-4 duration-200 animate-in fade-in-0 slide-in-from-top-2 md:hidden">
+                <div className="border-t border-border bg-background px-6 py-4 duration-200 animate-in fade-in-0 slide-in-from-top-2 md:hidden">
                     <div className="flex flex-col gap-1">
                         {links.map((link) => (
                             <a
                                 key={link.href}
                                 href={link.href}
                                 onClick={() => setOpen(false)}
-                                className="rounded-lg px-2 py-2.5 text-base font-medium text-neutral-700 transition-colors hover:bg-neutral-50"
+                                className="rounded-lg px-2 py-2.5 text-base font-medium text-foreground transition-colors hover:bg-muted"
                             >
                                 {link.label}
                             </a>
@@ -84,7 +84,7 @@ export default function LandingNav({ ctaHref, ctaLabel }: { ctaHref: string; cta
                         <Link
                             href="/auth/login"
                             onClick={() => setOpen(false)}
-                            className="rounded-lg px-2 py-2.5 text-base font-medium text-neutral-700 transition-colors hover:bg-neutral-50"
+                            className="rounded-lg px-2 py-2.5 text-base font-medium text-foreground transition-colors hover:bg-muted"
                         >
                             {t("navLogin")}
                         </Link>

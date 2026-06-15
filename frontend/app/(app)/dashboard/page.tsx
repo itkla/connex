@@ -81,7 +81,7 @@ export default async function Dashboard() {
     }).length;
 
     return (
-        <div className="min-h-screen bg-white px-2 pt-8 pb-12">
+        <div className="min-h-screen bg-background px-2 pt-8 pb-12">
             <div className="mx-auto flex w-full max-w-7xl flex-col gap-10">
                 <Rise>
                     <Greeting
@@ -153,7 +153,7 @@ export default async function Dashboard() {
                                 </Link>
                             }
                         />
-                        <div className="overflow-hidden rounded-2xl border border-black/[0.07] bg-white">
+                        <div className="overflow-hidden rounded-2xl border border-border bg-card">
                             <Timeline
                                 tasks={tasks}
                                 activities={activities}

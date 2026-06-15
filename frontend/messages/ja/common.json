@@ -81,6 +81,10 @@
     "navUsers": "ユーザー",
     "profile": "プロフィール",
     "logOut": "ログアウト",
+    "theme": "テーマ",
+    "themeLight": "ライト",
+    "themeDark": "ダーク",
+    "themeSystem": "システム",
     "profilePictureAlt": "{name}さんのプロフィール画像"
   },
   "CommonContentShell": {

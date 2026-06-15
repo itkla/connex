@@ -44,7 +44,7 @@ type Props = {
 };
 
 const inputClass =
-    'w-full rounded-lg bg-neutral-100 px-3 py-2 text-sm text-black placeholder-neutral-500 outline-none ring-1 ring-black/5 transition focus:ring-2 focus:ring-brand';
+    'w-full rounded-lg bg-muted px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground outline-none ring-1 ring-border transition focus:ring-2 focus:ring-brand';
 
 export default function TaskDialog({
     open,
@@ -147,7 +147,7 @@ export default function TaskDialog({
                             required
                         />
                         {fieldErrors.description && (
-                            <p className="px-1 text-sm text-red-600">{fieldErrors.description}</p>
+                            <p className="px-1 text-sm text-destructive">{fieldErrors.description}</p>
                         )}
                     </div>
 
@@ -174,7 +174,7 @@ export default function TaskDialog({
                                 <ComboboxInput
                                     id="task-assignee"
                                     placeholder={t('assignedToPlaceholder')}
-                                    className="ring-1 ring-black/5"
+                                    className="ring-1 ring-border"
                                 />
                                 <ComboboxContent className="pointer-events-auto">
                                     <ComboboxList onWheel={handleListWheel}>
@@ -202,7 +202,7 @@ export default function TaskDialog({
                                 <ComboboxInput
                                     id="task-person"
                                     placeholder={t('personPlaceholder')}
-                                    className="ring-1 ring-black/5"
+                                    className="ring-1 ring-border"
                                 />
                                 <ComboboxContent className="pointer-events-auto">
                                     <ComboboxList onWheel={handleListWheel}>
@@ -228,7 +228,7 @@ export default function TaskDialog({
                                 <ComboboxInput
                                     id="task-deal"
                                     placeholder={t('dealPlaceholder')}
-                                    className="ring-1 ring-black/5"
+                                    className="ring-1 ring-border"
                                 />
                                 <ComboboxContent className="pointer-events-auto">
                                     <ComboboxList onWheel={handleListWheel}>

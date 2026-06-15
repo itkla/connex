@@ -23,12 +23,12 @@ const ICON_CLASS: Record<AvatarSize, string> = {
 export default function CompanyAvatar({ company, type = 'small' }: { company: Company; type?: AvatarSize }) {
     return (
         // company logos are squircles. contact avatars are circles
-        <div className={cn("shrink-0 overflow-hidden rounded-2xl bg-neutral-200 ring-1 ring-black/5", SIZE_CLASS[type])}>
+        <div className={cn("shrink-0 overflow-hidden rounded-2xl bg-muted ring-1 ring-border", SIZE_CLASS[type])}>
             {company.logoUrl ? (
                 <img src={company.logoUrl} alt="" className="h-full w-full object-contain bg-white" />
             ) : (
-                <div className="h-full w-full flex items-center justify-center bg-gray-400">
-                    <BuildingOffice2Icon className={cn("text-white", ICON_CLASS[type])} />
+                <div className="h-full w-full flex items-center justify-center bg-muted-foreground/40">
+                    <BuildingOffice2Icon className={cn("text-muted-foreground", ICON_CLASS[type])} />
                 </div>
             )}
         </div>

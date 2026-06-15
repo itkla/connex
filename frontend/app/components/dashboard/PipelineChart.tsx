@@ -112,11 +112,11 @@ export default function PipelineChart({ deals }: { deals: Deal[] }) {
     const metrics: Metric[] = ['profit', 'projections'];
 
     return (
-        <div className="flex h-full flex-col overflow-hidden rounded-2xl border border-black/[0.07] bg-white">
-            <div className="flex flex-col border-b border-black/[0.06] sm:flex-row sm:items-stretch">
+        <div className="flex h-full flex-col overflow-hidden rounded-2xl border border-border bg-card">
+            <div className="flex flex-col border-b border-border sm:flex-row sm:items-stretch">
                 <div className="flex flex-1 flex-col justify-center gap-1 px-6 py-5">
                     <div className="flex items-center justify-between gap-2">
-                        <span className="text-xs font-medium tracking-[0.12em] text-neutral-500 uppercase">
+                        <span className="text-xs font-medium tracking-[0.12em] text-muted-foreground uppercase">
                             {t('activePipeline')}
                         </span>
                         {currencyCounts.size > 1 ? (
@@ -125,10 +125,10 @@ export default function PipelineChart({ deals }: { deals: Deal[] }) {
                                     <button
                                         type="button"
                                         aria-label={t('currency')}
-                                        className="inline-flex items-center gap-1.5 rounded-full bg-neutral-100 px-2.5 py-1 text-xs font-medium text-neutral-700 ring-1 ring-black/5 transition hover:bg-neutral-200"
+                                        className="inline-flex items-center gap-1.5 rounded-full bg-muted px-2.5 py-1 text-xs font-medium text-foreground ring-1 ring-border transition hover:bg-muted/60"
                                     >
                                         {currency}
-                                        <ChevronDownIcon className="size-3.5 text-neutral-500" />
+                                        <ChevronDownIcon className="size-3.5 text-muted-foreground" />
                                     </button>
                                 </DropdownMenuTrigger>
                                 <DropdownMenuContent align="end">
@@ -142,7 +142,7 @@ export default function PipelineChart({ deals }: { deals: Deal[] }) {
                                                 <span className={code === currency ? 'font-semibold' : ''}>
                                                     {code}
                                                 </span>
-                                                <span className="ml-auto text-xs tabular-nums text-neutral-500">
+                                                <span className="ml-auto text-xs tabular-nums text-muted-foreground">
                                                     {count}
                                                 </span>
                                             </DropdownMenuItem>
@@ -150,12 +150,12 @@ export default function PipelineChart({ deals }: { deals: Deal[] }) {
                                 </DropdownMenuContent>
                             </DropdownMenu>
                         ) : (
-                            <span className="rounded-full bg-neutral-100 px-2.5 py-1 text-xs font-medium text-neutral-600 ring-1 ring-black/5">
+                            <span className="rounded-full bg-muted px-2.5 py-1 text-xs font-medium text-muted-foreground ring-1 ring-border">
                                 {currency}
                             </span>
                         )}
                     </div>
-                    <span className="text-sm text-neutral-500">{t('chartDescription')}</span>
+                    <span className="text-sm text-muted-foreground">{t('chartDescription')}</span>
                 </div>
                 <TooltipProvider delayDuration={150}>
                     <div className="flex">
@@ -170,17 +170,17 @@ export default function PipelineChart({ deals }: { deals: Deal[] }) {
                                             aria-pressed={isActive}
                                             onClick={() => setActive(key)}
                                             className={cn(
-                                                'flex flex-1 flex-col justify-center gap-1 border-t border-black/[0.06] px-6 py-4 text-left transition-colors hover:bg-neutral-50 sm:border-t-0 sm:border-l sm:px-7',
+                                                'flex flex-1 flex-col justify-center gap-1 border-t border-border px-6 py-4 text-left transition-colors hover:bg-muted sm:border-t-0 sm:border-l sm:px-7',
                                                 isActive && 'bg-brand-light/30',
                                             )}
                                         >
-                                            <span className="text-xs font-medium tracking-wide text-neutral-500">
+                                            <span className="text-xs font-medium tracking-wide text-muted-foreground">
                                                 {chartConfig[key].label}
                                             </span>
                                             <span
                                                 className={cn(
                                                     'text-xl leading-none font-semibold tabular-nums',
-                                                    isActive ? 'text-brand-dark' : 'text-neutral-900',
+                                                    isActive ? 'text-brand-dark' : 'text-foreground',
                                                 )}
                                             >
                                                 {formatCompactCurrency(totals[key], currency, locale)}
@@ -204,19 +204,21 @@ export default function PipelineChart({ deals }: { deals: Deal[] }) {
                                 <stop offset="100%" stopColor="var(--color-brand)" stopOpacity={0} />
                             </linearGradient>
                         </defs>
-                        <CartesianGrid vertical={false} strokeDasharray="3 3" />
+                        <CartesianGrid vertical={false} strokeDasharray="3 3" stroke="var(--chart-grid)" />
                         <XAxis
                             dataKey="label"
                             tickLine={false}
                             axisLine={false}
                             tickMargin={8}
                             minTickGap={24}
+                            tick={{ fill: 'var(--muted-foreground)' }}
                         />
                         <YAxis
                             tickLine={false}
                             axisLine={false}
                             tickMargin={4}
                             width={48}
+                            tick={{ fill: 'var(--muted-foreground)' }}
                             tickFormatter={(v: number) => formatCompactCurrency(v, currency, locale)}
                         />
                         <ChartTooltip

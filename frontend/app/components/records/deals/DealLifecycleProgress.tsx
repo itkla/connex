@@ -103,25 +103,25 @@ export default async function DealLifecycleProgress({
 
     const scheduleClass =
         scheduleStatus?.tone === 'early'
-            ? 'bg-green-100 text-green-700'
+            ? 'bg-green-100 text-green-700 dark:bg-green-950/40 dark:text-green-300'
             : scheduleStatus?.tone === 'late'
-                ? 'bg-red-100 text-red-700'
-                : 'bg-neutral-200 text-neutral-700';
+                ? 'bg-red-100 text-red-700 dark:bg-red-950/40 dark:text-red-300'
+                : 'bg-muted text-foreground';
 
     if (filtered.length === 0 && !hasTime) return null;
 
     const closedNameClass = isWon
-        ? 'text-green-700'
+        ? 'text-green-700 dark:text-green-300'
         : isLost
-            ? 'text-red-700'
-            : 'text-neutral-700';
+            ? 'text-red-700 dark:text-red-300'
+            : 'text-foreground';
 
     return (
-        <div className="rounded-2xl bg-neutral-100 p-4 ring-1 ring-black/5 sm:p-6">
+        <div className="rounded-2xl bg-muted p-4 ring-1 ring-border sm:p-6">
             <div className="relative h-14 sm:h-16">
                 <div
                     aria-hidden="true"
-                    className="pointer-events-none absolute inset-x-0 top-4 h-px -translate-y-1/2 bg-neutral-300"
+                    className="pointer-events-none absolute inset-x-0 top-4 h-px -translate-y-1/2 bg-border"
                 />
                 <div
                     aria-hidden="true"
@@ -133,7 +133,7 @@ export default async function DealLifecycleProgress({
                     <Tooltip>
                         <TooltipTrigger asChild>
                             <div
-                                className="absolute top-4 z-0 size-3 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-white bg-brand shadow-sm sm:size-3.5"
+                                className="absolute top-4 z-0 size-3 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-background bg-brand shadow-sm sm:size-3.5"
                                 style={{ left: trackLeft(nowPct) }}
                             />
                         </TooltipTrigger>
@@ -168,15 +168,15 @@ export default async function DealLifecycleProgress({
                                 : isPast
                                     ? 'bg-brand text-white'
                                     : isWonStage
-                                        ? 'bg-white text-green-600 ring-1 ring-green-300'
+                                        ? 'bg-background text-green-600 ring-1 ring-green-300 dark:text-green-300 dark:ring-green-400/30'
                                         : isLostStage
-                                            ? 'bg-white text-red-600 ring-1 ring-red-300'
-                                            : 'bg-white text-neutral-500 ring-1 ring-neutral-300';
+                                            ? 'bg-background text-red-600 ring-1 ring-red-300 dark:text-red-300 dark:ring-red-400/30'
+                                            : 'bg-background text-muted-foreground ring-1 ring-border';
 
                     const labelClass =
                         isCurrent || wonAchieved || lostAchieved
-                            ? 'font-medium text-neutral-900'
-                            : 'text-neutral-500';
+                            ? 'font-medium text-foreground'
+                            : 'text-muted-foreground';
 
                     const labelStyle: CSSProperties = isLast
                         ? { right: `${100 - left}%` }
@@ -227,9 +227,9 @@ export default async function DealLifecycleProgress({
                 })}
             </div>
 
-            <div className="mt-4 flex items-start justify-between gap-3 text-[10px] leading-tight text-neutral-500 sm:text-[11px]">
+            <div className="mt-4 flex items-start justify-between gap-3 text-[10px] leading-tight text-muted-foreground sm:text-[11px]">
                 <div className="flex shrink-0 flex-col items-start whitespace-nowrap">
-                    <span className="font-medium text-neutral-700">{t('created')}</span>
+                    <span className="font-medium text-foreground">{t('created')}</span>
                     <span>{formatDate(createdAt, locale)}</span>
                 </div>
                 {expectedCloseDate || (isClosed && closedAt) ? (
@@ -245,7 +245,7 @@ export default async function DealLifecycleProgress({
                         </div>
                         <div className="flex shrink-0 flex-col items-end whitespace-nowrap">
                             <span
-                                className={`font-medium ${isClosed ? closedNameClass : 'text-neutral-700'}`}
+                                className={`font-medium ${isClosed ? closedNameClass : 'text-foreground'}`}
                             >
                                 {isClosed ? t('closed') : t('expectedClose')}
                             </span>

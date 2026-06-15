@@ -88,7 +88,7 @@ export default function QuickEditNoteSheet({
                                     : null;
                             return (
                                 <div key={note.id} className={idx > 0 ? 'border-t pt-6' : ''}>
-                                    <div className="mb-3 text-xs font-medium tracking-[0.12em] text-neutral-500 uppercase">
+                                    <div className="mb-3 text-xs font-medium tracking-[0.12em] text-muted-foreground uppercase">
                                         {t('noteIndex', { index: idx + 1 })}
                                     </div>
                                     <div className="grid gap-3">
@@ -118,7 +118,7 @@ export default function QuickEditNoteSheet({
                                                     <ComboboxInput
                                                         id={`person-${note.id}`}
                                                         placeholder={t('personPlaceholder')}
-                                                        className="ring-1 ring-black/5"
+                                                        className="ring-1 ring-border"
                                                     />
                                                     <ComboboxContent className="pointer-events-auto">
                                                         <ComboboxList onWheel={handleListWheel}>
@@ -147,7 +147,7 @@ export default function QuickEditNoteSheet({
                                                     <ComboboxInput
                                                         id={`deal-${note.id}`}
                                                         placeholder={t('dealPlaceholder')}
-                                                        className="ring-1 ring-black/5"
+                                                        className="ring-1 ring-border"
                                                     />
                                                     <ComboboxContent className="pointer-events-auto">
                                                         <ComboboxList onWheel={handleListWheel}>

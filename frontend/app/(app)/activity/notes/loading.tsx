@@ -21,7 +21,7 @@ export default function Loading() {
                 {Array.from({ length: 8 }).map((_, i) => (
                     <div
                         key={i}
-                        className="flex aspect-square flex-col rounded-2xl bg-white p-4 ring-1 ring-black/5"
+                        className="flex aspect-square flex-col rounded-2xl bg-card p-4 ring-1 ring-border"
                     >
                         <div className="flex-1 space-y-2">
                             <Skeleton className="h-4 w-3/4" />
@@ -29,7 +29,7 @@ export default function Loading() {
                             <Skeleton className="h-3 w-5/6" />
                             <Skeleton className="h-3 w-2/3" />
                         </div>
-                        <div className="mt-3 space-y-2.5 border-t border-neutral-100 pt-3">
+                        <div className="mt-3 space-y-2.5 border-t border-border pt-3">
                             <Skeleton className="h-5 w-24 rounded-full" />
                             <div className="flex items-center justify-between">
                                 <div className="flex items-center gap-2">

@@ -72,7 +72,7 @@ export default function NoteCard({ note, person, deal, author, onEdit, onDelete 
                 whileTap={reduce ? undefined : { scale: 0.99 }}
                 transition={{ duration: 0.2, ease: EASE_OUT }}
                 onClick={() => onEdit?.()}
-                className="group relative flex aspect-square w-full min-w-0 cursor-pointer flex-col overflow-hidden rounded-2xl bg-white p-4 ring-1 ring-black/5 transition-shadow duration-200 hover:shadow-lg"
+                className="group relative flex aspect-square w-full min-w-0 cursor-pointer flex-col overflow-hidden rounded-2xl bg-card p-4 ring-1 ring-border transition-shadow duration-200 hover:shadow-lg"
             >
                 <DropdownMenu>
                     <DropdownMenuTrigger asChild>
@@ -80,7 +80,7 @@ export default function NoteCard({ note, person, deal, author, onEdit, onDelete 
                             type="button"
                             aria-label={t('actionsAria')}
                             onClick={(e) => e.stopPropagation()}
-                            className="absolute top-3 right-3 flex size-7 shrink-0 items-center justify-center rounded-full text-neutral-500 opacity-0 transition hover:bg-neutral-100 hover:text-neutral-800 focus-visible:opacity-100 group-hover:opacity-100 pointer-coarse:opacity-100 aria-expanded:bg-neutral-100 aria-expanded:text-neutral-800 aria-expanded:opacity-100"
+                            className="absolute top-3 right-3 flex size-7 shrink-0 items-center justify-center rounded-full text-muted-foreground opacity-0 transition hover:bg-muted hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100 pointer-coarse:opacity-100 aria-expanded:bg-muted aria-expanded:text-foreground aria-expanded:opacity-100"
                         >
                             <EllipsisHorizontalIcon className="size-4" />
                         </button>
@@ -97,7 +97,7 @@ export default function NoteCard({ note, person, deal, author, onEdit, onDelete 
                                 onEdit?.();
                             }}
                         >
-                            <PencilIcon className="size-4 text-neutral-500" />
+                            <PencilIcon className="size-4 text-muted-foreground" />
                             {t('edit')}
                         </DropdownMenuItem>
                         <DropdownMenuItem
@@ -106,12 +106,12 @@ export default function NoteCard({ note, person, deal, author, onEdit, onDelete 
                                 copyContent();
                             }}
                         >
-                            <DocumentDuplicateIcon className="size-4 text-neutral-500" />
+                            <DocumentDuplicateIcon className="size-4 text-muted-foreground" />
                             {t('copyContent')}
                         </DropdownMenuItem>
                         <DropdownMenuSeparator />
                         <DropdownMenuItem
-                            className="text-destructive hover:bg-red-500/10"
+                            className="text-destructive hover:bg-destructive/10"
                             onSelect={(e) => {
                                 e.preventDefault();
                                 onDelete?.();
@@ -126,21 +126,21 @@ export default function NoteCard({ note, person, deal, author, onEdit, onDelete 
                 <div className="min-h-0 flex-1 overflow-y-auto pr-7">
                     {body ? (
                         <>
-                            <p className="text-[15px] font-semibold leading-snug break-words text-neutral-900">
+                            <p className="text-[15px] font-semibold leading-snug break-words text-foreground">
                                 {heading}
                             </p>
-                            <p className="mt-1.5 text-sm leading-relaxed break-words whitespace-pre-wrap text-neutral-600">
+                            <p className="mt-1.5 text-sm leading-relaxed break-words whitespace-pre-wrap text-muted-foreground">
                                 {body}
                             </p>
                         </>
                     ) : (
-                        <p className="text-sm leading-relaxed break-words whitespace-pre-wrap text-neutral-700">
+                        <p className="text-sm leading-relaxed break-words whitespace-pre-wrap text-foreground">
                             {heading}
                         </p>
                     )}
                 </div>
 
-                <div className="mt-3 shrink-0 space-y-2.5 border-t border-neutral-100 pt-3">
+                <div className="mt-3 shrink-0 space-y-2.5 border-t border-border pt-3">
                     <div className="flex min-w-0 flex-wrap items-center gap-1.5">
                         {person && (
                             <Link
@@ -157,7 +157,7 @@ export default function NoteCard({ note, person, deal, author, onEdit, onDelete 
                             <Link
                                 href={`/records/deals/${deal.id}`}
                                 onClick={(e) => e.stopPropagation()}
-                                className="inline-flex max-w-[12rem] items-center gap-1 rounded-full bg-neutral-100 px-2 py-0.5 text-xs font-medium text-neutral-700 transition hover:bg-neutral-200"
+                                className="inline-flex max-w-[12rem] items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-foreground transition hover:bg-muted/70"
                                 title={deal.name}
                             >
                                 <BriefcaseIcon className="size-3 shrink-0" />
@@ -165,7 +165,7 @@ export default function NoteCard({ note, person, deal, author, onEdit, onDelete 
                             </Link>
                         )}
                         {!hasContext && (
-                            <span className="inline-flex items-center gap-1 text-xs font-medium text-neutral-500">
+                            <span className="inline-flex items-center gap-1 text-xs font-medium text-muted-foreground">
                                 <LockClosedIcon className="size-3 shrink-0" />
                                 {t('private')}
                             </span>
@@ -174,19 +174,19 @@ export default function NoteCard({ note, person, deal, author, onEdit, onDelete 
 
                     <div className="flex items-center justify-between gap-2">
                         <div className="flex min-w-0 items-center gap-2">
-                            <Avatar size="sm" className="ring-1 ring-black/5">
+                            <Avatar size="sm" className="ring-1 ring-border">
                                 {author?.profilePictureUrl ? (
                                     <AvatarImage src={author.profilePictureUrl} alt={authorName} />
                                 ) : (
                                     <AvatarFallback>
-                                        <UserIcon className="size-3 text-neutral-500" />
+                                        <UserIcon className="size-3 text-muted-foreground" />
                                     </AvatarFallback>
                                 )}
                             </Avatar>
-                            <span className="truncate text-xs font-medium text-neutral-600">{authorName}</span>
+                            <span className="truncate text-xs font-medium text-muted-foreground">{authorName}</span>
                         </div>
                         <span
-                            className="shrink-0 text-xs text-neutral-500 tabular-nums"
+                            className="shrink-0 text-xs text-muted-foreground tabular-nums"
                             title={formatDateTime(updated, locale)}
                         >
                             {formatShortDate(updated, locale)}

@@ -51,7 +51,7 @@ export default function DeleteRecordDialog<T>({
                     </DialogClose>
                     <Button
                         variant="destructive"
-                        className="bg-red-500 text-white hover:bg-red-600"
+                        className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
                         disabled={isDeleting}
                         onClick={confirmDelete}
                     >

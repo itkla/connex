@@ -32,10 +32,10 @@ function boundaryPoint(from: Circle, to: Circle): { x: number; y: number } {
 }
 
 const OUTCOME_BADGE: Record<DealSummary['outcome'], string> = {
-    won: 'bg-emerald-100 text-emerald-700',
-    lost: 'bg-red-100 text-red-700',
-    open: 'bg-blue-100 text-blue-700',
-    closed: 'bg-neutral-100 text-neutral-600',
+    won: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300',
+    lost: 'bg-red-100 text-red-700 dark:bg-red-950/40 dark:text-red-300',
+    open: 'bg-blue-100 text-blue-700 dark:bg-blue-950/40 dark:text-blue-300',
+    closed: 'bg-muted text-muted-foreground',
 };
 
 export default function RelationEdge({ id, source, target, data, markerEnd }: EdgeProps<RelationEdgeType>) {
@@ -61,7 +61,7 @@ export default function RelationEdge({ id, source, target, data, markerEnd }: Ed
     const deals = data?.deals ?? [];
     const gradId = `relgrad-${id}`;
 
-    const stroke = isRelCc ? `url(#${gradId})` : variant === 'uc-user' ? '#94a3b8' : '#cbd5e1';
+    const stroke = isRelCc ? `url(#${gradId})` : variant === 'uc-user' ? 'var(--muted-foreground)' : 'var(--border)';
     const strokeWidth = isRelCc ? 2.5 : variant === 'uc-user' ? 1.75 : 1.25;
 
     return (
@@ -99,16 +99,16 @@ export default function RelationEdge({ id, source, target, data, markerEnd }: Ed
             {hovered && deals.length > 0 && (
                 <EdgeLabelRenderer>
                     <div
-                        className="nodrag nopan pointer-events-none absolute z-50 w-60 rounded-lg border border-neutral-200 bg-white p-2 shadow-xl"
+                        className="nodrag nopan pointer-events-none absolute z-50 w-60 rounded-lg border border-border bg-popover text-popover-foreground p-2 shadow-xl"
                         style={{ transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)` }}
                     >
-                        <p className="mb-1.5 px-1 text-[10px] font-semibold uppercase tracking-wider text-neutral-400">
+                        <p className="mb-1.5 px-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
                             {deals.length} deal{deals.length > 1 ? 's' : ''}
                         </p>
                         <ul className="space-y-1">
                             {deals.map((d) => (
                                 <li key={d.id} className="flex items-center justify-between gap-2 rounded px-1 py-0.5">
-                                    <span className="min-w-0 flex-1 truncate text-xs text-neutral-700">{d.name}</span>
+                                    <span className="min-w-0 flex-1 truncate text-xs text-foreground">{d.name}</span>
                                     <span
                                         className={cn(
                                             'shrink-0 rounded-full px-1.5 py-0.5 text-[9px] font-medium uppercase',

@@ -22,19 +22,19 @@ export default function Panel({
     children: ReactNode;
 }) {
     return (
-        <section className={cn('flex h-full flex-col rounded-2xl bg-white p-6 ring-1 ring-black/5', className)}>
+        <section className={cn('flex h-full flex-col rounded-2xl bg-card p-6 ring-1 ring-border', className)}>
             {(title || action) && (
                 <div className="mb-5 flex items-start justify-between gap-4">
                     <div className="min-w-0">
                         <div className="flex items-center gap-1.5">
                             {title && (
-                                <h2 className="text-xs font-medium uppercase tracking-[0.12em] text-neutral-500">
+                                <h2 className="text-xs font-medium uppercase tracking-[0.12em] text-muted-foreground">
                                     {title}
                                 </h2>
                             )}
                             {info && title && <InfoTip title={title} body={info} label={infoLabel ?? title} />}
                         </div>
-                        {subtitle && <p className="mt-1.5 truncate text-sm text-neutral-500">{subtitle}</p>}
+                        {subtitle && <p className="mt-1.5 truncate text-sm text-muted-foreground">{subtitle}</p>}
                     </div>
                     {action ? <div className="shrink-0">{action}</div> : null}
                 </div>

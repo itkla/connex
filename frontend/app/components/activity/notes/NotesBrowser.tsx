@@ -274,7 +274,7 @@ export default function NotesBrowser({ notes, persons, deals, users, currentUser
                 label: t('columnContent'),
                 getSortValue: (n) => n.content ?? null,
                 render: (n) => (
-                    <span className="block max-w-[28rem] truncate text-sm text-neutral-800">
+                    <span className="block max-w-[28rem] truncate text-sm text-foreground">
                         {n.content}
                     </span>
                 ),
@@ -317,12 +317,12 @@ export default function NotesBrowser({ notes, persons, deals, users, currentUser
     const renderRowAvatar = (n: Note) => {
         const author = userById.get(n.author);
         return (
-            <Avatar size="sm" className="ring-1 ring-black/5">
+            <Avatar size="sm" className="ring-1 ring-border">
                 {author?.profilePictureUrl ? (
                     <AvatarImage src={author.profilePictureUrl} alt={author.displayName} />
                 ) : (
                     <AvatarFallback>
-                        <UserIcon className="size-3 text-neutral-500" />
+                        <UserIcon className="size-3 text-muted-foreground" />
                     </AvatarFallback>
                 )}
             </Avatar>
@@ -330,7 +330,7 @@ export default function NotesBrowser({ notes, persons, deals, users, currentUser
     };
 
     const selectionActions = (
-        <ButtonGroup className="rounded-full bg-neutral-100">
+        <ButtonGroup className="rounded-full bg-muted">
             <Button variant="outline" size="sm" onClick={openEditSheet}>
                 <PencilIcon className="size-4" />
                 {t('quickEdit')}
@@ -356,7 +356,7 @@ export default function NotesBrowser({ notes, persons, deals, users, currentUser
             <div className="flex flex-wrap items-start justify-between gap-4">
                 <div>
                     <h1 className="text-4xl font-extrabold">{t('title')}</h1>
-                    <p className="mt-1 max-w-prose text-sm text-neutral-500">{t('subtitle')}</p>
+                    <p className="mt-1 max-w-prose text-sm text-muted-foreground">{t('subtitle')}</p>
                 </div>
                 <Button
                     className="bg-brand text-white hover:bg-brand-dark"
@@ -372,14 +372,14 @@ export default function NotesBrowser({ notes, persons, deals, users, currentUser
                 <div
                     role="group"
                     aria-label={t('displayModeAria')}
-                    className="inline-flex rounded-full bg-neutral-100 p-0.5 ring-1 ring-black/5"
+                    className="inline-flex rounded-full bg-muted p-0.5 ring-1 ring-border"
                 >
                     <button
                         type="button"
                         onClick={() => setDisplayMode('grid')}
                         aria-label={t('gridViewAria')}
                         aria-pressed={displayMode === 'grid'}
-                        className={`flex h-7 w-7 items-center justify-center rounded-full transition ${displayMode === 'grid' ? 'bg-white text-neutral-900 shadow' : 'text-neutral-500 hover:text-neutral-700'}`}
+                        className={`flex h-7 w-7 items-center justify-center rounded-full transition ${displayMode === 'grid' ? 'bg-background text-foreground shadow' : 'text-muted-foreground hover:text-foreground'}`}
                     >
                         <Squares2X2Icon className="size-4" />
                     </button>
@@ -388,7 +388,7 @@ export default function NotesBrowser({ notes, persons, deals, users, currentUser
                         onClick={() => setDisplayMode('table')}
                         aria-label={t('tableViewAria')}
                         aria-pressed={displayMode === 'table'}
-                        className={`flex h-7 w-7 items-center justify-center rounded-full transition ${displayMode === 'table' ? 'bg-white text-neutral-900 shadow' : 'text-neutral-500 hover:text-neutral-700'}`}
+                        className={`flex h-7 w-7 items-center justify-center rounded-full transition ${displayMode === 'table' ? 'bg-background text-foreground shadow' : 'text-muted-foreground hover:text-foreground'}`}
                     >
                         <TableCellsIcon className="size-4" />
                     </button>
@@ -398,9 +398,9 @@ export default function NotesBrowser({ notes, persons, deals, users, currentUser
                     <Select value={groupBy} onValueChange={(v) => setGroupBy(v as typeof groupBy)}>
                         <SelectTrigger
                             aria-label={t('groupByAria')}
-                            className="flex h-auto items-center gap-2 rounded-full border-0 bg-neutral-100 px-4 py-2 text-sm text-neutral-700 ring-1 ring-black/5 shadow-none transition hover:bg-neutral-200 focus-visible:border-0 focus-visible:ring-1 focus-visible:ring-black/5"
+                            className="flex h-auto items-center gap-2 rounded-full border-0 bg-muted px-4 py-2 text-sm text-foreground ring-1 ring-border shadow-none transition hover:bg-muted/70 focus-visible:border-0 focus-visible:ring-1 focus-visible:ring-border"
                         >
-                            <span className="text-neutral-500">{t('groupBy')}</span>
+                            <span className="text-muted-foreground">{t('groupBy')}</span>
                             <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
@@ -417,18 +417,18 @@ export default function NotesBrowser({ notes, persons, deals, users, currentUser
                         placeholder={t('searchPlaceholder')}
                         value={query}
                         onChange={(e) => setQuery(e.target.value)}
-                        className="w-full rounded-full bg-neutral-100 px-4 py-2 pr-10 text-sm text-black placeholder-neutral-500 outline-none ring-1 ring-black/5 transition focus:ring-2 focus:ring-brand"
+                        className="w-full rounded-full bg-muted px-4 py-2 pr-10 text-sm text-foreground placeholder:text-muted-foreground outline-none ring-1 ring-border transition focus:ring-2 focus:ring-brand"
                     />
-                    <MagnifyingGlassIcon className="pointer-events-none absolute right-3 top-1/2 size-4 -translate-y-1/2 text-neutral-500" />
+                    <MagnifyingGlassIcon className="pointer-events-none absolute right-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
                 </div>
             </div>
 
             {filteredNotes.length === 0 ? (
-                <div className="rounded-2xl bg-white px-6 py-20 text-center ring-1 ring-black/5">
+                <div className="rounded-2xl bg-card px-6 py-20 text-center ring-1 ring-border">
                     <div className="mx-auto flex size-14 items-center justify-center rounded-2xl bg-brand-light text-brand-dark">
                         <PencilSquareIcon className="size-7" />
                     </div>
-                    <p className="mx-auto mt-5 max-w-sm text-sm font-medium text-neutral-700">
+                    <p className="mx-auto mt-5 max-w-sm text-sm font-medium text-foreground">
                         {notes.length === 0 ? t('empty') : t('emptyFiltered')}
                     </p>
                     {notes.length === 0 && (
@@ -447,7 +447,7 @@ export default function NotesBrowser({ notes, persons, deals, users, currentUser
                         <section key={g.id}>
                             {g.label && (
                                 <div className="mb-3 flex items-center gap-2 px-1">
-                                    <h2 className="text-xs font-medium uppercase tracking-[0.12em] text-neutral-500">
+                                    <h2 className="text-xs font-medium uppercase tracking-[0.12em] text-muted-foreground">
                                         {g.label}
                                     </h2>
                                     <Badge variant="outline">{g.notes.length}</Badge>

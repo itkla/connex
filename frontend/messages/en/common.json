@@ -81,6 +81,10 @@
     "navUsers": "Users",
     "profile": "Profile",
     "logOut": "Log out",
+    "theme": "Theme",
+    "themeLight": "Light",
+    "themeDark": "Dark",
+    "themeSystem": "System",
     "profilePictureAlt": "{name}'s profile picture"
   },
   "CommonContentShell": {

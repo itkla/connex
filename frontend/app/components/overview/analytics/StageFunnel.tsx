@@ -25,11 +25,11 @@ type Row = {
 
 // class is a protected keyword in TypeScript, so ima use klass instead
 function stageFill(index: number, total: number, klass: string): string {
-    if (klass === 'won') return '#10b981';
-    if (klass === 'lost') return '#ef4444';
+    if (klass === 'won') return 'var(--chart-won)';
+    if (klass === 'lost') return 'var(--chart-lost)';
     const t = total <= 1 ? 0 : index / (total - 1);
     const lighten = 55 - t * 45;
-    return `color-mix(in oklch, var(--color-brand) ${100 - lighten}%, white)`;
+    return `color-mix(in oklch, var(--color-brand) ${100 - lighten}%, var(--card))`;
 }
 
 export default function StageFunnel({
@@ -86,7 +86,7 @@ export default function StageFunnel({
     }, [activeId, stages, openDeals]);
 
     if (available.length === 0) {
-        return <div className="flex h-56 items-center justify-center text-sm text-neutral-500">{t('empty')}</div>;
+        return <div className="flex h-56 items-center justify-center text-sm text-muted-foreground">{t('empty')}</div>;
     }
 
     const activeName = available.find((p) => p.id === activeId)?.name ?? '';
@@ -101,17 +101,17 @@ export default function StageFunnel({
                             <button
                                 type="button"
                                 aria-label={t('selectPipeline')}
-                                className="inline-flex items-center gap-1.5 rounded-full bg-neutral-100 px-3 py-1.5 text-sm font-medium text-neutral-700 ring-1 ring-black/5 transition hover:bg-neutral-200"
+                                className="inline-flex items-center gap-1.5 rounded-full bg-muted px-3 py-1.5 text-sm font-medium text-foreground ring-1 ring-border transition hover:bg-muted/80"
                             >
                                 {activeName}
-                                <ChevronDownIcon className="size-3.5 text-neutral-500" />
+                                <ChevronDownIcon className="size-3.5 text-muted-foreground" />
                             </button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="start">
                             {available.map((p) => (
                                 <DropdownMenuItem key={p.id} onSelect={() => setSelectedId(p.id)}>
                                     <span className={p.id === activeId ? 'font-semibold' : ''}>{p.name}</span>
-                                    <span className="ml-auto text-xs text-neutral-500">
+                                    <span className="ml-auto text-xs text-muted-foreground">
                                         {t('deals', { count: p.openCount })}
                                     </span>
                                 </DropdownMenuItem>
@@ -119,11 +119,11 @@ export default function StageFunnel({
                         </DropdownMenuContent>
                     </DropdownMenu>
                 ) : (
-                    <p className="text-sm text-neutral-500">{t('subtitle', { pipeline: activeName })}</p>
+                    <p className="text-sm text-muted-foreground">{t('subtitle', { pipeline: activeName })}</p>
                 )}
             </div>
             {rows.length === 0 ? (
-                <div className="flex flex-1 items-center justify-center text-sm text-neutral-500">{t('empty')}</div>
+                <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">{t('empty')}</div>
             ) : (
                 <ul className="flex flex-col gap-3">
                     {rows.map((row) => {
@@ -131,19 +131,19 @@ export default function StageFunnel({
                         return (
                             <li key={row.id} className="group">
                                 <div className="mb-1 flex items-baseline justify-between gap-3 text-sm">
-                                    <span className="min-w-0 truncate font-medium text-neutral-700">{row.name}</span>
-                                    <span className="shrink-0 tabular-nums text-neutral-500">
+                                    <span className="min-w-0 truncate font-medium text-foreground">{row.name}</span>
+                                    <span className="shrink-0 tabular-nums text-muted-foreground">
                                         {t('deals', { count: row.count })}
                                     </span>
                                 </div>
                                 <div className="flex items-center gap-3">
-                                    <div className="h-7 flex-1 overflow-hidden rounded-md bg-neutral-100">
+                                    <div className="h-7 flex-1 overflow-hidden rounded-md bg-muted">
                                         <div
                                             className="h-full rounded-md transition-[width] duration-500 ease-out group-hover:brightness-95 motion-reduce:transition-none"
                                             style={{ width: `${width}%`, backgroundColor: row.fill }}
                                         />
                                     </div>
-                                    <span className="w-16 shrink-0 text-right text-sm tabular-nums text-neutral-900">
+                                    <span className="w-16 shrink-0 text-right text-sm tabular-nums text-foreground">
                                         {formatCompactCurrency(row.value, currency, locale)}
                                     </span>
                                 </div>

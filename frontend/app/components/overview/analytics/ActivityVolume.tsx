@@ -70,15 +70,15 @@ export default function ActivityVolume({ activities, range }: { activities: Acti
     }, [t]);
 
     if (total === 0) {
-        return <div className="flex h-64 items-center justify-center text-sm text-neutral-500">{t('empty')}</div>;
+        return <div className="flex h-64 items-center justify-center text-sm text-muted-foreground">{t('empty')}</div>;
     }
 
     return (
         <ChartContainer config={chartConfig} className="aspect-auto h-64 w-full">
             <BarChart data={data} margin={{ top: 8, right: 4, left: -16, bottom: 0 }}>
                 <CartesianGrid vertical={false} strokeDasharray="3 3" />
-                <XAxis dataKey="label" tickLine={false} axisLine={false} tickMargin={10} tick={{ fontSize: 11, fill: '#737373' }} />
-                <YAxis tickLine={false} axisLine={false} tickMargin={4} width={36} allowDecimals={false} tick={{ fontSize: 11, fill: '#737373' }} />
+                <XAxis dataKey="label" tickLine={false} axisLine={false} tickMargin={10} tick={{ fontSize: 11, fill: 'var(--chart-axis)' }} />
+                <YAxis tickLine={false} axisLine={false} tickMargin={4} width={36} allowDecimals={false} tick={{ fontSize: 11, fill: 'var(--chart-axis)' }} />
                 <ChartTooltip cursor={{ fill: 'var(--color-brand)', fillOpacity: 0.05 }} content={<ChartTooltipContent />} />
                 {activeTypes.map((type, i) => (
                     <Bar

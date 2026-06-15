@@ -35,11 +35,11 @@ export default function LanguageSwitcher({ align = "end" }: { align?: Align }) {
                     type="button"
                     aria-label={t("languageLabel")}
                     data-pending={isPending ? "" : undefined}
-                    className="group inline-flex items-center gap-1.5 rounded-full border border-black/10 bg-white/70 px-3 py-1.5 text-sm font-medium text-neutral-700 outline-none transition-[transform,background-color,border-color] duration-150 ease-out hover:border-black/20 hover:bg-white focus-visible:ring-2 focus-visible:ring-brand active:scale-[0.97] data-[state=open]:border-black/20 data-[state=open]:bg-white data-[pending]:opacity-60"
+                    className="group inline-flex items-center gap-1.5 rounded-full border border-border bg-background/70 px-3 py-1.5 text-sm font-medium text-foreground outline-none transition-[transform,background-color,border-color] duration-150 ease-out hover:border-border hover:bg-background focus-visible:ring-2 focus-visible:ring-brand active:scale-[0.97] data-[state=open]:border-border data-[state=open]:bg-background data-[pending]:opacity-60"
                 >
-                    <GlobeAltIcon className="size-4 text-neutral-500 transition-colors group-hover:text-neutral-700" />
+                    <GlobeAltIcon className="size-4 text-muted-foreground transition-colors group-hover:text-foreground" />
                     <span>{t(active.labelKey)}</span>
-                    <ChevronDownIcon className="size-3.5 text-neutral-400 transition-transform duration-200 ease-out group-data-[state=open]:rotate-180" />
+                    <ChevronDownIcon className="size-3.5 text-muted-foreground transition-transform duration-200 ease-out group-data-[state=open]:rotate-180" />
                 </button>
             </DropdownMenu.Trigger>
 
@@ -47,7 +47,7 @@ export default function LanguageSwitcher({ align = "end" }: { align?: Align }) {
                 <DropdownMenu.Content
                     align={align}
                     sideOffset={8}
-                    className="z-50 min-w-[10rem] origin-[var(--radix-dropdown-menu-content-transform-origin)] rounded-xl border border-black/10 bg-white p-1 text-neutral-800 shadow-[0_16px_40px_-12px_rgba(0,0,0,0.22)] data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[side=top]:slide-in-from-bottom-1 data-[side=bottom]:slide-in-from-top-1"
+                    className="z-50 min-w-[10rem] origin-[var(--radix-dropdown-menu-content-transform-origin)] rounded-xl border border-border bg-popover p-1 text-popover-foreground shadow-lg data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[side=top]:slide-in-from-bottom-1 data-[side=bottom]:slide-in-from-top-1"
                 >
                     {LANGUAGES.map((lang) => {
                         const isActive = lang.code === locale;

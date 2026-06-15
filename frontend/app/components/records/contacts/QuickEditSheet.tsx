@@ -10,7 +10,7 @@ import ContactAvatar from '@/app/components/records/contacts/ContactAvatar';
 
 // the styling from login
 // TODO: move this to a shared location
-const inputClass = 'w-full rounded-lg bg-neutral-100 px-3 py-2 text-sm text-black placeholder-neutral-500 outline-none ring-1 ring-black/5 transition focus:ring-2 focus:ring-brand';
+const inputClass = 'w-full rounded-lg bg-muted px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground outline-none ring-1 ring-border transition focus:ring-2 focus:ring-brand';
 
 export type ContactDraft = {
     name: string;
@@ -72,13 +72,13 @@ export default function QuickEditSheet({
                                         {updateImageFile ? (
                                             <label
                                                 htmlFor={`pfp-${c.id}`}
-                                                className="group relative flex h-16 w-16 cursor-pointer items-center justify-center overflow-hidden rounded-full bg-neutral-200 ring-1 ring-black/5 transition hover:ring-2 hover:ring-brand"
+                                                className="group relative flex h-16 w-16 cursor-pointer items-center justify-center overflow-hidden rounded-full bg-muted ring-1 ring-border transition hover:ring-2 hover:ring-brand"
                                             >
                                                 {previewSrc ? (
                                                     <img src={previewSrc} alt="" className="h-full w-full object-cover" />
                                                 ) : (
-                                                    <div className="flex h-full w-full items-center justify-center bg-gray-400">
-                                                        <UserIcon className="size-10 text-white" />
+                                                    <div className="flex h-full w-full items-center justify-center bg-muted-foreground/40">
+                                                        <UserIcon className="size-10 text-muted-foreground" />
                                                     </div>
                                                 )}
                                                 <div className="absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 transition group-hover:opacity-100">
@@ -95,7 +95,7 @@ export default function QuickEditSheet({
                                         ) : (
                                             <ContactAvatar contact={c} type="large" />
                                         )}
-                                        <div className="text-lg font-medium text-neutral-600">{c.name}</div>
+                                        <div className="text-lg font-medium text-foreground">{c.name}</div>
                                     </div>
 
                                     <div className="grid gap-3">

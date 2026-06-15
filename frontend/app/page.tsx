@@ -72,18 +72,18 @@ export default async function Home() {
     ];
 
     return (
-        <div className="font-body min-h-screen bg-white text-neutral-900">
+        <div className="font-body min-h-screen bg-background text-foreground">
             <LandingNav ctaHref={ctaHref} ctaLabel={ctaLabel} />
 
             <main>
                 <section className="mx-auto grid max-w-7xl grid-cols-1 items-center gap-12 px-6 pt-14 pb-20 lg:min-h-[calc(100dvh-4rem)] lg:grid-cols-2 lg:gap-16 lg:px-8 lg:pb-28 lg:pt-20">
                     <div className="max-w-xl">
-                        <h1 className="connex-rise font-display text-[clamp(2.5rem,6.5vw,4.25rem)] leading-[1.08] tracking-[-0.01em] text-balance text-neutral-900">
+                        <h1 className="connex-rise font-display text-[clamp(2.5rem,6.5vw,4.25rem)] leading-[1.08] tracking-[-0.01em] text-balance text-foreground">
                             {t("heroHeadlineLead")} <em className="italic">{t("heroHeadlineEmphasis")}</em>{" "}
                             {t("heroHeadlineRest")}
                         </h1>
                         <p
-                            className="connex-rise mt-6 max-w-md text-lg leading-relaxed text-neutral-600 text-pretty"
+                            className="connex-rise mt-6 max-w-md text-lg leading-relaxed text-muted-foreground text-pretty"
                             style={{ animationDelay: "90ms" }}
                         >
                             {t("heroSubtext")}
@@ -98,7 +98,7 @@ export default async function Home() {
                             </Link>
                             <Link
                                 href="#workflow"
-                                className="inline-flex items-center justify-center rounded-full border border-black/10 px-6 py-3 text-base font-medium text-neutral-700 transition-[transform,border-color,background-color] duration-150 ease-out hover:border-black/20 hover:bg-neutral-50 active:scale-[0.98]"
+                                className="inline-flex items-center justify-center rounded-full border border-border px-6 py-3 text-base font-medium text-foreground transition-[transform,border-color,background-color] duration-150 ease-out hover:border-border hover:bg-muted active:scale-[0.98]"
                             >
                                 {t("heroSecondaryCta")}
                             </Link>
@@ -123,13 +123,13 @@ export default async function Home() {
                     </div>
                 </section>
 
-                <section id="features" className="scroll-mt-20 border-t border-black/[0.06] bg-neutral-50/60">
+                <section id="features" className="scroll-mt-20 border-t border-border bg-muted/60">
                     <div className="mx-auto max-w-7xl px-6 py-20 lg:px-8 lg:py-28">
                         <Reveal className="max-w-2xl">
-                            <h2 className="font-display text-[clamp(2rem,4vw,3rem)] leading-[1.1] tracking-[-0.01em] text-balance text-neutral-900">
+                            <h2 className="font-display text-[clamp(2rem,4vw,3rem)] leading-[1.1] tracking-[-0.01em] text-balance text-foreground">
                                 {t("featuresHeading")}
                             </h2>
-                            <p className="mt-4 max-w-xl text-lg leading-relaxed text-neutral-600 text-pretty">
+                            <p className="mt-4 max-w-xl text-lg leading-relaxed text-muted-foreground text-pretty">
                                 {t("featuresSubtext")}
                             </p>
                         </Reveal>
@@ -139,14 +139,14 @@ export default async function Home() {
                                 const Icon = feature.icon;
                                 return (
                                     <Reveal key={feature.key} delay={i * 0.06} className={feature.span}>
-                                        <div className="flex h-full flex-col rounded-2xl border border-black/[0.07] bg-white p-6">
+                                        <div className="flex h-full flex-col rounded-2xl border border-border bg-card p-6">
                                             <div className="flex size-10 items-center justify-center rounded-xl bg-brand-light">
                                                 <Icon className="size-5 text-brand-dark" />
                                             </div>
-                                            <h3 className="mt-5 text-lg font-semibold text-neutral-900">
+                                            <h3 className="mt-5 text-lg font-semibold text-foreground">
                                                 {feature.title}
                                             </h3>
-                                            <p className="mt-2 text-[15px] leading-relaxed text-neutral-600">
+                                            <p className="mt-2 text-[15px] leading-relaxed text-muted-foreground">
                                                 {feature.body}
                                             </p>
                                             <FeatureMotif
@@ -165,13 +165,13 @@ export default async function Home() {
                     </div>
                 </section>
 
-                <section id="workflow" className="scroll-mt-20 border-t border-black/[0.06]">
+                <section id="workflow" className="scroll-mt-20 border-t border-border">
                     <div className="mx-auto max-w-7xl px-6 py-20 lg:px-8 lg:py-28">
                         <Reveal className="max-w-2xl">
-                            <h2 className="font-display text-[clamp(2rem,4vw,3rem)] leading-[1.1] tracking-[-0.01em] text-balance text-neutral-900">
+                            <h2 className="font-display text-[clamp(2rem,4vw,3rem)] leading-[1.1] tracking-[-0.01em] text-balance text-foreground">
                                 {t("workflowHeading")}
                             </h2>
-                            <p className="mt-4 max-w-xl text-lg leading-relaxed text-neutral-600 text-pretty">
+                            <p className="mt-4 max-w-xl text-lg leading-relaxed text-muted-foreground text-pretty">
                                 {t("workflowSubtext")}
                             </p>
                         </Reveal>
@@ -184,8 +184,8 @@ export default async function Home() {
                                             <span className="font-display text-3xl text-brand-dark">{step.n}</span>
                                             <span className="h-px flex-1 bg-gradient-to-r from-brand/40 to-transparent" />
                                         </div>
-                                        <h3 className="mt-5 text-xl font-semibold text-neutral-900">{step.title}</h3>
-                                        <p className="mt-2 text-[15px] leading-relaxed text-neutral-600 text-pretty">
+                                        <h3 className="mt-5 text-xl font-semibold text-foreground">{step.title}</h3>
+                                        <p className="mt-2 text-[15px] leading-relaxed text-muted-foreground text-pretty">
                                             {step.body}
                                         </p>
                                     </div>
@@ -224,30 +224,30 @@ export default async function Home() {
                 </section>
             </main>
 
-            <footer className="border-t border-black/[0.06] bg-white">
+            <footer className="border-t border-border bg-card">
                 <div className="mx-auto max-w-7xl px-6 py-12 lg:px-8">
                     <div className="flex flex-col gap-8 sm:flex-row sm:items-start sm:justify-between">
                         <div className="max-w-xs">
                             <Link href="/" className="flex items-center gap-2.5">
                                 <span className="size-3 rounded-[5px] bg-brand" aria-hidden="true" />
-                                <span className="text-lg font-bold tracking-tight text-neutral-900">
+                                <span className="text-lg font-bold tracking-tight text-foreground">
                                     {t("brand")}
                                 </span>
                             </Link>
-                            <p className="mt-3 text-sm leading-relaxed text-neutral-500">{t("footerTagline")}</p>
+                            <p className="mt-3 text-sm leading-relaxed text-muted-foreground">{t("footerTagline")}</p>
                         </div>
 
                         <div className="flex flex-col gap-6 sm:flex-row sm:items-start sm:gap-12">
                             <nav className="flex flex-col gap-3 text-sm">
-                                <a href="#features" className="text-neutral-600 transition-colors hover:text-neutral-900">
+                                <a href="#features" className="text-muted-foreground transition-colors hover:text-foreground">
                                     {t("navFeatures")}
                                 </a>
-                                <a href="#workflow" className="text-neutral-600 transition-colors hover:text-neutral-900">
+                                <a href="#workflow" className="text-muted-foreground transition-colors hover:text-foreground">
                                     {t("navWorkflow")}
                                 </a>
                                 <Link
                                     href="/auth/login"
-                                    className="text-neutral-600 transition-colors hover:text-neutral-900"
+                                    className="text-muted-foreground transition-colors hover:text-foreground"
                                 >
                                     {t("navLogin")}
                                 </Link>
@@ -256,7 +256,7 @@ export default async function Home() {
                         </div>
                     </div>
 
-                    <div className="mt-10 border-t border-black/[0.06] pt-6 text-sm text-neutral-400">
+                    <div className="mt-10 border-t border-border pt-6 text-sm text-muted-foreground">
                         {t("footerRights")}
                     </div>
                 </div>
@@ -280,12 +280,12 @@ function FeatureMotif({ featureKey, stageLabels }: { featureKey: string; stageLa
                         style={{ width: stage.width }}
                         className={`flex items-center justify-between rounded-lg px-3 py-1.5 ${stage.accent
                                 ? "bg-brand text-neutral-950"
-                                : "border border-black/[0.06] bg-neutral-50 text-neutral-700"
+                                : "border border-border bg-muted text-foreground"
                             }`}
                     >
                         <span className="text-xs font-medium">{stage.label}</span>
                         <span
-                            className={`text-[11px] tabular-nums ${stage.accent ? "text-neutral-950/70" : "text-neutral-400"
+                            className={`text-[11px] tabular-nums ${stage.accent ? "text-neutral-950/70" : "text-muted-foreground"
                                 }`}
                         >
                             {stage.count}
@@ -305,13 +305,13 @@ function FeatureMotif({ featureKey, stageLabels }: { featureKey: string; stageLa
                     {people.map((p, idx) => (
                         <span
                             key={p}
-                            className={`flex size-9 items-center justify-center rounded-full text-xs font-semibold ring-2 ring-white ${idx % 2 === 0 ? "bg-neutral-900 text-white" : "bg-brand-light text-brand-dark"
+                            className={`flex size-9 items-center justify-center rounded-full text-xs font-semibold ring-2 ring-card ${idx % 2 === 0 ? "bg-neutral-900 text-white dark:bg-neutral-100 dark:text-neutral-900" : "bg-brand-light text-brand-dark"
                                 }`}
                         >
                             {p}
                         </span>
                     ))}
-                    <span className="flex size-9 items-center justify-center rounded-full bg-neutral-100 text-xs font-medium text-neutral-500 ring-2 ring-white">
+                    <span className="flex size-9 items-center justify-center rounded-full bg-muted text-xs font-medium text-muted-foreground ring-2 ring-card">
                         +9
                     </span>
                 </div>
@@ -344,20 +344,20 @@ function FeatureMotif({ featureKey, stageLabels }: { featureKey: string; stageLa
                     preserveAspectRatio="none"
                     aria-hidden="true"
                 >
-                    <line x1="26" y1="50" x2="68" y2="22" stroke="#73d200" strokeWidth="1.5" vectorEffect="non-scaling-stroke" />
-                    <line x1="26" y1="50" x2="70" y2="78" stroke="#d4d4d4" strokeWidth="1.5" vectorEffect="non-scaling-stroke" />
-                    <line x1="68" y1="22" x2="70" y2="78" stroke="#d4d4d4" strokeWidth="1.5" vectorEffect="non-scaling-stroke" />
+                    <line x1="26" y1="50" x2="68" y2="22" stroke="var(--color-brand)" strokeWidth="1.5" vectorEffect="non-scaling-stroke" />
+                    <line x1="26" y1="50" x2="70" y2="78" stroke="var(--border)" strokeWidth="1.5" vectorEffect="non-scaling-stroke" />
+                    <line x1="68" y1="22" x2="70" y2="78" stroke="var(--border)" strokeWidth="1.5" vectorEffect="non-scaling-stroke" />
                 </svg>
                 <span
                     className="absolute size-6 -translate-x-1/2 -translate-y-1/2 rounded-md bg-brand shadow-sm"
                     style={{ left: "26%", top: "50%" }}
                 />
                 <span
-                    className="absolute size-5 -translate-x-1/2 -translate-y-1/2 rounded-md bg-neutral-300 ring-2 ring-white"
+                    className="absolute size-5 -translate-x-1/2 -translate-y-1/2 rounded-md bg-muted ring-2 ring-card"
                     style={{ left: "68%", top: "22%" }}
                 />
                 <span
-                    className="absolute size-4 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-emerald-500 bg-white ring-2 ring-white"
+                    className="absolute size-4 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-emerald-500 bg-card ring-2 ring-card"
                     style={{ left: "70%", top: "78%" }}
                 />
             </div>

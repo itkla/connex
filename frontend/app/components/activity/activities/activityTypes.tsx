@@ -25,28 +25,28 @@ type TypeMeta = {
 export const TYPE_META: Record<ActivityType, TypeMeta> = {
     Call: {
         Icon: PhoneIcon,
-        chip: 'bg-emerald-50 text-emerald-600 ring-emerald-600/15',
-        selected: 'bg-emerald-50 text-emerald-700 ring-emerald-600/30',
+        chip: 'bg-emerald-50 text-emerald-600 ring-emerald-600/15 dark:bg-emerald-950/40 dark:text-emerald-300 dark:ring-emerald-400/20',
+        selected: 'bg-emerald-50 text-emerald-700 ring-emerald-600/30 dark:bg-emerald-950/40 dark:text-emerald-300 dark:ring-emerald-400/30',
     },
     Email: {
         Icon: EnvelopeIcon,
-        chip: 'bg-sky-50 text-sky-600 ring-sky-600/15',
-        selected: 'bg-sky-50 text-sky-700 ring-sky-600/30',
+        chip: 'bg-sky-50 text-sky-600 ring-sky-600/15 dark:bg-sky-950/40 dark:text-sky-300 dark:ring-sky-400/20',
+        selected: 'bg-sky-50 text-sky-700 ring-sky-600/30 dark:bg-sky-950/40 dark:text-sky-300 dark:ring-sky-400/30',
     },
     Meeting: {
         Icon: UserGroupIcon,
-        chip: 'bg-violet-50 text-violet-600 ring-violet-600/15',
-        selected: 'bg-violet-50 text-violet-700 ring-violet-600/30',
+        chip: 'bg-violet-50 text-violet-600 ring-violet-600/15 dark:bg-violet-950/40 dark:text-violet-300 dark:ring-violet-400/20',
+        selected: 'bg-violet-50 text-violet-700 ring-violet-600/30 dark:bg-violet-950/40 dark:text-violet-300 dark:ring-violet-400/30',
     },
     Note: {
         Icon: PencilSquareIcon,
-        chip: 'bg-amber-50 text-amber-600 ring-amber-600/15',
-        selected: 'bg-amber-50 text-amber-700 ring-amber-600/30',
+        chip: 'bg-amber-50 text-amber-600 ring-amber-600/15 dark:bg-amber-950/40 dark:text-amber-300 dark:ring-amber-400/20',
+        selected: 'bg-amber-50 text-amber-700 ring-amber-600/30 dark:bg-amber-950/40 dark:text-amber-300 dark:ring-amber-400/30',
     },
     Other: {
         Icon: SparklesIcon,
-        chip: 'bg-neutral-100 text-neutral-500 ring-black/5',
-        selected: 'bg-neutral-100 text-neutral-700 ring-black/10',
+        chip: 'bg-muted text-muted-foreground ring-border',
+        selected: 'bg-muted text-foreground ring-border',
     },
 };
 
@@ -85,7 +85,7 @@ export function ActivityTypePicker({
                             'flex flex-col items-center gap-1.5 rounded-xl px-1 py-2.5 text-[11px] font-medium ring-1 ring-inset transition duration-150 active:scale-[0.97] disabled:pointer-events-none disabled:opacity-50',
                             active
                                 ? selected
-                                : 'bg-white text-neutral-500 ring-black/5 hover:bg-neutral-50 hover:text-neutral-700',
+                                : 'bg-card text-muted-foreground ring-border hover:bg-muted hover:text-foreground',
                         )}
                     >
                         <Icon className="size-4" />

@@ -87,7 +87,7 @@ export default function QuickEditDealSheet({
 
                             return (
                                 <div key={d.id} className={idx > 0 ? 'border-t pt-6' : ''}>
-                                    <div className="mb-3 text-lg font-medium text-neutral-600">{d.name}</div>
+                                    <div className="mb-3 text-lg font-medium text-foreground">{d.name}</div>
 
                                     <div className="grid gap-3">
                                         <div className="grid gap-1.5">
@@ -140,7 +140,7 @@ export default function QuickEditDealSheet({
                                                         updateDraft(d.id, { pipeline: next, stage: 0 });
                                                     }}
                                                 >
-                                                    <ComboboxInput id={`deal-pipeline-${d.id}`} placeholder={t('selectPipeline')} className="ring-1 ring-black/5" />
+                                                    <ComboboxInput id={`deal-pipeline-${d.id}`} placeholder={t('selectPipeline')} className="ring-1 ring-border" />
                                                     <ComboboxContent className="pointer-events-auto">
                                                         <ComboboxList onWheel={handleListWheel}>
                                                             <ComboboxEmpty>{t('noPipelines')}</ComboboxEmpty>
@@ -175,7 +175,7 @@ export default function QuickEditDealSheet({
                                                         id={`deal-stage-${d.id}`}
                                                         placeholder={draft.pipeline ? t('selectStage') : t('pickPipelineFirst')}
                                                         disabled={!draft.pipeline}
-                                                        className="ring-1 ring-black/5"
+                                                        className="ring-1 ring-border"
                                                     />
                                                     <ComboboxContent className="pointer-events-auto">
                                                         <ComboboxList onWheel={handleListWheel}>
@@ -201,7 +201,7 @@ export default function QuickEditDealSheet({
                                                     updateDraft(d.id, { company: (c as Company | null)?.id ?? null })
                                                 }
                                             >
-                                                <ComboboxInput id={`deal-company-${d.id}`} placeholder={t('selectCompany')} showClear className="ring-1 ring-black/5" />
+                                                <ComboboxInput id={`deal-company-${d.id}`} placeholder={t('selectCompany')} showClear className="ring-1 ring-border" />
                                                 <ComboboxContent className="pointer-events-auto">
                                                     <ComboboxList onWheel={handleListWheel}>
                                                         <ComboboxEmpty>{t('noCompanies')}</ComboboxEmpty>

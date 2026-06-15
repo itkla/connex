@@ -22,7 +22,7 @@ const TEXT_CLASS: Record<AvatarSize, string> = {
 export default function UserAvatar({ user, type = "small" }: { user: User; type?: AvatarSize }) {
     const initial = user.displayName?.slice(0, 1).toUpperCase() || "?";
     return (
-        <div className={cn("shrink-0 overflow-hidden rounded-full ring-1 ring-black/5", SIZE_CLASS[type])}>
+        <div className={cn("shrink-0 overflow-hidden rounded-full ring-1 ring-border", SIZE_CLASS[type])}>
             {user.profilePictureUrl ? (
                 <img src={user.profilePictureUrl} alt="" className="h-full w-full object-cover" />
             ) : (

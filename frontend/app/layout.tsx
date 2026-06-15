@@ -4,6 +4,7 @@ import { NextIntlClientProvider } from "next-intl";
 import { getLocale } from "next-intl/server";
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { ThemeProvider } from "@/app/components/ThemeProvider";
 import "./globals.css";
 
 const inter = Inter({
@@ -43,13 +44,16 @@ export default async function RootLayout({
   return (
     <html
       lang={locale}
+      suppressHydrationWarning
       className={`${inter.variable} ${instrumentSerif.variable} ${notoSansJP.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col">
-        <NextIntlClientProvider>
-          <TooltipProvider>{children}</TooltipProvider>
-        </NextIntlClientProvider>
-        <Toaster position="top-center" />
+        <ThemeProvider>
+          <NextIntlClientProvider>
+            <TooltipProvider>{children}</TooltipProvider>
+          </NextIntlClientProvider>
+          <Toaster position="top-center" />
+        </ThemeProvider>
       </body>
     </html>
   );

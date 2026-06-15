@@ -66,15 +66,15 @@ export default function DealCard({ deal, company, pipeline, stage, onQuickEdit, 
 
     return (
         <div
-            className="group flex cursor-pointer items-center gap-4 rounded-2xl bg-white p-4 ring-1 ring-black/5 transition duration-200 hover:bg-neutral-50 hover:ring-black/10 hover:shadow-[0_10px_30px_-12px_rgb(0_0_0/0.18)]"
+            className="group flex cursor-pointer items-center gap-4 rounded-2xl bg-card p-4 ring-1 ring-border transition duration-200 hover:bg-muted hover:ring-border hover:shadow-lg"
             onClick={open}
         >
             {/* if company exists, show avatar; if not, assume freelancer and show a placeholder avatar */}
-            <Suspense fallback={<span className="size-16 shrink-0 rounded-2xl bg-neutral-100 ring-1 ring-black/5" />}>
+            <Suspense fallback={<span className="size-16 shrink-0 rounded-2xl bg-muted ring-1 ring-border" />}>
             {company ? (
                 <CompanyAvatar company={company} type="large" />
             ) : (
-                <div className="flex size-16 shrink-0 items-center justify-center rounded-2xl bg-neutral-100 text-neutral-400 ring-1 ring-black/5">
+                <div className="flex size-16 shrink-0 items-center justify-center rounded-2xl bg-muted text-muted-foreground ring-1 ring-border">
                     <BuildingOffice2Icon className="size-7" />
                 </div>
             )}
@@ -82,13 +82,13 @@ export default function DealCard({ deal, company, pipeline, stage, onQuickEdit, 
 
             <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2">
-                    <h3 className="truncate text-base font-semibold text-neutral-900">
+                    <h3 className="truncate text-base font-semibold text-foreground">
                         {deal.name}
                     </h3>
                     <span
                         className={
                             status === 'closed'
-                                ? 'shrink-0 rounded-full bg-neutral-200 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-neutral-600'
+                                ? 'shrink-0 rounded-full bg-neutral-200 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-neutral-600 dark:bg-neutral-800 dark:text-neutral-200'
                                 : 'shrink-0 rounded-full bg-brand-light px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-brand-dark'
                         }
                     >
@@ -98,7 +98,7 @@ export default function DealCard({ deal, company, pipeline, stage, onQuickEdit, 
                             {switch}
                     </span> */}
                 </div>
-                <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-neutral-500">
+                <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
                     {company && (
                         <span className="inline-flex items-center gap-1 truncate">
                             <BuildingOffice2Icon className="size-3.5" />
@@ -110,7 +110,7 @@ export default function DealCard({ deal, company, pipeline, stage, onQuickEdit, 
                             <span className="size-1.5 rounded-full bg-brand" />
                             {stage.name}
                             {pipeline && (
-                                <span className="text-neutral-400">· {pipeline.name}</span>
+                                <span className="text-muted-foreground">· {pipeline.name}</span>
                             )}
                         </span>
                     )}
@@ -124,11 +124,11 @@ export default function DealCard({ deal, company, pipeline, stage, onQuickEdit, 
             </div>
 
             <div className="text-right">
-                <div className="text-lg font-semibold text-neutral-900">
+                <div className="text-lg font-semibold text-foreground">
                     {formatCompactCurrency(deal.value, deal.currency || 'USD', locale)}
                 </div>
                 {deal.currency && (
-                    <div className="text-[10px] uppercase tracking-wider text-neutral-500">
+                    <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
                         {deal.currency}
                     </div>
                 )}
@@ -140,14 +140,14 @@ export default function DealCard({ deal, company, pipeline, stage, onQuickEdit, 
                         type="button"
                         aria-label={t('dealActions')}
                         onClick={(e) => e.stopPropagation()}
-                        className="flex size-8 shrink-0 items-center justify-center rounded-full text-neutral-400 opacity-0 transition hover:bg-neutral-100 hover:text-neutral-700 group-hover:opacity-100 focus:opacity-100 data-[state=open]:opacity-100"
+                        className="flex size-8 shrink-0 items-center justify-center rounded-full text-muted-foreground opacity-0 transition hover:bg-muted hover:text-foreground group-hover:opacity-100 focus:opacity-100 data-[state=open]:opacity-100"
                     >
                         <EllipsisVerticalIcon className="size-4" />
                     </button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end" onClick={(e) => e.stopPropagation()}>
                     <DropdownMenuItem onSelect={open}>
-                        <EyeIcon className="size-4 text-neutral-500" />
+                        <EyeIcon className="size-4 text-muted-foreground" />
                         {t('view')}
                     </DropdownMenuItem>
                     {onQuickEdit && (
@@ -157,7 +157,7 @@ export default function DealCard({ deal, company, pipeline, stage, onQuickEdit, 
                                 onQuickEdit();
                             }}
                         >
-                            <PencilIcon className="size-4 text-neutral-500" />
+                            <PencilIcon className="size-4 text-muted-foreground" />
                             {t('quickEdit')}
                         </DropdownMenuItem>
                     )}
@@ -187,7 +187,7 @@ export default function DealCard({ deal, company, pipeline, stage, onQuickEdit, 
                     e.stopPropagation();
                     open();
                 }}
-                className="size-8 shrink-0 border-none bg-neutral-100 text-neutral-500 shadow-none hover:bg-neutral-200 hover:text-neutral-700"
+                className="size-8 shrink-0 border-none bg-muted text-muted-foreground shadow-none hover:bg-muted/80 hover:text-foreground"
             >
                 <ChevronRightIcon className="size-4" />
             </Button>

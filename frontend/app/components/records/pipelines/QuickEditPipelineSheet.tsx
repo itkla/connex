@@ -80,7 +80,7 @@ export default function QuickEditPipelineSheet({
                             return (
                                 <div key={p.id} className={idx > 0 ? 'border-t pt-6' : ''}>
                                     <div className="mb-3 flex items-center gap-3">
-                                        <div className="text-lg font-medium text-neutral-600">{p.name}</div>
+                                        <div className="text-lg font-medium text-muted-foreground">{p.name}</div>
                                     </div>
 
                                     <div className="grid gap-3">
@@ -140,7 +140,7 @@ export default function QuickEditPipelineSheet({
                                                             type="button"
                                                             aria-label={t('removeStageAriaLabel')}
                                                             onClick={() => removeStage(p.id, i)}
-                                                            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-neutral-100 text-neutral-500 transition hover:bg-neutral-200 hover:text-destructive"
+                                                            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground transition hover:bg-muted/60 hover:text-destructive"
                                                         >
                                                             <XMarkIcon className="size-4" />
                                                         </button>
@@ -149,7 +149,7 @@ export default function QuickEditPipelineSheet({
                                                 <button
                                                     type="button"
                                                     onClick={() => addStage(p.id)}
-                                                    className="flex items-center gap-2 self-start rounded-full bg-neutral-100 px-3 py-1.5 text-sm text-neutral-700 ring-1 ring-black/5 transition hover:bg-neutral-200"
+                                                    className="flex items-center gap-2 self-start rounded-full bg-muted px-3 py-1.5 text-sm text-foreground ring-1 ring-border transition hover:bg-muted/60"
                                                 >
                                                     <PlusIcon className="size-4" />
                                                     {t('addStage')}

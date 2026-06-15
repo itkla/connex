@@ -10,7 +10,7 @@ import { CameraIcon } from '@heroicons/react/24/outline';
 import { useTranslations } from 'next-intl';
 import { useFieldErrors } from '@/app/hooks/useFieldErrors';
 
-const inputClass = 'w-full rounded-lg bg-neutral-100 px-3 py-2 text-sm text-black placeholder-neutral-500 outline-none ring-1 ring-black/5 transition focus:ring-2 focus:ring-brand';
+const inputClass = 'w-full rounded-lg bg-muted px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground outline-none ring-1 ring-border transition focus:ring-2 focus:ring-brand';
 
 type Props = {
     open: boolean;
@@ -81,12 +81,12 @@ export default function NewCompanyDialog({
                 <div className="flex justify-center">
                     <label
                         htmlFor="company-logo"
-                        className="group relative flex h-20 w-20 cursor-pointer items-center justify-center overflow-hidden rounded-2xl bg-neutral-100 ring-1 ring-black/5 transition hover:ring-2 hover:ring-brand"
+                        className="group relative flex h-20 w-20 cursor-pointer items-center justify-center overflow-hidden rounded-2xl bg-muted ring-1 ring-border transition hover:ring-2 hover:ring-brand"
                     >
                         {logoPreview ? (
                             <img src={logoPreview} alt="" className="h-full w-full object-contain " />
                         ) : (
-                            <div className="h-full w-full" style={{ background: 'linear-gradient(180deg, #cdd5dc 0%, #b6bfc6 60%, #9aa4ad 100%)' }} />
+                            <div className="h-full w-full bg-muted" />
                         )}
                         <div className="absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 transition group-hover:opacity-100">
                             <CameraIcon className="size-6 text-white" />
@@ -112,14 +112,14 @@ export default function NewCompanyDialog({
                                 setPayload((prev) => ({ ...prev, name: e.target.value }));
                                 clearError('name');
                             }}
-                            className={`${inputClass} ${fieldErrors.name ? 'ring-2 ring-red-400 focus:ring-red-500' : ''}`}
+                            className={`${inputClass} ${fieldErrors.name ? 'ring-2 ring-destructive focus:ring-destructive' : ''}`}
                             placeholder={t('placeholderName')}
                             aria-invalid={Boolean(fieldErrors.name)}
                             autoFocus
                             required
                         />
                         {fieldErrors.name && (
-                            <p className="px-1 text-sm text-red-600">{fieldErrors.name}</p>
+                            <p className="px-1 text-sm text-destructive">{fieldErrors.name}</p>
                         )}
                     </div>
 
@@ -133,12 +133,12 @@ export default function NewCompanyDialog({
                                 setPayload((prev) => ({ ...prev, website: e.target.value }));
                                 clearError('website');
                             }}
-                            className={`${inputClass} ${fieldErrors.website ? 'ring-2 ring-red-400 focus:ring-red-500' : ''}`}
+                            className={`${inputClass} ${fieldErrors.website ? 'ring-2 ring-destructive focus:ring-destructive' : ''}`}
                             aria-invalid={Boolean(fieldErrors.website)}
                             placeholder={t('placeholderWebsite')}
                         />
                         {fieldErrors.website && (
-                            <p className="px-1 text-sm text-red-600">{fieldErrors.website}</p>
+                            <p className="px-1 text-sm text-destructive">{fieldErrors.website}</p>
                         )}
                     </div>
 
@@ -164,12 +164,12 @@ export default function NewCompanyDialog({
                                     setPayload((prev) => ({ ...prev, phone: e.target.value }));
                                     clearError('phone');
                                 }}
-                                className={`${inputClass} ${fieldErrors.phone ? 'ring-2 ring-red-400 focus:ring-red-500' : ''}`}
+                                className={`${inputClass} ${fieldErrors.phone ? 'ring-2 ring-destructive focus:ring-destructive' : ''}`}
                                 placeholder={t('placeholderPhone')}
                                 aria-invalid={Boolean(fieldErrors.phone)}
                             />
                             {fieldErrors.phone && (
-                                <p className="px-1 text-sm text-red-600">{fieldErrors.phone}</p>
+                                <p className="px-1 text-sm text-destructive">{fieldErrors.phone}</p>
                             )}
                         </div>
                     </div>

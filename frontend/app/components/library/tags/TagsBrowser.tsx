@@ -136,7 +136,7 @@ export default function TagsBrowser({ tags: initialTags }: Props) {
             <div className="flex flex-wrap items-start justify-between gap-4">
                 <div>
                     <h1 className="text-4xl font-extrabold">{t('title')}</h1>
-                    <p className="mt-1 max-w-prose text-sm text-neutral-500">{t('subtitle')}</p>
+                    <p className="mt-1 max-w-prose text-sm text-muted-foreground">{t('subtitle')}</p>
                 </div>
                 {hasTags && (
                     <Button
@@ -153,7 +153,7 @@ export default function TagsBrowser({ tags: initialTags }: Props) {
             {hasTags && (
                 <div className="flex flex-wrap items-center justify-between gap-3">
                     <div className="flex items-center gap-3">
-                        <div className="inline-flex items-center gap-0.5 rounded-full bg-neutral-100 p-0.5 ring-1 ring-black/5">
+                        <div className="inline-flex items-center gap-0.5 rounded-full bg-muted p-0.5 ring-1 ring-border">
                             <SortButton
                                 Icon={SwatchIcon}
                                 label={t('sortColor')}
@@ -167,7 +167,7 @@ export default function TagsBrowser({ tags: initialTags }: Props) {
                                 onClick={() => setSort('name')}
                             />
                         </div>
-                        <span className="hidden text-xs tabular-nums text-neutral-500 sm:inline">
+                        <span className="hidden text-xs tabular-nums text-muted-foreground sm:inline">
                             {t('count', { count: tags.length })}
                         </span>
                     </div>
@@ -178,9 +178,9 @@ export default function TagsBrowser({ tags: initialTags }: Props) {
                             placeholder={t('searchPlaceholder')}
                             value={query}
                             onChange={(e) => setQuery(e.target.value)}
-                            className="w-full rounded-full bg-neutral-100 px-4 py-2 pr-10 text-sm text-black placeholder-neutral-500 outline-none ring-1 ring-black/5 transition focus:ring-2 focus:ring-brand"
+                            className="w-full rounded-full bg-muted px-4 py-2 pr-10 text-sm text-foreground placeholder:text-muted-foreground outline-none ring-1 ring-border transition focus:ring-2 focus:ring-brand"
                         />
-                        <MagnifyingGlassIcon className="pointer-events-none absolute right-3 top-1/2 size-4 -translate-y-1/2 text-neutral-500" />
+                        <MagnifyingGlassIcon className="pointer-events-none absolute right-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
                     </div>
                 </div>
             )}
@@ -193,8 +193,8 @@ export default function TagsBrowser({ tags: initialTags }: Props) {
                     onCreate={openCreate}
                 />
             ) : noResults ? (
-                <div className="rounded-2xl bg-white px-6 py-20 text-center ring-1 ring-black/5">
-                    <p className="text-sm text-neutral-500">{t('noResults', { query: query.trim() })}</p>
+                <div className="rounded-2xl bg-card px-6 py-20 text-center ring-1 ring-border">
+                    <p className="text-sm text-muted-foreground">{t('noResults', { query: query.trim() })}</p>
                 </div>
             ) : (
                 <ul className="grid grid-cols-[repeat(auto-fill,minmax(160px,1fr))] gap-3">
@@ -234,7 +234,7 @@ export default function TagsBrowser({ tags: initialTags }: Props) {
                         </DialogDescription>
                     </DialogHeader>
                     {deletingTag && (
-                        <div className="flex items-center justify-center rounded-xl bg-neutral-50 px-4 py-5 ring-1 ring-black/5">
+                        <div className="flex items-center justify-center rounded-xl bg-muted px-4 py-5 ring-1 ring-border">
                             <span
                                 className="inline-flex max-w-full items-center rounded-4xl px-3 py-1 text-sm font-medium"
                                 style={{
@@ -280,7 +280,7 @@ function SortButton({
             aria-pressed={active}
             title={label}
             className={`flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium transition ${
-                active ? 'bg-white text-neutral-900 shadow-sm' : 'text-neutral-500 hover:text-neutral-800'
+                active ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'
             }`}
         >
             <Icon className="size-3.5" />
@@ -306,7 +306,7 @@ function TagTile({ tag, reduce, onEdit, onCopy, onDelete, t }: TileProps) {
             <motion.div
                 whileHover={reduce ? undefined : { y: -2 }}
                 transition={{ duration: 0.2, ease: EASE_OUT }}
-                className="group relative overflow-hidden rounded-2xl bg-white ring-1 ring-black/5 transition-shadow duration-200 hover:shadow-lg"
+                className="group relative overflow-hidden rounded-2xl bg-card ring-1 ring-border transition-shadow duration-200 hover:shadow-lg"
             >
                 <motion.button
                     type="button"
@@ -329,7 +329,7 @@ function TagTile({ tag, reduce, onEdit, onCopy, onDelete, t }: TileProps) {
                         type="button"
                         onClick={onCopy}
                         title={t('copyHex')}
-                        className="font-mono text-[11px] uppercase tracking-wide text-neutral-500 transition hover:text-neutral-800"
+                        className="font-mono text-[11px] uppercase tracking-wide text-muted-foreground transition hover:text-foreground"
                     >
                         {tag.color}
                     </button>
@@ -338,23 +338,23 @@ function TagTile({ tag, reduce, onEdit, onCopy, onDelete, t }: TileProps) {
                             <button
                                 type="button"
                                 aria-label={t('actionsAria', { name: tag.name })}
-                                className="flex size-6 shrink-0 items-center justify-center rounded-full text-neutral-500 transition hover:bg-neutral-100 hover:text-neutral-800 aria-expanded:bg-neutral-100 aria-expanded:text-neutral-800"
+                                className="flex size-6 shrink-0 items-center justify-center rounded-full text-muted-foreground transition hover:bg-muted hover:text-foreground aria-expanded:bg-muted aria-expanded:text-foreground"
                             >
                                 <EllipsisHorizontalIcon className="size-4" />
                             </button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end" className="w-40">
                             <DropdownMenuItem onSelect={onEdit}>
-                                <PencilIcon className="size-4 text-neutral-500" />
+                                <PencilIcon className="size-4 text-muted-foreground" />
                                 {t('edit')}
                             </DropdownMenuItem>
                             <DropdownMenuItem onSelect={onCopy}>
-                                <ClipboardIcon className="size-4 text-neutral-500" />
+                                <ClipboardIcon className="size-4 text-muted-foreground" />
                                 {t('copyHex')}
                             </DropdownMenuItem>
                             <DropdownMenuSeparator />
                             <DropdownMenuItem
-                                className="text-destructive hover:bg-red-500/10"
+                                className="text-destructive hover:bg-destructive/10"
                                 onSelect={(e) => {
                                     e.preventDefault();
                                     onDelete();
@@ -388,7 +388,7 @@ function AddTile({
                 whileHover={reduce ? undefined : { y: -2 }}
                 whileTap={reduce ? undefined : { scale: 0.99 }}
                 transition={{ duration: 0.2, ease: EASE_OUT }}
-                className="flex h-full min-h-[8.5rem] w-full flex-col items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-neutral-200 text-neutral-500 transition-colors hover:border-brand hover:bg-brand-light/30 hover:text-brand-dark"
+                className="flex h-full min-h-[8.5rem] w-full flex-col items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-border text-muted-foreground transition-colors hover:border-brand hover:bg-brand-light/30 hover:text-brand-dark"
             >
                 <PlusIcon className="size-5" strokeWidth={2.5} />
                 <span className="text-sm font-medium">{label}</span>
@@ -409,12 +409,12 @@ function EmptyState({
     onCreate: () => void;
 }) {
     return (
-        <div className="rounded-2xl bg-white px-6 py-20 text-center ring-1 ring-black/5">
+        <div className="rounded-2xl bg-card px-6 py-20 text-center ring-1 ring-border">
             <div className="mx-auto flex size-14 items-center justify-center rounded-2xl bg-brand-light text-brand-dark">
                 <TagIcon className="size-7" />
             </div>
-            <h2 className="mt-5 text-lg font-semibold text-neutral-900">{title}</h2>
-            <p className="mx-auto mt-1.5 max-w-sm text-sm text-neutral-500">{body}</p>
+            <h2 className="mt-5 text-lg font-semibold text-foreground">{title}</h2>
+            <p className="mx-auto mt-1.5 max-w-sm text-sm text-muted-foreground">{body}</p>
             <Button onClick={onCreate} className="mt-6 bg-brand text-white hover:bg-brand-dark">
                 <PlusIcon strokeWidth={2.5} />
                 {cta}

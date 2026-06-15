@@ -12,7 +12,7 @@ import { useTranslations } from 'next-intl';
 import { Select, SelectItem, SelectContent, SelectValue, SelectTrigger } from '@/components/ui/select';
 import { useFieldErrors } from '@/app/hooks/useFieldErrors';
 
-const inputClass = 'w-full rounded-lg bg-neutral-100 px-3 py-2 text-sm text-black placeholder-neutral-500 outline-none ring-1 ring-black/5 transition focus:ring-2 focus:ring-brand';
+const inputClass = 'w-full rounded-lg bg-muted px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground outline-none ring-1 ring-border transition focus:ring-2 focus:ring-brand';
 
 type Props = {
     open: boolean;
@@ -109,20 +109,20 @@ export default function NewPipelineDialog({
                                 setPayload((prev) => ({ ...prev, name: e.target.value }));
                                 clearError('name');
                             }}
-                            className={`${inputClass} ${fieldErrors.name ? 'ring-2 ring-red-400 focus:ring-red-500' : ''}`}
+                            className={`${inputClass} ${fieldErrors.name ? 'ring-2 ring-destructive focus:ring-destructive' : ''}`}
                             placeholder={t('namePlaceholder')}
                             aria-invalid={Boolean(fieldErrors.name)}
                             autoFocus
                             required
                         />
                         {fieldErrors.name && (
-                            <p className="px-1 text-sm text-red-600">{fieldErrors.name}</p>
+                            <p className="px-1 text-sm text-destructive">{fieldErrors.name}</p>
                         )}
                     </div>
 
                     <div className="grid gap-1.5">
                         <Label>{t('stages')}</Label>
-                        <p className="text-xs text-neutral-500">
+                        <p className="text-xs text-muted-foreground">
                             {t('stagesHint')}
                         </p>
                         <div className="flex flex-col gap-2">
@@ -132,7 +132,7 @@ export default function NewPipelineDialog({
                                         type="text"
                                         value={s.name}
                                         onChange={(e) => updateStageName(i, e.target.value)}
-                                        className={`${inputClass} flex-1 ${duplicateStageNames.has((s.name ?? '').trim().toLowerCase()) ? 'ring-2 ring-red-400 focus:ring-red-500' : ''}`}
+                                        className={`${inputClass} flex-1 ${duplicateStageNames.has((s.name ?? '').trim().toLowerCase()) ? 'ring-2 ring-destructive focus:ring-destructive' : ''}`}
                                         aria-invalid={duplicateStageNames.has((s.name ?? '').trim().toLowerCase())}
                                         placeholder={t('stageNamePlaceholder')}
                                     />
@@ -165,7 +165,7 @@ export default function NewPipelineDialog({
                                         type="button"
                                         aria-label={t('removeStageAriaLabel')}
                                         onClick={() => removeStage(i)}
-                                        className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-neutral-100 text-neutral-500 transition hover:bg-neutral-200 hover:text-destructive"
+                                        className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground transition hover:bg-muted/60 hover:text-destructive"
                                     >
                                         <XMarkIcon className="size-4" />
                                     </button>
@@ -174,14 +174,14 @@ export default function NewPipelineDialog({
                             <button
                                 type="button"
                                 onClick={addStage}
-                                className="flex items-center gap-2 self-start rounded-full bg-neutral-100 px-3 py-1.5 text-sm text-neutral-700 ring-1 ring-black/5 transition hover:bg-neutral-200"
+                                className="flex items-center gap-2 self-start rounded-full bg-muted px-3 py-1.5 text-sm text-foreground ring-1 ring-border transition hover:bg-muted/60"
                             >
                                 <PlusIcon className="size-4" />
                                 {t('addStage')}
                             </button>
                         </div>
                         {duplicateStageNames.size > 0 && (
-                            <p className="px-1 text-sm text-red-600">{t('duplicateStageName')}</p>
+                            <p className="px-1 text-sm text-destructive">{t('duplicateStageName')}</p>
                         )}
                     </div>
                 </div>

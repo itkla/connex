@@ -28,7 +28,7 @@ import { ApiError, addDealPerson, createActivity, getCompanyDeals } from '@/app/
 import { toastError, toastSuccess } from '@/app/lib/toast';
 import { type Deal } from '@/app/lib/types';
 
-const inputClass = 'w-full rounded-lg bg-neutral-100 px-3 py-2 text-sm text-black placeholder-neutral-500 outline-none ring-1 ring-black/5 transition focus:ring-2 focus:ring-brand';
+const inputClass = 'w-full rounded-lg bg-muted px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground outline-none ring-1 ring-border transition focus:ring-2 focus:ring-brand';
 
 const ACTIVITY_TYPES = ['Call', 'Email', 'Meeting', 'Note', 'Other'] as const;
 
@@ -143,7 +143,7 @@ export default function NewActivityDialog({
                         variant="ghost"
                         size="icon-sm"
                         title={t('triggerTitle')}
-                        className="text-neutral-500 hover:text-black cursor-pointer"
+                        className="text-muted-foreground hover:text-foreground cursor-pointer"
                     >
                         <PlusIcon className="size-4" />
                         <span className="sr-only">{t('triggerSr')}</span>

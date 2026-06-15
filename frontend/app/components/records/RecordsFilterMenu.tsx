@@ -57,16 +57,16 @@ export default function RecordsFilterMenu<T extends { id: SelectionId }>({
                     className={`flex items-center gap-2 rounded-full px-4 py-2 text-sm ring-1 transition ${
                         activeCount > 0
                             ? 'bg-brand-light text-brand ring-brand/20 hover:bg-brand-light/80'
-                            : 'bg-neutral-100 text-neutral-700 ring-black/5 hover:bg-neutral-200'
+                            : 'bg-muted text-foreground ring-border hover:bg-muted/80'
                     }`}
                 >
-                    <FunnelIcon className={`size-4 ${activeCount > 0 ? 'text-brand' : 'text-neutral-500'}`} />
+                    <FunnelIcon className={`size-4 ${activeCount > 0 ? 'text-brand' : 'text-muted-foreground'}`} />
                     {activeCount > 0 && (
                         <span className="flex h-4 min-w-4 items-center justify-center rounded-full bg-brand px-1 text-xs font-semibold text-white">
                             {activeCount}
                         </span>
                     )}
-                    <ChevronDownIcon className={`size-4 ${activeCount > 0 ? 'text-brand' : 'text-neutral-500'}`} />
+                    <ChevronDownIcon className={`size-4 ${activeCount > 0 ? 'text-brand' : 'text-muted-foreground'}`} />
                 </button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="start" className="min-w-48">

@@ -25,7 +25,7 @@ export default function OverviewCard({
             href={href}
             index={index}
             className={cn(
-                'flex h-full flex-col rounded-2xl border border-black/[0.07] bg-white px-5 py-4 transition-shadow duration-200 hover:shadow-[0_14px_34px_-16px_rgba(0,0,0,0.22)]',
+                'flex h-full flex-col rounded-2xl border border-border bg-card px-5 py-4 transition-shadow duration-200 hover:shadow-[0_14px_34px_-16px_rgba(0,0,0,0.22)] dark:hover:shadow-[0_14px_34px_-16px_rgba(0,0,0,0.6)]',
                 className,
             )}
         >
@@ -34,15 +34,15 @@ export default function OverviewCard({
                     <Icon className="size-4" />
                 </span>
                 {href ? (
-                    <ArrowUpRightIcon className="size-4 text-neutral-300 transition-[transform,color] duration-200 group-hover:-translate-y-0.5 group-hover:translate-x-0.5 group-hover:text-brand-dark" />
+                    <ArrowUpRightIcon className="size-4 text-muted-foreground transition-[transform,color] duration-200 group-hover:-translate-y-0.5 group-hover:translate-x-0.5 group-hover:text-brand-dark" />
                 ) : null}
             </div>
-            <span className="mt-4 text-xs font-medium tracking-[0.12em] text-neutral-500 uppercase">
+            <span className="mt-4 text-xs font-medium tracking-[0.12em] text-muted-foreground uppercase">
                 {label}
             </span>
-            <CountUp value={value} className="mt-1 text-4xl leading-none text-neutral-900 tabular-nums" />
+            <CountUp value={value} className="mt-1 text-4xl leading-none text-foreground tabular-nums" />
             {description ? (
-                <span className="mt-1 pt-2 text-xs text-neutral-400">{description}</span>
+                <span className="mt-1 pt-2 text-xs text-muted-foreground">{description}</span>
             ) : null}
         </MotionCard>
     );

@@ -31,7 +31,7 @@ import { toastError, toastSuccess } from '@/app/lib/toast';
 type Which = 'task' | 'note' | null;
 
 const inputClass =
-    'w-full rounded-lg bg-neutral-100 px-3 py-2 text-sm text-black placeholder-neutral-500 outline-none ring-1 ring-black/5 transition focus:ring-2 focus:ring-brand';
+    'w-full rounded-lg bg-muted px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground outline-none ring-1 ring-border transition focus:ring-2 focus:ring-brand';
 
 export default function QuickCreate({ currentUserId }: { currentUserId: number }) {
     const router = useRouter();
@@ -117,7 +117,7 @@ export default function QuickCreate({ currentUserId }: { currentUserId: number }
                             setWhich('task');
                         }}
                     >
-                        <CheckCircleIcon className="size-4 text-neutral-500" />
+                        <CheckCircleIcon className="size-4 text-muted-foreground" />
                         {t('newTask')}
                     </DropdownMenuItem>
                     <DropdownMenuItem
@@ -126,7 +126,7 @@ export default function QuickCreate({ currentUserId }: { currentUserId: number }
                             setWhich('note');
                         }}
                     >
-                        <DocumentTextIcon className="size-4 text-neutral-500" />
+                        <DocumentTextIcon className="size-4 text-muted-foreground" />
                         {t('newNote')}
                     </DropdownMenuItem>
                 </DropdownMenuContent>

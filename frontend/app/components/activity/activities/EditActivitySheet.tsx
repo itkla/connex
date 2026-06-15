@@ -28,7 +28,7 @@ import { type Activity, type Contact, type Deal, type UpdateActivityPayload } fr
 import { parseMysqlDateTime, toMysqlDateTime } from '@/app/lib/utils';
 
 const inputClass =
-    'w-full rounded-lg bg-neutral-100 px-3 py-2 text-sm text-black placeholder-neutral-500 outline-none ring-1 ring-black/5 transition focus:ring-2 focus:ring-brand';
+    'w-full rounded-lg bg-muted px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground outline-none ring-1 ring-border transition focus:ring-2 focus:ring-brand';
 
 const NONE_VALUE = 'none';
 

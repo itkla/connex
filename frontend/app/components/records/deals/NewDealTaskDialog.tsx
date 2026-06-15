@@ -24,7 +24,7 @@ import { addDealPerson, ApiError, createTask, getCompanyPeople, getUsers } from 
 import { toastError, toastSuccess } from '@/app/lib/toast';
 import { type Contact, type Deal, type User } from '@/app/lib/types';
 
-const inputClass = 'w-full rounded-lg bg-neutral-100 px-3 py-2 text-sm text-black placeholder-neutral-500 outline-none ring-1 ring-black/5 transition focus:ring-2 focus:ring-brand';
+const inputClass = 'w-full rounded-lg bg-muted px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground outline-none ring-1 ring-border transition focus:ring-2 focus:ring-brand';
 
 export default function NewDealTaskDialog({
     dealId,

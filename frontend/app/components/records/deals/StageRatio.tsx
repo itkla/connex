@@ -20,20 +20,20 @@ const PIPELINE_PALETTE = [
     'var(--color-chart-5)',
 ];
 
-const STAGE_WON = '#22c55e';  // green
-const STAGE_LOST = '#ef4444'; // red
-const STAGE_OPEN = '#fcd34d'; // amber
+const STAGE_WON = 'var(--chart-won)';  // green
+const STAGE_LOST = 'var(--chart-lost)'; // red
+const STAGE_OPEN = 'var(--chart-open)'; // amber
 
 function colorForStage(name: string, index: number, total: number) {
     const n = name.toLowerCase();
     if (/(?:\bwon\b|renew|complet)/.test(n)) return STAGE_WON;
     if (/(?:lost|churn)/.test(n)) return STAGE_LOST;
     const lighten = total <= 1 ? 0 : (1 - index / (total - 1)) * 40;
-    return `color-mix(in oklch, ${STAGE_OPEN} ${100 - lighten}%, white)`;
+    return `color-mix(in oklch, ${STAGE_OPEN} ${100 - lighten}%, var(--card))`;
 }
 
 function fadeColor(color: string, amount = 55) {
-    return `color-mix(in oklch, ${color} ${100 - amount}%, white)`;
+    return `color-mix(in oklch, ${color} ${100 - amount}%, var(--card))`;
 }
 
 function isClosed(deal: Deal): boolean {
@@ -186,7 +186,7 @@ export default function StageRatio({ deals }: { deals: Deal[] }) {
                     cx="50%"
                     cy="50%"
                     outerRadius="50%"
-                    stroke="white"
+                    stroke="var(--chart-stroke)"
                     strokeWidth={1}
                 />
                 <Pie
@@ -197,7 +197,7 @@ export default function StageRatio({ deals }: { deals: Deal[] }) {
                     cy="50%"
                     innerRadius="60%"
                     outerRadius="80%"
-                    stroke="white"
+                    stroke="var(--chart-stroke)"
                     strokeWidth={1}
                 />
             </PieChart>
@@ -223,9 +223,9 @@ function StageRatioTooltip({ active, payload, openLabel, closedLabel, dealsLabel
         ? `${d.pipelineName} · ${d.name} · ${statusLabel}`
         : `${d.name} · ${statusLabel}`;
     return (
-        <div className="rounded-md bg-white p-2 text-xs ring-1 ring-black/5 shadow-md">
-            <div className="font-medium text-neutral-700 mb-1.5">{title}</div>
-            <div className="flex items-center gap-1.5 text-neutral-600">
+        <div className="rounded-md bg-popover text-popover-foreground p-2 text-xs border border-border shadow-md">
+            <div className="font-medium text-popover-foreground mb-1.5">{title}</div>
+            <div className="flex items-center gap-1.5 text-muted-foreground">
                 <span
                     className="inline-block size-2 rounded-sm"
                     style={{ backgroundColor: d.fill }}

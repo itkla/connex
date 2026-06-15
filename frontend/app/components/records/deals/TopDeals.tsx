@@ -74,9 +74,9 @@ function Section({
     const locale = useLocale();
     return (
         <div className="min-h-0 overflow-hidden">
-            <h3 className="mb-1.5 text-xs uppercase tracking-wider text-neutral-500">{title}</h3>
+            <h3 className="mb-1.5 text-xs uppercase tracking-wider text-muted-foreground">{title}</h3>
             {deals.length === 0 ? (
-                <p className="text-sm text-neutral-500">{emptyLabel}</p>
+                <p className="text-sm text-muted-foreground">{emptyLabel}</p>
             ) : (
                 <ul className="space-y-0.5">
                     {deals.map((d, i) => {
@@ -85,7 +85,7 @@ function Section({
                             <li key={d.id}>
                                 <Link
                                     href={`/records/deals/${d.id}`}
-                                    className="flex items-center justify-between gap-2 rounded-md px-2 py-1 text-sm transition hover:bg-neutral-200"
+                                    className="flex items-center justify-between gap-2 rounded-md px-2 py-1 text-sm transition hover:bg-muted"
                                 >
                                     <span className="flex min-w-0 items-center gap-1.5">
                                         <TrophyIcon
@@ -94,13 +94,13 @@ function Section({
                                             style={{ color: RANK_COLORS[i] }}
                                         />
                                         <span className="min-w-0 truncate">
-                                            <span className="font-medium text-neutral-900">{d.name}</span>
+                                            <span className="font-medium text-foreground">{d.name}</span>
                                             {companyName && (
-                                                <span className="text-neutral-500"> · {companyName}</span>
+                                                <span className="text-muted-foreground"> · {companyName}</span>
                                             )}
                                         </span>
                                     </span>
-                                    <span className="shrink-0 font-medium text-neutral-700">
+                                    <span className="shrink-0 font-medium text-foreground">
                                         {formatCompactCurrency(d[field] ?? 0, d.currency || 'USD', locale)}
                                     </span>
                                 </Link>

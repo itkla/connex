@@ -96,7 +96,7 @@ export default function QuickEditCompanySheet({
                                         )} */}
                                         <label
                                             htmlFor={`logo-${c.id}`}
-                                            className="group relative flex h-16 w-16 cursor-pointer items-center justify-center overflow-hidden rounded-2xl bg-neutral-200 ring-1 ring-black/5 transition hover:ring-2 hover:ring-brand"
+                                            className="group relative flex h-16 w-16 cursor-pointer items-center justify-center overflow-hidden rounded-2xl bg-muted ring-1 ring-border transition hover:ring-2 hover:ring-brand"
                                         >
                                             {previewSrc ? (
                                                 <img src={previewSrc} alt="" className="h-full w-full object-cover" />
@@ -114,7 +114,7 @@ export default function QuickEditCompanySheet({
                                                 className="sr-only"
                                             />
                                         </label>
-                                        <div className="text-lg font-medium text-neutral-600">{c.name}</div>
+                                        <div className="text-lg font-medium text-foreground">{c.name}</div>
                                     </div>
 
                                     <div className="grid gap-3">

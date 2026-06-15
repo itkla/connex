@@ -319,7 +319,7 @@ export default function TasksBrowser({ tasks: initialTasks, persons, deals, user
             <header className="flex flex-wrap items-start justify-between gap-4">
                 <div>
                     <h1 className="text-4xl font-extrabold tracking-tight">{t('title')}</h1>
-                    <p className="mt-1 text-sm text-neutral-500">{t('subtitle')}</p>
+                    <p className="mt-1 text-sm text-muted-foreground">{t('subtitle')}</p>
                 </div>
                 <Button
                     className="bg-brand text-white shadow-sm transition-transform hover:bg-brand-dark active:scale-[0.98]"
@@ -344,7 +344,7 @@ export default function TasksBrowser({ tasks: initialTasks, persons, deals, user
 
             <div className="grid grid-cols-1 gap-6 md:grid-cols-[200px_minmax(0,1fr)] md:gap-10">
                 <aside className="md:sticky md:top-6 md:self-start">
-                    <h2 className="mb-2 px-3 text-[11px] font-semibold uppercase tracking-[0.14em] text-neutral-400">
+                    <h2 className="mb-2 px-3 text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
                         {t('queuesHeader')}
                     </h2>
                     <nav className="space-y-0.5">
@@ -359,7 +359,7 @@ export default function TasksBrowser({ tasks: initialTasks, persons, deals, user
                                 onClick={() => setQueue(q)}
                             />
                         ))}
-                        <div className="mx-3 my-3 h-px bg-neutral-200" />
+                        <div className="mx-3 my-3 h-px bg-border" />
                         <QueueButton
                             Icon={QUEUE_ICON.completed}
                             label={t('queue_completed')}
@@ -379,9 +379,9 @@ export default function TasksBrowser({ tasks: initialTasks, persons, deals, user
                                 placeholder={t('searchPlaceholder')}
                                 value={query}
                                 onChange={(e) => setQuery(e.target.value)}
-                                className="w-full rounded-full bg-neutral-100 px-4 py-2 pr-10 text-sm text-black placeholder-neutral-500 outline-none ring-1 ring-black/5 transition focus:ring-2 focus:ring-brand"
+                                className="w-full rounded-full bg-muted px-4 py-2 pr-10 text-sm text-foreground placeholder:text-muted-foreground outline-none ring-1 ring-border transition focus:ring-2 focus:ring-brand"
                             />
-                            <MagnifyingGlassIcon className="pointer-events-none absolute right-3 top-1/2 size-4 -translate-y-1/2 text-neutral-500" />
+                            <MagnifyingGlassIcon className="pointer-events-none absolute right-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
                         </div>
                     </div>
 
@@ -392,31 +392,31 @@ export default function TasksBrowser({ tasks: initialTasks, persons, deals, user
                             message={emptyMessage}
                         />
                     ) : isCompletedQueue ? (
-                        <div className="overflow-hidden rounded-2xl bg-white ring-1 ring-black/5">
-                            <ul className="divide-y divide-neutral-100">
+                        <div className="overflow-hidden rounded-2xl bg-card ring-1 ring-border">
+                            <ul className="divide-y divide-border">
                                 <AnimatePresence initial={false} mode="popLayout">
                                     {filtered.map((task) => renderRow(task, 'completed'))}
                                 </AnimatePresence>
                             </ul>
                         </div>
                     ) : (
-                        <div className="overflow-hidden rounded-2xl bg-white ring-1 ring-black/5">
+                        <div className="overflow-hidden rounded-2xl bg-card ring-1 ring-border">
                             {visibleBuckets.map((bucket, i) => (
-                                <section key={bucket} className={cn(i > 0 && 'border-t border-neutral-200')}>
+                                <section key={bucket} className={cn(i > 0 && 'border-t border-border')}>
                                     <div className="flex items-baseline justify-between px-5 pt-4 pb-2">
                                         <h3
                                             className={cn(
                                                 'text-sm font-semibold',
-                                                bucket === 'overdue' ? 'text-destructive' : 'text-neutral-900',
+                                                bucket === 'overdue' ? 'text-destructive' : 'text-foreground',
                                             )}
                                         >
                                             {t(`bucket_${bucket}` as 'bucket_overdue')}
                                         </h3>
-                                        <span className="text-xs tabular-nums text-neutral-400">
+                                        <span className="text-xs tabular-nums text-muted-foreground">
                                             {grouped[bucket].length}
                                         </span>
                                     </div>
-                                    <ul className="divide-y divide-neutral-100">
+                                    <ul className="divide-y divide-border">
                                         <AnimatePresence initial={false} mode="popLayout">
                                             {grouped[bucket].map((task) => renderRow(task, bucket))}
                                         </AnimatePresence>
@@ -462,7 +462,7 @@ function ProgressRing({ value, reduce, label }: { value: number; reduce: boolean
     return (
         <div className="relative shrink-0" style={{ width: size, height: size }}>
             <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} className="-rotate-90">
-                <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="#ededed" strokeWidth={stroke} />
+                <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="var(--chart-grid)" strokeWidth={stroke} />
                 <motion.circle
                     cx={size / 2}
                     cy={size / 2}
@@ -477,7 +477,7 @@ function ProgressRing({ value, reduce, label }: { value: number; reduce: boolean
                     transition={{ duration: reduce ? 0 : 0.9, ease: EASE_OUT }}
                 />
             </svg>
-            <span className="absolute inset-0 flex items-center justify-center font-mono text-[11px] font-medium tabular-nums text-neutral-700">
+            <span className="absolute inset-0 flex items-center justify-center font-mono text-[11px] font-medium tabular-nums text-foreground">
                 {label}
             </span>
         </div>
@@ -504,11 +504,11 @@ function FocusStrip({
         total === 0 ? t('nothingDueToday') : left === 0 ? t('allDoneToday') : t('tasksLeft', { count: left });
 
     return (
-        <div className="grid grid-cols-3 gap-px overflow-hidden rounded-2xl bg-neutral-200 ring-1 ring-black/5">
+        <div className="grid grid-cols-3 gap-px overflow-hidden rounded-2xl bg-border ring-1 ring-border">
             <button
                 type="button"
                 onClick={onSelectToday}
-                className="flex min-h-20 items-center gap-3.5 bg-white p-4 text-left outline-none transition hover:bg-neutral-50 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand"
+                className="flex min-h-20 items-center gap-3.5 bg-card p-4 text-left outline-none transition hover:bg-muted focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand"
             >
                 <ProgressRing
                     value={total === 0 ? 0 : done / total}
@@ -516,29 +516,29 @@ function FocusStrip({
                     label={total === 0 ? '0' : `${done}/${total}`}
                 />
                 <span className="min-w-0">
-                    <span className="block text-sm font-semibold text-neutral-900">{t('today')}</span>
-                    <span className="mt-0.5 block truncate text-xs text-neutral-500">{todaySub}</span>
+                    <span className="block text-sm font-semibold text-foreground">{t('today')}</span>
+                    <span className="mt-0.5 block truncate text-xs text-muted-foreground">{todaySub}</span>
                 </span>
             </button>
 
             <button
                 type="button"
                 onClick={onSelectOverdue}
-                className="flex min-h-20 flex-col justify-center bg-white p-4 text-left outline-none transition hover:bg-neutral-50 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand"
+                className="flex min-h-20 flex-col justify-center bg-card p-4 text-left outline-none transition hover:bg-muted focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand"
             >
-                <span className={cn('text-2xl font-semibold leading-none tabular-nums', overdue > 0 ? 'text-destructive' : 'text-neutral-300')}>
+                <span className={cn('text-2xl font-semibold leading-none tabular-nums', overdue > 0 ? 'text-destructive' : 'text-muted-foreground')}>
                     {overdue}
                 </span>
-                <span className="mt-1.5 text-xs font-medium text-neutral-500">{t('queue_overdue')}</span>
+                <span className="mt-1.5 text-xs font-medium text-muted-foreground">{t('queue_overdue')}</span>
             </button>
 
             <button
                 type="button"
                 onClick={onSelectWeek}
-                className="flex min-h-20 flex-col justify-center bg-white p-4 text-left outline-none transition hover:bg-neutral-50 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand"
+                className="flex min-h-20 flex-col justify-center bg-card p-4 text-left outline-none transition hover:bg-muted focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand"
             >
-                <span className="text-2xl font-semibold leading-none tabular-nums text-neutral-900">{doneThisWeek}</span>
-                <span className="mt-1.5 text-xs font-medium text-neutral-500">{t('doneThisWeek')}</span>
+                <span className="text-2xl font-semibold leading-none tabular-nums text-foreground">{doneThisWeek}</span>
+                <span className="mt-1.5 text-xs font-medium text-muted-foreground">{t('doneThisWeek')}</span>
             </button>
         </div>
     );
@@ -566,7 +566,7 @@ function QueueButton({
             aria-current={active ? 'page' : undefined}
             className={cn(
                 'relative flex w-full items-center justify-between rounded-lg px-3 py-2 text-sm transition-colors',
-                active ? 'text-brand-dark' : 'text-neutral-700 hover:bg-neutral-100',
+                active ? 'text-brand-dark' : 'text-foreground hover:bg-muted',
             )}
         >
             {active && (
@@ -577,10 +577,10 @@ function QueueButton({
                 />
             )}
             <span className="relative z-10 flex min-w-0 items-center gap-2.5">
-                <Icon className={cn('size-4 shrink-0', active ? 'text-brand-dark' : 'text-neutral-400')} />
+                <Icon className={cn('size-4 shrink-0', active ? 'text-brand-dark' : 'text-muted-foreground')} />
                 <span className={cn('truncate', active && 'font-medium')}>{label}</span>
             </span>
-            <span className={cn('relative z-10 shrink-0 text-xs tabular-nums', active ? 'text-brand-dark/70' : 'text-neutral-400')}>
+            <span className={cn('relative z-10 shrink-0 text-xs tabular-nums', active ? 'text-brand-dark/70' : 'text-muted-foreground')}>
                 {count}
             </span>
         </button>
@@ -588,10 +588,10 @@ function QueueButton({
 }
 
 const DUE_CHIP: Record<DueTone, string> = {
-    overdue: 'bg-red-50 text-red-600 ring-red-600/10',
+    overdue: 'bg-red-50 text-red-600 ring-red-600/10 dark:bg-red-950/40 dark:text-red-400 dark:ring-red-400/20',
     today: 'bg-brand-light/70 text-brand-dark ring-brand-dark/15',
-    soon: 'bg-neutral-100 text-neutral-600 ring-black/5',
-    later: 'bg-neutral-100 text-neutral-500 ring-black/5',
+    soon: 'bg-muted text-muted-foreground ring-border',
+    later: 'bg-muted text-muted-foreground ring-border',
 };
 
 type TaskRowProps = {
@@ -632,7 +632,7 @@ function TaskRow({
             exit={reduce ? { opacity: 0 } : { opacity: 0, x: 8, transition: { duration: 0.2, ease: EASE_OUT } }}
             transition={{ duration: 0.22, ease: EASE_OUT }}
             className={cn(
-                'group flex cursor-pointer items-center gap-3 px-5 py-3 transition-colors hover:bg-neutral-50/80',
+                'group flex cursor-pointer items-center gap-3 px-5 py-3 transition-colors hover:bg-muted/80',
                 (checked || isCompletedRow) && 'opacity-55',
             )}
             onClick={onOpen}
@@ -643,14 +643,14 @@ function TaskRow({
                     onCheckedChange={(value) => onToggle(value === true)}
                     disabled={pending && !checked}
                     aria-label={ariaCompleteLabel}
-                    className="size-[18px] rounded-full border-neutral-300 transition data-[state=checked]:border-brand data-[state=checked]:bg-brand data-[state=checked]:text-white"
+                    className="size-[18px] rounded-full border-border transition data-[state=checked]:border-brand data-[state=checked]:bg-brand data-[state=checked]:text-white"
                 />
             </div>
 
             <span
                 className={cn(
                     'min-w-0 flex-1 truncate text-sm',
-                    checked || isCompletedRow ? 'text-neutral-400 line-through' : 'text-neutral-900',
+                    checked || isCompletedRow ? 'text-muted-foreground line-through' : 'text-foreground',
                 )}
             >
                 {task.description}
@@ -672,7 +672,7 @@ function TaskRow({
                     <Link
                         href={`/records/deals/${deal.id}`}
                         onClick={(e) => e.stopPropagation()}
-                        className="inline-flex max-w-40 items-center gap-1 rounded-full bg-white px-2 py-0.5 text-xs font-medium text-neutral-700 ring-1 ring-inset ring-neutral-200 transition hover:bg-neutral-50"
+                        className="inline-flex max-w-40 items-center gap-1 rounded-full bg-card px-2 py-0.5 text-xs font-medium text-foreground ring-1 ring-inset ring-border transition hover:bg-muted"
                         title={deal.name}
                     >
                         <BriefcaseIcon className="size-3 shrink-0" />
@@ -698,12 +698,12 @@ function TaskRow({
                 {assignee ? (
                     <Tooltip>
                         <TooltipTrigger asChild>
-                            <Avatar size="sm" className="ring-1 ring-black/5">
+                            <Avatar size="sm" className="ring-1 ring-border">
                                 {assignee.profilePictureUrl ? (
                                     <AvatarImage src={assignee.profilePictureUrl} alt={assignee.displayName} />
                                 ) : (
                                     <AvatarFallback>
-                                        <UserIcon className="size-3 text-neutral-500" />
+                                        <UserIcon className="size-3 text-muted-foreground" />
                                     </AvatarFallback>
                                 )}
                             </Avatar>
@@ -723,11 +723,11 @@ function TaskRow({
 function TaskEmptyState({ filtered, completed, message }: { filtered: boolean; completed: boolean; message: string }) {
     const Icon = completed ? CheckCircleIcon : filtered ? MagnifyingGlassIcon : CheckIcon;
     return (
-        <div className="rounded-2xl bg-white px-6 py-20 text-center ring-1 ring-black/5">
+        <div className="rounded-2xl bg-card px-6 py-20 text-center ring-1 ring-border">
             <div className="mx-auto flex size-14 items-center justify-center rounded-2xl bg-brand-light text-brand-dark">
                 <Icon className="size-7" strokeWidth={1.75} />
             </div>
-            <p className="mx-auto mt-5 max-w-sm text-sm font-medium text-neutral-700">{message}</p>
+            <p className="mx-auto mt-5 max-w-sm text-sm font-medium text-foreground">{message}</p>
         </div>
     );
 }

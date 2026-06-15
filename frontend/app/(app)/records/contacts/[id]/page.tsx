@@ -75,7 +75,7 @@ export default async function ContactPage({ params }: { params: { id: number } }
                     <ContactAvatar contact={contact} type="xlarge" />
                     <div className="flex flex-col gap-2">
                         <div className="flex flex-row flex-wrap items-center gap-3">
-                            <h1 className="text-4xl font-extrabold tracking-tight text-black">
+                            <h1 className="text-4xl font-extrabold tracking-tight text-foreground">
                                 {contact.name}
                             </h1>
                             <TagEditor
@@ -84,9 +84,9 @@ export default async function ContactPage({ params }: { params: { id: number } }
                                 allTags={allTags}
                             />
                         </div>
-                        <h3 className="flex flex-wrap items-center gap-2 text-sm text-neutral-500">
+                        <h3 className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
                             {contact.title ? (
-                                <Link href={`/records/contacts?title=${contact.title}`} className="rounded-md bg-neutral-100 px-2 py-1 text-neutral-500 transition-colors duration-200 hover:bg-brand-hover hover:text-white">
+                                <Link href={`/records/contacts?title=${contact.title}`} className="rounded-md bg-muted px-2 py-1 text-muted-foreground transition-colors duration-200 hover:bg-brand-hover hover:text-white">
                                     {contact.title}
                                 </Link>
                             ) : null}
@@ -95,7 +95,7 @@ export default async function ContactPage({ params }: { params: { id: number } }
                                     <span>@</span>
                                     <Link
                                         href={`/records/companies/${contact.company.id}`}
-                                        className="rounded-md bg-neutral-100 px-2 py-1 text-neutral-500 transition-colors duration-200 hover:bg-brand-hover hover:text-white"
+                                        className="rounded-md bg-muted px-2 py-1 text-muted-foreground transition-colors duration-200 hover:bg-brand-hover hover:text-white"
                                     >
                                         {contact.company.name}
                                     </Link>
@@ -106,11 +106,11 @@ export default async function ContactPage({ params }: { params: { id: number } }
                 </div>
 
                 <div className="flex flex-col items-end gap-2">
-                    <span className="text-xs font-medium tracking-[0.12em] text-neutral-500 uppercase">
+                    <span className="text-xs font-medium tracking-[0.12em] text-muted-foreground uppercase">
                         {t("relations")}
                     </span>
                     {interactionUsers.length === 0 ? (
-                        <span className="text-xs text-neutral-400">{t("noRecordedInteractions")}</span>
+                        <span className="text-xs text-muted-foreground">{t("noRecordedInteractions")}</span>
                     ) : (
                         <AvatarGroup>
                             {interactionUsers.map((user) => (
@@ -118,7 +118,7 @@ export default async function ContactPage({ params }: { params: { id: number } }
                                     <TooltipTrigger asChild>
                                         <Link href={`/users/${user.id}`}>
                                             <Avatar
-                                                className="h-12 w-12 bg-neutral-500"
+                                                className="h-12 w-12 bg-muted-foreground/40"
                                             >
                                                 {user.profilePictureUrl ? (
                                                     <AvatarImage
@@ -127,7 +127,7 @@ export default async function ContactPage({ params }: { params: { id: number } }
                                                     />
                                                 ) : (
                                                     <AvatarFallback>
-                                                        <UserIcon className="size-4 text-white" />
+                                                        <UserIcon className="size-4 text-muted-foreground" />
                                                     </AvatarFallback>
                                                 )}
                                             </Avatar>
@@ -157,11 +157,11 @@ export default async function ContactPage({ params }: { params: { id: number } }
             <div className="mt-12 grid grid-cols-1 gap-8 md:grid-cols-[minmax(0,1fr)_minmax(0,2fr)] md:min-h-0 md:flex-1">
                 <aside>
                     <div className="mb-3 flex h-8 items-center">
-                        <h2 className="px-6 text-xs font-medium tracking-[0.12em] text-neutral-500 uppercase">
+                        <h2 className="px-6 text-xs font-medium tracking-[0.12em] text-muted-foreground uppercase">
                             {t("profile")}
                         </h2>
                     </div>
-                    <dl className="divide-y divide-neutral-200 overflow-hidden rounded-2xl bg-neutral-100 ring-1 ring-black/5">
+                    <dl className="divide-y divide-border overflow-hidden rounded-2xl bg-card ring-1 ring-border">
                         <InfoRow label={t("email")} value={contact.email ?? ''} />
                         <InfoRow label={t("phone")} value={contact.phone ?? ''} />
                         <InfoRow label={t("title")} value={contact.title ?? ''} />
@@ -173,7 +173,7 @@ export default async function ContactPage({ params }: { params: { id: number } }
 
                 <section className="md:flex md:min-h-0 md:flex-col">
                     <div className="mb-3 flex h-8 items-center">
-                        <h2 className="px-6 text-xs font-medium tracking-[0.12em] text-neutral-500 uppercase">
+                        <h2 className="px-6 text-xs font-medium tracking-[0.12em] text-muted-foreground uppercase">
                             {t("theirActivity")}
                         </h2>
                     </div>
@@ -215,25 +215,25 @@ export default async function ContactPage({ params }: { params: { id: number } }
                     </div>
 
                     <div className="mt-6 mb-3 flex h-8 items-center">
-                        <h2 className="px-6 text-xs font-medium tracking-[0.12em] text-neutral-500 uppercase">
+                        <h2 className="px-6 text-xs font-medium tracking-[0.12em] text-muted-foreground uppercase">
                             {t("activePipeline")}
                         </h2>
                     </div>
-                    <div className="overflow-hidden rounded-2xl bg-neutral-100 ring-1 ring-black/5">
+                    <div className="overflow-hidden rounded-2xl bg-card ring-1 ring-border">
                         {deals.length === 0 ? (
-                            <p className="px-6 py-6 text-sm text-neutral-500">{t("noActiveDeals")}</p>
+                            <p className="px-6 py-6 text-sm text-muted-foreground">{t("noActiveDeals")}</p>
                         ) : (
-                            <ul className="divide-y divide-neutral-200">
+                            <ul className="divide-y divide-border">
                                 {deals.map((deal) => (
                                     <li key={deal.id}>
                                         <Link
                                             href={`/records/deals/${deal.id}`}
-                                            className="flex items-center justify-between px-6 py-4 transition-colors hover:bg-neutral-200/60"
+                                            className="flex items-center justify-between px-6 py-4 transition-colors hover:bg-muted/60"
                                         >
-                                            <span className="text-sm font-medium text-black">
+                                            <span className="text-sm font-medium text-foreground">
                                                 {deal.name}
                                             </span>
-                                            <span className="text-sm text-neutral-500">
+                                            <span className="text-sm text-muted-foreground">
                                                 {formatCompactCurrency(deal.value, deal.currency, locale)}
                                             </span>
                                         </Link>
@@ -244,11 +244,11 @@ export default async function ContactPage({ params }: { params: { id: number } }
                     </div>
 
                     <div className="mt-6 mb-3 flex h-8 items-center">
-                        <h2 className="px-6 text-xs font-medium tracking-[0.12em] text-neutral-500 uppercase">
+                        <h2 className="px-6 text-xs font-medium tracking-[0.12em] text-muted-foreground uppercase">
                             {t("timeline")}
                         </h2>
                     </div>
-                    <div className="overflow-hidden rounded-2xl bg-white ring-1 ring-black/5 md:flex md:min-h-0 md:flex-1 md:flex-col">
+                    <div className="overflow-hidden rounded-2xl bg-card ring-1 ring-border md:flex md:min-h-0 md:flex-1 md:flex-col">
                         <div className="md:min-h-0 md:flex-1 md:overflow-y-auto md:[-webkit-mask-image:linear-gradient(to_bottom,transparent_0,black_24px)] md:[mask-image:linear-gradient(to_bottom,transparent_0,black_24px)]">
                             <Timeline
                                 tasks={tasks}

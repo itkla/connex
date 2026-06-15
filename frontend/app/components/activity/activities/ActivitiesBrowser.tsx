@@ -225,7 +225,7 @@ export default function ActivitiesBrowser({ activities, persons, deals, users, c
             <header className="flex flex-wrap items-start justify-between gap-4">
                 <div>
                     <h1 className="text-4xl font-extrabold tracking-tight">{t('title')}</h1>
-                    <p className="mt-1 text-sm text-neutral-500">{t('subtitle')}</p>
+                    <p className="mt-1 text-sm text-muted-foreground">{t('subtitle')}</p>
                 </div>
                 <Button
                     className="bg-brand text-white shadow-sm transition-transform hover:bg-brand-dark active:scale-[0.98]"
@@ -241,7 +241,7 @@ export default function ActivitiesBrowser({ activities, persons, deals, users, c
 
             <div className="grid grid-cols-1 gap-6 md:grid-cols-[200px_minmax(0,1fr)] md:gap-10">
                 <aside className="md:sticky md:top-6 md:self-start">
-                    <h2 className="mb-2 px-3 text-[11px] font-semibold uppercase tracking-[0.14em] text-neutral-400">
+                    <h2 className="mb-2 px-3 text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
                         {t('filtersHeader')}
                     </h2>
                     <nav className="space-y-0.5">
@@ -268,9 +268,9 @@ export default function ActivitiesBrowser({ activities, persons, deals, users, c
                                 placeholder={t('searchPlaceholder')}
                                 value={query}
                                 onChange={(e) => setQuery(e.target.value)}
-                                className="w-full rounded-full bg-neutral-100 px-4 py-2 pr-10 text-sm text-black placeholder-neutral-500 outline-none ring-1 ring-black/5 transition focus:ring-2 focus:ring-brand"
+                                className="w-full rounded-full bg-muted px-4 py-2 pr-10 text-sm text-foreground placeholder:text-muted-foreground outline-none ring-1 ring-border transition focus:ring-2 focus:ring-brand"
                             />
-                            <MagnifyingGlassIcon className="pointer-events-none absolute right-3 top-1/2 size-4 -translate-y-1/2 text-neutral-500" />
+                            <MagnifyingGlassIcon className="pointer-events-none absolute right-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
                         </div>
                     </div>
 
@@ -368,10 +368,10 @@ function WeekPulse({
     t: ReturnType<typeof useTranslations>;
 }) {
     return (
-        <div className="flex items-center gap-5 rounded-2xl bg-white p-4 ring-1 ring-black/5">
+        <div className="flex items-center gap-5 rounded-2xl bg-card p-4 ring-1 ring-border">
             <div className="shrink-0">
-                <div className="text-2xl font-semibold tabular-nums text-neutral-900">{pulse.total}</div>
-                <div className="mt-0.5 text-xs font-medium text-neutral-500">{t('weekTotalLabel')}</div>
+                <div className="text-2xl font-semibold tabular-nums text-foreground">{pulse.total}</div>
+                <div className="mt-0.5 text-xs font-medium text-muted-foreground">{t('weekTotalLabel')}</div>
             </div>
             <div
                 className="ml-auto flex h-10 items-end gap-1.5"
@@ -422,7 +422,7 @@ function FilterButton({
             aria-current={active ? 'page' : undefined}
             className={cn(
                 'relative flex w-full items-center justify-between rounded-lg px-3 py-2 text-sm transition-colors',
-                active ? 'text-brand-dark' : 'text-neutral-700 hover:bg-neutral-100',
+                active ? 'text-brand-dark' : 'text-foreground hover:bg-muted',
             )}
         >
             {active && (
@@ -433,10 +433,10 @@ function FilterButton({
                 />
             )}
             <span className="relative z-10 flex min-w-0 items-center gap-2.5">
-                <Icon className={cn('size-4 shrink-0', iconColor ?? (active ? 'text-brand-dark' : 'text-neutral-400'))} />
+                <Icon className={cn('size-4 shrink-0', iconColor ?? (active ? 'text-brand-dark' : 'text-muted-foreground'))} />
                 <span className={cn('truncate', active && 'font-medium')}>{label}</span>
             </span>
-            <span className={cn('relative z-10 shrink-0 text-xs tabular-nums', active ? 'text-brand-dark/70' : 'text-neutral-400')}>
+            <span className={cn('relative z-10 shrink-0 text-xs tabular-nums', active ? 'text-brand-dark/70' : 'text-muted-foreground')}>
                 {count}
             </span>
         </button>
@@ -493,7 +493,7 @@ function TimelineRow({
             <div className="relative flex flex-col items-center">
                 <span
                     aria-hidden
-                    className="absolute left-1/2 w-px -translate-x-1/2 bg-neutral-200"
+                    className="absolute left-1/2 w-px -translate-x-1/2 bg-border"
                     style={{
                         top: connectUp ? 0 : NODE_ANCHOR,
                         bottom: connectDown ? 0 : `calc(100% - ${NODE_ANCHOR}px)`,
@@ -509,23 +509,23 @@ function TimelineRow({
 
             <div className="pb-6">
                 <div
-                    className="group cursor-pointer rounded-xl px-3 py-2 transition-colors hover:bg-neutral-50"
+                    className="group cursor-pointer rounded-xl px-3 py-2 transition-colors hover:bg-muted"
                     onClick={onOpen}
                 >
                 <div className="flex items-start gap-2">
                     <div className="min-w-0 flex-1">
-                        <p className="truncate text-sm font-medium text-neutral-900">{activity.subject}</p>
-                        <p className="mt-0.5 text-xs text-neutral-400">{typeLabel}</p>
+                        <p className="truncate text-sm font-medium text-foreground">{activity.subject}</p>
+                        <p className="mt-0.5 text-xs text-muted-foreground">{typeLabel}</p>
                     </div>
                     <div className="flex shrink-0 items-center gap-0.5">
-                        <span className="text-xs tabular-nums text-neutral-400">{time}</span>
+                        <span className="text-xs tabular-nums text-muted-foreground">{time}</span>
                         <DropdownMenu>
                             <DropdownMenuTrigger asChild>
                                 <button
                                     type="button"
                                     aria-label={actionsAria}
                                     onClick={(e) => e.stopPropagation()}
-                                    className="flex size-7 shrink-0 items-center justify-center rounded-full text-neutral-400 opacity-0 transition hover:bg-neutral-100 hover:text-neutral-700 group-hover:opacity-100 focus:opacity-100 aria-expanded:opacity-100 data-[state=open]:opacity-100"
+                                    className="flex size-7 shrink-0 items-center justify-center rounded-full text-muted-foreground opacity-0 transition hover:bg-muted hover:text-foreground group-hover:opacity-100 focus:opacity-100 aria-expanded:opacity-100 data-[state=open]:opacity-100"
                                 >
                                     <EllipsisHorizontalIcon className="size-4" />
                                 </button>
@@ -537,12 +537,12 @@ function TimelineRow({
                                         onEdit();
                                     }}
                                 >
-                                    <PencilIcon className="size-4 text-neutral-500" />
+                                    <PencilIcon className="size-4 text-muted-foreground" />
                                     {editLabel}
                                 </DropdownMenuItem>
                                 <DropdownMenuSeparator />
                                 <DropdownMenuItem
-                                    className="text-destructive hover:bg-red-500/10"
+                                    className="text-destructive hover:bg-destructive/10"
                                     onSelect={(e) => {
                                         e.preventDefault();
                                         onDelete();
@@ -557,7 +557,7 @@ function TimelineRow({
                 </div>
 
                 {activity.notes ? (
-                    <p className="mt-1 line-clamp-2 text-sm text-neutral-500">{activity.notes}</p>
+                    <p className="mt-1 line-clamp-2 text-sm text-muted-foreground">{activity.notes}</p>
                 ) : null}
 
                 {(person || deal || creator) && (
@@ -577,7 +577,7 @@ function TimelineRow({
                             <Link
                                 href={`/records/deals/${deal.id}`}
                                 onClick={(e) => e.stopPropagation()}
-                                className="inline-flex max-w-48 items-center gap-1 rounded-full bg-white px-2 py-0.5 text-xs font-medium text-neutral-700 ring-1 ring-inset ring-neutral-200 transition hover:bg-neutral-50"
+                                className="inline-flex max-w-48 items-center gap-1 rounded-full bg-card px-2 py-0.5 text-xs font-medium text-foreground ring-1 ring-inset ring-border transition hover:bg-muted"
                                 title={deal.name}
                             >
                                 <BriefcaseIcon className="size-3 shrink-0" />
@@ -588,12 +588,12 @@ function TimelineRow({
                             <Tooltip>
                                 <TooltipTrigger asChild>
                                     <span className="ml-auto inline-flex" onClick={(e) => e.stopPropagation()}>
-                                        <Avatar size="sm" className="ring-1 ring-black/5">
+                                        <Avatar size="sm" className="ring-1 ring-border">
                                             {creator.profilePictureUrl ? (
                                                 <AvatarImage src={creator.profilePictureUrl} alt={creatorName} />
                                             ) : (
                                                 <AvatarFallback>
-                                                    <UserIcon className="size-3 text-neutral-500" />
+                                                    <UserIcon className="size-3 text-muted-foreground" />
                                                 </AvatarFallback>
                                             )}
                                         </Avatar>
@@ -635,17 +635,17 @@ function DateMarker({
             <div className="relative flex flex-col items-center">
                 <span
                     aria-hidden
-                    className="absolute left-1/2 w-px -translate-x-1/2 bg-neutral-200"
+                    className="absolute left-1/2 w-px -translate-x-1/2 bg-border"
                     style={{
                         top: connectUp ? 0 : DATE_ANCHOR,
                         bottom: connectDown ? 0 : `calc(100% - ${DATE_ANCHOR}px)`,
                     }}
                 />
-                <span aria-hidden className="relative z-10 mt-3.5 size-2 rounded-full bg-neutral-300 ring-4 ring-white" />
+                <span aria-hidden className="relative z-10 mt-3.5 size-2 rounded-full bg-muted-foreground ring-4 ring-background" />
             </div>
             <div className="flex items-center gap-2 pt-2 pb-2">
-                <h3 className="text-sm font-semibold text-neutral-700">{label}</h3>
-                <span className="text-xs tabular-nums text-neutral-400">{count}</span>
+                <h3 className="text-sm font-semibold text-foreground">{label}</h3>
+                <span className="text-xs tabular-nums text-muted-foreground">{count}</span>
             </div>
         </motion.li>
     );
@@ -654,11 +654,11 @@ function DateMarker({
 function ActivityEmptyState({ filtered, message }: { filtered: boolean; message: string }) {
     const Icon = filtered ? MagnifyingGlassIcon : InboxStackIcon;
     return (
-        <div className="rounded-2xl bg-white px-6 py-20 text-center ring-1 ring-black/5">
+        <div className="rounded-2xl bg-card px-6 py-20 text-center ring-1 ring-border">
             <div className="mx-auto flex size-14 items-center justify-center rounded-2xl bg-brand-light text-brand-dark">
                 <Icon className="size-7" strokeWidth={1.75} />
             </div>
-            <p className="mx-auto mt-5 max-w-sm text-sm font-medium text-neutral-700">{message}</p>
+            <p className="mx-auto mt-5 max-w-sm text-sm font-medium text-foreground">{message}</p>
         </div>
     );
 }

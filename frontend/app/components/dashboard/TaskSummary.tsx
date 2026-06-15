@@ -37,9 +37,9 @@ export default async function TaskSummary({ tasks }: { tasks: Task[] }) {
         .slice(0, 4);
 
     return (
-        <div className="flex h-full flex-col rounded-2xl border border-black/[0.07] bg-white p-6">
+        <div className="flex h-full flex-col rounded-2xl border border-border bg-card p-6">
             <div className="flex items-baseline justify-between">
-                <span className="text-xs font-medium tracking-[0.12em] text-neutral-500 uppercase">
+                <span className="text-xs font-medium tracking-[0.12em] text-muted-foreground uppercase">
                     {t('openTasks')}
                 </span>
                 <Link
@@ -50,7 +50,7 @@ export default async function TaskSummary({ tasks }: { tasks: Task[] }) {
                 </Link>
             </div>
             <div className="mt-3 flex items-center gap-3">
-                <CountUp value={open.length} className="text-5xl leading-none text-neutral-900 tabular-nums" />
+                <CountUp value={open.length} className="text-5xl leading-none text-foreground tabular-nums" />
                 {overdue > 0 ? (
                     <Badge variant="destructive" className="gap-1 px-2.5">
                         <ExclamationTriangleIcon />
@@ -58,7 +58,7 @@ export default async function TaskSummary({ tasks }: { tasks: Task[] }) {
                     </Badge>
                 ) : null}
             </div>
-            <p className="mt-2 text-sm text-neutral-500">{t('dueThisWeek', { count: dueSoon })}</p>
+            <p className="mt-2 text-sm text-muted-foreground">{t('dueThisWeek', { count: dueSoon })}</p>
             <UpcomingTasks tasks={upcoming} locale={locale} />
         </div>
     );

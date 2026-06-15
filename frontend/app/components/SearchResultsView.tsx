@@ -135,42 +135,42 @@ export default function SearchResultsView({
             </h1>
 
             {!hasResults ? (
-                <p className="text-sm text-neutral-500">{t("noResults", { query })}</p>
+                <p className="text-sm text-muted-foreground">{t("noResults", { query })}</p>
             ) : (
                 <div className="space-y-8">
                     {groups.map((group) => (
                         <section key={group.key}>
-                            <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-neutral-400">
+                            <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                                 {group.heading}{" "}
-                                <span className="text-neutral-300">({group.rows.length})</span>
+                                <span className="text-muted-foreground">({group.rows.length})</span>
                             </h2>
-                            <ul className="overflow-hidden rounded-2xl ring-1 ring-black/5">
+                            <ul className="overflow-hidden rounded-2xl ring-1 ring-border">
                                 {group.rows.map((row) => {
                                     const Icon = row.icon;
                                     return (
-                                        <li key={row.key} className="border-b border-black/5 last:border-0">
+                                        <li key={row.key} className="border-b border-border last:border-0">
                                             <Link
                                                 href={row.href}
-                                                className="flex items-center gap-3 bg-white px-4 py-3 transition hover:bg-neutral-50"
+                                                className="flex items-center gap-3 bg-card px-4 py-3 transition hover:bg-muted"
                                             >
                                                 <span className="flex size-8 shrink-0 items-center justify-center">
                                                     {row.leading ? (
                                                         row.leading
                                                     ) : row.accent ? (
                                                         <span
-                                                            className="size-4 rounded-full ring-1 ring-black/10"
+                                                            className="size-4 rounded-full ring-1 ring-border"
                                                             style={{ backgroundColor: row.accent }}
                                                         />
                                                     ) : Icon ? (
-                                                        <Icon className="size-5 text-neutral-400" />
+                                                        <Icon className="size-5 text-muted-foreground" />
                                                     ) : null}
                                                 </span>
                                                 <span className="min-w-0 flex-1">
-                                                    <span className="block truncate text-sm text-black">
+                                                    <span className="block truncate text-sm text-foreground">
                                                         {row.label}
                                                     </span>
                                                     {row.subtitle && (
-                                                        <span className="block truncate text-xs text-neutral-500">
+                                                        <span className="block truncate text-xs text-muted-foreground">
                                                             {row.subtitle}
                                                         </span>
                                                     )}

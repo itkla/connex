@@ -12,6 +12,7 @@ import {
     type EdgeChange,
 } from '@xyflow/react';
 import { useCallback, useState } from 'react';
+import { useTheme } from 'next-themes';
 
 import '@xyflow/react/dist/style.css';
 
@@ -41,6 +42,8 @@ function Flow({ graph, focusId }: { graph: Graph; focusId?: string }) {
     });
     const [edges, setEdges] = useState<RelationEdgeType[]>(graph.edges);
 
+    const { resolvedTheme } = useTheme();
+
     const { onNodeDragStart, onNodeDragStop } = useForceLayout(focusId);
 
     const onNodesChange = useCallback(
@@ -64,6 +67,7 @@ function Flow({ graph, focusId }: { graph: Graph; focusId?: string }) {
             onEdgesChange={onEdgesChange}
             onNodeDragStart={onNodeDragStart}
             onNodeDragStop={onNodeDragStop}
+            colorMode={resolvedTheme === 'dark' ? 'dark' : 'light'}
             onlyRenderVisibleElements
             minZoom={0.1}
             fitView

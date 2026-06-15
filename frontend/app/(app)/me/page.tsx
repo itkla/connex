@@ -62,7 +62,7 @@ export default async function MePage() {
     const randomGreeting = greetings[Math.floor(Math.random() * greetings.length)];
 
     return (
-        <div className="min-h-screen bg-white px-6 pt-12 pb-12 md:flex md:h-screen md:flex-col md:overflow-hidden">
+        <div className="min-h-screen bg-background px-6 pt-12 pb-12 md:flex md:h-screen md:flex-col md:overflow-hidden">
             <div className="mx-auto w-full max-w-5xl md:flex md:min-h-0 md:flex-1 md:flex-col">
                 <header className="flex items-center gap-6">
                     {user.profilePictureUrl ? (
@@ -77,16 +77,16 @@ export default async function MePage() {
                     ) : (
                         <div
                             aria-label={t('profilePicturePlaceholderAriaLabel')}
-                            className="flex h-24 w-24 shrink-0 items-center justify-center rounded-full bg-brand-light text-4xl text-brand-dark ring-1 ring-black/5"
+                            className="flex h-24 w-24 shrink-0 items-center justify-center rounded-full bg-brand-light text-4xl text-brand-dark ring-1 ring-border"
                         >
                             {initials}
                         </div>
                     )}
                     <h1 className="leading-tight tracking-tight">
-                        <span className="block text-2xl font-medium text-neutral-500">
+                        <span className="block text-2xl font-medium text-muted-foreground">
                             {randomGreeting}
                         </span>
-                        <span className="mt-1 block text-4xl font-extrabold tracking-tight text-black">
+                        <span className="mt-1 block text-4xl font-extrabold tracking-tight text-foreground">
                             {user.displayName}
                         </span>
                     </h1>
@@ -95,12 +95,12 @@ export default async function MePage() {
                 <div className="mt-12 grid grid-cols-1 gap-8 md:grid-cols-[minmax(0,1fr)_minmax(0,2fr)] md:min-h-0 md:flex-1">
                     <aside>
                         <div className="mb-3 flex h-8 items-center justify-between">
-                            <h2 className="px-6 text-xs font-medium tracking-[0.12em] text-neutral-500 uppercase">
+                            <h2 className="px-6 text-xs font-medium tracking-[0.12em] text-muted-foreground uppercase">
                                 {t('profile')}
                             </h2>
                             <EditSelfModal user={user} />
                         </div>
-                        <dl className="divide-y divide-neutral-200 overflow-hidden rounded-2xl bg-neutral-100 ring-1 ring-black/5">
+                        <dl className="divide-y divide-border overflow-hidden rounded-2xl bg-muted ring-1 ring-border">
                             <InfoRow
                                 label={t('username')}
                                 value={`@${user.username}`}
@@ -135,7 +135,7 @@ export default async function MePage() {
 
                     <section className="md:flex md:min-h-0 md:flex-col">
                         <div className="mb-3 flex h-8 items-center">
-                            <h2 className="px-6 text-xs font-medium tracking-[0.12em] text-neutral-500 uppercase">
+                            <h2 className="px-6 text-xs font-medium tracking-[0.12em] text-muted-foreground uppercase">
                                 {t('myActivity')}
                             </h2>
                         </div>
@@ -153,7 +153,7 @@ export default async function MePage() {
                             <StatCard label={t('notes')} value={notes.length} />
                         </div>
 
-                        <div className="mt-6 overflow-hidden rounded-2xl bg-white ring-1 ring-black/5 md:flex md:min-h-0 md:flex-1 md:flex-col">
+                        <div className="mt-6 overflow-hidden rounded-2xl bg-card ring-1 ring-border md:flex md:min-h-0 md:flex-1 md:flex-col">
                             <div className="md:min-h-0 md:flex-1 md:overflow-y-auto md:[-webkit-mask-image:linear-gradient(to_bottom,transparent_0,black_24px)] md:[mask-image:linear-gradient(to_bottom,transparent_0,black_24px)]">
                                 <Timeline
                                     tasks={tasks}

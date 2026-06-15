@@ -158,7 +158,7 @@ export default async function DealPage({ params }: { params: { id: number } }) {
             <header className="mt-8 flex flex-wrap items-center justify-between gap-6">
                 <div className="flex flex-col gap-2 py-8">
                     <div className="flex flex-row flex-wrap items-center gap-3">
-                        <h1 className="text-4xl font-extrabold tracking-tight text-black">{deal.name}</h1>
+                        <h1 className="text-4xl font-extrabold tracking-tight text-foreground">{deal.name}</h1>
                         {tags.map((tag) => (
                             <span
                                 key={tag.id}
@@ -169,11 +169,11 @@ export default async function DealPage({ params }: { params: { id: number } }) {
                             </span>
                         ))}
                     </div>
-                    <h3 className="flex flex-wrap items-center gap-2 text-sm text-neutral-500">
+                    <h3 className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
                         {company ? (
                             <Link
                                 href={`/records/companies/${company.id}`}
-                                className="inline-flex items-center gap-1 rounded-md bg-neutral-100 px-2 py-1 transition-colors duration-200 hover:bg-brand-hover hover:text-white"
+                                className="inline-flex items-center gap-1 rounded-md bg-muted px-2 py-1 transition-colors duration-200 hover:bg-brand-hover hover:text-white"
                             >
                                 <BuildingOffice2Icon className="size-3.5" />
                                 {company.name}
@@ -198,10 +198,10 @@ export default async function DealPage({ params }: { params: { id: number } }) {
                 </div>
 
                 <div className="flex flex-col items-end gap-2">
-                    <span className="text-xs font-medium tracking-[0.12em] text-neutral-500 uppercase">
+                    <span className="text-xs font-medium tracking-[0.12em] text-muted-foreground uppercase">
                         {closed ? t('actual') : t('projected')} · {currency}
                     </span>
-                    <div className="text-3xl font-extrabold text-neutral-900">
+                    <div className="text-3xl font-extrabold text-foreground">
                         {formatCurrency(closed ? deal.actualValue : deal.value, currency, locale)}
                     </div>
                 </div>
@@ -220,18 +220,18 @@ export default async function DealPage({ params }: { params: { id: number } }) {
             </div>
 
             <div className="mt-8 mb-3 flex h-8 items-center gap-1.5">
-                <h2 className="px-6 text-xs font-medium uppercase tracking-[0.12em] text-neutral-500">
+                <h2 className="px-6 text-xs font-medium uppercase tracking-[0.12em] text-muted-foreground">
                     {t('pipelineProgress')}
                 </h2>
                 {/* TODO: make the tooltips show translation lines, but that's something for after */}
                 <Tooltip>
                     <TooltipTrigger asChild>
-                        <InformationCircleIcon className="size-3 text-neutral-500" />
+                        <InformationCircleIcon className="size-3 text-muted-foreground" />
                     </TooltipTrigger>
                     <TooltipContent>
                         <div className="flex flex-col gap-2">
                             <h2 className="text-sm font-medium">{t('pipelineProgress')}</h2>
-                            <p className="text-xs text-neutral-400">
+                            <p className="text-xs text-muted-foreground">
                                 {t('pipelineProgressTooltip')}
                             </p>
                         </div>
@@ -248,20 +248,20 @@ export default async function DealPage({ params }: { params: { id: number } }) {
             />
 
             <div className="mt-6 mb-3 flex h-8 items-center">
-                <h2 className="px-6 text-xs font-medium uppercase tracking-[0.12em] text-neutral-500">
+                <h2 className="px-6 text-xs font-medium uppercase tracking-[0.12em] text-muted-foreground">
                     {t('performance')}
                 </h2>
                 <Tooltip>
                     <TooltipTrigger asChild>
-                        <InformationCircleIcon className="size-3 text-neutral-500" />
+                        <InformationCircleIcon className="size-3 text-muted-foreground" />
                     </TooltipTrigger>
                     <TooltipContent>
                         <div className="flex flex-col gap-2">
                             <h2 className="text-sm font-medium">{t('performance')}</h2>
-                            <p className="text-xs text-neutral-400">
+                            <p className="text-xs text-muted-foreground">
                                 {t('performanceTooltip')}
                             </p>
-                            <ul className="list-disc list-inside text-xs text-neutral-400">
+                            <ul className="list-disc list-inside text-xs text-muted-foreground">
                                 <li>{t('performanceBulletProjected')}</li>
                                 <li>{t('performanceBulletActual')}</li>
                                 <li>{t('performanceBulletVariance')}</li>
@@ -291,17 +291,17 @@ export default async function DealPage({ params }: { params: { id: number } }) {
             </div>
 
             <div className="mt-6 mb-3 flex h-8 items-center">
-                <h2 className="px-6 text-xs font-medium uppercase tracking-[0.12em] text-neutral-500">
+                <h2 className="px-6 text-xs font-medium uppercase tracking-[0.12em] text-muted-foreground">
                     {t('engagement')}
                 </h2>
                 <Tooltip>
                     <TooltipTrigger asChild>
-                        <InformationCircleIcon className="size-3 text-neutral-500" />
+                        <InformationCircleIcon className="size-3 text-muted-foreground" />
                     </TooltipTrigger>
                     <TooltipContent>
                         <div className="flex flex-col gap-2">
                             <h2 className="text-sm font-medium">{t('performance')}</h2>
-                            <p className="text-xs text-neutral-400">
+                            <p className="text-xs text-muted-foreground">
                                 {t('engagementTooltip')}
                             </p>
                         </div>
@@ -316,11 +316,11 @@ export default async function DealPage({ params }: { params: { id: number } }) {
             <div className="mt-12 grid grid-cols-1 gap-8 md:min-h-0 md:flex-1 md:grid-cols-[minmax(0,1fr)_minmax(0,2fr)]">
                 <aside>
                     <div className="mb-3 flex h-8 items-center">
-                        <h2 className="px-6 text-xs font-medium uppercase tracking-[0.12em] text-neutral-500">
+                        <h2 className="px-6 text-xs font-medium uppercase tracking-[0.12em] text-muted-foreground">
                             {t('details')}
                         </h2>
                     </div>
-                    <dl className="divide-y divide-neutral-200 overflow-hidden rounded-2xl bg-neutral-100 ring-1 ring-black/5">
+                    <dl className="divide-y divide-border overflow-hidden rounded-2xl bg-muted ring-1 ring-border">
                         <InfoRow label={t('pipeline')} value={pipeline?.name ?? '—'} />
                         <InfoRow label={t('stage')} value={currentStage?.name ?? '—'} />
                         <InfoRow label={t('company')} value={company?.name ?? '—'} />
@@ -334,18 +334,18 @@ export default async function DealPage({ params }: { params: { id: number } }) {
 
                 <section className="md:flex md:min-h-0 md:flex-col">
                     <div className="mb-3 flex h-8 items-center">
-                        <h2 className="px-6 text-xs font-medium uppercase tracking-[0.12em] text-neutral-500">
+                        <h2 className="px-6 text-xs font-medium uppercase tracking-[0.12em] text-muted-foreground">
                             {t('peopleOnThisDeal')}
                             {/* <InformationCircleIcon className="size-2" /> */}
                         </h2>
                         <Tooltip>
                             <TooltipTrigger asChild>
-                                <InformationCircleIcon className="size-3 text-neutral-500" />
+                                <InformationCircleIcon className="size-3 text-muted-foreground" />
                             </TooltipTrigger>
                             <TooltipContent>
                                 <div className="flex flex-col gap-2">
                                     <h2 className="text-sm font-medium">{t('peopleOnThisDeal')}</h2>
-                                    <p className="text-xs text-neutral-400">
+                                    <p className="text-xs text-muted-foreground">
                                         {t('peopleOnThisDealTooltipShort')}
                                     </p>
                                     <p>
@@ -355,26 +355,26 @@ export default async function DealPage({ params }: { params: { id: number } }) {
                             </TooltipContent>
                         </Tooltip>
                     </div>
-                    <div className="overflow-hidden rounded-2xl bg-neutral-100 ring-1 ring-black/5">
+                    <div className="overflow-hidden rounded-2xl bg-muted ring-1 ring-border">
                         {dealPeople.length === 0 ? (
-                            <p className="px-6 py-6 text-sm text-neutral-500">
+                            <p className="px-6 py-6 text-sm text-muted-foreground">
                                 {t('noPeopleAssociated')}
                             </p>
                         ) : (
-                            <ul className="divide-y divide-neutral-200">
+                            <ul className="divide-y divide-border">
                                 {dealPeople.map(({ person, role }) => (
                                     <li key={person.id}>
                                         <Link
                                             href={`/records/contacts/${person.id}`}
-                                            className="flex items-center gap-3 px-6 py-3 transition-colors hover:bg-neutral-200/60"
+                                            className="flex items-center gap-3 px-6 py-3 transition-colors hover:bg-muted/60"
                                         >
                                             <ContactAvatar contact={person} type="medium" />
                                             <div className="min-w-0 flex-1">
-                                                <p className="truncate text-sm font-medium text-neutral-900">
+                                                <p className="truncate text-sm font-medium text-foreground">
                                                     {person.name}
                                                 </p>
                                                 {person.title ? (
-                                                    <p className="truncate text-xs text-neutral-500">
+                                                    <p className="truncate text-xs text-muted-foreground">
                                                         {person.title}
                                                     </p>
                                                 ) : null}
@@ -394,24 +394,24 @@ export default async function DealPage({ params }: { params: { id: number } }) {
                     <DealTaskList dealId={deal.id} companyId={deal.company} tasks={tasks} deals={allDeals} />
 
                     <div className="mb-3 mt-6 flex h-8 items-center">
-                        <h2 className="px-6 text-xs font-medium uppercase tracking-[0.12em] text-neutral-500">
+                        <h2 className="px-6 text-xs font-medium uppercase tracking-[0.12em] text-muted-foreground">
                             {t('timeline')}
                         </h2>
                         <Tooltip>
                             <TooltipTrigger asChild>
-                                <InformationCircleIcon className="size-3 text-neutral-500" />
+                                <InformationCircleIcon className="size-3 text-muted-foreground" />
                             </TooltipTrigger>
                             <TooltipContent>
                                 <div className="flex flex-col gap-2">
                                     <h2 className="text-sm font-medium">{t('timeline')}</h2>
-                                    <p className="text-xs text-neutral-400">
+                                    <p className="text-xs text-muted-foreground">
                                         {t('timelineTooltip')}
                                     </p>
                                 </div>
                             </TooltipContent>
                         </Tooltip>
                     </div>
-                    <div className="overflow-hidden rounded-2xl bg-white ring-1 ring-black/5 md:flex md:min-h-0 md:flex-1 md:flex-col">
+                    <div className="overflow-hidden rounded-2xl bg-card ring-1 ring-border md:flex md:min-h-0 md:flex-1 md:flex-col">
                         <div className="md:min-h-0 md:flex-1 md:overflow-y-auto md:[-webkit-mask-image:linear-gradient(to_bottom,transparent_0,black_24px)] md:[mask-image:linear-gradient(to_bottom,transparent_0,black_24px)]">
                             <Timeline
                                 tasks={tasks}
@@ -441,7 +441,7 @@ function StatusPill({ outcome, t }: { outcome: DealOutcome; t: (key: string) => 
     }
     if (outcome === 'lost') {
         return (
-            <span className="inline-flex items-center gap-1 rounded-full bg-red-100 px-2.5 py-0.5 text-[10px] font-medium uppercase tracking-wider text-red-700">
+            <span className="inline-flex items-center gap-1 rounded-full bg-red-100 px-2.5 py-0.5 text-[10px] font-medium uppercase tracking-wider text-red-700 dark:bg-red-950/40 dark:text-red-300">
                 <XCircleIcon className="size-3" /> {t('statusLost')}
             </span>
         );
@@ -454,7 +454,7 @@ function StatusPill({ outcome, t }: { outcome: DealOutcome; t: (key: string) => 
         );
     }
     return (
-        <span className="rounded-full bg-neutral-200 px-2.5 py-0.5 text-[10px] font-medium uppercase tracking-wider text-neutral-600">
+        <span className="rounded-full bg-neutral-200 px-2.5 py-0.5 text-[10px] font-medium uppercase tracking-wider text-neutral-600 dark:bg-neutral-800 dark:text-neutral-200">
             {t('statusClosed')}
         </span>
     );

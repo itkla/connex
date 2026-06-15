@@ -18,7 +18,7 @@ export const ACTIVITY_COLORS: Record<ActivityType, string> = {
     Email: '#0ea5e9',
     Meeting: '#10b981',
     Note: '#f59e0b',
-    Other: '#a3a3a3',
+    Other: 'var(--muted-foreground)',
 };
 
 const DAY = 86400000; // 1 day in milliseconds

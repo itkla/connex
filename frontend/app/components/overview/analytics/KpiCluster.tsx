@@ -11,11 +11,11 @@ function Sparkline({ series, positive }: { series: number[]; positive: boolean }
     const w = 80;
     const h = 28;
     const pad = 3;
-    const stroke = positive ? 'var(--color-brand)' : '#a3a3a3';
+    const stroke = positive ? 'var(--color-brand)' : 'var(--muted-foreground)';
     if (series.length < 2 || series.every((v) => v === 0)) {
         return (
             <svg width={w} height={h} viewBox={`0 0 ${w} ${h}`} aria-hidden className="overflow-visible">
-                <line x1={pad} y1={h - pad} x2={w - pad} y2={h - pad} stroke="#e5e5e5" strokeWidth={1.5} />
+                <line x1={pad} y1={h - pad} x2={w - pad} y2={h - pad} stroke="var(--border)" strokeWidth={1.5} />
             </svg>
         );
     }
@@ -49,13 +49,13 @@ function Sparkline({ series, positive }: { series: number[]; positive: boolean }
 function DeltaChip({ kpi }: { kpi: Kpi }) {
     const t = useTranslations('AnalyticsKpis');
     if (kpi.delta == null) {
-        return <span className="text-xs text-neutral-500">{t('noBaseline')}</span>;
+        return <span className="text-xs text-muted-foreground">{t('noBaseline')}</span>;
     }
     const threshold = 0.005;
     const flat = Math.abs(kpi.delta) < threshold;
     const up = kpi.delta > 0;
     const good = flat ? null : up === kpi.goodWhenUp;
-    const tone = good == null ? 'text-neutral-500' : good ? 'text-emerald-700' : 'text-red-600';
+    const tone = good == null ? 'text-muted-foreground' : good ? 'text-emerald-700 dark:text-emerald-400' : 'text-red-600 dark:text-red-400';
     const magnitude = Math.round(Math.abs(kpi.delta) * 100);
     const suffix = kpi.deltaKind === 'pp' ? 'pp' : '%';
     const Icon = up ? ArrowUpIcon : ArrowDownIcon;
@@ -64,7 +64,7 @@ function DeltaChip({ kpi }: { kpi: Kpi }) {
             {!flat && <Icon className="size-3" />}
             {magnitude}
             {suffix}
-            <span className="font-normal text-neutral-500">{t('vsPrevious')}</span>
+            <span className="font-normal text-muted-foreground">{t('vsPrevious')}</span>
         </span>
     );
 }
@@ -80,12 +80,12 @@ export default function KpiCluster({ kpis, currency }: { kpis: Kpi[]; currency: 
     };
 
     return (
-        <div className="grid grid-cols-1 gap-px overflow-hidden rounded-2xl bg-neutral-200 ring-1 ring-black/5 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="grid grid-cols-1 gap-px overflow-hidden rounded-2xl bg-border ring-1 ring-border sm:grid-cols-2 lg:grid-cols-4">
             {kpis.map((kpi) => (
-                <div key={kpi.key} className="flex flex-col gap-3 bg-white p-6">
+                <div key={kpi.key} className="flex flex-col gap-3 bg-card p-6">
                     <div className="flex items-start justify-between gap-3">
                         <div className="flex items-center gap-1.5">
-                            <span className="text-xs font-medium uppercase tracking-[0.12em] text-neutral-500">
+                            <span className="text-xs font-medium uppercase tracking-[0.12em] text-muted-foreground">
                                 {t(kpi.key)}
                             </span>
                             <InfoTip
@@ -101,7 +101,7 @@ export default function KpiCluster({ kpis, currency }: { kpis: Kpi[]; currency: 
                         </div>
                         <Sparkline series={kpi.series} positive={kpi.goodWhenUp} />
                     </div>
-                    <span className="text-3xl leading-none text-black tabular-nums">{formatValue(kpi)}</span>
+                    <span className="text-3xl leading-none text-foreground tabular-nums">{formatValue(kpi)}</span>
                     <DeltaChip kpi={kpi} />
                 </div>
             ))}

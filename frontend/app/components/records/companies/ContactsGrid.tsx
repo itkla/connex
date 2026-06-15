@@ -29,18 +29,18 @@ export default function ContactsGrid({ contacts, company, allTags }: { contacts:
     return (
         <>
             <div className="mt-6 mb-3 flex h-8 items-center justify-between">
-                <h2 className="px-6 text-xs font-medium tracking-[0.12em] text-neutral-500 uppercase">
+                <h2 className="px-6 text-xs font-medium tracking-[0.12em] text-muted-foreground uppercase">
                     {t('contacts')}
                 </h2>
                 <button onClick={() => {
                     setNewContactDialogOpen(true);
                 }}>
-                    <PlusIcon className="size-4 text-neutral-500 hover:text-neutral-600 transition-colors duration-300 cursor-pointer" />
+                    <PlusIcon className="size-4 text-muted-foreground hover:text-foreground transition-colors duration-300 cursor-pointer" />
                 </button>
             </div>
             {contacts.length === 0 ? (
-                <div className="overflow-hidden rounded-2xl bg-neutral-100 ring-1 ring-black/5">
-                    <p className="px-6 py-6 text-sm text-neutral-500">{t('noContacts')}</p>
+                <div className="overflow-hidden rounded-2xl bg-muted ring-1 ring-border">
+                    <p className="px-6 py-6 text-sm text-muted-foreground">{t('noContacts')}</p>
                 </div>
             ) : (
                 <ul className="grid grid-cols-2 gap-3 sm:grid-cols-3">

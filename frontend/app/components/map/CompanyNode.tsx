@@ -15,9 +15,9 @@ type Person = { id: number; src?: string; label: string };
 
 function Stat({ label, value }: { label: string; value: number }) {
     return (
-        <div className="rounded-lg bg-neutral-50 px-2 py-1.5 text-center ring-1 ring-black/5">
-            <p className="text-sm font-semibold text-neutral-900">{value}</p>
-            <p className="text-[10px] uppercase tracking-wider text-neutral-500">{label}</p>
+        <div className="rounded-lg bg-muted px-2 py-1.5 text-center ring-1 ring-border">
+            <p className="text-sm font-semibold text-foreground">{value}</p>
+            <p className="text-[10px] uppercase tracking-wider text-muted-foreground">{label}</p>
         </div>
     );
 }
@@ -35,7 +35,7 @@ function CompanyNodeImpl({ id, data }: NodeProps<CompanyNodeType>) {
                 <button type="button" onClick={toggle} className="rounded-2xl transition-transform hover:scale-110" title={company.name}>
                     <CompanyAvatar company={company} type="large" />
                 </button>
-                <span className="pointer-events-none absolute left-1/2 top-full mt-1 -translate-x-1/2 max-w-[9rem] truncate text-center text-xs font-medium text-neutral-700">
+                <span className="pointer-events-none absolute left-1/2 top-full mt-1 -translate-x-1/2 max-w-[9rem] truncate text-center text-xs font-medium text-foreground">
                     {company.name}
                 </span>
             </div>
@@ -50,7 +50,7 @@ function CompanyNodeImpl({ id, data }: NodeProps<CompanyNodeType>) {
     }));
 
     return (
-        <div className="relative w-96 rounded-2xl border border-neutral-200 bg-white p-4 shadow-xl z-10">
+        <div className="relative w-96 rounded-2xl border border-border bg-card p-4 shadow-xl z-10">
             <Handle type="target" position={Position.Top} isConnectable={false} className="!opacity-0" />
             <Handle type="source" position={Position.Bottom} isConnectable={false} className="!opacity-0" />
 
@@ -58,17 +58,17 @@ function CompanyNodeImpl({ id, data }: NodeProps<CompanyNodeType>) {
                 <button type="button" onClick={toggle} className="flex min-w-0 flex-1 items-center gap-3 text-left">
                     <CompanyAvatar company={company} type="large" />
                     <div className="min-w-0">
-                        <p className="truncate text-sm font-semibold text-neutral-900">{company.name}</p>
-                        {company.industry ? <p className="truncate text-xs text-neutral-500">{company.industry}</p> : null}
+                        <p className="truncate text-sm font-semibold text-foreground">{company.name}</p>
+                        {company.industry ? <p className="truncate text-xs text-muted-foreground">{company.industry}</p> : null}
                     </div>
                 </button>
                 <div className="flex items-center">
                     <Tooltip>
                         <TooltipTrigger asChild>
                             <Link href={`/records/companies/${company.id}`} className="nodrag shrink-0 flex items-center">
-                                <Button variant="outline" size="icon-lg" aria-label="Open company record" className="flex items-center justify-center bg-neutral-100 shadow-none hover:bg-neutral-200">
+                                <Button variant="outline" size="icon-lg" aria-label="Open company record" className="flex items-center justify-center bg-muted shadow-none hover:bg-muted/80">
                                     {/* <ArrowUpRightIcon className="size-3.5 text-neutral-500" /> */}
-                                    <ChevronRightIcon className="size-3.5 text-neutral-500" />
+                                    <ChevronRightIcon className="size-3.5 text-muted-foreground" />
                                 </Button>
                             </Link>
                         </TooltipTrigger>
@@ -81,10 +81,10 @@ function CompanyNodeImpl({ id, data }: NodeProps<CompanyNodeType>) {
             </div>
 
             {(company.website || company.phone) && (
-                <div className="mt-3 space-y-1.5 text-xs text-neutral-600">
+                <div className="mt-3 space-y-1.5 text-xs text-muted-foreground">
                     {company.website ? (
                         <p className="flex items-center gap-1.5">
-                            <GlobeAltIcon className="size-3.5 shrink-0 text-neutral-400" />
+                            <GlobeAltIcon className="size-3.5 shrink-0 text-muted-foreground" />
                             <Link href={company.website} target="_blank" className="nodrag truncate transition hover:text-brand">
                                 {company.website}
                             </Link>
@@ -92,7 +92,7 @@ function CompanyNodeImpl({ id, data }: NodeProps<CompanyNodeType>) {
                     ) : null}
                     {company.phone ? (
                         <p className="flex items-center gap-1.5">
-                            <PhoneIcon className="size-3.5 shrink-0 text-neutral-400" />
+                            <PhoneIcon className="size-3.5 shrink-0 text-muted-foreground" />
                             <span className="truncate">{company.phone}</span>
                         </p>
                     ) : null}
@@ -118,7 +118,7 @@ function CompanyNodeImpl({ id, data }: NodeProps<CompanyNodeType>) {
                 <div className="mt-3 flex flex-wrap items-start gap-x-6 gap-y-2">
                     {employees.length > 0 && (
                         <div>
-                            <p className="mb-1 text-[10px] font-medium uppercase tracking-wider text-neutral-500">
+                            <p className="mb-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
                                 People · {employees.length}
                             </p>
                             {/* <MiniAvatars people={employees} /> */}
@@ -127,7 +127,7 @@ function CompanyNodeImpl({ id, data }: NodeProps<CompanyNodeType>) {
                                     <Tooltip key={e.id}>
                                         <TooltipTrigger asChild>
                                             <Link href={`/records/contacts/${e.id}`} className="nodrag">
-                                                <Avatar key={e.id} className="h-7 w-7 bg-white">
+                                                <Avatar key={e.id} className="h-7 w-7 bg-card">
                                                     <AvatarImage src={e.src} />
                                                     <AvatarFallback className="text-[10px]">{(e.label || '?').charAt(0)}</AvatarFallback>
                                                 </Avatar>
@@ -148,7 +148,7 @@ function CompanyNodeImpl({ id, data }: NodeProps<CompanyNodeType>) {
                     )}
                     {relations.length > 0 && (
                         <div>
-                            <p className="mb-1 text-[10px] font-medium uppercase tracking-wider text-neutral-500">
+                            <p className="mb-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
                                 Relations · {relations.length}
                             </p>
                             {/* <MiniAvatars people={relations} /> */}
@@ -157,7 +157,7 @@ function CompanyNodeImpl({ id, data }: NodeProps<CompanyNodeType>) {
                                     <Tooltip key={r.id}>
                                         <TooltipTrigger asChild>
                                             <Link href={`/users/${r.id}`} className="nodrag">
-                                                <Avatar key={r.id} className="h-7 w-7 bg-white">
+                                                <Avatar key={r.id} className="h-7 w-7 bg-card">
                                                     <AvatarImage src={r.src} />
                                                     <AvatarFallback className="text-[10px]">{(r.label || '?').charAt(0)}</AvatarFallback>
                                                 </Avatar>

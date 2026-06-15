@@ -10,7 +10,7 @@ import { Combobox, ComboboxItem, ComboboxList, ComboboxContent, ComboboxEmpty, C
 import { Label } from '@/components/ui/label';
 import { type Company, type CreateDealPayload, type Pipeline, type Stage } from '@/app/lib/types';
 
-const inputClass = 'w-full rounded-lg bg-neutral-100 px-3 py-2 text-sm text-black placeholder-neutral-500 outline-none ring-1 ring-black/5 transition focus:ring-2 focus:ring-brand';
+const inputClass = 'w-full rounded-lg bg-muted px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground outline-none ring-1 ring-border transition focus:ring-2 focus:ring-brand';
 
 type Props = {
     open: boolean;
@@ -84,14 +84,14 @@ export default function NewDealDialog({
                                 setPayload((prev) => ({ ...prev, name: e.target.value }));
                                 clearError('name');
                             }}
-                            className={`${inputClass} ${fieldErrors.name ? 'ring-2 ring-red-400 focus:ring-red-500' : ''}`}
+                            className={`${inputClass} ${fieldErrors.name ? 'ring-2 ring-destructive focus:ring-destructive' : ''}`}
                             placeholder={t('namePlaceholder')}
                             aria-invalid={Boolean(fieldErrors.name)}
                             autoFocus
                             required
                         />
                         {fieldErrors.name && (
-                            <p className="px-1 text-sm text-red-600">{fieldErrors.name}</p>
+                            <p className="px-1 text-sm text-destructive">{fieldErrors.name}</p>
                         )}
                     </div>
 
@@ -108,12 +108,12 @@ export default function NewDealDialog({
                                     setPayload((prev) => ({ ...prev, value: Number(e.target.value) }));
                                     clearError('value');
                                 }}
-                                className={`${inputClass} ${fieldErrors.value ? 'ring-2 ring-red-400 focus:ring-red-500' : ''}`}
+                                className={`${inputClass} ${fieldErrors.value ? 'ring-2 ring-destructive focus:ring-destructive' : ''}`}
                                 aria-invalid={Boolean(fieldErrors.value)}
                                 placeholder="0"
                             />
                             {fieldErrors.value && (
-                                <p className="px-1 text-sm text-red-600">{fieldErrors.value}</p>
+                                <p className="px-1 text-sm text-destructive">{fieldErrors.value}</p>
                             )}
                         </div>
                         <div className="grid gap-1.5">
@@ -151,7 +151,7 @@ export default function NewDealDialog({
                                     id="deal-pipeline"
                                     placeholder={t('selectPipeline')}
                                     aria-invalid={Boolean(fieldErrors.pipeline)}
-                                    className={`ring-1 ring-black/5 ${fieldErrors.pipeline ? 'ring-2 ring-red-400' : ''}`}
+                                    className={`ring-1 ring-border ${fieldErrors.pipeline ? 'ring-2 ring-destructive' : ''}`}
                                 />
                                 <ComboboxContent className="pointer-events-auto">
                                     <ComboboxList onWheel={handleListWheel}>
@@ -165,7 +165,7 @@ export default function NewDealDialog({
                                 </ComboboxContent>
                             </Combobox>
                             {fieldErrors.pipeline && (
-                                <p className="px-1 text-sm text-red-600">{fieldErrors.pipeline}</p>
+                                <p className="px-1 text-sm text-destructive">{fieldErrors.pipeline}</p>
                             )}
                         </div>
                         <div className="grid gap-1.5">
@@ -185,7 +185,7 @@ export default function NewDealDialog({
                                     placeholder={payload.pipeline ? t('selectStage') : t('pickPipelineFirst')}
                                     disabled={!payload.pipeline}
                                     aria-invalid={Boolean(fieldErrors.stage)}
-                                    className={`ring-1 ring-black/5 ${fieldErrors.stage ? 'ring-2 ring-red-400' : ''}`}
+                                    className={`ring-1 ring-border ${fieldErrors.stage ? 'ring-2 ring-destructive' : ''}`}
                                 />
                                 <ComboboxContent className="pointer-events-auto">
                                     <ComboboxList onWheel={handleListWheel}>
@@ -199,7 +199,7 @@ export default function NewDealDialog({
                                 </ComboboxContent>
                             </Combobox>
                             {fieldErrors.stage && (
-                                <p className="px-1 text-sm text-red-600">{fieldErrors.stage}</p>
+                                <p className="px-1 text-sm text-destructive">{fieldErrors.stage}</p>
                             )}
                         </div>
                     </div>
@@ -214,7 +214,7 @@ export default function NewDealDialog({
                                 setPayload((prev) => ({ ...prev, company: (c as Company | null)?.id ?? null }))
                             }
                         >
-                            <ComboboxInput id="deal-company" placeholder={t('selectCompanyOptional')} showClear className="ring-1 ring-black/5" />
+                            <ComboboxInput id="deal-company" placeholder={t('selectCompanyOptional')} showClear className="ring-1 ring-border" />
                             <ComboboxContent className="pointer-events-auto">
                                 <ComboboxList onWheel={handleListWheel}>
                                     <ComboboxEmpty>{t('noCompaniesFound')}</ComboboxEmpty>

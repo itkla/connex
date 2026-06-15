@@ -61,25 +61,25 @@ export default async function Greeting({
             <Alert className="w-fit max-w-md border-brand/30 bg-brand-light/40">
                 <BellAlertIcon />
                 <AlertTitle>{t('upcomingTitle')}</AlertTitle>
-                <AlertDescription className="text-neutral-600">{upcomingSummary}</AlertDescription>
+                <AlertDescription className="text-muted-foreground">{upcomingSummary}</AlertDescription>
             </Alert>
         );
     } else {
-        status = <p className="text-sm text-neutral-500">{t('nothingUrgent')}</p>;
+        status = <p className="text-sm text-muted-foreground">{t('nothingUrgent')}</p>;
     }
 
     return (
         <header className="flex flex-col gap-5 md:flex-row md:items-center md:justify-between md:gap-8">
             <div className="min-w-0">
                 <h1 className="leading-tight tracking-tight">
-                    <span className="block text-2xl font-medium text-neutral-500">
+                    <span className="block text-2xl font-medium text-muted-foreground">
                         {t(timeOfDayGreetingKey())}
                     </span>
-                    <span className="mt-1 block text-4xl font-extrabold tracking-tight text-neutral-900 md:text-5xl">
+                    <span className="mt-1 block text-4xl font-extrabold tracking-tight text-foreground md:text-5xl">
                         {firstName}
                     </span>
                 </h1>
-                <span className="mt-3 block text-xs font-medium tracking-[0.12em] text-neutral-500 uppercase">
+                <span className="mt-3 block text-xs font-medium tracking-[0.12em] text-muted-foreground uppercase">
                     {todayLabel(locale)}
                 </span>
             </div>

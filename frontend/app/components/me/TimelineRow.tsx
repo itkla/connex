@@ -24,8 +24,8 @@ export type TimelineEntry =
 
 const CHIP_CLASS: Record<TimelineEntry['kind'], string> = {
     task: 'bg-brand-light text-brand-dark',
-    activity: 'bg-neutral-900 text-white',
-    note: 'bg-neutral-200 text-neutral-700',
+    activity: 'bg-neutral-900 text-white dark:bg-neutral-100 dark:text-neutral-900',
+    note: 'bg-neutral-200 text-neutral-700 dark:bg-neutral-800 dark:text-neutral-200',
 };
 
 const CHIP_LABEL_KEY: Record<TimelineEntry['kind'], 'chipTask' | 'chipActivity' | 'chipNote'> = {
@@ -87,34 +87,34 @@ export default function TimelineRow({
     if (entry.kind === 'task') {
         const { task } = entry;
         title = (
-            <p className={`text-sm ${task.completed ? 'text-neutral-400 line-through' : 'text-black'}`}>
+            <p className={`text-sm ${task.completed ? 'text-muted-foreground line-through' : 'text-foreground'}`}>
                 {task.description}
             </p>
         );
         if (task.completed) {
             subtitle = (
                 <span className="flex items-center gap-2">
-                    <CheckIcon className="h-4 w-4 text-neutral-500" />
-                    <p className="text-xs text-neutral-500">{t('completed')}</p>
+                    <CheckIcon className="h-4 w-4 text-muted-foreground" />
+                    <p className="text-xs text-muted-foreground">{t('completed')}</p>
                 </span>
             );
         } else if (task.dueDate) {
             subtitle = (
-                <p className="mt-0.5 text-xs text-neutral-500">
+                <p className="mt-0.5 text-xs text-muted-foreground">
                     {t('due', { date: formatShortDate(task.dueDate, locale) })}
                 </p>
             );
         }
     } else if (entry.kind === 'activity') {
         const { activity } = entry;
-        title = <p className="text-sm text-black">{activity.subject}</p>;
+        title = <p className="text-sm text-foreground">{activity.subject}</p>;
         subtitle = (
             <div className="mt-0.5 flex min-w-0 items-center gap-2">
-                <span className="text-xs font-medium tracking-wide text-neutral-500 uppercase">
+                <span className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
                     {activity.type}
                 </span>
                 {activity.notes ? (
-                    <span className="truncate text-xs text-neutral-500">
+                    <span className="truncate text-xs text-muted-foreground">
                         · {activity.notes}
                     </span>
                 ) : null}
@@ -122,7 +122,7 @@ export default function TimelineRow({
         );
     } else {
         title = (
-            <p className="line-clamp-2 text-sm text-black">
+            <p className="line-clamp-2 text-sm text-foreground">
                 {entry.note.content}
             </p>
         );
@@ -135,7 +135,7 @@ export default function TimelineRow({
                     <Avatar size="default">
                         <AvatarImage src={author?.profilePictureUrl} />
                         <AvatarFallback>
-                            <UserIcon className="size-3 text-neutral-500" />
+                            <UserIcon className="size-3 text-muted-foreground" />
                         </AvatarFallback>
                     </Avatar>
                 </TooltipTrigger>
@@ -150,7 +150,7 @@ export default function TimelineRow({
                 <div className="flex items-start justify-between gap-3">
                     {title}
                     {date ? (
-                        <time className="shrink-0 text-xs text-neutral-500">
+                        <time className="shrink-0 text-xs text-muted-foreground">
                             {date}
                         </time>
                     ) : null}
@@ -160,12 +160,12 @@ export default function TimelineRow({
             <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                     <Button variant="ghost" size="icon" className="rounded-full" aria-label={t('actionsAria')}>
-                        <EllipsisVerticalIcon className="size-3 text-neutral-500" />
+                        <EllipsisVerticalIcon className="size-3 text-muted-foreground" />
                     </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end">
                     <DropdownMenuItem onClick={() => setEditOpen(true)}>
-                        <PencilIcon className="size-4 text-neutral-500" />
+                        <PencilIcon className="size-4 text-muted-foreground" />
                         {t('edit')}
                     </DropdownMenuItem>
                     <DropdownMenuSeparator />

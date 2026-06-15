@@ -11,7 +11,7 @@ import { CameraIcon } from '@heroicons/react/24/outline';
 import { useTranslations } from 'next-intl';
 import { uploadContactPicture } from '@/app/lib/utils';
 import { useFieldErrors } from '@/app/hooks/useFieldErrors';
-const inputClass = 'w-full rounded-lg bg-neutral-100 px-3 py-2 text-sm text-black placeholder-neutral-500 outline-none ring-1 ring-black/5 transition focus:ring-2 focus:ring-brand';
+const inputClass = 'w-full rounded-lg bg-muted px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground outline-none ring-1 ring-border transition focus:ring-2 focus:ring-brand';
 
 type Props = {
     newContactDialogOpen: boolean;
@@ -90,12 +90,12 @@ export default function NewContactDialog({
                 <div className="flex justify-center">
                     <label
                         htmlFor="imageUrl"
-                        className="group relative flex h-20 w-20 cursor-pointer items-center justify-center overflow-hidden rounded-full bg-neutral-100 ring-1 ring-black/5 transition hover:ring-2 hover:ring-brand"
+                        className="group relative flex h-20 w-20 cursor-pointer items-center justify-center overflow-hidden rounded-full bg-muted ring-1 ring-border transition hover:ring-2 hover:ring-brand"
                     >
                         {imagePreview ? (
                             <img src={imagePreview} alt="" className="h-full w-full object-cover" />
                         ) : (
-                            <div className="h-full w-full" style={{ background: 'linear-gradient(180deg, #cdd5dc 0%, #b6bfc6 60%, #9aa4ad 100%)' }} />
+                            <div className="h-full w-full bg-muted" />
                         )}
                         {/* <ContactAvatar contact={newContactPayload} type="medium" /> */}
                         <div className="absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 transition group-hover:opacity-100">
@@ -122,14 +122,14 @@ export default function NewContactDialog({
                                 setNewContactPayload((prev) => ({ ...prev, name: e.target.value }));
                                 clearError('name');
                             }}
-                            className={`${inputClass} ${fieldErrors.name ? 'ring-2 ring-red-400 focus:ring-red-500' : ''}`}
+                            className={`${inputClass} ${fieldErrors.name ? 'ring-2 ring-destructive focus:ring-destructive' : ''}`}
                             placeholder={t('namePlaceholder')}
                             aria-invalid={Boolean(fieldErrors.name)}
                             autoFocus
                             required
                         />
                         {fieldErrors.name && (
-                            <p className="px-1 text-sm text-red-600">{fieldErrors.name}</p>
+                            <p className="px-1 text-sm text-destructive">{fieldErrors.name}</p>
                         )}
                     </div>
 
@@ -143,12 +143,12 @@ export default function NewContactDialog({
                                 setNewContactPayload((prev) => ({ ...prev, email: e.target.value }));
                                 clearError('email');
                             }}
-                            className={`${inputClass} ${fieldErrors.email ? 'ring-2 ring-red-400 focus:ring-red-500' : ''}`}
+                            className={`${inputClass} ${fieldErrors.email ? 'ring-2 ring-destructive focus:ring-destructive' : ''}`}
                             placeholder={t('emailPlaceholder')}
                             aria-invalid={Boolean(fieldErrors.email)}
                         />
                         {fieldErrors.email && (
-                            <p className="px-1 text-sm text-red-600">{fieldErrors.email}</p>
+                            <p className="px-1 text-sm text-destructive">{fieldErrors.email}</p>
                         )}
                     </div>
 
@@ -163,12 +163,12 @@ export default function NewContactDialog({
                                     setNewContactPayload((prev) => ({ ...prev, phone: e.target.value }));
                                     clearError('phone');
                                 }}
-                                className={`${inputClass} ${fieldErrors.phone ? 'ring-2 ring-red-400 focus:ring-red-500' : ''}`}
+                                className={`${inputClass} ${fieldErrors.phone ? 'ring-2 ring-destructive focus:ring-destructive' : ''}`}
                                 placeholder={t('phonePlaceholder')}
                                 aria-invalid={Boolean(fieldErrors.phone)}
                             />
                             {fieldErrors.phone && (
-                                <p className="px-1 text-sm text-red-600">{fieldErrors.phone}</p>
+                                <p className="px-1 text-sm text-destructive">{fieldErrors.phone}</p>
                             )}
                         </div>
                         <div className="grid gap-1.5">
@@ -198,7 +198,7 @@ export default function NewContactDialog({
                                 }))
                             }
                         >
-                            <ComboboxInput id="company" placeholder={t('selectCompanyPlaceholder')} className="ring-1 ring-black/5"/>
+                            <ComboboxInput id="company" placeholder={t('selectCompanyPlaceholder')} className="ring-1 ring-border"/>
                             <ComboboxContent className="pointer-events-auto">
                                 <ComboboxList onWheel={handleListWheel}>
                                     <ComboboxEmpty>{t('noCompaniesFound')}</ComboboxEmpty>

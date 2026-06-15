@@ -20,18 +20,18 @@ export default async function ActivityList({ activities }: { activities: Activit
     const recent = sorted.slice(0, 5);
 
     return (
-        <ul className="divide-y divide-neutral-200">
+        <ul className="divide-y divide-border">
             {recent.map((activity) => (
                 <li key={activity.id} className="flex flex-col gap-1 px-6 py-3">
                     <div className="flex items-start justify-between gap-4">
-                        <span className="text-sm text-black">{activity.subject}</span>
+                        <span className="text-sm text-foreground">{activity.subject}</span>
                         {activity.timestamp ? (
-                            <span className="shrink-0 text-xs text-neutral-500">
+                            <span className="shrink-0 text-xs text-muted-foreground">
                                 {formatShortDate(activity.timestamp, locale)}
                             </span>
                         ) : null}
                     </div>
-                    <span className="text-xs tracking-wide text-neutral-500 uppercase">
+                    <span className="text-xs tracking-wide text-muted-foreground uppercase">
                         {activity.type}
                     </span>
                 </li>

@@ -152,23 +152,23 @@ export function AuthForm({ mode, redirectUrl }: { mode: AuthMode; redirectUrl: s
     const hasFieldErrors = Object.keys(fieldErrors).length > 0;
 
     return (
-        <div className="min-h-[100dvh] w-full bg-white lg:grid lg:h-[100dvh] lg:grid-cols-[1fr_1.05fr] lg:grid-rows-[100dvh] lg:overflow-hidden">
+        <div className="min-h-[100dvh] w-full bg-background lg:grid lg:h-[100dvh] lg:grid-cols-[1fr_1.05fr] lg:grid-rows-[100dvh] lg:overflow-hidden">
             <div className="relative flex min-h-[100dvh] flex-col px-6 py-10 sm:px-10 lg:h-full lg:min-h-0 lg:overflow-y-auto lg:px-14 lg:py-12">
                 <Link
                     href="/"
                     className="flex w-fit items-center gap-2.5 rounded-lg transition-opacity duration-150 ease-out hover:opacity-70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand lg:hidden"
                 >
                     <span className="size-3 rounded-[5px] bg-brand" aria-hidden="true" />
-                    <span className="text-lg font-bold tracking-tight text-neutral-900">{tForm("brand")}</span>
+                    <span className="text-lg font-bold tracking-tight text-foreground">{tForm("brand")}</span>
                 </Link>
 
                 <div className="flex flex-1 items-center justify-center">
                     <div className="w-full max-w-[400px] py-10 lg:py-0">
-                        <h1 className="connex-rise font-display font-black text-[clamp(2rem,4vw,2.75rem)] leading-[1.1] tracking-[-0.01em] text-balance text-neutral-900">
+                        <h1 className="connex-rise font-display font-black text-[clamp(2rem,4vw,2.75rem)] leading-[1.1] tracking-[-0.01em] text-balance text-foreground">
                             {tMode("title")}
                         </h1>
                         <p
-                            className="connex-rise mt-3 text-base leading-relaxed text-neutral-600 text-pretty"
+                            className="connex-rise mt-3 text-base leading-relaxed text-muted-foreground text-pretty"
                             style={{ animationDelay: "60ms" }}
                         >
                             {tMode("subtitle")}
@@ -206,20 +206,20 @@ export function AuthForm({ mode, redirectUrl }: { mode: AuthMode; redirectUrl: s
                                                 required
                                                 aria-invalid={Boolean(fieldError)}
                                                 aria-describedby={fieldError ? errorId : undefined}
-                                                className={`peer h-14 w-full rounded-xl border bg-neutral-50 px-4 pt-5 pb-1.5 text-base text-neutral-900 outline-none transition-[border-color,box-shadow,background-color] duration-150 ease-out placeholder:text-transparent focus:bg-white focus:ring-4 ${
+                                                className={`peer h-14 w-full rounded-xl border bg-input px-4 pt-5 pb-1.5 text-base text-foreground outline-none transition-[border-color,box-shadow,background-color] duration-150 ease-out placeholder:text-transparent focus:bg-background focus:ring-4 ${
                                                     isPassword ? "pr-12" : ""
                                                 } ${
                                                     fieldError
-                                                        ? "border-red-400 focus:border-red-500 focus:ring-red-500/15"
-                                                        : "border-black/10 focus:border-brand focus:ring-brand/20"
+                                                        ? "border-destructive focus:border-destructive focus:ring-destructive/15"
+                                                        : "border-input focus:border-brand focus:ring-brand/20"
                                                 }`}
                                             />
                                             <label
                                                 htmlFor={fieldId}
                                                 className={`pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-base transition-all duration-150 ease-out peer-focus:top-2.5 peer-focus:translate-y-0 peer-focus:text-xs peer-[:not(:placeholder-shown)]:top-2.5 peer-[:not(:placeholder-shown)]:translate-y-0 peer-[:not(:placeholder-shown)]:text-xs ${
                                                     fieldError
-                                                        ? "text-red-500"
-                                                        : "text-neutral-500 peer-focus:text-neutral-700"
+                                                        ? "text-destructive"
+                                                        : "text-muted-foreground peer-focus:text-foreground"
                                                 }`}
                                             >
                                                 {fieldLabels[key]}
@@ -235,7 +235,7 @@ export function AuthForm({ mode, redirectUrl }: { mode: AuthMode; redirectUrl: s
                                                             : tForm("showPassword")
                                                     }
                                                     aria-pressed={showPassword}
-                                                    className="absolute right-2 top-1/2 inline-flex size-9 -translate-y-1/2 items-center justify-center rounded-lg text-neutral-400 transition-[color,transform] duration-150 ease-out hover:text-neutral-700 focus-visible:text-neutral-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand active:scale-[0.94]"
+                                                    className="absolute right-2 top-1/2 inline-flex size-9 -translate-y-1/2 items-center justify-center rounded-lg text-muted-foreground transition-[color,transform] duration-150 ease-out hover:text-foreground focus-visible:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand active:scale-[0.94]"
                                                 >
                                                     {showPassword ? (
                                                         <EyeSlashIcon className="size-5" />
@@ -246,7 +246,7 @@ export function AuthForm({ mode, redirectUrl }: { mode: AuthMode; redirectUrl: s
                                             )}
                                         </div>
                                         {fieldError && (
-                                            <p id={errorId} className="mt-1.5 px-1 text-sm text-red-600">
+                                            <p id={errorId} className="mt-1.5 px-1 text-sm text-destructive">
                                                 {fieldError}
                                             </p>
                                         )}
@@ -257,7 +257,7 @@ export function AuthForm({ mode, redirectUrl }: { mode: AuthMode; redirectUrl: s
                             {error && !hasFieldErrors && (
                                 <p
                                     role="alert"
-                                    className="rounded-xl bg-red-50 px-3.5 py-2.5 text-sm text-red-700"
+                                    className="rounded-xl bg-red-50 px-3.5 py-2.5 text-sm text-red-700 dark:bg-red-950/40 dark:text-red-300"
                                 >
                                     {error}
                                 </p>
@@ -269,7 +269,7 @@ export function AuthForm({ mode, redirectUrl }: { mode: AuthMode; redirectUrl: s
                                 style={{ animationDelay: `${120 + fields.length * 60}ms` }}
                                 className={`connex-rise mt-2 flex w-full items-center justify-center gap-2 rounded-full px-6 py-3.5 text-base font-semibold transition-[transform,background-color,opacity] duration-150 ease-out active:scale-[0.98] disabled:cursor-not-allowed ${
                                     hasFieldErrors
-                                        ? "bg-neutral-200 text-neutral-500"
+                                        ? "bg-muted text-muted-foreground"
                                         : "bg-brand text-neutral-950 hover:bg-brand-hover disabled:opacity-70"
                                 }`}
                             >
@@ -290,13 +290,13 @@ export function AuthForm({ mode, redirectUrl }: { mode: AuthMode; redirectUrl: s
                         </form>
 
                         <p
-                            className="connex-rise mt-7 text-center text-sm text-neutral-500"
+                            className="connex-rise mt-7 text-center text-sm text-muted-foreground"
                             style={{ animationDelay: `${180 + fields.length * 60}ms` }}
                         >
                             {tMode("altPrompt")}{" "}
                             <Link
                                 href={altHref}
-                                className="font-semibold text-neutral-900 underline decoration-brand decoration-2 underline-offset-4 transition-colors duration-150 ease-out hover:decoration-brand-hover"
+                                className="font-semibold text-foreground underline decoration-brand decoration-2 underline-offset-4 transition-colors duration-150 ease-out hover:decoration-brand-hover"
                             >
                                 {tMode("altLabel")}
                             </Link>

@@ -23,12 +23,12 @@ const ICON_CLASS: Record<AvatarSize, string> = {
 export default function ContactAvatar({ contact, type = 'small' }: { contact: Contact; type?: AvatarSize; upload?: boolean }) {
     return (
         // ContactAvatars are always round. company logos are squircles
-        <div className={cn("shrink-0 overflow-hidden rounded-full bg-neutral-200 ring-1 ring-black/5", SIZE_CLASS[type])}>
+        <div className={cn("shrink-0 overflow-hidden rounded-full bg-muted ring-1 ring-border", SIZE_CLASS[type])}>
             {contact.imageUrl ? (
                 <img src={contact.imageUrl} alt="" className="h-full w-full object-cover" />
             ) : (
-                <div className="h-full w-full flex items-center justify-center bg-gray-400">
-                    <UserIcon className={cn("text-white", ICON_CLASS[type])} />
+                <div className="h-full w-full flex items-center justify-center bg-muted-foreground/40">
+                    <UserIcon className={cn("text-muted-foreground", ICON_CLASS[type])} />
                 </div>
             )}
         </div>

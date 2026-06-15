@@ -24,7 +24,7 @@ import { Label } from '@/components/ui/label';
 import { ApiError, updateUser } from '@/app/lib/api';
 import { type User } from '@/app/lib/types';
 
-const inputClass = 'w-full rounded-xl bg-neutral-100 px-4 py-2.5 text-base text-black placeholder-neutral-500 outline-none ring-1 ring-black/5 transition focus:ring-2 focus:ring-brand';
+const inputClass = 'w-full rounded-xl bg-muted px-4 py-2.5 text-base text-foreground placeholder:text-muted-foreground outline-none ring-1 ring-border transition focus:ring-2 focus:ring-brand';
 
 type Props = {
     user: User;
@@ -148,7 +148,7 @@ export default function EditSelfModal({ user }: Props) {
                     variant="ghost"
                     size="icon-sm"
                     title={t('triggerTitle')}
-                    className="text-neutral-500 hover:text-black cursor-pointer"
+                    className="text-muted-foreground hover:text-foreground cursor-pointer"
                 >
                     <PencilSquareIcon className="size-5" />
                     <span className="sr-only">{t('triggerSrLabel')}</span>
@@ -184,7 +184,7 @@ export default function EditSelfModal({ user }: Props) {
                                             : user.profilePictureUrl
                                     }
                                     alt=""
-                                    className="h-24 w-24 rounded-full object-cover ring-1 ring-black/5"
+                                    className="h-24 w-24 rounded-full object-cover ring-1 ring-border"
                                 />
                             )}
                         </div>
@@ -201,7 +201,7 @@ export default function EditSelfModal({ user }: Props) {
                             required
                         />
                         {fieldErrors.username && (
-                            <p className="text-sm text-red-500">{fieldErrors.username}</p>
+                            <p className="text-sm text-destructive">{fieldErrors.username}</p>
                         )}
                     </div>
 
@@ -216,7 +216,7 @@ export default function EditSelfModal({ user }: Props) {
                             required
                         />
                         {fieldErrors.displayName && (
-                            <p className="text-sm text-red-500">{fieldErrors.displayName}</p>
+                            <p className="text-sm text-destructive">{fieldErrors.displayName}</p>
                         )}
                     </div>
 
@@ -231,7 +231,7 @@ export default function EditSelfModal({ user }: Props) {
                             required
                         />
                         {fieldErrors.email && (
-                            <p className="text-sm text-red-500">{fieldErrors.email}</p>
+                            <p className="text-sm text-destructive">{fieldErrors.email}</p>
                         )}
                     </div>
 

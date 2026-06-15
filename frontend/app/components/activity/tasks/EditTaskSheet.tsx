@@ -30,7 +30,7 @@ import { ApiError, getCompanyPeople, getUsers, updateTask } from '@/app/lib/api'
 import { type Contact, type Deal, type Task, type UpdateTaskPayload, type User } from '@/app/lib/types';
 import { parseMysqlDateTime } from '@/app/lib/utils';
 
-const inputClass = 'w-full rounded-lg bg-neutral-100 px-3 py-2 text-sm text-black placeholder-neutral-500 outline-none ring-1 ring-black/5 transition focus:ring-2 focus:ring-brand';
+const inputClass = 'w-full rounded-lg bg-muted px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground outline-none ring-1 ring-border transition focus:ring-2 focus:ring-brand';
 
 type TaskDraft = {
     description: string;
@@ -227,18 +227,18 @@ export default function EditTaskSheet({
                                 'flex items-center gap-2.5 rounded-lg px-3 py-2.5 ring-1 ring-inset transition-colors',
                                 draft.completed
                                     ? 'bg-brand-light/50 ring-brand-dark/15'
-                                    : 'bg-neutral-50 ring-black/5',
+                                    : 'bg-muted ring-border',
                             )}
                         >
                             <Checkbox
                                 id="task-completed"
                                 checked={draft.completed}
                                 onCheckedChange={(checked) => setDraft((d) => ({ ...d, completed: checked === true }))}
-                                className="size-[18px] rounded-full border-neutral-300 data-[state=checked]:border-brand data-[state=checked]:bg-brand data-[state=checked]:text-white"
+                                className="size-[18px] rounded-full border-border data-[state=checked]:border-brand data-[state=checked]:bg-brand data-[state=checked]:text-white"
                             />
                             <Label
                                 htmlFor="task-completed"
-                                className={cn('cursor-pointer text-sm font-medium', draft.completed ? 'text-brand-dark' : 'text-neutral-700')}
+                                className={cn('cursor-pointer text-sm font-medium', draft.completed ? 'text-brand-dark' : 'text-foreground')}
                             >
                                 {t('completedLabel')}
                             </Label>

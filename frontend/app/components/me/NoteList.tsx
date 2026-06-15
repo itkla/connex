@@ -18,15 +18,15 @@ export default async function NoteList({ notes }: { notes: Note[] }) {
     const recent = sorted.slice(0, 5);
 
     return (
-        <ul className="divide-y divide-neutral-200">
+        <ul className="divide-y divide-border">
             {recent.map((note) => (
                 <li key={note.id} className="flex flex-col gap-1 px-6 py-3">
                     <div className="flex items-start justify-between gap-4">
-                        <span className="line-clamp-2 text-sm text-black">
+                        <span className="line-clamp-2 text-sm text-foreground">
                             {note.content}
                         </span>
                         {note.createdAt ? (
-                            <span className="shrink-0 text-xs text-neutral-500">
+                            <span className="shrink-0 text-xs text-muted-foreground">
                                 {formatShortDate(note.createdAt, locale)}
                             </span>
                         ) : null}

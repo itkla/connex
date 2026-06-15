@@ -10,7 +10,7 @@ export default function Chip({ type = "default", color = "", children }: { type:
     };
     const colorClass = colorClasses[type];
     return (
-        <span className="inline-flex items-center gap-1 rounded-full bg-neutral-200 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-neutral-600" style={{ backgroundColor: color }}>
+        <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-muted-foreground" style={{ backgroundColor: color }}>
             <span className="mr-1">●</span>{children}
         </span>
     );

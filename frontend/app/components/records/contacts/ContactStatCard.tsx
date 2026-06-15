@@ -31,7 +31,7 @@ export default async function ContactStatCard({
                             variant="ghost"
                             size="icon-sm"
                             title={t('viewAllTitle', { label: label.toLowerCase() })}
-                            className="text-neutral-500 hover:text-black cursor-pointer"
+                            className="text-muted-foreground hover:text-foreground cursor-pointer"
                         >
                             <Link href={viewHref}>
                                 <ArrowUpRightIcon className="size-4" />

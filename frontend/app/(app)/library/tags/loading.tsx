@@ -18,7 +18,7 @@ export default function Loading() {
 
             <ul className="grid grid-cols-[repeat(auto-fill,minmax(160px,1fr))] gap-3">
                 {Array.from({ length: 12 }).map((_, i) => (
-                    <li key={i} className="overflow-hidden rounded-2xl ring-1 ring-black/5">
+                    <li key={i} className="overflow-hidden rounded-2xl ring-1 ring-border">
                         <Skeleton className="h-24 w-full rounded-none" />
                         <div className="flex items-center justify-between px-3 py-2.5">
                             <Skeleton className="h-3 w-16" />

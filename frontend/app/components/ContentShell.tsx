@@ -77,7 +77,7 @@ export default function ContentShell({
                         aria-controls="app-sidebar"
                         className="shrink-0 md:hidden"
                     >
-                        <MenuIcon className="size-5 text-neutral-500" />
+                        <MenuIcon className="size-5 text-muted-foreground" />
                     </Button>
                     <Button
                         type="button"
@@ -89,9 +89,9 @@ export default function ContentShell({
                         className="absolute left-6 hidden md:inline-flex"
                     >
                         {open ? (
-                            <PanelLeftCloseIcon className="size-5 text-neutral-500" />
+                            <PanelLeftCloseIcon className="size-5 text-muted-foreground" />
                         ) : (
-                            <PanelLeftOpenIcon className="size-5 text-neutral-500" />
+                            <PanelLeftOpenIcon className="size-5 text-muted-foreground" />
                         )}
                     </Button>
 

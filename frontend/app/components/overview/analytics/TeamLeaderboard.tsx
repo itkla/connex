@@ -53,7 +53,7 @@ export default function TeamLeaderboard({
     }, [users, activities, tasks, notes, range, now]);
 
     if (standings.length === 0) {
-        return <div className="flex h-64 items-center justify-center text-sm text-neutral-500">{t('empty')}</div>;
+        return <div className="flex h-64 items-center justify-center text-sm text-muted-foreground">{t('empty')}</div>;
     }
 
     const max = Math.max(...standings.map((s) => s.touches), 1);
@@ -64,20 +64,20 @@ export default function TeamLeaderboard({
                 <li key={s.user.id}>
                     <Link
                         href={`/users/${s.user.id}`}
-                        className="group flex items-center gap-3 rounded-lg px-2 py-1.5 -mx-2 transition hover:bg-neutral-100"
+                        className="group flex items-center gap-3 rounded-lg px-2 py-1.5 -mx-2 transition hover:bg-muted"
                     >
-                        <span className="w-4 shrink-0 text-sm tabular-nums text-neutral-500">{i + 1}</span>
+                        <span className="w-4 shrink-0 text-sm tabular-nums text-muted-foreground">{i + 1}</span>
                         <UserAvatar user={s.user} type="small" />
                         <div className="min-w-0 flex-1">
                             <div className="flex items-baseline justify-between gap-2">
-                                <span className="min-w-0 truncate text-sm font-medium text-neutral-900">
+                                <span className="min-w-0 truncate text-sm font-medium text-foreground">
                                     {s.user.displayName}
                                 </span>
-                                <span className="shrink-0 text-xs tabular-nums text-neutral-500">
+                                <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
                                     {t('touches', { count: s.touches })}
                                 </span>
                             </div>
-                            <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-neutral-100">
+                            <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-muted">
                                 <div
                                     className="h-full rounded-full bg-brand transition-[width] duration-500 ease-out motion-reduce:transition-none"
                                     style={{ width: `${(s.touches / max) * 100}%` }}
