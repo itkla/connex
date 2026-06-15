@@ -54,7 +54,8 @@
     "footerProduct": "Product",
     "footerCompany": "Company",
     "footerAbout": "About",
-    "footerRights": "© 2026 Connex. All rights reserved."
+    "footerRights": "© 2026 Connex. All rights reserved.",
+    "toggleLightDarkMode": "Toggle light/dark mode"
   },
   "CommonSidebar": {
     "ariaPrimarySidebar": "Primary sidebar",

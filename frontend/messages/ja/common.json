@@ -54,7 +54,8 @@
     "footerProduct": "プロダクト",
     "footerCompany": "会社",
     "footerAbout": "概要",
-    "footerRights": "© 2026 Connex"
+    "footerRights": "© 2026 Connex",
+    "toggleLightDarkMode": "らいと・ダークモードに切り替え"
   },
   "CommonSidebar": {
     "ariaPrimarySidebar": "メインサイドバー",

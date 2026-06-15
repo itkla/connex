@@ -1,10 +1,34 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useTranslations } from "next-intl";
-import { Bars3Icon, XMarkIcon } from "@heroicons/react/24/outline";
+import { Bars3Icon, XMarkIcon, SunIcon, MoonIcon } from "@heroicons/react/24/outline";
+import { useTheme } from "next-themes";
 import LanguageSwitcher from "./LanguageSwitcher";
+
+function ThemeToggle() {
+    const t = useTranslations("CommonHome");
+    const { resolvedTheme, setTheme } = useTheme();
+    const [mounted, setMounted] = useState(false);
+
+    // next-themes has no theme on the server; wait for mount to avoid a hydration mismatch.
+    useEffect(() => setMounted(true), []);
+
+    const isDark = resolvedTheme === "dark";
+    const next = isDark ? "light" : "dark";
+
+    return (
+        <button
+            type="button"
+            onClick={() => setTheme(next)}
+            aria-label={t("toggleLightDarkMode", { mode: next })}
+            className="inline-flex size-9 items-center justify-center rounded-full border border-border text-foreground transition active:scale-[0.95]"
+        >
+            {mounted && isDark ? <SunIcon className="size-5" /> : <MoonIcon className="size-5" />}
+        </button>
+    );
+}
 
 export default function LandingNav({ ctaHref, ctaLabel }: { ctaHref: string; ctaLabel: string }) {
     const t = useTranslations("CommonHome");
@@ -39,6 +63,7 @@ export default function LandingNav({ ctaHref, ctaLabel }: { ctaHref: string; cta
                 </div>
 
                 <div className="hidden items-center gap-3 md:flex">
+                    <ThemeToggle />
                     <LanguageSwitcher />
                     <Link
                         href="/auth/login"
@@ -55,6 +80,7 @@ export default function LandingNav({ ctaHref, ctaLabel }: { ctaHref: string; cta
                 </div>
 
                 <div className="flex items-center gap-2 md:hidden">
+                    <ThemeToggle />
                     <LanguageSwitcher />
                     <button
                         type="button"
