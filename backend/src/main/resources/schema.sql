@@ -11,6 +11,7 @@ DROP DATABASE IF EXISTS connexdb;
 CREATE DATABASE connexdb CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 USE connexdb;
 
+DROP TABLE IF EXISTS attachment;
 DROP TABLE IF EXISTS deal_tag;
 DROP TABLE IF EXISTS company_tag;
 DROP TABLE IF EXISTS person_tag;
@@ -211,6 +212,26 @@ CREATE TABLE note (
     INDEX idx_note_deal   (deal_id)
 ) DEFAULT CHARSET=utf8mb4 COMMENT='Notes';
 
+
+-- ----------------------------------------------------------------------------
+-- attachment : a generic file attached to any entity (company, person, deal, user, ...).
+-- ----------------------------------------------------------------------------
+CREATE TABLE attachment (
+    id              INT AUTO_INCREMENT PRIMARY KEY COMMENT 'Attachment ID',
+    entity_type     VARCHAR(32)   NOT NULL COMMENT 'Owning entity type (company, person, deal, user, ...)',
+    entity_id       INT           NOT NULL COMMENT 'Owning entity ID',
+    file_name       VARCHAR(255)  NOT NULL COMMENT 'Original file name',
+    url             VARCHAR(2048) NOT NULL COMMENT 'Public URL to the stored file',
+    content_type    VARCHAR(255)  COMMENT 'MIME type',
+    size            BIGINT        COMMENT 'File size in bytes',
+    uploaded_by_id  INT           COMMENT 'Uploader User ID',
+    created_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT 'Creation timestamp',
+    updated_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT 'Last update timestamp',
+    CONSTRAINT fk_attachment_uploaded_by FOREIGN KEY (uploaded_by_id) REFERENCES app_user(id) ON DELETE SET NULL,
+    -- polymorphic owner: no FK is possible, so cleanup of orphans is handled in the application layer
+    INDEX idx_attachment_entity (entity_type, entity_id),
+    INDEX idx_attachment_uploaded_by (uploaded_by_id)
+) DEFAULT CHARSET=utf8mb4 COMMENT='Generic file attachments for any entity';
 
 -- ============================================================================
 -- Junction tables

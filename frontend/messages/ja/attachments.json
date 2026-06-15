@@ -1,0 +1,18 @@
+{
+  "Attachments": {
+    "title": "ファイル",
+    "add": "ファイルを追加",
+    "addOrDrop": "ファイルを追加またはドロップ",
+    "uploading": "アップロード中...",
+    "empty": "ファイルはまだありません。クリックまたはドロップして追加してください。",
+    "by": "{name}",
+    "unknownUser": "不明",
+    "download": "ダウンロード",
+    "delete": "削除",
+    "deleted": "ファイルを削除しました",
+    "deleteFailed": "ファイルを削除できませんでした",
+    "uploadFailed": "{name} をアップロードできませんでした",
+    "uploadedCount": "{count}件のファイルをアップロードしました",
+    "loadFailed": "ファイルを読み込めませんでした"
+  }
+}

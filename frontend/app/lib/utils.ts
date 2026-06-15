@@ -1,5 +1,7 @@
 // transplanted from /me 
 
+import { type UploadedFile } from '@/app/lib/types';
+
 export function formatShortDate(value: string | undefined, locale: string) {
     if (!value) {
         return '—';
@@ -197,6 +199,61 @@ export async function uploadCompanyLogo(companyId: number, file: File): Promise<
     }
     const data = (await res.json()) as { logoUrl: string };
     return data.logoUrl;
+}
+
+/**
+ * uploads a file for any entity to the public directory and returns its metadata.
+ * mirrors the profile-picture flow: the binary is written to disk here, then the
+ * caller records it against the backend via createAttachment().
+ * @param entityType - the owning entity type (e.g. "company", "person", "deal", "user")
+ * @param entityId - the owning entity id
+ * @param file - the file to upload
+ * @returns the stored file's public url and metadata
+ */
+export async function uploadFile(entityType: string, entityId: number, file: File): Promise<UploadedFile> {
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('entityType', entityType);
+    formData.append('entityId', String(entityId));
+    const res = await fetch('/api/uploads', {
+        method: 'POST',
+        body: formData,
+    });
+    if (!res.ok) {
+        throw new Error('Failed to upload file');
+    }
+    return (await res.json()) as UploadedFile;
+}
+
+/**
+ * removes a previously uploaded file from disk. best-effort; failures are swallowed
+ * so a missing file never blocks deleting the attachment record.
+ * @param url - the public url returned by uploadFile()
+ */
+export async function deleteUploadedFile(url: string): Promise<void> {
+    try {
+        await fetch(`/api/uploads?url=${encodeURIComponent(url)}`, { method: 'DELETE' });
+    } catch {
+        // best-effort cleanup
+    }
+}
+
+/**
+ * formats a byte count into a human-readable size (e.g. 1.2 MB)
+ * @param bytes - the number of bytes
+ * @returns the formatted size string
+ */
+export function formatFileSize(bytes?: number): string {
+    if (bytes == null || Number.isNaN(bytes) || bytes < 0) return '—';
+    if (bytes < 1024) return `${bytes} B`;
+    const units = ['KB', 'MB', 'GB', 'TB'];
+    let value = bytes / 1024;
+    let unitIndex = 0;
+    while (value >= 1024 && unitIndex < units.length - 1) {
+        value /= 1024;
+        unitIndex++;
+    }
+    return `${value.toFixed(value >= 10 || Number.isInteger(value) ? 0 : 1)} ${units[unitIndex]}`;
 }
 
 /**

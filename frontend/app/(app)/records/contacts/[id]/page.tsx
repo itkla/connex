@@ -1,4 +1,4 @@
-import { getCompanies, getContactById, getContacts, getCurrentUserFromCookie, getDeals, getTags, getUserById } from "@/app/lib/api";
+import { getAttachmentsFromCookie, getCompanies, getContactById, getContacts, getCurrentUserFromCookie, getDeals, getTags, getUserById } from "@/app/lib/api";
 import { notFound, redirect } from "next/navigation";
 import { type Company, type Deal, type Tag, type Contact, type User } from "@/app/lib/types";
 import { cookies } from "next/headers";
@@ -15,6 +15,7 @@ import TagEditor from "@/app/components/records/contacts/TagEditor";
 import { Avatar, AvatarFallback, AvatarGroup, AvatarImage } from "@/components/ui/avatar";
 import InfoRow from "@/app/components/me/InfoRow";
 import Timeline from "@/app/components/me/Timeline";
+import Attachments from "@/app/components/attachments/Attachments";
 import { formatCompactCurrency, formatDate, formatDateTime } from "@/app/lib/utils";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
 
@@ -25,13 +26,14 @@ export default async function ContactPage({ params }: { params: { id: number } }
     const t = await getTranslations("ContactsPage");
     const locale = await getLocale();
 
-    const [contact, currentUser, allTags, allCompanies, allPersons, allDeals] = await Promise.all([
+    const [contact, currentUser, allTags, allCompanies, allPersons, allDeals, attachments] = await Promise.all([
         getContactById(id, init) as Promise<Contact>,
         getCurrentUserFromCookie((await cookies()).toString()),
         getTags(init).catch(() => [] as Tag[]),
         getCompanies(init).catch(() => [] as Company[]),
         getContacts({}, init).catch(() => [] as Contact[]),
         getDeals(init).catch(() => [] as Deal[]),
+        getAttachmentsFromCookie("person", id, cookie),
     ]);
     if (!contact) {
         console.error(`Contact not found: ${id}`);
@@ -169,6 +171,13 @@ export default async function ContactPage({ params }: { params: { id: number } }
                         <InfoRow label={t("added")} value={formatDate(contact.createdAt, locale)} />
                         <InfoRow label={t("updated")} value={formatDateTime(contact.updatedAt, locale)} />
                     </dl>
+
+                    <Attachments
+                        entityType="person"
+                        entityId={contact.id}
+                        initialAttachments={attachments}
+                        className="mt-6"
+                    />
                 </aside>
 
                 <section className="md:flex md:min-h-0 md:flex-col">

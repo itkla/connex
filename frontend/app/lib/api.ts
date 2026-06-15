@@ -658,3 +658,32 @@ export async function searchFromCookie(cookie: string | null, query: string): Pr
         return EMPTY_SEARCH_RESULTS;
     }
 }
+
+/*
+* == Attachments (generic file uploads for any entity)
+*/
+
+/**
+ * Lists attachments for a given entity.
+ * @param entityType - The owning entity type (e.g. "company", "person", "deal", "user")
+ * @param entityId - The owning entity id
+ */
+export function getAttachments(entityType: string, entityId: number, init: RequestInit = {}) {
+    return getJson<Types.Attachment[]>(`/api/attachments${buildQuery({ entityType, entityId })}`, init);
+}
+
+export function getAttachmentsFromCookie(entityType: string, entityId: number, cookie: string | null) {
+    return safeWithCookie<Types.Attachment>((init) => getAttachments(entityType, entityId, init), cookie);
+}
+
+/**
+ * Records an attachment after its binary has been stored via the Next.js upload route.
+ * @param payload - The attachment metadata (entity, url, file name, etc.)
+ */
+export function createAttachment(payload: Types.CreateAttachmentPayload) {
+    return postJson<Types.Attachment>(`/api/attachments`, payload);
+}
+
+export function deleteAttachment(id: number, init: RequestInit = {}) {
+    return deleteJson<void>(`/api/attachments/${id}`, init);
+}

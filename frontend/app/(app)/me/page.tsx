@@ -7,6 +7,7 @@ import { getLocale, getTranslations } from 'next-intl/server';
 import { Skeleton } from '@/components/ui/skeleton'; // TODO: add skeleton loaders to render before the PRomises resolve
 
 import {
+    getAttachmentsFromCookie,
     getContacts,
     getCurrentUserFromCookie,
     getDeals,
@@ -23,6 +24,7 @@ import StatCard from '@/app/components/me/StatCard';
 import Timeline from '@/app/components/me/Timeline';
 import EditSelfModal from '@/app/components/me/EditSelfModal';
 import UserAvatar from '@/app/components/records/users/UserAvatar';
+import Attachments from '@/app/components/attachments/Attachments';
 
 export default async function MePage() {
     const t = await getTranslations('MePage');
@@ -36,13 +38,14 @@ export default async function MePage() {
     }
 
     const init = { headers: { cookie: cookie ?? '' } } as const;
-    const [tasks, activities, notes, users, persons, deals] = await Promise.all([
+    const [tasks, activities, notes, users, persons, deals, attachments] = await Promise.all([
         getUserTasksFromCookie(user.id, cookie),
         getUserActivitiesFromCookie(user.id, cookie),
         getUserNotesFromCookie(user.id, cookie),
         getUsers(init).catch(() => [] as User[]),
         getContacts({}, init).catch(() => [] as Contact[]),
         getDeals(init).catch(() => [] as Deal[]),
+        getAttachmentsFromCookie('user', user.id, cookie),
     ]);
 
     const initials = user.displayName?.slice(0, 1).toUpperCase() ?? '?';
@@ -118,6 +121,13 @@ export default async function MePage() {
                                 value={formatDate(user.createdAt, locale)}
                             />
                         </dl>
+
+                        <Attachments
+                            entityType="user"
+                            entityId={user.id}
+                            initialAttachments={attachments}
+                            className="mt-6"
+                        />
                         {/* TODO: find a better place to put this */}
                         <div className="mt-6 px-6">
                             {/* TODO: fix Link attaching to parent div, causing the whole section to be clickable and not just the text + arrow */}

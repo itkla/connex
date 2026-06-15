@@ -3,8 +3,11 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
+import { LoaderCircle } from 'lucide-react';
 import { toastError, toastSuccess } from '@/app/lib/toast';
 import { EllipsisVerticalIcon, PencilSquareIcon, EyeIcon, PaperClipIcon, TrashIcon, PlusIcon, UserIcon, BriefcaseIcon } from '@heroicons/react/24/outline';
+
+import { useAttachmentUploader } from '@/app/components/attachments/useAttachmentUploader';
 
 import {
     DropdownMenu,
@@ -31,6 +34,7 @@ export default function CompanyActionsMenu({
 }) {
     const router = useRouter();
     const t = useTranslations('CompaniesActionsMenu');
+    const { inputRef: attachmentInputRef, uploading: attachmentsUploading, openPicker: openAttachmentPicker, onFilesSelected: onAttachmentFilesSelected } = useAttachmentUploader('company', company.id);
     const [deleteOpen, setDeleteOpen] = useState(false);
     const [isDeleting, setIsDeleting] = useState(false);
     const [editOpen, setEditOpen] = useState(false);
@@ -166,8 +170,17 @@ export default function CompanyActionsMenu({
                 </Button>
             </ButtonGroup>
             <ButtonGroup orientation="horizontal">
-                <Button variant="outline" size="sm">
-                    <PaperClipIcon className="size-4" />
+                <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={openAttachmentPicker}
+                    disabled={attachmentsUploading}
+                >
+                    {attachmentsUploading ? (
+                        <LoaderCircle className="size-4 animate-spin" />
+                    ) : (
+                        <PaperClipIcon className="size-4" />
+                    )}
                     {t('add')}
                 </Button>
                 <DropdownMenu>
@@ -219,6 +232,15 @@ export default function CompanyActionsMenu({
                     </DropdownMenuContent>
                 </DropdownMenu>
             </ButtonGroup>
+
+            {/* hidden input to upload attachments */}
+            <input
+                ref={attachmentInputRef}
+                type="file"
+                multiple
+                className="hidden"
+                onChange={onAttachmentFilesSelected}
+            />
 
             <EditCompanySheet company={company} open={editOpen} onOpenChange={setEditOpen} />
 

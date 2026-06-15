@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
 import { toastError, toastSuccess } from '@/app/lib/toast';
 import { useTranslations } from 'next-intl';
+import { LoaderCircle } from 'lucide-react';
 import {
     EllipsisVerticalIcon,
     PencilSquareIcon,
@@ -17,6 +18,8 @@ import {
     ArrowUturnLeftIcon,
     TrashIcon,
 } from '@heroicons/react/24/outline';
+
+import { useAttachmentUploader } from '@/app/components/attachments/useAttachmentUploader';
 
 import {
     DropdownMenu,
@@ -61,6 +64,7 @@ export default function DealActionsMenu({
 }) {
     const router = useRouter();
     const t = useTranslations('DealsActionsMenu');
+    const { inputRef: attachmentInputRef, uploading: attachmentsUploading, openPicker: openAttachmentPicker, onFilesSelected: onAttachmentFilesSelected } = useAttachmentUploader('deal', deal.id);
     const [editOpen, setEditOpen] = useState(false);
     const [activityOpen, setActivityOpen] = useState(false);
     const [taskOpen, setTaskOpen] = useState(false);
@@ -136,8 +140,17 @@ export default function DealActionsMenu({
                 </Button>
             </ButtonGroup>
             <ButtonGroup orientation="horizontal">
-                <Button variant="outline" size="sm">
-                    <PaperClipIcon className="size-4" />
+                <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={openAttachmentPicker}
+                    disabled={attachmentsUploading}
+                >
+                    {attachmentsUploading ? (
+                        <LoaderCircle className="size-4 animate-spin" />
+                    ) : (
+                        <PaperClipIcon className="size-4" />
+                    )}
                     {t('add')}
                 </Button>
                 <DropdownMenu>
@@ -211,6 +224,14 @@ export default function DealActionsMenu({
                     </DropdownMenuContent>
                 </DropdownMenu>
             </ButtonGroup>
+
+            <input
+                ref={attachmentInputRef}
+                type="file"
+                multiple
+                className="hidden"
+                onChange={onAttachmentFilesSelected}
+            />
 
             <EditDealSheet
                 deal={deal}

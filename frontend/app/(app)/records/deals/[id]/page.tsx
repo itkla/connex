@@ -7,6 +7,7 @@ import { getLocale, getTranslations } from 'next-intl/server';
 
 import {
     getActivitiesForDeal,
+    getAttachmentsFromCookie,
     getCompanies,
     getCompanyById,
     getContactById,
@@ -47,6 +48,7 @@ import {
 import ContactAvatar from '@/app/components/records/contacts/ContactAvatar';
 import InfoRow from '@/app/components/me/InfoRow';
 import Timeline from '@/app/components/me/Timeline';
+import Attachments from '@/app/components/attachments/Attachments';
 import SummaryTile from '@/app/components/SummaryTile';
 import { EngagementSparkline, type EngagementPoint } from '@/app/components/records/companies/CompanyCard';
 import DealActionsMenu from '@/app/components/records/deals/DealActionsMenu';
@@ -71,7 +73,7 @@ export default async function DealPage({ params }: { params: { id: number } }) {
     const t = await getTranslations('DealsPage');
     const locale = await getLocale();
 
-    const [deal, currentUser, activities, notes, tasks, tags, peopleRaw, allPipelines, allCompanies, allPersons, allDeals, allUsers] =
+    const [deal, currentUser, activities, notes, tasks, tags, peopleRaw, allPipelines, allCompanies, allPersons, allDeals, allUsers, attachments] =
         await Promise.all([
             getDealById(id, init).catch(() => null),
             getCurrentUserFromCookie(cookie),
@@ -85,6 +87,7 @@ export default async function DealPage({ params }: { params: { id: number } }) {
             getContacts({}, init).catch(() => [] as Contact[]),
             getDeals(init).catch(() => [] as Deal[]),
             getUsers(init).catch(() => [] as User[]),
+            getAttachmentsFromCookie("deal", id, cookie),
         ]);
 
     if (!deal) notFound();
@@ -330,6 +333,13 @@ export default async function DealPage({ params }: { params: { id: number } }) {
                         <InfoRow label={t('created')} value={formatDate(deal.createdAt, locale)} />
                         <InfoRow label={t('updated')} value={formatDateTime(deal.updatedAt, locale)} />
                     </dl>
+
+                    <Attachments
+                        entityType="deal"
+                        entityId={deal.id}
+                        initialAttachments={attachments}
+                        className="mt-6"
+                    />
                 </aside>
 
                 <section className="md:flex md:min-h-0 md:flex-col">

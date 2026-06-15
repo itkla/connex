@@ -1,0 +1,18 @@
+{
+  "Attachments": {
+    "title": "Files",
+    "add": "Add file",
+    "addOrDrop": "Add a file or drop it here",
+    "uploading": "Uploading...",
+    "empty": "No files yet. Click or drop to add one.",
+    "by": "by {name}",
+    "unknownUser": "Unknown",
+    "download": "Download",
+    "delete": "Delete",
+    "deleted": "File deleted",
+    "deleteFailed": "Couldn't delete the file",
+    "uploadFailed": "Couldn't upload {name}",
+    "uploadedCount": "{count, plural, =1 {# file uploaded} other {# files uploaded}}",
+    "loadFailed": "Couldn't load files"
+  }
+}

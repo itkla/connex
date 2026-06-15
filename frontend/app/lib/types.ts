@@ -384,6 +384,38 @@ export type UpdateTaskPayload = {
     dealId?: number;
 };
 
+export type AttachmentEntityType = 'company' | 'person' | 'deal' | 'user';
+
+export type Attachment = {
+    id: number;
+    entityType: string;
+    entityId: number;
+    fileName: string;
+    url: string;
+    contentType?: string;
+    size?: number;
+    uploadedBy?: number;
+    uploadedByName?: string;
+    createdAt: string;
+    updatedAt: string;
+};
+
+export type CreateAttachmentPayload = {
+    entityType: string;
+    entityId: number;
+    fileName: string;
+    url: string;
+    contentType?: string;
+    size?: number;
+};
+
+export type UploadedFile = {
+    url: string;
+    fileName: string;
+    contentType: string;
+    size: number;
+};
+
 export type SearchResults = {
     companies: Company[];
     people: Contact[];

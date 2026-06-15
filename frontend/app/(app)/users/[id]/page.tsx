@@ -7,6 +7,7 @@ import { ArrowLeftIcon } from "@heroicons/react/24/outline";
 import { getLocale, getTranslations } from "next-intl/server";
 
 import {
+    getAttachmentsFromCookie,
     getContacts,
     getCurrentUserFromCookie,
     getDeals,
@@ -23,6 +24,7 @@ import UserAvatar from "@/app/components/records/users/UserAvatar";
 import InfoRow from "@/app/components/me/InfoRow";
 import StatCard from "@/app/components/me/StatCard";
 import Timeline from "@/app/components/me/Timeline";
+import Attachments from "@/app/components/attachments/Attachments";
 
 export default async function UserPage({ params }: { params: { id: number } }) {
     const { id } = await params;
@@ -31,7 +33,7 @@ export default async function UserPage({ params }: { params: { id: number } }) {
     const t = await getTranslations("UsersPage");
     const locale = await getLocale();
 
-    const [user, currentUser, tasks, activities, notes, users, persons, deals] = await Promise.all([
+    const [user, currentUser, tasks, activities, notes, users, persons, deals, attachments] = await Promise.all([
         getUserById(id, init).catch(() => null),
         getCurrentUserFromCookie(cookie),
         getUserTasksFromCookie(id, cookie),
@@ -40,6 +42,7 @@ export default async function UserPage({ params }: { params: { id: number } }) {
         getUsers(init).catch(() => [] as User[]),
         getContacts({}, init).catch(() => [] as Contact[]),
         getDeals(init).catch(() => [] as Deal[]),
+        getAttachmentsFromCookie("user", id, cookie),
     ]);
 
     if (!currentUser) {
@@ -89,6 +92,13 @@ export default async function UserPage({ params }: { params: { id: number } }) {
                         <InfoRow label={t("memberSince")} value={formatDate(user.createdAt, locale)} />
                         <InfoRow label={t("updated")} value={formatDateTime(user.updatedAt, locale)} />
                     </dl>
+
+                    <Attachments
+                        entityType="user"
+                        entityId={user.id}
+                        initialAttachments={attachments}
+                        className="mt-6"
+                    />
                 </aside>
 
                 <section className="md:flex md:min-h-0 md:flex-col">

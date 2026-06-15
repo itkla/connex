@@ -12,6 +12,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 
 import {
     getActivities,
+    getAttachmentsFromCookie,
     getCompanyById,
     getCompanyDeals,
     getCompanyPeople,
@@ -38,6 +39,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import ContactCard from "@/app/components/records/contacts/ContactCard";
 import QuickEditSheet from "@/app/components/records/contacts/QuickEditSheet";
 import ContactsGrid from "@/app/components/records/companies/ContactsGrid";
+import Attachments from "@/app/components/attachments/Attachments";
 
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 
@@ -58,6 +60,7 @@ export default async function CompanyPage({ params }: { params: { id: number } }
         allTasks,
         allActivities,
         allNotes,
+        attachments,
     ] = await Promise.all([
         getCompanyById(id, init) as Promise<Company>,
         getCurrentUserFromCookie(cookie),
@@ -68,6 +71,7 @@ export default async function CompanyPage({ params }: { params: { id: number } }
         getTasks(init).catch(() => [] as Task[]),
         getActivities(init).catch(() => [] as Activity[]),
         getNotes(init).catch(() => [] as Note[]),
+        getAttachmentsFromCookie("company", id, cookie),
     ]);
 
     if (!company) {
@@ -238,6 +242,13 @@ export default async function CompanyPage({ params }: { params: { id: number } }
                         <InfoRow label={t("added")} value={formatDate(company.createdAt, locale)} />
                         <InfoRow label={t("updated")} value={formatDateTime(company.updatedAt, locale)} />
                     </dl>
+
+                    <Attachments
+                        entityType="company"
+                        entityId={company.id}
+                        initialAttachments={attachments}
+                        className="mt-6"
+                    />
                 </aside>
 
                 <section className="md:flex md:min-h-0 md:flex-col">

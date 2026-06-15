@@ -3,9 +3,12 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
+import { LoaderCircle } from 'lucide-react';
 import { toastError, toastSuccess } from '@/app/lib/toast';
 import { EllipsisVerticalIcon, PencilSquareIcon, EyeIcon, PlusIcon, ChatBubbleLeftRightIcon, DocumentTextIcon, CheckCircleIcon, PaperClipIcon } from '@heroicons/react/24/outline';
 import { BuildingOffice2Icon, NoSymbolIcon, TrashIcon } from '@heroicons/react/24/outline';
+
+import { useAttachmentUploader } from '@/app/components/attachments/useAttachmentUploader';
 
 import {
     DropdownMenu,
@@ -42,6 +45,7 @@ export default function ContactActionsMenu({
 }) {
     const router = useRouter();
     const t = useTranslations('ContactsActionsMenu');
+    const { inputRef: attachmentInputRef, uploading: attachmentsUploading, openPicker: openAttachmentPicker, onFilesSelected: onAttachmentFilesSelected } = useAttachmentUploader('person', contact.id);
     const [changeOpen, setChangeOpen] = useState(false);
     const [deleteOpen, setDeleteOpen] = useState(false);
     const [isDeleting, setIsDeleting] = useState(false);
@@ -103,8 +107,17 @@ export default function ContactActionsMenu({
                 </ButtonGroup>
                 <ButtonGroup orientation="horizontal">
                     {/* // add attachments, files, pictures, business cards etc */}
-                    <Button variant="outline" size="sm">
-                        <PaperClipIcon className="size-4" />
+                    <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={openAttachmentPicker}
+                        disabled={attachmentsUploading}
+                    >
+                        {attachmentsUploading ? (
+                            <LoaderCircle className="size-4 animate-spin" />
+                        ) : (
+                            <PaperClipIcon className="size-4" />
+                        )}
                         {t('add')}
                     </Button>
                     <DropdownMenu>
@@ -187,6 +200,15 @@ export default function ContactActionsMenu({
                         </DropdownMenuContent>
                     </DropdownMenu>
                 </ButtonGroup>
+
+                {/* hidden input to upload attachments */}
+                <input
+                    ref={attachmentInputRef}
+                    type="file"
+                    multiple
+                    className="hidden"
+                    onChange={onAttachmentFilesSelected}
+                />
 
                 <EditContactSheet contact={contact} open={editOpen} onOpenChange={setEditOpen} />
 
