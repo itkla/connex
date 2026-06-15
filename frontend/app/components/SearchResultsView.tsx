@@ -10,11 +10,13 @@ import {
     BoltIcon,
     DocumentTextIcon,
     CheckCircleIcon,
+    PaperClipIcon,
 } from "@heroicons/react/24/outline";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import CompanyAvatar from "@/app/components/records/companies/CompanyAvatar";
 import UserAvatar from "@/app/components/records/users/UserAvatar";
 import type { SearchResults } from "@/app/lib/types";
+import { formatFileSize } from "@/app/lib/utils";
 
 type IconType = React.ComponentType<{ className?: string }>;
 
@@ -26,6 +28,7 @@ type Row = {
     icon?: IconType;
     accent?: string;
     leading?: React.ReactNode;
+    external?: boolean;
 };
 
 type Group = { key: string; heading: string; rows: Row[] };
@@ -125,6 +128,14 @@ export default function SearchResultsView({
         icon: CheckCircleIcon,
         label: truncate(task.description),
     }));
+    add("attachments", t("groupAttachments"), results.attachments, (a) => ({
+        key: `attachment-${a.id}`,
+        href: a.url,
+        external: true,
+        icon: PaperClipIcon,
+        label: a.fileName,
+        subtitle: typeof a.size === "number" ? formatFileSize(a.size) : undefined,
+    }));
 
     const hasResults = groups.length > 0;
 
@@ -147,35 +158,50 @@ export default function SearchResultsView({
                             <ul className="overflow-hidden rounded-2xl ring-1 ring-border">
                                 {group.rows.map((row) => {
                                     const Icon = row.icon;
+                                    const rowClassName =
+                                        "flex items-center gap-3 bg-card px-4 py-3 transition hover:bg-muted";
+                                    const content = (
+                                        <>
+                                            <span className="flex size-8 shrink-0 items-center justify-center">
+                                                {row.leading ? (
+                                                    row.leading
+                                                ) : row.accent ? (
+                                                    <span
+                                                        className="size-4 rounded-full ring-1 ring-border"
+                                                        style={{ backgroundColor: row.accent }}
+                                                    />
+                                                ) : Icon ? (
+                                                    <Icon className="size-5 text-muted-foreground" />
+                                                ) : null}
+                                            </span>
+                                            <span className="min-w-0 flex-1">
+                                                <span className="block truncate text-sm text-foreground">
+                                                    {row.label}
+                                                </span>
+                                                {row.subtitle && (
+                                                    <span className="block truncate text-xs text-muted-foreground">
+                                                        {row.subtitle}
+                                                    </span>
+                                                )}
+                                            </span>
+                                        </>
+                                    );
                                     return (
                                         <li key={row.key} className="border-b border-border last:border-0">
-                                            <Link
-                                                href={row.href}
-                                                className="flex items-center gap-3 bg-card px-4 py-3 transition hover:bg-muted"
-                                            >
-                                                <span className="flex size-8 shrink-0 items-center justify-center">
-                                                    {row.leading ? (
-                                                        row.leading
-                                                    ) : row.accent ? (
-                                                        <span
-                                                            className="size-4 rounded-full ring-1 ring-border"
-                                                            style={{ backgroundColor: row.accent }}
-                                                        />
-                                                    ) : Icon ? (
-                                                        <Icon className="size-5 text-muted-foreground" />
-                                                    ) : null}
-                                                </span>
-                                                <span className="min-w-0 flex-1">
-                                                    <span className="block truncate text-sm text-foreground">
-                                                        {row.label}
-                                                    </span>
-                                                    {row.subtitle && (
-                                                        <span className="block truncate text-xs text-muted-foreground">
-                                                            {row.subtitle}
-                                                        </span>
-                                                    )}
-                                                </span>
-                                            </Link>
+                                            {row.external ? (
+                                                <a
+                                                    href={row.href}
+                                                    target="_blank"
+                                                    rel="noopener noreferrer"
+                                                    className={rowClassName}
+                                                >
+                                                    {content}
+                                                </a>
+                                            ) : (
+                                                <Link href={row.href} className={rowClassName}>
+                                                    {content}
+                                                </Link>
+                                            )}
                                         </li>
                                     );
                                 })}

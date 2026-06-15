@@ -19,4 +19,5 @@ public class SearchResultsDto {
     private List<NoteDto> notes;
     private List<TaskDto> tasks;
     private List<UserDto> users;
+    private List<AttachmentDto> attachments;
 }

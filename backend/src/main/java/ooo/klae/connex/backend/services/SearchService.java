@@ -9,8 +9,10 @@ import ooo.klae.connex.backend.mappers.ActivityMapper;
 import ooo.klae.connex.backend.mappers.NoteMapper;
 import ooo.klae.connex.backend.mappers.TaskMapper;
 import ooo.klae.connex.backend.mappers.UserMapper;
+import ooo.klae.connex.backend.mappers.AttachmentMapper;
 
 import ooo.klae.connex.backend.dto.ActivityDto;
+import ooo.klae.connex.backend.dto.AttachmentDto;
 import ooo.klae.connex.backend.dto.CompanyDto;
 import ooo.klae.connex.backend.dto.DealDto;
 import ooo.klae.connex.backend.dto.NoteDto;
@@ -38,11 +40,12 @@ public class SearchService {
     private final NoteMapper noteMapper;
     private final TaskMapper taskMapper;
     private final UserMapper userMapper;
+    private final AttachmentMapper attachmentMapper;
 
     public SearchResultsDto search(String query) {
         if (query == null || query.isBlank()) {
             return new SearchResultsDto(List.of(), List.of(), List.of(), List.of(),
-                    List.of(), List.of(), List.of(), List.of(), List.of());
+                    List.of(), List.of(), List.of(), List.of(), List.of(), List.of());
         }
 
         // search may contain special characters, so we need to escape them
@@ -57,7 +60,8 @@ public class SearchService {
             activityMapper.search(pattern).stream().map(ActivityDto::from).toList(),
             noteMapper.search(pattern).stream().map(NoteDto::from).toList(),
             taskMapper.search(pattern).stream().map(TaskDto::from).toList(),
-            userMapper.search(pattern).stream().map(UserDto::from).toList()
+            userMapper.search(pattern).stream().map(UserDto::from).toList(),
+            attachmentMapper.search(pattern).stream().map(AttachmentDto::from).toList()
         );
     }
 

@@ -11,7 +11,8 @@ import {
     TagIcon,
     BoltIcon,
     DocumentTextIcon,
-    CheckCircleIcon
+    CheckCircleIcon,
+    PaperClipIcon
 } from "@heroicons/react/24/outline";
 import { Loader2Icon } from "lucide-react";
 
@@ -21,6 +22,7 @@ import CompanyAvatar from "@/app/components/records/companies/CompanyAvatar";
 import UserAvatar from "@/app/components/records/users/UserAvatar";
 import { search as searchApi } from "@/app/lib/api";
 import type { SearchResults } from "@/app/lib/types";
+import { formatFileSize } from "@/app/lib/utils";
 import { cn } from "@/lib/utils";
 
 const MIN_QUERY_LENGTH = 2;
@@ -37,6 +39,7 @@ type ResultRow = {
     icon?: IconType;
     accent?: string;
     leading?: React.ReactNode;
+    external?: boolean;
 };
 
 type ResultGroup = {
@@ -206,6 +209,14 @@ export default function SearchBar() {
             icon: CheckCircleIcon,
             label: truncate(task.description),
         }));
+        addGroup("attachments", t("groupAttachments"), results.attachments, (a) => ({
+            key: `attachment-${a.id}`,
+            href: a.url,
+            external: true,
+            icon: PaperClipIcon,
+            label: a.fileName,
+            subtitle: typeof a.size === "number" ? formatFileSize(a.size) : undefined,
+        }));
 
         return built;
     }, [results, t]);
@@ -220,10 +231,14 @@ export default function SearchBar() {
         el?.scrollIntoView({ block: "nearest" });
     }, [activeIndex]);
 
-    function navigate(href: string) {
+    function navigate(href: string, external = false) {
         setOpen(false);
         setActiveIndex(-1);
-        router.push(href);
+        if (external) {
+            window.open(href, "_blank", "noopener,noreferrer");
+        } else {
+            router.push(href);
+        }
     }
 
     function goToSearchPage() {
@@ -243,7 +258,7 @@ export default function SearchBar() {
             event.preventDefault();
             const active = showDropdown && hasResults && activeIndex >= 0 ? flatRows[activeIndex] : undefined;
             if (active) {
-                navigate(active.href);
+                navigate(active.href, active.external);
             } else {
                 goToSearchPage();
             }
@@ -325,7 +340,7 @@ export default function SearchBar() {
                                         key={row.key}
                                         type="button"
                                         data-index={row.index}
-                                        onClick={() => navigate(row.href)}
+                                        onClick={() => navigate(row.href, row.external)}
                                         onMouseEnter={() => setActiveIndex(row.index)}
                                         className={cn(
                                             "flex w-full items-center gap-3 rounded-xl px-3 py-2 text-left transition",

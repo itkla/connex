@@ -12,6 +12,7 @@ import java.util.List;
 public interface AttachmentMapper {
     List<Attachment> getByEntity(@Param("entityType") String entityType, @Param("entityId") int entityId);
     Attachment getById(int id);
+    List<Attachment> search(String query);
     int insert(Attachment attachment);
     int delete(int id);
     int deleteByEntity(@Param("entityType") String entityType, @Param("entityId") int entityId);

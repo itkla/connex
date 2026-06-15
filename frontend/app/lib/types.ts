@@ -426,4 +426,5 @@ export type SearchResults = {
     notes: Note[];
     tasks: Task[];
     users: User[];
+    attachments: Attachment[];
 };

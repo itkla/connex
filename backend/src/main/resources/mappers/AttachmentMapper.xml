@@ -39,6 +39,17 @@
     WHERE a.id = #{id}
   </select>
 
+  <select id="search" resultMap="AttachmentResult">
+    SELECT <include refid="attachmentColumns"/>
+    FROM attachment a
+    LEFT JOIN app_user u ON u.id = a.uploaded_by_id
+    WHERE a.file_name LIKE #{query}
+    OR a.content_type LIKE #{query}
+    OR u.display_name LIKE #{query}
+    ORDER BY a.created_at DESC
+    LIMIT 10
+  </select>
+
   <insert id="insert" useGeneratedKeys="true" keyProperty="id">
     INSERT INTO attachment (entity_type, entity_id, file_name, url, content_type, size, uploaded_by_id)
     VALUES (

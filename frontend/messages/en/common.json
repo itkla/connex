@@ -106,7 +106,8 @@
     "groupActivities": "Activities",
     "groupNotes": "Notes",
     "groupTasks": "Tasks",
-    "groupUsers": "Users"
+    "groupUsers": "Users",
+    "groupAttachments": "Files"
   },
   "CommonProfileCard": {
     "defaultName": "Profile Name",

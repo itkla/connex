@@ -106,7 +106,8 @@
     "groupActivities": "アクティビティ",
     "groupNotes": "メモ",
     "groupTasks": "タスク",
-    "groupUsers": "ユーザー"
+    "groupUsers": "ユーザー",
+    "groupAttachments": "ファイル"
   },
   "CommonProfileCard": {
     "defaultName": "プロフィール名",
