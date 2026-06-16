@@ -4,6 +4,7 @@ import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -11,6 +12,9 @@ import org.springframework.web.bind.annotation.RestController;
 
 import ooo.klae.connex.backend.beans.Attachment;
 import ooo.klae.connex.backend.dto.AttachmentDto;
+import ooo.klae.connex.backend.dto.AttachmentFacets;
+import ooo.klae.connex.backend.dto.PageResponse;
+import ooo.klae.connex.backend.dto.TagDto;
 import ooo.klae.connex.backend.services.AttachmentService;
 import ooo.klae.connex.backend.services.AuthService;
 
@@ -51,9 +55,41 @@ public class AttachmentController {
     }
 
     /**
+     * GET endpoint for a paginated, searchable, filterable slice of every attachment.
+     * Powers the Files library. {@code sort} is one of newest|oldest|name|largest;
+     * {@code types} filters by owning entity type, {@code kinds} by derived file kind.
+     */
+    @GetMapping("/page")
+    public PageResponse<AttachmentDto> getAttachmentsPage(
+        @RequestParam(defaultValue = "1") int page,
+        @RequestParam(defaultValue = "24") int size,
+        @RequestParam(required = false) String q,
+        @RequestParam(required = false) String sort,
+        @RequestParam(required = false) List<String> types,
+        @RequestParam(required = false) List<String> kinds,
+        @RequestParam(required = false) List<Integer> tagIds,
+        @RequestParam(required = false) Boolean orphaned
+    ) {
+        String query = (q == null || q.isBlank()) ? null : "%" + q + "%";
+        int offset = Math.max(0, (page - 1) * size);
+        List<AttachmentDto> items = attachmentService.getPage(query, sort, types, kinds, tagIds, orphaned, size, offset)
+            .stream().map(AttachmentDto::from).toList();
+        return new PageResponse<>(items, attachmentService.countPage(query, types, kinds, tagIds, orphaned));
+    }
+
+    /**
+     * GET endpoint for the Files library filter facets (counts by source and kind,
+     * plus totals), computed across the whole table rather than the current page.
+     */
+    @GetMapping("/facets")
+    public AttachmentFacets getAttachmentFacets() {
+        return attachmentService.facets();
+    }
+
+    /**
      * GET endpoint to retrieve a single attachment by ID.
      */
-    @GetMapping("/{id}")
+    @GetMapping("/{id:\\d+}")
     public AttachmentDto getAttachmentById(@PathVariable int id) {
         return AttachmentDto.from(attachmentService.getById(id));
     }
@@ -75,5 +111,37 @@ public class AttachmentController {
     @DeleteMapping("/{id}")
     public void deleteAttachment(@PathVariable int id) {
         attachmentService.delete(id);
+    }
+
+    /**
+     * GET endpoint to list the tags attached to an attachment.
+     */
+    @GetMapping("/{id}/tags")
+    public List<TagDto> getTagsForAttachment(@PathVariable int id) {
+        return attachmentService.getTags(id).stream().map(TagDto::from).toList();
+    }
+
+    /**
+     * POST endpoint to attach a tag to an attachment.
+     */
+    @PostMapping("/{id}/tags/{tagId}")
+    public void addTagToAttachment(@PathVariable int id, @PathVariable int tagId) {
+        attachmentService.addTag(id, tagId);
+    }
+
+    /**
+     * DELETE endpoint to detach a tag from an attachment.
+     */
+    @DeleteMapping("/{id}/tags/{tagId}")
+    public void removeTagFromAttachment(@PathVariable int id, @PathVariable int tagId) {
+        attachmentService.removeTag(id, tagId);
+    }
+
+    /**
+     * PUT endpoint to replace the full set of tags on an attachment.
+     */
+    @PutMapping("/{id}/tags")
+    public List<TagDto> replaceTagsForAttachment(@PathVariable int id, @RequestBody List<Integer> tagIds) {
+        return attachmentService.replaceTags(id, tagIds).stream().map(TagDto::from).toList();
     }
 }

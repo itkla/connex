@@ -13,7 +13,14 @@ import {
     DropdownMenuItem,
     DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { addCompanyTag, addContactTag, removeCompanyTag, removeContactTag } from '@/app/lib/api';
+import {
+    addAttachmentTag,
+    addCompanyTag,
+    addContactTag,
+    removeAttachmentTag,
+    removeCompanyTag,
+    removeContactTag,
+} from '@/app/lib/api';
 import { readableTextColor } from '@/app/lib/utils';
 import { type Tag } from '@/app/lib/types';
 
@@ -22,20 +29,29 @@ type TagAction = { type: 'add'; tag: Tag } | { type: 'remove'; tagId: number };
 type Props = {
     currentTags: Tag[];
     allTags: Tag[];
-} & ({ contactId: number; companyId?: never } | { companyId: number; contactId?: never });
+    onChange?: () => void;
+} & (
+    | { contactId: number; companyId?: never; attachmentId?: never }
+    | { companyId: number; contactId?: never; attachmentId?: never }
+    | { attachmentId: number; contactId?: never; companyId?: never }
+);
 
 export default function TagEditor({
     contactId,
     companyId,
+    attachmentId,
     currentTags,
     allTags,
+    onChange,
 }: Props) {
     const router = useRouter();
     const t = useTranslations('ContactsTagEditor');
     const [optimisticTags, applyOptimistic] = useOptimistic<Tag[], TagAction>(
         currentTags,
         (state, action) => {
-            if (action.type === 'add') return [...state, action.tag];
+            if (action.type === 'add') {
+                return state.some((tag) => tag.id === action.tag.id) ? state : [...state, action.tag];
+            }
             return state.filter((t) => t.id !== action.tagId);
         },
     );
@@ -44,9 +60,17 @@ export default function TagEditor({
     const availableTags = allTags.filter((t) => !currentIds.has(t.id));
 
     const addTag = (tagId: number) =>
-        contactId != null ? addContactTag(contactId, tagId) : addCompanyTag(companyId!, tagId);
+        contactId != null
+            ? addContactTag(contactId, tagId)
+            : companyId != null
+              ? addCompanyTag(companyId, tagId)
+              : addAttachmentTag(attachmentId!, tagId);
     const removeTag = (tagId: number) =>
-        contactId != null ? removeContactTag(contactId, tagId) : removeCompanyTag(companyId!, tagId);
+        contactId != null
+            ? removeContactTag(contactId, tagId)
+            : companyId != null
+              ? removeCompanyTag(companyId, tagId)
+              : removeAttachmentTag(attachmentId!, tagId);
 
     const handleAdd = (tag: Tag) => {
         startTransition(async () => {
@@ -54,6 +78,7 @@ export default function TagEditor({
             try {
                 await addTag(tag.id);
                 router.refresh();
+                onChange?.();
             } catch (err) {
                 toastError(err instanceof Error ? err.message : t('toastFailedAdd'));
             }
@@ -66,6 +91,7 @@ export default function TagEditor({
             try {
                 await removeTag(tag.id);
                 router.refresh();
+                onChange?.();
             } catch (err) {
                 toastError(err instanceof Error ? err.message : t('toastFailedRemove'));
             }

@@ -130,8 +130,7 @@ export default function SearchResultsView({
     }));
     add("attachments", t("groupAttachments"), results.attachments, (a) => ({
         key: `attachment-${a.id}`,
-        href: a.url,
-        external: true,
+        href: `/library/files?file=${a.id}`,
         icon: PaperClipIcon,
         label: a.fileName,
         subtitle: typeof a.size === "number" ? formatFileSize(a.size) : undefined,

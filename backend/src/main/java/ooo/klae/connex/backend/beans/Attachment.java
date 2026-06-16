@@ -7,6 +7,8 @@ import com.fasterxml.jackson.annotation.ObjectIdGenerators;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+import java.util.List;
+
 /**
  * Represents a file attached to any entity. The owning record is referenced
  * polymorphically via {@code entityType} + {@code entityId} so the same table
@@ -31,6 +33,7 @@ public class Attachment {
     private User uploadedBy;
     private String createdAt;
     private String updatedAt;
+    private List<Tag> tags;
 
     public int getId() {
         return id;
@@ -118,5 +121,13 @@ public class Attachment {
 
     public void setUpdatedAt(String updatedAt) {
         this.updatedAt = updatedAt;
+    }
+
+    public List<Tag> getTags() {
+        return tags;
+    }
+
+    public void setTags(List<Tag> tags) {
+        this.tags = tags;
     }
 }

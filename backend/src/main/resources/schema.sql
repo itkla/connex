@@ -275,3 +275,12 @@ CREATE TABLE deal_tag (
     CONSTRAINT fk_deal_tag_tag  FOREIGN KEY (tag_id)  REFERENCES tag(id)  ON DELETE CASCADE,
     INDEX idx_deal_tag_tag (tag_id)
 ) DEFAULT CHARSET=utf8mb4 COMMENT='Deal-Tag Relationships';
+
+CREATE TABLE attachment_tag (
+    attachment_id INT NOT NULL,
+    tag_id        INT NOT NULL,
+    PRIMARY KEY (attachment_id, tag_id),
+    CONSTRAINT fk_attachment_tag_attachment FOREIGN KEY (attachment_id) REFERENCES attachment(id) ON DELETE CASCADE,
+    CONSTRAINT fk_attachment_tag_tag        FOREIGN KEY (tag_id)        REFERENCES tag(id)        ON DELETE CASCADE,
+    INDEX idx_attachment_tag_tag (tag_id)
+) DEFAULT CHARSET=utf8mb4 COMMENT='Attachment-Tag Relationships';

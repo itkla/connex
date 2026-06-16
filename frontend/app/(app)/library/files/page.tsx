@@ -1,7 +1,7 @@
-import { getAllAttachmentsFromCookie, getCurrentUserFromCookie } from "@/app/lib/api";
-import type { Attachment } from "@/app/lib/types";
+import { getCurrentUserFromCookie } from "@/app/lib/api";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
+import { Suspense } from "react";
 import FilesBrowser from "@/app/components/library/files/FilesBrowser";
 
 export default async function FilesLibraryPage() {
@@ -11,7 +11,9 @@ export default async function FilesLibraryPage() {
         redirect('/auth/login');
     }
 
-    const files: Attachment[] = await getAllAttachmentsFromCookie(cookie);
-
-    return <FilesBrowser attachments={files} />;
+    return (
+        <Suspense>
+            <FilesBrowser />
+        </Suspense>
+    );
 }

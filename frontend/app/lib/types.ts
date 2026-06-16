@@ -397,6 +397,7 @@ export type Attachment = {
     size?: number;
     uploadedBy?: number;
     uploadedByName?: string;
+    tags?: Tag[];
     createdAt: string;
     updatedAt: string;
 };
@@ -408,6 +409,27 @@ export type CreateAttachmentPayload = {
     url: string;
     contentType?: string;
     size?: number;
+};
+
+export type FacetCount = {
+    key: string;
+    count: number;
+};
+
+export type AttachmentsPageParams = PageParams & {
+    types?: string[];    // filter by owning entity type
+    kinds?: string[];    // filter by derived file kind
+    tagIds?: number[];   // filter by attached tag
+    orphaned?: boolean;  // only files whose owning record is gone
+};
+
+export type AttachmentFacets = {
+    sources: FacetCount[];
+    kinds: FacetCount[];
+    tags: FacetCount[];
+    orphaned: number;
+    total: number;
+    totalSize: number;
 };
 
 export type UploadedFile = {

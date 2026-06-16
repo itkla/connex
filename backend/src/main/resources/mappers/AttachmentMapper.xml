@@ -20,15 +20,20 @@
     </association>
   </resultMap>
 
+  <resultMap id="AttachmentWithTagsResult" type="Attachment" extends="AttachmentResult">
+    <collection property="tags" ofType="Tag" column="id"
+      select="ooo.klae.connex.backend.mappers.TagMapper.getTagsByAttachmentId"/>
+  </resultMap>
+
   <sql id="attachmentColumns">
     a.id, a.entity_type, a.entity_id, a.file_name, a.url, a.content_type, a.size,
     a.uploaded_by_id, a.created_at, a.updated_at, u.display_name AS uploaded_by_name
   </sql>
 
-  <select id="getByEntity" resultMap="AttachmentResult">
-    SELECT <include refid="attachmentColumns"/>
-    FROM attachment a
-    LEFT JOIN app_user u ON u.id = a.uploaded_by_id
+  <select id="getByEntity" resultMap="AttachmentWithTagsResult">
+    SELECT <include refid="attachmentColumns"/>,
+      COALESCE(c.name, p.name, d.name, eu.display_name) AS entity_label
+    <include refid="attachJoins"/>
     WHERE a.entity_type = #{entityType} AND a.entity_id = #{entityId}
     ORDER BY a.created_at DESC
   </select>
@@ -45,10 +50,10 @@
     ORDER BY a.created_at DESC
   </select>
 
-  <select id="getById" resultMap="AttachmentResult">
-    SELECT <include refid="attachmentColumns"/>
-    FROM attachment a
-    LEFT JOIN app_user u ON u.id = a.uploaded_by_id
+  <select id="getById" resultMap="AttachmentWithTagsResult">
+    SELECT <include refid="attachmentColumns"/>,
+      COALESCE(c.name, p.name, d.name, eu.display_name) AS entity_label
+    <include refid="attachJoins"/>
     WHERE a.id = #{id}
   </select>
 
@@ -62,6 +67,144 @@
     ORDER BY a.created_at DESC
     LIMIT 10
   </select>
+
+  <sql id="kindExpr">
+    CASE
+      WHEN a.content_type LIKE 'image/%'
+        OR LOWER(SUBSTRING_INDEX(a.file_name, '.', -1)) IN ('png','jpg','jpeg','gif','webp','svg','avif','bmp','ico','heic','heif','tif','tiff') THEN 'image'
+      WHEN a.content_type = 'application/pdf'
+        OR LOWER(SUBSTRING_INDEX(a.file_name, '.', -1)) = 'pdf' THEN 'pdf'
+      WHEN a.content_type LIKE '%spreadsheet%' OR a.content_type = 'text/csv' OR a.content_type = 'application/vnd.ms-excel'
+        OR LOWER(SUBSTRING_INDEX(a.file_name, '.', -1)) IN ('xls','xlsx','csv','tsv','ods') THEN 'spreadsheet'
+      WHEN a.content_type LIKE '%presentation%' OR a.content_type = 'application/vnd.ms-powerpoint'
+        OR LOWER(SUBSTRING_INDEX(a.file_name, '.', -1)) IN ('ppt','pptx','odp','key') THEN 'presentation'
+      WHEN a.content_type LIKE 'audio/%' OR a.content_type LIKE 'video/%'
+        OR LOWER(SUBSTRING_INDEX(a.file_name, '.', -1)) IN ('mp3','wav','ogg','flac','m4a','aac','mp4','mov','webm','avi','mkv','m4v') THEN 'media'
+      WHEN a.content_type LIKE '%zip%' OR a.content_type LIKE '%compressed%' OR a.content_type LIKE '%x-7z%'
+        OR a.content_type LIKE '%x-rar%' OR a.content_type LIKE '%x-tar%' OR a.content_type LIKE '%gzip%' OR a.content_type LIKE '%x-bzip%'
+        OR LOWER(SUBSTRING_INDEX(a.file_name, '.', -1)) IN ('zip','rar','7z','tar','gz','tgz','bz2','xz') THEN 'archive'
+      WHEN a.content_type = 'application/json' OR a.content_type = 'application/xml' OR a.content_type = 'text/html'
+        OR a.content_type LIKE '%javascript%'
+        OR LOWER(SUBSTRING_INDEX(a.file_name, '.', -1)) IN ('js','jsx','ts','tsx','json','html','htm','css','scss','py','java','go','rb','rs','php','sh','yml','yaml','xml','sql','c','cpp','cs','kt','swift','toml') THEN 'code'
+      WHEN a.content_type LIKE '%word%' OR a.content_type LIKE '%opendocument.text%' OR a.content_type = 'application/rtf'
+        OR a.content_type LIKE 'text/%'
+        OR LOWER(SUBSTRING_INDEX(a.file_name, '.', -1)) IN ('doc','docx','odt','rtf','txt','md','markdown','pages') THEN 'document'
+      ELSE 'other'
+    END
+  </sql>
+
+  <sql id="attachJoins">
+    FROM attachment a
+    LEFT JOIN app_user u  ON u.id  = a.uploaded_by_id
+    LEFT JOIN company  c  ON a.entity_type = 'company' AND c.id  = a.entity_id
+    LEFT JOIN person   p  ON a.entity_type = 'person'  AND p.id  = a.entity_id
+    LEFT JOIN deal     d  ON a.entity_type = 'deal'    AND d.id  = a.entity_id
+    LEFT JOIN app_user eu ON a.entity_type = 'user'    AND eu.id = a.entity_id
+  </sql>
+
+  <sql id="attachPageWhere">
+    <where>
+      <if test="query != null">
+        AND (a.file_name LIKE #{query} OR a.content_type LIKE #{query}
+          OR COALESCE(c.name, p.name, d.name, eu.display_name) LIKE #{query}
+          OR u.display_name LIKE #{query})
+      </if>
+      <if test="types != null and types.size() > 0">
+        AND a.entity_type IN <foreach item="ty" collection="types" open="(" separator="," close=")">#{ty}</foreach>
+      </if>
+      <if test="kinds != null and kinds.size() > 0">
+        AND (<include refid="kindExpr"/>) IN <foreach item="kd" collection="kinds" open="(" separator="," close=")">#{kd}</foreach>
+      </if>
+      <if test="tagIds != null and tagIds.size() > 0">
+        AND EXISTS (
+          SELECT 1 FROM attachment_tag att
+          WHERE att.attachment_id = a.id
+          AND att.tag_id IN <foreach item="tg" collection="tagIds" open="(" separator="," close=")">#{tg}</foreach>
+        )
+      </if>
+      <if test="orphaned != null and orphaned">
+        AND COALESCE(c.name, p.name, d.name, eu.display_name) IS NULL
+      </if>
+    </where>
+  </sql>
+
+  <sql id="attachPageOrderBy">
+    ORDER BY
+    <choose>
+      <when test="sort == 'oldest'">a.created_at ASC</when>
+      <when test="sort == 'name'">a.file_name ASC</when>
+      <when test="sort == 'largest'">a.size DESC</when>
+      <otherwise>a.created_at DESC</otherwise>
+    </choose>
+  </sql>
+
+  <select id="getPage" resultMap="AttachmentWithTagsResult">
+    SELECT <include refid="attachmentColumns"/>,
+      COALESCE(c.name, p.name, d.name, eu.display_name) AS entity_label
+    <include refid="attachJoins"/>
+    <include refid="attachPageWhere"/>
+    <include refid="attachPageOrderBy"/>
+    LIMIT #{limit} OFFSET #{offset}
+  </select>
+
+  <select id="countPage" resultType="long">
+    SELECT COUNT(*)
+    <include refid="attachJoins"/>
+    <include refid="attachPageWhere"/>
+  </select>
+
+  <select id="countsBySource" resultType="ooo.klae.connex.backend.dto.FacetCount">
+    SELECT a.entity_type AS `key`, COUNT(*) AS count
+    FROM attachment a
+    GROUP BY a.entity_type
+  </select>
+
+  <select id="countsByKind" resultType="ooo.klae.connex.backend.dto.FacetCount">
+    SELECT <include refid="kindExpr"/> AS `key`, COUNT(*) AS count
+    FROM attachment a
+    GROUP BY `key`
+  </select>
+
+  <select id="countsByTag" resultType="ooo.klae.connex.backend.dto.FacetCount">
+    SELECT att.tag_id AS `key`, COUNT(*) AS count
+    FROM attachment_tag att
+    GROUP BY att.tag_id
+  </select>
+
+  <select id="countOrphaned" resultType="long">
+    SELECT COUNT(*)
+    <include refid="attachJoins"/>
+    WHERE COALESCE(c.name, p.name, d.name, eu.display_name) IS NULL
+  </select>
+
+  <select id="totalCount" resultType="long">
+    SELECT COUNT(*) FROM attachment a
+  </select>
+
+  <select id="totalSize" resultType="long">
+    SELECT COALESCE(SUM(a.size), 0) FROM attachment a
+  </select>
+
+  <insert id="addTag">
+    INSERT IGNORE INTO attachment_tag (attachment_id, tag_id)
+    VALUES (#{attachmentId}, #{tagId})
+  </insert>
+
+  <delete id="removeTag">
+    DELETE FROM attachment_tag
+    WHERE attachment_id = #{attachmentId} AND tag_id = #{tagId}
+  </delete>
+
+  <delete id="clearTags">
+    DELETE FROM attachment_tag WHERE attachment_id = #{attachmentId}
+  </delete>
+
+  <insert id="insertTags">
+    INSERT IGNORE INTO attachment_tag (attachment_id, tag_id) VALUES
+    <foreach collection="tagIds" item="tagId" separator=",">
+      (#{attachmentId}, #{tagId})
+    </foreach>
+  </insert>
 
   <insert id="insert" useGeneratedKeys="true" keyProperty="id">
     INSERT INTO attachment (entity_type, entity_id, file_name, url, content_type, size, uploaded_by_id)

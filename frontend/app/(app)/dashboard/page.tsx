@@ -11,6 +11,8 @@ import {
 
 import {
     getActivitiesFromCookie,
+    getAttachmentFacets,
+    getAttachmentsPage,
     getCompaniesFromCookie,
     getContactsFromCookie,
     getCurrentUserFromCookie,
@@ -20,12 +22,13 @@ import {
     getTasksFromCookie,
     getUsers,
 } from '@/app/lib/api';
-import type { User } from '@/app/lib/types';
+import type { Attachment, AttachmentFacets, Page, User } from '@/app/lib/types';
 import { timeOf } from '@/app/lib/utils';
 
 import Greeting from '@/app/components/dashboard/Greeting';
 import OverviewCard from '@/app/components/dashboard/OverviewCard';
 import PipelineChart from '@/app/components/dashboard/PipelineChart';
+import RecentFiles from '@/app/components/dashboard/RecentFiles';
 import Rise from '@/app/components/dashboard/Rise';
 import SectionHeader from '@/app/components/dashboard/SectionHeader';
 import TaskSummary from '@/app/components/dashboard/TaskSummary';
@@ -45,7 +48,8 @@ export default async function Dashboard() {
     }
 
     const init = { headers: { cookie: cookie ?? '' } } as const;
-    const [companies, contacts, deals, pipelines, tasks, activities, notes, users] =
+    const emptyFacets: AttachmentFacets = { sources: [], kinds: [], tags: [], orphaned: 0, total: 0, totalSize: 0 };
+    const [companies, contacts, deals, pipelines, tasks, activities, notes, users, recentFiles, fileFacets] =
         await Promise.all([
             getCompaniesFromCookie(cookie),
             getContactsFromCookie(cookie),
@@ -55,6 +59,10 @@ export default async function Dashboard() {
             getActivitiesFromCookie(cookie),
             getNotesFromCookie(cookie),
             getUsers(init).catch(() => [] as User[]),
+            getAttachmentsPage({ size: 6, sort: 'newest' }, init).catch(
+                () => ({ items: [], total: 0 }) as Page<Attachment>,
+            ),
+            getAttachmentFacets(init).catch(() => emptyFacets),
         ]);
 
     // TODO: move this to it's own separate component so it can be reused elsewhere
@@ -139,6 +147,27 @@ export default async function Dashboard() {
                         <TaskSummary tasks={tasks} />
                     </Rise>
                 </div>
+
+                <Rise delay={0.33}>
+                    <section>
+                        <SectionHeader
+                            title={t('files')}
+                            action={
+                                <Link
+                                    href="/library/files"
+                                    className="text-xs text-brand hover:text-brand-hover"
+                                >
+                                    {t('viewAll')}
+                                </Link>
+                            }
+                        />
+                        <RecentFiles
+                            files={recentFiles.items}
+                            total={fileFacets.total}
+                            totalSize={fileFacets.totalSize}
+                        />
+                    </section>
+                </Rise>
 
                 <Rise delay={0.36}>
                     <section>

@@ -8,6 +8,8 @@ import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+import java.util.List;
+
 import ooo.klae.connex.backend.beans.Attachment;
 import ooo.klae.connex.backend.beans.User;
 
@@ -52,6 +54,8 @@ public class AttachmentDto {
     private String createdAt;
     private String updatedAt;
 
+    private List<TagDto> tags;
+
     public static AttachmentDto from(Attachment a) {
         if (a == null) return null;
         AttachmentDto dto = new AttachmentDto();
@@ -67,6 +71,7 @@ public class AttachmentDto {
         dto.uploadedByName = a.getUploadedBy() != null ? a.getUploadedBy().getDisplayName() : null;
         dto.createdAt = a.getCreatedAt();
         dto.updatedAt = a.getUpdatedAt();
+        dto.tags = a.getTags() == null ? null : a.getTags().stream().map(TagDto::from).toList();
         return dto;
     }
 

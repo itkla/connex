@@ -689,11 +689,45 @@ export function getAllAttachmentsFromCookie(cookie: string | null) {
 }
 
 /**
+ * Paginated, searchable, filterable slice of every attachment, for the Files library.
+ */
+export function getAttachmentsPage(params: Types.AttachmentsPageParams = {}, init: RequestInit = {}) {
+    return getJson<Types.Page<Types.Attachment>>(`/api/attachments/page${buildQuery(params)}`, init);
+}
+
+/**
+ * Filter facets (counts by source and kind, plus totals) across the whole table.
+ */
+export function getAttachmentFacets(init: RequestInit = {}) {
+    return getJson<Types.AttachmentFacets>(`/api/attachments/facets`, init);
+}
+
+/**
  * Records an attachment after its binary has been stored via the Next.js upload route.
  * @param payload - The attachment metadata (entity, url, file name, etc.)
  */
 export function createAttachment(payload: Types.CreateAttachmentPayload) {
     return postJson<Types.Attachment>(`/api/attachments`, payload);
+}
+
+export function getAttachment(id: number, init: RequestInit = {}) {
+    return getJson<Types.Attachment>(`/api/attachments/${id}`, init);
+}
+
+export function getAttachmentTags(id: number, init: RequestInit = {}) {
+    return getJson<Types.Tag[]>(`/api/attachments/${id}/tags`, init);
+}
+
+export function addAttachmentTag(id: number, tagId: number, init: RequestInit = {}) {
+    return postJson<void>(`/api/attachments/${id}/tags/${tagId}`, {}, init);
+}
+
+export function removeAttachmentTag(id: number, tagId: number, init: RequestInit = {}) {
+    return deleteJson<void>(`/api/attachments/${id}/tags/${tagId}`, init);
+}
+
+export function replaceAttachmentTags(id: number, tagIds: number[], init: RequestInit = {}) {
+    return putJson<Types.Tag[]>(`/api/attachments/${id}/tags`, tagIds, init);
 }
 
 export function deleteAttachment(id: number, init: RequestInit = {}) {

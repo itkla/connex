@@ -21,4 +21,5 @@ public interface TagMapper {
     List<Tag> getTagsByPersonId(int personId);
     List<Tag> getTagsByCompanyId(int companyId);
     List<Tag> getTagsByDealId(int dealId);
+    List<Tag> getTagsByAttachmentId(int attachmentId);
 }

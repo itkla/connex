@@ -10,7 +10,10 @@
     "pipeline": "パイプライン",
     "tasks": "タスク",
     "recentActivity": "最近のアクティビティ",
-    "viewAll": "すべて表示"
+    "viewAll": "すべて表示",
+    "files": "ファイル",
+    "storageUsed": "{count}件のファイル · {size}",
+    "noFiles": "ファイルはまだありません"
   },
   "DashboardGreeting": {
     "workingLate": "遅くまでお疲れさまです、",

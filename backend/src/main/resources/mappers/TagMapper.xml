@@ -64,4 +64,12 @@
     WHERE dt.deal_id = #{dealId}
     ORDER BY t.name
   </select>
+
+  <select id="getTagsByAttachmentId" resultType="Tag">
+    SELECT t.id, t.name, t.color
+    FROM tag t
+    JOIN attachment_tag at ON at.tag_id = t.id
+    WHERE at.attachment_id = #{attachmentId}
+    ORDER BY t.name
+  </select>
 </mapper>

@@ -10,7 +10,10 @@
     "pipeline": "Pipeline",
     "tasks": "Tasks",
     "recentActivity": "Recent activity",
-    "viewAll": "View all"
+    "viewAll": "View all",
+    "files": "Files",
+    "storageUsed": "{count, plural, =1 {# file} other {# files}} · {size}",
+    "noFiles": "No files yet"
   },
   "DashboardGreeting": {
     "workingLate": "Working late,",
