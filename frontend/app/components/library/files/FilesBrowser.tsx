@@ -3,7 +3,7 @@
 /* eslint-disable @next/next/no-img-element */
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { usePathname, useRouter, useSearchParams } from 'next/navigation';
+import { useSearchParams } from 'next/navigation';
 import { useLocale, useTranslations } from 'next-intl';
 import { motion, useReducedMotion } from 'motion/react';
 import {
@@ -65,6 +65,7 @@ import {
     type SourceType,
 } from '@/app/components/library/files/fileMeta';
 
+import { useUrlSync } from '@/app/hooks/useUrlSync';
 import RecordsRenderView from '@/app/components/records/RecordsRenderView';
 import { type ColumnDef } from '@/app/components/records/types';
 import FileActionsMenu from '@/app/components/library/files/FileActionsMenu';
@@ -113,8 +114,6 @@ export default function FilesBrowser() {
     const t = useTranslations('LibraryFiles');
     const locale = useLocale();
     const reduce = useReducedMotion() ?? false;
-    const router = useRouter();
-    const pathname = usePathname();
     const searchParams = useSearchParams();
 
     const [kind, setKind] = useState<FileKind | 'all'>(() => normalizeKind(searchParams.get('kind')));
@@ -176,19 +175,15 @@ export default function FilesBrowser() {
     }, [loadFacets]);
 
     // keep the URL in sync so a filtered view is shareable / deep-linkable
-    useEffect(() => {
-        const params = new URLSearchParams();
-        if (query) params.set('q', query);
-        if (kind !== 'all') params.set('kind', kind);
-        if (source !== 'all') params.set('source', source);
-        if (sort !== 'newest') params.set('sort', sort);
-        if (tagIds.length) params.set('tags', tagIds.join(','));
-        if (orphaned) params.set('orphaned', '1');
-        if (detailFile) params.set('file', String(detailFile.id));
-        const qs = params.toString();
-        router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [query, kind, source, sort, tagIds, orphaned, detailFile]);
+    useUrlSync({
+        q: query || undefined,
+        kind: kind !== 'all' ? kind : undefined,
+        source: source !== 'all' ? source : undefined,
+        sort: sort !== 'newest' ? sort : undefined,
+        tags: tagIds.length ? tagIds.join(',') : undefined,
+        orphaned: orphaned ? '1' : undefined,
+        file: detailFile ? String(detailFile.id) : undefined,
+    });
 
     // selection is scoped to the loaded page; drop it whenever the result set changes
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -639,6 +634,8 @@ export default function FilesBrowser() {
                         entityLabel={t('entityLabel')}
                         selectionActions={selectionActions}
                         loading={loading}
+                        filtersActive={filtersActive}
+                        onClearFilters={clearFilters}
                         pagination={{
                             page,
                             pageSize: size,

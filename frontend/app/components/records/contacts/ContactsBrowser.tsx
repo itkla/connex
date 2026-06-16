@@ -17,6 +17,7 @@ import {
 } from '@heroicons/react/24/outline';
 
 import RecordsRenderView from '@/app/components/records/RecordsRenderView';
+import RecordsSortMenu from '@/app/components/records/RecordsSortMenu';
 import RecordsFilterMenu from '@/app/components/records/RecordsFilterMenu';
 import DeleteRecordDialog from '@/app/components/records/DeleteRecordDialog';
 import { useRecordsBrowser } from '@/app/hooks/useRecordsBrowser';
@@ -398,6 +399,14 @@ export default function ContactsBrowser() {
                     filterState={filterState}
                     onChange={setFilterState}
                 />
+                {displayMode === 'grid' && (
+                    <RecordsSortMenu
+                        columns={columns}
+                        sortKey={sortKey}
+                        sortDirection={sortDirection}
+                        onSortChange={onSortChange}
+                    />
+                )}
                 <div
                     role="group"
                     aria-label={t('displayModeAria')}

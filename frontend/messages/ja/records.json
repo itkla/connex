@@ -13,7 +13,10 @@
     "rowsPerPage": "表示件数",
     "showing": "{total} 件中 {from}–{to} 件",
     "previousPage": "前のページへ",
-    "nextPage": "次のページへ"
+    "nextPage": "次のページへ",
+    "noResults": "現在のフィルターに一致するものがありません。",
+    "clearFilters": "フィルターを解除",
+    "sortBy": "並び替え"
   },
   "RecordsFilterMenu": {
     "filterAria": "フィルター",

@@ -16,9 +16,11 @@ import {
 } from '@heroicons/react/24/outline';
 
 import RecordsRenderView from '@/app/components/records/RecordsRenderView';
+import RecordsSortMenu from '@/app/components/records/RecordsSortMenu';
 import RecordsFilterMenu from '@/app/components/records/RecordsFilterMenu';
 import DeleteRecordDialog from '@/app/components/records/DeleteRecordDialog';
 import { useRecordsBrowser } from '@/app/hooks/useRecordsBrowser';
+import { useRecordsSort } from '@/app/hooks/useRecordsSort';
 import { type ColumnDef, applyRecordFilters } from '@/app/components/records/types';
 import CompanyCard from '@/app/components/records/companies/CompanyCard';
 import CompanyAvatar from '@/app/components/records/companies/CompanyAvatar';
@@ -72,6 +74,7 @@ export default function CompaniesBrowser({ companies }: { companies: Company[] }
         storageKey: 'companies:view',
         searchFields,
     });
+    const { sortKey, sortDirection, onSortChange, sortState } = useRecordsSort();
 
     const [isDeleting, setIsDeleting] = useState(false);
     const [editSheetOpen, setEditSheetOpen] = useState(false);
@@ -400,6 +403,14 @@ export default function CompaniesBrowser({ companies }: { companies: Company[] }
                     filterState={filterState}
                     onChange={setFilterState}
                 />
+                {displayMode === 'grid' && (
+                    <RecordsSortMenu
+                        columns={columns}
+                        sortKey={sortKey}
+                        sortDirection={sortDirection}
+                        onSortChange={onSortChange}
+                    />
+                )}
                 <div
                     role="group"
                     aria-label={t('displayModeAriaLabel')}
@@ -460,6 +471,7 @@ export default function CompaniesBrowser({ companies }: { companies: Company[] }
                 gridClassName="grid grid-cols-1 gap-3"
                 entityLabel={t('entityLabel')}
                 selectionActions={selectionActions}
+                sortState={sortState}
             />
 
             <QuickEditCompanySheet

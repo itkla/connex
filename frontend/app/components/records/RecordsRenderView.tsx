@@ -13,6 +13,7 @@ import {
     TrashIcon,
     XMarkIcon,
 } from '@heroicons/react/24/outline';
+import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import {
     DropdownMenu,
@@ -78,6 +79,10 @@ interface Props<T extends { id: SelectionId; name?: string }> {
         onPageSizeChange: (size: number) => void;
     };
     sortState?: { key: string | null; direction: SortDirection; onSortChange: (key: string) => void };
+    sortOptions?: { key: string; label: string }[];
+    emptyState?: ReactNode;
+    filtersActive?: boolean;
+    onClearFilters?: () => void;
     loading?: boolean;
 }
 
@@ -98,6 +103,10 @@ export default function RecordsRenderView<T extends { id: SelectionId; name?: st
     selectionActions,
     pagination,
     sortState,
+    sortOptions,
+    emptyState,
+    filtersActive = false,
+    onClearFilters,
     loading = false,
 }: Props<T>) {
     const router = useRouter();
@@ -109,14 +118,15 @@ export default function RecordsRenderView<T extends { id: SelectionId; name?: st
     const [page, setPage] = useState(1);
 
     const server = !!pagination;
-    const activeSortKey = server ? sortState?.key ?? null : sortKey;
-    const activeSortDirection = server ? sortState?.direction ?? 'asc' : sortDirection;
+    const controlled = !!sortState;
+    const activeSortKey = controlled ? sortState!.key : sortKey;
+    const activeSortDirection = controlled ? sortState!.direction : sortDirection;
 
     const sortedData = useMemo(() => {
-        if (server || !sortKey) return data;
-        const col = columns.find((c) => c.key === sortKey);
+        if (server || !activeSortKey) return data;
+        const col = columns.find((c) => c.key === activeSortKey);
         if (!col?.getSortValue) return data;
-        const dir = sortDirection === 'asc' ? 1 : -1;
+        const dir = activeSortDirection === 'asc' ? 1 : -1;
         return [...data].sort((a, b) => {
             const av = col.getSortValue!(a);
             const bv = col.getSortValue!(b);
@@ -126,7 +136,7 @@ export default function RecordsRenderView<T extends { id: SelectionId; name?: st
             if (typeof av === 'number' && typeof bv === 'number') return (av - bv) * dir;
             return String(av).localeCompare(String(bv), undefined, { sensitivity: 'base' }) * dir;
         });
-    }, [server, data, columns, sortKey, sortDirection]);
+    }, [server, data, columns, activeSortKey, activeSortDirection]);
 
     const total = server ? pagination!.total : sortedData.length;
     const effectivePageSize = server ? pagination!.pageSize : pageSize;
@@ -142,7 +152,7 @@ export default function RecordsRenderView<T extends { id: SelectionId; name?: st
         else { setPageSize(s); setPage(1); }
     };
     const onSort = (key: string) => {
-        if (server) sortState!.onSortChange(key);
+        if (controlled) sortState!.onSortChange(key);
         else if (sortKey === key) setSortDirection((d) => (d === 'asc' ? 'desc' : 'asc'));
         else { setSortKey(key); setSortDirection('asc'); }
     };
@@ -162,6 +172,43 @@ export default function RecordsRenderView<T extends { id: SelectionId; name?: st
     };
 
     const hasRowActions = !!(onQuickEdit || onDelete);
+
+    const gridSortOptions =
+        sortOptions ?? columns.filter((c) => c.getSortValue).map((c) => ({ key: c.key, label: c.label }));
+    const activeSortOption = gridSortOptions.find((o) => o.key === activeSortKey);
+    const gridSortBar =
+        !controlled && displayMode === 'grid' && gridSortOptions.length > 0 ? (
+            <div className="mb-3 flex justify-end">
+                <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                        <button
+                            type="button"
+                            aria-label={t('sortBy')}
+                            className="inline-flex items-center gap-1.5 rounded-full bg-muted px-3 py-1.5 text-xs font-medium text-muted-foreground ring-1 ring-border transition hover:text-foreground aria-expanded:text-foreground"
+                        >
+                            <ChevronUpDownIcon className="size-3.5" />
+                            <span>{activeSortOption ? `${t('sortBy')}: ${activeSortOption.label}` : t('sortBy')}</span>
+                        </button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end">
+                        {gridSortOptions.map((opt) => {
+                            const active = activeSortKey === opt.key;
+                            return (
+                                <DropdownMenuItem key={opt.key} onSelect={() => onSort(opt.key)}>
+                                    <span className="flex-1">{opt.label}</span>
+                                    {active &&
+                                        (activeSortDirection === 'asc' ? (
+                                            <ChevronUpIcon className="size-4 text-brand-dark" />
+                                        ) : (
+                                            <ChevronDownIcon className="size-4 text-brand-dark" />
+                                        ))}
+                                </DropdownMenuItem>
+                            );
+                        })}
+                    </DropdownMenuContent>
+                </DropdownMenu>
+            </div>
+        ) : null;
 
     const selectionBar = (
         <AnimatePresence>
@@ -250,6 +297,21 @@ export default function RecordsRenderView<T extends { id: SelectionId; name?: st
     );
 
     if (loading && pagedData.length === 0) {
+        if (displayMode === 'grid') {
+            return (
+                <div className={gridClassName} aria-busy>
+                    {Array.from({ length: 8 }).map((_, i) => (
+                        <div key={i} className="overflow-hidden rounded-2xl ring-1 ring-border">
+                            <div className="aspect-[4/3] animate-pulse bg-muted" />
+                            <div className="space-y-2 p-3">
+                                <div className="h-3.5 w-3/4 animate-pulse rounded bg-muted" />
+                                <div className="h-3 w-1/2 animate-pulse rounded bg-muted" />
+                            </div>
+                        </div>
+                    ))}
+                </div>
+            );
+        }
         return (
             <div className="space-y-2 rounded-2xl bg-card p-4 ring-1 ring-border">
                 {Array.from({ length: 6 }).map((_, i) => (
@@ -260,13 +322,28 @@ export default function RecordsRenderView<T extends { id: SelectionId; name?: st
     }
 
     if (pagedData.length === 0) {
+        if (!filtersActive && emptyState !== undefined) {
+            return (
+                <>
+                    {emptyState}
+                    {selectionBar}
+                </>
+            );
+        }
         return (
             <>
                 <div className="rounded-2xl bg-card px-6 py-16 text-center ring-1 ring-border">
                     <div className="mx-auto flex size-12 items-center justify-center rounded-2xl bg-muted text-muted-foreground">
                         <InboxIcon className="size-6" />
                     </div>
-                    <p className="mx-auto mt-4 max-w-sm text-sm font-medium text-muted-foreground">{t('emptyState')}</p>
+                    <p className="mx-auto mt-4 max-w-sm text-sm font-medium text-muted-foreground">
+                        {filtersActive ? t('noResults') : t('emptyState')}
+                    </p>
+                    {filtersActive && onClearFilters && (
+                        <Button variant="outline" className="mt-5" onClick={onClearFilters}>
+                            {t('clearFilters')}
+                        </Button>
+                    )}
                 </div>
                 {selectionBar}
             </>
@@ -276,6 +353,7 @@ export default function RecordsRenderView<T extends { id: SelectionId; name?: st
     if (displayMode === 'grid') {
         return (
             <>
+                {gridSortBar}
                 <div className={cn(gridClassName, loading && 'opacity-60 transition-opacity')} aria-busy={loading}>
                     <AnimatePresence initial={false}>
                         {pagedData.map((item) => (

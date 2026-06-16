@@ -13,7 +13,10 @@
     "rowsPerPage": "Rows per page",
     "showing": "Showing {from}–{to} of {total}",
     "previousPage": "Go to previous page",
-    "nextPage": "Go to next page"
+    "nextPage": "Go to next page",
+    "noResults": "No matches for the current filters.",
+    "clearFilters": "Clear filters",
+    "sortBy": "Sort"
   },
   "RecordsFilterMenu": {
     "filterAria": "Filter",

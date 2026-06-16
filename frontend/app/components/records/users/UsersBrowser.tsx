@@ -8,10 +8,12 @@ import { EyeIcon } from "@heroicons/react/24/solid";
 import { Button } from "@/components/ui/button";
 
 import RecordsRenderView from "@/app/components/records/RecordsRenderView";
+import RecordsSortMenu from "@/app/components/records/RecordsSortMenu";
 import UserAvatar from "@/app/components/records/users/UserAvatar";
 import UserCard from "@/app/components/records/users/UserCard";
 import NewUserDialog from "@/app/components/records/users/NewUserDialog";
 import { useRecordsBrowser } from "@/app/hooks/useRecordsBrowser";
+import { useRecordsSort } from "@/app/hooks/useRecordsSort";
 import { type ColumnDef } from "@/app/components/records/types";
 import { formatDate, formatDateTime } from "@/app/lib/utils";
 import { type User } from "@/app/lib/types";
@@ -36,6 +38,7 @@ export default function UsersBrowser({ users }: { users: User[] }) {
         storageKey: "users:view",
         searchFields,
     });
+    const { sortKey, sortDirection, onSortChange, sortState } = useRecordsSort();
 
     const columns: ColumnDef<User>[] = useMemo(
         () => [
@@ -96,6 +99,14 @@ export default function UsersBrowser({ users }: { users: User[] }) {
             </div>
 
             <div className="flex items-center gap-4">
+                {displayMode === "grid" && (
+                    <RecordsSortMenu
+                        columns={columns}
+                        sortKey={sortKey}
+                        sortDirection={sortDirection}
+                        onSortChange={onSortChange}
+                    />
+                )}
                 <div
                     role="group"
                     aria-label={t("displayModeAria")}
@@ -144,6 +155,7 @@ export default function UsersBrowser({ users }: { users: User[] }) {
                 onSelectedIdsChange={setSelectedIds}
                 entityLabel={t("entityLabel")}
                 selectionActions={selectionActions}
+                sortState={sortState}
             />
         </div>
     );
