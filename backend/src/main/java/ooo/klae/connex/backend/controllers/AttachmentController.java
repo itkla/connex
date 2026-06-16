@@ -34,14 +34,20 @@ public class AttachmentController {
     private final AuthService authService;
 
     /**
-     * GET endpoint to list attachments for a given entity.
+     * GET endpoint to list attachments. With {@code entityType} + {@code entityId}
+     * it scopes to a single record; with neither it returns every attachment across
+     * all entities (used by the Files library), each carrying its resolved
+     * {@code entityLabel} so the client can link back to the owning record.
      */
     @GetMapping
     public List<AttachmentDto> getAttachments(
-        @RequestParam String entityType,
-        @RequestParam int entityId
+        @RequestParam(required = false) String entityType,
+        @RequestParam(required = false) Integer entityId
     ) {
-        return attachmentService.getByEntity(entityType, entityId).stream().map(AttachmentDto::from).toList();
+        List<Attachment> attachments = (entityType != null && entityId != null)
+            ? attachmentService.getByEntity(entityType, entityId)
+            : attachmentService.getAll();
+        return attachments.stream().map(AttachmentDto::from).toList();
     }
 
     /**

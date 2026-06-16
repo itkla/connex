@@ -390,6 +390,7 @@ export type Attachment = {
     id: number;
     entityType: string;
     entityId: number;
+    entityLabel?: string;
     fileName: string;
     url: string;
     contentType?: string;

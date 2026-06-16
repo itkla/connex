@@ -677,6 +677,18 @@ export function getAttachmentsFromCookie(entityType: string, entityId: number, c
 }
 
 /**
+ * Lists every attachment across all entities, each carrying its resolved
+ * {@code entityLabel}. Powers the Files library page.
+ */
+export function getAllAttachments(init: RequestInit = {}) {
+    return getJson<Types.Attachment[]>(`/api/attachments`, init);
+}
+
+export function getAllAttachmentsFromCookie(cookie: string | null) {
+    return safeWithCookie<Types.Attachment>((init) => getAllAttachments(init), cookie);
+}
+
+/**
  * Records an attachment after its binary has been stored via the Next.js upload route.
  * @param payload - The attachment metadata (entity, url, file name, etc.)
  */

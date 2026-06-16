@@ -31,6 +31,10 @@ public class AttachmentService {
         return attachmentMapper.getByEntity(normalizeType(entityType), entityId);
     }
 
+    public List<Attachment> getAll() {
+        return attachmentMapper.getAll();
+    }
+
     public Attachment getById(int id) {
         Attachment attachment = attachmentMapper.getById(id);
         if (attachment == null) throw new ResourceNotFoundException("Attachment not found with id: " + id);

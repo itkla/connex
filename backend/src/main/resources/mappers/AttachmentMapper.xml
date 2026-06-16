@@ -7,6 +7,7 @@
     <id property="id" column="id"/>
     <result property="entityType" column="entity_type"/>
     <result property="entityId" column="entity_id"/>
+    <result property="entityLabel" column="entity_label"/>
     <result property="fileName" column="file_name"/>
     <result property="url" column="url"/>
     <result property="contentType" column="content_type"/>
@@ -29,6 +30,18 @@
     FROM attachment a
     LEFT JOIN app_user u ON u.id = a.uploaded_by_id
     WHERE a.entity_type = #{entityType} AND a.entity_id = #{entityId}
+    ORDER BY a.created_at DESC
+  </select>
+
+  <select id="getAll" resultMap="AttachmentResult">
+    SELECT <include refid="attachmentColumns"/>,
+      COALESCE(c.name, p.name, d.name, eu.display_name) AS entity_label
+    FROM attachment a
+    LEFT JOIN app_user u  ON u.id  = a.uploaded_by_id
+    LEFT JOIN company  c  ON a.entity_type = 'company' AND c.id  = a.entity_id
+    LEFT JOIN person   p  ON a.entity_type = 'person'  AND p.id  = a.entity_id
+    LEFT JOIN deal     d  ON a.entity_type = 'deal'    AND d.id  = a.entity_id
+    LEFT JOIN app_user eu ON a.entity_type = 'user'    AND eu.id = a.entity_id
     ORDER BY a.created_at DESC
   </select>
 

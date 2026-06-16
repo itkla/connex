@@ -11,6 +11,7 @@ import java.util.List;
 
 public interface AttachmentMapper {
     List<Attachment> getByEntity(@Param("entityType") String entityType, @Param("entityId") int entityId);
+    List<Attachment> getAll();
     Attachment getById(int id);
     List<Attachment> search(String query);
     int insert(Attachment attachment);

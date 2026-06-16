@@ -22,6 +22,7 @@ public class Attachment {
     private int id;
     private String entityType;
     private int entityId;
+    private String entityLabel;
     private String fileName;
     private String url;
     private String contentType;
@@ -53,6 +54,14 @@ public class Attachment {
 
     public void setEntityId(int entityId) {
         this.entityId = entityId;
+    }
+
+    public String getEntityLabel() {
+        return entityLabel;
+    }
+
+    public void setEntityLabel(String entityLabel) {
+        this.entityLabel = entityLabel;
     }
 
     public String getFileName() {

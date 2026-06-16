@@ -30,6 +30,8 @@ public class AttachmentDto {
     @NotNull
     private Integer entityId;
 
+    private String entityLabel;
+
     @NotBlank
     @Size(max = 255)
     private String fileName;
@@ -56,6 +58,7 @@ public class AttachmentDto {
         dto.id = a.getId();
         dto.entityType = a.getEntityType();
         dto.entityId = a.getEntityId();
+        dto.entityLabel = a.getEntityLabel();
         dto.fileName = a.getFileName();
         dto.url = a.getUrl();
         dto.contentType = a.getContentType();

@@ -9,6 +9,7 @@ import {
     ChevronDownIcon,
     ChevronUpDownIcon,
     DocumentTextIcon,
+    FolderIcon,
     FunnelIcon,
     HomeIcon,
     TagIcon,
@@ -87,6 +88,7 @@ function useSections(): NavSection[] {
             label: t("sectionLibrary"),
             items: [
                 { label: t("navTags"), href: "/library/tags", icon: TagIcon },
+                { label: t("navFiles"), href: "/library/files", icon: FolderIcon },
             ],
         },
         {
