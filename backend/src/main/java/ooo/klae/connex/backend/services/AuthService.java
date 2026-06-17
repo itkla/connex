@@ -33,6 +33,7 @@ public class AuthService {
     private final UserMapper userMapper;
     private final PasswordEncoder passwordEncoder;
     private final AuthenticationManager authenticationManager;
+    private final AuditService auditService;
     private final SecurityContextRepository securityContextRepository = new HttpSessionSecurityContextRepository();
 
     /**
@@ -41,21 +42,27 @@ public class AuthService {
      * @return
      */
     public User register(RegisterDto request) {
-        if (userMapper.getUserByUsername(request.getUsername()) != null) {
-            throw new DuplicateResourceException("username", "Username is already taken");
-        }
+        try {
+            if (userMapper.getUserByUsername(request.getUsername()) != null) {
+                throw new DuplicateResourceException("username", "Username is already taken");
+            }
 
-        if (userMapper.getUserByEmail(request.getEmail()) != null) {
-            throw new DuplicateResourceException("email", "Email is already registered");
-        }
+            if (userMapper.getUserByEmail(request.getEmail()) != null) {
+                throw new DuplicateResourceException("email", "Email is already registered");
+            }
 
-        User user = new User();
-        user.setUsername(request.getUsername());
-        user.setDisplayName(request.getDisplayName());
-        user.setEmail(request.getEmail());
-        user.setPasswordHash(passwordEncoder.encode(request.getPassword()));
-        userMapper.insert(user);
-        return user;
+            User user = new User();
+            user.setUsername(request.getUsername());
+            user.setDisplayName(request.getDisplayName());
+            user.setEmail(request.getEmail());
+            user.setPasswordHash(passwordEncoder.encode(request.getPassword()));
+            userMapper.insert(user);
+            auditService.record("auth.register", "user", user.getId(), user.getDisplayName(), "User registered", null);
+            return user;
+        } catch (Exception e) {
+            auditService.record("auth.register", "user", null, null, "Failed to register user", e.getMessage());
+            throw e;
+        }
     }
 
     /**
@@ -81,6 +88,8 @@ public class AuthService {
         ));
         SecurityContextHolder.setContext(context);
         securityContextRepository.saveContext(context, httpRequest, httpResponse);
+        auditService.record("auth.login", "user", refreshedUser.getId(), refreshedUser.getDisplayName(),
+                refreshedUser.getDisplayName() + " logged in", null);
         return refreshedUser;
     }
 
@@ -90,7 +99,9 @@ public class AuthService {
      */
     public User getCurrentUser() {
         Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
-        if (authentication == null || !authentication.isAuthenticated() || !(authentication.getPrincipal() instanceof User principal)) {
+        if (authentication == null || !authentication.isAuthenticated()
+                || !(authentication.getPrincipal() instanceof User principal)) {
+            auditService.record("auth.getCurrentUser", "user", null, null, "Unauthorized access attempt", null);
             throw new ResourceNotFoundException("Not authenticated");
         }
 
@@ -98,6 +109,7 @@ public class AuthService {
         // reduntant if the user is not updated; just returns the same value
         User fresh = userMapper.getUserById(principal.getId());
         if (fresh == null) {
+            // auditService.record("auth.getCurrentUser", "user", null, null, "User not found", null);
             throw new ResourceNotFoundException("Not authenticated");
         }
         return fresh;

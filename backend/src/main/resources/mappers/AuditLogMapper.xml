@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="ooo.klae.connex.backend.mappers.AuditLogMapper">
+
+  <resultMap id="AuditLogResult" type="AuditLog">
+    <id property="id" column="id"/>
+    <result property="action" column="action"/>
+    <result property="entityType" column="entity_type"/>
+    <result property="entityId" column="entity_id"/>
+    <result property="actorId" column="actor_id"/>
+    <result property="actorLabel" column="actor_label"/>
+    <result property="targetLabel" column="target_label"/>
+    <result property="outcome" column="outcome"/>
+    <result property="summary" column="summary"/>
+    <result property="changes" column="changes"/>
+    <result property="context" column="context"/>
+    <result property="ipAddress" column="ip_address"/>
+    <result property="userAgent" column="user_agent"/>
+    <result property="sessionId" column="session_id"/>
+    <result property="requestId" column="request_id"/>
+    <result property="createdAt" column="created_at"/>
+    <result property="currentActorLabel" column="current_actor_label"/>
+  </resultMap>
+
+  <sql id="auditColumns">
+    al.id, al.action, al.entity_type, al.entity_id, al.actor_id, al.actor_label,
+    al.target_label, al.outcome, al.summary, al.changes, al.context, al.ip_address,
+    al.user_agent, al.session_id, al.request_id, al.created_at,
+    u.display_name AS current_actor_label
+  </sql>
+
+  <insert id="insert" useGeneratedKeys="true" keyProperty="id">
+    INSERT INTO audit_log
+      (action, entity_type, entity_id, actor_id, actor_label, target_label,
+       outcome, summary, changes, context, ip_address, user_agent, session_id, request_id)
+    VALUES
+      (#{action}, #{entityType}, #{entityId}, #{actorId}, #{actorLabel}, #{targetLabel},
+       #{outcome}, #{summary}, #{changes}, #{context}, #{ipAddress}, #{userAgent}, #{sessionId}, #{requestId})
+  </insert>
+
+  <select id="findRecent" resultMap="AuditLogResult">
+    SELECT <include refid="auditColumns"/>
+    FROM audit_log al
+    LEFT JOIN app_user u ON u.id = al.actor_id
+    ORDER BY al.created_at DESC, al.id DESC
+    LIMIT #{limit}
+  </select>
+
+  <select id="findByEntity" resultMap="AuditLogResult">
+    SELECT <include refid="auditColumns"/>
+    FROM audit_log al
+    LEFT JOIN app_user u ON u.id = al.actor_id
+    WHERE al.entity_type = #{entityType} AND al.entity_id = #{entityId}
+    ORDER BY al.created_at DESC, al.id DESC
+    LIMIT #{limit}
+  </select>
+
+</mapper>

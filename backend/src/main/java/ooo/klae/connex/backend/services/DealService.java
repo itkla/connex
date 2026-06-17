@@ -39,6 +39,7 @@ public class DealService {
     private final ActivityMapper activityMapper;
     private final NoteMapper noteMapper;
     private final TaskMapper taskMapper;
+    private final AuditService auditService;
 
     private static final DateTimeFormatter MYSQL_DATETIME = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
@@ -132,6 +133,7 @@ public class DealService {
     public Deal create(Deal deal) {
         reconcileClosedAt(deal);
         dealMapper.insert(deal);
+        auditService.record("deal.create", "deal", deal.getId(), deal.getName(), "Deal created", null);
         return deal;
     }
 
@@ -146,6 +148,7 @@ public class DealService {
         deal.setId(id);
         reconcileClosedAt(deal);
         dealMapper.update(deal);
+        auditService.record("deal.update", "deal", id, deal.getName(), "Deal updated", null);
         return deal;
     }
 
@@ -156,6 +159,7 @@ public class DealService {
     public void delete(int id) {
         if (dealMapper.getDealById(id) == null) throw new ResourceNotFoundException("Deal not found with id: " + id);
         dealMapper.delete(id);
+        auditService.record("deal.delete", "deal", id, null, "Deal deleted", null);
     }
 
     /**
@@ -177,6 +181,7 @@ public class DealService {
         if (dealMapper.getDealById(dealId) == null) throw new ResourceNotFoundException("Deal not found with id: " + dealId);
         if (tagMapper.getTagById(tagId) == null) throw new ResourceNotFoundException("Tag not found with id: " + tagId);
         dealMapper.addTag(dealId, tagId);
+        auditService.record("deal.addTag", "deal", dealId, null, "Tag added to deal", null);
     }
 
     /**
@@ -187,6 +192,7 @@ public class DealService {
     public void removeTag(int dealId, int tagId) {
         if (dealMapper.getDealById(dealId) == null) throw new ResourceNotFoundException("Deal not found with id: " + dealId);
         dealMapper.removeTag(dealId, tagId);
+        auditService.record("deal.removeTag", "deal", dealId, null, "Tag removed from deal", null);
     }
 
     /**
@@ -209,6 +215,7 @@ public class DealService {
         if (dealMapper.getDealById(dealId) == null) throw new ResourceNotFoundException("Deal not found with id: " + dealId);
         if (personMapper.getPersonById(personId) == null) throw new ResourceNotFoundException("Person not found with id: " + personId);
         dealMapper.addPerson(dealId, personId, role);
+        auditService.record("deal.addPerson", "deal", dealId, null, "Person added to deal", null);
     }
 
     /**
@@ -221,6 +228,7 @@ public class DealService {
         if (dealMapper.getDealById(dealId) == null) throw new ResourceNotFoundException("Deal not found with id: " + dealId);
         if (dealMapper.updatePersonRole(dealId, personId, role) == 0)
             throw new ResourceNotFoundException("Person " + personId + " is not associated with deal " + dealId);
+        auditService.record("deal.updatePersonRole", "deal", dealId, null, "Person role updated for deal", null);
     }
 
     /**
@@ -231,6 +239,7 @@ public class DealService {
     public void removePerson(int dealId, int personId) {
         if (dealMapper.getDealById(dealId) == null) throw new ResourceNotFoundException("Deal not found with id: " + dealId);
         dealMapper.removePerson(dealId, personId);
+        auditService.record("deal.removePerson", "deal", dealId, null, "Person removed from deal", null);
     }
 
     /**
@@ -244,6 +253,7 @@ public class DealService {
         if (dealMapper.getDealById(dealId) == null) throw new ResourceNotFoundException("Deal not found with id: " + dealId);
         dealMapper.clearTags(dealId);
         if (tagIds != null && !tagIds.isEmpty()) dealMapper.insertTags(dealId, tagIds);
+        auditService.record("deal.replaceTags", "deal", dealId, null, "Tags replaced for deal", null);
         return tagMapper.getTagsByDealId(dealId);
     }
 
@@ -258,6 +268,7 @@ public class DealService {
         if (dealMapper.getDealById(dealId) == null) throw new ResourceNotFoundException("Deal not found with id: " + dealId);
         dealMapper.clearPeople(dealId);
         if (people != null && !people.isEmpty()) dealMapper.insertPeople(dealId, people);
+        auditService.record("deal.replacePeople", "deal", dealId, null, "People replaced for deal", null);
         return dealMapper.getDealPeopleByDealId(dealId);
     }
 

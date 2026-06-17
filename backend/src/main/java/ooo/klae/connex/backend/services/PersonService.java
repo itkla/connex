@@ -35,6 +35,7 @@ public class PersonService {
     private final ActivityMapper activityMapper;
     private final NoteMapper noteMapper;
     private final TaskMapper taskMapper;
+    private final AuditService auditService;
 
     /**
      * Retrieves all {@code Person} records.
@@ -95,6 +96,7 @@ public class PersonService {
      */
     public Person create(Person person) {
         personMapper.insert(person);
+        auditService.record("person.create", "person", person.getId(), person.getName(), "Person created", null);
         return person;
     }
 
@@ -108,6 +110,7 @@ public class PersonService {
         if (personMapper.getPersonById(id) == null) throw new ResourceNotFoundException("Person not found with id: " + id);
         person.setId(id);
         personMapper.update(person);
+        auditService.record("person.update", "person", id, person.getName(), "Person updated", null);
         return person;
     }
 
@@ -118,6 +121,7 @@ public class PersonService {
     public void delete(int id) {
         if (personMapper.getPersonById(id) == null) throw new ResourceNotFoundException("Person not found with id: " + id);
         personMapper.delete(id);
+        auditService.record("person.delete", "person", id, null, "Person deleted", null);
     }
 
     /**
@@ -139,6 +143,7 @@ public class PersonService {
         if (personMapper.getPersonById(personId) == null) throw new ResourceNotFoundException("Person not found with id: " + personId);
         if (tagMapper.getTagById(tagId) == null) throw new ResourceNotFoundException("Tag not found with id: " + tagId);
         personMapper.addTag(personId, tagId);
+        auditService.record("person.addTag", "person", personId, null, "Tag added to person", null);
     }
 
     /**
@@ -149,6 +154,7 @@ public class PersonService {
     public void removeTag(int personId, int tagId) {
         if (personMapper.getPersonById(personId) == null) throw new ResourceNotFoundException("Person not found with id: " + personId);
         personMapper.removeTag(personId, tagId);
+        auditService.record("person.removeTag", "person", personId, null, "Tag removed from person", null);
     }
 
     /**
@@ -162,6 +168,7 @@ public class PersonService {
         if (personMapper.getPersonById(personId) == null) throw new ResourceNotFoundException("Person not found with id: " + personId);
         personMapper.clearTags(personId);
         if (tagIds != null && !tagIds.isEmpty()) personMapper.insertTags(personId, tagIds);
+        auditService.record("person.replaceTags", "person", personId, null, "Tags replaced for person", null);
         return tagMapper.getTagsByPersonId(personId);
     }
 

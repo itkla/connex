@@ -28,6 +28,7 @@ public class TagService {
     private final DealMapper dealMapper;
     private final PersonMapper personMapper;
     private final CompanyMapper companyMapper;
+    private final AuditService auditService;
 
     /**
      * Retrieves all {@code Tag} records.
@@ -55,6 +56,7 @@ public class TagService {
      */
     public Tag create(Tag tag) {
         tagMapper.insert(tag);
+        auditService.record("tag.create", "tag", tag.getId(), tag.getName(), "Tag created", null);
         return tag;
     }
 
@@ -68,6 +70,7 @@ public class TagService {
         if (tagMapper.getTagById(id) == null) throw new ResourceNotFoundException("Tag not found with id: " + id);
         tag.setId(id);
         tagMapper.update(tag);
+        auditService.record("tag.update", "tag", id, tag.getName(), "Tag updated", null);
         return tag;
     }
 
@@ -78,6 +81,7 @@ public class TagService {
     public void delete(int id) {
         if (tagMapper.getTagById(id) == null) throw new ResourceNotFoundException("Tag not found with id: " + id);
         tagMapper.delete(id);
+        auditService.record("tag.delete", "tag", id, null, "Tag deleted", null);
     }
 
     /**

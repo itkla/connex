@@ -41,6 +41,7 @@ public class SearchService {
     private final TaskMapper taskMapper;
     private final UserMapper userMapper;
     private final AttachmentMapper attachmentMapper;
+    private final AuditService auditService;
 
     public SearchResultsDto search(String query) {
         if (query == null || query.isBlank()) {
@@ -50,7 +51,7 @@ public class SearchService {
 
         // search may contain special characters, so we need to escape them
         String pattern = "%" + escapeLike(query.trim()) + "%";
-
+        auditService.record("search", "search", null, query, "Search performed", null);
         return new SearchResultsDto(
             companyMapper.search(pattern).stream().map(CompanyDto::from).toList(),
             personMapper.search(pattern).stream().map(PersonDto::from).toList(),

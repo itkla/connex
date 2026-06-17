@@ -14,6 +14,7 @@ import ooo.klae.connex.backend.beans.Tag;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 
 import java.util.List;
+import java.util.Set;
 
 import lombok.RequiredArgsConstructor;
 
@@ -30,6 +31,10 @@ public class CompanyService {
     private final TagMapper tagMapper;
     private final PersonMapper personMapper;
     private final DealMapper dealMapper;
+    private final AuditService auditService;
+
+    private static final Set<String> AUDIT_FIELDS =
+        Set.of("name", "website", "industry", "phone", "address", "logoUrl");
 
     /**
      * Retrieves all {@code Company} records.
@@ -65,6 +70,9 @@ public class CompanyService {
      */
     public Company createCompany(Company company) {
         companyMapper.insert(company);
+        auditService.record("company.create", "company", company.getId(), company.getName(),
+            "Created company " + company.getName(),
+            auditService.diff(null, company, AUDIT_FIELDS));
         return company;
     }
 
@@ -76,9 +84,13 @@ public class CompanyService {
      * @return
      */
     public Company updateCompany(int id, Company company) {
-        if (companyMapper.getCompanyById(id) == null) throw new ResourceNotFoundException("Company not found with id: " + id);
+        Company before = companyMapper.getCompanyById(id);
+        if (before == null) throw new ResourceNotFoundException("Company not found with id: " + id);
         company.setId(id);
         companyMapper.update(company);
+        auditService.record("company.update", "company", id, company.getName(),
+            "Updated company " + company.getName(),
+            auditService.diff(before, company, AUDIT_FIELDS));
         return company;
     }
 
@@ -89,8 +101,12 @@ public class CompanyService {
      * @param id
      */
     public void deleteCompany(int id) {
-        if (companyMapper.getCompanyById(id) == null) throw new ResourceNotFoundException("Company not found with id: " + id);
+        Company before = companyMapper.getCompanyById(id);
+        if (before == null) throw new ResourceNotFoundException("Company not found with id: " + id);
         companyMapper.delete(id);
+        auditService.record("company.delete", "company", id, before.getName(),
+            "Deleted company " + before.getName(),
+            auditService.diff(before, null, AUDIT_FIELDS));
     }
 
     /**
@@ -112,6 +128,7 @@ public class CompanyService {
         if (companyMapper.getCompanyById(companyId) == null) throw new ResourceNotFoundException("Company not found with id: " + companyId);
         if (tagMapper.getTagById(tagId) == null) throw new ResourceNotFoundException("Tag not found with id: " + tagId);
         companyMapper.addTag(companyId, tagId);
+        auditService.record("company.addTag", "company", companyId, null, "Tag added to company", null);
     }
 
     /**
@@ -122,6 +139,7 @@ public class CompanyService {
     public void removeTag(int companyId, int tagId) {
         if (companyMapper.getCompanyById(companyId) == null) throw new ResourceNotFoundException("Company not found with id: " + companyId);
         companyMapper.removeTag(companyId, tagId);
+        auditService.record("company.removeTag", "company", companyId, null, "Tag removed from company", null);
     }
 
     /**
@@ -135,6 +153,7 @@ public class CompanyService {
         if (companyMapper.getCompanyById(companyId) == null) throw new ResourceNotFoundException("Company not found with id: " + companyId);
         companyMapper.clearTags(companyId);
         if (tagIds != null && !tagIds.isEmpty()) companyMapper.insertTags(companyId, tagIds);
+        auditService.record("company.replaceTags", "company", companyId, null, "Tags replaced for company", null);
         return tagMapper.getTagsByCompanyId(companyId);
     }
 
