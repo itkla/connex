@@ -13,7 +13,7 @@ function UCNodeImpl({ data }: NodeProps<UCNodeType>) {
             <div className="flex h-24 w-24 items-center justify-center rounded-3xl bg-brand text-white shadow-lg ring-4 ring-brand/20">
                 <BuildingOffice2Icon className="size-12" />
             </div>
-            <span className="pointer-events-none absolute left-1/2 top-full mt-1.5 -translate-x-1/2 max-w-[12rem] truncate text-center text-sm font-semibold text-foreground">
+            <span className="map-node-label pointer-events-none absolute left-1/2 top-full mt-1.5 -translate-x-1/2 max-w-[12rem] truncate text-center text-sm font-semibold text-foreground">
                 {data.label}
             </span>
         </div>

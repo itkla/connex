@@ -11,7 +11,7 @@ import { Button } from '@/components/ui/button';
 import type { CompanyNode as CompanyNodeType } from './graph/types';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import NodeDot from '@/app/components/map/NodeDot';
-import { useIsDotTier } from '@/app/hooks/useNodeTier';
+import { useDotEnabled } from '@/app/hooks/useNodeTier';
 
 type Person = { id: number; src?: string; label: string };
 
@@ -26,30 +26,30 @@ function Stat({ label, value }: { label: string; value: number }) {
 
 function CompanyNodeImpl({ id, data }: NodeProps<CompanyNodeType>) {
     const { updateNodeData } = useReactFlow();
-    const { company, metrics, expanded, revealed } = data;
-    const isDot = useIsDotTier();
+    const { company, metrics, expanded, hovered } = data;
+    const dotEnabled = useDotEnabled();
     const toggle = () => updateNodeData(id, { expanded: !expanded });
 
-    if (isDot && !expanded && !revealed) {
+    if (dotEnabled && !expanded && !hovered) {
         return (
             <NodeDot
                 shape="square"
                 className="bg-muted-foreground/50"
                 title={company.name}
-                onClick={() => updateNodeData(id, { revealed: true })}
+                onClick={toggle}
             />
         );
     }
 
     if (!expanded) {
         return (
-            <div className="relative flex flex-col items-center">
+            <div className="map-node-bloom relative flex flex-col items-center">
                 <Handle type="target" position={Position.Top} isConnectable={false} className="!opacity-0" />
                 <Handle type="source" position={Position.Bottom} isConnectable={false} className="!opacity-0" />
                 <button type="button" onClick={toggle} className="rounded-2xl transition-transform hover:scale-110" title={company.name}>
                     <CompanyAvatar company={company} type="large" />
                 </button>
-                <span className="pointer-events-none absolute left-1/2 top-full mt-1 -translate-x-1/2 max-w-[9rem] truncate text-center text-xs font-medium text-foreground">
+                <span className="map-node-label pointer-events-none absolute left-1/2 top-full mt-1 -translate-x-1/2 max-w-[9rem] truncate text-center text-xs font-medium text-foreground">
                     {company.name}
                 </span>
             </div>

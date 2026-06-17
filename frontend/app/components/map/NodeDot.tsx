@@ -28,6 +28,9 @@ export default function NodeDot({
                     className,
                 )}
             />
+            <span className="map-node-label pointer-events-none absolute left-1/2 top-full mt-1 -translate-x-1/2 max-w-[7rem] truncate text-center text-[10px] font-medium text-foreground">
+                {title}
+            </span>
         </div>
     );
 }

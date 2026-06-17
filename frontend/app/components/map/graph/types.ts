@@ -14,7 +14,6 @@ export type UCNodeData = {
 export type UserNodeData = {
     kind: 'user';
     user: User;
-    revealed?: boolean; // shown as a full avatar despite the dot tier (clicked open)
 };
 
 export type CompanyNodeData = {
@@ -22,7 +21,7 @@ export type CompanyNodeData = {
     company: Company;
     metrics: CompanyMetrics;
     expanded: boolean;
-    revealed?: boolean; // shown as a logo despite the dot tier (clicked open)
+    hovered?: boolean; // transient: this node's tree is hovered, so bloom to a logo
 };
 
 export type ContactNodeData = {
@@ -30,7 +29,7 @@ export type ContactNodeData = {
     contact: Contact;
     hasActivity: boolean;
     expanded: boolean;
-    revealed?: boolean; // shown as a pfp despite the dot tier (clicked open)
+    hovered?: boolean; // transient: this node's tree is hovered, so bloom to a pfp
 };
 
 export type UCNode = Node<UCNodeData, 'uc'>;

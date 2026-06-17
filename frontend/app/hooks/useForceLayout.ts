@@ -65,7 +65,7 @@ function commitPositions(
 }
 
 export function useForceLayout(focusId?: string) {
-    const { getNodes, getEdges, setNodes, fitView, getNode, setCenter } =
+    const { getNodes, getEdges, setNodes, fitView, setCenter } =
         useReactFlow<AppNode, RelationEdge>();
     const initialized = useNodesInitialized();
 
@@ -178,10 +178,7 @@ export function useForceLayout(focusId?: string) {
             focusFrame = requestAnimationFrame(() => {
                 const sn = focusId ? index.get(focusId) : undefined;
                 if (sn) {
-                    const node = getNode(focusId!);
-                    const w = node?.measured?.width ?? 0;
-                    const h = node?.measured?.height ?? 0;
-                    setCenter((sn.x ?? 0) + w / 2, (sn.y ?? 0) + h / 2, { zoom: 1, duration: SETTLE_MS });
+                    setCenter(sn.x ?? 0, sn.y ?? 0, { zoom: 1, duration: SETTLE_MS });
                 } else {
                     fitView({ padding: 0.2, duration: SETTLE_MS });
                 }
@@ -199,7 +196,7 @@ export function useForceLayout(focusId?: string) {
             sim.stop();
             simRef.current = null;
         };
-    }, [initialized, getNodes, getEdges, setNodes, fitView, getNode, setCenter, focusId]);
+    }, [initialized, getNodes, getEdges, setNodes, fitView, setCenter, focusId]);
 
     const onNodeDragStart = useCallback(
         (_: unknown, node: AppNode) => {

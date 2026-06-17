@@ -199,4 +199,43 @@
   .settle-animate .react-flow__node {
     transition: transform 0.7s cubic-bezier(0.23, 1, 0.32, 1);
   }
+
+  .react-flow__node,
+  .react-flow__edge {
+    transition: opacity 0.25s ease;
+  }
+  .map-dim .react-flow__node,
+  .map-dim .react-flow__edge {
+    opacity: 0.16;
+  }
+  .map-dim .react-flow__node.rf-active,
+  .map-dim .react-flow__edge.rf-active {
+    opacity: 1;
+  }
+
+  @keyframes mapNodeBloom {
+    from {
+      transform: scale(0.2);
+      opacity: 0;
+    }
+    to {
+      transform: scale(1);
+      opacity: 1;
+    }
+  }
+  .map-node-bloom {
+    animation: mapNodeBloom 0.22s cubic-bezier(0.23, 1, 0.32, 1);
+  }
+}
+
+.map-node-label {
+  opacity: var(--label-opacity, 1);
+}
+.react-flow__node.rf-active .map-node-label {
+  opacity: 1;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .map-node-label {
+    transition: opacity 0.15s ease;
+  }
 }

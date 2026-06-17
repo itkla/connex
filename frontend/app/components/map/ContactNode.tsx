@@ -10,12 +10,12 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import NodeDot from '@/app/components/map/NodeDot';
-import { useIsDotTier } from '@/app/hooks/useNodeTier';
+import { useDotEnabled } from '@/app/hooks/useNodeTier';
 
 function ContactNodeImpl({ id, data }: NodeProps<ContactNodeType>) {
     const { updateNodeData } = useReactFlow();
-    const { contact, hasActivity, expanded, revealed } = data;
-    const isDot = useIsDotTier();
+    const { contact, hasActivity, expanded, hovered } = data;
+    const dotEnabled = useDotEnabled();
     const toggle = () => updateNodeData(id, { expanded: !expanded });
 
     // TODO: fix the misalignment bug where the image isn't perfectly centered in the ring
@@ -24,13 +24,13 @@ function ContactNodeImpl({ id, data }: NodeProps<ContactNodeType>) {
         hasActivity ? 'border-solid border-emerald-500 dark:border-emerald-400' : 'border-dashed border-border',
     );
 
-    if (isDot && !expanded && !revealed) {
+    if (dotEnabled && !expanded && !hovered) {
         return (
             <NodeDot
                 shape="circle"
                 className={hasActivity ? 'bg-emerald-500 dark:bg-emerald-400' : 'bg-muted-foreground/50'}
                 title={contact.name}
-                onClick={() => updateNodeData(id, { revealed: true })}
+                onClick={toggle}
             />
         );
     }
@@ -106,13 +106,13 @@ function ContactNodeImpl({ id, data }: NodeProps<ContactNodeType>) {
     }
 
     return (
-        <div className="relative flex flex-col items-center">
+        <div className="map-node-bloom relative flex flex-col items-center">
             <Handle type="target" position={Position.Top} isConnectable={false} className="!opacity-0" />
             <Handle type="source" position={Position.Bottom} isConnectable={false} className="!opacity-0" />
             <button type="button" onClick={toggle} className={ring} title={contact.name}>
                 <ContactAvatar contact={contact} type="medium" />
             </button>
-            <span className="pointer-events-none absolute left-1/2 top-full mt-1 -translate-x-1/2 max-w-[8rem] truncate text-center text-[11px] font-medium text-foreground">
+            <span className="map-node-label pointer-events-none absolute left-1/2 top-full mt-1 -translate-x-1/2 max-w-[8rem] truncate text-center text-[11px] font-medium text-foreground">
                 {contact.name}
             </span>
         </div>

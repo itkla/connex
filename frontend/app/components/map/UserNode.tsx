@@ -1,29 +1,13 @@
 'use client';
 
-import { Handle, Position, useReactFlow, type NodeProps } from '@xyflow/react';
+import { Handle, Position, type NodeProps } from '@xyflow/react';
 import { memo } from 'react';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import type { UserNode as UserNodeType } from './graph/types';
-import NodeDot from '@/app/components/map/NodeDot';
-import { useIsDotTier } from '@/app/hooks/useNodeTier';
 
-function UserNodeImpl({ id, data }: NodeProps<UserNodeType>) {
-    const { updateNodeData } = useReactFlow();
-    const { user, revealed } = data;
-    const isDot = useIsDotTier();
+function UserNodeImpl({ data }: NodeProps<UserNodeType>) {
+    const { user } = data;
     const name = user.displayName || user.username;
-
-    if (isDot && !revealed) {
-        return (
-            <NodeDot
-                shape="circle"
-                className="bg-brand"
-                title={name}
-                onClick={() => updateNodeData(id, { revealed: true })}
-            />
-        );
-    }
-
     return (
         <div className="relative flex flex-col items-center">
             <Handle type="target" position={Position.Top} isConnectable={false} className="!opacity-0" />
@@ -34,7 +18,7 @@ function UserNodeImpl({ id, data }: NodeProps<UserNodeType>) {
                     {name.charAt(0).toUpperCase()}
                 </AvatarFallback>
             </Avatar>
-            <span className="pointer-events-none absolute left-1/2 top-full mt-1 -translate-x-1/2 max-w-[8rem] truncate text-center text-[11px] font-medium text-foreground">
+            <span className="map-node-label pointer-events-none absolute left-1/2 top-full mt-1 -translate-x-1/2 max-w-[8rem] truncate text-center text-[11px] font-medium text-foreground">
                 {name}
             </span>
         </div>
