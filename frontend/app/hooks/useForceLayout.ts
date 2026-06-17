@@ -13,7 +13,7 @@ import {
     type SimulationLinkDatum,
 } from 'd3';
 import { useNodesInitialized, useReactFlow } from '@xyflow/react';
-import { useCallback, useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { UC_ID } from '@/app/components/map/graph/buildGraph';
 import { RING_RADIUS } from '@/app/components/map/graph/radialLayout';
 import type { AppNode, RelationEdge } from '@/app/components/map/graph/types';
@@ -38,17 +38,88 @@ const LINK_STRENGTH: Record<NonNullable<SimLink['variant']>, number> = {
     'rel-cc': 0.12,
     'cc-co': 0.6,
 };
+
 const ALPHA_MIN = 0.01;
 const REHEAT_ALPHA = 0.5;
+const MAX_TICKS = 300;
+const EPSILON = 0.5;
+const SETTLE_MS = 700;
+
+function commitPositions(
+    nodes: AppNode[],
+    index: Map<string, SimNode>,
+    dragging: Set<string>,
+): AppNode[] {
+    let changed = false;
+    const next = nodes.map((node) => {
+        if (dragging.has(node.id)) return node;
+        const sn = index.get(node.id);
+        if (!sn) return node;
+        const x = sn.x ?? 0;
+        const y = sn.y ?? 0;
+        if (Math.abs(node.position.x - x) + Math.abs(node.position.y - y) < EPSILON) return node;
+        changed = true;
+        return { ...node, position: { x, y } };
+    });
+    return changed ? next : nodes;
+}
 
 export function useForceLayout(focusId?: string) {
-    const { getNodes, getEdges, setNodes, fitView, getNode, setCenter } = useReactFlow<AppNode, RelationEdge>();
+    const { getNodes, getEdges, setNodes, fitView, getNode, setCenter } =
+        useReactFlow<AppNode, RelationEdge>();
     const initialized = useNodesInitialized();
 
+    const [settling, setSettling] = useState(true);
+
     const draggingRef = useRef<Set<string>>(new Set());
+    const simRef = useRef<Simulation<SimNode, SimLink> | null>(null);
+    const indexRef = useRef<Map<string, SimNode>>(new Map());
     const runningRef = useRef(false);
-    const reheatRef = useRef<(() => void) | null>(null);
-    const fittedRef = useRef(false);
+    const frameRef = useRef(0);
+
+    const startLiveLoop = useCallback(() => {
+        if (runningRef.current) return;
+        const sim = simRef.current;
+        const index = indexRef.current;
+        if (!sim) return;
+        runningRef.current = true;
+
+        const tick = () => {
+            const dragging = draggingRef.current;
+            for (const n of getNodes()) {
+                const sn = index.get(n.id);
+                if (!sn) continue;
+                if (n.id === UC_ID) {
+                    sn.fx = 0;
+                    sn.fy = 0;
+                } else if (dragging.has(n.id)) {
+                    sn.fx = n.position.x;
+                    sn.fy = n.position.y;
+                } else {
+                    sn.fx = null;
+                    sn.fy = null;
+                }
+            }
+
+            sim.tick();
+            setNodes((nodes) => commitPositions(nodes, index, dragging));
+
+            if (sim.alpha() > ALPHA_MIN || dragging.size > 0) {
+                frameRef.current = requestAnimationFrame(tick);
+            } else {
+                runningRef.current = false;
+            }
+        };
+
+        frameRef.current = requestAnimationFrame(tick);
+    }, [getNodes, setNodes]);
+
+    const reheat = useCallback(() => {
+        const sim = simRef.current;
+        if (!sim) return;
+        sim.alpha(REHEAT_ALPHA);
+        startLiveLoop();
+    }, [startLiveLoop]);
 
     useEffect(() => {
         if (!initialized) return;
@@ -85,89 +156,67 @@ export function useForceLayout(focusId?: string) {
             )
             .force('collide', forceCollide<SimNode>(58))
             .alpha(0.6)
+            .alphaDecay(0.05)
             .stop();
 
-        let frame = 0;
+        const uc = index.get(UC_ID);
+        if (uc) {
+            uc.fx = 0;
+            uc.fy = 0;
+        }
 
-        const tick = () => {
-            const dragging = draggingRef.current;
-            const live = getNodes();
-            for (const n of live) {
-                const sn = index.get(n.id);
-                if (!sn) continue;
-                if (n.id === UC_ID) {
-                    sn.fx = 0;
-                    sn.fy = 0;
-                } else if (dragging.has(n.id)) {
-                    sn.fx = n.position.x;
-                    sn.fy = n.position.y;
+        simRef.current = sim;
+        indexRef.current = index;
+
+        let focusFrame = 0;
+        let settleTimer: ReturnType<typeof setTimeout> | undefined;
+
+        const settleFrame = requestAnimationFrame(() => {
+            for (let i = 0; i < MAX_TICKS && sim.alpha() > ALPHA_MIN; i++) sim.tick();
+            setNodes((nodes) => commitPositions(nodes, index, draggingRef.current));
+
+            focusFrame = requestAnimationFrame(() => {
+                const sn = focusId ? index.get(focusId) : undefined;
+                if (sn) {
+                    const node = getNode(focusId!);
+                    const w = node?.measured?.width ?? 0;
+                    const h = node?.measured?.height ?? 0;
+                    setCenter((sn.x ?? 0) + w / 2, (sn.y ?? 0) + h / 2, { zoom: 1, duration: SETTLE_MS });
                 } else {
-                    sn.fx = null;
-                    sn.fy = null;
+                    fitView({ padding: 0.2, duration: SETTLE_MS });
                 }
-            }
+            });
 
-            sim.tick();
-
-            setNodes((nodes) =>
-                nodes.map((node) => {
-                    if (dragging.has(node.id)) return node;
-                    const sn = index.get(node.id);
-                    return sn ? { ...node, position: { x: sn.x ?? 0, y: sn.y ?? 0 } } : node;
-                }),
-            );
-
-            if (sim.alpha() > ALPHA_MIN || dragging.size > 0) {
-                frame = requestAnimationFrame(tick);
-            } else {
-                runningRef.current = false;
-                if (!fittedRef.current) {
-                    fittedRef.current = true;
-                    const focusNode = focusId ? getNode(focusId) : undefined;
-                    if (focusNode) {
-                        const w = focusNode.measured?.width ?? 0;
-                        const h = focusNode.measured?.height ?? 0;
-                        setCenter(focusNode.position.x + w / 2, focusNode.position.y + h / 2, {
-                            zoom: 1,
-                            duration: 700,
-                        });
-                    } else {
-                        fitView({ padding: 0.2, duration: 400 });
-                    }
-                }
-            }
-        };
-
-        const start = () => {
-            if (runningRef.current) return;
-            runningRef.current = true;
-            frame = requestAnimationFrame(tick);
-        };
-
-        reheatRef.current = () => {
-            sim.alpha(REHEAT_ALPHA);
-            start();
-        };
-
-        start();
+            settleTimer = setTimeout(() => setSettling(false), SETTLE_MS + 80);
+        });
 
         return () => {
-            cancelAnimationFrame(frame);
+            cancelAnimationFrame(settleFrame);
+            cancelAnimationFrame(focusFrame);
+            cancelAnimationFrame(frameRef.current);
+            if (settleTimer) clearTimeout(settleTimer);
             runningRef.current = false;
-            reheatRef.current = null;
             sim.stop();
+            simRef.current = null;
         };
     }, [initialized, getNodes, getEdges, setNodes, fitView, getNode, setCenter, focusId]);
 
-    const onNodeDragStart = useCallback((_: unknown, node: AppNode) => {
-        draggingRef.current.add(node.id);
-        reheatRef.current?.();
-    }, []);
+    const onNodeDragStart = useCallback(
+        (_: unknown, node: AppNode) => {
+            setSettling(false);
+            draggingRef.current.add(node.id);
+            reheat();
+        },
+        [reheat],
+    );
 
-    const onNodeDragStop = useCallback((_: unknown, node: AppNode) => {
-        draggingRef.current.delete(node.id);
-        reheatRef.current?.();
-    }, []);
+    const onNodeDragStop = useCallback(
+        (_: unknown, node: AppNode) => {
+            draggingRef.current.delete(node.id);
+            reheat();
+        },
+        [reheat],
+    );
 
-    return { initialized, onNodeDragStart, onNodeDragStop };
+    return { initialized, settling, onNodeDragStart, onNodeDragStop };
 }

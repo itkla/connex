@@ -10,6 +10,8 @@ import { Avatar, AvatarFallback, AvatarGroup, AvatarGroupCount, AvatarImage } fr
 import { Button } from '@/components/ui/button';
 import type { CompanyNode as CompanyNodeType } from './graph/types';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import NodeDot from '@/app/components/map/NodeDot';
+import { useIsDotTier } from '@/app/hooks/useNodeTier';
 
 type Person = { id: number; src?: string; label: string };
 
@@ -24,8 +26,20 @@ function Stat({ label, value }: { label: string; value: number }) {
 
 function CompanyNodeImpl({ id, data }: NodeProps<CompanyNodeType>) {
     const { updateNodeData } = useReactFlow();
-    const { company, metrics, expanded } = data;
+    const { company, metrics, expanded, revealed } = data;
+    const isDot = useIsDotTier();
     const toggle = () => updateNodeData(id, { expanded: !expanded });
+
+    if (isDot && !expanded && !revealed) {
+        return (
+            <NodeDot
+                shape="square"
+                className="bg-muted-foreground/50"
+                title={company.name}
+                onClick={() => updateNodeData(id, { revealed: true })}
+            />
+        );
+    }
 
     if (!expanded) {
         return (

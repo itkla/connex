@@ -11,7 +11,7 @@ import {
     type NodeChange,
     type EdgeChange,
 } from '@xyflow/react';
-import { useCallback, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { useTheme } from 'next-themes';
 
 import '@xyflow/react/dist/style.css';
@@ -24,6 +24,7 @@ import Legend from '@/app/components/map/Legend';
 import RelationEdge from '@/app/components/map/edges/RelationEdge';
 import { useForceLayout } from '@/app/hooks/useForceLayout';
 import { radialLayout } from '@/app/components/map/graph/radialLayout';
+import { LodContext, lodConfigForNodeCount } from '@/app/hooks/useNodeTier';
 import type { AppNode, Graph, RelationEdge as RelationEdgeType } from './graph/types';
 
 const nodeTypes = { uc: UCNode, user: UserNode, company: CompanyNode, contact: ContactNode };
@@ -43,8 +44,9 @@ function Flow({ graph, focusId }: { graph: Graph; focusId?: string }) {
     const [edges, setEdges] = useState<RelationEdgeType[]>(graph.edges);
 
     const { resolvedTheme } = useTheme();
+    const lod = useMemo(() => lodConfigForNodeCount(graph.nodes.length), [graph.nodes.length]);
 
-    const { onNodeDragStart, onNodeDragStop } = useForceLayout(focusId);
+    const { settling, onNodeDragStart, onNodeDragStop } = useForceLayout(focusId);
 
     const onNodesChange = useCallback(
         (changes: NodeChange<AppNode>[]) =>
@@ -58,26 +60,29 @@ function Flow({ graph, focusId }: { graph: Graph; focusId?: string }) {
     );
 
     return (
-        <ReactFlow
-            nodes={nodes}
-            edges={edges}
-            nodeTypes={nodeTypes}
-            edgeTypes={edgeTypes}
-            onNodesChange={onNodesChange}
-            onEdgesChange={onEdgesChange}
-            onNodeDragStart={onNodeDragStart}
-            onNodeDragStop={onNodeDragStop}
-            colorMode={resolvedTheme === 'dark' ? 'dark' : 'light'}
-            onlyRenderVisibleElements
-            minZoom={0.1}
-            fitView
-        >
-            <Background />
-            <Controls position="bottom-right" />
-            <Panel position="top-right">
-                <Legend />
-            </Panel>
-        </ReactFlow>
+        <LodContext.Provider value={lod}>
+            <ReactFlow
+                nodes={nodes}
+                edges={edges}
+                nodeTypes={nodeTypes}
+                edgeTypes={edgeTypes}
+                onNodesChange={onNodesChange}
+                onEdgesChange={onEdgesChange}
+                onNodeDragStart={onNodeDragStart}
+                onNodeDragStop={onNodeDragStop}
+                colorMode={resolvedTheme === 'dark' ? 'dark' : 'light'}
+                className={settling ? 'settle-animate' : undefined}
+                onlyRenderVisibleElements
+                minZoom={0.1}
+                fitView
+            >
+                <Background />
+                <Controls position="bottom-right" />
+                <Panel position="top-right">
+                    <Legend />
+                </Panel>
+            </ReactFlow>
+        </LodContext.Provider>
     );
 }
 

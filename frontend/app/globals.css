@@ -195,4 +195,8 @@
       transform: translateY(0);
     }
   }
+
+  .settle-animate .react-flow__node {
+    transition: transform 0.7s cubic-bezier(0.23, 1, 0.32, 1);
+  }
 }

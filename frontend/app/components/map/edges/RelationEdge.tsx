@@ -4,31 +4,30 @@ import {
     BaseEdge,
     EdgeLabelRenderer,
     getStraightPath,
-    useInternalNode,
+    useStore,
     type EdgeProps,
+    type ReactFlowState,
 } from '@xyflow/react';
-import { useState } from 'react';
+import { useCallback, useState } from 'react';
 import { cn } from '@/lib/utils';
 import type { DealSummary, RelationEdge as RelationEdgeType } from '../graph/types';
 
-type Circle = { x: number; y: number; r: number };
+type Geo = { sx: number; sy: number; sr: number; tx: number; ty: number; tr: number };
 
-function circleOf(node: ReturnType<typeof useInternalNode>): Circle | null {
-    if (!node) return null;
-    const w = node.measured?.width ?? 0;
-    const h = node.measured?.height ?? 0;
-    return {
-        x: node.internals.positionAbsolute.x + w / 2,
-        y: node.internals.positionAbsolute.y + h / 2,
-        r: Math.min(w, h) / 2, // inscribed radius so the line meets the avatar edge
-    };
+function geoEqual(a: Geo | null, b: Geo | null) {
+    if (a === b) return true;
+    if (!a || !b) return false;
+    return (
+        a.sx === b.sx && a.sy === b.sy && a.sr === b.sr &&
+        a.tx === b.tx && a.ty === b.ty && a.tr === b.tr
+    );
 }
 
-function boundaryPoint(from: Circle, to: Circle): { x: number; y: number } {
-    const dx = to.x - from.x;
-    const dy = to.y - from.y;
+function boundaryPoint(fx: number, fy: number, r: number, tx: number, ty: number) {
+    const dx = tx - fx;
+    const dy = ty - fy;
     const dist = Math.hypot(dx, dy) || 1;
-    return { x: from.x + (dx / dist) * from.r, y: from.y + (dy / dist) * from.r };
+    return { x: fx + (dx / dist) * r, y: fy + (dy / dist) * r };
 }
 
 const OUTCOME_BADGE: Record<DealSummary['outcome'], string> = {
@@ -39,16 +38,33 @@ const OUTCOME_BADGE: Record<DealSummary['outcome'], string> = {
 };
 
 export default function RelationEdge({ id, source, target, data, markerEnd }: EdgeProps<RelationEdgeType>) {
-    const sourceNode = useInternalNode(source);
-    const targetNode = useInternalNode(target);
+    const selector = useCallback(
+        (s: ReactFlowState): Geo | null => {
+            const sn = s.nodeLookup.get(source);
+            const tn = s.nodeLookup.get(target);
+            if (!sn || !tn) return null;
+            const sw = sn.measured?.width ?? 0;
+            const sh = sn.measured?.height ?? 0;
+            const tw = tn.measured?.width ?? 0;
+            const th = tn.measured?.height ?? 0;
+            return {
+                sx: sn.internals.positionAbsolute.x + sw / 2,
+                sy: sn.internals.positionAbsolute.y + sh / 2,
+                sr: Math.min(sw, sh) / 2,
+                tx: tn.internals.positionAbsolute.x + tw / 2,
+                ty: tn.internals.positionAbsolute.y + th / 2,
+                tr: Math.min(tw, th) / 2,
+            };
+        },
+        [source, target],
+    );
+    const geo = useStore(selector, geoEqual);
     const [hovered, setHovered] = useState(false);
 
-    const s = circleOf(sourceNode);
-    const t = circleOf(targetNode);
-    if (!s || !t) return null;
+    if (!geo) return null;
 
-    const sp = boundaryPoint(s, t);
-    const tp = boundaryPoint(t, s);
+    const sp = boundaryPoint(geo.sx, geo.sy, geo.sr, geo.tx, geo.ty);
+    const tp = boundaryPoint(geo.tx, geo.ty, geo.tr, geo.sx, geo.sy);
     const [path, labelX, labelY] = getStraightPath({
         sourceX: sp.x,
         sourceY: sp.y,
@@ -86,15 +102,17 @@ export default function RelationEdge({ id, source, target, data, markerEnd }: Ed
                 }}
             />
 
-            <path
-                d={path}
-                fill="none"
-                stroke="transparent"
-                strokeWidth={16}
-                style={{ pointerEvents: 'stroke', cursor: deals.length ? 'pointer' : 'default' }}
-                onMouseEnter={() => setHovered(true)}
-                onMouseLeave={() => setHovered(false)}
-            />
+            {deals.length > 0 && (
+                <path
+                    d={path}
+                    fill="none"
+                    stroke="transparent"
+                    strokeWidth={16}
+                    style={{ pointerEvents: 'stroke', cursor: 'pointer' }}
+                    onMouseEnter={() => setHovered(true)}
+                    onMouseLeave={() => setHovered(false)}
+                />
+            )}
 
             {hovered && deals.length > 0 && (
                 <EdgeLabelRenderer>

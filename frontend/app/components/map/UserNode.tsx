@@ -1,13 +1,29 @@
 'use client';
 
-import { Handle, Position, type NodeProps } from '@xyflow/react';
+import { Handle, Position, useReactFlow, type NodeProps } from '@xyflow/react';
 import { memo } from 'react';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import type { UserNode as UserNodeType } from './graph/types';
+import NodeDot from '@/app/components/map/NodeDot';
+import { useIsDotTier } from '@/app/hooks/useNodeTier';
 
-function UserNodeImpl({ data }: NodeProps<UserNodeType>) {
-    const { user } = data;
+function UserNodeImpl({ id, data }: NodeProps<UserNodeType>) {
+    const { updateNodeData } = useReactFlow();
+    const { user, revealed } = data;
+    const isDot = useIsDotTier();
     const name = user.displayName || user.username;
+
+    if (isDot && !revealed) {
+        return (
+            <NodeDot
+                shape="circle"
+                className="bg-brand"
+                title={name}
+                onClick={() => updateNodeData(id, { revealed: true })}
+            />
+        );
+    }
+
     return (
         <div className="relative flex flex-col items-center">
             <Handle type="target" position={Position.Top} isConnectable={false} className="!opacity-0" />
