@@ -15,6 +15,7 @@ public interface CompanyMapper {
     List<Company> getAllCompanies();
     List<Company> getCompaniesByTagId(int tagId);
     Company getCompanyById(int id);
+    List<Company> getCompaniesWithWebsite();
     List<Company> search(String query);
     int insert(Company company);
     int update(Company company);
