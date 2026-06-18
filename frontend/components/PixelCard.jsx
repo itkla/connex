@@ -146,9 +146,11 @@ export default function PixelCard({ variant = 'default', gap, speed, colors, noF
   const initPixels = () => {
     if (!containerRef.current || !canvasRef.current) return;
 
-    const rect = containerRef.current.getBoundingClientRect();
-    const width = Math.floor(rect.width);
-    const height = Math.floor(rect.height);
+    // Use the layout box (clientWidth/Height), NOT getBoundingClientRect: the latter returns
+    // transform-scaled dimensions during the dialog's zoom-in animation, which would size the
+    // canvas smaller than its container and leave gaps on the sides after the animation settles.
+    const width = containerRef.current.clientWidth;
+    const height = containerRef.current.clientHeight;
     const ctx = canvasRef.current.getContext('2d');
 
     canvasRef.current.width = width;

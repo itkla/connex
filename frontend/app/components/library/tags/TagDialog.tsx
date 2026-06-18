@@ -5,6 +5,7 @@ import { useTranslations } from 'next-intl';
 import { motion, useReducedMotion } from 'motion/react';
 import { Loader2Icon } from 'lucide-react';
 import { CheckIcon } from '@heroicons/react/24/solid';
+import { TagIcon } from '@heroicons/react/24/outline';
 
 import {
     Dialog,
@@ -17,7 +18,15 @@ import {
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
+import {
+    DialogStatusCover,
+    resolveDialogStatus,
+    fieldInputClass,
+    fieldErrorClass,
+    fieldLeadIconClass,
+} from '@/components/ui/dialog-status-cover';
 
+import { cn } from '@/lib/utils';
 import { ApiError, createTag, updateTag } from '@/app/lib/api';
 import { toastError, toastSuccess } from '@/app/lib/toast';
 import type { Tag } from '@/app/lib/types';
@@ -32,21 +41,28 @@ type Props = {
     onSaved: (tag: Tag) => void;
 };
 
-const inputClass =
-    'w-full rounded-lg bg-muted px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground outline-none ring-1 ring-border transition focus:ring-2 focus:ring-brand';
 const MAX_NAME = 40;
 const EASE_OUT: [number, number, number, number] = [0.23, 1, 0.32, 1];
 
 export default function TagDialog({ open, onOpenChange, mode, tag, onSaved }: Props) {
+    const [submitting, setSubmitting] = useState(false);
+
+    const handleOpenChange = (next: boolean) => {
+        if (!next && submitting) return;
+        onOpenChange(next);
+    };
+
     return (
-        <Dialog open={open} onOpenChange={onOpenChange}>
-            <DialogContent>
+        <Dialog open={open} onOpenChange={handleOpenChange}>
+            <DialogContent className="gap-0 overflow-hidden p-0 sm:max-w-lg">
                 <TagForm
                     key={`${mode}-${tag?.id ?? 'new'}`}
                     mode={mode}
                     tag={tag ?? null}
                     onSaved={onSaved}
                     onClose={() => onOpenChange(false)}
+                    submitting={submitting}
+                    setSubmitting={setSubmitting}
                 />
             </DialogContent>
         </Dialog>
@@ -58,11 +74,15 @@ function TagForm({
     tag,
     onSaved,
     onClose,
+    submitting,
+    setSubmitting,
 }: {
     mode: 'create' | 'edit';
     tag: Tag | null;
     onSaved: (tag: Tag) => void;
     onClose: () => void;
+    submitting: boolean;
+    setSubmitting: React.Dispatch<React.SetStateAction<boolean>>;
 }) {
     const t = useTranslations('ActivityLibraryTagDialog');
     const reduce = useReducedMotion() ?? false;
@@ -73,7 +93,8 @@ function TagForm({
     const [name, setName] = useState(mode === 'edit' ? tag?.name ?? '' : '');
     const [color, setColor] = useState(initialColor);
     const [hexInput, setHexInput] = useState(initialColor);
-    const [submitting, setSubmitting] = useState(false);
+    const [succeeded, setSucceeded] = useState(false);
+    const status = resolveDialogStatus({ isLoading: submitting, isSuccess: succeeded });
 
     const pickColor = (next: string) => {
         const normalized = normalizeHex(next) ?? DEFAULT_TAG_COLOR;
@@ -89,7 +110,7 @@ function TagForm({
 
     const hexValid = normalizeHex(hexInput) !== null;
     const trimmedName = name.trim();
-    const canSubmit = trimmedName.length > 0 && hexValid && !submitting;
+    const canSubmit = trimmedName.length > 0 && hexValid && !submitting && !succeeded;
     const previewInk = readableTextColor(color);
 
     const handleSubmit = async (e: React.SubmitEvent<HTMLFormElement>) => {
@@ -106,8 +127,12 @@ function TagForm({
                     ? await createTag({ name: trimmedName, color: finalColor })
                     : await updateTag(tag!.id, { name: trimmedName, color: finalColor });
             toastSuccess(mode === 'create' ? t('toastCreated') : t('toastUpdated'));
-            onSaved(saved);
-            onClose();
+            setSubmitting(false);
+            setSucceeded(true);
+            setTimeout(() => {
+                onSaved(saved);
+                onClose();
+            }, 900);
         } catch (err) {
             const message =
                 err instanceof ApiError
@@ -123,12 +148,15 @@ function TagForm({
 
     return (
         <>
-            <DialogHeader>
-                <DialogTitle>{mode === 'create' ? t('titleCreate') : t('titleEdit')}</DialogTitle>
+            <DialogStatusCover status={status} />
+
+            <div className="px-6 pb-6">
+            <DialogHeader className="ncd-rise -mt-12 mb-5" style={{ animationDelay: '40ms' }}>
+                <DialogTitle className="text-xl font-semibold tracking-tight">{mode === 'create' ? t('titleCreate') : t('titleEdit')}</DialogTitle>
                 <DialogDescription>{t('description')}</DialogDescription>
             </DialogHeader>
 
-            <div className="flex min-h-20 items-center justify-center rounded-xl bg-muted px-4 py-5 ring-1 ring-border">
+            <div className="ncd-rise flex min-h-20 items-center justify-center rounded-xl bg-muted px-4 py-5 ring-1 ring-border" style={{ animationDelay: '90ms' }}>
                 <motion.span
                     className="inline-flex max-w-full items-center rounded-4xl px-3 py-1 text-sm font-medium"
                     animate={{ backgroundColor: color, color: previewInk }}
@@ -138,22 +166,25 @@ function TagForm({
                 </motion.span>
             </div>
 
-            <form onSubmit={handleSubmit} className="grid gap-4">
-                <div className="grid gap-1.5">
+            <form onSubmit={handleSubmit} className="mt-4 grid gap-4">
+                <div className="ncd-rise grid gap-1.5" style={{ animationDelay: '140ms' }}>
                     <Label htmlFor="tag-name">{t('nameLabel')}</Label>
-                    <input
-                        id="tag-name"
-                        value={name}
-                        onChange={(e) => setName(e.target.value)}
-                        placeholder={t('namePlaceholder')}
-                        className={inputClass}
-                        maxLength={MAX_NAME}
-                        autoFocus
-                        required
-                    />
+                    <div className="group relative">
+                        <TagIcon className={fieldLeadIconClass} />
+                        <input
+                            id="tag-name"
+                            value={name}
+                            onChange={(e) => setName(e.target.value)}
+                            placeholder={t('namePlaceholder')}
+                            className={cn(fieldInputClass, 'pl-9 pr-3')}
+                            maxLength={MAX_NAME}
+                            autoFocus
+                            required
+                        />
+                    </div>
                 </div>
 
-                <div className="grid gap-2">
+                <div className="ncd-rise grid gap-2" style={{ animationDelay: '190ms' }}>
                     <Label>{t('colorLabel')}</Label>
                     <div role="radiogroup" aria-label={t('paletteAria')} className="grid grid-cols-8 gap-2">
                         {TAG_PALETTE.map((swatch) => {
@@ -206,21 +237,19 @@ function TagForm({
                             spellCheck={false}
                             aria-label={t('hexLabel')}
                             aria-invalid={!hexValid}
-                            className={`${inputClass} font-mono uppercase ${
-                                hexValid ? '' : 'ring-2 ring-destructive focus:ring-destructive'
-                            }`}
+                            className={cn(fieldInputClass, 'px-3 font-mono uppercase tracking-wide', !hexValid && fieldErrorClass)}
                         />
                     </div>
                     {!hexValid && <p className="text-xs text-destructive">{t('hexInvalid')}</p>}
                 </div>
 
-                <DialogFooter>
+                <DialogFooter className="ncd-rise mt-1" style={{ animationDelay: '240ms' }}>
                     <DialogClose asChild>
                         <Button type="button" variant="outline" disabled={submitting}>
                             {t('cancel')}
                         </Button>
                     </DialogClose>
-                    <Button type="submit" disabled={!canSubmit} className="bg-brand text-white hover:bg-brand-dark">
+                    <Button type="submit" disabled={!canSubmit} className="min-w-24 bg-brand text-white shadow-sm transition hover:bg-brand-hover hover:shadow-md">
                         {submitting ? (
                             <Loader2Icon className="size-4 animate-spin" />
                         ) : mode === 'create' ? (
@@ -231,6 +260,7 @@ function TagForm({
                     </Button>
                 </DialogFooter>
             </form>
+            </div>
         </>
     );
 }

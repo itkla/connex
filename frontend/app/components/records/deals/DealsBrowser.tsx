@@ -199,14 +199,19 @@ export default function DealsBrowser({ deals }: { deals: Deal[] }) {
     };
     const [newDialogOpen, setNewDialogOpen] = useState(false);
     const [isCreating, setIsCreating] = useState(false);
+    const [creationSucceeded, setCreationSucceeded] = useState(false);
     const [newPayload, setNewPayload] = useState<CreateDealPayload>(emptyDraft);
 
     const closeNewDialog = (open: boolean) => {
         setNewDialogOpen(open);
-        if (!open) setNewPayload(emptyDraft);
+        if (!open) {
+            setNewPayload(emptyDraft);
+            setCreationSucceeded(false);
+        }
     };
 
     const createNewDeal = async () => {
+        setCreationSucceeded(false);
         setIsCreating(true);
         try {
             await createDeal({
@@ -220,8 +225,12 @@ export default function DealsBrowser({ deals }: { deals: Deal[] }) {
                 expectedCloseDate: newPayload.expectedCloseDate || undefined,
             });
             toastSuccess(t('dealCreated'));
-            closeNewDialog(false);
-            router.refresh();
+            setIsCreating(false);
+            setCreationSucceeded(true);
+            setTimeout(() => {
+                closeNewDialog(false);
+                router.refresh();
+            }, 900);
         } catch (err) {
             if (isFieldError(err)) {
                 throw err;
@@ -657,6 +666,7 @@ export default function DealsBrowser({ deals }: { deals: Deal[] }) {
                 pipelines={pipelines}
                 stagesByPipeline={stagesByPipeline}
                 isCreating={isCreating}
+                isSuccess={creationSucceeded}
                 createNewDeal={createNewDeal}
             />
 
