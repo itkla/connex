@@ -9,8 +9,9 @@ import { cn } from '@/lib/utils';
 import { ensureUrlScheme, isLikelyUrl, normalizeWebsiteForCompare } from '@/app/lib/utils';
 import { type CreateCompanyPayload, type Company } from '@/app/lib/types';
 import { isFieldError } from '@/app/lib/api';
-import { ChangeEvent, DragEvent, Dispatch, FormEvent, SetStateAction, useEffect, useMemo, useState } from 'react';
+import { ChangeEvent, DragEvent, Dispatch, FormEvent, SetStateAction, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
+import PixelCard from '@/components/PixelCard';
 import {
     ArrowPathIcon,
     CameraIcon,
@@ -28,6 +29,9 @@ import { useFieldErrors } from '@/app/hooks/useFieldErrors';
 
 const inputBase = 'w-full rounded-lg bg-muted py-2 text-sm text-foreground placeholder:text-muted-foreground outline-none ring-1 ring-border transition focus:ring-2 focus:ring-brand';
 const inputError = 'ring-2 ring-destructive focus:ring-destructive';
+const PIXEL_GRAY = '#e5e7eb,#cbd5e1,#94a3b8';
+const PIXEL_GREEN = '#bbf7d0,#86efac,#73d200';
+const PIXEL_RED = '#fecaca,#f87171,#ef4444';
 const inputWarn = 'ring-2 ring-amber-500 focus:ring-amber-500';
 const leadIcon = 'pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground transition-colors group-focus-within:text-brand';
 
@@ -96,6 +100,13 @@ export default function NewCompanyDialog({
             : isSuccess
                 ? 'success'
                 : 'idle';
+
+    const lastPixelColorsRef = useRef(PIXEL_GRAY);
+    let pixelColors = lastPixelColorsRef.current;
+    if (status === 'loading') pixelColors = PIXEL_GRAY;
+    else if (status === 'success') pixelColors = PIXEL_GREEN;
+    else if (status === 'error') pixelColors = PIXEL_RED;
+    lastPixelColorsRef.current = pixelColors;
 
     useEffect(() => {
         if (!open && logoPreview) {
@@ -172,32 +183,14 @@ export default function NewCompanyDialog({
     return (
         <Dialog open={open} onOpenChange={handleOpenChange}>
             <DialogContent className="gap-0 overflow-hidden p-0 sm:max-w-lg">
-                <div
-                    aria-hidden
-                    className={cn(
-                        'relative h-24 overflow-hidden transition-colors duration-500 ease-out',
-                        status === 'idle' && 'bg-transparent',
-                        status === 'loading' && 'bg-muted',
-                        status === 'success' && 'bg-brand',
-                        status === 'error' && 'bg-destructive'
-                    )}
-                >
-                    {status === 'loading' && <div className="ncd-skeleton absolute inset-0" />}
-                    <div
-                        className={cn(
-                            'absolute inset-0 opacity-[0.14] transition-opacity duration-500',
-                            status !== 'success' && status !== 'error' && 'opacity-0'
-                        )}
-                        style={{
-                            backgroundImage: 'radial-gradient(circle at 1px 1px, #fff 1px, transparent 0)',
-                            backgroundSize: '15px 15px',
-                        }}
-                    />
-                    <div
-                        className={cn(
-                            'absolute -left-10 -top-16 size-48 rounded-full bg-white/25 blur-2xl transition-opacity duration-500',
-                            status !== 'success' && status !== 'error' && 'opacity-0'
-                        )}
+                <div aria-hidden className="relative h-24 overflow-hidden">
+                    <PixelCard
+                        active={status !== 'idle'}
+                        colors={pixelColors}
+                        gap={5}
+                        speed={40}
+                        noFocus
+                        className="pointer-events-none absolute inset-0 aspect-auto! h-full! w-full! rounded-none! border-0!"
                     />
                     <div className="absolute inset-x-0 bottom-0 h-1/2 bg-gradient-to-t from-popover to-transparent" />
                 </div>
