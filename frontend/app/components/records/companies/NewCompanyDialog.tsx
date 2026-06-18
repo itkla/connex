@@ -3,25 +3,32 @@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogClose } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
+import { Autocomplete, AutocompleteContent, AutocompleteList, AutocompleteItem, AutocompleteEmpty, AutocompleteInput } from '@/components/ui/autocomplete';
+import { InputGroupAddon } from '@/components/ui/input-group';
 import { cn } from '@/lib/utils';
-import { type CreateCompanyPayload } from '@/app/lib/types';
-import { ChangeEvent, DragEvent, Dispatch, FormEvent, SetStateAction, useEffect, useState } from 'react';
+import { ensureUrlScheme, isLikelyUrl, normalizeWebsiteForCompare } from '@/app/lib/utils';
+import { type CreateCompanyPayload, type Company } from '@/app/lib/types';
+import { isFieldError } from '@/app/lib/api';
+import { ChangeEvent, DragEvent, Dispatch, FormEvent, SetStateAction, useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
 import {
-    Loader2Icon,
+    ArrowPathIcon,
     CameraIcon,
-    ImagePlusIcon,
-    XIcon,
-    Building2Icon,
-    GlobeIcon,
+    XMarkIcon,
+    BuildingOffice2Icon,
+    GlobeAltIcon,
     BriefcaseIcon,
     PhoneIcon,
     MapPinIcon,
-} from 'lucide-react';
+    ExclamationTriangleIcon,
+} from '@heroicons/react/24/outline';
+import { ImagePlusIcon } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { useFieldErrors } from '@/app/hooks/useFieldErrors';
 
 const inputBase = 'w-full rounded-lg bg-muted py-2 text-sm text-foreground placeholder:text-muted-foreground outline-none ring-1 ring-border transition focus:ring-2 focus:ring-brand';
 const inputError = 'ring-2 ring-destructive focus:ring-destructive';
+const inputWarn = 'ring-2 ring-amber-500 focus:ring-amber-500';
 const leadIcon = 'pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground transition-colors group-focus-within:text-brand';
 
 type Props = {
@@ -33,6 +40,7 @@ type Props = {
     setLogoFile: Dispatch<SetStateAction<File | null>>;
     isCreating: boolean;
     isSuccess?: boolean;
+    existingCompanies?: Company[];
     createNewCompany: () => void | Promise<void>;
 };
 
@@ -45,15 +53,42 @@ export default function NewCompanyDialog({
     setLogoFile,
     isCreating,
     isSuccess = false,
+    existingCompanies = [],
     createNewCompany,
 }: Props) {
     const t = useTranslations('CompaniesNewDialog');
     const [logoPreview, setLogoPreview] = useState<string | null>(null);
     const [isDragging, setIsDragging] = useState(false);
+    const [websiteFormatError, setWebsiteFormatError] = useState<string | null>(null);
     const { fieldErrors, reset: resetFieldErrors, clearError, captureFieldErrors } = useFieldErrors();
 
     const initial = payload.name.trim().charAt(0).toUpperCase();
+
+    const websiteByDomain = useMemo(() => {
+        const map = new Map<string, Company>();
+        for (const c of existingCompanies) {
+            const key = normalizeWebsiteForCompare(c.website);
+            if (key && !map.has(key)) map.set(key, c);
+        }
+        return map;
+    }, [existingCompanies]);
+
+    const industrySuggestions = useMemo(() => {
+        const set = new Set<string>();
+        for (const c of existingCompanies) {
+            const v = c.industry?.trim();
+            if (v) set.add(v);
+        }
+        return Array.from(set).sort((a, b) => a.localeCompare(b));
+    }, [existingCompanies]);
+
+    const duplicateCompany = useMemo(() => {
+        const key = normalizeWebsiteForCompare(payload.website);
+        return key ? websiteByDomain.get(key) ?? null : null;
+    }, [payload.website, websiteByDomain]);
+
     const hasErrors = Object.keys(fieldErrors).length > 0;
+    const websiteBlocked = Boolean(duplicateCompany) || Boolean(websiteFormatError);
     const status: 'idle' | 'loading' | 'success' | 'error' = isCreating
         ? 'loading'
         : hasErrors
@@ -70,6 +105,7 @@ export default function NewCompanyDialog({
         if (!open) {
             resetFieldErrors();
             setIsDragging(false);
+            setWebsiteFormatError(null);
         }
     }, [open, logoPreview, resetFieldErrors]);
 
@@ -103,19 +139,38 @@ export default function NewCompanyDialog({
         setLogoFile(null);
     };
 
+    const handleWebsiteBlur = () => {
+        const normalized = ensureUrlScheme(payload.website ?? '');
+        if (normalized !== (payload.website ?? '')) {
+            setPayload((prev) => ({ ...prev, website: normalized }));
+        }
+        setWebsiteFormatError(normalized && !isLikelyUrl(normalized) ? t('websiteInvalid') : null);
+    };
+
+    const handleOpenChange = (next: boolean) => {
+        if (!next && isCreating) return;
+        onOpenChange(next);
+    };
+
     const handleSubmit = async (e: FormEvent) => {
         e.preventDefault();
-        if (isCreating) return;
+        if (isCreating || websiteBlocked) return;
         resetFieldErrors();
         try {
             await createNewCompany();
         } catch (err) {
             captureFieldErrors(err);
+            if (isFieldError(err)) {
+                const firstKey = Object.keys(err.fieldErrors)[0];
+                if (firstKey) {
+                    requestAnimationFrame(() => document.getElementById(`company-${firstKey}`)?.focus());
+                }
+            }
         }
     };
 
     return (
-        <Dialog open={open} onOpenChange={onOpenChange}>
+        <Dialog open={open} onOpenChange={handleOpenChange}>
             <DialogContent className="gap-0 overflow-hidden p-0 sm:max-w-lg">
                 <div
                     aria-hidden
@@ -163,7 +218,7 @@ export default function NewCompanyDialog({
                             )}
                         >
                             {logoPreview ? (
-                                <img src={logoPreview} alt="" className="size-full object-contain bg-white" />
+                                <img src={logoPreview} alt="" className="size-full bg-white object-contain" />
                             ) : initial ? (
                                 <div className="flex size-full select-none items-center justify-center bg-brand-light text-3xl font-semibold text-brand-dark">
                                     {initial}
@@ -196,7 +251,7 @@ export default function NewCompanyDialog({
                                 aria-label="Remove logo"
                                 className="absolute -right-1 -top-1 flex size-5 items-center justify-center rounded-full bg-foreground text-background ring-2 ring-popover transition hover:scale-110 active:scale-95"
                             >
-                                <XIcon className="size-3" />
+                                <XMarkIcon className="size-3" />
                             </button>
                         )}
                     </div>
@@ -212,7 +267,7 @@ export default function NewCompanyDialog({
                                 {t('labelName')} <span className="text-muted-foreground">*</span>
                             </Label>
                             <div className="group relative">
-                                <Building2Icon className={leadIcon} />
+                                <BuildingOffice2Icon className={leadIcon} />
                                 <input
                                     id="company-name"
                                     type="text"
@@ -224,18 +279,19 @@ export default function NewCompanyDialog({
                                     className={cn(inputBase, 'pl-9 pr-3', fieldErrors.name && inputError)}
                                     placeholder={t('placeholderName')}
                                     aria-invalid={Boolean(fieldErrors.name)}
+                                    aria-describedby={fieldErrors.name ? 'company-name-error' : undefined}
                                     autoComplete="organization"
                                     autoFocus
                                     required
                                 />
                             </div>
-                            {fieldErrors.name && <p className="text-sm text-destructive">{fieldErrors.name}</p>}
+                            {fieldErrors.name && <p id="company-name-error" className="text-sm text-destructive">{fieldErrors.name}</p>}
                         </div>
 
                         <div className="ncd-rise grid gap-1.5" style={{ animationDelay: '140ms' }}>
                             <Label htmlFor="company-website">{t('labelWebsite')}</Label>
                             <div className="group relative">
-                                <GlobeIcon className={leadIcon} />
+                                <GlobeAltIcon className={leadIcon} />
                                 <input
                                     id="company-website"
                                     type="url"
@@ -243,32 +299,74 @@ export default function NewCompanyDialog({
                                     onChange={(e) => {
                                         setPayload((prev) => ({ ...prev, website: e.target.value }));
                                         clearError('website');
+                                        setWebsiteFormatError(null);
                                     }}
-                                    className={cn(inputBase, 'pl-9 pr-3', fieldErrors.website && inputError)}
-                                    aria-invalid={Boolean(fieldErrors.website)}
+                                    onBlur={handleWebsiteBlur}
+                                    className={cn(
+                                        inputBase,
+                                        'pl-9 pr-3',
+                                        (fieldErrors.website || websiteFormatError) && inputError,
+                                        duplicateCompany && !fieldErrors.website && !websiteFormatError && inputWarn
+                                    )}
+                                    aria-invalid={Boolean(fieldErrors.website || websiteFormatError || duplicateCompany)}
+                                    aria-describedby={(fieldErrors.website || websiteFormatError || duplicateCompany) ? 'company-website-help' : undefined}
                                     placeholder={t('placeholderWebsite')}
                                     autoComplete="url"
                                 />
                             </div>
-                            {fieldErrors.website && <p className="text-sm text-destructive">{fieldErrors.website}</p>}
+                            {fieldErrors.website ? (
+                                <p id="company-website-help" className="text-sm text-destructive">{fieldErrors.website}</p>
+                            ) : duplicateCompany ? (
+                                <p id="company-website-help" className="flex items-center gap-1.5 text-sm text-amber-600 dark:text-amber-500">
+                                    <ExclamationTriangleIcon className="size-3.5 shrink-0" />
+                                    <span>
+                                        {t('websiteDuplicate')}{' '}
+                                        <Link
+                                            href={`/records/companies/${duplicateCompany.id}`}
+                                            className="font-medium underline underline-offset-2 hover:text-foreground"
+                                        >
+                                            {duplicateCompany.name}
+                                        </Link>
+                                    </span>
+                                </p>
+                            ) : websiteFormatError ? (
+                                <p id="company-website-help" className="text-sm text-destructive">{websiteFormatError}</p>
+                            ) : null}
                         </div>
 
                         <div className="ncd-rise grid grid-cols-2 gap-3" style={{ animationDelay: '190ms' }}>
                             <div className="grid gap-1.5">
                                 <Label htmlFor="company-industry">
-                                    {t('labelIndustry')} <span className="text-muted-foreground">*</span>
+                                    {t('labelIndustry')}
                                 </Label>
-                                <div className="group relative">
-                                    <BriefcaseIcon className={leadIcon} />
-                                    <input
+                                <Autocomplete
+                                    items={industrySuggestions}
+                                    value={payload.industry ?? ''}
+                                    onValueChange={(v) => setPayload((prev) => ({ ...prev, industry: v }))}
+                                    mode="both"
+                                >
+                                    <AutocompleteInput
                                         id="company-industry"
-                                        type="text"
-                                        value={payload.industry ?? ''}
-                                        onChange={(e) => setPayload((prev) => ({ ...prev, industry: e.target.value }))}
-                                        className={cn(inputBase, 'pl-9 pr-3')}
                                         placeholder={t('placeholderIndustry')}
-                                    />
-                                </div>
+                                        className="rounded-lg border-0 bg-muted shadow-none ring-1 ring-border dark:bg-muted has-[[data-slot=input-group-control]:focus-visible]:ring-2 has-[[data-slot=input-group-control]:focus-visible]:ring-brand"
+                                    >
+                                        <InputGroupAddon align="inline-start">
+                                            <BriefcaseIcon className="size-4 text-muted-foreground transition-colors group-focus-within/input-group:text-brand" />
+                                        </InputGroupAddon>
+                                    </AutocompleteInput>
+                                    {industrySuggestions.length > 0 && (
+                                        <AutocompleteContent>
+                                            <AutocompleteEmpty>{t('noIndustryMatches')}</AutocompleteEmpty>
+                                            <AutocompleteList>
+                                                {(opt: string) => (
+                                                    <AutocompleteItem key={opt} value={opt}>
+                                                        {opt}
+                                                    </AutocompleteItem>
+                                                )}
+                                            </AutocompleteList>
+                                        </AutocompleteContent>
+                                    )}
+                                </Autocomplete>
                             </div>
                             <div className="grid gap-1.5">
                                 <Label htmlFor="company-phone">{t('labelPhone')}</Label>
@@ -285,10 +383,11 @@ export default function NewCompanyDialog({
                                         className={cn(inputBase, 'pl-9 pr-3', fieldErrors.phone && inputError)}
                                         placeholder={t('placeholderPhone')}
                                         aria-invalid={Boolean(fieldErrors.phone)}
+                                        aria-describedby={fieldErrors.phone ? 'company-phone-error' : undefined}
                                         autoComplete="tel"
                                     />
                                 </div>
-                                {fieldErrors.phone && <p className="text-sm text-destructive">{fieldErrors.phone}</p>}
+                                {fieldErrors.phone && <p id="company-phone-error" className="text-sm text-destructive">{fieldErrors.phone}</p>}
                             </div>
                         </div>
 
@@ -316,12 +415,12 @@ export default function NewCompanyDialog({
                             </DialogClose>
                             <Button
                                 type="submit"
-                                disabled={isCreating || hasErrors || isSuccess}
+                                disabled={isCreating || hasErrors || isSuccess || websiteBlocked}
                                 className="min-w-24 bg-brand text-white shadow-sm transition hover:bg-brand-hover hover:shadow-md"
                             >
                                 {isCreating ? (
                                     <>
-                                        <Loader2Icon className="size-4 animate-spin" />
+                                        <ArrowPathIcon className="size-4 animate-spin" />
                                         {t('create')}
                                     </>
                                 ) : (

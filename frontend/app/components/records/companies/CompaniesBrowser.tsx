@@ -501,6 +501,7 @@ export default function CompaniesBrowser({ companies }: { companies: Company[] }
                 setLogoFile={setLogoFile}
                 isCreating={isCreating}
                 isSuccess={creationSucceeded}
+                existingCompanies={companies}
                 createNewCompany={createNewCompany}
             />
 
