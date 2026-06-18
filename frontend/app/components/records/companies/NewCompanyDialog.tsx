@@ -23,7 +23,7 @@ import {
     MapPinIcon,
     ExclamationTriangleIcon,
 } from '@heroicons/react/24/outline';
-import { ImagePlusIcon } from 'lucide-react';
+import { ImagePlusIcon, Loader2Icon } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { useFieldErrors } from '@/app/hooks/useFieldErrors';
 
@@ -413,7 +413,7 @@ export default function NewCompanyDialog({
                             >
                                 {isCreating ? (
                                     <>
-                                        <ArrowPathIcon className="size-4 animate-spin" />
+                                        <Loader2Icon className="size-4 animate-spin" />
                                         {t('create')}
                                     </>
                                 ) : (
