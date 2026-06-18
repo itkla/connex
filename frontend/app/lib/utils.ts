@@ -353,6 +353,41 @@ export function compareByColor(a: string, b: string): number {
 }
 
 /**
+ * ensures a URL has an http(s) scheme, prepending https:// when missing.
+ * @param url 
+ * @returns the url with a scheme, or '' if blank
+ */
+export function ensureUrlScheme(url: string): string {
+    const trimmed = url.trim();
+    if (!trimmed) return '';
+    return /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
+}
+
+/**
+ * checks if a string looks like an http(s) URL with a dotted host.
+ * @param url 
+ * @returns 
+ */
+export function isLikelyUrl(url: string): boolean {
+    return /^https?:\/\/[\w-]+(\.[\w-]+)+.*$/i.test(url.trim());
+}
+
+/**
+ * normalizes a website for comparison. things like http://www.example.com and https://example.com should be considered the same.
+ * @param website 
+ * @returns 
+ */
+export function normalizeWebsiteForCompare(website: string | null | undefined): string {
+    if (!website) return '';
+    return website
+        .trim()
+        .toLowerCase()
+        .replace(/^https?:\/\//, '')
+        .replace(/^www\./, '')
+        .replace(/\/+$/, '');
+}
+
+/**
  * converts a name to initials
  * @param name - the name to convert to initials
  * @returns the initials of the name
