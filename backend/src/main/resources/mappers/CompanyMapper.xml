@@ -39,6 +39,10 @@
     SELECT <include refid="companyColumns"/> FROM company WHERE id = #{id}
   </select>
 
+  <select id="getCompaniesWithWebsite" resultType="Company">
+    SELECT id, website FROM company WHERE website IS NOT NULL AND website != ''
+  </select>
+
   <select id="search" resultType="Company">
     SELECT <include refid="companyColumns"/> FROM company
     WHERE name LIKE #{query} OR website LIKE #{query} OR industry LIKE #{query} OR phone LIKE #{query} OR address LIKE #{query}

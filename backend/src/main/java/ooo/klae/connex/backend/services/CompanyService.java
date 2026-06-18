@@ -12,6 +12,7 @@ import ooo.klae.connex.backend.beans.Deal;
 import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.beans.Tag;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
+import ooo.klae.connex.backend.exceptions.DuplicateResourceException;
 
 import java.util.List;
 import java.util.Set;
@@ -69,11 +70,41 @@ public class CompanyService {
      * @return
      */
     public Company createCompany(Company company) {
+        assertUniqueWebsite(company);
         companyMapper.insert(company);
         auditService.record("company.create", "company", company.getId(), company.getName(),
             "Created company " + company.getName(),
             auditService.diff(null, company, AUDIT_FIELDS));
         return company;
+    }
+
+    /**
+     * Ensures the website is unique.
+     * @param company
+     */
+    private void assertUniqueWebsite(Company company) {
+        String target = normalizeWebsite(company.getWebsite());
+        if (target.isEmpty()) return;
+        for (Company other : companyMapper.getCompaniesWithWebsite()) {
+            if (other.getId() == company.getId()) continue; // skip self (id is 0 on create)
+            if (target.equals(normalizeWebsite(other.getWebsite())))
+                throw new DuplicateResourceException("website", "A company with this website already exists");
+        }
+    }
+
+    /**
+     * Normalizes a website for comparison.
+     * Lowercases, trims, removes leading "www." and trailing slashes.
+     * @param website
+     * @return
+     */
+    private static String normalizeWebsite(String website) {
+        if (website == null) return "";
+        String w = website.trim().toLowerCase();
+        w = w.replaceFirst("^https?://", "");
+        w = w.replaceFirst("^www\\.", "");
+        w = w.replaceAll("/+$", "");
+        return w;
     }
 
     /**
@@ -87,6 +118,7 @@ public class CompanyService {
         Company before = companyMapper.getCompanyById(id);
         if (before == null) throw new ResourceNotFoundException("Company not found with id: " + id);
         company.setId(id);
+        assertUniqueWebsite(company);
         companyMapper.update(company);
         auditService.record("company.update", "company", id, company.getName(),
             "Updated company " + company.getName(),
