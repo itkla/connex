@@ -377,22 +377,18 @@ export default function DealsBrowser({ deals }: { deals: Deal[] }) {
         let openCount = 0;
         let openValue = 0;
         let closedActualValue = 0;
-        let accuracyCount = 0;
-        let accuracySum = 0;
+        let closedForecastValue = 0;
         for (const d of dealsInCurrency) {
             if (isClosed(d)) {
                 closedActualValue += d.actualValue ?? 0;
-                if ((d.value ?? 0) > 0) {
-                    accuracySum += (d.actualValue ?? 0) / d.value;
-                    accuracyCount++;
-                }
+                closedForecastValue += d.value ?? 0;
             } else {
                 openCount++;
                 openValue += d.value ?? 0;
             }
         }
-        const forecastAccuracy = accuracyCount > 0 ? accuracySum / accuracyCount : null;
-        return { openCount, openValue, closedActualValue, forecastAccuracy };
+        const forecastAccuracy = closedForecastValue > 0 ? closedActualValue / closedForecastValue : null;
+        return { openCount, openValue, closedActualValue, closedForecastValue, forecastAccuracy };
     }, [dealsInCurrency]);
 
     const columns: ColumnDef<Deal>[] = useMemo(() => [
@@ -554,12 +550,30 @@ export default function DealsBrowser({ deals }: { deals: Deal[] }) {
                 <SummaryTile label={t('stageRatio')} value={<StageRatio deals={dealsInCurrency} />} />
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
-                <SummaryTile label={t('projectedPipeline')} value={formatCompactCurrency(summary.openValue, activeCurrency, locale)} />
-                <SummaryTile label={t('actualRevenue')} value={formatCompactCurrency(summary.closedActualValue, activeCurrency, locale)} />
-                <SummaryTile label={t('openDeals')} value={String(summary.openCount)} />
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+                <SummaryTile
+                    label={t('openPipeline')}
+                    tooltip={t('openPipelineTooltip')}
+                    value={formatCompactCurrency(summary.openValue, activeCurrency, locale)}
+                />
+                <SummaryTile
+                    label={t('openDeals')}
+                    tooltip={t('openDealsTooltip')}
+                    value={String(summary.openCount)}
+                />
+                <SummaryTile
+                    label={t('closedForecast')}
+                    tooltip={t('closedForecastTooltip')}
+                    value={formatCompactCurrency(summary.closedForecastValue, activeCurrency, locale)}
+                />
+                <SummaryTile
+                    label={t('closedRevenue')}
+                    tooltip={t('closedRevenueTooltip')}
+                    value={formatCompactCurrency(summary.closedActualValue, activeCurrency, locale)}
+                />
                 <SummaryTile
                     label={t('forecastAccuracy')}
+                    tooltip={t('forecastAccuracyTooltip')}
                     value={summary.forecastAccuracy != null ? `${Math.round(summary.forecastAccuracy * 100)}%` : '—'}
                 />
             </div>
