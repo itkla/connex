@@ -24,10 +24,9 @@ const STAGE_WON = 'var(--chart-won)';  // green
 const STAGE_LOST = 'var(--chart-lost)'; // red
 const STAGE_OPEN = 'var(--chart-open)'; // amber
 
-function colorForStage(name: string, index: number, total: number) {
-    const n = name.toLowerCase();
-    if (/(?:\bwon\b|renew|complet)/.test(n)) return STAGE_WON;
-    if (/(?:lost|churn)/.test(n)) return STAGE_LOST;
+function colorForStage(klass: StageClass, index: number, total: number) {
+    if (klass === 'won') return STAGE_WON;
+    if (klass === 'lost') return STAGE_LOST;
     const lighten = total <= 1 ? 0 : (1 - index / (total - 1)) * 40;
     return `color-mix(in oklch, ${STAGE_OPEN} ${100 - lighten}%, var(--card))`;
 }
@@ -132,8 +131,9 @@ export default function StageRatio({ deals }: { deals: Deal[] }) {
                 const stages = stagesByPipeline[pipeline.id] ?? [];
                 return (['open', 'closed'] as const).flatMap((status) =>
                     stages.map((stage, i) => {
-                        const baseColor = colorForStage(stage.name, i, stages.length);
-                        const won = classifyStage(stage) === 'won';
+                        const klass = classifyStage(stage);
+                        const baseColor = colorForStage(klass, i, stages.length);
+                        const won = klass === 'won';
                         const matches = deals.filter(
                             (d) => d.stage === stage.id && (status === 'closed' ? isClosed(d) : !isClosed(d)),
                         );
