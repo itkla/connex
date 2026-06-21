@@ -24,6 +24,8 @@
     "company": "Company",
     "currency": "Currency",
     "closedAt": "Closed at",
+    "closedReasonWonTitle": "Why this deal was won",
+    "closedReasonLostTitle": "Why this deal was lost",
     "created": "Created",
     "updated": "Updated",
     "peopleOnThisDeal": "People on this deal",
@@ -258,6 +260,7 @@
     "expectedCloseDate": "Expected close date",
     "closedQuestion": "Closed?",
     "closedAt": "Closed at",
+    "closedReason": "Closed reason",
     "actualValue": "Actual value",
     "cancel": "Cancel",
     "save": "Save"

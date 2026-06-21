@@ -58,6 +58,7 @@ public class DealService {
             }
         } else {
             deal.setClosedAt(null);
+            deal.setClosedReason(null);
         }
     }
 

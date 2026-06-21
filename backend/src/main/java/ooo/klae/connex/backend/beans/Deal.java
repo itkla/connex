@@ -33,6 +33,7 @@ public class Deal {
     private Tag[] tags;
     private String expectedCloseDate;
     private String closedAt;
+    private String closedReason;
     private String createdAt;
     private String updatedAt;
 
@@ -130,6 +131,14 @@ public class Deal {
 
     public void setClosedAt(String closedAt) {
         this.closedAt = closedAt;
+    }
+
+    public String getClosedReason() {
+        return closedReason;
+    }
+
+    public void setClosedReason(String closedReason) {
+        this.closedReason = closedReason;
     }
 
     public String getCreatedAt() {

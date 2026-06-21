@@ -14,6 +14,7 @@
     <result property="companyId"         column="company_id"/>
     <result property="expectedCloseDate" column="expected_close_date"/>
     <result property="closedAt"          column="closed_at"/>
+    <result property="closedReason"      column="closed_reason"/>
     <result property="createdAt"         column="created_at"/>
     <result property="updatedAt"         column="updated_at"/>
   </resultMap>
@@ -45,13 +46,13 @@
 
   <sql id="dealColumns">
     id, name, value, actual_value, currency, pipeline_id, stage_id, company_id,
-    expected_close_date, closed_at, created_at, updated_at
-  </sql>
+    expected_close_date, closed_at, closed_reason, created_at, updated_at
+</sql>
 
   <sql id="qualifiedDealColumns">
     d.id, d.name, d.value, d.actual_value, d.currency, d.pipeline_id, d.stage_id, d.company_id,
-    d.expected_close_date, d.closed_at, d.created_at, d.updated_at
-  </sql>
+    d.expected_close_date, d.closed_at, d.closed_reason, d.created_at, d.updated_at
+</sql>
 
   <select id="getAllDeals" resultMap="DealResult">
     SELECT <include refid="dealColumns"/> FROM deal
@@ -100,10 +101,10 @@
 
   <insert id="insert" useGeneratedKeys="true" keyProperty="id">
     INSERT INTO deal (name, value, actual_value, currency, pipeline_id, stage_id, company_id,
-                      expected_close_date, closed_at)
+                      expected_close_date, closed_at, closed_reason)
     VALUES (
       #{name}, #{value}, #{actualValue}, #{currency}, #{pipelineId}, #{stageId}, #{companyId},
-      #{expectedCloseDate}, #{closedAt}
+      #{expectedCloseDate}, #{closedAt}, #{closedReason}
     )
   </insert>
 
@@ -117,7 +118,8 @@
         stage_id = #{stageId},
         company_id = #{companyId},
         expected_close_date = #{expectedCloseDate},
-        closed_at = #{closedAt}
+        closed_at = #{closedAt},
+        closed_reason = #{closedReason}
     WHERE id = #{id}
   </update>
 

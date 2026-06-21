@@ -136,6 +136,7 @@ CREATE TABLE deal (
     company_id          INT COMMENT 'Company ID',
     expected_close_date DATETIME COMMENT 'Expected close date',
     closed_at           DATETIME COMMENT 'Close date',
+    closed_reason       VARCHAR(255) COMMENT 'Reason the deal was closed (won/lost)',
     created_at          DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT 'Creation timestamp',
     updated_at          DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT 'Last update timestamp',
     CONSTRAINT fk_deal_pipeline FOREIGN KEY (pipeline_id) REFERENCES pipeline(id) ON DELETE RESTRICT,
