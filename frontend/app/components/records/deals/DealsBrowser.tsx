@@ -64,6 +64,7 @@ function toDraft(d: Deal): DealDraft {
         company: d.company ?? null,
         expectedCloseDate: d.expectedCloseDate ?? '',
         closedAt: d.closedAt ?? null,
+        closedReason: d.closedReason ?? null,
     };
 }
 
@@ -77,7 +78,8 @@ function diffDraft(original: DealDraft, draft: DealDraft): boolean {
         original.stage !== draft.stage ||
         original.company !== draft.company ||
         original.expectedCloseDate !== draft.expectedCloseDate ||
-        original.closedAt !== draft.closedAt
+        original.closedAt !== draft.closedAt ||
+        original.closedReason !== draft.closedReason
     );
 }
 
@@ -289,6 +291,7 @@ export default function DealsBrowser({ deals }: { deals: Deal[] }) {
                         company: draft.company ?? null,
                         expectedCloseDate: draft.expectedCloseDate || undefined,
                         closedAt: draft.closedAt,
+                        closedReason: draft.closedReason,
                     };
                     return updateDeal(d.id, payload);
                 }),
@@ -365,6 +368,7 @@ export default function DealsBrowser({ deals }: { deals: Deal[] }) {
                 company: deal.company ?? null,
                 expectedCloseDate: deal.expectedCloseDate,
                 closedAt: closed ? toMysqlDateTime(new Date().toISOString()) : null,
+                closedReason: closed ? deal.closedReason : null,
             });
             toastSuccess(closed ? t('dealClosed') : t('dealReopened'));
             router.refresh();

@@ -52,6 +52,9 @@ public class DealDto {
     @Size(max = 32)
     private String closedAt;
 
+    @Size(max = 255)
+    private String closedReason;
+
     private int[] personIds;
     private int[] activityIds;
     private int[] noteIds;
@@ -74,6 +77,7 @@ public class DealDto {
         dto.company = d.getCompanyId();
         dto.expectedCloseDate = d.getExpectedCloseDate();
         dto.closedAt = d.getClosedAt();
+        dto.closedReason = d.getClosedReason();
 
         // Hunter's note: i genuinely forgot how i made this. stackoverflow? idk but it's hard to read but once you understand it it works
         dto.personIds = d.getPeople() == null ? null : Arrays.stream(d.getPeople())
@@ -101,6 +105,7 @@ public class DealDto {
         d.setCompanyId(company);
         d.setExpectedCloseDate(expectedCloseDate);
         d.setClosedAt(closedAt);
+        d.setClosedReason(closedReason);
         d.setCreatedAt(createdAt);
         d.setUpdatedAt(updatedAt);
         return d;

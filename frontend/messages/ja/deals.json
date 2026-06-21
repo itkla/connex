@@ -24,6 +24,8 @@
     "company": "会社",
     "currency": "通貨",
     "closedAt": "決着日時",
+    "closedReasonWonTitle": "成約に至った理由",
+    "closedReasonLostTitle": "失注に至った理由",
     "created": "作成日",
     "updated": "更新日",
     "peopleOnThisDeal": "案件の関係者",
@@ -256,6 +258,7 @@
     "expectedCloseDate": "決着予定日",
     "closedQuestion": "決着済み?",
     "closedAt": "決着日時",
+    "closedReason": "決着理由",
     "actualValue": "実績金額",
     "cancel": "キャンセル",
     "save": "保存"
