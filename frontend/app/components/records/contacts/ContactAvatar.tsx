@@ -25,7 +25,7 @@ export default function ContactAvatar({ contact, type = 'small' }: { contact: Co
         // ContactAvatars are always round. company logos are squircles
         <div className={cn("shrink-0 overflow-hidden rounded-full bg-muted ring-1 ring-border", SIZE_CLASS[type])}>
             {contact.imageUrl ? (
-                <img src={contact.imageUrl} alt="" className="h-full w-full object-cover" />
+                <img src={contact.imageUrl} alt="" loading="lazy" decoding="async" className="h-full w-full object-cover" />
             ) : (
                 <div className="h-full w-full flex items-center justify-center bg-muted-foreground/40">
                     <UserIcon className={cn("text-muted-foreground", ICON_CLASS[type])} />

@@ -84,6 +84,7 @@ export default function CompaniesBrowser({ companies }: { companies: Company[] }
     const emptyDraft: CreateCompanyPayload = { name: '', website: '', industry: '', phone: '', address: '' };
     const [newDialogOpen, setNewDialogOpen] = useState(false);
     const [isCreating, setIsCreating] = useState(false);
+    const [creationSucceeded, setCreationSucceeded] = useState(false);
     const [newPayload, setNewPayload] = useState<CreateCompanyPayload>(emptyDraft);
     const [logoFile, setLogoFile] = useState<File | null>(null);
 
@@ -120,10 +121,12 @@ export default function CompaniesBrowser({ companies }: { companies: Company[] }
         if (!open) {
             setNewPayload(emptyDraft);
             setLogoFile(null);
+            setCreationSucceeded(false);
         }
     };
 
     const createNewCompany = async () => {
+        setCreationSucceeded(false);
         setIsCreating(true);
         try {
             const created = await createCompany(newPayload);
@@ -132,8 +135,12 @@ export default function CompaniesBrowser({ companies }: { companies: Company[] }
                 await updateCompany(created.id, { ...newPayload, logoUrl });
             }
             toastSuccess(t('toastCompanyCreated'));
-            closeNewDialog(false);
-            router.refresh();
+            setIsCreating(false);
+            setCreationSucceeded(true);
+            setTimeout(() => {
+                closeNewDialog(false);
+                router.refresh();
+            }, 850);
         } catch (err) {
             if (isFieldError(err)) {
                 throw err;
@@ -493,6 +500,8 @@ export default function CompaniesBrowser({ companies }: { companies: Company[] }
                 logoFile={logoFile}
                 setLogoFile={setLogoFile}
                 isCreating={isCreating}
+                isSuccess={creationSucceeded}
+                existingCompanies={companies}
                 createNewCompany={createNewCompany}
             />
 

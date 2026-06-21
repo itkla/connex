@@ -244,6 +244,7 @@ export type Deal = {
     company: number | null;
     expectedCloseDate?: string;
     closedAt?: string;
+    closedReason?: string;
     createdAt: string;
     updatedAt: string;
 };
@@ -258,6 +259,7 @@ export type CreateDealPayload = {
     company?: number | null;
     expectedCloseDate?: string;
     closedAt?: string;
+    closedReason?: string;
 };
 
 export type UpdateDealPayload = {
@@ -270,6 +272,7 @@ export type UpdateDealPayload = {
     company?: number | null;
     expectedCloseDate?: string | null;
     closedAt?: string | null;
+    closedReason?: string | null;
 };
 
 export type Pipeline = {

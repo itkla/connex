@@ -51,7 +51,9 @@ export default function CompanyActionsMenu({
     });
     const [imageFile, setImageFile] = useState<File | null>(null);
     const [isCreatingContact, setIsCreatingContact] = useState(false);
+    const [contactCreationSucceeded, setContactCreationSucceeded] = useState(false);
     const [isCreatingDeal, setIsCreatingDeal] = useState(false);
+    const [dealCreationSucceeded, setDealCreationSucceeded] = useState(false);
 
     const emptyDealPayload = (): CreateDealPayload => ({
         name: '',
@@ -79,9 +81,17 @@ export default function CompanyActionsMenu({
         setNewContactDialogOpen(true);
     };
 
+    const closeNewContactDialog = (open: boolean) => {
+        setNewContactDialogOpen(open);
+        if (!open) setContactCreationSucceeded(false);
+    };
+
     const closeNewDealDialog = (open: boolean) => {
         setNewDealDialogOpen(open);
-        if (!open) setNewDealPayload(emptyDealPayload());
+        if (!open) {
+            setNewDealPayload(emptyDealPayload());
+            setDealCreationSucceeded(false);
+        }
     };
 
     const showNewDealDialog = () => {
@@ -103,6 +113,7 @@ export default function CompanyActionsMenu({
     };
 
     const createNewContact = async () => {
+        setContactCreationSucceeded(false);
         setIsCreatingContact(true);
         try {
             // console.log('newContactPayload', newContactPayload);
@@ -112,8 +123,12 @@ export default function CompanyActionsMenu({
                 await updateContact(newContact.id, { ...newContactPayload, imageUrl });
             }
             toastSuccess(t('toastContactCreated'));
-            setNewContactDialogOpen(false);
-            router.refresh();
+            setIsCreatingContact(false);
+            setContactCreationSucceeded(true);
+            setTimeout(() => {
+                closeNewContactDialog(false);
+                router.refresh();
+            }, 900);
         } catch (err) {
             if (isFieldError(err)) {
                 throw err;
@@ -126,6 +141,7 @@ export default function CompanyActionsMenu({
     };
 
     const createNewDeal = async () => {
+        setDealCreationSucceeded(false);
         setIsCreatingDeal(true);
         try {
             await createDeal({
@@ -140,8 +156,12 @@ export default function CompanyActionsMenu({
                 expectedCloseDate: newDealPayload.expectedCloseDate || undefined,
             });
             toastSuccess(t('toastDealCreated'));
-            closeNewDealDialog(false);
-            router.refresh();
+            setIsCreatingDeal(false);
+            setDealCreationSucceeded(true);
+            setTimeout(() => {
+                closeNewDealDialog(false);
+                router.refresh();
+            }, 900);
         } catch (err) {
             if (isFieldError(err)) {
                 throw err;
@@ -257,7 +277,7 @@ export default function CompanyActionsMenu({
 
             <NewContactDialog
                 newContactDialogOpen={newContactDialogOpen}
-                setNewContactDialogOpen={setNewContactDialogOpen}
+                setNewContactDialogOpen={closeNewContactDialog}
                 newContactPayload={newContactPayload}
                 setNewContactPayload={setNewContactPayload}
                 imageFile={imageFile}
@@ -265,6 +285,7 @@ export default function CompanyActionsMenu({
                 companies={[company]}
                 selectedCompany={company}
                 isCreating={isCreatingContact}
+                isSuccess={contactCreationSucceeded}
                 createNewContact={createNewContact}
             />
 
@@ -277,6 +298,7 @@ export default function CompanyActionsMenu({
                 pipelines={pipelines}
                 stagesByPipeline={stagesByPipeline}
                 isCreating={isCreatingDeal}
+                isSuccess={dealCreationSucceeded}
                 createNewDeal={createNewDeal}
             />
         </div>

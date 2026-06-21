@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { toastError, toastSuccess } from '@/app/lib/toast';
 import { Loader2Icon } from 'lucide-react';
-import { ClipboardDocumentCheckIcon } from '@heroicons/react/24/outline';
+import { ClipboardDocumentCheckIcon, Bars3BottomLeftIcon, CalendarIcon, UserCircleIcon, UserIcon, BriefcaseIcon } from '@heroicons/react/24/outline';
 
 import {
     Dialog,
@@ -27,8 +27,11 @@ import {
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
+import { DialogStatusCover, resolveDialogStatus, fieldInputClass, fieldLeadIconClass } from '@/components/ui/dialog-status-cover';
+import { InputGroupAddon } from '@/components/ui/input-group';
+import { cn } from '@/lib/utils';
 
-import { ApiError, createTask } from '@/app/lib/api';
+import { ApiError, createTask, isFieldError } from '@/app/lib/api';
 import { useFieldErrors } from '@/app/hooks/useFieldErrors';
 import type { Contact, Deal, User } from '@/app/lib/types';
 
@@ -42,9 +45,6 @@ type Props = {
     defaultPerson?: Contact | null;
     defaultDeal?: Deal | null;
 };
-
-const inputClass =
-    'w-full rounded-lg bg-muted px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground outline-none ring-1 ring-border transition focus:ring-2 focus:ring-brand';
 
 export default function TaskDialog({
     open,
@@ -65,6 +65,7 @@ export default function TaskDialog({
     const [selectedPerson, setSelectedPerson] = useState<Contact | null>(null);
     const [selectedDeal, setSelectedDeal] = useState<Deal | null>(null);
     const [submitting, setSubmitting] = useState(false);
+    const [succeeded, setSucceeded] = useState(false);
     const { fieldErrors, reset: resetFieldErrors, clearError, captureFieldErrors } = useFieldErrors();
 
     useEffect(() => {
@@ -97,10 +98,17 @@ export default function TaskDialog({
                 dealId: selectedDeal?.id ?? undefined,
             });
             toastSuccess(t('toastCreated'));
-            onOpenChange(false);
+            setSucceeded(true);
             router.refresh();
+            setTimeout(() => onOpenChange(false), 900);
         } catch (err) {
             if (captureFieldErrors(err)) {
+                if (isFieldError(err)) {
+                    const firstKey = Object.keys(err.fieldErrors)[0];
+                    if (firstKey) {
+                        requestAnimationFrame(() => document.getElementById(`task-${firstKey}`)?.focus());
+                    }
+                }
                 return;
             }
             const message =
@@ -115,154 +123,185 @@ export default function TaskDialog({
         }
     };
 
+    const hasErrors = Object.keys(fieldErrors).length > 0;
+    const status = resolveDialogStatus({ isLoading: submitting, hasErrors, isSuccess: succeeded });
+
+    const handleOpenChange = (next: boolean) => {
+        if (!next && submitting) return;
+        if (!next) setSucceeded(false);
+        onOpenChange(next);
+    };
+
     return (
-        <Dialog open={open} onOpenChange={onOpenChange}>
-            <DialogContent>
-                <DialogHeader>
-                    <div className="flex items-start gap-3">
-                        <span className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-brand-light text-brand-dark">
-                            <ClipboardDocumentCheckIcon className="size-5" />
-                        </span>
-                        <div className="space-y-1">
-                            <DialogTitle>{t('titleCreate')}</DialogTitle>
-                            <DialogDescription>{t('description')}</DialogDescription>
+        <Dialog open={open} onOpenChange={handleOpenChange}>
+            <DialogContent className="gap-0 overflow-hidden p-0 sm:max-w-lg">
+                <DialogStatusCover status={status} />
+
+                <div className="px-6 pb-6">
+                    <DialogHeader className="ncd-rise -mt-12" style={{ animationDelay: '40ms' }}>
+                        <div className="flex items-start gap-3">
+                            <span className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-brand-light text-brand-dark">
+                                <ClipboardDocumentCheckIcon className="size-5" />
+                            </span>
+                            <div className="space-y-1">
+                                <DialogTitle className="text-xl font-semibold tracking-tight">{t('titleCreate')}</DialogTitle>
+                                <DialogDescription>{t('description')}</DialogDescription>
+                            </div>
                         </div>
-                    </div>
-                </DialogHeader>
+                    </DialogHeader>
 
-                <form onSubmit={handleSubmit} className="grid gap-4">
-                    <div className="grid gap-1.5">
-                        <Label htmlFor="task-description">{t('descriptionLabel')}</Label>
-                        <Textarea
-                            id="task-description"
-                            value={description}
-                            onChange={(e) => {
-                                setDescription(e.target.value);
-                                clearError('description');
-                            }}
-                            placeholder={t('descriptionPlaceholder')}
-                            rows={3}
-                            aria-invalid={Boolean(fieldErrors.description)}
-                            autoFocus
-                            required
-                        />
-                        {fieldErrors.description && (
-                            <p className="px-1 text-sm text-destructive">{fieldErrors.description}</p>
-                        )}
-                    </div>
-
-                    <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-                        <div className="grid gap-1.5">
-                            <Label htmlFor="task-due">{t('dueDateLabel')}</Label>
-                            <input
-                                id="task-due"
-                                type="date"
-                                value={dueDate}
-                                onChange={(e) => setDueDate(e.target.value)}
-                                className={inputClass}
-                            />
-                        </div>
-
-                        <div className="grid gap-1.5">
-                            <Label htmlFor="task-assignee">{t('assignedToLabel')}</Label>
-                            <Combobox
-                                items={users}
-                                itemToStringLabel={(u: User) => u.displayName || u.username}
-                                value={assignee}
-                                onValueChange={(u) => setAssignee(u as User | null)}
-                            >
-                                <ComboboxInput
-                                    id="task-assignee"
-                                    placeholder={t('assignedToPlaceholder')}
-                                    className="ring-1 ring-border"
+                    <form onSubmit={handleSubmit} className="grid gap-5">
+                        <div className="ncd-rise grid gap-1.5" style={{ animationDelay: '90ms' }}>
+                            <Label htmlFor="task-description">{t('descriptionLabel')}</Label>
+                            <div className="group relative">
+                                <Bars3BottomLeftIcon className="pointer-events-none absolute left-3 top-3 size-4 text-muted-foreground transition-colors group-focus-within:text-brand" />
+                                <Textarea
+                                    id="task-description"
+                                    value={description}
+                                    onChange={(e) => {
+                                        setDescription(e.target.value);
+                                        clearError('description');
+                                    }}
+                                    placeholder={t('descriptionPlaceholder')}
+                                    rows={3}
+                                    aria-invalid={Boolean(fieldErrors.description)}
+                                    aria-describedby={fieldErrors.description ? 'task-description-error' : undefined}
+                                    className={cn(fieldInputClass, 'pl-9 pr-3')}
+                                    autoFocus
+                                    required
                                 />
-                                <ComboboxContent className="pointer-events-auto">
-                                    <ComboboxList onWheel={handleListWheel}>
-                                        <ComboboxEmpty>{t('noUserFound')}</ComboboxEmpty>
-                                        {users.map((u) => (
-                                            <ComboboxItem key={u.id} value={u}>
-                                                {u.displayName || u.username}
-                                            </ComboboxItem>
-                                        ))}
-                                    </ComboboxList>
-                                </ComboboxContent>
-                            </Combobox>
+                            </div>
+                            {fieldErrors.description && <p id="task-description-error" className="text-sm text-destructive">{fieldErrors.description}</p>}
                         </div>
-                    </div>
 
-                    <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-                        <div className="grid gap-1.5">
-                            <Label htmlFor="task-person">{t('personLabel')}</Label>
-                            <Combobox
-                                items={persons}
-                                itemToStringLabel={(p: Contact) => p.name}
-                                value={selectedPerson}
-                                onValueChange={(p) => setSelectedPerson(p as Contact | null)}
+                        <div className="ncd-rise grid grid-cols-1 gap-3 md:grid-cols-2" style={{ animationDelay: '140ms' }}>
+                            <div className="grid gap-1.5">
+                                <Label htmlFor="task-due">{t('dueDateLabel')}</Label>
+                                <div className="group relative">
+                                    <CalendarIcon className={fieldLeadIconClass} />
+                                    <input
+                                        id="task-due"
+                                        type="date"
+                                        value={dueDate}
+                                        onChange={(e) => setDueDate(e.target.value)}
+                                        className={cn(fieldInputClass, 'pl-9 pr-3')}
+                                    />
+                                </div>
+                            </div>
+
+                            <div className="grid gap-1.5">
+                                <Label htmlFor="task-assignee">{t('assignedToLabel')}</Label>
+                                <Combobox
+                                    items={users}
+                                    itemToStringLabel={(u: User) => u.displayName || u.username}
+                                    value={assignee}
+                                    onValueChange={(u) => setAssignee(u as User | null)}
+                                >
+                                    <ComboboxInput
+                                        id="task-assignee"
+                                        placeholder={t('assignedToPlaceholder')}
+                                        className="rounded-lg border-0 bg-muted shadow-none ring-1 ring-border dark:bg-muted has-[[data-slot=input-group-control]:focus-visible]:ring-2 has-[[data-slot=input-group-control]:focus-visible]:ring-brand"
+                                    >
+                                        <InputGroupAddon align="inline-start">
+                                            <UserCircleIcon className="size-4 text-muted-foreground transition-colors group-focus-within/input-group:text-brand" />
+                                        </InputGroupAddon>
+                                    </ComboboxInput>
+                                    <ComboboxContent className="pointer-events-auto">
+                                        <ComboboxList onWheel={handleListWheel}>
+                                            <ComboboxEmpty>{t('noUserFound')}</ComboboxEmpty>
+                                            {users.map((u) => (
+                                                <ComboboxItem key={u.id} value={u}>
+                                                    {u.displayName || u.username}
+                                                </ComboboxItem>
+                                            ))}
+                                        </ComboboxList>
+                                    </ComboboxContent>
+                                </Combobox>
+                            </div>
+                        </div>
+
+                        <div className="ncd-rise grid grid-cols-1 gap-3 md:grid-cols-2" style={{ animationDelay: '190ms' }}>
+                            <div className="grid gap-1.5">
+                                <Label htmlFor="task-person">{t('personLabel')}</Label>
+                                <Combobox
+                                    items={persons}
+                                    itemToStringLabel={(p: Contact) => p.name}
+                                    value={selectedPerson}
+                                    onValueChange={(p) => setSelectedPerson(p as Contact | null)}
+                                >
+                                    <ComboboxInput
+                                        id="task-person"
+                                        placeholder={t('personPlaceholder')}
+                                        className="rounded-lg border-0 bg-muted shadow-none ring-1 ring-border dark:bg-muted has-[[data-slot=input-group-control]:focus-visible]:ring-2 has-[[data-slot=input-group-control]:focus-visible]:ring-brand"
+                                    >
+                                        <InputGroupAddon align="inline-start">
+                                            <UserIcon className="size-4 text-muted-foreground transition-colors group-focus-within/input-group:text-brand" />
+                                        </InputGroupAddon>
+                                    </ComboboxInput>
+                                    <ComboboxContent className="pointer-events-auto">
+                                        <ComboboxList onWheel={handleListWheel}>
+                                            <ComboboxEmpty>{t('noPersonFound')}</ComboboxEmpty>
+                                            {persons.map((p) => (
+                                                <ComboboxItem key={p.id} value={p}>
+                                                    {p.name}
+                                                </ComboboxItem>
+                                            ))}
+                                        </ComboboxList>
+                                    </ComboboxContent>
+                                </Combobox>
+                            </div>
+
+                            <div className="grid gap-1.5">
+                                <Label htmlFor="task-deal">{t('dealLabel')}</Label>
+                                <Combobox
+                                    items={deals}
+                                    itemToStringLabel={(d: Deal) => d.name}
+                                    value={selectedDeal}
+                                    onValueChange={(d) => setSelectedDeal(d as Deal | null)}
+                                >
+                                    <ComboboxInput
+                                        id="task-deal"
+                                        placeholder={t('dealPlaceholder')}
+                                        className="rounded-lg border-0 bg-muted shadow-none ring-1 ring-border dark:bg-muted has-[[data-slot=input-group-control]:focus-visible]:ring-2 has-[[data-slot=input-group-control]:focus-visible]:ring-brand"
+                                    >
+                                        <InputGroupAddon align="inline-start">
+                                            <BriefcaseIcon className="size-4 text-muted-foreground transition-colors group-focus-within/input-group:text-brand" />
+                                        </InputGroupAddon>
+                                    </ComboboxInput>
+                                    <ComboboxContent className="pointer-events-auto">
+                                        <ComboboxList onWheel={handleListWheel}>
+                                            <ComboboxEmpty>{t('noDealFound')}</ComboboxEmpty>
+                                            {deals.map((d) => (
+                                                <ComboboxItem key={d.id} value={d}>
+                                                    {d.name}
+                                                </ComboboxItem>
+                                            ))}
+                                        </ComboboxList>
+                                    </ComboboxContent>
+                                </Combobox>
+                            </div>
+                        </div>
+
+                        <DialogFooter className="ncd-rise" style={{ animationDelay: '240ms' }}>
+                            <DialogClose asChild>
+                                <Button type="button" variant="outline" disabled={submitting}>
+                                    {t('cancel')}
+                                </Button>
+                            </DialogClose>
+                            <Button
+                                type="submit"
+                                disabled={submitting || succeeded}
+                                className="min-w-24 bg-brand text-white shadow-sm transition hover:bg-brand-hover hover:shadow-md"
                             >
-                                <ComboboxInput
-                                    id="task-person"
-                                    placeholder={t('personPlaceholder')}
-                                    className="ring-1 ring-border"
-                                />
-                                <ComboboxContent className="pointer-events-auto">
-                                    <ComboboxList onWheel={handleListWheel}>
-                                        <ComboboxEmpty>{t('noPersonFound')}</ComboboxEmpty>
-                                        {persons.map((p) => (
-                                            <ComboboxItem key={p.id} value={p}>
-                                                {p.name}
-                                            </ComboboxItem>
-                                        ))}
-                                    </ComboboxList>
-                                </ComboboxContent>
-                            </Combobox>
-                        </div>
-
-                        <div className="grid gap-1.5">
-                            <Label htmlFor="task-deal">{t('dealLabel')}</Label>
-                            <Combobox
-                                items={deals}
-                                itemToStringLabel={(d: Deal) => d.name}
-                                value={selectedDeal}
-                                onValueChange={(d) => setSelectedDeal(d as Deal | null)}
-                            >
-                                <ComboboxInput
-                                    id="task-deal"
-                                    placeholder={t('dealPlaceholder')}
-                                    className="ring-1 ring-border"
-                                />
-                                <ComboboxContent className="pointer-events-auto">
-                                    <ComboboxList onWheel={handleListWheel}>
-                                        <ComboboxEmpty>{t('noDealFound')}</ComboboxEmpty>
-                                        {deals.map((d) => (
-                                            <ComboboxItem key={d.id} value={d}>
-                                                {d.name}
-                                            </ComboboxItem>
-                                        ))}
-                                    </ComboboxList>
-                                </ComboboxContent>
-                            </Combobox>
-                        </div>
-                    </div>
-
-                    <DialogFooter>
-                        <DialogClose asChild>
-                            <Button type="button" variant="outline" disabled={submitting}>
-                                {t('cancel')}
+                                {submitting ? (
+                                    <Loader2Icon className="size-4 animate-spin" />
+                                ) : (
+                                    t('create')
+                                )}
                             </Button>
-                        </DialogClose>
-                        <Button
-                            type="submit"
-                            disabled={submitting}
-                            className="bg-brand text-white transition-transform hover:bg-brand-dark active:scale-[0.98]"
-                        >
-                            {submitting ? (
-                                <Loader2Icon className="size-4 animate-spin" />
-                            ) : (
-                                t('create')
-                            )}
-                        </Button>
-                    </DialogFooter>
-                </form>
+                        </DialogFooter>
+                    </form>
+                </div>
             </DialogContent>
         </Dialog>
     );

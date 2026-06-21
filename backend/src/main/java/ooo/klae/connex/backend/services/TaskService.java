@@ -20,6 +20,7 @@ import lombok.RequiredArgsConstructor;
 @RequiredArgsConstructor
 public class TaskService {
     private final TaskMapper taskMapper;
+    private final AuditService auditService;
 
     public List<Task> getAllTasks() {
         return taskMapper.getAllTasks();
@@ -45,6 +46,7 @@ public class TaskService {
 
     public Task create(Task task) {
         taskMapper.insert(task);
+        auditService.record("task.create", "task", task.getId(), task.getDescription(), "Task created", null);
         return task;
     }
 
@@ -52,11 +54,13 @@ public class TaskService {
         if (taskMapper.getTaskById(id) == null) throw new ResourceNotFoundException("Task not found with id: " + id);
         task.setId(id);
         taskMapper.update(task);
+        auditService.record("task.update", "task", id, task.getDescription(), "Task updated", null);
         return task;
     }
 
     public void delete(int id) {
         if (taskMapper.getTaskById(id) == null) throw new ResourceNotFoundException("Task not found with id: " + id);
         taskMapper.delete(id);
+        auditService.record("task.delete", "task", id, null, "Task deleted", null);
     }
 }

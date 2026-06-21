@@ -196,6 +196,11 @@ export function EngagementSparkline({ data }: { data: EngagementPoint[] }) {
         () => new Intl.DateTimeFormat(locale, { month: 'short', day: 'numeric' }),
         [locale],
     );
+    const ticks = useMemo(() => {
+        const out: number[] = [];
+        for (let i = data.length - 1; i >= 0; i -= 2) out.push(data[i].weekStart);
+        return out.reverse();
+    }, [data]);
     const total = data.reduce((s, d) => s + d.count, 0);
     return (
         <div className="md:col-span-2 rounded-xl bg-transparent p-3 ring-1 ring-border">
@@ -212,7 +217,8 @@ export function EngagementSparkline({ data }: { data: EngagementPoint[] }) {
                                 tick={{ fontSize: 10, fill: 'var(--chart-axis)' }}
                                 tickLine={false}
                                 axisLine={false}
-                                interval={1}
+                                ticks={ticks}
+                                interval={0}
                             />
                             <RechartsTooltip
                                 cursor={{ stroke: 'var(--color-brand)', strokeOpacity: 0.3, strokeWidth: 1 }}

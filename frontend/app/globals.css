@@ -195,4 +195,117 @@
       transform: translateY(0);
     }
   }
+
+  .ncd-rise {
+    opacity: 0;
+    animation: ncdRise 0.5s cubic-bezier(0.23, 1, 0.32, 1) both;
+  }
+
+  @keyframes ncdRise {
+    from {
+      opacity: 0;
+      transform: translateY(10px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  .ncd-pop {
+    animation: ncdPop 0.5s cubic-bezier(0.34, 1.4, 0.64, 1) both;
+  }
+
+  @keyframes ncdPop {
+    from {
+      opacity: 0;
+      transform: scale(0.82);
+    }
+    to {
+      opacity: 1;
+      transform: scale(1);
+    }
+  }
+
+  .ncd-sheen::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(
+      115deg,
+      transparent 30%,
+      rgba(255, 255, 255, 0.35) 48%,
+      transparent 62%
+    );
+    transform: translateX(-100%);
+    animation: ncdSheen 4.5s cubic-bezier(0.23, 1, 0.32, 1) 0.4s infinite;
+  }
+
+  @keyframes ncdSheen {
+    0% {
+      transform: translateX(-100%);
+    }
+    35%,
+    100% {
+      transform: translateX(100%);
+    }
+  }
+
+  .ncd-skeleton::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    transform: translateX(-100%);
+    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.35), transparent);
+    animation: ncdShimmer 1.3s ease-in-out infinite;
+  }
+
+  @keyframes ncdShimmer {
+    100% {
+      transform: translateX(100%);
+    }
+  }
+
+  .settle-animate .react-flow__node {
+    transition: transform 0.7s cubic-bezier(0.23, 1, 0.32, 1);
+  }
+
+  .react-flow__node,
+  .react-flow__edge {
+    transition: opacity 0.25s ease;
+  }
+  .map-dim .react-flow__node,
+  .map-dim .react-flow__edge {
+    opacity: 0.16;
+  }
+  .map-dim .react-flow__node.rf-active,
+  .map-dim .react-flow__edge.rf-active {
+    opacity: 1;
+  }
+
+  @keyframes mapNodeBloom {
+    from {
+      transform: scale(0.2);
+      opacity: 0;
+    }
+    to {
+      transform: scale(1);
+      opacity: 1;
+    }
+  }
+  .map-node-bloom {
+    animation: mapNodeBloom 0.22s cubic-bezier(0.23, 1, 0.32, 1);
+  }
+}
+
+.map-node-label {
+  opacity: var(--label-opacity, 1);
+}
+.react-flow__node.rf-active .map-node-label {
+  opacity: 1;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .map-node-label {
+    transition: opacity 0.15s ease;
+  }
 }

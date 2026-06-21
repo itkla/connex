@@ -4,14 +4,24 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { Button } from '@/components/ui/button';
 import { Loader2Icon } from 'lucide-react';
 import { Combobox, ComboboxItem, ComboboxList, ComboboxContent, ComboboxEmpty, ComboboxInput } from '@/components/ui/combobox';
+import { InputGroupAddon } from '@/components/ui/input-group';
 import { Label } from '@/components/ui/label';
+import { cn } from '@/lib/utils';
 import { type Company, type CreateContactPayload } from '@/app/lib/types';
-import { ChangeEvent, Dispatch, SetStateAction, useEffect, useState, type WheelEvent } from 'react';
-import { CameraIcon } from '@heroicons/react/24/outline';
+import { ChangeEvent, Dispatch, FormEvent, SetStateAction, useEffect, useState, type WheelEvent } from 'react';
+import {
+    CameraIcon,
+    UserIcon,
+    EnvelopeIcon,
+    PhoneIcon,
+    BriefcaseIcon,
+    BuildingOffice2Icon,
+} from '@heroicons/react/24/outline';
 import { useTranslations } from 'next-intl';
-import { uploadContactPicture } from '@/app/lib/utils';
+import { initials, uploadContactPicture } from '@/app/lib/utils';
+import { isFieldError } from '@/app/lib/api';
 import { useFieldErrors } from '@/app/hooks/useFieldErrors';
-const inputClass = 'w-full rounded-lg bg-muted px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground outline-none ring-1 ring-border transition focus:ring-2 focus:ring-brand';
+import { DialogStatusCover, resolveDialogStatus, fieldInputClass, fieldErrorClass, fieldLeadIconClass } from '@/components/ui/dialog-status-cover';
 
 type Props = {
     newContactDialogOpen: boolean;
@@ -23,6 +33,7 @@ type Props = {
     companies: Company[];
     selectedCompany: Company | null;
     isCreating: boolean;
+    isSuccess?: boolean;
     createNewContact: () => void | Promise<void>;
 };
 
@@ -36,6 +47,7 @@ export default function NewContactDialog({
     companies,
     selectedCompany,
     isCreating,
+    isSuccess = false,
     createNewContact,
 }: Props) {
     const t = useTranslations('ContactsNewContactDialog');
@@ -48,6 +60,10 @@ export default function NewContactDialog({
             await createNewContact();
         } catch (err) {
             captureFieldErrors(err);
+            if (isFieldError(err)) {
+                const k = Object.keys(err.fieldErrors)[0];
+                if (k) requestAnimationFrame(() => document.getElementById(k)?.focus());
+            }
         }
     };
 
@@ -79,152 +95,198 @@ export default function NewContactDialog({
         setImageFile(file);
     };
 
+    const handleOpenChange = (next: boolean) => {
+        if (!next && isCreating) return;
+        setNewContactDialogOpen(next);
+    };
+
+    const hasErrors = Object.keys(fieldErrors).length > 0;
+    const status = resolveDialogStatus({ isLoading: isCreating, hasErrors, isSuccess });
+    const contactInitial = initials(newContactPayload.name || '');
+
     return (
-        <Dialog open={newContactDialogOpen} onOpenChange={setNewContactDialogOpen}>
-            <DialogContent>
-                <DialogHeader>
-                    <DialogTitle>{t('dialogTitle')}</DialogTitle>
-                    <DialogDescription>{t('description')}</DialogDescription>
-                </DialogHeader>
+        <Dialog open={newContactDialogOpen} onOpenChange={handleOpenChange}>
+            <DialogContent className="gap-0 overflow-hidden p-0 sm:max-w-lg">
+                <DialogStatusCover status={status} />
 
-                <div className="flex justify-center">
-                    <label
-                        htmlFor="imageUrl"
-                        className="group relative flex h-20 w-20 cursor-pointer items-center justify-center overflow-hidden rounded-full bg-muted ring-1 ring-border transition hover:ring-2 hover:ring-brand"
-                    >
-                        {imagePreview ? (
-                            <img src={imagePreview} alt="" className="h-full w-full object-cover" />
-                        ) : (
-                            <div className="h-full w-full bg-muted" />
-                        )}
-                        {/* <ContactAvatar contact={newContactPayload} type="medium" /> */}
-                        <div className="absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 transition group-hover:opacity-100">
-                            <CameraIcon className="size-6 text-white" />
-                        </div>
-                        <input
-                            id="imageUrl"
-                            type="file"
-                            accept="image/*"
-                            onChange={handleImageChange}
-                            className="sr-only"
-                        />
-                    </label>
-                </div>
-
-                <div className="grid gap-4">
-                    <div className="grid gap-1.5">
-                        <Label htmlFor="name">{t('name')}</Label>
-                        <input
-                            id="name"
-                            type="text"
-                            value={newContactPayload.name}
-                            onChange={(e) => {
-                                setNewContactPayload((prev) => ({ ...prev, name: e.target.value }));
-                                clearError('name');
-                            }}
-                            className={`${inputClass} ${fieldErrors.name ? 'ring-2 ring-destructive focus:ring-destructive' : ''}`}
-                            placeholder={t('namePlaceholder')}
-                            aria-invalid={Boolean(fieldErrors.name)}
-                            autoFocus
-                            required
-                        />
-                        {fieldErrors.name && (
-                            <p className="px-1 text-sm text-destructive">{fieldErrors.name}</p>
-                        )}
-                    </div>
-
-                    <div className="grid gap-1.5">
-                        <Label htmlFor="email">{t('email')}</Label>
-                        <input
-                            id="email"
-                            type="email"
-                            value={newContactPayload.email}
-                            onChange={(e) => {
-                                setNewContactPayload((prev) => ({ ...prev, email: e.target.value }));
-                                clearError('email');
-                            }}
-                            className={`${inputClass} ${fieldErrors.email ? 'ring-2 ring-destructive focus:ring-destructive' : ''}`}
-                            placeholder={t('emailPlaceholder')}
-                            aria-invalid={Boolean(fieldErrors.email)}
-                        />
-                        {fieldErrors.email && (
-                            <p className="px-1 text-sm text-destructive">{fieldErrors.email}</p>
-                        )}
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-3">
-                        <div className="grid gap-1.5">
-                            <Label htmlFor="phone">{t('phone')}</Label>
-                            <input
-                                id="phone"
-                                type="tel"
-                                value={newContactPayload.phone}
-                                onChange={(e) => {
-                                    setNewContactPayload((prev) => ({ ...prev, phone: e.target.value }));
-                                    clearError('phone');
-                                }}
-                                className={`${inputClass} ${fieldErrors.phone ? 'ring-2 ring-destructive focus:ring-destructive' : ''}`}
-                                placeholder={t('phonePlaceholder')}
-                                aria-invalid={Boolean(fieldErrors.phone)}
-                            />
-                            {fieldErrors.phone && (
-                                <p className="px-1 text-sm text-destructive">{fieldErrors.phone}</p>
-                            )}
-                        </div>
-                        <div className="grid gap-1.5">
-                            <Label htmlFor="title">{t('title')}</Label>
-                            <input
-                                id="title"
-                                type="text"
-                                value={newContactPayload.title}
-                                onChange={(e) => setNewContactPayload((prev) => ({ ...prev, title: e.target.value }))}
-                                className={inputClass}
-                                placeholder={t('titlePlaceholder')}
-                            />
-                        </div>
-                    </div>
-
-                    <div className="grid gap-1.5">
-                        <Label htmlFor="company">{t('company')}</Label>
-                        <Combobox
-                            items={companies}
-                            itemToStringLabel={(c: Company) => c.name}
-                            value={selectedCompany}
-                            // disabled={isCreating}
-                            onValueChange={(c) =>
-                                setNewContactPayload((prev) => ({
-                                    ...prev,
-                                    companyId: (c as Company | null)?.id,
-                                }))
-                            }
+                <div className="px-6 pb-6">
+                    <div className="ncd-pop relative -mt-12 mb-4 w-fit">
+                        <label
+                            htmlFor="imageUrl"
+                            className="group relative flex size-20 cursor-pointer items-center justify-center overflow-hidden rounded-full bg-muted shadow-lg ring-4 ring-popover transition hover:ring-brand"
                         >
-                            <ComboboxInput id="company" placeholder={t('selectCompanyPlaceholder')} className="ring-1 ring-border"/>
-                            <ComboboxContent className="pointer-events-auto">
-                                <ComboboxList onWheel={handleListWheel}>
-                                    <ComboboxEmpty>{t('noCompaniesFound')}</ComboboxEmpty>
-                                    {companies.map((company) => (
-                                        <ComboboxItem key={company.id} value={company}>
-                                            {company.name}
-                                        </ComboboxItem>
-                                    ))}
-                                </ComboboxList>
-                            </ComboboxContent>
-                        </Combobox>
-                    </div>
-                </div>
+                            {imagePreview ? (
+                                <img src={imagePreview} alt="" className="size-full object-cover" />
+                            ) : contactInitial ? (
+                                <div className="flex size-full select-none items-center justify-center bg-brand-light text-2xl font-semibold text-brand-dark">
+                                    {contactInitial}
+                                </div>
+                            ) : (
+                                <div className="flex size-full items-center justify-center bg-brand-light">
+                                    <UserIcon className="size-7 text-brand-dark/70 transition group-hover:text-brand-dark" />
+                                </div>
+                            )}
 
-                <DialogFooter>
-                    <DialogClose asChild>
-                        <Button variant="outline" disabled={isCreating}>{t('cancel')}</Button>
-                    </DialogClose>
-                    <Button
-                        onClick={handleCreate}
-                        disabled={isCreating}
-                        className="bg-brand text-white hover:bg-brand-dark"
+                            {(imagePreview || contactInitial) && (
+                                <div className="absolute inset-0 flex items-center justify-center bg-black/45 opacity-0 transition group-hover:opacity-100">
+                                    <CameraIcon className="size-5 text-white" />
+                                </div>
+                            )}
+
+                            <input
+                                id="imageUrl"
+                                type="file"
+                                accept="image/*"
+                                onChange={handleImageChange}
+                                className="sr-only"
+                            />
+                        </label>
+                    </div>
+
+                    <DialogHeader className="ncd-rise mb-5" style={{ animationDelay: '40ms' }}>
+                        <DialogTitle className="text-xl font-semibold tracking-tight">{t('dialogTitle')}</DialogTitle>
+                        <DialogDescription>{t('description')}</DialogDescription>
+                    </DialogHeader>
+
+                    <form
+                        onSubmit={(e: FormEvent) => {
+                            e.preventDefault();
+                            if (isCreating) return;
+                            handleCreate();
+                        }}
+                        className="grid gap-5"
                     >
-                        {isCreating ? <Loader2Icon className="size-4 animate-spin" /> : t('create')}
-                    </Button>
-                </DialogFooter>
+                        <div className="ncd-rise grid gap-1.5" style={{ animationDelay: '90ms' }}>
+                            <Label htmlFor="name">{t('name')}</Label>
+                            <div className="group relative">
+                                <UserIcon className={fieldLeadIconClass} />
+                                <input
+                                    id="name"
+                                    type="text"
+                                    value={newContactPayload.name}
+                                    onChange={(e) => {
+                                        setNewContactPayload((prev) => ({ ...prev, name: e.target.value }));
+                                        clearError('name');
+                                    }}
+                                    className={cn(fieldInputClass, 'pl-9 pr-3', fieldErrors.name && fieldErrorClass)}
+                                    placeholder={t('namePlaceholder')}
+                                    aria-invalid={Boolean(fieldErrors.name)}
+                                    aria-describedby={fieldErrors.name ? 'name-error' : undefined}
+                                    autoFocus
+                                    required
+                                />
+                            </div>
+                            {fieldErrors.name && <p id="name-error" className="text-sm text-destructive">{fieldErrors.name}</p>}
+                        </div>
+
+                        <div className="ncd-rise grid gap-1.5" style={{ animationDelay: '140ms' }}>
+                            <Label htmlFor="email">{t('email')}</Label>
+                            <div className="group relative">
+                                <EnvelopeIcon className={fieldLeadIconClass} />
+                                <input
+                                    id="email"
+                                    type="email"
+                                    value={newContactPayload.email}
+                                    onChange={(e) => {
+                                        setNewContactPayload((prev) => ({ ...prev, email: e.target.value }));
+                                        clearError('email');
+                                    }}
+                                    className={cn(fieldInputClass, 'pl-9 pr-3', fieldErrors.email && fieldErrorClass)}
+                                    placeholder={t('emailPlaceholder')}
+                                    aria-invalid={Boolean(fieldErrors.email)}
+                                    aria-describedby={fieldErrors.email ? 'email-error' : undefined}
+                                />
+                            </div>
+                            {fieldErrors.email && <p id="email-error" className="text-sm text-destructive">{fieldErrors.email}</p>}
+                        </div>
+
+                        <div className="ncd-rise grid grid-cols-2 gap-3" style={{ animationDelay: '190ms' }}>
+                            <div className="grid gap-1.5">
+                                <Label htmlFor="phone">{t('phone')}</Label>
+                                <div className="group relative">
+                                    <PhoneIcon className={fieldLeadIconClass} />
+                                    <input
+                                        id="phone"
+                                        type="tel"
+                                        value={newContactPayload.phone}
+                                        onChange={(e) => {
+                                            setNewContactPayload((prev) => ({ ...prev, phone: e.target.value }));
+                                            clearError('phone');
+                                        }}
+                                        className={cn(fieldInputClass, 'pl-9 pr-3', fieldErrors.phone && fieldErrorClass)}
+                                        placeholder={t('phonePlaceholder')}
+                                        aria-invalid={Boolean(fieldErrors.phone)}
+                                        aria-describedby={fieldErrors.phone ? 'phone-error' : undefined}
+                                    />
+                                </div>
+                                {fieldErrors.phone && <p id="phone-error" className="text-sm text-destructive">{fieldErrors.phone}</p>}
+                            </div>
+                            <div className="grid gap-1.5">
+                                <Label htmlFor="title">{t('title')}</Label>
+                                <div className="group relative">
+                                    <BriefcaseIcon className={fieldLeadIconClass} />
+                                    <input
+                                        id="title"
+                                        type="text"
+                                        value={newContactPayload.title}
+                                        onChange={(e) => setNewContactPayload((prev) => ({ ...prev, title: e.target.value }))}
+                                        className={cn(fieldInputClass, 'pl-9 pr-3')}
+                                        placeholder={t('titlePlaceholder')}
+                                    />
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="ncd-rise grid gap-1.5" style={{ animationDelay: '240ms' }}>
+                            <Label htmlFor="company">{t('company')}</Label>
+                            <Combobox
+                                items={companies}
+                                itemToStringLabel={(c: Company) => c.name}
+                                value={selectedCompany}
+                                // disabled={isCreating}
+                                onValueChange={(c) =>
+                                    setNewContactPayload((prev) => ({
+                                        ...prev,
+                                        companyId: (c as Company | null)?.id,
+                                    }))
+                                }
+                            >
+                                <ComboboxInput
+                                    id="company"
+                                    placeholder={t('selectCompanyPlaceholder')}
+                                    className="rounded-lg border-0 bg-muted shadow-none ring-1 ring-border dark:bg-muted has-[[data-slot=input-group-control]:focus-visible]:ring-2 has-[[data-slot=input-group-control]:focus-visible]:ring-brand"
+                                >
+                                    <InputGroupAddon align="inline-start">
+                                        <BuildingOffice2Icon className="size-4 text-muted-foreground transition-colors group-focus-within/input-group:text-brand" />
+                                    </InputGroupAddon>
+                                </ComboboxInput>
+                                <ComboboxContent className="pointer-events-auto">
+                                    <ComboboxList onWheel={handleListWheel}>
+                                        <ComboboxEmpty>{t('noCompaniesFound')}</ComboboxEmpty>
+                                        {companies.map((company) => (
+                                            <ComboboxItem key={company.id} value={company}>
+                                                {company.name}
+                                            </ComboboxItem>
+                                        ))}
+                                    </ComboboxList>
+                                </ComboboxContent>
+                            </Combobox>
+                        </div>
+
+                        <DialogFooter className="ncd-rise mt-5" style={{ animationDelay: '290ms' }}>
+                            <DialogClose asChild>
+                                <Button type="button" variant="outline" disabled={isCreating}>{t('cancel')}</Button>
+                            </DialogClose>
+                            <Button
+                                type="submit"
+                                disabled={isCreating || isSuccess}
+                                className="min-w-24 bg-brand text-white shadow-sm transition hover:bg-brand-hover hover:shadow-md"
+                            >
+                                {isCreating ? <Loader2Icon className="size-4 animate-spin" /> : t('create')}
+                            </Button>
+                        </DialogFooter>
+                    </form>
+                </div>
             </DialogContent>
         </Dialog>
     );

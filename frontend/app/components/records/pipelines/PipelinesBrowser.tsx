@@ -105,6 +105,7 @@ export default function PipelinesBrowser({ pipelines }: { pipelines: Pipeline[] 
     const emptyPipelineDraft: CreatePipelinePayload = { name: '' };
     const [newPipelineDialogOpen, setNewPipelineDialogOpen] = useState(false);
     const [isCreating, setIsCreating] = useState(false);
+    const [creationSucceeded, setCreationSucceeded] = useState(false);
     const [newPipelinePayload, setNewPipelinePayload] = useState<CreatePipelinePayload>(emptyPipelineDraft);
 
     const [stagesByPipeline, setStagesByPipeline] = useState<Map<number, Stage[]>>(new Map());
@@ -144,7 +145,10 @@ export default function PipelinesBrowser({ pipelines }: { pipelines: Pipeline[] 
 
     const closeNewPipelineDialog = (open: boolean) => {
         setNewPipelineDialogOpen(open);
-        if (!open) setNewPipelinePayload(emptyPipelineDraft);
+        if (!open) {
+            setNewPipelinePayload(emptyPipelineDraft);
+            setCreationSucceeded(false);
+        }
     };
 
     const createNewPipeline = async () => {
@@ -158,6 +162,7 @@ export default function PipelinesBrowser({ pipelines }: { pipelines: Pipeline[] 
             return;
         }
 
+        setCreationSucceeded(false);
         setIsCreating(true);
         try {
             const created = await createPipeline(pipelineFields);
@@ -179,9 +184,13 @@ export default function PipelinesBrowser({ pipelines }: { pipelines: Pipeline[] 
                 toastSuccess(t('pipelineCreated'));
             }
 
-            closeNewPipelineDialog(false);
+            setIsCreating(false);
+            setCreationSucceeded(true);
             setMetricsStatus('idle');
-            router.refresh();
+            setTimeout(() => {
+                closeNewPipelineDialog(false);
+                router.refresh();
+            }, 900);
         } catch (err) {
             if (isFieldError(err)) {
                 throw err;
@@ -604,6 +613,7 @@ export default function PipelinesBrowser({ pipelines }: { pipelines: Pipeline[] 
                 payload={newPipelinePayload}
                 setPayload={setNewPipelinePayload}
                 isCreating={isCreating}
+                isSuccess={creationSucceeded}
                 createNewPipeline={createNewPipeline}
             />
 

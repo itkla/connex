@@ -51,9 +51,9 @@ function buildBuckets(deals: Deal[], now: number, locale: string, range: RangeKe
         buckets.push({ key, label, won: 0, projected: 0 });
     }
 
-    // add today label
+    // mark the current month by its unique key (month labels repeat across years)
     const today = new Date(now);
-    const todayLabel = buckets[keyToIndex.get(`${today.getFullYear()}-${today.getMonth()}`) ?? -1]?.label ?? null;
+    const todayKey = `${today.getFullYear()}-${today.getMonth()}`;
 
     for (const deal of deals) {
         const closed = parseMysqlDateTime(deal.closedAt);
@@ -75,7 +75,7 @@ function buildBuckets(deals: Deal[], now: number, locale: string, range: RangeKe
         }
     }
 
-    return { data: buckets, todayLabel };
+    return { data: buckets, todayKey: keyToIndex.has(todayKey) ? todayKey : null };
 }
 
 export default function RevenueTrend({
@@ -90,10 +90,16 @@ export default function RevenueTrend({
     const t = useTranslations('AnalyticsRevenue');
     const locale = useLocale();
     const [now] = useState(() => Date.now());
-    const { data, todayLabel } = useMemo(
+    const { data, todayKey } = useMemo(
         () => buildBuckets(deals, now, locale, range),
         [deals, now, locale, range],
     );
+
+    const labelByKey = useMemo(() => {
+        const map = new Map<string, string>();
+        for (const b of data) map.set(b.key, b.label);
+        return map;
+    }, [data]);
 
     const hasData = data.some((b) => b.won > 0 || b.projected > 0);
 
@@ -119,7 +125,8 @@ export default function RevenueTrend({
                 </defs>
                 <CartesianGrid vertical={false} strokeDasharray="3 3" />
                 <XAxis
-                    dataKey="label"
+                    dataKey="key"
+                    tickFormatter={(value: string) => labelByKey.get(value) ?? value}
                     tickLine={false}
                     axisLine={false}
                     tickMargin={10}
@@ -143,9 +150,9 @@ export default function RevenueTrend({
                         />
                     }
                 />
-                {todayLabel != null && (
+                {todayKey != null && (
                     <ReferenceLine
-                        x={todayLabel}
+                        x={todayKey}
                         stroke="var(--chart-grid)"
                         strokeDasharray="4 4"
                         label={{ value: t('today'), position: 'top', fontSize: 10, fill: 'var(--muted-foreground)' }}

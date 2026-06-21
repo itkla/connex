@@ -6,18 +6,17 @@ import { ChevronRightIcon, EnvelopeIcon, PhoneIcon } from '@heroicons/react/24/o
 import { cn } from '@/lib/utils';
 import ContactAvatar from '@/app/components/records/contacts/ContactAvatar';
 import type { ContactNode as ContactNodeType } from './graph/types';
-import { AvatarFallback, Avatar, AvatarImage, AvatarGroup } from '@/components/ui/avatar';
-import { User } from '@/app/lib/types';
-import { getUserById } from '@/app/lib/api';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
+import NodeDot from '@/app/components/map/NodeDot';
+import { useDotEnabled } from '@/app/hooks/useNodeTier';
 
 function ContactNodeImpl({ id, data }: NodeProps<ContactNodeType>) {
     const { updateNodeData } = useReactFlow();
-    const { contact, hasActivity, expanded } = data;
+    const { contact, hasActivity, expanded, hovered } = data;
+    const dotEnabled = useDotEnabled();
     const toggle = () => updateNodeData(id, { expanded: !expanded });
-
 
     // TODO: fix the misalignment bug where the image isn't perfectly centered in the ring
     const ring = cn(
@@ -25,27 +24,16 @@ function ContactNodeImpl({ id, data }: NodeProps<ContactNodeType>) {
         hasActivity ? 'border-solid border-emerald-500 dark:border-emerald-400' : 'border-dashed border-border',
     );
 
-    const tasks = contact.tasks ?? [];
-    const activities = contact.activities ?? [];
-    const notes = contact.notes ?? [];
-    const deals = contact.deals ?? [];
-    const openTasks = tasks.filter((t) => !t.completed).length;
-
-    const interactionUserIds = Array.from(new Set<number>([
-        ...activities.map((a) => a.createdById),
-        ...notes.map((n) => n.author),
-        ...tasks.map((t) => t.assignedToId),
-    ].filter((v): v is number => typeof v === "number")));
-
-    // const interactionUsers: User[] = [];
-    // for (const uid of interactionUserIds) {
-    //     try {
-    //         const u = await getUserById(uid);
-    //         if (u) interactionUsers.push(u as User);
-    //     } catch {
-
-    //     }
-    // }
+    if (dotEnabled && !expanded && !hovered) {
+        return (
+            <NodeDot
+                shape="circle"
+                className={hasActivity ? 'bg-emerald-500 dark:bg-emerald-400' : 'bg-muted-foreground/50'}
+                title={contact.name}
+                onClick={toggle}
+            />
+        );
+    }
 
     if (expanded) {
 
@@ -118,13 +106,13 @@ function ContactNodeImpl({ id, data }: NodeProps<ContactNodeType>) {
     }
 
     return (
-        <div className="relative flex flex-col items-center">
+        <div className="map-node-bloom relative flex flex-col items-center">
             <Handle type="target" position={Position.Top} isConnectable={false} className="!opacity-0" />
             <Handle type="source" position={Position.Bottom} isConnectable={false} className="!opacity-0" />
             <button type="button" onClick={toggle} className={ring} title={contact.name}>
                 <ContactAvatar contact={contact} type="medium" />
             </button>
-            <span className="pointer-events-none absolute left-1/2 top-full mt-1 -translate-x-1/2 max-w-[8rem] truncate text-center text-[11px] font-medium text-foreground">
+            <span className="map-node-label pointer-events-none absolute left-1/2 top-full mt-1 -translate-x-1/2 max-w-[8rem] truncate text-center text-[11px] font-medium text-foreground">
                 {contact.name}
             </span>
         </div>

@@ -32,6 +32,7 @@ public class UserService implements UserDetailsService {
     private final ActivityMapper activityMapper;
     private final NoteMapper noteMapper;
     private final TaskMapper taskMapper;
+    private final AuditService auditService;
 
     @Override
     public UserDetails loadUserByUsername(String username) throws UsernameNotFoundException {
@@ -58,6 +59,7 @@ public class UserService implements UserDetailsService {
 
     public User create(User user) {
         userMapper.insert(user);
+        auditService.record("user.create", "user", user.getId(), user.getUsername(), "User created", null);
         return user;
     }
 
@@ -65,12 +67,14 @@ public class UserService implements UserDetailsService {
         if (userMapper.getUserById(id) == null) throw new ResourceNotFoundException("User not found with id: " + id);
         user.setId(id);
         userMapper.update(user);
+        auditService.record("user.update", "user", id, user.getUsername(), "User updated", null);
         return user;
     }
 
     public void delete(int id) {
         if (userMapper.getUserById(id) == null) throw new ResourceNotFoundException("User not found with id: " + id);
         userMapper.delete(id);
+        auditService.record("user.delete", "user", id, null, "User deleted", null);
     }
 
     /**

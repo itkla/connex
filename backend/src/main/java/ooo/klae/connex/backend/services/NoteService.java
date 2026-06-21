@@ -20,6 +20,7 @@ import lombok.RequiredArgsConstructor;
 @RequiredArgsConstructor
 public class NoteService {
     private final NoteMapper noteMapper;
+    private final AuditService auditService;
 
     public List<Note> getAllNotes() {
         return noteMapper.getAllNotes();
@@ -45,6 +46,7 @@ public class NoteService {
 
     public Note create(Note note) {
         noteMapper.insert(note);
+        auditService.record("note.create", "note", note.getId(), note.getContent(), "Note created", null);
         return note;
     }
 
@@ -52,11 +54,13 @@ public class NoteService {
         if (noteMapper.getNoteById(id) == null) throw new ResourceNotFoundException("Note not found with id: " + id);
         note.setId(id);
         noteMapper.update(note);
+        auditService.record("note.update", "note", id, note.getContent(), "Note updated", null);
         return note;
     }
 
     public void delete(int id) {
         if (noteMapper.getNoteById(id) == null) throw new ResourceNotFoundException("Note not found with id: " + id);
         noteMapper.delete(id);
+        auditService.record("note.delete", "note", id, null, "Note deleted", null);
     }
 }

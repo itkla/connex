@@ -21,14 +21,15 @@ import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectItem, SelectContent, SelectValue, SelectTrigger } from '@/components/ui/select';
+import { DialogStatusCover, resolveDialogStatus, fieldInputClass, fieldLeadIconClass } from '@/components/ui/dialog-status-cover';
+import { TagIcon, CalendarIcon, BriefcaseIcon, PencilSquareIcon, Bars3BottomLeftIcon } from '@heroicons/react/24/outline';
+import { cn } from '@/lib/utils';
 
 import { toMysqlDateTime } from '@/app/lib/utils';
 
 import { ApiError, addDealPerson, createActivity, getCompanyDeals } from '@/app/lib/api';
 import { toastError, toastSuccess } from '@/app/lib/toast';
 import { type Deal } from '@/app/lib/types';
-
-const inputClass = 'w-full rounded-lg bg-muted px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground outline-none ring-1 ring-border transition focus:ring-2 focus:ring-brand';
 
 const ACTIVITY_TYPES = ['Call', 'Email', 'Meeting', 'Note', 'Other'] as const;
 
@@ -64,6 +65,7 @@ export default function NewActivityDialog({
     const [deals, setDeals] = useState<Deal[]>([]);
     const [loadingDeals, setLoadingDeals] = useState(false);
     const [submitting, setSubmitting] = useState(false);
+    const [succeeded, setSucceeded] = useState(false);
 
     const reset = () => {
         setType(ACTIVITY_TYPES[0]);
@@ -95,9 +97,10 @@ export default function NewActivityDialog({
                 await addDealPerson(selectedDealId, contactId, 'Contact');
             }
             toastSuccess(t('toastActivityLogged'));
-            setOpen(false);
+            setSucceeded(true);
             reset();
             router.refresh();
+            setTimeout(() => setOpen(false), 900);
         } catch (err) {
             const message = err instanceof ApiError ? err.message : err instanceof Error ? err.message : t('toastFailedLog');
             toastError(message);
@@ -128,14 +131,19 @@ export default function NewActivityDialog({
         if (open) loadCompanyDeals();
     }, [open, companyId]);
 
+    const status = resolveDialogStatus({ isLoading: submitting, isSuccess: succeeded });
+
+    const handleOpenChange = (next: boolean) => {
+        if (!next && submitting) return;
+        setOpen(next);
+        if (!next) {
+            reset();
+            setSucceeded(false);
+        }
+    };
+
     return (
-        <Dialog
-            open={open}
-            onOpenChange={(next) => {
-                setOpen(next);
-                if (!next) reset();
-            }}
-        >
+        <Dialog open={open} onOpenChange={handleOpenChange}>
             {controlled ? null : (
                 <DialogTrigger asChild>
                     <Button
@@ -150,107 +158,126 @@ export default function NewActivityDialog({
                     </Button>
                 </DialogTrigger>
             )}
-            <DialogContent>
-                <DialogHeader>
-                    <DialogTitle>{t('dialogTitle')}</DialogTitle>
+            <DialogContent className="gap-0 overflow-hidden p-0 sm:max-w-lg">
+                <DialogStatusCover status={status} />
+
+                <div className="px-6 pb-6">
+                <DialogHeader className="ncd-rise -mt-12 mb-5" style={{ animationDelay: '40ms' }}>
+                    <DialogTitle className="text-xl font-semibold tracking-tight">{t('dialogTitle')}</DialogTitle>
                     <DialogDescription>
                         {t('description', { contactName })}
                     </DialogDescription>
                 </DialogHeader>
 
-                <form onSubmit={handleSubmit} className="grid gap-4">
-                    <div className="grid gap-2">
+                <form onSubmit={handleSubmit} className="grid gap-5">
+                    <div className="ncd-rise grid gap-1.5" style={{ animationDelay: '90ms' }}>
                         <Label htmlFor="activity-type">{t('type')}</Label>
-                        <Select value={type} onValueChange={setType}>
-                            <SelectTrigger id="activity-type" className={inputClass}>
-                                <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                                {ACTIVITY_TYPES.map((value) => (
-                                    <SelectItem key={value} value={value}>
-                                        {t(`type${value}` as 'typeCall' | 'typeEmail' | 'typeMeeting' | 'typeNote' | 'typeOther')}
-                                    </SelectItem>
-                                ))}
-                            </SelectContent>
-                        </Select>
+                        <div className="group relative">
+                            <TagIcon className={fieldLeadIconClass} />
+                            <Select value={type} onValueChange={setType}>
+                                <SelectTrigger id="activity-type" className={cn(fieldInputClass, 'pl-9 pr-3')}>
+                                    <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    {ACTIVITY_TYPES.map((value) => (
+                                        <SelectItem key={value} value={value}>
+                                            {t(`type${value}` as 'typeCall' | 'typeEmail' | 'typeMeeting' | 'typeNote' | 'typeOther')}
+                                        </SelectItem>
+                                    ))}
+                                </SelectContent>
+                            </Select>
+                        </div>
                     </div>
 
-                    <div className="grid gap-2">
+                    <div className="ncd-rise grid gap-1.5" style={{ animationDelay: '140ms' }}>
                         <Label htmlFor="activity-date-time">{t('dateAndTime')}</Label>
-                        <input
-                            id="activity-date-time"
-                            type="datetime-local"
-                            value={timestamp}
-                            onChange={(e) => setTimestamp(e.target.value)}
-                            className={inputClass}
-                        >
-                        </input>
+                        <div className="group relative">
+                            <CalendarIcon className={fieldLeadIconClass} />
+                            <input
+                                id="activity-date-time"
+                                type="datetime-local"
+                                value={timestamp}
+                                onChange={(e) => setTimestamp(e.target.value)}
+                                className={cn(fieldInputClass, 'pl-9 pr-3')}
+                            />
+                        </div>
                     </div>
 
-                    <div className="grid gap-2">
+                    <div className="ncd-rise grid gap-1.5" style={{ animationDelay: '190ms' }}>
                         <Label htmlFor="activity-deal">{t('deal')}</Label>
-                        <Select
-                            value={dealId}
-                            onValueChange={setDealId}
-                            disabled={loadingDeals || !companyId}
-                        >
-                            <SelectTrigger id="activity-deal" className={inputClass}>
-                                <SelectValue
-                                    placeholder={
-                                        !companyId
-                                            ? t('assignCompanyToLinkDealsPlaceholder')
-                                            : loadingDeals
-                                                ? t('loadingDealsPlaceholder')
-                                                : t('noDealPlaceholder')
-                                    }
-                                />
-                            </SelectTrigger>
-                            <SelectContent>
-                                <SelectItem value="none">{t('noDeal')}</SelectItem>
-                                {deals.map((deal) => (
-                                    <SelectItem key={deal.id} value={deal.id.toString()}>
-                                        {deal.name}
-                                    </SelectItem>
-                                ))}
-                            </SelectContent>
-                        </Select>
+                        <div className="group relative">
+                            <BriefcaseIcon className={fieldLeadIconClass} />
+                            <Select
+                                value={dealId}
+                                onValueChange={setDealId}
+                                disabled={loadingDeals || !companyId}
+                            >
+                                <SelectTrigger id="activity-deal" className={cn(fieldInputClass, 'pl-9 pr-3')}>
+                                    <SelectValue
+                                        placeholder={
+                                            !companyId
+                                                ? t('assignCompanyToLinkDealsPlaceholder')
+                                                : loadingDeals
+                                                    ? t('loadingDealsPlaceholder')
+                                                    : t('noDealPlaceholder')
+                                        }
+                                    />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value="none">{t('noDeal')}</SelectItem>
+                                    {deals.map((deal) => (
+                                        <SelectItem key={deal.id} value={deal.id.toString()}>
+                                            {deal.name}
+                                        </SelectItem>
+                                    ))}
+                                </SelectContent>
+                            </Select>
+                        </div>
                     </div>
 
-                    <div className="grid gap-2">
+                    <div className="ncd-rise grid gap-1.5" style={{ animationDelay: '240ms' }}>
                         <Label htmlFor="activity-subject">{t('subject')}</Label>
-                        <input
-                            id="activity-subject"
-                            type="text"
-                            value={subject}
-                            onChange={(e) => setSubject(e.target.value)}
-                            className={inputClass}
-                            placeholder={t('subjectPlaceholder')}
-                            required
-                            autoFocus
-                        />
+                        <div className="group relative">
+                            <PencilSquareIcon className={fieldLeadIconClass} />
+                            <input
+                                id="activity-subject"
+                                type="text"
+                                value={subject}
+                                onChange={(e) => setSubject(e.target.value)}
+                                className={cn(fieldInputClass, 'pl-9 pr-3')}
+                                placeholder={t('subjectPlaceholder')}
+                                required
+                                autoFocus
+                            />
+                        </div>
                     </div>
 
-                    <div className="grid gap-2">
+                    <div className="ncd-rise grid gap-1.5" style={{ animationDelay: '290ms' }}>
                         <Label htmlFor="activity-notes">{t('notes')}</Label>
-                        <Textarea
-                            id="activity-notes"
-                            value={notes}
-                            onChange={(e) => setNotes(e.target.value)}
-                            placeholder={t('notesPlaceholder')}
-                        />
+                        <div className="group relative">
+                            <Bars3BottomLeftIcon className="pointer-events-none absolute left-3 top-3 size-4 text-muted-foreground transition-colors group-focus-within:text-brand" />
+                            <Textarea
+                                id="activity-notes"
+                                value={notes}
+                                onChange={(e) => setNotes(e.target.value)}
+                                placeholder={t('notesPlaceholder')}
+                                className={cn(fieldInputClass, 'min-h-24 pl-9 pr-3')}
+                            />
+                        </div>
                     </div>
 
-                    <DialogFooter>
+                    <DialogFooter className="ncd-rise mt-5" style={{ animationDelay: '340ms' }}>
                         <DialogClose asChild>
                             <Button type="button" variant="outline" disabled={submitting}>
                                 {t('cancel')}
                             </Button>
                         </DialogClose>
-                        <Button type="submit" disabled={submitting} className="bg-brand text-white hover:bg-brand-dark">
+                        <Button type="submit" disabled={submitting || succeeded} className="min-w-24 bg-brand text-white shadow-sm transition hover:bg-brand-hover hover:shadow-md">
                             {submitting ? <Loader2Icon className="size-4 animate-spin" /> : t('log')}
                         </Button>
                     </DialogFooter>
                 </form>
+                </div>
             </DialogContent>
         </Dialog>
     );

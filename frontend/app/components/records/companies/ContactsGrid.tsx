@@ -26,6 +26,12 @@ export default function ContactsGrid({ contacts, company, allTags }: { contacts:
     });
     const [imageFile, setImageFile] = useState<File | null>(null);
     const [isCreating, setIsCreating] = useState(false);
+    const [creationSucceeded, setCreationSucceeded] = useState(false);
+
+    const closeNewContactDialog = (open: boolean) => {
+        setNewContactDialogOpen(open);
+        if (!open) setCreationSucceeded(false);
+    };
     return (
         <>
             <div className="mt-6 mb-3 flex h-8 items-center justify-between">
@@ -63,9 +69,9 @@ export default function ContactsGrid({ contacts, company, allTags }: { contacts:
                 </ul>
             )}
 
-            <NewContactDialog 
+            <NewContactDialog
                 newContactDialogOpen={newContactDialogOpen}
-                setNewContactDialogOpen={setNewContactDialogOpen}
+                setNewContactDialogOpen={closeNewContactDialog}
                 newContactPayload={newContactPayload}
                 setNewContactPayload={setNewContactPayload}
                 imageFile={imageFile}
@@ -73,7 +79,9 @@ export default function ContactsGrid({ contacts, company, allTags }: { contacts:
                 companies={[company]}
                 selectedCompany={company}
                 isCreating={isCreating}
+                isSuccess={creationSucceeded}
                 createNewContact={async () => {
+                    setCreationSucceeded(false);
                     setIsCreating(true);
                     try {
                         const newContact = await createContact(newContactPayload);
@@ -89,9 +97,13 @@ export default function ContactsGrid({ contacts, company, allTags }: { contacts:
                             companyId: company?.id,
                         });
                         setImageFile(null);
-                        setNewContactDialogOpen(false);
                         toast.success(t('toastContactCreated'));
-                        router.refresh();
+                        setIsCreating(false);
+                        setCreationSucceeded(true);
+                        setTimeout(() => {
+                            closeNewContactDialog(false);
+                            router.refresh();
+                        }, 900);
                     } catch (error) {
                         if (isFieldError(error)) {
                             throw error;

@@ -11,6 +11,7 @@ DROP DATABASE IF EXISTS connexdb;
 CREATE DATABASE connexdb CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 USE connexdb;
 
+DROP TABLE IF EXISTS audit_log;
 DROP TABLE IF EXISTS attachment;
 DROP TABLE IF EXISTS deal_tag;
 DROP TABLE IF EXISTS company_tag;
@@ -135,6 +136,7 @@ CREATE TABLE deal (
     company_id          INT COMMENT 'Company ID',
     expected_close_date DATETIME COMMENT 'Expected close date',
     closed_at           DATETIME COMMENT 'Close date',
+    closed_reason       VARCHAR(255) COMMENT 'Reason the deal was closed (won/lost)',
     created_at          DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT 'Creation timestamp',
     updated_at          DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT 'Last update timestamp',
     CONSTRAINT fk_deal_pipeline FOREIGN KEY (pipeline_id) REFERENCES pipeline(id) ON DELETE RESTRICT,
@@ -284,3 +286,35 @@ CREATE TABLE attachment_tag (
     CONSTRAINT fk_attachment_tag_tag        FOREIGN KEY (tag_id)        REFERENCES tag(id)        ON DELETE CASCADE,
     INDEX idx_attachment_tag_tag (tag_id)
 ) DEFAULT CHARSET=utf8mb4 COMMENT='Attachment-Tag Relationships';
+
+-- ============================================================================
+-- audit_log : append-only record of "who did what, when"
+-- ============================================================================
+CREATE TABLE audit_log (
+    id            INT AUTO_INCREMENT PRIMARY KEY COMMENT 'Audit event ID',
+    action        VARCHAR(48)  NOT NULL COMMENT 'e.g. company.create, company.update, auth.login',
+    entity_type   VARCHAR(32)  NOT NULL COMMENT 'Target entity type (company, person, deal, user, ...)',
+    entity_id     INT          NULL COMMENT 'Target entity ID (null for non-entity events)',
+    actor_id      INT          NULL COMMENT 'User who performed the action (null = unauthenticated/system)',
+    actor_label   VARCHAR(255) NULL COMMENT 'Actor display name AT EVENT TIME (survives rename/delete)',
+    target_label  VARCHAR(255) NULL COMMENT 'Target descriptor AT EVENT TIME (survives target delete)',
+    outcome       VARCHAR(16)  NOT NULL DEFAULT 'success' COMMENT 'success | failure',
+    summary       VARCHAR(255) NULL COMMENT 'Human-readable one-liner',
+    changes       JSON         NULL COMMENT 'Field diff {field:{old,new}} over an explicit allowlist',
+    context       JSON         NULL COMMENT 'Client-asserted intent (reserved for future enrichment)',
+    ip_address    VARCHAR(45)  NULL COMMENT 'Client IP, IPv6-safe (low-confidence until trusted proxy configured)',
+    user_agent    VARCHAR(512) NULL COMMENT 'Request User-Agent',
+    session_id    VARCHAR(64)  NULL COMMENT 'Server-derived session hash (non-spoofable)',
+    request_id    VARCHAR(64)  NULL COMMENT 'Per-request id, groups events from one HTTP request',
+    created_at    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT 'Event time (append-only; intentionally no updated_at)',
+    CONSTRAINT fk_audit_log_actor FOREIGN KEY (actor_id) REFERENCES app_user(id) ON DELETE SET NULL,
+    INDEX idx_audit_log_entity     (entity_type, entity_id),
+    INDEX idx_audit_log_actor      (actor_id),
+    INDEX idx_audit_log_action     (action),
+    INDEX idx_audit_log_created_at (created_at)
+) DEFAULT CHARSET=utf8mb4 COMMENT='Append-only audit log';
+
+CREATE TRIGGER trg_audit_log_no_update BEFORE UPDATE ON audit_log
+FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'audit_log is append-only';
+CREATE TRIGGER trg_audit_log_no_delete BEFORE DELETE ON audit_log
+FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'audit_log is append-only';

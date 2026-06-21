@@ -64,6 +64,7 @@ function toDraft(d: Deal): DealDraft {
         company: d.company ?? null,
         expectedCloseDate: d.expectedCloseDate ?? '',
         closedAt: d.closedAt ?? null,
+        closedReason: d.closedReason ?? null,
     };
 }
 
@@ -77,7 +78,8 @@ function diffDraft(original: DealDraft, draft: DealDraft): boolean {
         original.stage !== draft.stage ||
         original.company !== draft.company ||
         original.expectedCloseDate !== draft.expectedCloseDate ||
-        original.closedAt !== draft.closedAt
+        original.closedAt !== draft.closedAt ||
+        original.closedReason !== draft.closedReason
     );
 }
 
@@ -199,14 +201,19 @@ export default function DealsBrowser({ deals }: { deals: Deal[] }) {
     };
     const [newDialogOpen, setNewDialogOpen] = useState(false);
     const [isCreating, setIsCreating] = useState(false);
+    const [creationSucceeded, setCreationSucceeded] = useState(false);
     const [newPayload, setNewPayload] = useState<CreateDealPayload>(emptyDraft);
 
     const closeNewDialog = (open: boolean) => {
         setNewDialogOpen(open);
-        if (!open) setNewPayload(emptyDraft);
+        if (!open) {
+            setNewPayload(emptyDraft);
+            setCreationSucceeded(false);
+        }
     };
 
     const createNewDeal = async () => {
+        setCreationSucceeded(false);
         setIsCreating(true);
         try {
             await createDeal({
@@ -220,8 +227,12 @@ export default function DealsBrowser({ deals }: { deals: Deal[] }) {
                 expectedCloseDate: newPayload.expectedCloseDate || undefined,
             });
             toastSuccess(t('dealCreated'));
-            closeNewDialog(false);
-            router.refresh();
+            setIsCreating(false);
+            setCreationSucceeded(true);
+            setTimeout(() => {
+                closeNewDialog(false);
+                router.refresh();
+            }, 900);
         } catch (err) {
             if (isFieldError(err)) {
                 throw err;
@@ -280,6 +291,7 @@ export default function DealsBrowser({ deals }: { deals: Deal[] }) {
                         company: draft.company ?? null,
                         expectedCloseDate: draft.expectedCloseDate || undefined,
                         closedAt: draft.closedAt,
+                        closedReason: draft.closedReason,
                     };
                     return updateDeal(d.id, payload);
                 }),
@@ -356,6 +368,7 @@ export default function DealsBrowser({ deals }: { deals: Deal[] }) {
                 company: deal.company ?? null,
                 expectedCloseDate: deal.expectedCloseDate,
                 closedAt: closed ? toMysqlDateTime(new Date().toISOString()) : null,
+                closedReason: closed ? deal.closedReason : null,
             });
             toastSuccess(closed ? t('dealClosed') : t('dealReopened'));
             router.refresh();
@@ -368,22 +381,18 @@ export default function DealsBrowser({ deals }: { deals: Deal[] }) {
         let openCount = 0;
         let openValue = 0;
         let closedActualValue = 0;
-        let accuracyCount = 0;
-        let accuracySum = 0;
+        let closedForecastValue = 0;
         for (const d of dealsInCurrency) {
             if (isClosed(d)) {
                 closedActualValue += d.actualValue ?? 0;
-                if ((d.value ?? 0) > 0) {
-                    accuracySum += (d.actualValue ?? 0) / d.value;
-                    accuracyCount++;
-                }
+                closedForecastValue += d.value ?? 0;
             } else {
                 openCount++;
                 openValue += d.value ?? 0;
             }
         }
-        const forecastAccuracy = accuracyCount > 0 ? accuracySum / accuracyCount : null;
-        return { openCount, openValue, closedActualValue, forecastAccuracy };
+        const forecastAccuracy = closedForecastValue > 0 ? closedActualValue / closedForecastValue : null;
+        return { openCount, openValue, closedActualValue, closedForecastValue, forecastAccuracy };
     }, [dealsInCurrency]);
 
     const columns: ColumnDef<Deal>[] = useMemo(() => [
@@ -545,12 +554,30 @@ export default function DealsBrowser({ deals }: { deals: Deal[] }) {
                 <SummaryTile label={t('stageRatio')} value={<StageRatio deals={dealsInCurrency} />} />
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
-                <SummaryTile label={t('projectedPipeline')} value={formatCompactCurrency(summary.openValue, activeCurrency, locale)} />
-                <SummaryTile label={t('actualRevenue')} value={formatCompactCurrency(summary.closedActualValue, activeCurrency, locale)} />
-                <SummaryTile label={t('openDeals')} value={String(summary.openCount)} />
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+                <SummaryTile
+                    label={t('openPipeline')}
+                    tooltip={t('openPipelineTooltip')}
+                    value={formatCompactCurrency(summary.openValue, activeCurrency, locale)}
+                />
+                <SummaryTile
+                    label={t('openDeals')}
+                    tooltip={t('openDealsTooltip')}
+                    value={String(summary.openCount)}
+                />
+                <SummaryTile
+                    label={t('closedForecast')}
+                    tooltip={t('closedForecastTooltip')}
+                    value={formatCompactCurrency(summary.closedForecastValue, activeCurrency, locale)}
+                />
+                <SummaryTile
+                    label={t('closedRevenue')}
+                    tooltip={t('closedRevenueTooltip')}
+                    value={formatCompactCurrency(summary.closedActualValue, activeCurrency, locale)}
+                />
                 <SummaryTile
                     label={t('forecastAccuracy')}
+                    tooltip={t('forecastAccuracyTooltip')}
                     value={summary.forecastAccuracy != null ? `${Math.round(summary.forecastAccuracy * 100)}%` : '—'}
                 />
             </div>
@@ -657,6 +684,7 @@ export default function DealsBrowser({ deals }: { deals: Deal[] }) {
                 pipelines={pipelines}
                 stagesByPipeline={stagesByPipeline}
                 isCreating={isCreating}
+                isSuccess={creationSucceeded}
                 createNewDeal={createNewDeal}
             />
 

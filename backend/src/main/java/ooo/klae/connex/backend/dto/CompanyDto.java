@@ -27,7 +27,8 @@ public class CompanyDto {
     @Size(max = 255)
     private String name;
 
-    @URL
+    @URL(regexp = "^https?://[\\w-]+(\\.[\\w-]+)+.*$",
+         message = "Please enter a valid URL including http:// or https://")
     @Size(max = 255)
     private String website;
 

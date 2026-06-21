@@ -21,6 +21,7 @@ export type CompanyNodeData = {
     company: Company;
     metrics: CompanyMetrics;
     expanded: boolean;
+    hovered?: boolean; // transient: this node's tree is hovered, so bloom to a logo
 };
 
 export type ContactNodeData = {
@@ -28,6 +29,7 @@ export type ContactNodeData = {
     contact: Contact;
     hasActivity: boolean;
     expanded: boolean;
+    hovered?: boolean; // transient: this node's tree is hovered, so bloom to a pfp
 };
 
 export type UCNode = Node<UCNodeData, 'uc'>;

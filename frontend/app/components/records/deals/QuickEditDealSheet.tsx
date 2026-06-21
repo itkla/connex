@@ -24,6 +24,7 @@ export type DealDraft = {
     company: number | null;
     expectedCloseDate: string;
     closedAt: string | null;
+    closedReason: string | null;
 };
 
 type Props = {
@@ -168,6 +169,7 @@ export default function QuickEditDealSheet({
                                                             closedAt: terminal
                                                                 ? draft.closedAt ?? toMysqlDateTime(new Date())
                                                                 : null,
+                                                            closedReason: terminal ? draft.closedReason : null,
                                                         });
                                                     }}
                                                 >
@@ -263,6 +265,17 @@ export default function QuickEditDealSheet({
                                                         value={actualValue}
                                                         onChange={(e) => updateDraft(d.id, { actualValue: Number(e.target.value) })}
                                                         className="connex-input"
+                                                    />
+                                                </div>
+                                                <div className="grid gap-1.5">
+                                                    <Label htmlFor={`deal-closed-reason-${d.id}`}>{t('closedReason')}</Label>
+                                                    <textarea
+                                                        id={`deal-closed-reason-${d.id}`}
+                                                        value={draft.closedReason ?? ''}
+                                                        onChange={(e) => updateDraft(d.id, { closedReason: e.target.value })}
+                                                        className="connex-input"
+                                                        rows={3}
+                                                        maxLength={255}
                                                     />
                                                 </div>
                                                 </>

@@ -137,6 +137,7 @@ export default function ContactsBrowser() {
     const emptyContactDraft: CreateContactPayload = { name: '', email: '', phone: '', title: '' };
     const [newContactDialogOpen, setNewContactDialogOpen] = useState(false);
     const [isCreating, setIsCreating] = useState(false);
+    const [creationSucceeded, setCreationSucceeded] = useState(false);
     const [newContactPayload, setNewContactPayload] = useState<CreateContactPayload>(emptyContactDraft);
     const [imageFile, setImageFile] = useState<File | null>(null);
     const selectedCompany = useMemo(
@@ -149,10 +150,12 @@ export default function ContactsBrowser() {
         if (!open) {
             setNewContactPayload(emptyContactDraft);
             setImageFile(null);
+            setCreationSucceeded(false);
         }
     };
 
     const createNewContact = async () => {
+        setCreationSucceeded(false);
         setIsCreating(true);
         try {
             const newContact = await createContact(newContactPayload);
@@ -161,8 +164,12 @@ export default function ContactsBrowser() {
                 await updateContact(newContact.id, { ...newContactPayload, imageUrl });
             }
             toastSuccess(t('toastContactCreated'));
-            setNewContactDialogOpen(false);
-            refresh();
+            setIsCreating(false);
+            setCreationSucceeded(true);
+            setTimeout(() => {
+                closeNewContactDialog(false);
+                refresh();
+            }, 900);
         } catch (err) {
             if (isFieldError(err)) {
                 throw err;
@@ -495,6 +502,7 @@ export default function ContactsBrowser() {
                 companies={companies}
                 selectedCompany={selectedCompany}
                 isCreating={isCreating}
+                isSuccess={creationSucceeded}
                 createNewContact={createNewContact}
             />
 
