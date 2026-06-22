@@ -34,7 +34,7 @@ export default function PipelineValue({
         for (const deal of deals) {
             if (deal.pipeline == null) continue;
             const entry = totals.get(deal.pipeline) ?? { won: 0, open: 0, openCount: 0 };
-            if (!isClosed(deal, now)) {
+            if (!isClosed(deal)) {
                 entry.open += deal.value ?? 0;
                 entry.openCount += 1;
             } else {

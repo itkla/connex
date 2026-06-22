@@ -118,9 +118,9 @@ export default function AnalyticsBoard({
     const openPipeline = useMemo(
         () =>
             dealsInCurrency
-                .filter((d) => !isClosed(d, now))
+                .filter((d) => !isClosed(d))
                 .reduce((sum, d) => sum + (d.value ?? 0), 0),
-        [dealsInCurrency, now],
+        [dealsInCurrency],
     );
 
     const rangeOptions: { key: RangeKey; label: string }[] = [

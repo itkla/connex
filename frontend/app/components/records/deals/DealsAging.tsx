@@ -7,6 +7,7 @@ import { useTranslations } from 'next-intl';
 import { ChartContainer, ChartLegend, ChartLegendContent, type ChartConfig } from '@/components/ui/chart';
 import { type Deal, type Stage } from '@/app/lib/types';
 import { parseMysqlDateTime } from '@/app/lib/utils';
+import { isDealClosed } from './dealOutcome';
 
 const BUCKETS = [
     { key: 'fresh', labelKey: 'bucketFresh', max: 7, color: '#22c55e' },
@@ -17,11 +18,6 @@ const BUCKETS = [
 
 type BucketKey = (typeof BUCKETS)[number]['key'];
 type BucketLabelKey = (typeof BUCKETS)[number]['labelKey'];
-
-function isClosed(deal: Deal): boolean {
-    const t = parseMysqlDateTime(deal.closedAt);
-    return Number.isFinite(t) && t <= Date.now();
-}
 
 function daysSince(value?: string): number {
     const t = parseMysqlDateTime(value);
@@ -47,7 +43,7 @@ export default function DealsAging({ deals, stageById }: { deals: Deal[]; stageB
     const data = useMemo<Row[]>(() => {
         const byStage = new Map<string, Row>();
         for (const deal of deals) {
-            if (isClosed(deal) || deal.stage == null) continue;
+            if (isDealClosed(deal) || deal.stage == null) continue;
             const stageName = stageById.get(deal.stage)?.name ?? `Stage ${deal.stage}`;
             const bucket = bucketFor(daysSince(deal.updatedAt));
             const row =

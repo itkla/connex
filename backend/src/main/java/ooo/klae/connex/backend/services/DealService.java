@@ -1,14 +1,15 @@
 package ooo.klae.connex.backend.services;
 
+import java.time.LocalDateTime;
+import java.time.ZoneOffset;
+import java.time.format.DateTimeFormatter;
+import java.util.List;
+import java.util.Set;
+
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import ooo.klae.connex.backend.mappers.ActivityMapper;
-import ooo.klae.connex.backend.mappers.DealMapper;
-import ooo.klae.connex.backend.mappers.NoteMapper;
-import ooo.klae.connex.backend.mappers.PersonMapper;
-import ooo.klae.connex.backend.mappers.TagMapper;
-import ooo.klae.connex.backend.mappers.TaskMapper;
+import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.beans.Activity;
 import ooo.klae.connex.backend.beans.Deal;
 import ooo.klae.connex.backend.beans.DealPerson;
@@ -17,13 +18,12 @@ import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.beans.Tag;
 import ooo.klae.connex.backend.beans.Task;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
-
-import java.time.LocalDateTime;
-import java.time.format.DateTimeFormatter;
-import java.util.List;
-import java.util.Set;
-
-import lombok.RequiredArgsConstructor;
+import ooo.klae.connex.backend.mappers.ActivityMapper;
+import ooo.klae.connex.backend.mappers.DealMapper;
+import ooo.klae.connex.backend.mappers.NoteMapper;
+import ooo.klae.connex.backend.mappers.PersonMapper;
+import ooo.klae.connex.backend.mappers.TagMapper;
+import ooo.klae.connex.backend.mappers.TaskMapper;
 
 /**
  * Business logic for logging and retrieving {@code Deal} records.
@@ -70,7 +70,7 @@ public class DealService {
             deal.setClosedAt(null);
             deal.setClosedReason(null);
         } else if (deal.getClosedAt() == null || deal.getClosedAt().isBlank()) {
-            deal.setClosedAt(LocalDateTime.now().format(MYSQL_DATETIME));
+            deal.setClosedAt(LocalDateTime.now(ZoneOffset.UTC).format(MYSQL_DATETIME));
         }
     }
 

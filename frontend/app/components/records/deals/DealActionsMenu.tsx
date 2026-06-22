@@ -37,13 +37,8 @@ import NewDealTaskDialog from '@/app/components/records/deals/NewDealTaskDialog'
 import NoteDialog from '@/app/components/activity/notes/NoteDialog';
 
 import { closeDeal, deleteDeal, reopenDeal } from '@/app/lib/api';
-import { parseMysqlDateTime } from '@/app/lib/utils';
 import { type Company, type Contact, type Deal, type Pipeline, type Stage } from '@/app/lib/types';
-
-function isClosed(deal: Deal): boolean {
-    const t = parseMysqlDateTime(deal.closedAt);
-    return Number.isFinite(t) && t <= Date.now();
-}
+import { isDealClosed } from './dealOutcome';
 
 export default function DealActionsMenu({
     deal,
@@ -73,7 +68,7 @@ export default function DealActionsMenu({
     const [isDeleting, setIsDeleting] = useState(false);
     const [isUpdatingStatus, setIsUpdatingStatus] = useState(false);
 
-    const closed = isClosed(deal);
+    const closed = isDealClosed(deal);
 
     const toggleDealStatus = async (won: boolean | null) => {
         setIsUpdatingStatus(true);

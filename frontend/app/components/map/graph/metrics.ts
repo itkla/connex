@@ -9,6 +9,7 @@ import type {
     User,
 } from '@/app/lib/types';
 import { parseMysqlDateTime, pickDominantCurrency } from '@/app/lib/utils';
+import { isDealClosed } from '@/app/components/records/deals/dealOutcome';
 
 // TODO: consolidate this with the other metric calculation functions used in the other components
 
@@ -68,8 +69,7 @@ export function computeCompanyMetrics(company: Company, lists: MetricsLists): Co
     let projectedRevenue = 0;
     for (const d of companyDeals) {
         if ((d.currency || 'USD') !== currency) continue;
-        const closed = d.closedAt ? Date.parse(d.closedAt) : NaN;
-        if (Number.isFinite(closed) && closed <= now) pastRevenue += d.value ?? 0;
+        if (isDealClosed(d)) pastRevenue += d.value ?? 0;
         else projectedRevenue += d.value ?? 0;
     }
 

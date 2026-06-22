@@ -19,9 +19,10 @@ import {
 } from '@heroicons/react/24/outline';
 import { ChevronRightIcon } from '@heroicons/react/24/solid';
 import { Button } from '@/components/ui/button';
-import { formatCompactCurrency, formatShortDate, parseMysqlDateTime } from '@/app/lib/utils';
+import { formatCompactCurrency, formatShortDate } from '@/app/lib/utils';
 import CompanyAvatar from '@/app/components/records/companies/CompanyAvatar';
 import { type Company, type Contact, type Deal, type Pipeline, type Stage } from '@/app/lib/types';
+import { isDealClosed } from './dealOutcome';
 import Chip from '@/app/components/Chip';
 import ContactAvatar from '../contacts/ContactAvatar';
 import { Suspense } from 'react';
@@ -38,9 +39,7 @@ interface DealCardProps {
 }
 
 function dealStatus(deal: Deal): 'open' | 'closed' {
-    const t = parseMysqlDateTime(deal.closedAt);
-    if (!Number.isFinite(t)) return 'open';
-    return t <= Date.now() ? 'closed' : 'open';
+    return isDealClosed(deal) ? 'closed' : 'open';
 }
 
 export default function DealCard({ deal, company, pipeline, stage, onQuickEdit, onDelete }: DealCardProps) {

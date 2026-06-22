@@ -30,6 +30,7 @@ import { createCompany, deleteCompany, getUsers, getTasks, getDeals, updateCompa
 import { uploadCompanyLogo, pickDominantCurrency, parseMysqlDateTime } from '@/app/lib/utils';
 import { type Company, type CreateCompanyPayload, type UpdateCompanyPayload, type Contact, type Activity, type Note, type Task, type User, type Deal, type CompanyMetrics, type LoadStatus } from '@/app/lib/types';
 import { getContacts } from '@/app/lib/api';
+import { isDealClosed } from '@/app/components/records/deals/dealOutcome';
 
 function toDraft(c: Company): CompanyDraft {
     return {
@@ -343,8 +344,7 @@ export default function CompaniesBrowser({ companies }: { companies: Company[] }
             let projectedRevenue = 0;
             for (const d of deals) {
                 if ((d.currency || 'USD') !== currency) continue;
-                const closed = d.closedAt ? Date.parse(d.closedAt) : NaN;
-                if (Number.isFinite(closed) && closed <= now) {
+                if (isDealClosed(d)) {
                     pastRevenue += d.value ?? 0;
                 } else {
                     projectedRevenue += d.value ?? 0;

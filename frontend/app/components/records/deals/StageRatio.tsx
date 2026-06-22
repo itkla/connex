@@ -10,8 +10,8 @@ import {
 } from '@/components/ui/chart';
 import { Pipeline, Stage, type Deal } from '@/app/lib/types';
 import { getPipelines, getStagesByPipelineId } from '@/app/lib/api';
-import { formatCompactCurrency, parseMysqlDateTime } from '@/app/lib/utils';
-import { classifyStage, type StageClass } from './dealOutcome';
+import { formatCompactCurrency } from '@/app/lib/utils';
+import { classifyStage, isDealClosed, type StageClass } from './dealOutcome';
 
 const PIPELINE_PALETTE = [
     '#0ea5e9', // sky-500
@@ -33,11 +33,6 @@ function colorForStage(klass: StageClass, index: number, total: number) {
 
 function fadeColor(color: string, amount = 55) {
     return `color-mix(in oklch, ${color} ${100 - amount}%, var(--card))`;
-}
-
-function isClosed(deal: Deal): boolean {
-    const t = parseMysqlDateTime(deal.closedAt);
-    return Number.isFinite(t) && t <= Date.now();
 }
 
 type DealStatus = 'open' | 'closed';
@@ -94,7 +89,7 @@ export default function StageRatio({ deals }: { deals: Deal[] }) {
                 const pipelineDeals = deals.filter((d) => d.pipeline === pipeline.id);
                 const currency = pipelineDeals[0]?.currency || 'USD';
                 const bucket = (open: boolean) => {
-                    const matches = pipelineDeals.filter((d) => isClosed(d) !== open);
+                    const matches = pipelineDeals.filter((d) => isDealClosed(d) !== open);
                     return {
                         value: matches.length,
                         total: matches.reduce(
@@ -124,7 +119,7 @@ export default function StageRatio({ deals }: { deals: Deal[] }) {
                         const klass = classifyStage(stage);
                         const baseColor = colorForStage(klass, i, stages.length);
                         const matches = deals.filter(
-                            (d) => d.stage === stage.id && (status === 'closed' ? isClosed(d) : !isClosed(d)),
+                            (d) => d.stage === stage.id && (status === 'closed' ? isDealClosed(d) : !isDealClosed(d)),
                         );
                         return {
                             name: stage.name,

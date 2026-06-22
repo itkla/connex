@@ -5,14 +5,10 @@ import { TrophyIcon } from '@heroicons/react/24/solid';
 import { useLocale, useTranslations } from 'next-intl';
 
 import { type Company, type Deal } from '@/app/lib/types';
-import { formatCompactCurrency, parseMysqlDateTime } from '@/app/lib/utils';
+import { formatCompactCurrency } from '@/app/lib/utils';
+import { isDealClosed } from './dealOutcome';
 
 const RANK_COLORS = ['#fbbf24', '#94a3b8', '#cd7f32'] as const; // gold, silver, bronze
-
-function isClosed(deal: Deal): boolean {
-    const t = parseMysqlDateTime(deal.closedAt);
-    return Number.isFinite(t) && t <= Date.now();
-}
 
 type Field = 'value' | 'actualValue';
 
@@ -25,12 +21,12 @@ export default function TopDeals({
 }) {
     const t = useTranslations('DealsTopDeals');
     const topOpen = [...deals]
-        .filter((d) => !isClosed(d))
+        .filter((d) => !isDealClosed(d))
         .sort((a, b) => (b.value ?? 0) - (a.value ?? 0))
         .slice(0, 3);
 
     const topWins = [...deals]
-        .filter(isClosed)
+        .filter(isDealClosed)
         .sort((a, b) => (b.actualValue ?? 0) - (a.actualValue ?? 0))
         .slice(0, 3);
 

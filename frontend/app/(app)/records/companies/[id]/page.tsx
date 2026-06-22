@@ -25,6 +25,7 @@ import {
 } from "@/app/lib/api";
 import { type Activity, type Company, type Contact, type Deal, type Note, type Tag, type Task, type User } from "@/app/lib/types";
 import { formatCompactCurrency, formatDate, formatDateTime, parseMysqlDateTime, pickDominantCurrency } from "@/app/lib/utils";
+import { isDealClosed } from "@/app/components/records/deals/dealOutcome";
 
 import CompanyActionsMenu from "@/app/components/records/companies/CompanyActionsMenu";
 import CompanyAvatar from "@/app/components/records/companies/CompanyAvatar";
@@ -135,8 +136,7 @@ export default async function CompanyPage({ params }: { params: { id: number } }
     let projectedRevenue = 0;
     for (const d of deals) {
         if ((d.currency || 'USD') !== revenueCurrency) continue;
-        const closed = d.closedAt ? Date.parse(d.closedAt) : NaN;
-        if (Number.isFinite(closed) && closed <= now) {
+        if (isDealClosed(d)) {
             pastRevenue += d.value ?? 0;
         } else {
             projectedRevenue += d.value ?? 0;

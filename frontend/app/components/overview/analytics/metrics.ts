@@ -1,5 +1,6 @@
 import { type Deal } from '@/app/lib/types';
 import { parseMysqlDateTime } from '@/app/lib/utils';
+import { isDealClosed } from '@/app/components/records/deals/dealOutcome';
 
 export type RangeKey = '30d' | '90d' | '12m';
 
@@ -27,9 +28,8 @@ export function normalizeActivityType(value?: string | null): ActivityType {
     return (ACTIVITY_TYPES as readonly string[]).includes(v) ? (v as ActivityType) : 'Other';
 }
 
-export function isClosed(deal: Deal, now: number): boolean {
-    const t = parseMysqlDateTime(deal.closedAt);
-    return Number.isFinite(t) && t <= now;
+export function isClosed(deal: Deal): boolean {
+    return isDealClosed(deal);
 }
 
 export type DeltaKind = 'pct' | 'pp';

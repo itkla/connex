@@ -45,12 +45,11 @@ export default function StageFunnel({
 }) {
     const t = useTranslations('AnalyticsStageFunnel');
     const locale = useLocale();
-    const [now] = useState(() => Date.now());
     const [selectedId, setSelectedId] = useState<number | null>(null);
 
     const openDeals = useMemo(
-        () => deals.filter((d) => !isClosed(d, now) && d.pipeline != null && d.stage != null),
-        [deals, now],
+        () => deals.filter((d) => !isClosed(d) && d.pipeline != null && d.stage != null),
+        [deals],
     );
 
     const available = useMemo(() => {

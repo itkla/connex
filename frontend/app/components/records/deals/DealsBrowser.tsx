@@ -48,7 +48,7 @@ import {
     type Contact,
     type UpdateDealPayload,
 } from '@/app/lib/types';
-import { parseMysqlDateTime } from '@/app/lib/utils';
+import { isDealClosed } from './dealOutcome';
 import CompanyAvatar from '@/app/components/records/companies/CompanyAvatar';
 import ContactAvatar from '../contacts/ContactAvatar';
 import SummaryTile from '@/app/components/SummaryTile';
@@ -85,11 +85,6 @@ function diffDraft(original: DealDraft, draft: DealDraft): boolean {
         original.closedReason !== draft.closedReason ||
         original.won !== draft.won
     );
-}
-
-function isClosed(deal: Deal): boolean {
-    const t = parseMysqlDateTime(deal.closedAt);
-    return Number.isFinite(t) && t <= Date.now();
 }
 
 export default function DealsBrowser({ deals }: { deals: Deal[] }) {
@@ -367,7 +362,7 @@ export default function DealsBrowser({ deals }: { deals: Deal[] }) {
         let closedActualValue = 0;
         let closedForecastValue = 0;
         for (const d of dealsInCurrency) {
-            if (isClosed(d)) {
+            if (isDealClosed(d)) {
                 closedActualValue += d.actualValue ?? 0;
                 closedForecastValue += d.value ?? 0;
             } else {
@@ -424,13 +419,13 @@ export default function DealsBrowser({ deals }: { deals: Deal[] }) {
         {
             key: 'status',
             label: t('columnStatus'),
-            getSortValue: (d) => (isClosed(d) ? 1 : 0),
+            getSortValue: (d) => (isDealClosed(d) ? 1 : 0),
             filter: {
-                getValue: (d) => (isClosed(d) ? 'closed' : 'open'),
+                getValue: (d) => (isDealClosed(d) ? 'closed' : 'open'),
                 formatValue: (v) => (v === 'closed' ? t('statusClosed') : t('statusOpen')),
             },
             render: (d) => {
-                const closed = isClosed(d);
+                const closed = isDealClosed(d);
                 return (
                     <DropdownMenu>
                         <DropdownMenuTrigger asChild>
