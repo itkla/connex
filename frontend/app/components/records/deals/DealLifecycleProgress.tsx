@@ -1,5 +1,5 @@
 import { Fragment, type CSSProperties } from 'react';
-import { CheckIcon, XMarkIcon } from '@heroicons/react/24/solid';
+import { CheckIcon, XMarkIcon, CheckCircleIcon, XCircleIcon } from '@heroicons/react/24/solid';
 import { getLocale, getTranslations } from 'next-intl/server';
 
 import { type Stage } from '@/app/lib/types';
@@ -18,6 +18,7 @@ export default async function DealLifecycleProgress({
     createdAt,
     expectedCloseDate,
     closedAt,
+    closedReason,
 }: {
     stages: Stage[];
     currentStageId: number | null;
@@ -25,6 +26,7 @@ export default async function DealLifecycleProgress({
     createdAt: string;
     expectedCloseDate?: string;
     closedAt?: string;
+    closedReason?: string;
 }) {
     const t = await getTranslations('DealsLifecycleProgress');
     const locale = await getLocale();
@@ -117,7 +119,8 @@ export default async function DealLifecycleProgress({
             : 'text-foreground';
 
     return (
-        <div className="rounded-2xl bg-muted p-4 ring-1 ring-border sm:p-6">
+        <div className="overflow-hidden rounded-2xl">
+            <div className={`border border-border bg-muted p-4 sm:p-6 ${isClosed && closedReason ? 'rounded-t-2xl border-b-0' : 'rounded-2xl'}`}>
             <div className="relative h-14 sm:h-16">
                 <div
                     aria-hidden="true"
@@ -257,6 +260,33 @@ export default async function DealLifecycleProgress({
                     </>
                 ) : null}
             </div>
+            </div>
+
+            {isClosed && closedReason ? (
+                <div
+                    className={`flex items-start gap-3 rounded-b-2xl border p-4 text-foreground sm:px-6 ${
+                        isWon
+                            ? 'border-brand/20 bg-brand-light'
+                            : 'border-red-200 bg-red-50 dark:border-red-900/60 dark:bg-red-950'
+                    }`}
+                >
+                    {isWon ? (
+                        <CheckCircleIcon className="size-5 shrink-0 text-brand-dark" />
+                    ) : (
+                        <XCircleIcon className="size-5 shrink-0 text-red-600 dark:text-red-400" />
+                    )}
+                    <div className="flex min-w-0 flex-col gap-0.5">
+                        <span
+                            className={`text-[11px] font-semibold uppercase tracking-[0.08em] ${
+                                isWon ? 'text-brand-dark' : 'text-red-700 dark:text-red-300'
+                            }`}
+                        >
+                            {isWon ? t('closedReasonWonTitle') : t('closedReasonLostTitle')}
+                        </span>
+                        <p className="text-sm leading-snug">{closedReason}</p>
+                    </div>
+                </div>
+            ) : null}
         </div>
     );
 }

@@ -88,7 +88,9 @@
     "daysOverdue": "{days} 日超過",
     "created": "作成日",
     "closed": "決着日",
-    "expectedClose": "決着予定日"
+    "expectedClose": "決着予定日",
+    "closedReasonWonTitle": "成約に至った理由",
+    "closedReasonLostTitle": "失注に至った理由"
   },
   "DealsTaskList": {
     "taskDeleted": "タスクを削除しました",

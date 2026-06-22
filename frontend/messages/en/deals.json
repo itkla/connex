@@ -88,7 +88,9 @@
     "daysOverdue": "{days}d overdue",
     "created": "Created",
     "closed": "Closed",
-    "expectedClose": "Expected close"
+    "expectedClose": "Expected close",
+    "closedReasonWonTitle": "Why this deal was won",
+    "closedReasonLostTitle": "Why this deal was lost"
   },
   "DealsTaskList": {
     "taskDeleted": "Task deleted",

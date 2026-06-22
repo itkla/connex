@@ -60,7 +60,6 @@ import { dealOutcome, type DealOutcome } from '@/app/components/records/deals/de
 // import { toast } from 'sonner';
 import DealTaskList from '@/app/components/records/deals/DealTaskList';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
-import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert';
 
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 
@@ -249,6 +248,7 @@ export default async function DealPage({ params }: { params: { id: number } }) {
                 createdAt={deal.createdAt}
                 expectedCloseDate={deal.expectedCloseDate}
                 closedAt={deal.closedAt}
+                closedReason={deal.closedReason}
             />
 
             <div className="mt-6 mb-3 flex h-8 items-center">
@@ -293,15 +293,6 @@ export default async function DealPage({ params }: { params: { id: number } }) {
                     value={closed ? formatDate(deal.closedAt, locale) : formatDate(deal.expectedCloseDate, locale)}
                 />
             </div>
-
-            {outcome !== 'open' && deal.closedReason ? (
-                <Alert variant={outcome === 'lost' ? 'destructive' : 'default'} className="mt-6">
-                    <AlertTitle>
-                        {outcome === 'won' ? t('closedReasonWonTitle') : t('closedReasonLostTitle')}
-                    </AlertTitle>
-                    <AlertDescription>{deal.closedReason}</AlertDescription>
-                </Alert>
-            ) : null}
 
             <div className="mt-6 mb-3 flex h-8 items-center">
                 <h2 className="px-6 text-xs font-medium uppercase tracking-[0.12em] text-muted-foreground">
