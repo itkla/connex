@@ -265,13 +265,13 @@ export function RevenueTiles({
         <div className="space-y-2">
             <div className="rounded-xl bg-transparent p-3 ring-1 ring-border">
                 <p className="text-xs uppercase tracking-wider text-muted-foreground">{t('closedRevenue')}</p>
-                <p className="mt-1 text-lg font-semibold text-foreground">
+                <p className="mt-1 text-lg font-semibold tabular-nums text-foreground">
                     {formatCompactCurrency(pastRevenue, currency, locale)}
                 </p>
             </div>
             <div className="rounded-xl bg-transparent p-3 ring-1 ring-border">
                 <p className="text-xs uppercase tracking-wider text-muted-foreground">{t('projected')}</p>
-                <p className="mt-1 text-lg font-semibold text-foreground">
+                <p className="mt-1 text-lg font-semibold tabular-nums text-foreground">
                     {formatCompactCurrency(projectedRevenue, currency, locale)}
                 </p>
             </div>

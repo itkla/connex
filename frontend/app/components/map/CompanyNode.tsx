@@ -2,24 +2,35 @@
 
 import { Handle, Position, useReactFlow, type NodeProps } from '@xyflow/react';
 import { memo } from 'react';
+import { motion, useReducedMotion } from 'motion/react';
 import Link from 'next/link';
-import { ArrowUpRightIcon, ChevronRightIcon, GlobeAltIcon, PhoneIcon } from '@heroicons/react/24/outline';
+import { ChevronRightIcon, GlobeAltIcon, PhoneIcon } from '@heroicons/react/24/outline';
 import CompanyAvatar from '@/app/components/records/companies/CompanyAvatar';
 import { EngagementSparkline, RevenueTiles } from '@/app/components/records/companies/CompanyCard';
-import { Avatar, AvatarFallback, AvatarGroup, AvatarGroupCount, AvatarImage } from '@/components/ui/avatar';
-import { Button } from '@/components/ui/button';
+import { Avatar, AvatarFallback, AvatarGroup, AvatarImage } from '@/components/ui/avatar';
+import { buttonVariants } from '@/components/ui/button';
+import { cn } from '@/lib/utils';
 import type { CompanyNode as CompanyNodeType } from './graph/types';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import NodeDot from '@/app/components/map/NodeDot';
 import { useDotEnabled } from '@/app/hooks/useNodeTier';
 
+// Project motion grammar (PRODUCT.md / globals.css): ease-out, state-reporting only.
+const EASE_OUT: [number, number, number, number] = [0.23, 1, 0.32, 1];
+
 type Person = { id: number; src?: string; label: string };
 
-function Stat({ label, value }: { label: string; value: number }) {
+function StatStrip({ items }: { items: { label: string; value: number }[] }) {
     return (
-        <div className="rounded-lg bg-muted px-2 py-1.5 text-center ring-1 ring-border">
-            <p className="text-sm font-semibold text-foreground">{value}</p>
-            <p className="text-[10px] uppercase tracking-wider text-muted-foreground">{label}</p>
+        <div className="mt-3 grid grid-cols-4 divide-x divide-border overflow-hidden rounded-xl ring-1 ring-border">
+            {items.map((s) => (
+                <div key={s.label} className="px-2 py-2 text-center">
+                    <p className="text-sm font-semibold tabular-nums text-foreground">{s.value}</p>
+                    <p className="mt-0.5 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+                        {s.label}
+                    </p>
+                </div>
+            ))}
         </div>
     );
 }
@@ -28,6 +39,7 @@ function CompanyNodeImpl({ id, data }: NodeProps<CompanyNodeType>) {
     const { updateNodeData } = useReactFlow();
     const { company, metrics, expanded, hovered } = data;
     const dotEnabled = useDotEnabled();
+    const reduceMotion = useReducedMotion();
     const toggle = () => updateNodeData(id, { expanded: !expanded });
 
     if (dotEnabled && !expanded && !hovered) {
@@ -64,11 +76,16 @@ function CompanyNodeImpl({ id, data }: NodeProps<CompanyNodeType>) {
     }));
 
     return (
-        <div className="relative w-96 rounded-2xl border border-border bg-card p-4 shadow-xl z-10">
+        <motion.div
+            initial={reduceMotion ? { opacity: 0 } : { opacity: 0, scale: 0.96, y: 2 }}
+            animate={reduceMotion ? { opacity: 1 } : { opacity: 1, scale: 1, y: 0 }}
+            transition={{ duration: reduceMotion ? 0.12 : 0.18, ease: EASE_OUT }}
+            className="relative z-10 w-96 rounded-2xl bg-card p-4 ring-1 ring-border shadow-[0_10px_30px_-12px_rgb(0_0_0/0.20)] dark:shadow-[0_18px_45px_-18px_rgb(0_0_0/0.65)]"
+        >
             <Handle type="target" position={Position.Top} isConnectable={false} className="!opacity-0" />
             <Handle type="source" position={Position.Bottom} isConnectable={false} className="!opacity-0" />
 
-            <div className="flex items-center gap-3 justify-between">
+            <div className="flex items-center gap-2">
                 <button type="button" onClick={toggle} className="flex min-w-0 flex-1 items-center gap-3 text-left">
                     <CompanyAvatar company={company} type="large" />
                     <div className="min-w-0">
@@ -76,50 +93,56 @@ function CompanyNodeImpl({ id, data }: NodeProps<CompanyNodeType>) {
                         {company.industry ? <p className="truncate text-xs text-muted-foreground">{company.industry}</p> : null}
                     </div>
                 </button>
-                <div className="flex items-center">
-                    <Tooltip>
-                        <TooltipTrigger asChild>
-                            <Link href={`/records/companies/${company.id}`} className="nodrag shrink-0 flex items-center">
-                                <Button variant="outline" size="icon-lg" aria-label="Open company record" className="flex items-center justify-center bg-muted shadow-none hover:bg-muted/80">
-                                    {/* <ArrowUpRightIcon className="size-3.5 text-neutral-500" /> */}
-                                    <ChevronRightIcon className="size-3.5 text-muted-foreground" />
-                                </Button>
-                            </Link>
-                        </TooltipTrigger>
-                        <TooltipContent side="left" align="center">
-                            View Company
-                        </TooltipContent>
-                    </Tooltip>
-
-                </div>
+                <Tooltip>
+                    <TooltipTrigger asChild>
+                        <Link
+                            href={`/records/companies/${company.id}`}
+                            aria-label="Open company record"
+                            className={cn(
+                                buttonVariants({ variant: 'ghost', size: 'icon-sm' }),
+                                'nodrag group/open shrink-0 rounded-full bg-muted text-muted-foreground shadow-none hover:bg-muted/80 hover:text-foreground',
+                            )}
+                        >
+                            <ChevronRightIcon className="size-4 transition-transform duration-150 ease-out group-hover/open:translate-x-0.5" />
+                        </Link>
+                    </TooltipTrigger>
+                    <TooltipContent side="left" align="center">
+                        View company
+                    </TooltipContent>
+                </Tooltip>
             </div>
 
             {(company.website || company.phone) && (
-                <div className="mt-3 space-y-1.5 text-xs text-muted-foreground">
+                <div className="mt-3 space-y-0.5 border-t border-border pt-3 text-xs text-muted-foreground">
                     {company.website ? (
-                        <p className="flex items-center gap-1.5">
+                        <p className="flex items-center gap-2">
                             <GlobeAltIcon className="size-3.5 shrink-0 text-muted-foreground" />
-                            <Link href={company.website} target="_blank" className="nodrag truncate transition hover:text-brand">
+                            <Link
+                                href={company.website}
+                                target="_blank"
+                                className="nodrag truncate transition-colors hover:text-brand-dark"
+                            >
                                 {company.website}
                             </Link>
                         </p>
                     ) : null}
                     {company.phone ? (
-                        <p className="flex items-center gap-1.5">
+                        <p className="flex items-center gap-2">
                             <PhoneIcon className="size-3.5 shrink-0 text-muted-foreground" />
-                            <span className="truncate">{company.phone}</span>
+                            <span className="truncate tabular-nums">{company.phone}</span>
                         </p>
                     ) : null}
                 </div>
             )}
 
-            <div className="mt-3 grid grid-cols-4 gap-1.5">
-                {/* // TODO: make these link out to the respective records */}
-                <Stat label="Deals" value={metrics.numDeals} />
-                <Stat label="People" value={metrics.persons.length} />
-                <Stat label="Activity" value={metrics.numActivities} />
-                <Stat label="Notes" value={metrics.numNotes} />
-            </div>
+            <StatStrip
+                items={[
+                    { label: 'Deals', value: metrics.numDeals },
+                    { label: 'People', value: metrics.persons.length },
+                    { label: 'Activity', value: metrics.numActivities },
+                    { label: 'Notes', value: metrics.numNotes },
+                ]}
+            />
 
             <div className="mt-3 space-y-2">
                 <RevenueTiles pastRevenue={metrics.pastRevenue} projectedRevenue={metrics.projectedRevenue} currency={metrics.currency} />
@@ -129,18 +152,17 @@ function CompanyNodeImpl({ id, data }: NodeProps<CompanyNodeType>) {
             </div>
 
             {(employees.length > 0 || relations.length > 0) && (
-                <div className="mt-3 flex flex-wrap items-start gap-x-6 gap-y-2">
+                <div className="mt-3 flex flex-wrap items-start gap-x-6 gap-y-2 border-t border-border pt-3">
                     {employees.length > 0 && (
                         <div>
-                            <p className="mb-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+                            <p className="mb-1.5 text-[10px] font-medium uppercase tracking-[0.12em] text-muted-foreground">
                                 People · {employees.length}
                             </p>
-                            {/* <MiniAvatars people={employees} /> */}
                             <AvatarGroup>
                                 {employees.map((e) => (
                                     <Tooltip key={e.id}>
                                         <TooltipTrigger asChild>
-                                            <Link href={`/records/contacts/${e.id}`} className="nodrag">
+                                            <Link href={`/records/contacts/${e.id}`} className="nodrag transition-transform hover:scale-110">
                                                 <Avatar key={e.id} className="h-7 w-7 bg-card">
                                                     <AvatarImage src={e.src} />
                                                     <AvatarFallback className="text-[10px]">{(e.label || '?').charAt(0)}</AvatarFallback>
@@ -152,25 +174,19 @@ function CompanyNodeImpl({ id, data }: NodeProps<CompanyNodeType>) {
                                         </TooltipContent>
                                     </Tooltip>
                                 ))}
-                                {/* {overflow > 0 && (
-                                    <AvatarGroupCount className="h-7 w-7 bg-neutral-200 text-[10px] text-neutral-600 ring-transparent">
-                                        +{overflow}
-                                    </AvatarGroupCount>
-                                )}   */}
                             </AvatarGroup>
                         </div>
                     )}
                     {relations.length > 0 && (
                         <div>
-                            <p className="mb-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+                            <p className="mb-1.5 text-[10px] font-medium uppercase tracking-[0.12em] text-muted-foreground">
                                 Relations · {relations.length}
                             </p>
-                            {/* <MiniAvatars people={relations} /> */}
                             <AvatarGroup>
                                 {relations.map((r) => (
                                     <Tooltip key={r.id}>
                                         <TooltipTrigger asChild>
-                                            <Link href={`/users/${r.id}`} className="nodrag">
+                                            <Link href={`/users/${r.id}`} className="nodrag transition-transform hover:scale-110">
                                                 <Avatar key={r.id} className="h-7 w-7 bg-card">
                                                     <AvatarImage src={r.src} />
                                                     <AvatarFallback className="text-[10px]">{(r.label || '?').charAt(0)}</AvatarFallback>
@@ -187,7 +203,7 @@ function CompanyNodeImpl({ id, data }: NodeProps<CompanyNodeType>) {
                     )}
                 </div>
             )}
-        </div>
+        </motion.div>
     );
 }
 
