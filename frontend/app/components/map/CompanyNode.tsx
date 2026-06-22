@@ -15,7 +15,6 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import NodeDot from '@/app/components/map/NodeDot';
 import { useDotEnabled } from '@/app/hooks/useNodeTier';
 
-// Project motion grammar (PRODUCT.md / globals.css): ease-out, state-reporting only.
 const EASE_OUT: [number, number, number, number] = [0.23, 1, 0.32, 1];
 
 type Person = { id: number; src?: string; label: string };

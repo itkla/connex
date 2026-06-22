@@ -11,10 +11,8 @@ import {
     ArrowTopRightOnSquareIcon,
     Bars3Icon,
     CheckIcon,
-    ChevronUpDownIcon,
     EllipsisVerticalIcon,
     LinkSlashIcon,
-    MagnifyingGlassIcon,
     Squares2X2Icon,
     TagIcon,
     TrashIcon,
@@ -60,7 +58,6 @@ import {
     KIND_ICON,
     KIND_LABEL_KEY,
     SOURCE_TYPES,
-    sourceMetaFor,
     type FileKind,
     type SourceType,
 } from '@/app/components/library/files/fileMeta';
@@ -68,13 +65,19 @@ import {
 import { useUrlSync } from '@/app/hooks/useUrlSync';
 import RecordsRenderView from '@/app/components/records/RecordsRenderView';
 import { type ColumnDef } from '@/app/components/records/types';
+import {
+    SearchField,
+    FilterBar,
+    MultiSelectFilter,
+    RadioFilter,
+    SegmentedToggle,
+    pillClass,
+    type FilterChipData,
+} from '@/app/components/filters';
 import FileActionsMenu from '@/app/components/library/files/FileActionsMenu';
 import FileGlyph from '@/app/components/library/files/FileGlyph';
 import OwnerChip from '@/app/components/library/files/OwnerChip';
 import IconLink from '@/app/components/library/files/IconLink';
-import ViewButton from '@/app/components/library/files/ViewButton';
-import FilterMenu from '@/app/components/library/files/FilterMenu';
-import MenuChoice from '@/app/components/library/files/MenuChoice';
 import EmptyState from '@/app/components/library/files/EmptyState';
 import FileDetailSheet from '@/app/components/library/files/FileDetailSheet';
 import FileTagChips from '@/app/components/library/files/FileTagChips';
@@ -112,6 +115,7 @@ function normalizeSort(v: string | null): SortKey {
 
 export default function FilesBrowser() {
     const t = useTranslations('LibraryFiles');
+    const tf = useTranslations('Filters');
     const locale = useLocale();
     const reduce = useReducedMotion() ?? false;
     const searchParams = useSearchParams();
@@ -221,6 +225,14 @@ export default function FilesBrowser() {
         setOrphaned(false);
     };
 
+    const chips: FilterChipData[] = [
+        ...(query.trim() ? [{ id: 'q', label: tf('chipSearch', { query: query.trim() }), onRemove: () => setQuery('') }] : []),
+        ...(kind !== 'all' ? [{ id: 'kind', label: t(KIND_LABEL_KEY[kind]), onRemove: () => setKind('all') }] : []),
+        ...(source !== 'all' ? [{ id: 'source', label: t(SOURCE_LABEL_KEY[source]), onRemove: () => setSource('all') }] : []),
+        ...tagIds.map((id) => ({ id: `tag-${id}`, label: tagById.get(id)?.name ?? String(id), onRemove: () => toggleTag(id) })),
+        ...(orphaned ? [{ id: 'orphaned', label: t('unlinked'), onRemove: () => setOrphaned(false) }] : []),
+    ];
+
     const selectedAttachments = useMemo(
         () => items.filter((a) => selectedIds.has(a.id)),
         [items, selectedIds],
@@ -286,9 +298,6 @@ export default function FilesBrowser() {
             setBulkBusy(false);
         }
     };
-
-    const typeLabel = kind === 'all' ? t('typeAll') : t(KIND_LABEL_KEY[kind]);
-    const sourceLabel = source === 'all' ? t('sourceAll') : t(SOURCE_LABEL_KEY[source]);
 
     // list-mode columns for RecordsRenderView (sorting stays on the toolbar dropdown)
     const columns: ColumnDef<Attachment>[] = useMemo(
@@ -449,163 +458,93 @@ export default function FilesBrowser() {
                 <EmptyState t={t} />
             ) : (
                 <>
-                    <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-                        <div className="flex flex-wrap items-center gap-2">
-                            {kindOptions.length > 1 && (
-                                <FilterMenu current={typeLabel} active={kind !== 'all'} srLabel={t('typeLabel')}>
-                                    <DropdownMenuLabel>{t('typeLabel')}</DropdownMenuLabel>
-                                    <DropdownMenuSeparator />
-                                    <MenuChoice label={t('typeAll')} active={kind === 'all'} onSelect={() => setKind('all')} />
-                                    {kindOptions.map(({ kind: k, count }) => (
-                                        <MenuChoice
-                                            key={k}
-                                            Icon={KIND_ICON[k]}
-                                            label={t(KIND_LABEL_KEY[k])}
-                                            count={count}
-                                            active={kind === k}
-                                            onSelect={() => setKind(k)}
-                                        />
-                                    ))}
-                                </FilterMenu>
-                            )}
-                            {sourceOptions.length > 1 && (
-                                <FilterMenu current={sourceLabel} active={source !== 'all'} srLabel={t('sourceLabel')}>
-                                    <DropdownMenuLabel>{t('sourceLabel')}</DropdownMenuLabel>
-                                    <DropdownMenuSeparator />
-                                    <MenuChoice
-                                        label={t('sourceAll')}
-                                        active={source === 'all'}
-                                        onSelect={() => setSource('all')}
-                                    />
-                                    {sourceOptions.map(({ source: s, count }) => {
-                                        const meta = sourceMetaFor(s);
-                                        return (
-                                            <MenuChoice
-                                                key={s}
-                                                Icon={meta?.Icon}
-                                                label={t(SOURCE_LABEL_KEY[s])}
-                                                count={count}
-                                                active={source === s}
-                                                onSelect={() => setSource(s)}
-                                            />
-                                        );
-                                    })}
-                                </FilterMenu>
-                            )}
-                            {tagOptions.length > 0 && (
-                                <FilterMenu
-                                    current={tagIds.length === 0 ? t('tagAll') : t('tagCount', { count: tagIds.length })}
-                                    active={tagIds.length > 0}
-                                    srLabel={t('tagLabel')}
-                                >
-                                    <DropdownMenuLabel>{t('tagLabel')}</DropdownMenuLabel>
-                                    <DropdownMenuSeparator />
-                                    {tagIds.length > 0 && (
-                                        <DropdownMenuItem
-                                            onSelect={(e) => {
-                                                e.preventDefault();
-                                                setTagIds([]);
-                                            }}
-                                        >
-                                            <span className="flex-1">{t('tagAll')}</span>
-                                        </DropdownMenuItem>
-                                    )}
-                                    {tagOptions.map(({ tag, count }) => {
-                                        const isSelected = tagIds.includes(tag.id);
-                                        return (
-                                            <DropdownMenuItem
-                                                key={tag.id}
-                                                onSelect={(e) => {
-                                                    e.preventDefault();
-                                                    toggleTag(tag.id);
-                                                }}
-                                            >
-                                                <span
-                                                    className="size-2.5 shrink-0 rounded-full"
-                                                    style={{ backgroundColor: tag.color }}
-                                                />
-                                                <span className="flex-1 truncate">{tag.name}</span>
-                                                <span className="text-xs tabular-nums text-muted-foreground">{count}</span>
-                                                {isSelected && <CheckIcon className="size-4 text-brand-dark" />}
-                                            </DropdownMenuItem>
-                                        );
-                                    })}
-                                </FilterMenu>
-                            )}
-                            <FilterMenu
-                                Icon={ChevronUpDownIcon}
-                                current={t(SORT_LABEL_KEY[sort])}
-                                active={sort !== 'newest'}
-                                srLabel={t('sortLabel')}
-                                hideChevron
+                    <FilterBar
+                        reduce={reduce}
+                        chips={chips}
+                        hasActiveFilters={filtersActive}
+                        onClearAll={clearFilters}
+                        clearAllLabel={tf('clearAll')}
+                        search={
+                            <SearchField
+                                value={query}
+                                onChange={setQuery}
+                                onClear={() => setQuery('')}
+                                placeholder={t('searchPlaceholder')}
+                                searchAria={t('searchPlaceholder')}
+                                clearAria={tf('clearSearchAria')}
+                            />
+                        }
+                        trailing={
+                            <div className="flex items-center gap-1.5">
+                                <RadioFilter
+                                    label={t('sortLabel')}
+                                    ariaLabel={t('sortLabel')}
+                                    value={sort}
+                                    onValueChange={(v) => setSort(v as SortKey)}
+                                    options={SORT_KEYS.map((key) => ({ value: key, label: t(SORT_LABEL_KEY[key]) }))}
+                                />
+                                <SegmentedToggle
+                                    ariaLabel={t('viewGrid')}
+                                    value={view}
+                                    onChange={setView}
+                                    options={[
+                                        { value: 'grid', icon: <Squares2X2Icon className="size-4" />, ariaLabel: t('viewGrid') },
+                                        { value: 'list', icon: <Bars3Icon className="size-4" />, ariaLabel: t('viewList') },
+                                    ]}
+                                />
+                            </div>
+                        }
+                    >
+                        {kindOptions.length > 1 && (
+                            <RadioFilter
+                                label={t('typeLabel')}
+                                ariaLabel={t('typeLabel')}
+                                value={kind}
+                                onValueChange={(v) => setKind(v as FileKind | 'all')}
+                                options={[
+                                    { value: 'all', label: t('typeAll') },
+                                    ...kindOptions.map(({ kind: k, count }) => ({ value: k, label: t(KIND_LABEL_KEY[k]), count })),
+                                ]}
+                            />
+                        )}
+                        {sourceOptions.length > 1 && (
+                            <RadioFilter
+                                label={t('sourceLabel')}
+                                ariaLabel={t('sourceLabel')}
+                                value={source}
+                                onValueChange={(v) => setSource(v as SourceType | 'all')}
+                                options={[
+                                    { value: 'all', label: t('sourceAll') },
+                                    ...sourceOptions.map(({ source: s, count }) => ({ value: s, label: t(SOURCE_LABEL_KEY[s]), count })),
+                                ]}
+                            />
+                        )}
+                        {tagOptions.length > 0 && (
+                            <MultiSelectFilter
+                                label={t('tagLabel')}
+                                ariaLabel={t('tagLabel')}
+                                options={tagOptions.map(({ tag, count }) => ({ value: String(tag.id), label: tag.name, total: count }))}
+                                selected={new Set(tagIds.map(String))}
+                                onToggle={(v) => toggleTag(Number(v))}
+                                onClear={() => setTagIds([])}
+                                clearLabel={tf('clear')}
+                                scroll
+                            />
+                        )}
+                        {facets && facets.orphaned > 0 && (
+                            <button
+                                type="button"
+                                onClick={() => setOrphaned((o) => !o)}
+                                aria-pressed={orphaned}
+                                title={t('unlinkedHint')}
+                                className={pillClass(orphaned)}
                             >
-                                <DropdownMenuLabel>{t('sortLabel')}</DropdownMenuLabel>
-                                <DropdownMenuSeparator />
-                                {SORT_KEYS.map((key) => (
-                                    <MenuChoice
-                                        key={key}
-                                        label={t(SORT_LABEL_KEY[key])}
-                                        active={sort === key}
-                                        onSelect={() => setSort(key)}
-                                    />
-                                ))}
-                            </FilterMenu>
-                            {facets && facets.orphaned > 0 && (
-                                <button
-                                    type="button"
-                                    onClick={() => setOrphaned((o) => !o)}
-                                    aria-pressed={orphaned}
-                                    title={t('unlinkedHint')}
-                                    className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium ring-1 transition ${
-                                        orphaned
-                                            ? 'bg-brand-light text-brand-dark ring-brand-light'
-                                            : 'bg-muted text-muted-foreground ring-border hover:text-foreground'
-                                    }`}
-                                >
-                                    <LinkSlashIcon className="size-3.5" />
-                                    {t('unlinked')}
-                                    <span className="tabular-nums">{facets.orphaned}</span>
-                                </button>
-                            )}
-                            {filtersActive && (
-                                <button
-                                    type="button"
-                                    onClick={clearFilters}
-                                    className="rounded-full px-2.5 py-1.5 text-xs font-medium text-muted-foreground transition hover:text-foreground"
-                                >
-                                    {t('clearFilters')}
-                                </button>
-                            )}
-                            <div className="inline-flex shrink-0 items-center gap-0.5 rounded-full bg-muted p-0.5 ring-1 ring-border">
-                                <ViewButton
-                                    Icon={Squares2X2Icon}
-                                    label={t('viewGrid')}
-                                    active={view === 'grid'}
-                                    onClick={() => setView('grid')}
-                                />
-                                <ViewButton
-                                    Icon={Bars3Icon}
-                                    label={t('viewList')}
-                                    active={view === 'list'}
-                                    onClick={() => setView('list')}
-                                />
-                            </div>
-                        </div>
-
-                        <div className="flex items-center gap-2">
-                            <div className="relative min-w-0 flex-1 lg:flex-none">
-                                <input
-                                    type="text"
-                                    value={query}
-                                    onChange={(e) => setQuery(e.target.value)}
-                                    placeholder={t('searchPlaceholder')}
-                                    aria-label={t('searchPlaceholder')}
-                                    className="w-full rounded-full bg-muted px-4 py-2 pr-9 text-sm text-foreground placeholder:text-muted-foreground outline-none ring-1 ring-border transition focus:ring-2 focus:ring-brand lg:w-64"
-                                />
-                                <MagnifyingGlassIcon className="pointer-events-none absolute right-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-                            </div>
-                        </div>
-                    </div>
+                                <LinkSlashIcon className="size-3.5" />
+                                {t('unlinked')}
+                                <span className="tabular-nums">{facets.orphaned}</span>
+                            </button>
+                        )}
+                    </FilterBar>
 
                     <RecordsRenderView<Attachment>
                         data={items}

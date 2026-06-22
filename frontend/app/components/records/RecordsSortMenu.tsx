@@ -35,7 +35,7 @@ export default function RecordsSortMenu<T>({
                 <button
                     type="button"
                     aria-label={t('sortBy')}
-                    className="inline-flex items-center gap-1.5 rounded-full bg-muted px-3 py-1.5 text-xs font-medium text-muted-foreground ring-1 ring-border transition hover:text-foreground aria-expanded:text-foreground"
+                    className="inline-flex h-9 items-center gap-1.5 rounded-full bg-muted px-3 text-xs font-medium text-muted-foreground ring-1 ring-border transition hover:text-foreground aria-expanded:text-foreground"
                 >
                     <ChevronUpDownIcon className="size-3.5" />
                     <span>{active ? `${t('sortBy')}: ${active.label}` : t('sortBy')}</span>

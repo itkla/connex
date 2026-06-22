@@ -1,4 +1,18 @@
 {
+  "Filters": {
+    "searchAria": "Search",
+    "clearSearchAria": "Clear search",
+    "clear": "Clear",
+    "clearAll": "Clear all",
+    "chipSearch": "Search: {query}",
+    "noMatchesTitle": "No matches",
+    "noMatchesBody": "Try adjusting your search or filters.",
+    "assignee": "Assignee",
+    "creator": "Creator",
+    "contact": "Contact",
+    "deal": "Deal",
+    "company": "Company"
+  },
   "CommonHome": {
     "brand": "CONNEX",
     "navFeatures": "Features",

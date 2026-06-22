@@ -3,12 +3,11 @@
 import { useCallback, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useLocale, useTranslations } from 'next-intl';
-import { AnimatePresence } from 'motion/react';
+import { AnimatePresence, useReducedMotion } from 'motion/react';
 import { toast } from 'sonner';
 import { toastError, toastSuccess } from '@/app/lib/toast';
 import { PlusIcon, EllipsisVerticalIcon, PencilIcon, TrashIcon } from '@heroicons/react/24/solid';
 import {
-    MagnifyingGlassIcon,
     Squares2X2Icon,
     TableCellsIcon,
     UserIcon,
@@ -23,15 +22,9 @@ import {
     DropdownMenuContent,
     DropdownMenuItem,
 } from '@/components/ui/dropdown-menu';
-import {
-    Select,
-    SelectContent,
-    SelectItem,
-    SelectTrigger,
-    SelectValue,
-} from '@/components/ui/select';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 
+import { SearchField, FilterBar, RadioFilter, SegmentedToggle, type FilterChipData } from '@/app/components/filters';
 import { useRecordsBrowser } from '@/app/hooks/useRecordsBrowser';
 import RecordsRenderView from '@/app/components/records/RecordsRenderView';
 import DeleteRecordDialog from '@/app/components/records/DeleteRecordDialog';
@@ -72,7 +65,9 @@ function diffDraft(original: NoteDraft, draft: NoteDraft): boolean {
 export default function NotesBrowser({ notes, persons, deals, users, currentUserId }: Props) {
     const router = useRouter();
     const t = useTranslations('ActivityNotes');
+    const tf = useTranslations('Filters');
     const locale = useLocale();
+    const reduce = useReducedMotion() ?? false;
 
     const personById = useMemo(() => {
         const map = new Map<number, Contact>();
@@ -170,6 +165,15 @@ export default function NotesBrowser({ notes, persons, deals, users, currentUser
         }
         return Array.from(map.values()).sort((a, b) => a.sortKey.localeCompare(b.sortKey));
     }, [filteredNotes, groupBy, displayMode, personById, t]);
+
+    const groupByLabelOf = (g: 'none' | 'person' | 'company') =>
+        g === 'person' ? t('groupPerson') : g === 'company' ? t('groupCompany') : t('groupNone');
+    const groupActive = displayMode === 'grid' && groupBy !== 'none';
+    const hasActiveFilters = query.trim() !== '' || groupActive;
+    const chips: FilterChipData[] = [
+        ...(query.trim() ? [{ id: 'q', label: tf('chipSearch', { query: query.trim() }), onRemove: () => setQuery('') }] : []),
+        ...(groupActive ? [{ id: 'group', label: groupByLabelOf(groupBy), onRemove: () => setGroupBy('none') }] : []),
+    ];
 
     const closeNoteDialog = (open: boolean) => {
         if (!open) {
@@ -368,60 +372,48 @@ export default function NotesBrowser({ notes, persons, deals, users, currentUser
                 </Button>
             </div>
 
-            <div className="flex flex-wrap items-center gap-3">
-                <div
-                    role="group"
-                    aria-label={t('displayModeAria')}
-                    className="inline-flex rounded-full bg-muted p-0.5 ring-1 ring-border"
-                >
-                    <button
-                        type="button"
-                        onClick={() => setDisplayMode('grid')}
-                        aria-label={t('gridViewAria')}
-                        aria-pressed={displayMode === 'grid'}
-                        className={`flex h-7 w-7 items-center justify-center rounded-full transition ${displayMode === 'grid' ? 'bg-background text-foreground shadow' : 'text-muted-foreground hover:text-foreground'}`}
-                    >
-                        <Squares2X2Icon className="size-4" />
-                    </button>
-                    <button
-                        type="button"
-                        onClick={() => setDisplayMode('table')}
-                        aria-label={t('tableViewAria')}
-                        aria-pressed={displayMode === 'table'}
-                        className={`flex h-7 w-7 items-center justify-center rounded-full transition ${displayMode === 'table' ? 'bg-background text-foreground shadow' : 'text-muted-foreground hover:text-foreground'}`}
-                    >
-                        <TableCellsIcon className="size-4" />
-                    </button>
-                </div>
-
-                {displayMode === 'grid' && (
-                    <Select value={groupBy} onValueChange={(v) => setGroupBy(v as typeof groupBy)}>
-                        <SelectTrigger
-                            aria-label={t('groupByAria')}
-                            className="flex h-auto items-center gap-2 rounded-full border-0 bg-muted px-4 py-2 text-sm text-foreground ring-1 ring-border shadow-none transition hover:bg-muted/70 focus-visible:border-0 focus-visible:ring-1 focus-visible:ring-border"
-                        >
-                            <span className="text-muted-foreground">{t('groupBy')}</span>
-                            <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                            <SelectItem value="none">{t('groupNone')}</SelectItem>
-                            <SelectItem value="person">{t('groupPerson')}</SelectItem>
-                            <SelectItem value="company">{t('groupCompany')}</SelectItem>
-                        </SelectContent>
-                    </Select>
-                )}
-
-                <div className="relative ml-auto w-full max-w-sm">
-                    <input
-                        type="text"
-                        placeholder={t('searchPlaceholder')}
+            <FilterBar
+                reduce={reduce}
+                chips={chips}
+                hasActiveFilters={hasActiveFilters}
+                onClearAll={() => { setQuery(''); setGroupBy('none'); }}
+                clearAllLabel={tf('clearAll')}
+                search={
+                    <SearchField
                         value={query}
-                        onChange={(e) => setQuery(e.target.value)}
-                        className="w-full rounded-full bg-muted px-4 py-2 pr-10 text-sm text-foreground placeholder:text-muted-foreground outline-none ring-1 ring-border transition focus:ring-2 focus:ring-brand"
+                        onChange={setQuery}
+                        onClear={() => setQuery('')}
+                        placeholder={t('searchPlaceholder')}
+                        searchAria={tf('searchAria')}
+                        clearAria={tf('clearSearchAria')}
                     />
-                    <MagnifyingGlassIcon className="pointer-events-none absolute right-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-                </div>
-            </div>
+                }
+                trailing={
+                    <SegmentedToggle
+                        ariaLabel={t('displayModeAria')}
+                        value={displayMode}
+                        onChange={setDisplayMode}
+                        options={[
+                            { value: 'grid', icon: <Squares2X2Icon className="size-4" />, ariaLabel: t('gridViewAria') },
+                            { value: 'table', icon: <TableCellsIcon className="size-4" />, ariaLabel: t('tableViewAria') },
+                        ]}
+                    />
+                }
+            >
+                {displayMode === 'grid' && (
+                    <RadioFilter
+                        label={t('groupBy')}
+                        ariaLabel={t('groupByAria')}
+                        value={groupBy}
+                        onValueChange={(v) => setGroupBy(v as typeof groupBy)}
+                        options={[
+                            { value: 'none', label: t('groupNone') },
+                            { value: 'person', label: t('groupPerson') },
+                            { value: 'company', label: t('groupCompany') },
+                        ]}
+                    />
+                )}
+            </FilterBar>
 
             {filteredNotes.length === 0 ? (
                 <div className="rounded-2xl bg-card px-6 py-20 text-center ring-1 ring-border">

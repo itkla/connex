@@ -11,17 +11,17 @@ import { toastError, toastSuccess } from '@/app/lib/toast';
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from '@/components/ui/dropdown-menu';
 import { PlusIcon, TrashIcon, PencilIcon, EllipsisVerticalIcon, EyeIcon } from '@heroicons/react/24/solid';
 import {
-    MagnifyingGlassIcon,
-    Squares2X2Icon,
     TableCellsIcon,
     ChevronDownIcon,
 } from '@heroicons/react/24/outline';
+import { useReducedMotion } from 'motion/react';
 
 import RecordsRenderView from '@/app/components/records/RecordsRenderView';
-import RecordsFilterMenu from '@/app/components/records/RecordsFilterMenu';
+import RecordsFilterPills from '@/app/components/records/RecordsFilterPills';
+import { SearchField, FilterBar, type FilterChipData } from '@/app/components/filters';
 import DeleteRecordDialog from '@/app/components/records/DeleteRecordDialog';
 import { useRecordsBrowser } from '@/app/hooks/useRecordsBrowser';
-import { type ColumnDef, applyRecordFilters } from '@/app/components/records/types';
+import { type ColumnDef, applyRecordFilters, deriveFilterOptions, facetChips, countActiveFilters } from '@/app/components/records/types';
 import DealCard from '@/app/components/records/deals/DealCard';
 import DealAvatar from '@/app/components/records/deals/DealAvatar';
 import NewDealDialog from '@/app/components/records/deals/NewDealDialog';
@@ -90,7 +90,9 @@ function diffDraft(original: DealDraft, draft: DealDraft): boolean {
 export default function DealsBrowser({ deals }: { deals: Deal[] }) {
     const router = useRouter();
     const t = useTranslations('DealsBrowser');
+    const tf = useTranslations('Filters');
     const locale = useLocale();
+    const reduce = useReducedMotion() ?? false;
 
     const [companies, setCompanies] = useState<Company[]>([]);
     const [pipelines, setPipelines] = useState<Pipeline[]>([]);
@@ -475,6 +477,14 @@ export default function DealsBrowser({ deals }: { deals: Deal[] }) {
         [filteredDeals, columns, filterState],
     );
 
+    const facets = useMemo(() => deriveFilterOptions(columns, filteredDeals), [columns, filteredDeals]);
+    const hasActiveFilters = query.trim() !== '' || countActiveFilters(filterState) > 0;
+    const clearAll = useCallback(() => { setQuery(''); setFilterState({}); }, [setQuery, setFilterState]);
+    const chips: FilterChipData[] = [
+        ...(query.trim() ? [{ id: 'q', label: tf('chipSearch', { query: query.trim() }), onRemove: () => setQuery('') }] : []),
+        ...facetChips(facets, filterState, setFilterState),
+    ];
+
     const selectionActions = (
         <ButtonGroup className="rounded-full bg-muted">
             <Button variant="outline" size="sm" onClick={viewSelected}>
@@ -570,49 +580,46 @@ export default function DealsBrowser({ deals }: { deals: Deal[] }) {
                 />
             </div>
 
-            <div className="flex items-center gap-4">
-                <RecordsFilterMenu<Deal>
-                    columns={columns}
-                    items={filteredDeals}
+            <FilterBar
+                reduce={reduce}
+                chips={chips}
+                hasActiveFilters={hasActiveFilters}
+                onClearAll={clearAll}
+                clearAllLabel={tf('clearAll')}
+                search={
+                    <SearchField
+                        value={query}
+                        onChange={setQuery}
+                        onClear={() => setQuery('')}
+                        placeholder={t('searchPlaceholder')}
+                        searchAria={tf('searchAria')}
+                        clearAria={tf('clearSearchAria')}
+                    />
+                }
+                trailing={
+                    <div
+                        role="group"
+                        aria-label={t('displayMode')}
+                        className="inline-flex rounded-full bg-muted p-0.5 ring-1 ring-border"
+                    >
+                        <button
+                            type="button"
+                            onClick={() => setDisplayMode('table')}
+                            aria-label={t('tableView')}
+                            aria-pressed={displayMode === 'table'}
+                            className={`flex h-8 w-8 items-center justify-center rounded-full transition ${displayMode === 'table' ? 'bg-background text-foreground shadow' : 'text-muted-foreground hover:text-foreground'}`}
+                        >
+                            <TableCellsIcon className="size-4" />
+                        </button>
+                    </div>
+                }
+            >
+                <RecordsFilterPills<Deal>
+                    facets={facets}
                     filterState={filterState}
                     onChange={setFilterState}
                 />
-                <div
-                    role="group"
-                    aria-label={t('displayMode')}
-                    className="inline-flex rounded-full bg-muted p-0.5 ring-1 ring-border"
-                >
-                    {/* <button
-                        type="button"
-                        onClick={() => setDisplayMode('grid')}
-                        aria-label={t('gridView')}
-                        aria-pressed={displayMode === 'grid'}
-                        className={`flex h-7 w-7 items-center justify-center rounded-full transition ${displayMode === 'grid' ? 'bg-white text-neutral-900 shadow' : 'text-neutral-500 hover:text-neutral-700'}`}
-                    >
-                        <Squares2X2Icon className="size-4" />
-                    </button> */}
-                    <button
-                        type="button"
-                        onClick={() => setDisplayMode('table')}
-                        aria-label={t('tableView')}
-                        aria-pressed={displayMode === 'table'}
-                        className={`flex h-7 w-7 items-center justify-center rounded-full transition ${displayMode === 'table' ? 'bg-background text-foreground shadow' : 'text-muted-foreground hover:text-foreground'}`}
-                    >
-                        <TableCellsIcon className="size-4" />
-                    </button>
-                </div>
-
-                <div className="relative ml-auto w-full max-w-sm">
-                    <input
-                        type="text"
-                        placeholder={t('searchPlaceholder')}
-                        value={query}
-                        onChange={(e) => setQuery(e.target.value)}
-                        className="w-full rounded-full bg-muted px-4 py-2 pr-10 text-sm text-foreground placeholder:text-muted-foreground outline-none ring-1 ring-border transition focus:ring-2 focus:ring-brand"
-                    />
-                    <MagnifyingGlassIcon className="pointer-events-none absolute right-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-                </div>
-            </div>
+            </FilterBar>
 
             <RecordsRenderView<Deal>
                 data={visibleDeals}

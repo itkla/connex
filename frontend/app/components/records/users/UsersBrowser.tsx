@@ -3,12 +3,14 @@
 import { useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
-import { MagnifyingGlassIcon, Squares2X2Icon, TableCellsIcon } from "@heroicons/react/24/outline";
+import { Squares2X2Icon, TableCellsIcon } from "@heroicons/react/24/outline";
 import { EyeIcon } from "@heroicons/react/24/solid";
+import { useReducedMotion } from "motion/react";
 import { Button } from "@/components/ui/button";
 
 import RecordsRenderView from "@/app/components/records/RecordsRenderView";
 import RecordsSortMenu from "@/app/components/records/RecordsSortMenu";
+import { SearchField, FilterBar, SegmentedToggle, type FilterChipData } from "@/app/components/filters";
 import UserAvatar from "@/app/components/records/users/UserAvatar";
 import UserCard from "@/app/components/records/users/UserCard";
 import NewUserDialog from "@/app/components/records/users/NewUserDialog";
@@ -23,7 +25,9 @@ const searchFields = (u: User) => [u.displayName, u.username, u.email];
 export default function UsersBrowser({ users }: { users: User[] }) {
     const router = useRouter();
     const t = useTranslations("UsersBrowser");
+    const tf = useTranslations("Filters");
     const locale = useLocale();
+    const reduce = useReducedMotion() ?? false;
     const {
         displayMode,
         setDisplayMode,
@@ -76,6 +80,10 @@ export default function UsersBrowser({ users }: { users: User[] }) {
         [t, locale],
     );
 
+    const chips: FilterChipData[] = query.trim()
+        ? [{ id: "q", label: tf("chipSearch", { query: query.trim() }), onRemove: () => setQuery("") }]
+        : [];
+
     const viewSelected = () => {
         if (selectedUsers.length === 1) {
             router.push(`/users/${selectedUsers[0].id}`);
@@ -98,51 +106,44 @@ export default function UsersBrowser({ users }: { users: User[] }) {
                 <NewUserDialog />
             </div>
 
-            <div className="flex items-center gap-4">
-                {displayMode === "grid" && (
-                    <RecordsSortMenu
-                        columns={columns}
-                        sortKey={sortKey}
-                        sortDirection={sortDirection}
-                        onSortChange={onSortChange}
-                    />
-                )}
-                <div
-                    role="group"
-                    aria-label={t("displayModeAria")}
-                    className="inline-flex rounded-full bg-muted p-0.5 ring-1 ring-border"
-                >
-                    <button
-                        type="button"
-                        onClick={() => setDisplayMode("grid")}
-                        aria-label={t("gridViewAria")}
-                        aria-pressed={displayMode === "grid"}
-                        className={`flex h-7 w-7 items-center justify-center rounded-full transition ${displayMode === "grid" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
-                    >
-                        <Squares2X2Icon className="size-4" />
-                    </button>
-                    <button
-                        type="button"
-                        onClick={() => setDisplayMode("table")}
-                        aria-label={t("tableViewAria")}
-                        aria-pressed={displayMode === "table"}
-                        className={`flex h-7 w-7 items-center justify-center rounded-full transition ${displayMode === "table" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
-                    >
-                        <TableCellsIcon className="size-4" />
-                    </button>
-                </div>
-
-                <div className="relative ml-auto w-full max-w-sm">
-                    <input
-                        type="text"
-                        placeholder={t("searchPlaceholder")}
+            <FilterBar
+                reduce={reduce}
+                chips={chips}
+                hasActiveFilters={query.trim() !== ""}
+                onClearAll={() => setQuery("")}
+                clearAllLabel={tf("clearAll")}
+                search={
+                    <SearchField
                         value={query}
-                        onChange={(e) => setQuery(e.target.value)}
-                        className="w-full rounded-full bg-muted px-4 py-2 pr-10 text-sm text-foreground placeholder:text-muted-foreground outline-none ring-1 ring-border transition focus:ring-2 focus:ring-brand"
+                        onChange={setQuery}
+                        onClear={() => setQuery("")}
+                        placeholder={t("searchPlaceholder")}
+                        searchAria={tf("searchAria")}
+                        clearAria={tf("clearSearchAria")}
                     />
-                    <MagnifyingGlassIcon className="pointer-events-none absolute right-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-                </div>
-            </div>
+                }
+                trailing={
+                    <div className="flex items-center gap-2">
+                        {displayMode === "grid" && (
+                            <RecordsSortMenu
+                                columns={columns}
+                                sortKey={sortKey}
+                                sortDirection={sortDirection}
+                                onSortChange={onSortChange}
+                            />
+                        )}
+                        <SegmentedToggle
+                            ariaLabel={t("displayModeAria")}
+                            value={displayMode}
+                            onChange={setDisplayMode}
+                            options={[
+                                { value: "grid", icon: <Squares2X2Icon className="size-4" />, ariaLabel: t("gridViewAria") },
+                                { value: "table", icon: <TableCellsIcon className="size-4" />, ariaLabel: t("tableViewAria") },
+                            ]}
+                        />
+                    </div>
+                }
+            />
 
             <RecordsRenderView<User>
                 data={filteredUsers}

@@ -3,6 +3,7 @@
 import { useCallback, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
+import { useReducedMotion } from 'motion/react';
 import { Button } from '@/components/ui/button';
 import { ButtonGroup } from '@/components/ui/button-group';
 import { toast } from 'sonner';
@@ -10,18 +11,18 @@ import { toastError, toastSuccess } from '@/app/lib/toast';
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
 import { PlusIcon, TrashIcon, PencilIcon, EllipsisVerticalIcon, EyeIcon } from '@heroicons/react/24/solid';
 import {
-    MagnifyingGlassIcon,
     Squares2X2Icon,
     TableCellsIcon,
 } from '@heroicons/react/24/outline';
 
 import RecordsRenderView from '@/app/components/records/RecordsRenderView';
 import RecordsSortMenu from '@/app/components/records/RecordsSortMenu';
-import RecordsFilterMenu from '@/app/components/records/RecordsFilterMenu';
+import RecordsFilterPills from '@/app/components/records/RecordsFilterPills';
+import { SearchField, FilterBar, SegmentedToggle, type FilterChipData } from '@/app/components/filters';
 import DeleteRecordDialog from '@/app/components/records/DeleteRecordDialog';
 import { useRecordsBrowser } from '@/app/hooks/useRecordsBrowser';
 import { useRecordsSort } from '@/app/hooks/useRecordsSort';
-import { type ColumnDef, applyRecordFilters } from '@/app/components/records/types';
+import { type ColumnDef, applyRecordFilters, deriveFilterOptions, facetChips, countActiveFilters } from '@/app/components/records/types';
 import CompanyCard from '@/app/components/records/companies/CompanyCard';
 import CompanyAvatar from '@/app/components/records/companies/CompanyAvatar';
 import NewCompanyDialog from '@/app/components/records/companies/NewCompanyDialog';
@@ -57,6 +58,8 @@ const searchFields = (c: Company) => [c.name, c.website, c.industry, c.phone, c.
 export default function CompaniesBrowser({ companies }: { companies: Company[] }) {
     const router = useRouter();
     const t = useTranslations('CompaniesBrowser');
+    const tf = useTranslations('Filters');
+    const reduce = useReducedMotion() ?? false;
     const {
         displayMode,
         setDisplayMode,
@@ -292,6 +295,14 @@ export default function CompaniesBrowser({ companies }: { companies: Company[] }
         [filteredCompanies, columns, filterState],
     );
 
+    const facets = useMemo(() => deriveFilterOptions(columns, filteredCompanies), [columns, filteredCompanies]);
+    const hasActiveFilters = query.trim() !== '' || countActiveFilters(filterState) > 0;
+    const clearAll = useCallback(() => { setQuery(''); setFilterState({}); }, [setQuery, setFilterState]);
+    const chips: FilterChipData[] = [
+        ...(query.trim() ? [{ id: 'q', label: tf('chipSearch', { query: query.trim() }), onRemove: () => setQuery('') }] : []),
+        ...facetChips(facets, filterState, setFilterState),
+    ];
+
     // TODO: move processing to the backend so the frontend doesn't traverse the full tables to derive per-company metrics
 
     const metricsByCompanyId = useMemo(() => {
@@ -403,57 +414,50 @@ export default function CompaniesBrowser({ companies }: { companies: Company[] }
                 </Button>
             </div>
 
-            <div className="flex items-center gap-4">
-                <RecordsFilterMenu<Company>
-                    columns={columns}
-                    items={filteredCompanies}
+            <FilterBar
+                reduce={reduce}
+                chips={chips}
+                hasActiveFilters={hasActiveFilters}
+                onClearAll={clearAll}
+                clearAllLabel={tf('clearAll')}
+                search={
+                    <SearchField
+                        value={query}
+                        onChange={setQuery}
+                        onClear={() => setQuery('')}
+                        placeholder={t('searchPlaceholder')}
+                        searchAria={tf('searchAria')}
+                        clearAria={tf('clearSearchAria')}
+                    />
+                }
+                trailing={
+                    <div className="flex items-center gap-2">
+                        {displayMode === 'grid' && (
+                            <RecordsSortMenu
+                                columns={columns}
+                                sortKey={sortKey}
+                                sortDirection={sortDirection}
+                                onSortChange={onSortChange}
+                            />
+                        )}
+                        <SegmentedToggle
+                            ariaLabel={t('displayModeAriaLabel')}
+                            value={displayMode}
+                            onChange={setDisplayMode}
+                            options={[
+                                { value: 'grid', icon: <Squares2X2Icon className="size-4" />, ariaLabel: t('gridViewAriaLabel') },
+                                { value: 'table', icon: <TableCellsIcon className="size-4" />, ariaLabel: t('tableViewAriaLabel') },
+                            ]}
+                        />
+                    </div>
+                }
+            >
+                <RecordsFilterPills<Company>
+                    facets={facets}
                     filterState={filterState}
                     onChange={setFilterState}
                 />
-                {displayMode === 'grid' && (
-                    <RecordsSortMenu
-                        columns={columns}
-                        sortKey={sortKey}
-                        sortDirection={sortDirection}
-                        onSortChange={onSortChange}
-                    />
-                )}
-                <div
-                    role="group"
-                    aria-label={t('displayModeAriaLabel')}
-                    className="inline-flex rounded-full bg-muted p-0.5 ring-1 ring-border"
-                >
-                    <button
-                        type="button"
-                        onClick={() => setDisplayMode('grid')}
-                        aria-label={t('gridViewAriaLabel')}
-                        aria-pressed={displayMode === 'grid'}
-                        className={`flex h-7 w-7 items-center justify-center rounded-full transition ${displayMode === 'grid' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
-                    >
-                        <Squares2X2Icon className="size-4" />
-                    </button>
-                    <button
-                        type="button"
-                        onClick={() => setDisplayMode('table')}
-                        aria-label={t('tableViewAriaLabel')}
-                        aria-pressed={displayMode === 'table'}
-                        className={`flex h-7 w-7 items-center justify-center rounded-full transition ${displayMode === 'table' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
-                    >
-                        <TableCellsIcon className="size-4" />
-                    </button>
-                </div>
-
-                <div className="relative ml-auto w-full max-w-sm">
-                    <input
-                        type="text"
-                        placeholder={t('searchPlaceholder')}
-                        value={query}
-                        onChange={(e) => setQuery(e.target.value)}
-                        className="w-full rounded-full bg-muted px-4 py-2 pr-10 text-sm text-foreground placeholder:text-muted-foreground outline-none ring-1 ring-border transition focus:ring-2 focus:ring-brand"
-                    />
-                    <MagnifyingGlassIcon className="pointer-events-none absolute right-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-                </div>
-            </div>
+            </FilterBar>
 
             <RecordsRenderView<Company>
                 data={visibleCompanies}

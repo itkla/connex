@@ -96,6 +96,25 @@ export function countActiveFilters(filterState: FilterState): number {
     return Object.values(filterState).reduce((sum, keys) => sum + keys.length, 0);
 }
 
+export function facetChips(
+    facets: ColumnFilterFacet[],
+    filterState: FilterState,
+    onChange: (next: FilterState) => void,
+): { id: string; label: string; onRemove: () => void }[] {
+    const chips: { id: string; label: string; onRemove: () => void }[] = [];
+    for (const facet of facets) {
+        for (const key of filterState[facet.key] ?? []) {
+            const opt = facet.options.find((o) => o.key === key);
+            chips.push({
+                id: `${facet.key}:${key}`,
+                label: opt ? opt.label : key,
+                onRemove: () => onChange(toggleFilterValue(filterState, facet.key, key)),
+            });
+        }
+    }
+    return chips;
+}
+
 export function toggleFilterValue(state: FilterState, columnKey: string, optionKey: string): FilterState {
     const current = state[columnKey] ?? [];
     const next = current.includes(optionKey)

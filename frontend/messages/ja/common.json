@@ -1,4 +1,18 @@
 {
+  "Filters": {
+    "searchAria": "検索",
+    "clearSearchAria": "検索をクリア",
+    "clear": "クリア",
+    "clearAll": "すべてクリア",
+    "chipSearch": "検索: {query}",
+    "noMatchesTitle": "一致なし",
+    "noMatchesBody": "検索条件やフィルターを調整してください。",
+    "assignee": "担当者",
+    "creator": "作成者",
+    "contact": "連絡先",
+    "deal": "取引",
+    "company": "会社"
+  },
   "CommonHome": {
     "brand": "CONNEX",
     "navFeatures": "機能",

@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState, type ComponentType } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ComponentType } from 'react';
 import { useLocale, useTranslations } from 'next-intl';
 import Link from 'next/link';
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
@@ -18,6 +18,7 @@ import {
 } from '@heroicons/react/24/outline';
 import { PlusIcon } from '@heroicons/react/24/solid';
 
+import { SearchField, FilterBar, MultiSelectFilter, type FilterChipData } from '@/app/components/filters';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Button } from '@/components/ui/button';
@@ -135,8 +136,30 @@ function formatDue(
     };
 }
 
+function bumpOption(map: Map<string, { label: string; count: number }>, key: string, label: string) {
+    const e = map.get(key);
+    if (e) e.count++;
+    else map.set(key, { label, count: 1 });
+}
+
+function toOptions(map: Map<string, { label: string; count: number }>) {
+    return [...map.entries()]
+        .sort((a, b) => b[1].count - a[1].count || a[1].label.localeCompare(b[1].label))
+        .map(([value, { label, count }]) => ({ value, label, total: count }));
+}
+
+function toggleInSet(setter: React.Dispatch<React.SetStateAction<Set<string>>>, value: string) {
+    setter((prev) => {
+        const next = new Set(prev);
+        if (next.has(value)) next.delete(value);
+        else next.add(value);
+        return next;
+    });
+}
+
 export default function TasksBrowser({ tasks: initialTasks, persons, deals, users, currentUserId }: Props) {
     const t = useTranslations('ActivityTasks');
+    const tf = useTranslations('Filters');
     const locale = useLocale();
     const reduce = useReducedMotion() ?? false;
 
@@ -152,6 +175,10 @@ export default function TasksBrowser({ tasks: initialTasks, persons, deals, user
     const userById = useMemo(() => new Map(users.map((u) => [u.id, u])), [users]);
 
     const [query, setQuery] = useState('');
+    const [assigneeFilter, setAssigneeFilter] = useState<Set<string>>(new Set());
+    const [personFilter, setPersonFilter] = useState<Set<string>>(new Set());
+    const [dealFilter, setDealFilter] = useState<Set<string>>(new Set());
+    const [companyFilter, setCompanyFilter] = useState<Set<string>>(new Set());
     const [queue, setQueue] = useState<Queue>('myOpen');
     const [queueInitialized, setQueueInitialized] = useState(false);
     const [editingTask, setEditingTask] = useState<Task | null>(null);
@@ -207,11 +234,60 @@ export default function TasksBrowser({ tasks: initialTasks, persons, deals, user
         return { total, done, left: total - done, overdue: queueCounts.overdue, doneThisWeek };
     }, [tasks, queueCounts.overdue, now]);
 
+    const companyIdForTask = useCallback(
+        (task: Task) => {
+            if (task.personId == null) return null;
+            const person = personById.get(task.personId);
+            return person?.company?.id ?? person?.companyId ?? null;
+        },
+        [personById],
+    );
+
+    const queueTasks = useMemo(
+        () => tasks.filter((task) => isInQueue(queue, task, currentUserId) || completing.has(task.id)),
+        [tasks, queue, currentUserId, completing],
+    );
+
+    const dimensionOptions = useMemo(() => {
+        const assignees = new Map<string, { label: string; count: number }>();
+        const persons_ = new Map<string, { label: string; count: number }>();
+        const deals_ = new Map<string, { label: string; count: number }>();
+        const companies = new Map<string, { label: string; count: number }>();
+        for (const task of queueTasks) {
+            const assignee = userById.get(task.assignedToId);
+            if (assignee) bumpOption(assignees, String(task.assignedToId), assignee.displayName || assignee.username);
+            if (task.personId != null) {
+                const person = personById.get(task.personId);
+                if (person) bumpOption(persons_, String(person.id), person.name);
+            }
+            if (task.dealId != null) {
+                const deal = dealById.get(task.dealId);
+                if (deal) bumpOption(deals_, String(deal.id), deal.name);
+            }
+            const companyId = companyIdForTask(task);
+            if (companyId != null) {
+                const company = task.personId != null ? personById.get(task.personId)?.company : undefined;
+                if (company) bumpOption(companies, String(companyId), company.name);
+            }
+        }
+        return {
+            assignees: toOptions(assignees),
+            persons: toOptions(persons_),
+            deals: toOptions(deals_),
+            companies: toOptions(companies),
+        };
+    }, [queueTasks, userById, personById, dealById, companyIdForTask]);
+
     const filtered = useMemo(() => {
         const q = query.trim().toLowerCase();
-        return tasks.filter((task) => {
-            const inQueue = isInQueue(queue, task, currentUserId) || completing.has(task.id);
-            if (!inQueue) return false;
+        return queueTasks.filter((task) => {
+            if (assigneeFilter.size && !assigneeFilter.has(String(task.assignedToId))) return false;
+            if (personFilter.size && !(task.personId != null && personFilter.has(String(task.personId)))) return false;
+            if (dealFilter.size && !(task.dealId != null && dealFilter.has(String(task.dealId)))) return false;
+            if (companyFilter.size) {
+                const companyId = companyIdForTask(task);
+                if (!(companyId != null && companyFilter.has(String(companyId)))) return false;
+            }
             if (!q) return true;
             const haystacks = [
                 task.description,
@@ -221,7 +297,7 @@ export default function TasksBrowser({ tasks: initialTasks, persons, deals, user
             ];
             return haystacks.some((s) => s?.toLowerCase().includes(q));
         });
-    }, [tasks, query, queue, currentUserId, personById, dealById, userById, completing]);
+    }, [queueTasks, query, assigneeFilter, personFilter, dealFilter, companyFilter, companyIdForTask, personById, dealById, userById]);
 
     const grouped = useMemo(() => {
         const buckets: Record<Bucket, Task[]> = { overdue: [], today: [], upcoming: [], noDate: [], completed: [] };
@@ -294,7 +370,26 @@ export default function TasksBrowser({ tasks: initialTasks, persons, deals, user
     const hasAnyTasks = tasks.length > 0;
     const isEmpty = filtered.length === 0;
     const isCompletedQueue = queue === 'completed';
-    const emptyMessage = query.trim() ? t('emptyFiltered') : t(`emptyQueue_${queue}` as 'emptyQueue_myOpen');
+    const dimensionsActive =
+        assigneeFilter.size > 0 || personFilter.size > 0 || dealFilter.size > 0 || companyFilter.size > 0;
+    const emptyMessage = query.trim() || dimensionsActive ? t('emptyFiltered') : t(`emptyQueue_${queue}` as 'emptyQueue_myOpen');
+
+    const labelFor = (options: { value: string; label: string }[], value: string) =>
+        options.find((o) => o.value === value)?.label ?? value;
+    const chips: FilterChipData[] = [
+        ...(query.trim() ? [{ id: 'q', label: tf('chipSearch', { query: query.trim() }), onRemove: () => setQuery('') }] : []),
+        ...[...assigneeFilter].map((v) => ({ id: `assignee-${v}`, label: labelFor(dimensionOptions.assignees, v), onRemove: () => toggleInSet(setAssigneeFilter, v) })),
+        ...[...personFilter].map((v) => ({ id: `person-${v}`, label: labelFor(dimensionOptions.persons, v), onRemove: () => toggleInSet(setPersonFilter, v) })),
+        ...[...dealFilter].map((v) => ({ id: `deal-${v}`, label: labelFor(dimensionOptions.deals, v), onRemove: () => toggleInSet(setDealFilter, v) })),
+        ...[...companyFilter].map((v) => ({ id: `company-${v}`, label: labelFor(dimensionOptions.companies, v), onRemove: () => toggleInSet(setCompanyFilter, v) })),
+    ];
+    const clearAllFilters = () => {
+        setQuery('');
+        setAssigneeFilter(new Set());
+        setPersonFilter(new Set());
+        setDealFilter(new Set());
+        setCompanyFilter(new Set());
+    };
 
     const renderRow = (task: Task, bucket: Bucket) => (
         <TaskRow
@@ -372,18 +467,73 @@ export default function TasksBrowser({ tasks: initialTasks, persons, deals, user
                 </aside>
 
                 <div className="min-w-0 space-y-4">
-                    <div className="flex items-center">
-                        <div className="relative ml-auto w-full max-w-xs">
-                            <input
-                                type="text"
-                                placeholder={t('searchPlaceholder')}
+                    <FilterBar
+                        reduce={reduce}
+                        chips={chips}
+                        hasActiveFilters={query.trim() !== '' || dimensionsActive}
+                        onClearAll={clearAllFilters}
+                        clearAllLabel={tf('clearAll')}
+                        className="py-0"
+                        search={
+                            <SearchField
                                 value={query}
-                                onChange={(e) => setQuery(e.target.value)}
-                                className="w-full rounded-full bg-muted px-4 py-2 pr-10 text-sm text-foreground placeholder:text-muted-foreground outline-none ring-1 ring-border transition focus:ring-2 focus:ring-brand"
+                                onChange={setQuery}
+                                onClear={() => setQuery('')}
+                                placeholder={t('searchPlaceholder')}
+                                searchAria={tf('searchAria')}
+                                clearAria={tf('clearSearchAria')}
                             />
-                            <MagnifyingGlassIcon className="pointer-events-none absolute right-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-                        </div>
-                    </div>
+                        }
+                    >
+                        {dimensionOptions.assignees.length > 0 && (
+                            <MultiSelectFilter
+                                label={tf('assignee')}
+                                ariaLabel={tf('assignee')}
+                                options={dimensionOptions.assignees}
+                                selected={assigneeFilter}
+                                onToggle={(v) => toggleInSet(setAssigneeFilter, v)}
+                                onClear={() => setAssigneeFilter(new Set())}
+                                clearLabel={tf('clear')}
+                                scroll
+                            />
+                        )}
+                        {dimensionOptions.persons.length > 0 && (
+                            <MultiSelectFilter
+                                label={tf('contact')}
+                                ariaLabel={tf('contact')}
+                                options={dimensionOptions.persons}
+                                selected={personFilter}
+                                onToggle={(v) => toggleInSet(setPersonFilter, v)}
+                                onClear={() => setPersonFilter(new Set())}
+                                clearLabel={tf('clear')}
+                                scroll
+                            />
+                        )}
+                        {dimensionOptions.deals.length > 0 && (
+                            <MultiSelectFilter
+                                label={tf('deal')}
+                                ariaLabel={tf('deal')}
+                                options={dimensionOptions.deals}
+                                selected={dealFilter}
+                                onToggle={(v) => toggleInSet(setDealFilter, v)}
+                                onClear={() => setDealFilter(new Set())}
+                                clearLabel={tf('clear')}
+                                scroll
+                            />
+                        )}
+                        {dimensionOptions.companies.length > 0 && (
+                            <MultiSelectFilter
+                                label={tf('company')}
+                                ariaLabel={tf('company')}
+                                options={dimensionOptions.companies}
+                                selected={companyFilter}
+                                onToggle={(v) => toggleInSet(setCompanyFilter, v)}
+                                onClear={() => setCompanyFilter(new Set())}
+                                clearLabel={tf('clear')}
+                                scroll
+                            />
+                        )}
+                    </FilterBar>
 
                     {isEmpty ? (
                         <TaskEmptyState

@@ -11,18 +11,19 @@ import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuIte
 import { PlusIcon, TrashIcon, PencilIcon, EllipsisVerticalIcon, EyeIcon } from '@heroicons/react/24/solid';
 import { BuildingOffice2Icon, NoSymbolIcon } from '@heroicons/react/24/outline';
 import {
-    MagnifyingGlassIcon,
     Squares2X2Icon,
     TableCellsIcon,
 } from '@heroicons/react/24/outline';
+import { useReducedMotion } from 'motion/react';
 
 import RecordsRenderView from '@/app/components/records/RecordsRenderView';
 import RecordsSortMenu from '@/app/components/records/RecordsSortMenu';
-import RecordsFilterMenu from '@/app/components/records/RecordsFilterMenu';
+import RecordsFilterPills from '@/app/components/records/RecordsFilterPills';
+import { SearchField, FilterBar, SegmentedToggle, type FilterChipData } from '@/app/components/filters';
 import DeleteRecordDialog from '@/app/components/records/DeleteRecordDialog';
 import { useRecordsBrowser } from '@/app/hooks/useRecordsBrowser';
 import { useServerRecords } from '@/app/hooks/useServerRecords';
-import { type ColumnDef, type ColumnFilterFacet, FILTER_EMPTY } from '@/app/components/records/types';
+import { type ColumnDef, type ColumnFilterFacet, FILTER_EMPTY, facetChips, countActiveFilters } from '@/app/components/records/types';
 import ContactCard from '@/app/components/records/contacts/ContactCard';
 import ContactAvatar from '@/app/components/records/contacts/ContactAvatar';
 import NewContactDialog from '@/app/components/records/contacts/NewContactDialog';
@@ -56,6 +57,8 @@ function diffDraft(original: ContactDraft, draft: ContactDraft): boolean {
 export default function ContactsBrowser() {
     const router = useRouter();
     const t = useTranslations('ContactsBrowser');
+    const tf = useTranslations('Filters');
+    const reduce = useReducedMotion() ?? false;
 
     const {
         displayMode,
@@ -121,6 +124,13 @@ export default function ContactsBrowser() {
         if (titleOptions.length) out.push({ key: 'title', label: t('columnTitle'), options: titleOptions });
         return out;
     }, [personFacets, t]);
+
+    const hasActiveFilters = query.trim() !== '' || countActiveFilters(filterState) > 0;
+    const clearAll = useCallback(() => { setQuery(''); setFilterState({}); }, [setQuery, setFilterState]);
+    const chips: FilterChipData[] = [
+        ...(query.trim() ? [{ id: 'q', label: tf('chipSearch', { query: query.trim() }), onRemove: () => setQuery('') }] : []),
+        ...facetChips(facets, filterState, setFilterState),
+    ];
 
     const [isDeleting, setIsDeleting] = useState(false);
     const [editSheetOpen, setEditSheetOpen] = useState(false);
@@ -399,57 +409,50 @@ export default function ContactsBrowser() {
                 </Button>
             </div>
 
-            <div className="flex items-center gap-4">
-                <RecordsFilterMenu<Contact>
-                    columns={columns}
+            <FilterBar
+                reduce={reduce}
+                chips={chips}
+                hasActiveFilters={hasActiveFilters}
+                onClearAll={clearAll}
+                clearAllLabel={tf('clearAll')}
+                search={
+                    <SearchField
+                        value={query}
+                        onChange={setQuery}
+                        onClear={() => setQuery('')}
+                        placeholder={t('searchPlaceholder')}
+                        searchAria={tf('searchAria')}
+                        clearAria={tf('clearSearchAria')}
+                    />
+                }
+                trailing={
+                    <div className="flex items-center gap-2">
+                        {displayMode === 'grid' && (
+                            <RecordsSortMenu
+                                columns={columns}
+                                sortKey={sortKey}
+                                sortDirection={sortDirection}
+                                onSortChange={onSortChange}
+                            />
+                        )}
+                        <SegmentedToggle
+                            ariaLabel={t('displayModeAria')}
+                            value={displayMode}
+                            onChange={setDisplayMode}
+                            options={[
+                                { value: 'grid', icon: <Squares2X2Icon className="size-4" />, ariaLabel: t('gridViewAria') },
+                                { value: 'table', icon: <TableCellsIcon className="size-4" />, ariaLabel: t('tableViewAria') },
+                            ]}
+                        />
+                    </div>
+                }
+            >
+                <RecordsFilterPills<Contact>
                     facets={facets}
                     filterState={filterState}
                     onChange={setFilterState}
                 />
-                {displayMode === 'grid' && (
-                    <RecordsSortMenu
-                        columns={columns}
-                        sortKey={sortKey}
-                        sortDirection={sortDirection}
-                        onSortChange={onSortChange}
-                    />
-                )}
-                <div
-                    role="group"
-                    aria-label={t('displayModeAria')}
-                    className="inline-flex rounded-full bg-muted p-0.5 ring-1 ring-border"
-                >
-                    <button
-                        type="button"
-                        onClick={() => setDisplayMode('grid')}
-                        aria-label={t('gridViewAria')}
-                        aria-pressed={displayMode === 'grid'}
-                        className={`flex h-7 w-7 items-center justify-center rounded-full transition ${displayMode === 'grid' ? 'bg-background text-foreground shadow' : 'text-muted-foreground hover:text-foreground'}`}
-                    >
-                        <Squares2X2Icon className="size-4" />
-                    </button>
-                    <button
-                        type="button"
-                        onClick={() => setDisplayMode('table')}
-                        aria-label={t('tableViewAria')}
-                        aria-pressed={displayMode === 'table'}
-                        className={`flex h-7 w-7 items-center justify-center rounded-full transition ${displayMode === 'table' ? 'bg-background text-foreground shadow' : 'text-muted-foreground hover:text-foreground'}`}
-                    >
-                        <TableCellsIcon className="size-4" />
-                    </button>
-                </div>
-
-                <div className="relative ml-auto w-full max-w-sm">
-                    <input
-                        type="text"
-                        placeholder={t('searchPlaceholder')}
-                        value={query}
-                        onChange={(e) => setQuery(e.target.value)}
-                        className="w-full rounded-full bg-muted px-4 py-2 pr-10 text-sm text-foreground placeholder:text-muted-foreground outline-none ring-1 ring-border transition focus:ring-2 focus:ring-brand"
-                    />
-                    <MagnifyingGlassIcon className="pointer-events-none absolute right-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-                </div>
-            </div>
+            </FilterBar>
 
             <RecordsRenderView<Contact>
                 data={contacts}

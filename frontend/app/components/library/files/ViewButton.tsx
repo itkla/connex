@@ -27,7 +27,7 @@ export default function ViewButton({
             aria-pressed={active}
             title={label}
             aria-label={label}
-            className={`flex items-center justify-center rounded-full p-1.5 transition ${
+            className={`flex items-center justify-center rounded-full p-2 transition ${
                 active ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'
             }`}
         >

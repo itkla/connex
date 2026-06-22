@@ -1,10 +1,9 @@
 'use client';
 
-import { useMemo, useState, type ComponentType } from 'react';
+import { useMemo, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
 import {
-    MagnifyingGlassIcon,
     SwatchIcon,
     BarsArrowDownIcon,
     PencilIcon,
@@ -16,6 +15,7 @@ import {
 import { PlusIcon } from '@heroicons/react/24/solid';
 import { Loader2Icon } from 'lucide-react';
 
+import { SearchField, FilterBar, SortToggle, type FilterChipData } from '@/app/components/filters';
 import { Button } from '@/components/ui/button';
 import {
     DropdownMenu,
@@ -42,7 +42,6 @@ import TagDialog from '@/app/components/library/tags/TagDialog';
 
 type Props = { tags: Tag[] };
 type SortKey = 'color' | 'name';
-type IconType = ComponentType<{ className?: string }>;
 const EASE_OUT: [number, number, number, number] = [0.23, 1, 0.32, 1];
 
 function tilePresence(reduce: boolean) {
@@ -63,6 +62,7 @@ function tilePresence(reduce: boolean) {
 
 export default function TagsBrowser({ tags: initialTags }: Props) {
     const t = useTranslations('ActivityLibraryTags');
+    const tf = useTranslations('Filters');
     const reduce = useReducedMotion() ?? false;
 
     const [tags, setTags] = useState<Tag[]>(initialTags);
@@ -151,38 +151,38 @@ export default function TagsBrowser({ tags: initialTags }: Props) {
             </div>
 
             {hasTags && (
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                    <div className="flex items-center gap-3">
-                        <div className="inline-flex items-center gap-0.5 rounded-full bg-muted p-0.5 ring-1 ring-border">
-                            <SortButton
-                                Icon={SwatchIcon}
-                                label={t('sortColor')}
-                                active={sort === 'color'}
-                                onClick={() => setSort('color')}
-                            />
-                            <SortButton
-                                Icon={BarsArrowDownIcon}
-                                label={t('sortName')}
-                                active={sort === 'name'}
-                                onClick={() => setSort('name')}
-                            />
-                        </div>
-                        <span className="hidden text-xs tabular-nums text-muted-foreground sm:inline">
-                            {t('count', { count: tags.length })}
-                        </span>
-                    </div>
-
-                    <div className="relative ml-auto w-full max-w-xs">
-                        <input
-                            type="text"
-                            placeholder={t('searchPlaceholder')}
+                <FilterBar
+                    reduce={reduce}
+                    chips={query.trim() ? [{ id: 'q', label: tf('chipSearch', { query: query.trim() }), onRemove: () => setQuery('') }] as FilterChipData[] : []}
+                    hasActiveFilters={query.trim() !== ''}
+                    onClearAll={() => setQuery('')}
+                    clearAllLabel={tf('clearAll')}
+                    search={
+                        <SearchField
                             value={query}
-                            onChange={(e) => setQuery(e.target.value)}
-                            className="w-full rounded-full bg-muted px-4 py-2 pr-10 text-sm text-foreground placeholder:text-muted-foreground outline-none ring-1 ring-border transition focus:ring-2 focus:ring-brand"
+                            onChange={setQuery}
+                            onClear={() => setQuery('')}
+                            placeholder={t('searchPlaceholder')}
+                            searchAria={tf('searchAria')}
+                            clearAria={tf('clearSearchAria')}
                         />
-                        <MagnifyingGlassIcon className="pointer-events-none absolute right-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-                    </div>
-                </div>
+                    }
+                    trailing={
+                        <div className="flex items-center gap-3">
+                            <SortToggle
+                                value={sort}
+                                onChange={setSort}
+                                options={[
+                                    { value: 'color', label: t('sortColor'), icon: <SwatchIcon className="size-3.5" /> },
+                                    { value: 'name', label: t('sortName'), icon: <BarsArrowDownIcon className="size-3.5" /> },
+                                ]}
+                            />
+                            <span className="hidden text-xs tabular-nums text-muted-foreground sm:inline">
+                                {t('count', { count: tags.length })}
+                            </span>
+                        </div>
+                    }
+                />
             )}
 
             {!hasTags ? (
@@ -259,33 +259,6 @@ export default function TagsBrowser({ tags: initialTags }: Props) {
                 </DialogContent>
             </Dialog>
         </div>
-    );
-}
-
-function SortButton({
-    Icon,
-    label,
-    active,
-    onClick,
-}: {
-    Icon: IconType;
-    label: string;
-    active: boolean;
-    onClick: () => void;
-}) {
-    return (
-        <button
-            type="button"
-            onClick={onClick}
-            aria-pressed={active}
-            title={label}
-            className={`flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium transition ${
-                active ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'
-            }`}
-        >
-            <Icon className="size-3.5" />
-            <span className="hidden sm:inline">{label}</span>
-        </button>
     );
 }
 

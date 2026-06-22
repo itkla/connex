@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState, type ComponentType } from 'react';
+import { useCallback, useEffect, useMemo, useState, type ComponentType } from 'react';
 import { useRouter } from 'next/navigation';
 import { useLocale, useTranslations } from 'next-intl';
 import Link from 'next/link';
@@ -22,6 +22,7 @@ import {
 } from '@heroicons/react/24/outline';
 import { PlusIcon } from '@heroicons/react/24/solid';
 
+import { SearchField, FilterBar, MultiSelectFilter, type FilterChipData } from '@/app/components/filters';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
@@ -86,9 +87,31 @@ function todayKey(): number {
     return d.getTime();
 }
 
+function bumpOption(map: Map<string, { label: string; count: number }>, key: string, label: string) {
+    const e = map.get(key);
+    if (e) e.count++;
+    else map.set(key, { label, count: 1 });
+}
+
+function toOptions(map: Map<string, { label: string; count: number }>) {
+    return [...map.entries()]
+        .sort((a, b) => b[1].count - a[1].count || a[1].label.localeCompare(b[1].label))
+        .map(([value, { label, count }]) => ({ value, label, total: count }));
+}
+
+function toggleInSet(setter: React.Dispatch<React.SetStateAction<Set<string>>>, value: string) {
+    setter((prev) => {
+        const next = new Set(prev);
+        if (next.has(value)) next.delete(value);
+        else next.add(value);
+        return next;
+    });
+}
+
 export default function ActivitiesBrowser({ activities, persons, deals, users, currentUserId }: Props) {
     const router = useRouter();
     const t = useTranslations('ActivityPage');
+    const tf = useTranslations('Filters');
     const locale = useLocale();
     const reduce = useReducedMotion() ?? false;
     const [now] = useState(() => Date.now());
@@ -98,6 +121,10 @@ export default function ActivitiesBrowser({ activities, persons, deals, users, c
     const userById = useMemo(() => new Map(users.map((u) => [u.id, u])), [users]);
 
     const [query, setQuery] = useState('');
+    const [creatorFilter, setCreatorFilter] = useState<Set<string>>(new Set());
+    const [personFilter, setPersonFilter] = useState<Set<string>>(new Set());
+    const [dealFilter, setDealFilter] = useState<Set<string>>(new Set());
+    const [companyFilter, setCompanyFilter] = useState<Set<string>>(new Set());
     const [filter, setFilter] = useState<Filter>('all');
     const [filterInitialized, setFilterInitialized] = useState(false);
     const [editing, setEditing] = useState<Activity | null>(null);
@@ -141,11 +168,61 @@ export default function ActivitiesBrowser({ activities, persons, deals, users, c
         return { days, total, max, today };
     }, [activities, now]);
 
+    const companyIdForActivity = useCallback(
+        (a: Activity) => {
+            if (a.personId == null) return null;
+            const person = personById.get(a.personId);
+            return person?.company?.id ?? person?.companyId ?? null;
+        },
+        [personById],
+    );
+
+    const typeActivities = useMemo(
+        () => activities.filter((a) => filter === 'all' || normalizeType(a.type) === filter),
+        [activities, filter],
+    );
+
+    const dimensionOptions = useMemo(() => {
+        const creators = new Map<string, { label: string; count: number }>();
+        const persons_ = new Map<string, { label: string; count: number }>();
+        const deals_ = new Map<string, { label: string; count: number }>();
+        const companies = new Map<string, { label: string; count: number }>();
+        for (const a of typeActivities) {
+            const creator = userById.get(a.createdById);
+            if (creator) bumpOption(creators, String(a.createdById), creator.displayName || creator.username);
+            if (a.personId != null) {
+                const person = personById.get(a.personId);
+                if (person) bumpOption(persons_, String(person.id), person.name);
+            }
+            if (a.dealId != null) {
+                const deal = dealById.get(a.dealId);
+                if (deal) bumpOption(deals_, String(deal.id), deal.name);
+            }
+            const companyId = companyIdForActivity(a);
+            if (companyId != null) {
+                const company = a.personId != null ? personById.get(a.personId)?.company : undefined;
+                if (company) bumpOption(companies, String(companyId), company.name);
+            }
+        }
+        return {
+            creators: toOptions(creators),
+            persons: toOptions(persons_),
+            deals: toOptions(deals_),
+            companies: toOptions(companies),
+        };
+    }, [typeActivities, userById, personById, dealById, companyIdForActivity]);
+
     const filtered = useMemo(() => {
         const q = query.trim().toLowerCase();
-        return activities
+        return typeActivities
             .filter((a) => {
-                if (filter !== 'all' && normalizeType(a.type) !== filter) return false;
+                if (creatorFilter.size && !creatorFilter.has(String(a.createdById))) return false;
+                if (personFilter.size && !(a.personId != null && personFilter.has(String(a.personId)))) return false;
+                if (dealFilter.size && !(a.dealId != null && dealFilter.has(String(a.dealId)))) return false;
+                if (companyFilter.size) {
+                    const companyId = companyIdForActivity(a);
+                    if (!(companyId != null && companyFilter.has(String(companyId)))) return false;
+                }
                 if (!q) return true;
                 const haystacks = [
                     a.subject,
@@ -157,7 +234,7 @@ export default function ActivitiesBrowser({ activities, persons, deals, users, c
                 return haystacks.some((s) => s?.toLowerCase().includes(q));
             })
             .sort((a, b) => activityTime(b) - activityTime(a));
-    }, [activities, query, filter, personById, dealById, userById]);
+    }, [typeActivities, query, creatorFilter, personFilter, dealFilter, companyFilter, companyIdForActivity, personById, dealById, userById]);
 
     const groups = useMemo(() => {
         const today = startOfDayKey(now);
@@ -217,8 +294,27 @@ export default function ActivitiesBrowser({ activities, persons, deals, users, c
     };
 
     const isEmpty = filtered.length === 0;
-    const emptyMessage = query.trim() || filter !== 'all' ? t('emptyFiltered') : t('empty');
+    const dimensionsActive =
+        creatorFilter.size > 0 || personFilter.size > 0 || dealFilter.size > 0 || companyFilter.size > 0;
+    const emptyMessage = query.trim() || filter !== 'all' || dimensionsActive ? t('emptyFiltered') : t('empty');
     const hasAny = activities.length > 0;
+
+    const labelFor = (options: { value: string; label: string }[], value: string) =>
+        options.find((o) => o.value === value)?.label ?? value;
+    const chips: FilterChipData[] = [
+        ...(query.trim() ? [{ id: 'q', label: tf('chipSearch', { query: query.trim() }), onRemove: () => setQuery('') }] : []),
+        ...[...creatorFilter].map((v) => ({ id: `creator-${v}`, label: labelFor(dimensionOptions.creators, v), onRemove: () => toggleInSet(setCreatorFilter, v) })),
+        ...[...personFilter].map((v) => ({ id: `person-${v}`, label: labelFor(dimensionOptions.persons, v), onRemove: () => toggleInSet(setPersonFilter, v) })),
+        ...[...dealFilter].map((v) => ({ id: `deal-${v}`, label: labelFor(dimensionOptions.deals, v), onRemove: () => toggleInSet(setDealFilter, v) })),
+        ...[...companyFilter].map((v) => ({ id: `company-${v}`, label: labelFor(dimensionOptions.companies, v), onRemove: () => toggleInSet(setCompanyFilter, v) })),
+    ];
+    const clearAllFilters = () => {
+        setQuery('');
+        setCreatorFilter(new Set());
+        setPersonFilter(new Set());
+        setDealFilter(new Set());
+        setCompanyFilter(new Set());
+    };
 
     return (
         <div className="mx-auto w-full max-w-5xl space-y-6">
@@ -261,19 +357,73 @@ export default function ActivitiesBrowser({ activities, persons, deals, users, c
                 </aside>
 
                 <div className="min-w-0 space-y-5">
-                    <div className="flex items-center">
-                        <div className="relative ml-auto w-full max-w-xs">
-                            <input
-                                type="text"
-                                placeholder={t('searchPlaceholder')}
+                    <FilterBar
+                        reduce={reduce}
+                        chips={chips}
+                        hasActiveFilters={query.trim() !== '' || dimensionsActive}
+                        onClearAll={clearAllFilters}
+                        clearAllLabel={tf('clearAll')}
+                        className="py-0"
+                        search={
+                            <SearchField
                                 value={query}
-                                onChange={(e) => setQuery(e.target.value)}
-                                className="w-full rounded-full bg-muted px-4 py-2 pr-10 text-sm text-foreground placeholder:text-muted-foreground outline-none ring-1 ring-border transition focus:ring-2 focus:ring-brand"
+                                onChange={setQuery}
+                                onClear={() => setQuery('')}
+                                placeholder={t('searchPlaceholder')}
+                                searchAria={tf('searchAria')}
+                                clearAria={tf('clearSearchAria')}
                             />
-                            <MagnifyingGlassIcon className="pointer-events-none absolute right-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-                        </div>
-                    </div>
-
+                        }
+                    >
+                        {dimensionOptions.creators.length > 0 && (
+                            <MultiSelectFilter
+                                label={tf('creator')}
+                                ariaLabel={tf('creator')}
+                                options={dimensionOptions.creators}
+                                selected={creatorFilter}
+                                onToggle={(v) => toggleInSet(setCreatorFilter, v)}
+                                onClear={() => setCreatorFilter(new Set())}
+                                clearLabel={tf('clear')}
+                                scroll
+                            />
+                        )}
+                        {dimensionOptions.persons.length > 0 && (
+                            <MultiSelectFilter
+                                label={tf('contact')}
+                                ariaLabel={tf('contact')}
+                                options={dimensionOptions.persons}
+                                selected={personFilter}
+                                onToggle={(v) => toggleInSet(setPersonFilter, v)}
+                                onClear={() => setPersonFilter(new Set())}
+                                clearLabel={tf('clear')}
+                                scroll
+                            />
+                        )}
+                        {dimensionOptions.deals.length > 0 && (
+                            <MultiSelectFilter
+                                label={tf('deal')}
+                                ariaLabel={tf('deal')}
+                                options={dimensionOptions.deals}
+                                selected={dealFilter}
+                                onToggle={(v) => toggleInSet(setDealFilter, v)}
+                                onClear={() => setDealFilter(new Set())}
+                                clearLabel={tf('clear')}
+                                scroll
+                            />
+                        )}
+                        {dimensionOptions.companies.length > 0 && (
+                            <MultiSelectFilter
+                                label={tf('company')}
+                                ariaLabel={tf('company')}
+                                options={dimensionOptions.companies}
+                                selected={companyFilter}
+                                onToggle={(v) => toggleInSet(setCompanyFilter, v)}
+                                onClear={() => setCompanyFilter(new Set())}
+                                clearLabel={tf('clear')}
+                                scroll
+                            />
+                        )}
+                    </FilterBar>
                     {isEmpty ? (
                         <ActivityEmptyState filtered={!!query.trim() || filter !== 'all'} message={emptyMessage} />
                     ) : (

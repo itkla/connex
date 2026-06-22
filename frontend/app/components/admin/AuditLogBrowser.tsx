@@ -1,11 +1,9 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type ComponentType } from "react";
+import { useEffect, useMemo, useState, type ComponentType } from "react";
 import { useLocale, useTranslations } from "next-intl";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import {
-    MagnifyingGlassIcon,
-    XMarkIcon,
     ClipboardDocumentListIcon,
     FunnelIcon,
 } from "@heroicons/react/24/outline";
@@ -27,16 +25,13 @@ import {
 } from "@heroicons/react/20/solid";
 import { Badge } from "@/components/ui/badge";
 import {
-    DropdownMenu,
-    DropdownMenuTrigger,
-    DropdownMenuContent,
-    DropdownMenuCheckboxItem,
-    DropdownMenuRadioGroup,
-    DropdownMenuRadioItem,
-    DropdownMenuLabel,
-    DropdownMenuSeparator,
-    DropdownMenuItem,
-} from "@/components/ui/dropdown-menu";
+    SearchField,
+    FilterBar,
+    MultiSelectFilter,
+    RadioFilter,
+    SortToggle,
+    type FilterChipData,
+} from "@/app/components/filters";
 import { cn } from "@/lib/utils";
 import {
     formatRelativeTime,
@@ -133,7 +128,6 @@ export default function AuditLogBrowser({ entries }: { entries: AuditLogEntry[] 
     const t = useTranslations("AdminAuditLog");
     const locale = useLocale();
     const reduce = useReducedMotion() ?? false;
-    const searchRef = useRef<HTMLInputElement>(null);
 
     const [filters, setFilters] = useState<Filters>({
         query: "",
@@ -162,22 +156,6 @@ export default function AuditLogBrowser({ entries }: { entries: AuditLogEntry[] 
         () => (e: AuditLogEntry) => e.actorLabel ?? systemLabel,
         [systemLabel],
     );
-
-    useEffect(() => {
-        function onKeyDown(e: KeyboardEvent) {
-            const target = e.target as HTMLElement | null;
-            const typing =
-                target?.tagName === "INPUT" ||
-                target?.tagName === "TEXTAREA" ||
-                target?.isContentEditable;
-            if (e.key === "/" && !typing) {
-                e.preventDefault();
-                searchRef.current?.focus();
-            }
-        }
-        document.addEventListener("keydown", onKeyDown);
-        return () => document.removeEventListener("keydown", onKeyDown);
-    }, []);
 
     const verbTotal = useMemo(() => {
         const m = new Map<string, number>();
@@ -421,20 +399,20 @@ export default function AuditLogBrowser({ entries }: { entries: AuditLogEntry[] 
         });
     }
 
-    const activeChips: Chip[] = (() => {
-        const chips: Chip[] = [];
+    const activeChips: FilterChipData[] = (() => {
+        const chips: FilterChipData[] = [];
         const q = filters.query.trim();
-        if (q) chips.push({ id: "q", label: t("chipSearch", { query: q }), remove: () => setFilters((p) => ({ ...p, query: "" })) });
+        if (q) chips.push({ id: "q", label: t("chipSearch", { query: q }), onRemove: () => setFilters((p) => ({ ...p, query: "" })) });
         for (const v of filters.verbs) {
             const opt = verbOptions.find((o) => o.value === v);
-            chips.push({ id: `v-${v}`, label: opt ? opt.label : v, remove: () => toggleSet("verbs", v) });
+            chips.push({ id: `v-${v}`, label: opt ? opt.label : v, onRemove: () => toggleSet("verbs", v) });
         }
         for (const e of filters.entities) {
-            chips.push({ id: `e-${e}`, label: e, remove: () => toggleSet("entities", e) });
+            chips.push({ id: `e-${e}`, label: e, onRemove: () => toggleSet("entities", e) });
         }
         if (filters.outcome !== "all") {
             const label = filters.outcome === "failed" ? t("outcomeFailed") : t("outcomeSuccess");
-            chips.push({ id: "o", label, remove: () => setFilters((p) => ({ ...p, outcome: "all" })) });
+            chips.push({ id: "o", label, onRemove: () => setFilters((p) => ({ ...p, outcome: "all" })) });
         }
         if (filters.range !== "all") {
             const map: Record<Exclude<RangeFilter, "all">, string> = {
@@ -442,10 +420,10 @@ export default function AuditLogBrowser({ entries }: { entries: AuditLogEntry[] 
                 "7d": t("date7d"),
                 "30d": t("date30d"),
             };
-            chips.push({ id: "r", label: map[filters.range], remove: () => setFilters((p) => ({ ...p, range: "all" })) });
+            chips.push({ id: "r", label: map[filters.range], onRemove: () => setFilters((p) => ({ ...p, range: "all" })) });
         }
         for (const a of filters.actors) {
-            chips.push({ id: `a-${a}`, label: a, remove: () => toggleSet("actors", a) });
+            chips.push({ id: `a-${a}`, label: a, onRemove: () => toggleSet("actors", a) });
         }
         return chips;
     })();
@@ -476,10 +454,14 @@ export default function AuditLogBrowser({ entries }: { entries: AuditLogEntry[] 
                 <EmptyState title={t("emptyAllTitle")} body={t("emptyAllBody")} />
             ) : (
                 <>
-                    <div className="rounded-2xl bg-card p-2.5 ring-1 ring-border">
-                        <div className="flex flex-wrap items-center gap-2">
+                    <FilterBar
+                        reduce={reduce}
+                        chips={activeChips}
+                        hasActiveFilters={hasActiveFilters}
+                        onClearAll={clearAll}
+                        clearAllLabel={t("clearAll")}
+                        search={
                             <SearchField
-                                ref={searchRef}
                                 value={filters.query}
                                 onChange={(v) => setFilters((p) => ({ ...p, query: v }))}
                                 onClear={() => setFilters((p) => ({ ...p, query: "" }))}
@@ -487,114 +469,77 @@ export default function AuditLogBrowser({ entries }: { entries: AuditLogEntry[] 
                                 searchAria={t("searchAria")}
                                 clearAria={t("clearSearchAria")}
                             />
-
-                            <div className="flex flex-wrap items-center gap-1.5">
-                                <MultiSelectFilter
-                                    label={t("filterAction")}
-                                    ariaLabel={t("filterAction")}
-                                    options={verbOptions}
-                                    counts={verbCounts}
-                                    selected={filters.verbs}
-                                    onToggle={(v) => toggleSet("verbs", v)}
-                                    onClear={() => clearFacet("verbs")}
-                                    clearLabel={t("clear")}
-                                />
-                                <MultiSelectFilter
-                                    label={t("filterEntity")}
-                                    ariaLabel={t("filterEntity")}
-                                    options={entityOptions}
-                                    counts={entityCounts}
-                                    selected={filters.entities}
-                                    onToggle={(v) => toggleSet("entities", v)}
-                                    onClear={() => clearFacet("entities")}
-                                    clearLabel={t("clear")}
-                                    capitalize
-                                />
-                                <RadioFilter
-                                    label={t("filterOutcome")}
-                                    ariaLabel={t("filterOutcome")}
-                                    value={filters.outcome}
-                                    onValueChange={(v) => setFilters((p) => ({ ...p, outcome: v as OutcomeFilter }))}
-                                    options={[
-                                        { value: "all", label: t("outcomeAll"), count: outcomeCounts.all },
-                                        { value: "success", label: t("outcomeSuccess"), count: outcomeCounts.success },
-                                        { value: "failed", label: t("outcomeFailed"), count: outcomeCounts.failed },
-                                    ]}
-                                />
-                                <RadioFilter
-                                    label={t("filterDate")}
-                                    ariaLabel={t("filterDate")}
-                                    value={filters.range}
-                                    onValueChange={(v) => setFilters((p) => ({ ...p, range: v as RangeFilter }))}
-                                    options={[
-                                        { value: "all", label: t("dateAll"), count: rangeCounts.all },
-                                        { value: "today", label: t("dateToday"), count: rangeCounts.today },
-                                        { value: "7d", label: t("date7d"), count: rangeCounts["7d"] },
-                                        { value: "30d", label: t("date30d"), count: rangeCounts["30d"] },
-                                    ]}
-                                />
-                                <MultiSelectFilter
-                                    label={t("filterActor")}
-                                    ariaLabel={t("filterActor")}
-                                    options={actorOptions}
-                                    counts={actorCounts}
-                                    selected={filters.actors}
-                                    onToggle={(v) => toggleSet("actors", v)}
-                                    onClear={() => clearFacet("actors")}
-                                    clearLabel={t("clear")}
-                                    scroll
-                                />
-                            </div>
-
-                            {hasActiveFilters && (
-                                <button
-                                    type="button"
-                                    onClick={clearAll}
-                                    className="ml-auto inline-flex h-8 items-center gap-1.5 rounded-full px-3 text-xs font-medium text-muted-foreground outline-none transition hover:bg-muted hover:text-foreground active:scale-[0.97] focus-visible:ring-2 focus-visible:ring-brand/40"
-                                >
-                                    <XMarkIcon className="size-3.5" />
-                                    {t("clearAll")}
-                                </button>
-                            )}
-                        </div>
-
-                        <AnimatePresence initial={false}>
-                            {activeChips.length > 0 && (
-                                <motion.div
-                                    layout={!reduce}
-                                    className="mt-2 flex flex-wrap items-center gap-1.5 border-t border-border/60 pt-2"
-                                    initial={reduce ? false : { opacity: 0, height: 0 }}
-                                    animate={{ opacity: 1, height: "auto" }}
-                                    exit={reduce ? { opacity: 0 } : { opacity: 0, height: 0 }}
-                                    transition={{ duration: 0.2, ease: EASE_OUT }}
-                                >
-                                    {activeChips.map((chip) => (
-                                        <FilterChip
-                                            key={chip.id}
-                                            label={chip.label}
-                                            reduce={reduce}
-                                            onRemove={chip.remove}
-                                        />
-                                    ))}
-                                </motion.div>
-                            )}
-                        </AnimatePresence>
-                    </div>
+                        }
+                    >
+                        <MultiSelectFilter
+                            label={t("filterAction")}
+                            ariaLabel={t("filterAction")}
+                            options={verbOptions}
+                            counts={verbCounts}
+                            selected={filters.verbs}
+                            onToggle={(v) => toggleSet("verbs", v)}
+                            onClear={() => clearFacet("verbs")}
+                            clearLabel={t("clear")}
+                        />
+                        <MultiSelectFilter
+                            label={t("filterEntity")}
+                            ariaLabel={t("filterEntity")}
+                            options={entityOptions}
+                            counts={entityCounts}
+                            selected={filters.entities}
+                            onToggle={(v) => toggleSet("entities", v)}
+                            onClear={() => clearFacet("entities")}
+                            clearLabel={t("clear")}
+                            capitalize
+                        />
+                        <RadioFilter
+                            label={t("filterOutcome")}
+                            ariaLabel={t("filterOutcome")}
+                            value={filters.outcome}
+                            onValueChange={(v) => setFilters((p) => ({ ...p, outcome: v as OutcomeFilter }))}
+                            options={[
+                                { value: "all", label: t("outcomeAll"), count: outcomeCounts.all },
+                                { value: "success", label: t("outcomeSuccess"), count: outcomeCounts.success },
+                                { value: "failed", label: t("outcomeFailed"), count: outcomeCounts.failed },
+                            ]}
+                        />
+                        <RadioFilter
+                            label={t("filterDate")}
+                            ariaLabel={t("filterDate")}
+                            value={filters.range}
+                            onValueChange={(v) => setFilters((p) => ({ ...p, range: v as RangeFilter }))}
+                            options={[
+                                { value: "all", label: t("dateAll"), count: rangeCounts.all },
+                                { value: "today", label: t("dateToday"), count: rangeCounts.today },
+                                { value: "7d", label: t("date7d"), count: rangeCounts["7d"] },
+                                { value: "30d", label: t("date30d"), count: rangeCounts["30d"] },
+                            ]}
+                        />
+                        <MultiSelectFilter
+                            label={t("filterActor")}
+                            ariaLabel={t("filterActor")}
+                            options={actorOptions}
+                            counts={actorCounts}
+                            selected={filters.actors}
+                            onToggle={(v) => toggleSet("actors", v)}
+                            onClear={() => clearFacet("actors")}
+                            clearLabel={t("clear")}
+                            scroll
+                        />
+                    </FilterBar>
 
                     <div className="flex items-center justify-between gap-3 px-1">
                         <span className="text-xs tabular-nums text-muted-foreground">
                             {t("resultCount", { shown: filtered.length, total: entries.length })}
                         </span>
-                        <div className="inline-flex items-center rounded-full bg-muted p-0.5 ring-1 ring-border/60">
-                            <SortButton active={sort === "newest"} onClick={() => setSort("newest")}>
-                                <ArrowDownIcon className="size-3.5" />
-                                {t("sortNewest")}
-                            </SortButton>
-                            <SortButton active={sort === "oldest"} onClick={() => setSort("oldest")}>
-                                <ArrowUpIcon className="size-3.5" />
-                                {t("sortOldest")}
-                            </SortButton>
-                        </div>
+                        <SortToggle
+                            value={sort}
+                            onChange={setSort}
+                            options={[
+                                { value: "newest", label: t("sortNewest"), icon: <ArrowDownIcon className="size-3.5" /> },
+                                { value: "oldest", label: t("sortOldest"), icon: <ArrowUpIcon className="size-3.5" /> },
+                            ]}
+                        />
                     </div>
 
                     {filtered.length === 0 ? (
@@ -683,234 +628,6 @@ function dayLabel(
         day: "numeric",
         year: d.getFullYear() === currentYear ? undefined : "numeric",
     }).format(d);
-}
-
-type Chip = { id: string; label: string; remove: () => void };
-
-function SearchField({
-    ref,
-    value,
-    onChange,
-    onClear,
-    placeholder,
-    searchAria,
-    clearAria,
-}: {
-    ref: React.Ref<HTMLInputElement>;
-    value: string;
-    onChange: (v: string) => void;
-    onClear: () => void;
-    placeholder: string;
-    searchAria: string;
-    clearAria: string;
-}) {
-    return (
-        <div className="relative min-w-48 flex-1">
-            <MagnifyingGlassIcon className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-            <input
-                ref={ref}
-                type="text"
-                value={value}
-                aria-label={searchAria}
-                onChange={(e) => onChange(e.target.value)}
-                onKeyDown={(e) => {
-                    if (e.key === "Escape" && value) {
-                        e.preventDefault();
-                        onClear();
-                    }
-                }}
-                placeholder={placeholder}
-                className="h-9 w-full rounded-full bg-muted pl-9 pr-9 text-sm text-foreground outline-none ring-1 ring-border transition placeholder:text-muted-foreground focus:ring-2 focus:ring-brand"
-            />
-            {value ? (
-                <button
-                    type="button"
-                    onClick={onClear}
-                    aria-label={clearAria}
-                    className="absolute right-2.5 top-1/2 grid size-5 -translate-y-1/2 place-items-center rounded-full text-muted-foreground outline-none transition hover:bg-background hover:text-foreground active:scale-90 focus-visible:ring-2 focus-visible:ring-brand/40"
-                >
-                    <XMarkIcon className="size-3.5" />
-                </button>
-            ) : (
-                <kbd className="pointer-events-none absolute right-3 top-1/2 hidden -translate-y-1/2 select-none rounded border border-border bg-background px-1.5 text-[10px] font-medium text-muted-foreground sm:block">
-                    /
-                </kbd>
-            )}
-        </div>
-    );
-}
-
-function pillClass(active: boolean): string {
-    return cn(
-        "group inline-flex h-8 items-center gap-1.5 rounded-full px-3 text-xs font-medium ring-1 outline-none transition active:scale-[0.97] focus-visible:ring-2 focus-visible:ring-brand/40",
-        active
-            ? "bg-brand-light/70 text-brand-dark ring-brand-dark/20"
-            : "bg-muted text-foreground ring-border hover:bg-accent hover:text-accent-foreground",
-    );
-}
-
-function MultiSelectFilter({
-    label,
-    ariaLabel,
-    options,
-    counts,
-    selected,
-    onToggle,
-    onClear,
-    clearLabel,
-    capitalize,
-    scroll,
-}: {
-    label: string;
-    ariaLabel: string;
-    options: { value: string; total: number; label?: string }[];
-    counts: Map<string, number>;
-    selected: Set<string>;
-    onToggle: (v: string) => void;
-    onClear: () => void;
-    clearLabel: string;
-    capitalize?: boolean;
-    scroll?: boolean;
-}) {
-    const active = selected.size > 0;
-    return (
-        <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-                <button type="button" aria-label={ariaLabel} aria-pressed={active} className={pillClass(active)}>
-                    <span>{label}</span>
-                    {active && (
-                        <span className="grid size-4 place-items-center rounded-full bg-brand-dark text-[10px] font-semibold leading-none text-white tabular-nums">
-                            {selected.size}
-                        </span>
-                    )}
-                    <ChevronDownIcon className="size-3.5 text-muted-foreground transition-transform duration-200 ease-out group-data-[state=open]:rotate-180" />
-                </button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="start" className="w-60">
-                <DropdownMenuLabel>{label}</DropdownMenuLabel>
-                <DropdownMenuSeparator />
-                <div className={cn(scroll && "max-h-72 overflow-y-auto")}>
-                    {options.map((opt) => {
-                        const checked = selected.has(opt.value);
-                        const count = counts.get(opt.value) ?? 0;
-                        const text = opt.label ?? opt.value;
-                        return (
-                            <DropdownMenuCheckboxItem
-                                key={opt.value}
-                                checked={checked}
-                                onSelect={(e) => {
-                                    e.preventDefault();
-                                    onToggle(opt.value);
-                                }}
-                            >
-                                <span className={cn("flex flex-1 items-center justify-between gap-2", capitalize && "capitalize")}>
-                                    <span className="truncate">{text}</span>
-                                    <span className="shrink-0 text-xs tabular-nums text-muted-foreground">{count}</span>
-                                </span>
-                            </DropdownMenuCheckboxItem>
-                        );
-                    })}
-                </div>
-                {active && (
-                    <>
-                        <DropdownMenuSeparator />
-                        <DropdownMenuItem onSelect={onClear} className="text-muted-foreground">
-                            <XMarkIcon className="size-4" />
-                            {clearLabel}
-                        </DropdownMenuItem>
-                    </>
-                )}
-            </DropdownMenuContent>
-        </DropdownMenu>
-    );
-}
-
-function RadioFilter({
-    label,
-    ariaLabel,
-    value,
-    onValueChange,
-    options,
-}: {
-    label: string;
-    ariaLabel: string;
-    value: string;
-    onValueChange: (v: string) => void;
-    options: { value: string; label: string; count: number }[];
-}) {
-    const active = value !== options[0]?.value;
-    const selectedLabel = options.find((o) => o.value === value)?.label ?? label;
-    return (
-        <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-                <button type="button" aria-label={ariaLabel} aria-pressed={active} className={pillClass(active)}>
-                    <span>{active ? selectedLabel : label}</span>
-                    <ChevronDownIcon className="size-3.5 text-muted-foreground transition-transform duration-200 ease-out group-data-[state=open]:rotate-180" />
-                </button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="start" className="w-56">
-                <DropdownMenuLabel>{label}</DropdownMenuLabel>
-                <DropdownMenuSeparator />
-                <DropdownMenuRadioGroup value={value} onValueChange={onValueChange}>
-                    {options.map((opt) => (
-                        <DropdownMenuRadioItem key={opt.value} value={opt.value}>
-                            <span className="flex flex-1 items-center justify-between gap-2">
-                                <span>{opt.label}</span>
-                                <span className="shrink-0 text-xs tabular-nums text-muted-foreground">{opt.count}</span>
-                            </span>
-                        </DropdownMenuRadioItem>
-                    ))}
-                </DropdownMenuRadioGroup>
-            </DropdownMenuContent>
-        </DropdownMenu>
-    );
-}
-
-function FilterChip({ label, reduce, onRemove }: { label: string; reduce: boolean; onRemove: () => void }) {
-    return (
-        <motion.span
-            layout={!reduce}
-            initial={reduce ? false : { opacity: 0, scale: 0.9 }}
-            animate={{ opacity: 1, scale: 1 }}
-            exit={reduce ? { opacity: 0 } : { opacity: 0, scale: 0.9 }}
-            transition={{ duration: 0.18, ease: EASE_OUT }}
-            className="inline-flex h-6 items-center gap-1 rounded-full bg-muted px-2.5 text-xs font-medium text-foreground ring-1 ring-border"
-        >
-            <span className="max-w-40 truncate">{label}</span>
-            <button
-                type="button"
-                onClick={onRemove}
-                className="grid size-4 place-items-center rounded-full text-muted-foreground outline-none transition hover:bg-background hover:text-foreground active:scale-90 focus-visible:ring-2 focus-visible:ring-brand/40"
-                aria-label="Remove filter"
-            >
-                <XMarkIcon className="size-3" />
-            </button>
-        </motion.span>
-    );
-}
-
-function SortButton({
-    active,
-    onClick,
-    children,
-}: {
-    active: boolean;
-    onClick: () => void;
-    children: React.ReactNode;
-}) {
-    return (
-        <button
-            type="button"
-            onClick={onClick}
-            aria-pressed={active}
-            className={cn(
-                "inline-flex h-7 items-center gap-1 rounded-full px-2.5 text-xs font-medium outline-none transition active:scale-[0.97] focus-visible:ring-2 focus-visible:ring-brand/40",
-                active ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground",
-            )}
-        >
-            {children}
-        </button>
-    );
 }
 
 function StatCluster({
