@@ -91,6 +91,42 @@ export function parseMysqlDateTime(value?: string | null): number {
     return Date.parse(hasTz ? s : s + 'Z');
 }
 
+/**
+ * Formats a UTC timestamp as a compact, localized relative time
+ * (e.g. "just now", "5 min ago", "3 days ago"). Falls back to an absolute
+ * short date once an event is older than ~30 days, since "47 days ago" reads
+ * worse than the date itself. Accepts MySQL datetimes (assumed UTC) or any
+ * Date-parseable string.
+ *
+ * @param value - the timestamp to format
+ * @param locale - BCP-47 locale tag used for both relative and absolute output
+ * @param now - reference time in ms (defaults to Date.now(); injectable for tests)
+ */
+export function formatRelativeTime(
+    value: string | undefined | null,
+    locale: string,
+    now: number = Date.now(),
+): string {
+    const ms = parseMysqlDateTime(value);
+    if (Number.isNaN(ms)) return '—';
+
+    const diff = ms - now; // negative for the past
+    const absSec = Math.abs(diff) / 1000;
+
+    if (absSec < 45) return 'just now';
+
+    const rtf = new Intl.RelativeTimeFormat(locale, { numeric: 'auto', style: 'short' });
+    const minute = 60;
+    const hour = 60 * minute;
+    const day = 24 * hour;
+
+    if (absSec < hour) return rtf.format(Math.round(diff / 1000 / minute), 'minute');
+    if (absSec < day) return rtf.format(Math.round(diff / 1000 / hour), 'hour');
+    if (absSec < 30 * day) return rtf.format(Math.round(diff / 1000 / day), 'day');
+
+    return formatShortDate(value ?? undefined, locale);
+}
+
 export function pickDominantCurrency(items: { currency?: string | null }[]): string {
     const counts = new Map<string, number>();
     for (const item of items) {

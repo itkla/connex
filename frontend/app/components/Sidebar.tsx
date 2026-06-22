@@ -23,6 +23,7 @@ import {
     ChartPieIcon,
     PresentationChartLineIcon,
     GlobeAltIcon,
+    ClipboardDocumentListIcon,
     SunIcon,
     MoonIcon,
     ComputerDesktopIcon,
@@ -95,6 +96,7 @@ function useSections(): NavSection[] {
             label: t("sectionTeam"),
             items: [
                 { label: t("navUsers"), href: "/users", icon: UserGroupIcon },
+                { label: t("navAuditLog"), href: "/admin/logs", icon: ClipboardDocumentListIcon },
             ],
         },
     ];

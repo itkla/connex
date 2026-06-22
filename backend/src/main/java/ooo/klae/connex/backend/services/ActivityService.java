@@ -7,6 +7,7 @@ import ooo.klae.connex.backend.beans.Activity;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 
 import java.util.List;
+import java.util.Set;
 
 import lombok.RequiredArgsConstructor;
 
@@ -21,6 +22,9 @@ import lombok.RequiredArgsConstructor;
 public class ActivityService {
     private final ActivityMapper activityMapper;
     private final AuditService auditService;
+
+    private static final Set<String> AUDIT_FIELDS =
+        Set.of("type", "subject", "notes", "timestamp");
 
     public List<Activity> getAllActivities() {
         return activityMapper.getAllActivities();
@@ -46,11 +50,7 @@ public class ActivityService {
      */
     public Activity getActivityById(int id) {
         Activity activity = activityMapper.getActivityById(id);
-        if (activity == null) {
-            auditService.record("activity.getActivityById", "activity", null, null, "Activity not found", null);
-            throw new ResourceNotFoundException("Activity not found with id: " + id);
-        }
-        auditService.record("activity.getActivityById", "activity", id, activity.getSubject(), "Activity retrieved", null);
+        if (activity == null) throw new ResourceNotFoundException("Activity not found with id: " + id);
         return activity;
     }
 
@@ -63,10 +63,12 @@ public class ActivityService {
         try {
             activityMapper.insert(activity);
             auditService.record("activity.create", "activity", activity.getId(), activity.getSubject(),
-                    "Activity created", null);
+                    "Created activity " + activity.getSubject(),
+                    auditService.diff(null, activity, AUDIT_FIELDS));
             return activity;
         } catch (Exception e) {
-            auditService.record("activity.create", "activity", null, null, "Failed to create activity", e.getMessage());
+            auditService.recordFailure("activity.create", "activity", null, activity.getSubject(),
+                    "Failed to create activity", e.getMessage());
             throw e;
         }
     }
@@ -78,14 +80,17 @@ public class ActivityService {
      * @return
      */
     public Activity update(int id, Activity activity) {
-        if (activityMapper.getActivityById(id) == null) {
-            auditService.record("activity.update", "activity", null, null,
+        Activity before = activityMapper.getActivityById(id);
+        if (before == null) {
+            auditService.recordFailure("activity.update", "activity", id, null,
                     "Could not update activity because it was not found", null);
             throw new ResourceNotFoundException("Activity not found with id: " + id);
         }
         activity.setId(id);
         activityMapper.update(activity);
-        auditService.record("activity.update", "activity", id, activity.getSubject(), "Activity updated", null);
+        auditService.record("activity.update", "activity", id, activity.getSubject(),
+            "Updated activity " + activity.getSubject(),
+            auditService.diff(before, activity, AUDIT_FIELDS));
         return activity;
     }
 
@@ -94,11 +99,15 @@ public class ActivityService {
      * @param id
      */
     public void delete(int id) {
-        if (activityMapper.getActivityById(id) == null) {
-            auditService.record("activity.delete", "activity", null, null, "Could not delete activity because it was not found", null);
+        Activity before = activityMapper.getActivityById(id);
+        if (before == null) {
+            auditService.recordFailure("activity.delete", "activity", id, null,
+                    "Could not delete activity because it was not found", null);
             throw new ResourceNotFoundException("Activity not found with id: " + id);
         }
         activityMapper.delete(id);
-        auditService.record("activity.delete", "activity", id, null, "Activity deleted", null);
+        auditService.record("activity.delete", "activity", id, before.getSubject(),
+            "Deleted activity " + before.getSubject(),
+            auditService.diff(before, null, AUDIT_FIELDS));
     }
 }

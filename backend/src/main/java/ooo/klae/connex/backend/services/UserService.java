@@ -16,6 +16,7 @@ import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 
 import java.util.List;
+import java.util.Set;
 
 import lombok.RequiredArgsConstructor;
 
@@ -33,6 +34,10 @@ public class UserService implements UserDetailsService {
     private final NoteMapper noteMapper;
     private final TaskMapper taskMapper;
     private final AuditService auditService;
+
+    private static final Set<String> AUDIT_FIELDS =
+        Set.of("username", "displayName", "email", "department", "title",
+               "employeeId", "phoneNumber", "profilePictureUrl");
 
     @Override
     public UserDetails loadUserByUsername(String username) throws UsernameNotFoundException {
@@ -59,22 +64,30 @@ public class UserService implements UserDetailsService {
 
     public User create(User user) {
         userMapper.insert(user);
-        auditService.record("user.create", "user", user.getId(), user.getUsername(), "User created", null);
+        auditService.record("user.create", "user", user.getId(), user.getUsername(),
+            "Created user " + user.getUsername(),
+            auditService.diff(null, user, AUDIT_FIELDS));
         return user;
     }
 
     public User update(int id, User user) {
-        if (userMapper.getUserById(id) == null) throw new ResourceNotFoundException("User not found with id: " + id);
+        User before = userMapper.getUserById(id);
+        if (before == null) throw new ResourceNotFoundException("User not found with id: " + id);
         user.setId(id);
         userMapper.update(user);
-        auditService.record("user.update", "user", id, user.getUsername(), "User updated", null);
+        auditService.record("user.update", "user", id, user.getUsername(),
+            "Updated user " + user.getUsername(),
+            auditService.diff(before, user, AUDIT_FIELDS));
         return user;
     }
 
     public void delete(int id) {
-        if (userMapper.getUserById(id) == null) throw new ResourceNotFoundException("User not found with id: " + id);
+        User before = userMapper.getUserById(id);
+        if (before == null) throw new ResourceNotFoundException("User not found with id: " + id);
         userMapper.delete(id);
-        auditService.record("user.delete", "user", id, null, "User deleted", null);
+        auditService.record("user.delete", "user", id, before.getUsername(),
+            "Deleted user " + before.getUsername(),
+            auditService.diff(before, null, AUDIT_FIELDS));
     }
 
     /**
@@ -114,8 +127,12 @@ public class UserService implements UserDetailsService {
      * @return
      */
     public User updateProfilePictureUrl(int userId, String profilePictureUrl) {
-        if (userMapper.getUserById(userId) == null) throw new ResourceNotFoundException("User not found with id: " + userId);
+        User before = userMapper.getUserById(userId);
+        if (before == null) throw new ResourceNotFoundException("User not found with id: " + userId);
         userMapper.updateProfilePictureUrl(userId, profilePictureUrl);
+        auditService.record("user.updateAvatar", "user", userId, before.getUsername(),
+            "Updated profile picture for " + before.getUsername(),
+            auditService.singleChange("profilePictureUrl", before.getProfilePictureUrl(), profilePictureUrl));
         return userMapper.getUserById(userId);
     }
 }

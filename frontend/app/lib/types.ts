@@ -451,3 +451,34 @@ export type SearchResults = {
     users: User[];
     attachments: Attachment[];
 };
+
+export type AuditChange = {
+    old: unknown;
+    new: unknown;
+};
+
+export type AuditLogEntry = {
+    id: number;
+    action: string;
+    entityType: string | null;
+    entityId: number | null;
+    actorId: number | null;
+    actorLabel: string | null;
+    targetLabel: string | null;
+    outcome: string | null;
+    summary: string | null;
+    changes?: Record<string, AuditChange> | null;
+    context?: Record<string, unknown> | null;
+    ipAddress?: string | null;
+    userAgent?: string | null;
+    sessionId?: string | null;
+    requestId?: string | null;
+    createdAt: string;
+    currentActorLabel?: string | null;
+};
+
+export type AuditLogParams = PageParams & {
+    entityType?: string;
+    entityId?: number;
+    limit?: number;
+};

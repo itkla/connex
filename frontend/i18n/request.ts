@@ -26,6 +26,7 @@ const namespaces = [
     "map",
     "calendar",
     "attachments",
+    "admin",
 ] as const;
 
 async function loadMessages(locale: Locale) {

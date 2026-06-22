@@ -733,3 +733,11 @@ export function replaceAttachmentTags(id: number, tagIds: number[], init: Reques
 export function deleteAttachment(id: number, init: RequestInit = {}) {
     return deleteJson<void>(`/api/attachments/${id}`, init);
 }
+
+/*
+== Admin operations
+*/
+
+export function getAuditLogs(params: Types.AuditLogParams = {}, init: RequestInit = {}) {
+    return getJson<Types.AuditLogEntry[]>(`/api/audit${buildQuery(params)}`, init);
+}

@@ -13,6 +13,7 @@ import ooo.klae.connex.backend.beans.Tag;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 
 import java.util.List;
+import java.util.Set;
 
 import lombok.RequiredArgsConstructor;
 
@@ -29,6 +30,9 @@ public class TagService {
     private final PersonMapper personMapper;
     private final CompanyMapper companyMapper;
     private final AuditService auditService;
+
+    private static final Set<String> AUDIT_FIELDS =
+        Set.of("name", "color");
 
     /**
      * Retrieves all {@code Tag} records.
@@ -56,7 +60,9 @@ public class TagService {
      */
     public Tag create(Tag tag) {
         tagMapper.insert(tag);
-        auditService.record("tag.create", "tag", tag.getId(), tag.getName(), "Tag created", null);
+        auditService.record("tag.create", "tag", tag.getId(), tag.getName(),
+            "Created tag " + tag.getName(),
+            auditService.diff(null, tag, AUDIT_FIELDS));
         return tag;
     }
 
@@ -67,10 +73,13 @@ public class TagService {
      * @return
      */
     public Tag update(int id, Tag tag) {
-        if (tagMapper.getTagById(id) == null) throw new ResourceNotFoundException("Tag not found with id: " + id);
+        Tag before = tagMapper.getTagById(id);
+        if (before == null) throw new ResourceNotFoundException("Tag not found with id: " + id);
         tag.setId(id);
         tagMapper.update(tag);
-        auditService.record("tag.update", "tag", id, tag.getName(), "Tag updated", null);
+        auditService.record("tag.update", "tag", id, tag.getName(),
+            "Updated tag " + tag.getName(),
+            auditService.diff(before, tag, AUDIT_FIELDS));
         return tag;
     }
 
@@ -79,9 +88,12 @@ public class TagService {
      * @param id
      */
     public void delete(int id) {
-        if (tagMapper.getTagById(id) == null) throw new ResourceNotFoundException("Tag not found with id: " + id);
+        Tag before = tagMapper.getTagById(id);
+        if (before == null) throw new ResourceNotFoundException("Tag not found with id: " + id);
         tagMapper.delete(id);
-        auditService.record("tag.delete", "tag", id, null, "Tag deleted", null);
+        auditService.record("tag.delete", "tag", id, before.getName(),
+            "Deleted tag " + before.getName(),
+            auditService.diff(before, null, AUDIT_FIELDS));
     }
 
     /**
