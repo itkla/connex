@@ -17,6 +17,7 @@ import ooo.klae.connex.backend.beans.Tag;
 import ooo.klae.connex.backend.beans.Task;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import java.util.List;
+import java.util.Set;
 
 import lombok.RequiredArgsConstructor;
 
@@ -36,6 +37,9 @@ public class PersonService {
     private final NoteMapper noteMapper;
     private final TaskMapper taskMapper;
     private final AuditService auditService;
+
+    private static final Set<String> AUDIT_FIELDS =
+        Set.of("name", "email", "phone", "title", "imageUrl");
 
     /**
      * Retrieves all {@code Person} records.
@@ -96,7 +100,9 @@ public class PersonService {
      */
     public Person create(Person person) {
         personMapper.insert(person);
-        auditService.record("person.create", "person", person.getId(), person.getName(), "Person created", null);
+        auditService.record("person.create", "person", person.getId(), person.getName(),
+            "Created person " + person.getName(),
+            auditService.diff(null, person, AUDIT_FIELDS));
         return person;
     }
 
@@ -107,10 +113,13 @@ public class PersonService {
      * @return Person updated person
      */
     public Person update(int id, Person person) {
-        if (personMapper.getPersonById(id) == null) throw new ResourceNotFoundException("Person not found with id: " + id);
+        Person before = personMapper.getPersonById(id);
+        if (before == null) throw new ResourceNotFoundException("Person not found with id: " + id);
         person.setId(id);
         personMapper.update(person);
-        auditService.record("person.update", "person", id, person.getName(), "Person updated", null);
+        auditService.record("person.update", "person", id, person.getName(),
+            "Updated person " + person.getName(),
+            auditService.diff(before, person, AUDIT_FIELDS));
         return person;
     }
 
@@ -119,9 +128,12 @@ public class PersonService {
      * @param id
      */
     public void delete(int id) {
-        if (personMapper.getPersonById(id) == null) throw new ResourceNotFoundException("Person not found with id: " + id);
+        Person before = personMapper.getPersonById(id);
+        if (before == null) throw new ResourceNotFoundException("Person not found with id: " + id);
         personMapper.delete(id);
-        auditService.record("person.delete", "person", id, null, "Person deleted", null);
+        auditService.record("person.delete", "person", id, before.getName(),
+            "Deleted person " + before.getName(),
+            auditService.diff(before, null, AUDIT_FIELDS));
     }
 
     /**
@@ -140,10 +152,14 @@ public class PersonService {
      * @param tagId
      */
     public void addTag(int personId, int tagId) {
-        if (personMapper.getPersonById(personId) == null) throw new ResourceNotFoundException("Person not found with id: " + personId);
-        if (tagMapper.getTagById(tagId) == null) throw new ResourceNotFoundException("Tag not found with id: " + tagId);
+        Person person = personMapper.getPersonById(personId);
+        if (person == null) throw new ResourceNotFoundException("Person not found with id: " + personId);
+        Tag tag = tagMapper.getTagById(tagId);
+        if (tag == null) throw new ResourceNotFoundException("Tag not found with id: " + tagId);
         personMapper.addTag(personId, tagId);
-        auditService.record("person.addTag", "person", personId, null, "Tag added to person", null);
+        auditService.record("person.addTag", "person", personId, person.getName(),
+            "Tagged " + person.getName() + " with " + tag.getName(),
+            auditService.singleChange("tag", null, tag.getName()));
     }
 
     /**
@@ -152,9 +168,14 @@ public class PersonService {
      * @param tagId
      */
     public void removeTag(int personId, int tagId) {
-        if (personMapper.getPersonById(personId) == null) throw new ResourceNotFoundException("Person not found with id: " + personId);
+        Person person = personMapper.getPersonById(personId);
+        if (person == null) throw new ResourceNotFoundException("Person not found with id: " + personId);
+        Tag tag = tagMapper.getTagById(tagId);
         personMapper.removeTag(personId, tagId);
-        auditService.record("person.removeTag", "person", personId, null, "Tag removed from person", null);
+        String tagName = tag != null ? tag.getName() : "#" + tagId;
+        auditService.record("person.removeTag", "person", personId, person.getName(),
+            "Removed tag " + tagName + " from " + person.getName(),
+            auditService.singleChange("tag", tagName, null));
     }
 
     /**
@@ -165,11 +186,16 @@ public class PersonService {
      */
     @Transactional
     public List<Tag> replaceTags(int personId, List<Integer> tagIds) {
-        if (personMapper.getPersonById(personId) == null) throw new ResourceNotFoundException("Person not found with id: " + personId);
+        Person person = personMapper.getPersonById(personId);
+        if (person == null) throw new ResourceNotFoundException("Person not found with id: " + personId);
+        List<String> before = tagMapper.getTagsByPersonId(personId).stream().map(Tag::getName).toList();
         personMapper.clearTags(personId);
         if (tagIds != null && !tagIds.isEmpty()) personMapper.insertTags(personId, tagIds);
-        auditService.record("person.replaceTags", "person", personId, null, "Tags replaced for person", null);
-        return tagMapper.getTagsByPersonId(personId);
+        List<Tag> after = tagMapper.getTagsByPersonId(personId);
+        auditService.record("person.replaceTags", "person", personId, person.getName(),
+            "Updated tags on " + person.getName(),
+            auditService.singleChange("tags", before, after.stream().map(Tag::getName).toList()));
+        return after;
     }
 
     /**

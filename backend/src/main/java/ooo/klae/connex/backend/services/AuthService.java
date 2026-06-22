@@ -3,6 +3,7 @@ package ooo.klae.connex.backend.services;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.Authentication;
+import org.springframework.security.core.AuthenticationException;
 import org.springframework.security.core.context.SecurityContext;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -60,7 +61,8 @@ public class AuthService {
             auditService.record("auth.register", "user", user.getId(), user.getDisplayName(), "User registered", null);
             return user;
         } catch (Exception e) {
-            auditService.record("auth.register", "user", null, null, "Failed to register user", e.getMessage());
+            auditService.recordFailure("auth.register", "user", null, request.getUsername(),
+                    "Failed to register user " + request.getUsername(), e.getMessage());
             throw e;
         }
     }
@@ -73,9 +75,16 @@ public class AuthService {
      * @return
      */
     public User login(LoginDto request, HttpServletRequest httpRequest, HttpServletResponse httpResponse) {
-        Authentication authentication = authenticationManager.authenticate(
-            new UsernamePasswordAuthenticationToken(request.getUsername(), request.getPassword())
-        );
+        Authentication authentication;
+        try {
+            authentication = authenticationManager.authenticate(
+                new UsernamePasswordAuthenticationToken(request.getUsername(), request.getPassword())
+            );
+        } catch (AuthenticationException e) {
+            auditService.recordFailure("auth.login", "user", null, request.getUsername(),
+                    "Failed login attempt for " + request.getUsername(), e.getMessage());
+            throw e;
+        }
         User user = (User) authentication.getPrincipal();
         userMapper.updateLastLoginAt(user.getId());
         User refreshedUser = userMapper.getUserById(user.getId());
@@ -101,7 +110,6 @@ public class AuthService {
         Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
         if (authentication == null || !authentication.isAuthenticated()
                 || !(authentication.getPrincipal() instanceof User principal)) {
-            auditService.record("auth.getCurrentUser", "user", null, null, "Unauthorized access attempt", null);
             throw new ResourceNotFoundException("Not authenticated");
         }
 
@@ -109,7 +117,6 @@ public class AuthService {
         // reduntant if the user is not updated; just returns the same value
         User fresh = userMapper.getUserById(principal.getId());
         if (fresh == null) {
-            // auditService.record("auth.getCurrentUser", "user", null, null, "User not found", null);
             throw new ResourceNotFoundException("Not authenticated");
         }
         return fresh;

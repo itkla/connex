@@ -157,10 +157,14 @@ public class CompanyService {
      * @param tagId
      */
     public void addTag(int companyId, int tagId) {
-        if (companyMapper.getCompanyById(companyId) == null) throw new ResourceNotFoundException("Company not found with id: " + companyId);
-        if (tagMapper.getTagById(tagId) == null) throw new ResourceNotFoundException("Tag not found with id: " + tagId);
+        Company company = companyMapper.getCompanyById(companyId);
+        if (company == null) throw new ResourceNotFoundException("Company not found with id: " + companyId);
+        Tag tag = tagMapper.getTagById(tagId);
+        if (tag == null) throw new ResourceNotFoundException("Tag not found with id: " + tagId);
         companyMapper.addTag(companyId, tagId);
-        auditService.record("company.addTag", "company", companyId, null, "Tag added to company", null);
+        auditService.record("company.addTag", "company", companyId, company.getName(),
+            "Tagged " + company.getName() + " with " + tag.getName(),
+            auditService.singleChange("tag", null, tag.getName()));
     }
 
     /**
@@ -169,9 +173,14 @@ public class CompanyService {
      * @param tagId
      */
     public void removeTag(int companyId, int tagId) {
-        if (companyMapper.getCompanyById(companyId) == null) throw new ResourceNotFoundException("Company not found with id: " + companyId);
+        Company company = companyMapper.getCompanyById(companyId);
+        if (company == null) throw new ResourceNotFoundException("Company not found with id: " + companyId);
+        Tag tag = tagMapper.getTagById(tagId);
         companyMapper.removeTag(companyId, tagId);
-        auditService.record("company.removeTag", "company", companyId, null, "Tag removed from company", null);
+        String tagName = tag != null ? tag.getName() : "#" + tagId;
+        auditService.record("company.removeTag", "company", companyId, company.getName(),
+            "Removed tag " + tagName + " from " + company.getName(),
+            auditService.singleChange("tag", tagName, null));
     }
 
     /**
@@ -182,11 +191,16 @@ public class CompanyService {
      */
     @Transactional
     public List<Tag> replaceTags(int companyId, List<Integer> tagIds) {
-        if (companyMapper.getCompanyById(companyId) == null) throw new ResourceNotFoundException("Company not found with id: " + companyId);
+        Company company = companyMapper.getCompanyById(companyId);
+        if (company == null) throw new ResourceNotFoundException("Company not found with id: " + companyId);
+        List<String> before = tagMapper.getTagsByCompanyId(companyId).stream().map(Tag::getName).toList();
         companyMapper.clearTags(companyId);
         if (tagIds != null && !tagIds.isEmpty()) companyMapper.insertTags(companyId, tagIds);
-        auditService.record("company.replaceTags", "company", companyId, null, "Tags replaced for company", null);
-        return tagMapper.getTagsByCompanyId(companyId);
+        List<Tag> after = tagMapper.getTagsByCompanyId(companyId);
+        auditService.record("company.replaceTags", "company", companyId, company.getName(),
+            "Updated tags on " + company.getName(),
+            auditService.singleChange("tags", before, after.stream().map(Tag::getName).toList()));
+        return after;
     }
 
     /**

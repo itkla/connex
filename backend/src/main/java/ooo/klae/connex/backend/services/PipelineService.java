@@ -10,6 +10,7 @@ import ooo.klae.connex.backend.beans.Stage;
 import ooo.klae.connex.backend.exceptions.DuplicateResourceException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import java.util.List;
+import java.util.Set;
 
 import lombok.RequiredArgsConstructor;
 
@@ -26,6 +27,12 @@ public class PipelineService {
     private final DealMapper dealMapper;
     private final AuditService auditService;
 
+    private static final Set<String> PIPELINE_AUDIT_FIELDS =
+        Set.of("name");
+
+    private static final Set<String> STAGE_AUDIT_FIELDS =
+        Set.of("name", "position", "success", "failure");
+
     public List<Pipeline> getAllPipelines() {
         return pipelineMapper.getAllPipelines();
     }
@@ -38,22 +45,30 @@ public class PipelineService {
 
     public Pipeline createPipeline(Pipeline pipeline) {
         pipelineMapper.insertPipeline(pipeline);
-        auditService.record("pipeline.create", "pipeline", pipeline.getId(), pipeline.getName(), "Pipeline created", null);
+        auditService.record("pipeline.create", "pipeline", pipeline.getId(), pipeline.getName(),
+            "Created pipeline " + pipeline.getName(),
+            auditService.diff(null, pipeline, PIPELINE_AUDIT_FIELDS));
         return pipeline;
     }
 
     public Pipeline updatePipeline(int id, Pipeline pipeline) {
-        if (pipelineMapper.getPipelineById(id) == null) throw new ResourceNotFoundException("Pipeline not found with id: " + id);
+        Pipeline before = pipelineMapper.getPipelineById(id);
+        if (before == null) throw new ResourceNotFoundException("Pipeline not found with id: " + id);
         pipeline.setId(id);
         pipelineMapper.updatePipeline(pipeline);
-        auditService.record("pipeline.update", "pipeline", id, pipeline.getName(), "Pipeline updated", null);
+        auditService.record("pipeline.update", "pipeline", id, pipeline.getName(),
+            "Updated pipeline " + pipeline.getName(),
+            auditService.diff(before, pipeline, PIPELINE_AUDIT_FIELDS));
         return pipeline;
     }
 
     public void deletePipeline(int id) {
-        if (pipelineMapper.getPipelineById(id) == null) throw new ResourceNotFoundException("Pipeline not found with id: " + id);
+        Pipeline before = pipelineMapper.getPipelineById(id);
+        if (before == null) throw new ResourceNotFoundException("Pipeline not found with id: " + id);
         pipelineMapper.deletePipeline(id);
-        auditService.record("pipeline.delete", "pipeline", id, null, "Pipeline deleted", null);
+        auditService.record("pipeline.delete", "pipeline", id, before.getName(),
+            "Deleted pipeline " + before.getName(),
+            auditService.diff(before, null, PIPELINE_AUDIT_FIELDS));
     }
 
     // Stage operations (will likely move to separate StageService in the future)
@@ -76,7 +91,9 @@ public class PipelineService {
         assertSingleTerminalOfType(pipelineId, stage);
         assertUniqueName(pipelineId, stage);
         pipelineMapper.insertStage(stage);
-        auditService.record("stage.create", "stage", stage.getId(), stage.getName(), "Stage created", null);
+        auditService.record("stage.create", "stage", stage.getId(), stage.getName(),
+            "Created stage " + stage.getName(),
+            auditService.diff(null, stage, STAGE_AUDIT_FIELDS));
         return stage;
     }
 
@@ -88,7 +105,9 @@ public class PipelineService {
         assertSingleTerminalOfType(existing.getPipeline().getId(), stage);
         assertUniqueName(existing.getPipeline().getId(), stage);
         pipelineMapper.updateStage(stage);
-        auditService.record("stage.update", "stage", id, stage.getName(), "Stage updated", null);
+        auditService.record("stage.update", "stage", id, stage.getName(),
+            "Updated stage " + stage.getName(),
+            auditService.diff(existing, stage, STAGE_AUDIT_FIELDS));
         return stage;
     }
 
@@ -114,9 +133,12 @@ public class PipelineService {
     }
 
     public void deleteStage(int id) {
-        if (pipelineMapper.getStageById(id) == null) throw new ResourceNotFoundException("Stage not found with id: " + id);
+        Stage before = pipelineMapper.getStageById(id);
+        if (before == null) throw new ResourceNotFoundException("Stage not found with id: " + id);
         pipelineMapper.deleteStage(id);
-        auditService.record("stage.delete", "stage", id, null, "Stage deleted", null);
+        auditService.record("stage.delete", "stage", id, before.getName(),
+            "Deleted stage " + before.getName(),
+            auditService.diff(before, null, STAGE_AUDIT_FIELDS));
     }
 
     /**

@@ -7,6 +7,7 @@ import ooo.klae.connex.backend.beans.Note;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 
 import java.util.List;
+import java.util.Set;
 
 import lombok.RequiredArgsConstructor;
 
@@ -21,6 +22,9 @@ import lombok.RequiredArgsConstructor;
 public class NoteService {
     private final NoteMapper noteMapper;
     private final AuditService auditService;
+
+    private static final Set<String> AUDIT_FIELDS =
+        Set.of("content");
 
     public List<Note> getAllNotes() {
         return noteMapper.getAllNotes();
@@ -46,21 +50,29 @@ public class NoteService {
 
     public Note create(Note note) {
         noteMapper.insert(note);
-        auditService.record("note.create", "note", note.getId(), note.getContent(), "Note created", null);
+        auditService.record("note.create", "note", note.getId(), note.getContent(),
+            "Created note",
+            auditService.diff(null, note, AUDIT_FIELDS));
         return note;
     }
 
     public Note update(int id, Note note) {
-        if (noteMapper.getNoteById(id) == null) throw new ResourceNotFoundException("Note not found with id: " + id);
+        Note before = noteMapper.getNoteById(id);
+        if (before == null) throw new ResourceNotFoundException("Note not found with id: " + id);
         note.setId(id);
         noteMapper.update(note);
-        auditService.record("note.update", "note", id, note.getContent(), "Note updated", null);
+        auditService.record("note.update", "note", id, note.getContent(),
+            "Updated note",
+            auditService.diff(before, note, AUDIT_FIELDS));
         return note;
     }
 
     public void delete(int id) {
-        if (noteMapper.getNoteById(id) == null) throw new ResourceNotFoundException("Note not found with id: " + id);
+        Note before = noteMapper.getNoteById(id);
+        if (before == null) throw new ResourceNotFoundException("Note not found with id: " + id);
         noteMapper.delete(id);
-        auditService.record("note.delete", "note", id, null, "Note deleted", null);
+        auditService.record("note.delete", "note", id, before.getContent(),
+            "Deleted note",
+            auditService.diff(before, null, AUDIT_FIELDS));
     }
 }

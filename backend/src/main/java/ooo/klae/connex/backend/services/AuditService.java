@@ -43,6 +43,10 @@ public class AuditService {
     private static final int USER_AGENT_MAX = 512;
     private static final int IP_MAX = 45;
     private static final int HASH_LEN = 64;
+    private static final int ERROR_MAX = 500;
+
+    private static final String OUTCOME_SUCCESS = "success";
+    private static final String OUTCOME_FAILURE = "failure";
 
     private final AuditLogMapper auditLogMapper;
     private final ObjectMapper objectMapper;
@@ -63,15 +67,48 @@ public class AuditService {
      */
     public void record(String action, String entityType, Integer entityId,
             String targetLabel, String summary, Object changes) {
+        write(action, entityType, entityId, targetLabel, OUTCOME_SUCCESS, summary, changes, null);
+    }
+
+    /**
+     * Records a single failed audit event. Never throws.
+     * @param action
+     * @param entityType
+     * @param entityId
+     * @param targetLabel
+     * @param summary
+     * @param errorMessage
+     */
+    public void recordFailure(String action, String entityType, Integer entityId,
+            String targetLabel, String summary, String errorMessage) {
+        Object context = errorMessage == null ? null
+                : Map.of("error", truncate(errorMessage, ERROR_MAX));
+        write(action, entityType, entityId, targetLabel, OUTCOME_FAILURE, summary, null, context);
+    }
+
+    /**
+     * Writes an audit event to the database.
+     * @param action
+     * @param entityType
+     * @param entityId
+     * @param targetLabel
+     * @param outcome
+     * @param summary
+     * @param changes
+     * @param context
+     */
+    private void write(String action, String entityType, Integer entityId, String targetLabel,
+            String outcome, String summary, Object changes, Object context) {
         try {
             AuditLog entry = new AuditLog();
             entry.setAction(truncate(action, ACTION_MAX));
             entry.setEntityType(truncate(entityType, ENTITY_TYPE_MAX));
             entry.setEntityId(entityId);
             entry.setTargetLabel(truncate(targetLabel, LABEL_MAX));
-            entry.setOutcome("success");
+            entry.setOutcome(outcome);
             entry.setSummary(truncate(summary, SUMMARY_MAX));
             entry.setChanges(toJson(changes));
+            entry.setContext(toJson(context));
 
             resolveActor(entry);
             resolveRequest(entry);
@@ -106,6 +143,22 @@ public class AuditService {
             }
         }
         return changes.isEmpty() ? null : changes;
+    }
+
+    /**
+     * Builds a single-field change payload.
+     * @param field
+     * @param oldVal
+     * @param newVal
+     * @return
+     */
+    public Map<String, Object> singleChange(String field, Object oldVal, Object newVal) {
+        Map<String, Object> delta = new LinkedHashMap<>();
+        delta.put("old", oldVal);
+        delta.put("new", newVal);
+        Map<String, Object> changes = new LinkedHashMap<>();
+        changes.put(field, delta);
+        return changes;
     }
 
     /**
