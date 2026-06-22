@@ -405,7 +405,7 @@ export default function CompaniesBrowser({ companies }: { companies: Company[] }
     );
 
     return (
-        <div className="space-y-6">
+        <div className="page-grid gap-y-6">
             <div className="flex items-center justify-between">
                 <h1 className="text-4xl font-extrabold">{t('title')}</h1>
                 <Button className="bg-brand text-white" aria-label={t('addCompanyAriaLabel')} onClick={() => setNewDialogOpen(true)}>

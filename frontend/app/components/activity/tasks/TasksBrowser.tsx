@@ -410,7 +410,7 @@ export default function TasksBrowser({ tasks: initialTasks, persons, deals, user
     );
 
     return (
-        <div className="mx-auto w-full max-w-5xl space-y-6">
+        <div className="mx-auto w-full max-w-7xl space-y-6">
             <header className="flex flex-wrap items-start justify-between gap-4">
                 <div>
                     <h1 className="text-4xl font-extrabold tracking-tight">{t('title')}</h1>

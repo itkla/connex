@@ -139,7 +139,7 @@ export default function SearchResultsView({
     const hasResults = groups.length > 0;
 
     return (
-        <div className="mx-auto w-full max-w-3xl">
+        <div className="mx-auto w-full max-w-7xl">
             <h1 className="mb-6 text-xl font-semibold text-foreground">
                 {t("resultsHeading", { query })}
             </h1>

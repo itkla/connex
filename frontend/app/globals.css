@@ -309,3 +309,19 @@
     transition: opacity 0.15s ease;
   }
 }
+
+.page-grid {
+  display: grid;
+  grid-template-columns:
+    [full-start] minmax(0, 1fr)
+    [main-start] min(80rem, 100%)
+    [main-end] minmax(0, 1fr)
+    [full-end];
+}
+.page-grid > * {
+  grid-column: main;
+  min-width: 0;
+}
+.page-grid > .page-bleed {
+  grid-column: main-start / full-end;
+}

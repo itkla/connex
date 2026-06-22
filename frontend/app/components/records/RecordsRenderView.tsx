@@ -37,6 +37,7 @@ import { useTranslations } from 'next-intl';
 
 import { copyToClipboard } from '@/app/lib/utils';
 import { cn } from '@/lib/utils';
+import { useDragScroll } from '@/app/hooks/useDragScroll';
 import { type ColumnDef, type CardCallbacks, type DisplayMode, type SelectionId } from './types';
 
 type SortDirection = 'asc' | 'desc';
@@ -112,6 +113,7 @@ export default function RecordsRenderView<T extends { id: SelectionId; name?: st
     const router = useRouter();
     const t = useTranslations('RecordsRenderView');
     const reduce = useReducedMotion() ?? false;
+    const scrollRef = useDragScroll<HTMLDivElement>();
     const [sortKey, setSortKey] = useState<string | null>(null);
     const [sortDirection, setSortDirection] = useState<SortDirection>('asc');
     const [pageSize, setPageSize] = useState(25);
@@ -379,9 +381,9 @@ export default function RecordsRenderView<T extends { id: SelectionId; name?: st
 
     return (
         <>
-            <div className={cn('overflow-hidden rounded-2xl bg-card ring-1 ring-border', loading && 'opacity-60 transition-opacity')} aria-busy={loading}>
-                <div className="overflow-x-auto">
-                    <table className="w-full border-collapse text-left text-sm">
+            <div className={cn('page-bleed overflow-hidden rounded-2xl bg-card ring-1 ring-border', loading && 'opacity-60 transition-opacity')} aria-busy={loading}>
+                <div ref={scrollRef} className="overflow-x-auto data-[dragging=true]:cursor-grabbing data-[dragging=true]:select-none">
+                    <table className="w-max min-w-full border-collapse text-left text-sm">
                         <thead>
                             <tr className="border-b border-border bg-muted/60">
                                 <th className="w-12 px-4 py-2.5">
@@ -475,7 +477,7 @@ export default function RecordsRenderView<T extends { id: SelectionId; name?: st
                                                 return (
                                                     <td
                                                         key={col.key}
-                                                        className="px-4 py-2.5 text-foreground transition-colors hover:text-brand-dark"
+                                                        className="px-4 py-2.5 whitespace-nowrap text-foreground transition-colors hover:text-brand-dark"
                                                         onClick={(e) => {
                                                             e.stopPropagation();
                                                             const v = getValue(item) ?? '';
@@ -491,7 +493,7 @@ export default function RecordsRenderView<T extends { id: SelectionId; name?: st
                                                 );
                                             }
                                             return (
-                                                <td key={col.key} className="px-4 py-2.5 text-foreground">
+                                                <td key={col.key} className="px-4 py-2.5 whitespace-nowrap text-foreground">
                                                     {content}
                                                 </td>
                                             );

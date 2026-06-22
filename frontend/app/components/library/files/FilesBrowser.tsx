@@ -438,7 +438,7 @@ export default function FilesBrowser() {
     );
 
     return (
-        <div className="space-y-8">
+        <div className="page-grid gap-y-8">
             <header className="flex flex-wrap items-end justify-between gap-4">
                 <div>
                     <h1 className="text-4xl font-extrabold tracking-tight">{t('title')}</h1>

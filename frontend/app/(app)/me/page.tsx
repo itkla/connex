@@ -66,7 +66,7 @@ export default async function MePage() {
 
     return (
         <div className="min-h-screen bg-background px-6 pt-12 pb-12 md:flex md:h-screen md:flex-col md:overflow-hidden">
-            <div className="mx-auto w-full max-w-5xl md:flex md:min-h-0 md:flex-1 md:flex-col">
+            <div className="mx-auto w-full max-w-7xl md:flex md:min-h-0 md:flex-1 md:flex-col">
                 <header className="flex items-center gap-6">
                     {user.profilePictureUrl ? (
                         // <Image

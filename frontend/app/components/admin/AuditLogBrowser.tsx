@@ -429,7 +429,7 @@ export default function AuditLogBrowser({ entries }: { entries: AuditLogEntry[] 
     })();
 
     return (
-        <div className="mx-auto w-full max-w-4xl space-y-6 pb-16">
+        <div className="mx-auto w-full max-w-7xl space-y-6 pb-16">
             <header className="flex flex-wrap items-end justify-between gap-4">
                 <div>
                     <h1 className="text-3xl font-bold tracking-tight text-balance text-foreground sm:text-4xl">{t("heading")}</h1>
