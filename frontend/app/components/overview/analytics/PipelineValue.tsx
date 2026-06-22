@@ -5,9 +5,8 @@ import Link from 'next/link';
 import { useLocale, useTranslations } from 'next-intl';
 
 import { type Deal, type Pipeline } from '@/app/lib/types';
-import { type StageClass } from '@/app/components/records/deals/dealOutcome';
 import { formatCompactCurrency, parseMysqlDateTime } from '@/app/lib/utils';
-import { classOf, isClosed, RANGE_DAYS, type RangeKey } from '@/app/components/overview/analytics/metrics';
+import { isClosed, RANGE_DAYS, type RangeKey } from '@/app/components/overview/analytics/metrics';
 
 const WON_COLOR = 'var(--color-brand)';
 const OPEN_COLOR = 'color-mix(in oklch, var(--color-brand) 30%, var(--card))';
@@ -17,13 +16,11 @@ type Row = { id: number; name: string; won: number; open: number; openCount: num
 export default function PipelineValue({
     deals,
     pipelines,
-    classById,
     range,
     currency,
 }: {
     deals: Deal[];
     pipelines: Pipeline[];
-    classById: Map<number, StageClass>;
     range: RangeKey;
     currency: string;
 }) {
@@ -42,7 +39,7 @@ export default function PipelineValue({
                 entry.openCount += 1;
             } else {
                 const closed = parseMysqlDateTime(deal.closedAt);
-                if (closed >= start && closed <= now && classOf(deal.stage, classById) === 'won') {
+                if (closed >= start && closed <= now && deal.won === true) {
                     entry.won += deal.actualValue ?? 0;
                 }
             }
@@ -64,7 +61,7 @@ export default function PipelineValue({
             // sort by total descending
             .filter((r) => r.total > 0)
             .sort((a, b) => b.total - a.total);
-    }, [deals, pipelines, classById, range, now]);
+    }, [deals, pipelines, range, now]);
 
     if (rows.length === 0) {
         return <div className="flex h-40 items-center justify-center text-sm text-muted-foreground">{t('empty')}</div>;

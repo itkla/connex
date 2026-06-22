@@ -5,9 +5,8 @@ import { Pie, PieChart, ResponsiveContainer, Tooltip as RechartsTooltip } from '
 import { useLocale, useTranslations } from 'next-intl';
 
 import { type Deal } from '@/app/lib/types';
-import { type StageClass } from '@/app/components/records/deals/dealOutcome';
 import { formatCompactCurrency, parseMysqlDateTime } from '@/app/lib/utils';
-import { classOf, RANGE_DAYS, type RangeKey } from '@/app/components/overview/analytics/metrics';
+import { RANGE_DAYS, type RangeKey } from '@/app/components/overview/analytics/metrics';
 
 const WON_COLOR = 'var(--chart-won)';
 const LOST_COLOR = 'var(--chart-lost)';
@@ -16,12 +15,10 @@ type Slice = { key: 'won' | 'lost'; label: string; count: number; value: number;
 
 export default function WinRateDonut({
     deals,
-    classById,
     range,
     currency,
 }: {
     deals: Deal[];
-    classById: Map<number, StageClass>;
     range: RangeKey;
     currency: string;
 }) {
@@ -38,11 +35,10 @@ export default function WinRateDonut({
         for (const deal of deals) {
             const closed = parseMysqlDateTime(deal.closedAt);
             if (!Number.isFinite(closed) || closed > now || closed < start) continue;
-            const cls = classOf(deal.stage, classById);
-            if (cls === 'won') {
+            if (deal.won === true) {
                 wonCount += 1;
                 wonValue += deal.actualValue ?? 0;
-            } else if (cls === 'lost') {
+            } else if (deal.won === false) {
                 lostCount += 1;
                 lostValue += deal.value ?? 0;
             }
@@ -51,7 +47,7 @@ export default function WinRateDonut({
             won: { count: wonCount, value: wonValue },
             lost: { count: lostCount, value: lostValue },
         };
-    }, [deals, classById, range, now]);
+    }, [deals, range, now]);
 
     const total = won.count + lost.count;
     if (total === 0) {

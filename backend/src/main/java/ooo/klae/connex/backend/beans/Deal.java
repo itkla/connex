@@ -34,6 +34,7 @@ public class Deal {
     private String expectedCloseDate;
     private String closedAt;
     private String closedReason;
+    private Boolean won; // outcome when closed: TRUE=won, FALSE=lost, NULL=open. closed_at follows this.
     private String createdAt;
     private String updatedAt;
 

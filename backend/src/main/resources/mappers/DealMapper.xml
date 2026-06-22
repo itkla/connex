@@ -15,6 +15,7 @@
     <result property="expectedCloseDate" column="expected_close_date"/>
     <result property="closedAt"          column="closed_at"/>
     <result property="closedReason"      column="closed_reason"/>
+    <result property="won"               column="won"/>
     <result property="createdAt"         column="created_at"/>
     <result property="updatedAt"         column="updated_at"/>
   </resultMap>
@@ -46,12 +47,12 @@
 
   <sql id="dealColumns">
     id, name, value, actual_value, currency, pipeline_id, stage_id, company_id,
-    expected_close_date, closed_at, closed_reason, created_at, updated_at
+    expected_close_date, closed_at, closed_reason, won, created_at, updated_at
 </sql>
 
   <sql id="qualifiedDealColumns">
     d.id, d.name, d.value, d.actual_value, d.currency, d.pipeline_id, d.stage_id, d.company_id,
-    d.expected_close_date, d.closed_at, d.closed_reason, d.created_at, d.updated_at
+    d.expected_close_date, d.closed_at, d.closed_reason, d.won, d.created_at, d.updated_at
 </sql>
 
   <select id="getAllDeals" resultMap="DealResult">
@@ -101,10 +102,10 @@
 
   <insert id="insert" useGeneratedKeys="true" keyProperty="id">
     INSERT INTO deal (name, value, actual_value, currency, pipeline_id, stage_id, company_id,
-                      expected_close_date, closed_at, closed_reason)
+                      expected_close_date, closed_at, closed_reason, won)
     VALUES (
       #{name}, #{value}, #{actualValue}, #{currency}, #{pipelineId}, #{stageId}, #{companyId},
-      #{expectedCloseDate}, #{closedAt}, #{closedReason}
+      #{expectedCloseDate}, #{closedAt}, #{closedReason}, #{won}
     )
   </insert>
 
@@ -119,14 +120,23 @@
         company_id = #{companyId},
         expected_close_date = #{expectedCloseDate},
         closed_at = #{closedAt},
-        closed_reason = #{closedReason}
+        closed_reason = #{closedReason},
+        won = #{won}
     WHERE id = #{id}
   </update>
 
   <delete id="delete">DELETE FROM deal WHERE id = #{id}</delete>
 
-  <select id="isStageTerminal" resultType="boolean">
-    SELECT (is_success OR is_failure) FROM stage WHERE id = #{stageId}
+  <select id="getStageOutcome" resultType="string">
+    SELECT CASE WHEN is_success THEN 'won' WHEN is_failure THEN 'lost' ELSE 'normal' END
+    FROM stage WHERE id = #{stageId}
+  </select>
+
+  <select id="getLastNormalStageId" resultType="java.lang.Integer">
+    SELECT id FROM stage
+    WHERE pipeline_id = #{pipelineId} AND is_success = FALSE AND is_failure = FALSE
+    ORDER BY position DESC
+    LIMIT 1
   </select>
 
   <insert id="addTag">

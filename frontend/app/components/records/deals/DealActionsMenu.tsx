@@ -2,7 +2,6 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { toast } from 'sonner';
 import { toastError, toastSuccess } from '@/app/lib/toast';
 import { useTranslations } from 'next-intl';
 import { LoaderCircle } from 'lucide-react';
@@ -15,6 +14,7 @@ import {
     ChatBubbleLeftRightIcon,
     DocumentTextIcon,
     CheckCircleIcon,
+    XCircleIcon,
     ArrowUturnLeftIcon,
     TrashIcon,
 } from '@heroicons/react/24/outline';
@@ -36,8 +36,8 @@ import NewDealActivityDialog from '@/app/components/records/deals/NewDealActivit
 import NewDealTaskDialog from '@/app/components/records/deals/NewDealTaskDialog';
 import NoteDialog from '@/app/components/activity/notes/NoteDialog';
 
-import { deleteDeal, updateDeal } from '@/app/lib/api';
-import { toMysqlDateTime, parseMysqlDateTime } from '@/app/lib/utils';
+import { closeDeal, deleteDeal, reopenDeal } from '@/app/lib/api';
+import { parseMysqlDateTime } from '@/app/lib/utils';
 import { type Company, type Contact, type Deal, type Pipeline, type Stage } from '@/app/lib/types';
 
 function isClosed(deal: Deal): boolean {
@@ -75,32 +75,12 @@ export default function DealActionsMenu({
 
     const closed = isClosed(deal);
 
-    const toggleDealStatus = async (close: boolean) => {
-        if (deal.pipeline == null || deal.stage == null) {
-            toast.error(t('cannotChangeStatus'));
-            return;
-        }
-        let stage = deal.stage;
-        if (!close) {
-            const normalStages = (stagesByPipeline[deal.pipeline] ?? []).filter((s) => !s.success && !s.failure);
-            if (normalStages.length > 0) {
-                stage = normalStages.reduce((a, b) => (b.position > a.position ? b : a)).id;
-            }
-        }
+    const toggleDealStatus = async (won: boolean | null) => {
         setIsUpdatingStatus(true);
         try {
-            await updateDeal(deal.id, {
-                name: deal.name,
-                value: deal.value,
-                actualValue: deal.actualValue ?? 0,
-                currency: deal.currency,
-                pipeline: deal.pipeline,
-                stage,
-                company: deal.company ?? null,
-                expectedCloseDate: deal.expectedCloseDate,
-                closedAt: close ? toMysqlDateTime(new Date().toISOString()) : null,
-            });
-            toastSuccess(close ? t('dealClosed') : t('dealReopened'));
+            if (won === null) await reopenDeal(deal.id);
+            else await closeDeal(deal.id, { won });
+            toastSuccess(won === null ? t('dealReopened') : t('dealClosed'));
             router.refresh();
         } catch (err) {
             toastError(err instanceof Error ? err.message : t('failedToUpdateStatus'));
@@ -197,20 +177,41 @@ export default function DealActionsMenu({
                         </Button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end" className="w-48">
-                        <DropdownMenuItem
-                            disabled={isUpdatingStatus}
-                            onSelect={(e) => {
-                                e.preventDefault();
-                                toggleDealStatus(!closed);
-                            }}
-                        >
-                            {closed ? (
+                        {closed ? (
+                            <DropdownMenuItem
+                                disabled={isUpdatingStatus}
+                                onSelect={(e) => {
+                                    e.preventDefault();
+                                    toggleDealStatus(null);
+                                }}
+                            >
                                 <ArrowUturnLeftIcon className="size-4" />
-                            ) : (
-                                <CheckCircleIcon className="size-4" />
-                            )}
-                            <span>{closed ? t('markOpen') : t('markClosed')}</span>
-                        </DropdownMenuItem>
+                                <span>{t('markOpen')}</span>
+                            </DropdownMenuItem>
+                        ) : (
+                            <>
+                                <DropdownMenuItem
+                                    disabled={isUpdatingStatus}
+                                    onSelect={(e) => {
+                                        e.preventDefault();
+                                        toggleDealStatus(true);
+                                    }}
+                                >
+                                    <CheckCircleIcon className="size-4" />
+                                    <span>{t('markWon')}</span>
+                                </DropdownMenuItem>
+                                <DropdownMenuItem
+                                    disabled={isUpdatingStatus}
+                                    onSelect={(e) => {
+                                        e.preventDefault();
+                                        toggleDealStatus(false);
+                                    }}
+                                >
+                                    <XCircleIcon className="size-4" />
+                                    <span>{t('markLost')}</span>
+                                </DropdownMenuItem>
+                            </>
+                        )}
                         <DropdownMenuItem
                             variant="destructive"
                             onSelect={(e) => {

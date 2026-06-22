@@ -46,24 +46,31 @@ public class DealService {
 
     private static final Set<String> AUDIT_FIELDS =
         Set.of("name", "value", "actualValue", "currency", "pipelineId", "stageId",
-               "companyId", "expectedCloseDate", "closedAt");
+               "companyId", "expectedCloseDate", "closedAt", "closedReason", "won");
 
     /**
-     * Keeps {@code closedAt} in sync with the deal's stage: a deal sitting on a terminal
+     * Reconciles a deal's close fields so {@code won} and {@code closedAt} always agree.
+     * The outcome is explicit and stage-independent: {@code won} (TRUE=won, FALSE=lost,
+     * NULL=open) is set by the client and may be set at ANY stage — a deal can win or lose
+     * mid-pipeline. {@code closedAt} follows {@code won} (stamped when an outcome exists,
+     * cleared when open). As a convenience, a deal sitting on a terminal (success/failure)
+     * stage is forced to that outcome — moving a deal onto "Closed Won" still wins it.
      * @param deal
-     * @return null
      */
-    private void reconcileClosedAt(Deal deal) {
+    private void reconcileCloseState(Deal deal) {
         Integer stageId = deal.getStageId();
-        boolean terminal = stageId != null && dealMapper.isStageTerminal(stageId);
-        if (terminal) {
-            String closedAt = deal.getClosedAt();
-            if (closedAt == null || closedAt.isBlank()) {
-                deal.setClosedAt(LocalDateTime.now().format(MYSQL_DATETIME));
-            }
-        } else {
+        String stageOutcome = stageId != null ? dealMapper.getStageOutcome(stageId) : "normal";
+        if ("won".equals(stageOutcome)) {
+            deal.setWon(true);
+        } else if ("lost".equals(stageOutcome)) {
+            deal.setWon(false);
+        }
+        // closed_at follows the outcome: present iff the deal has a won/lost result.
+        if (deal.getWon() == null) {
             deal.setClosedAt(null);
             deal.setClosedReason(null);
+        } else if (deal.getClosedAt() == null || deal.getClosedAt().isBlank()) {
+            deal.setClosedAt(LocalDateTime.now().format(MYSQL_DATETIME));
         }
     }
 
@@ -137,7 +144,7 @@ public class DealService {
      * @return
      */
     public Deal create(Deal deal) {
-        reconcileClosedAt(deal);
+        reconcileCloseState(deal);
         dealMapper.insert(deal);
         auditService.record("deal.create", "deal", deal.getId(), deal.getName(),
             "Created deal " + deal.getName(),
@@ -155,10 +162,68 @@ public class DealService {
         Deal before = dealMapper.getDealById(id);
         if (before == null) throw new ResourceNotFoundException("Deal not found with id: " + id);
         deal.setId(id);
-        reconcileClosedAt(deal);
+        reconcileCloseState(deal);
         dealMapper.update(deal);
         auditService.record("deal.update", "deal", id, deal.getName(),
             "Updated deal " + deal.getName(),
+            auditService.diff(before, deal, AUDIT_FIELDS));
+        return deal;
+    }
+
+    /**
+     * Closes a deal as an atomic, intent-expressing operation: records the outcome
+     * ({@code won} = true won / false lost), an optional reason and actual value, then
+     * reconciles {@code closedAt}. Works at any stage and does not move the stage, so the
+     * stage records where the deal was closed. Defaults to lost when no outcome is given.
+     * @param id the deal id
+     * @param won the outcome — TRUE = won, FALSE = lost (null defaults to lost)
+     * @param reason optional close reason (ignored when blank)
+     * @param actualValue optional realized value to record
+     * @return the closed deal
+     */
+    @Transactional
+    public Deal close(int id, Boolean won, String reason, Double actualValue) {
+        Deal before = dealMapper.getDealById(id);
+        if (before == null) throw new ResourceNotFoundException("Deal not found with id: " + id);
+        Deal deal = dealMapper.getDealById(id);
+        deal.setWon(won != null ? won : Boolean.FALSE);
+        if (reason != null && !reason.isBlank()) deal.setClosedReason(reason);
+        if (actualValue != null) deal.setActualValue(actualValue);
+        reconcileCloseState(deal);
+        dealMapper.update(deal);
+        auditService.record("deal.close", "deal", id, deal.getName(),
+            (Boolean.TRUE.equals(deal.getWon()) ? "Won deal " : "Lost deal ") + deal.getName(),
+            auditService.diff(before, deal, AUDIT_FIELDS));
+        return deal;
+    }
+
+    /**
+     * Reopens a deal.
+     * @param id
+     * @return
+     */
+    @Transactional
+    public Deal reopen(int id) {
+        Deal before = dealMapper.getDealById(id);
+        if (before == null) throw new ResourceNotFoundException("Deal not found with id: " + id);
+        Deal deal = dealMapper.getDealById(id);
+        deal.setWon(null); // reconcile clears closedAt + reason
+        Integer stageId = deal.getStageId();
+        boolean terminal = stageId != null && !"normal".equals(dealMapper.getStageOutcome(stageId));
+        if (terminal) {
+            Integer normalStage = deal.getPipelineId() != null
+                ? dealMapper.getLastNormalStageId(deal.getPipelineId())
+                : null;
+            if (normalStage == null) {
+                throw new IllegalStateException(
+                    "Cannot reopen deal \"" + deal.getName() + "\": its pipeline has no open stage to return to.");
+            }
+            deal.setStageId(normalStage);
+        }
+        reconcileCloseState(deal);
+        dealMapper.update(deal);
+        auditService.record("deal.reopen", "deal", id, deal.getName(),
+            "Reopened deal " + deal.getName(),
             auditService.diff(before, deal, AUDIT_FIELDS));
         return deal;
     }

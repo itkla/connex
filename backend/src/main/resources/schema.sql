@@ -135,16 +135,23 @@ CREATE TABLE deal (
     stage_id            INT NOT NULL COMMENT 'Stage ID',
     company_id          INT COMMENT 'Company ID',
     expected_close_date DATETIME COMMENT 'Expected close date',
-    closed_at           DATETIME COMMENT 'Close date',
+    closed_at           DATETIME COMMENT 'When the deal was closed (NULL = open). The stage_id at close records where it closed.',
     closed_reason       VARCHAR(255) COMMENT 'Reason the deal was closed (won/lost)',
+    won                 BOOLEAN COMMENT 'Outcome when closed: TRUE = won, FALSE = lost, NULL = open. Set by the client and independent of stage — a deal may be won/lost at any stage. closed_at follows this.',
     created_at          DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT 'Creation timestamp',
     updated_at          DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT 'Last update timestamp',
     CONSTRAINT fk_deal_pipeline FOREIGN KEY (pipeline_id) REFERENCES pipeline(id) ON DELETE RESTRICT,
     CONSTRAINT fk_deal_stage    FOREIGN KEY (stage_id)    REFERENCES stage(id)    ON DELETE RESTRICT,
     CONSTRAINT fk_deal_company  FOREIGN KEY (company_id)  REFERENCES company(id)  ON DELETE SET NULL,
+    -- a deal has an outcome iff it is closed: won is set exactly when closed_at is set
+    CONSTRAINT chk_deal_outcome_closed CHECK ((won IS NULL) = (closed_at IS NULL)),
+    CONSTRAINT chk_deal_reason_requires_close CHECK (
+        closed_reason IS NULL OR closed_at IS NOT NULL
+    ),
     INDEX idx_deal_pipeline (pipeline_id),
     INDEX idx_deal_stage    (stage_id),
-    INDEX idx_deal_company  (company_id)
+    INDEX idx_deal_company  (company_id),
+    INDEX idx_deal_won      (won)
 ) DEFAULT CHARSET=utf8mb4 COMMENT='Deals';
 
 

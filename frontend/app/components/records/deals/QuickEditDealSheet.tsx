@@ -11,8 +11,8 @@ import { Combobox, ComboboxItem, ComboboxList, ComboboxContent, ComboboxEmpty, C
 import { Label } from '@/components/ui/label';
 import { type Company, type Deal, type Pipeline, type Stage } from '@/app/lib/types';
 import { type SelectionId } from '@/app/components/records/types';
-import { Checkbox } from '@/components/ui/checkbox';
-import { toMysqlDateTime } from '@/app/lib/utils';
+import { cn } from '@/lib/utils';
+import { toMysqlDateTime, toDatetimeLocalValue } from '@/app/lib/utils';
 
 export type DealDraft = {
     name: string;
@@ -25,6 +25,7 @@ export type DealDraft = {
     expectedCloseDate: string;
     closedAt: string | null;
     closedReason: string | null;
+    won: boolean | null; // outcome: true=won, false=lost, null=open
 };
 
 type Props = {
@@ -83,7 +84,7 @@ export default function QuickEditDealSheet({
                             const stages = draft.pipeline ? stagesByPipeline[draft.pipeline] ?? [] : [];
                             const selectedStage = stages.find((s) => s.id === draft.stage) ?? null;
                             const expectedCloseDate = draft.expectedCloseDate ? draft.expectedCloseDate.slice(0, 10) : '';
-                            const closedAt = draft.closedAt ? draft.closedAt.slice(0, 10) : '';
+                            const closedAt = toDatetimeLocalValue(draft.closedAt);
                             const actualValue = draft.actualValue ?? 0;
 
                             return (
@@ -163,14 +164,14 @@ export default function QuickEditDealSheet({
                                                     disabled={!draft.pipeline}
                                                     onValueChange={(s) => {
                                                         const stage = s as Stage | null;
-                                                        const terminal = !!stage && (stage.success || stage.failure);
-                                                        updateDraft(d.id, {
-                                                            stage: stage?.id ?? 0,
-                                                            closedAt: terminal
-                                                                ? draft.closedAt ?? toMysqlDateTime(new Date())
-                                                                : null,
-                                                            closedReason: terminal ? draft.closedReason : null,
-                                                        });
+                                                        // A terminal stage forces the outcome (mirrors the server). A normal
+                                                        // stage leaves the explicit won/lost choice untouched.
+                                                        const patch: Partial<DealDraft> = { stage: stage?.id ?? 0 };
+                                                        if (stage?.success || stage?.failure) {
+                                                            patch.won = !!stage.success;
+                                                            patch.closedAt = draft.closedAt ?? toMysqlDateTime(new Date());
+                                                        }
+                                                        updateDraft(d.id, patch);
                                                     }}
                                                 >
                                                     <ComboboxInput
@@ -231,27 +232,54 @@ export default function QuickEditDealSheet({
                                         </div>
 
                                         <div className="grid gap-1.5">
-                                            <Label htmlFor={`deal-closed-${d.id}`}>{t('closedQuestion')}</Label>
-                                            {/* <input
-                                                id={`deal-closed-${d.id}`}
-                                                type="checkbox"
-                                                checked={draft.closedAt !== null}
-                                                onChange={(e) => updateDraft(d.id, { closedAt: e.target.checked ? new Date().toISOString() : null })}
-                                                className="connex-input"
-                                            /> */}
-                                            <Checkbox id={`deal-closed-${d.id}`} checked={draft.closedAt !== null} onCheckedChange={(checked) => updateDraft(d.id, { closedAt: checked ? toMysqlDateTime(new Date()) : null })} />
+                                            <Label>{t('outcomeLabel')}</Label>
+                                            <div className="grid grid-cols-3 gap-1.5">
+                                                {([
+                                                    { key: 'open', won: null, label: t('outcomeOpen') },
+                                                    { key: 'won', won: true, label: t('outcomeWon') },
+                                                    { key: 'lost', won: false, label: t('outcomeLost') },
+                                                ] as const).map((opt) => (
+                                                    <button
+                                                        key={opt.key}
+                                                        type="button"
+                                                        onClick={() =>
+                                                            updateDraft(
+                                                                d.id,
+                                                                opt.won === null
+                                                                    ? { won: null, closedAt: null, closedReason: null }
+                                                                    : { won: opt.won, closedAt: draft.closedAt ?? toMysqlDateTime(new Date()) },
+                                                            )
+                                                        }
+                                                        className={cn(
+                                                            'rounded-lg px-3 py-2 text-sm font-medium ring-1 transition',
+                                                            draft.won === opt.won
+                                                                ? opt.key === 'won'
+                                                                    ? 'bg-brand text-white ring-brand'
+                                                                    : opt.key === 'lost'
+                                                                      ? 'bg-red-600 text-white ring-red-600'
+                                                                      : 'bg-foreground text-background ring-foreground'
+                                                                : 'bg-muted text-muted-foreground ring-border hover:bg-muted/70',
+                                                        )}
+                                                    >
+                                                        {opt.label}
+                                                    </button>
+                                                ))}
+                                            </div>
 
-                                            {/* // if closed = true, show the closed at date field */}
-                                            {draft.closedAt !== null && (
+                                            {/* when closed (won/lost), capture when / how much / why */}
+                                            {draft.won !== null && (
                                                 <>
                                                 <div className="grid gap-1.5">
                                                     <Label htmlFor={`deal-closed-at-${d.id}`}>{t('closedAt')}</Label>
                                                     <input
                                                         id={`deal-closed-at-${d.id}`}
-                                                        type="date"
-                                                        // value={draft.closedAt}
+                                                        type="datetime-local"
                                                         value={closedAt}
-                                                        onChange={(e) => updateDraft(d.id, { closedAt: e.target.value })}
+                                                        onChange={(e) =>
+                                                            updateDraft(d.id, {
+                                                                closedAt: e.target.value ? toMysqlDateTime(e.target.value) : null,
+                                                            })
+                                                        }
                                                         className="connex-input"
                                                     />
                                                 </div>

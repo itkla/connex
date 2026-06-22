@@ -1,5 +1,4 @@
 import { type Deal } from '@/app/lib/types';
-import { type StageClass } from '@/app/components/records/deals/dealOutcome';
 import { parseMysqlDateTime } from '@/app/lib/utils';
 
 export type RangeKey = '30d' | '90d' | '12m';
@@ -26,11 +25,6 @@ const DAY = 86400000; // 1 day in milliseconds
 export function normalizeActivityType(value?: string | null): ActivityType {
     const v = (value ?? '').trim();
     return (ACTIVITY_TYPES as readonly string[]).includes(v) ? (v as ActivityType) : 'Other';
-}
-
-export function classOf(stageId: number | null | undefined, classById: Map<number, StageClass>): StageClass {
-    if (stageId == null) return 'normal';
-    return classById.get(stageId) ?? 'normal';
 }
 
 export function isClosed(deal: Deal, now: number): boolean {
@@ -76,7 +70,6 @@ const pctChange = (current: number, previous: number): number | null =>
 
 export function computeKpis(
     deals: Deal[],
-    classById: Map<number, StageClass>,
     now: number,
     days: number,
 ): Kpi[] {
@@ -91,7 +84,6 @@ export function computeKpis(
     const bucketIndex = (t: number) => Math.min(buckets - 1, Math.max(0, Math.floor((t - periodStart) / span)));
 
     for (const deal of deals) {
-        const cls = classOf(deal.stage, classById);
         const created = parseMysqlDateTime(deal.createdAt);
         const closed = parseMysqlDateTime(deal.closedAt);
         const value = deal.value ?? 0;
@@ -111,7 +103,7 @@ export function computeKpis(
         const inPrevious = closed >= prevStart && closed < periodStart;
         if (!inCurrent && !inPrevious) continue;
 
-        if (cls === 'won') {
+        if (deal.won === true) {
             const cycleDays = Number.isFinite(created) && closed >= created ? (closed - created) / DAY : null;
             if (inCurrent) {
                 current.wonValue += actual;
@@ -133,7 +125,7 @@ export function computeKpis(
                     previous.cycleCount += 1;
                 }
             }
-        } else if (cls === 'lost') {
+        } else if (deal.won === false) {
             if (inCurrent) {
                 current.lostCount += 1;
                 series[bucketIndex(closed)].lostCount += 1;

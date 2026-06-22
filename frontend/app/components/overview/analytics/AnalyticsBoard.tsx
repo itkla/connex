@@ -22,7 +22,6 @@ import {
     type Task,
     type User,
 } from '@/app/lib/types';
-import { classifyStage, type StageClass } from '@/app/components/records/deals/dealOutcome';
 import { formatCompactCurrency, pickDominantCurrency } from '@/app/lib/utils';
 import DealsAging from '@/app/components/records/deals/DealsAging';
 import TopDeals from '@/app/components/records/deals/TopDeals';
@@ -91,12 +90,6 @@ export default function AnalyticsBoard({
     const [range, setRange] = useState<RangeKey>('90d');
     const [now] = useState(() => Date.now());
 
-    const classById = useMemo(() => {
-        const map = new Map<number, StageClass>();
-        for (const stage of stages) map.set(stage.id, classifyStage(stage));
-        return map;
-    }, [stages]);
-
     const stageById = useMemo(() => new Map(stages.map((s) => [s.id, s])), [stages]);
     const companyById = useMemo(() => new Map(companies.map((c) => [c.id, c])), [companies]);
 
@@ -118,8 +111,8 @@ export default function AnalyticsBoard({
     );
 
     const kpis = useMemo(
-        () => computeKpis(dealsInCurrency, classById, now, RANGE_DAYS[range]),
-        [dealsInCurrency, classById, now, range],
+        () => computeKpis(dealsInCurrency, now, RANGE_DAYS[range]),
+        [dealsInCurrency, now, range],
     );
 
     const openPipeline = useMemo(
@@ -218,7 +211,6 @@ export default function AnalyticsBoard({
                     <PipelineValue
                         deals={dealsInCurrency}
                         pipelines={pipelines}
-                        classById={classById}
                         range={range}
                         currency={currency}
                     />
@@ -241,7 +233,7 @@ export default function AnalyticsBoard({
                     infoLabel={t('infoAria')}
                     className="lg:col-span-2"
                 >
-                    <WinRateDonut deals={dealsInCurrency} classById={classById} range={range} currency={currency} />
+                    <WinRateDonut deals={dealsInCurrency} range={range} currency={currency} />
                 </Panel>
             </Reveal>
 

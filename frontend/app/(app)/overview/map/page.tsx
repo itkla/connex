@@ -16,7 +16,6 @@ import {
 import type { Activity, Company, Contact, Deal, Note, Pipeline, Stage, Task, User } from "@/app/lib/types";
 import RelationMap from "@/app/components/map/RelationMap";
 import { buildGraph, companyNodeId, contactNodeId } from "@/app/components/map/graph/buildGraph";
-import { classifyStage, type StageClass } from "@/app/components/records/deals/dealOutcome";
 
 type MapSearchParams = { companyId?: string; contactId?: string };
 
@@ -43,16 +42,14 @@ export default async function MapPage({ searchParams }: { searchParams: Promise<
         redirect('/auth/login');
     }
 
-    // stage names + terminal classification across every pipeline, used to resolve deal outcome.
+    // stage names across every pipeline, used to label a deal's current stage.
     const stageLists = await Promise.all(
         pipelines.map((p) => getStagesByPipelineId(p.id, init).catch(() => [] as Stage[])),
     );
     const stageNames = new Map<number, string>();
-    const stageClass = new Map<number, StageClass>();
     for (const stages of stageLists) {
         for (const s of stages) {
             stageNames.set(s.id, s.name);
-            stageClass.set(s.id, classifyStage(s));
         }
     }
 
@@ -65,7 +62,6 @@ export default async function MapPage({ searchParams }: { searchParams: Promise<
         tasks: allTasks,
         notes: allNotes,
         stageNames,
-        stageClass,
         // TODO: replace with real branding later (maybe read ORG_NAME from .env?)
         ucLabel: "Your Company",
     });

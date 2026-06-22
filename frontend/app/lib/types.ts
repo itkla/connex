@@ -245,6 +245,8 @@ export type Deal = {
     expectedCloseDate?: string;
     closedAt?: string;
     closedReason?: string;
+    /** Outcome when closed: true = won, false = lost, null/undefined = open. closedAt follows this. */
+    won?: boolean | null;
     createdAt: string;
     updatedAt: string;
 };
@@ -260,6 +262,7 @@ export type CreateDealPayload = {
     expectedCloseDate?: string;
     closedAt?: string;
     closedReason?: string;
+    won?: boolean | null;
 };
 
 export type UpdateDealPayload = {
@@ -273,6 +276,7 @@ export type UpdateDealPayload = {
     expectedCloseDate?: string | null;
     closedAt?: string | null;
     closedReason?: string | null;
+    won?: boolean | null;
 };
 
 export type Pipeline = {

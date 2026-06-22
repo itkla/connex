@@ -55,6 +55,10 @@ public class DealDto {
     @Size(max = 255)
     private String closedReason;
 
+    // Explicit outcome: TRUE=won, FALSE=lost, NULL=open. Client-settable; the server
+    // reconciles closed_at to match (and a terminal stage forces it).
+    private Boolean won;
+
     private int[] personIds;
     private int[] activityIds;
     private int[] noteIds;
@@ -78,6 +82,7 @@ public class DealDto {
         dto.expectedCloseDate = d.getExpectedCloseDate();
         dto.closedAt = d.getClosedAt();
         dto.closedReason = d.getClosedReason();
+        dto.won = d.getWon();
 
         // Hunter's note: i genuinely forgot how i made this. stackoverflow? idk but it's hard to read but once you understand it it works
         dto.personIds = d.getPeople() == null ? null : Arrays.stream(d.getPeople())
@@ -106,6 +111,7 @@ public class DealDto {
         d.setExpectedCloseDate(expectedCloseDate);
         d.setClosedAt(closedAt);
         d.setClosedReason(closedReason);
+        d.setWon(won);
         d.setCreatedAt(createdAt);
         d.setUpdatedAt(updatedAt);
         return d;
