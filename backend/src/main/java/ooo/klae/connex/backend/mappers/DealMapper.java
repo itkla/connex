@@ -25,7 +25,9 @@ public interface DealMapper {
     int update(Deal deal);
     int delete(int id);
 
-    boolean isStageTerminal(int stageId);
+    String getStageOutcome(int stageId);
+
+    Integer getLastNormalStageId(int pipelineId);
 
     int addTag(@Param("dealId") int dealId, @Param("tagId") int tagId);
     int removeTag(@Param("dealId") int dealId, @Param("tagId") int tagId);

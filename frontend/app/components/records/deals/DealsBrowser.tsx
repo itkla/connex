@@ -28,6 +28,8 @@ import NewDealDialog from '@/app/components/records/deals/NewDealDialog';
 import QuickEditDealSheet, { type DealDraft } from '@/app/components/records/deals/QuickEditDealSheet';
 import {
     createDeal,
+    closeDeal,
+    reopenDeal,
     deleteDeal,
     updateDeal,
     getCompanies,
@@ -46,7 +48,7 @@ import {
     type Contact,
     type UpdateDealPayload,
 } from '@/app/lib/types';
-import { toMysqlDateTime, parseMysqlDateTime } from '@/app/lib/utils';
+import { parseMysqlDateTime } from '@/app/lib/utils';
 import CompanyAvatar from '@/app/components/records/companies/CompanyAvatar';
 import ContactAvatar from '../contacts/ContactAvatar';
 import SummaryTile from '@/app/components/SummaryTile';
@@ -65,6 +67,7 @@ function toDraft(d: Deal): DealDraft {
         expectedCloseDate: d.expectedCloseDate ?? '',
         closedAt: d.closedAt ?? null,
         closedReason: d.closedReason ?? null,
+        won: d.won ?? null,
     };
 }
 
@@ -79,7 +82,8 @@ function diffDraft(original: DealDraft, draft: DealDraft): boolean {
         original.company !== draft.company ||
         original.expectedCloseDate !== draft.expectedCloseDate ||
         original.closedAt !== draft.closedAt ||
-        original.closedReason !== draft.closedReason
+        original.closedReason !== draft.closedReason ||
+        original.won !== draft.won
     );
 }
 
@@ -292,6 +296,7 @@ export default function DealsBrowser({ deals }: { deals: Deal[] }) {
                         expectedCloseDate: draft.expectedCloseDate || undefined,
                         closedAt: draft.closedAt,
                         closedReason: draft.closedReason,
+                        won: draft.won,
                     };
                     return updateDeal(d.id, payload);
                 }),
@@ -345,37 +350,16 @@ export default function DealsBrowser({ deals }: { deals: Deal[] }) {
         }
     };
 
-    const toggleDealStatus = useCallback(async (deal: Deal, closed: boolean) => {
-        if (deal.pipeline == null || deal.stage == null) {
-            toast.error(t('cannotChangeStatus'));
-            return;
-        }
-        let stage = deal.stage;
-        if (!closed) {
-            const normalStages = (stagesByPipeline[deal.pipeline] ?? []).filter((s) => !s.success && !s.failure);
-            if (normalStages.length > 0) {
-                stage = normalStages.reduce((a, b) => (b.position > a.position ? b : a)).id;
-            }
-        }
+    const toggleDealStatus = useCallback(async (deal: Deal, won: boolean | null) => {
         try {
-            await updateDeal(deal.id, {
-                name: deal.name,
-                value: deal.value,
-                actualValue: deal.actualValue ?? 0,
-                currency: deal.currency,
-                pipeline: deal.pipeline,
-                stage,
-                company: deal.company ?? null,
-                expectedCloseDate: deal.expectedCloseDate,
-                closedAt: closed ? toMysqlDateTime(new Date().toISOString()) : null,
-                closedReason: closed ? deal.closedReason : null,
-            });
-            toastSuccess(closed ? t('dealClosed') : t('dealReopened'));
+            if (won === null) await reopenDeal(deal.id);
+            else await closeDeal(deal.id, { won });
+            toastSuccess(won === null ? t('dealReopened') : t('dealClosed'));
             router.refresh();
         } catch (err) {
             toastError(err instanceof Error ? err.message : t('failedToUpdateStatus'));
         }
-    }, [router, t, stagesByPipeline]);
+    }, [router, t]);
 
     const summary = useMemo(() => {
         let openCount = 0;
@@ -461,14 +445,23 @@ export default function DealsBrowser({ deals }: { deals: Deal[] }) {
                             </button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="start" onClick={(e) => e.stopPropagation()}>
-                            <DropdownMenuItem disabled={!closed} onSelect={() => toggleDealStatus(d, false)}>
-                                <span className="text-emerald-300">●</span>
-                                {t('markOpen')}
-                            </DropdownMenuItem>
-                            <DropdownMenuItem disabled={closed} onSelect={() => toggleDealStatus(d, true)}>
-                                <span className="text-gray-500">●</span>
-                                {t('markClosed')}
-                            </DropdownMenuItem>
+                            {closed ? (
+                                <DropdownMenuItem onSelect={() => toggleDealStatus(d, null)}>
+                                    <span className="text-emerald-300">●</span>
+                                    {t('markOpen')}
+                                </DropdownMenuItem>
+                            ) : (
+                                <>
+                                    <DropdownMenuItem onSelect={() => toggleDealStatus(d, true)}>
+                                        <span className="text-emerald-400">●</span>
+                                        {t('markWon')}
+                                    </DropdownMenuItem>
+                                    <DropdownMenuItem onSelect={() => toggleDealStatus(d, false)}>
+                                        <span className="text-red-400">●</span>
+                                        {t('markLost')}
+                                    </DropdownMenuItem>
+                                </>
+                            )}
                         </DropdownMenuContent>
                     </DropdownMenu>
                 );

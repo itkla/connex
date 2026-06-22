@@ -120,7 +120,7 @@ export default async function DealPage({ params }: { params: { id: number } }) {
     const pipeline = allPipelines.find((p) => p.id === deal.pipeline) ?? null;
     const currentStage = stages.find((s) => s.id === deal.stage) ?? null;
 
-    const outcome: DealOutcome = dealOutcome(currentStage);
+    const outcome: DealOutcome = dealOutcome(deal.won);
     const closed = outcome !== 'open';
     const variance =
         closed && deal.value > 0 ? (deal.actualValue - deal.value) / deal.value : null;
@@ -294,8 +294,8 @@ export default async function DealPage({ params }: { params: { id: number } }) {
                 />
             </div>
 
-            {(outcome === 'won' || outcome === 'lost') && deal.closedReason ? (
-                <Alert variant={outcome === 'won' ? 'default' : 'destructive'} className="mt-6">
+            {outcome !== 'open' && deal.closedReason ? (
+                <Alert variant={outcome === 'lost' ? 'destructive' : 'default'} className="mt-6">
                     <AlertTitle>
                         {outcome === 'won' ? t('closedReasonWonTitle') : t('closedReasonLostTitle')}
                     </AlertTitle>
@@ -466,16 +466,9 @@ function StatusPill({ outcome, t }: { outcome: DealOutcome; t: (key: string) => 
             </span>
         );
     }
-    if (outcome === 'open') {
-        return (
-            <span className="rounded-full bg-brand px-2.5 py-0.5 text-[10px] font-medium uppercase tracking-wider text-white">
-                {t('statusOpen')}
-            </span>
-        );
-    }
     return (
-        <span className="rounded-full bg-neutral-200 px-2.5 py-0.5 text-[10px] font-medium uppercase tracking-wider text-neutral-600 dark:bg-neutral-800 dark:text-neutral-200">
-            {t('statusClosed')}
+        <span className="rounded-full bg-brand px-2.5 py-0.5 text-[10px] font-medium uppercase tracking-wider text-white">
+            {t('statusOpen')}
         </span>
     );
 }

@@ -92,6 +92,19 @@ export function parseMysqlDateTime(value?: string | null): number {
 }
 
 /**
+ * Converts a UTC MySQL datetime string into the local "YYYY-MM-DDTHH:mm" value
+ * expected by an <input type="datetime-local">. Returns '' for empty/invalid input.
+ * The inverse is toMysqlDateTime(), which reads the local input value back to UTC.
+ */
+export function toDatetimeLocalValue(value?: string | null): string {
+    const ts = parseMysqlDateTime(value);
+    if (Number.isNaN(ts)) return '';
+    const d = new Date(ts);
+    const pad = (n: number) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+/**
  * Formats a UTC timestamp as a compact, localized relative time
  * (e.g. "just now", "5 min ago", "3 days ago"). Falls back to an absolute
  * short date once an event is older than ~30 days, since "47 days ago" reads

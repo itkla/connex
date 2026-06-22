@@ -497,6 +497,20 @@ export function deleteDeal(id: number, init: RequestInit = {}) {
     return deleteJson<void[]>(`/api/deals/${id}`, init);
 }
 
+/**
+ * Closes a deal atomically (intent endpoint) with an explicit outcome (won: true = won,
+ * false = lost). The server stamps the close date; it does not move the stage, so the deal
+ * records where it was closed. Unlike updateDeal it can't clobber unrelated fields.
+ */
+export function closeDeal(id: number, payload: { won: boolean; reason?: string | null; actualValue?: number }) {
+    return postJson<Types.Deal>(`/api/deals/${id}/close`, payload);
+}
+
+/** Reopens a closed deal: clears the outcome/close date and moves it off any terminal stage. */
+export function reopenDeal(id: number) {
+    return postJson<Types.Deal>(`/api/deals/${id}/reopen`, {});
+}
+
 export function getDealPeople(id: number, init: RequestInit = {}) {
     return getJson<Types.Contact[]>(`/api/deals/${id}/people`, init);
 }

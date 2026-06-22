@@ -1,5 +1,5 @@
 import type { Activity, Deal, Note, Task } from '@/app/lib/types';
-import type { DealOutcome, StageClass } from '@/app/components/records/deals/dealOutcome';
+import { dealOutcome } from '@/app/components/records/deals/dealOutcome';
 import { parseMysqlDateTime } from '@/app/lib/utils';
 import { computeCompanyMetrics } from './metrics';
 import type { AppNode, DealSummary, Graph, GraphInput, RelationEdge } from './types';
@@ -25,12 +25,6 @@ export function collectActiveContactIds(
     return s;
 }
 
-function outcomeOf(stageClass: StageClass | undefined): DealOutcome {
-    if (stageClass === 'won') return 'won';
-    if (stageClass === 'lost') return 'lost';
-    return 'open';
-}
-
 function ccColorFor(summaries: DealSummary[]): string {
     const closed = summaries
         .filter((s) => s.outcome === 'won' || s.outcome === 'lost')
@@ -42,7 +36,7 @@ function ccColorFor(summaries: DealSummary[]): string {
 }
 
 export function buildGraph(input: GraphInput): Graph {
-    const { companies, contacts, deals, users, activities, tasks, notes, stageNames, stageClass, ucLabel } = input;
+    const { companies, contacts, deals, users, activities, tasks, notes, stageNames, ucLabel } = input;
 
     const metricsLists = { contacts, deals, activities, tasks, notes, users };
     const activeContactIds = collectActiveContactIds(activities, tasks, notes);
@@ -98,7 +92,7 @@ export function buildGraph(input: GraphInput): Graph {
             return {
                 id: d.id,
                 name: d.name,
-                outcome: outcomeOf(d.stage != null ? stageClass.get(d.stage) : undefined),
+                outcome: dealOutcome(d.won),
                 value: d.value,
                 currency: d.currency,
                 stageName,

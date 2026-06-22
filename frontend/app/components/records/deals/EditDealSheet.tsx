@@ -22,6 +22,7 @@ function toDraft(d: Deal): DealDraft {
         expectedCloseDate: d.expectedCloseDate ?? '',
         closedAt: d.closedAt ?? null,
         closedReason: d.closedReason ?? null,
+        won: d.won ?? null,
     };
 }
 
@@ -74,6 +75,7 @@ export default function EditDealSheet({
                 expectedCloseDate: draft.expectedCloseDate || null,
                 closedAt: draft.closedAt || null,
                 closedReason: draft.closedReason || null,
+                won: draft.won,
             };
             await updateDeal(deal.id, payload);
             toastSuccess(t('dealUpdated'));

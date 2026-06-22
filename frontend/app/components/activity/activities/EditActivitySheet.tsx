@@ -25,7 +25,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { ApiError, updateActivity } from '@/app/lib/api';
 import { ActivityTypePicker, normalizeType, type ActivityType } from '@/app/components/activity/activities/activityTypes';
 import { type Activity, type Contact, type Deal, type UpdateActivityPayload } from '@/app/lib/types';
-import { parseMysqlDateTime, toMysqlDateTime } from '@/app/lib/utils';
+import { parseMysqlDateTime, toDatetimeLocalValue, toMysqlDateTime } from '@/app/lib/utils';
 
 const inputClass =
     'w-full rounded-lg bg-muted px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground outline-none ring-1 ring-border transition focus:ring-2 focus:ring-brand';
@@ -41,14 +41,14 @@ type ActivityDraft = {
     dealId: number | null;
 };
 
-function toDatetimeLocalValue(value?: string | null): string {
-    if (!value) return '';
-    const ts = parseMysqlDateTime(value);
-    if (Number.isNaN(ts)) return '';
-    const d = new Date(ts);
-    const pad = (n: number) => String(n).padStart(2, '0');
-    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
-}
+// function toDatetimeLocalValue(value?: string | null): string {
+//     if (!value) return '';
+//     const ts = parseMysqlDateTime(value);
+//     if (Number.isNaN(ts)) return '';
+//     const d = new Date(ts);
+//     const pad = (n: number) => String(n).padStart(2, '0');
+//     return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+// }
 
 // function normalizeType(value?: string | null): string {
 //     if (!value) return ACTIVITY_TYPES[0];

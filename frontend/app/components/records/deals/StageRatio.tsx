@@ -85,15 +85,7 @@ export default function StageRatio({ deals }: { deals: Deal[] }) {
         return map;
     }, [pipelines]);
 
-    const stageClassById = useMemo(() => {
-        const map = new Map<number, StageClass>();
-        Object.values(stagesByPipeline).forEach((stages) =>
-            stages.forEach((s) => map.set(s.id, classifyStage(s))),
-        );
-        return map;
-    }, [stagesByPipeline]);
-    
-    const closedValue = (d: Deal, won: boolean) => (won ? d.actualValue : d.value) ?? 0;
+    const closedValue = (d: Deal) => (d.won === true ? d.actualValue : d.value) ?? 0;
 
     const pipelineData = useMemo<PipelineDatum[]>(
         () =>
@@ -108,9 +100,7 @@ export default function StageRatio({ deals }: { deals: Deal[] }) {
                         total: matches.reduce(
                             (sum, d) =>
                                 sum +
-                                (open
-                                    ? (d.value ?? 0)
-                                    : closedValue(d, d.stage != null && stageClassById.get(d.stage) === 'won')),
+                                (open ? (d.value ?? 0) : closedValue(d)),
                             0,
                         ),
                     };
@@ -122,7 +112,7 @@ export default function StageRatio({ deals }: { deals: Deal[] }) {
                     { name: pipeline.name, status: 'closed' as const, ...closedBucket, currency, fill: fadeColor(base) },
                 ];
             }),
-        [deals, pipelines, pipelineColorById, stageClassById],
+        [deals, pipelines, pipelineColorById],
     );
 
     const stageData = useMemo<StageDatum[]>(
@@ -133,7 +123,6 @@ export default function StageRatio({ deals }: { deals: Deal[] }) {
                     stages.map((stage, i) => {
                         const klass = classifyStage(stage);
                         const baseColor = colorForStage(klass, i, stages.length);
-                        const won = klass === 'won';
                         const matches = deals.filter(
                             (d) => d.stage === stage.id && (status === 'closed' ? isClosed(d) : !isClosed(d)),
                         );
@@ -143,7 +132,7 @@ export default function StageRatio({ deals }: { deals: Deal[] }) {
                             status,
                             value: matches.length,
                             total: matches.reduce(
-                                (sum, d) => sum + (status === 'closed' ? closedValue(d, won) : (d.value ?? 0)),
+                                (sum, d) => sum + (status === 'closed' ? closedValue(d) : (d.value ?? 0)),
                                 0,
                             ),
                             currency: matches[0]?.currency || 'USD',

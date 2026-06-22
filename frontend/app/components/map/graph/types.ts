@@ -1,6 +1,6 @@
 import type { Node, Edge } from '@xyflow/react';
 import type { Activity, Company, CompanyMetrics, Contact, Deal, Note, Task, User } from '@/app/lib/types';
-import type { DealOutcome, StageClass } from '@/app/components/records/deals/dealOutcome';
+import type { DealOutcome } from '@/app/components/records/deals/dealOutcome';
 
 // note to hunter in the future: yo this type file is ONLY used by the graph; it isn't a general object definition file like the other type.ts is. therefore you should keep the file here as-is
 
@@ -72,6 +72,5 @@ export type GraphInput = {
     tasks: Task[];
     notes: Note[];
     stageNames: Map<number, string>;
-    stageClass: Map<number, StageClass>;
     ucLabel: string;
 };

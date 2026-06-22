@@ -13,6 +13,7 @@ import org.springframework.web.bind.annotation.RestController;
 import ooo.klae.connex.backend.beans.Deal;
 import ooo.klae.connex.backend.beans.DealPerson;
 import ooo.klae.connex.backend.dto.ActivityDto;
+import ooo.klae.connex.backend.dto.CloseDealRequest;
 import ooo.klae.connex.backend.dto.DealDto;
 import ooo.klae.connex.backend.dto.NoteDto;
 import ooo.klae.connex.backend.dto.TagDto;
@@ -100,6 +101,30 @@ public class DealController {
     @DeleteMapping("/{id}")
     public void deleteDeal(@PathVariable int id) {
         dealService.delete(id);
+    }
+
+    /**
+     * POST endpoint to close a deal.
+     * @param id
+     * @param req
+     * @return
+     */
+    @PostMapping("/{id}/close")
+    public DealDto closeDeal(@PathVariable int id, @Valid @RequestBody(required = false) CloseDealRequest req) {
+        Boolean won = req != null ? req.getWon() : null;
+        String reason = req != null ? req.getReason() : null;
+        Double actualValue = req != null ? req.getActualValue() : null;
+        return DealDto.from(dealService.close(id, won, reason, actualValue));
+    }
+
+    /**
+     * POST endpoint to reopen a closed deal.
+     * @param id
+     * @return
+     */
+    @PostMapping("/{id}/reopen")
+    public DealDto reopenDeal(@PathVariable int id) {
+        return DealDto.from(dealService.reopen(id));
     }
 
     /**

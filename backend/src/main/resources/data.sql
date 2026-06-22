@@ -71,19 +71,19 @@ INSERT INTO person (id, name, email, phone, company_id, title, image_url) VALUES
     (15, 'Solo Sven',            'sven@freelance.test',           '+1-555-000-1115', NULL, 'Freelancer', null);
 
 -- deal
-INSERT INTO deal (id, name, value, currency, pipeline_id, stage_id, company_id, expected_close_date, closed_at) VALUES
-    (1,  'Acme - Anvil Restock Q3',           45000.00,  'USD', 1, 2, 1,    '2026-07-15 00:00:00', NULL),
-    (2,  'Globex - Enterprise License',       250000.00, 'USD', 1, 3, 2,    '2026-08-01 00:00:00', NULL),
-    (3,  'Initech - TPS Reporting Module',    75000.00,  'USD', 1, 4, 3,    '2026-06-30 00:00:00', NULL),
-    (4,  'Soylent - Bulk Supply Agreement',   180000.00, 'USD', 1, 5, 4,    '2026-04-10 00:00:00', '2026-04-08 14:30:00'),
-    (5,  'Umbrella - Lab Equipment',          92000.00,  'USD', 1, 6, 5,    '2026-03-15 00:00:00', '2026-03-20 09:00:00'),
-    (6,  'Stark - Defense Contract',          1500000.00,'USD', 1, 4, 6,    '2026-09-30 00:00:00', NULL),
-    (7,  'Wayne - Security Overhaul',         420000.00, 'USD', 1, 3, 7,    '2026-07-22 00:00:00', NULL),
-    (8,  'Cyberdyne - AI Platform Trial',     35000.00,  'USD', 1, 1, 8,    '2026-08-15 00:00:00', NULL),
-    (9,  'Freelance - Imani Retainer',        12000.00,  'USD', 1, 2, NULL, '2026-06-01 00:00:00', NULL),
-    (10, 'Acme - Annual License Renewal',     60000.00,  'USD', 2, 8, 1,    '2026-06-30 00:00:00', NULL),
-    (11, 'Globex - Renewal',                  300000.00, 'USD', 2, 9, 2,    '2026-05-01 00:00:00', '2026-04-28 11:15:00'),
-    (12, 'Initech - Renewal',                 80000.00,  'USD', 2, 10, 3,   '2026-04-30 00:00:00', '2026-05-02 16:45:00');
+INSERT INTO deal (id, name, value, currency, pipeline_id, stage_id, company_id, expected_close_date, closed_at, won) VALUES
+    (1,  'Acme - Anvil Restock Q3',           45000.00,  'USD', 1, 2, 1,    '2026-07-15 00:00:00', NULL,                  NULL),
+    (2,  'Globex - Enterprise License',       250000.00, 'USD', 1, 3, 2,    '2026-08-01 00:00:00', NULL,                  NULL),
+    (3,  'Initech - TPS Reporting Module',    75000.00,  'USD', 1, 4, 3,    '2026-06-30 00:00:00', NULL,                  NULL),
+    (4,  'Soylent - Bulk Supply Agreement',   180000.00, 'USD', 1, 5, 4,    '2026-04-10 00:00:00', '2026-04-08 14:30:00', TRUE),
+    (5,  'Umbrella - Lab Equipment',          92000.00,  'USD', 1, 6, 5,    '2026-03-15 00:00:00', '2026-03-20 09:00:00', FALSE),
+    (6,  'Stark - Defense Contract',          1500000.00,'USD', 1, 4, 6,    '2026-09-30 00:00:00', NULL,                  NULL),
+    (7,  'Wayne - Security Overhaul',         420000.00, 'USD', 1, 3, 7,    '2026-07-22 00:00:00', NULL,                  NULL),
+    (8,  'Cyberdyne - AI Platform Trial',     35000.00,  'USD', 1, 1, 8,    '2026-08-15 00:00:00', NULL,                  NULL),
+    (9,  'Freelance - Imani Retainer',        12000.00,  'USD', 1, 2, NULL, '2026-06-01 00:00:00', NULL,                  NULL),
+    (10, 'Acme - Annual License Renewal',     60000.00,  'USD', 2, 8, 1,    '2026-06-30 00:00:00', NULL,                  NULL),
+    (11, 'Globex - Renewal',                  300000.00, 'USD', 2, 9, 2,    '2026-05-01 00:00:00', '2026-04-28 11:15:00', TRUE),
+    (12, 'Initech - Renewal',                 80000.00,  'USD', 2, 10, 3,   '2026-04-30 00:00:00', '2026-05-02 16:45:00', FALSE);
 
 -- activity
 INSERT INTO activity (id, type, subject, notes, person_id, deal_id, created_by_id, timestamp) VALUES
