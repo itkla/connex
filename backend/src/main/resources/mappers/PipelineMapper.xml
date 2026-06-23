@@ -5,6 +5,7 @@
 
   <resultMap id="StageResult" type="Stage">
     <id property="id" column="id"/>
+    <result property="workspaceId" column="workspace_id"/>
     <result property="name" column="name"/>
     <result property="position" column="position"/>
     <result property="success" column="is_success"/>
@@ -16,58 +17,69 @@
 
   <resultMap id="PipelineFullResult" type="Pipeline">
     <id property="id" column="id"/>
+    <result property="workspaceId" column="workspace_id"/>
     <result property="name" column="name"/>
     <result property="createdAt" column="created_at"/>
     <result property="updatedAt" column="updated_at"/>
-    <collection property="stages" ofType="Stage" column="id" select="ooo.klae.connex.backend.mappers.PipelineMapper.getStagesByPipelineId"/>
+    <collection property="stages" ofType="Stage"
+                column="{workspaceId=workspace_id,pipelineId=id}"
+                select="ooo.klae.connex.backend.mappers.PipelineMapper.getStagesByPipelineId"/>
   </resultMap>
 
   <select id="getAllPipelines" resultType="Pipeline">
-    SELECT id, name, created_at, updated_at FROM pipeline
+    SELECT id, workspace_id, name, created_at, updated_at FROM pipeline WHERE workspace_id = #{workspaceId}
   </select>
 
   <select id="getPipelineById" resultMap="PipelineFullResult">
-    SELECT id, name, created_at, updated_at FROM pipeline WHERE id = #{id}
+    SELECT id, workspace_id, name, created_at, updated_at FROM pipeline
+    WHERE workspace_id = #{workspaceId} AND id = #{id}
   </select>
 
   <select id="search" resultType="Pipeline">
-    SELECT id, name, created_at, updated_at FROM pipeline
-    WHERE name LIKE #{query}
+    SELECT id, workspace_id, name, created_at, updated_at FROM pipeline
+    WHERE workspace_id = #{workspaceId} AND name LIKE #{query}
     ORDER BY name
     LIMIT 10
   </select>
 
+  <select id="pipelineExists" resultType="boolean">
+    SELECT EXISTS(
+      SELECT 1 FROM pipeline WHERE workspace_id = #{workspaceId} AND id = #{id}
+    )
+  </select>
+
   <insert id="insertPipeline" useGeneratedKeys="true" keyProperty="id">
-    INSERT INTO pipeline (name) VALUES (#{name})
+    INSERT INTO pipeline (workspace_id, name) VALUES (#{workspaceId}, #{name})
   </insert>
 
   <update id="updatePipeline">
-    UPDATE pipeline SET name = #{name} WHERE id = #{id}
+    UPDATE pipeline SET name = #{name} WHERE workspace_id = #{workspaceId} AND id = #{id}
   </update>
 
-  <delete id="deletePipeline">DELETE FROM pipeline WHERE id = #{id}</delete>
+  <delete id="deletePipeline">DELETE FROM pipeline WHERE workspace_id = #{workspaceId} AND id = #{id}</delete>
 
   <select id="getStageById" resultMap="StageResult">
-    SELECT id, name, pipeline_id, position, is_success, is_failure FROM stage WHERE id = #{id}
+    SELECT id, workspace_id, name, pipeline_id, position, is_success, is_failure FROM stage
+    WHERE workspace_id = #{workspaceId} AND id = #{id}
   </select>
 
   <select id="getStagesByPipelineId" resultMap="StageResult">
-    SELECT id, name, pipeline_id, position, is_success, is_failure FROM stage
-    WHERE pipeline_id = #{pipelineId}
+    SELECT id, workspace_id, name, pipeline_id, position, is_success, is_failure FROM stage
+    WHERE workspace_id = #{workspaceId} AND pipeline_id = #{pipelineId}
     ORDER BY position
   </select>
 
   <insert id="insertStage" useGeneratedKeys="true" keyProperty="id">
-    INSERT INTO stage (name, pipeline_id, position, is_success, is_failure)
-    VALUES (#{name}, #{pipeline.id}, #{position}, #{success}, #{failure})
+    INSERT INTO stage (workspace_id, name, pipeline_id, position, is_success, is_failure)
+    VALUES (#{workspaceId}, #{name}, #{pipeline.id}, #{position}, #{success}, #{failure})
   </insert>
 
   <update id="updateStage">
     UPDATE stage
     SET name = #{name}, pipeline_id = #{pipeline.id}, position = #{position},
         is_success = #{success}, is_failure = #{failure}
-    WHERE id = #{id}
+    WHERE workspace_id = #{workspaceId} AND id = #{id}
   </update>
 
-  <delete id="deleteStage">DELETE FROM stage WHERE id = #{id}</delete>
+  <delete id="deleteStage">DELETE FROM stage WHERE workspace_id = #{workspaceId} AND id = #{id}</delete>
 </mapper>

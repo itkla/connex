@@ -75,6 +75,7 @@ abstract class AbstractMapperTest {
     protected Pipeline newPipeline() {
         Pipeline pipeline = new Pipeline();
         pipeline.setName("Pipeline " + unique());
+        pipeline.setWorkspaceId(workspace.getId());
         pipelineMapper.insertPipeline(pipeline);
         return pipeline;
     }
@@ -84,6 +85,7 @@ abstract class AbstractMapperTest {
         stage.setName("Stage " + unique());
         stage.setPipeline(pipeline);
         stage.setPosition(position);
+        stage.setWorkspaceId(workspace.getId());
         pipelineMapper.insertStage(stage);
         return stage;
     }

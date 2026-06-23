@@ -12,6 +12,7 @@ import org.junit.jupiter.api.Test;
 
 import ooo.klae.connex.backend.beans.Pipeline;
 import ooo.klae.connex.backend.beans.Stage;
+import ooo.klae.connex.backend.beans.Workspace;
 
 class PipelineMapperTest extends AbstractMapperTest {
 
@@ -31,9 +32,10 @@ class PipelineMapperTest extends AbstractMapperTest {
     void getPipelineById_returnsInsertedRow() {
         Pipeline pipeline = newPipeline();
 
-        Pipeline found = pipelineMapper.getPipelineById(pipeline.getId());
+        Pipeline found = pipelineMapper.getPipelineById(workspace.getId(), pipeline.getId());
 
         assertNotNull(found);
+        assertEquals(workspace.getId(), found.getWorkspaceId());
         assertEquals(pipeline.getName(), found.getName());
     }
 
@@ -44,7 +46,7 @@ class PipelineMapperTest extends AbstractMapperTest {
     void getAllPipelines_includesInsertedRow() {
         Pipeline pipeline = newPipeline();
 
-        List<Pipeline> all = pipelineMapper.getAllPipelines();
+        List<Pipeline> all = pipelineMapper.getAllPipelines(workspace.getId());
 
         assertTrue(all.stream().anyMatch(x -> x.getId() == pipeline.getId()));
     }
@@ -59,7 +61,7 @@ class PipelineMapperTest extends AbstractMapperTest {
 
         pipelineMapper.updatePipeline(pipeline);
 
-        assertEquals("Renamed Pipeline", pipelineMapper.getPipelineById(pipeline.getId()).getName());
+        assertEquals("Renamed Pipeline", pipelineMapper.getPipelineById(workspace.getId(), pipeline.getId()).getName());
     }
 
     /**
@@ -69,9 +71,9 @@ class PipelineMapperTest extends AbstractMapperTest {
     void deletePipeline_removesRow() {
         Pipeline pipeline = newPipeline();
 
-        pipelineMapper.deletePipeline(pipeline.getId());
+        pipelineMapper.deletePipeline(workspace.getId(), pipeline.getId());
 
-        assertNull(pipelineMapper.getPipelineById(pipeline.getId()));
+        assertNull(pipelineMapper.getPipelineById(workspace.getId(), pipeline.getId()));
     }
 
     /**
@@ -94,7 +96,7 @@ class PipelineMapperTest extends AbstractMapperTest {
         Pipeline pipeline = newPipeline();
         Stage stage = newStage(pipeline, 2);
 
-        Stage found = pipelineMapper.getStageById(stage.getId());
+        Stage found = pipelineMapper.getStageById(workspace.getId(), stage.getId());
 
         assertNotNull(found);
         assertEquals(stage.getName(), found.getName());
@@ -113,7 +115,7 @@ class PipelineMapperTest extends AbstractMapperTest {
         Stage stage0 = newStage(pipeline, 0);
         Stage stage1 = newStage(pipeline, 1);
 
-        List<Stage> stages = pipelineMapper.getStagesByPipelineId(pipeline.getId());
+        List<Stage> stages = pipelineMapper.getStagesByPipelineId(workspace.getId(), pipeline.getId());
 
         assertEquals(3, stages.size());
         assertEquals(stage0.getId(), stages.get(0).getId());
@@ -133,7 +135,7 @@ class PipelineMapperTest extends AbstractMapperTest {
 
         pipelineMapper.updateStage(stage);
 
-        Stage found = pipelineMapper.getStageById(stage.getId());
+        Stage found = pipelineMapper.getStageById(workspace.getId(), stage.getId());
         assertEquals("Renamed Stage", found.getName());
         assertEquals(5, found.getPosition());
     }
@@ -146,14 +148,14 @@ class PipelineMapperTest extends AbstractMapperTest {
         Pipeline pipeline = newPipeline();
         Stage stage = newStage(pipeline, 0);
 
-        Stage fresh = pipelineMapper.getStageById(stage.getId());
+        Stage fresh = pipelineMapper.getStageById(workspace.getId(), stage.getId());
         assertFalse(fresh.isSuccess());
         assertFalse(fresh.isFailure());
 
         stage.setSuccess(true);
         pipelineMapper.updateStage(stage);
 
-        Stage updated = pipelineMapper.getStageById(stage.getId());
+        Stage updated = pipelineMapper.getStageById(workspace.getId(), stage.getId());
         assertTrue(updated.isSuccess());
         assertFalse(updated.isFailure());
     }
@@ -166,9 +168,9 @@ class PipelineMapperTest extends AbstractMapperTest {
         Pipeline pipeline = newPipeline();
         Stage stage = newStage(pipeline, 0);
 
-        pipelineMapper.deleteStage(stage.getId());
+        pipelineMapper.deleteStage(workspace.getId(), stage.getId());
 
-        assertNull(pipelineMapper.getStageById(stage.getId()));
+        assertNull(pipelineMapper.getStageById(workspace.getId(), stage.getId()));
     }
 
     /**
@@ -179,8 +181,56 @@ class PipelineMapperTest extends AbstractMapperTest {
         Pipeline pipeline = newPipeline();
         Stage stage = newStage(pipeline, 0);
 
-        pipelineMapper.deletePipeline(pipeline.getId());
+        pipelineMapper.deletePipeline(workspace.getId(), pipeline.getId());
 
-        assertNull(pipelineMapper.getStageById(stage.getId()));
+        assertNull(pipelineMapper.getStageById(workspace.getId(), stage.getId()));
+    }
+
+    /**
+     * A pipeline and its stages in another workspace are invisible and immutable from this workspace.
+     */
+    @Test
+    void pipelinesAndStages_areIsolatedByWorkspace() {
+        Pipeline mine = newPipeline();
+        Workspace other = newWorkspace();
+        Pipeline foreignPipeline = newPipelineIn(other);
+        Stage foreignStage = newStageIn(other, foreignPipeline, 0);
+
+        assertNull(pipelineMapper.getPipelineById(workspace.getId(), foreignPipeline.getId()));
+        assertFalse(pipelineMapper.pipelineExists(workspace.getId(), foreignPipeline.getId()));
+        assertNull(pipelineMapper.getStageById(workspace.getId(), foreignStage.getId()));
+        assertTrue(pipelineMapper.getStagesByPipelineId(workspace.getId(), foreignPipeline.getId()).isEmpty());
+        assertTrue(pipelineMapper.getAllPipelines(workspace.getId()).stream().noneMatch(p -> p.getId() == foreignPipeline.getId()));
+        assertTrue(pipelineMapper.getAllPipelines(workspace.getId()).stream().anyMatch(p -> p.getId() == mine.getId()));
+
+        // cross-workspace mutation affects zero rows; the foreign rows survive
+        assertEquals(0, pipelineMapper.deletePipeline(workspace.getId(), foreignPipeline.getId()));
+        assertTrue(pipelineMapper.pipelineExists(other.getId(), foreignPipeline.getId()));
+    }
+
+    private Workspace newWorkspace() {
+        Workspace ws = new Workspace();
+        ws.setName("WS " + unique());
+        ws.setSlug("ws_" + unique());
+        workspaceMapper.insert(ws);
+        return ws;
+    }
+
+    private Pipeline newPipelineIn(Workspace ws) {
+        Pipeline pipeline = new Pipeline();
+        pipeline.setName("Pipeline " + unique());
+        pipeline.setWorkspaceId(ws.getId());
+        pipelineMapper.insertPipeline(pipeline);
+        return pipeline;
+    }
+
+    private Stage newStageIn(Workspace ws, Pipeline pipeline, int position) {
+        Stage stage = new Stage();
+        stage.setName("Stage " + unique());
+        stage.setWorkspaceId(ws.getId());
+        stage.setPipeline(pipeline);
+        stage.setPosition(position);
+        pipelineMapper.insertStage(stage);
+        return stage;
     }
 }

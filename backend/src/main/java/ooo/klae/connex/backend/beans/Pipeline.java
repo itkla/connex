@@ -17,6 +17,7 @@ import lombok.NoArgsConstructor;
 @NoArgsConstructor
 public class Pipeline {
     private int id;
+    private int workspaceId; // owning workspace
     private String name;
     private Stage[] stages;
     private String createdAt;
@@ -28,6 +29,14 @@ public class Pipeline {
 
     public void setId(int id) {
         this.id = id;
+    }
+
+    public int getWorkspaceId() {
+        return workspaceId;
+    }
+
+    public void setWorkspaceId(int workspaceId) {
+        this.workspaceId = workspaceId;
     }
 
     public String getName() {
