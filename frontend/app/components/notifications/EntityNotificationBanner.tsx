@@ -60,7 +60,7 @@ export default function EntityNotificationBanner({
                         <div className="min-w-0 flex-1">
                             <p className={cn("font-medium tracking-tight", style.accent)}>{content.title}</p>
                             {content.body ? (
-                                <p className="mt-0.5 text-sm text-muted-foreground">{content.body}</p>
+                                <p className="mt-0.5 text-sm text-foreground">{content.body}</p>
                             ) : null}
                         </div>
                         <div className="flex shrink-0 items-center gap-2">
