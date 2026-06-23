@@ -67,6 +67,7 @@ abstract class AbstractMapperTest {
         company.setIndustry("Tech");
         company.setPhone("+81-90-1234-5678");
         company.setAddress("1-1-1 Shinjuku, Tokyo, Japan");
+        company.setWorkspaceId(workspace.getId());
         companyMapper.insert(company);
         return company;
     }

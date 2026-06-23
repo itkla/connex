@@ -159,6 +159,6 @@ public class TagService {
      */
     public List<Company> getCompaniesByTagId(int tagId) {
         if (tagMapper.getTagById(tagId) == null) throw new ResourceNotFoundException("Tag not found with id: " + tagId);
-        return companyMapper.getCompaniesByTagId(tagId);
+        return companyMapper.getCompaniesByTagId(workspaceService.getCurrentWorkspaceId(), tagId);
     }
 }
