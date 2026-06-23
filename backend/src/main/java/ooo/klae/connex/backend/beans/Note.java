@@ -18,6 +18,7 @@ import lombok.NoArgsConstructor;
 @NoArgsConstructor
 public class Note {
     private int id;
+    private int workspaceId; // owning workspace
     private String content;
     @JsonIdentityReference(alwaysAsId = true)
     private User author;
@@ -34,6 +35,14 @@ public class Note {
 
     public void setId(int id) {
         this.id = id;
+    }
+
+    public int getWorkspaceId() {
+        return workspaceId;
+    }
+
+    public void setWorkspaceId(int workspaceId) {
+        this.workspaceId = workspaceId;
     }
 
     public String getContent() {

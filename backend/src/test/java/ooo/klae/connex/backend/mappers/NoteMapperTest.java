@@ -16,6 +16,7 @@ import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.beans.Pipeline;
 import ooo.klae.connex.backend.beans.Stage;
 import ooo.klae.connex.backend.beans.User;
+import ooo.klae.connex.backend.beans.Workspace;
 
 class NoteMapperTest extends AbstractMapperTest {
 
@@ -24,6 +25,7 @@ class NoteMapperTest extends AbstractMapperTest {
     // Builds note object
     private Note build(String content, User author, Person person, Deal deal) {
         Note n = new Note();
+        n.setWorkspaceId(workspace.getId());
         n.setContent(content);
         n.setAuthor(author);
         n.setPerson(person);
@@ -57,7 +59,7 @@ class NoteMapperTest extends AbstractMapperTest {
         Note note = build("the content", user, person, deal);
         noteMapper.insert(note);
 
-        Note found = noteMapper.getNoteById(note.getId());
+        Note found = noteMapper.getNoteById(workspace.getId(), note.getId());
 
         assertNotNull(found);
         assertEquals("the content", found.getContent());
@@ -69,11 +71,11 @@ class NoteMapperTest extends AbstractMapperTest {
     }
 
     /**
-     * Gets a note by ID and checks if the returned note is null when the ID is negative.
+     * Gets a note by ID and checks if the returned note is null when the ID is missing.
      */
     @Test
     void getNoteById_returnsNullWhenMissing() {
-        assertNull(noteMapper.getNoteById(-1));
+        assertNull(noteMapper.getNoteById(workspace.getId(), -1));
     }
 
     /**
@@ -85,7 +87,7 @@ class NoteMapperTest extends AbstractMapperTest {
 
         noteMapper.insert(note);
 
-        Note found = noteMapper.getNoteById(note.getId());
+        Note found = noteMapper.getNoteById(workspace.getId(), note.getId());
         assertNotNull(found);
         assertTrue(found.getPerson() == null || found.getPerson().getId() == 0);
         assertTrue(found.getDeal() == null || found.getDeal().getId() == 0);
@@ -99,7 +101,7 @@ class NoteMapperTest extends AbstractMapperTest {
         Note note = build("listed", newUser(), null, null);
         noteMapper.insert(note);
 
-        List<Note> all = noteMapper.getAllNotes();
+        List<Note> all = noteMapper.getAllNotes(workspace.getId());
 
         assertTrue(all.stream().anyMatch(x -> x.getId() == note.getId()));
     }
@@ -116,7 +118,7 @@ class NoteMapperTest extends AbstractMapperTest {
 
         noteMapper.update(note);
 
-        Note found = noteMapper.getNoteById(note.getId());
+        Note found = noteMapper.getNoteById(workspace.getId(), note.getId());
         assertEquals("after", found.getContent());
     }
 
@@ -128,9 +130,9 @@ class NoteMapperTest extends AbstractMapperTest {
         Note note = build("temp", newUser(), null, null);
         noteMapper.insert(note);
 
-        noteMapper.delete(note.getId());
+        noteMapper.delete(workspace.getId(), note.getId());
 
-        assertNull(noteMapper.getNoteById(note.getId()));
+        assertNull(noteMapper.getNoteById(workspace.getId(), note.getId()));
     }
 
     /**
@@ -147,7 +149,7 @@ class NoteMapperTest extends AbstractMapperTest {
         noteMapper.insert(note1);
         noteMapper.insert(note2);
 
-        List<Note> matched = noteMapper.getNotesByPersonId(person1.getId());
+        List<Note> matched = noteMapper.getNotesByPersonId(workspace.getId(), person1.getId());
 
         assertTrue(matched.stream().anyMatch(x -> x.getId() == note1.getId()));
         assertTrue(matched.stream().noneMatch(x -> x.getId() == note2.getId()));
@@ -169,7 +171,7 @@ class NoteMapperTest extends AbstractMapperTest {
         noteMapper.insert(note1);
         noteMapper.insert(note2);
 
-        List<Note> matched = noteMapper.getNotesByDealId(deal1.getId());
+        List<Note> matched = noteMapper.getNotesByDealId(workspace.getId(), deal1.getId());
 
         assertTrue(matched.stream().anyMatch(x -> x.getId() == note1.getId()));
         assertTrue(matched.stream().noneMatch(x -> x.getId() == note2.getId()));
@@ -188,9 +190,39 @@ class NoteMapperTest extends AbstractMapperTest {
         noteMapper.insert(note1);
         noteMapper.insert(note2);
 
-        List<Note> matched = noteMapper.getNotesByAuthorId(user1.getId());
+        List<Note> matched = noteMapper.getNotesByAuthorId(workspace.getId(), user1.getId());
 
         assertTrue(matched.stream().anyMatch(x -> x.getId() == note1.getId()));
         assertTrue(matched.stream().noneMatch(x -> x.getId() == note2.getId()));
+    }
+
+    /**
+     * A note in another workspace is invisible and immutable from this workspace.
+     */
+    @Test
+    void notes_areIsolatedByWorkspace() {
+        User user = newUser();
+        Note mine = build("mine", user, null, null);
+        noteMapper.insert(mine);
+
+        Workspace other = newWorkspace();
+        Note foreign = build("foreign", user, null, null);
+        foreign.setWorkspaceId(other.getId());
+        noteMapper.insert(foreign);
+
+        assertNull(noteMapper.getNoteById(workspace.getId(), foreign.getId()));
+        assertTrue(noteMapper.getAllNotes(workspace.getId()).stream().noneMatch(n -> n.getId() == foreign.getId()));
+        assertTrue(noteMapper.getAllNotes(workspace.getId()).stream().anyMatch(n -> n.getId() == mine.getId()));
+
+        assertEquals(0, noteMapper.delete(workspace.getId(), foreign.getId()));
+        assertNotNull(noteMapper.getNoteById(other.getId(), foreign.getId()));
+    }
+
+    private Workspace newWorkspace() {
+        Workspace ws = new Workspace();
+        ws.setName("WS " + unique());
+        ws.setSlug("ws_" + unique());
+        workspaceMapper.insert(ws);
+        return ws;
     }
 }

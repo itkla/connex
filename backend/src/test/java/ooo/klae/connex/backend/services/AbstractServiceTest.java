@@ -170,6 +170,7 @@ abstract class AbstractServiceTest {
 
     protected Note newNote(User author, Person person, Deal deal) {
         Note note = new Note();
+        note.setWorkspaceId(workspace.getId());
         note.setContent("note_" + unique());
         note.setAuthor(author);
         note.setPerson(person);

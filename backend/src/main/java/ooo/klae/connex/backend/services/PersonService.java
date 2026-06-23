@@ -213,8 +213,9 @@ public class PersonService {
      * Retrieves the notes associated with a person in the active workspace.
      */
     public List<Note> getNotesByPersonId(int personId) {
-        requirePerson(workspaceService.getCurrentWorkspaceId(), personId);
-        return noteMapper.getNotesByPersonId(personId);
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        requirePerson(workspaceId, personId);
+        return noteMapper.getNotesByPersonId(workspaceId, personId);
     }
 
     /**

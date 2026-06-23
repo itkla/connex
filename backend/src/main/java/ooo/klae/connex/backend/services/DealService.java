@@ -467,7 +467,7 @@ public class DealService {
     public List<Note> getNotesByDealId(int dealId) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         if (dealMapper.getDealById(workspaceId, dealId) == null) throw new ResourceNotFoundException("Deal not found with id: " + dealId);
-        return noteMapper.getNotesByDealId(dealId);
+        return noteMapper.getNotesByDealId(workspaceId, dealId);
     }
 
     /**

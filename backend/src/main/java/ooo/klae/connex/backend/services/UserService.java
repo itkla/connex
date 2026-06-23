@@ -126,7 +126,7 @@ public class UserService implements UserDetailsService {
      */
     public List<Note> getNotesByUserId(int userId) {
         getUserById(userId);
-        return noteMapper.getNotesByAuthorId(userId);
+        return noteMapper.getNotesByAuthorId(workspaceService.getCurrentWorkspaceId(), userId);
     }
 
     /**
