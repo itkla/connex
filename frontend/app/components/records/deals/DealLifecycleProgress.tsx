@@ -3,7 +3,7 @@ import { CheckIcon, XMarkIcon, CheckCircleIcon, XCircleIcon } from '@heroicons/r
 import { getLocale, getTranslations } from 'next-intl/server';
 
 import { type Stage } from '@/app/lib/types';
-import { formatDate, parseMysqlDateTime } from '@/app/lib/utils';
+import { formatDate, parseMysqlDateTime, startOfLocalDay } from '@/app/lib/utils';
 import { classifyStage, type DealOutcome } from '@/app/components/records/deals/dealOutcome';
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
 
@@ -42,7 +42,8 @@ export default async function DealLifecycleProgress({
     const startMs = parseMysqlDateTime(createdAt);
     const expectedMs = expectedCloseDate ? parseMysqlDateTime(expectedCloseDate) : NaN;
     const closedMs = closedAt ? parseMysqlDateTime(closedAt) : NaN;
-    const nowMs = Date.now();
+    const nowMs = new Date().getTime();
+    const todayStart = startOfLocalDay(nowMs);
 
     const isClosed = outcome !== 'open';
     const isWon = outcome === 'won';
@@ -66,7 +67,7 @@ export default async function DealLifecycleProgress({
 
     const daysOpen = hasTime ? Math.round((nowMs - startMs) / DAY_MS) : 0;
     const daysToExpected = Number.isFinite(expectedMs)
-        ? Math.round((expectedMs - nowMs) / DAY_MS)
+        ? Math.round((expectedMs - todayStart) / DAY_MS)
         : null;
     const closedVsExpected =
         isClosed && Number.isFinite(closedMs) && Number.isFinite(expectedMs)

@@ -17,6 +17,7 @@ import {
     XCircleIcon,
     ArrowUturnLeftIcon,
     TrashIcon,
+    UsersIcon,
 } from '@heroicons/react/24/outline';
 
 import { useAttachmentUploader } from '@/app/components/attachments/useAttachmentUploader';
@@ -25,19 +26,21 @@ import {
     DropdownMenu,
     DropdownMenuContent,
     DropdownMenuItem,
+    DropdownMenuSeparator,
     DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Button } from '@/components/ui/button';
 import { ButtonGroup } from '@/components/ui/button-group';
 
 import DeleteRecordDialog from '@/app/components/records/DeleteRecordDialog';
+import DealTeamDialog from '@/app/components/records/deals/DealTeamDialog';
 import EditDealSheet from '@/app/components/records/deals/EditDealSheet';
 import NewDealActivityDialog from '@/app/components/records/deals/NewDealActivityDialog';
 import NewDealTaskDialog from '@/app/components/records/deals/NewDealTaskDialog';
 import NoteDialog from '@/app/components/activity/notes/NoteDialog';
 
 import { closeDeal, deleteDeal, reopenDeal } from '@/app/lib/api';
-import { type Company, type Contact, type Deal, type Pipeline, type Stage } from '@/app/lib/types';
+import { type Company, type Contact, type Deal, type Pipeline, type Stage, type User } from '@/app/lib/types';
 import { isDealClosed } from './dealOutcome';
 
 export default function DealActionsMenu({
@@ -48,6 +51,8 @@ export default function DealActionsMenu({
     currentUserId,
     persons = [],
     deals = [],
+    users = [],
+    collaborators = [],
 }: {
     deal: Deal;
     companies: Company[];
@@ -56,11 +61,14 @@ export default function DealActionsMenu({
     currentUserId: number;
     persons?: Contact[];
     deals?: Deal[];
+    users?: User[];
+    collaborators?: User[];
 }) {
     const router = useRouter();
     const t = useTranslations('DealsActionsMenu');
     const { inputRef: attachmentInputRef, uploading: attachmentsUploading, openPicker: openAttachmentPicker, onFilesSelected: onAttachmentFilesSelected } = useAttachmentUploader('deal', deal.id);
     const [editOpen, setEditOpen] = useState(false);
+    const [teamOpen, setTeamOpen] = useState(false);
     const [activityOpen, setActivityOpen] = useState(false);
     const [taskOpen, setTaskOpen] = useState(false);
     const [noteOpen, setNoteOpen] = useState(false);
@@ -172,6 +180,16 @@ export default function DealActionsMenu({
                         </Button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end" className="w-48">
+                        <DropdownMenuItem
+                            onSelect={(e) => {
+                                e.preventDefault();
+                                setTeamOpen(true);
+                            }}
+                        >
+                            <UsersIcon className="size-4" />
+                            <span>{t('manageTeam')}</span>
+                        </DropdownMenuItem>
+                        <DropdownMenuSeparator />
                         {closed ? (
                             <DropdownMenuItem
                                 disabled={isUpdatingStatus}
@@ -236,6 +254,15 @@ export default function DealActionsMenu({
                 companies={companies}
                 pipelines={pipelines}
                 stagesByPipeline={stagesByPipeline}
+            />
+
+            <DealTeamDialog
+                open={teamOpen}
+                onOpenChange={setTeamOpen}
+                dealId={deal.id}
+                initialOwnerId={deal.ownerId}
+                initialCollaborators={collaborators}
+                users={users}
             />
 
             <NewDealActivityDialog

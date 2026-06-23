@@ -4,12 +4,13 @@
 <mapper namespace="ooo.klae.connex.backend.mappers.TaskMapper">
 
   <resultMap id="TaskResult" type="Task">
-    <id     property="id"          column="id"/>
+    <id property="id" column="id"/>
+    <result property="workspaceId" column="workspace_id"/>
     <result property="description" column="description"/>
-    <result property="completed"   column="completed"/>
-    <result property="dueDate"     column="due_date"/>
-    <result property="createdAt"   column="created_at"/>
-    <result property="updatedAt"   column="updated_at"/>
+    <result property="completed" column="completed"/>
+    <result property="dueDate" column="due_date"/>
+    <result property="createdAt" column="created_at"/>
+    <result property="updatedAt" column="updated_at"/>
     <association property="assignedTo" javaType="User">
       <id property="id" column="assigned_to_id"/>
     </association>
@@ -22,47 +23,58 @@
   </resultMap>
 
   <sql id="taskColumns">
-    id, description, completed, due_date, assigned_to_id, person_id, deal_id,
+    id, workspace_id, description, completed, due_date, assigned_to_id, person_id, deal_id,
     created_at, updated_at
   </sql>
 
   <select id="getAllTasks" resultMap="TaskResult">
-    SELECT <include refid="taskColumns"/> FROM task ORDER BY due_date IS NULL, due_date
+    SELECT <include refid="taskColumns"/>
+    FROM task
+    WHERE workspace_id = #{workspaceId}
+    ORDER BY due_date IS NULL, due_date
   </select>
 
   <select id="getTasksByAssignedToId" resultMap="TaskResult">
-    SELECT <include refid="taskColumns"/> FROM task
-    WHERE assigned_to_id = #{assignedToId}
+    SELECT <include refid="taskColumns"/>
+    FROM task
+    WHERE workspace_id = #{workspaceId} AND assigned_to_id = #{assignedToId}
     ORDER BY due_date IS NULL, due_date
   </select>
 
   <select id="getTasksByPersonId" resultMap="TaskResult">
-    SELECT <include refid="taskColumns"/> FROM task
-    WHERE person_id = #{personId}
+    SELECT <include refid="taskColumns"/>
+    FROM task
+    WHERE workspace_id = #{workspaceId} AND person_id = #{personId}
     ORDER BY due_date IS NULL, due_date
   </select>
 
   <select id="getTasksByDealId" resultMap="TaskResult">
-    SELECT <include refid="taskColumns"/> FROM task
-    WHERE deal_id = #{dealId}
+    SELECT <include refid="taskColumns"/>
+    FROM task
+    WHERE workspace_id = #{workspaceId} AND deal_id = #{dealId}
     ORDER BY due_date IS NULL, due_date
   </select>
 
   <select id="getTaskById" resultMap="TaskResult">
-    SELECT <include refid="taskColumns"/> FROM task WHERE id = #{id}
+    SELECT <include refid="taskColumns"/>
+    FROM task
+    WHERE workspace_id = #{workspaceId} AND id = #{id}
   </select>
 
   <select id="search" resultMap="TaskResult">
-    SELECT <include refid="taskColumns"/> FROM task
-    WHERE description LIKE #{query}
+    SELECT <include refid="taskColumns"/>
+    FROM task
+    WHERE workspace_id = #{workspaceId} AND description LIKE #{query}
     ORDER BY due_date IS NULL, due_date
     LIMIT 10
   </select>
 
   <insert id="insert" useGeneratedKeys="true" keyProperty="id">
-    INSERT INTO task (description, completed, due_date, assigned_to_id, person_id, deal_id)
+    INSERT INTO task (
+      workspace_id, description, completed, due_date, assigned_to_id, person_id, deal_id
+    )
     VALUES (
-      #{description}, #{completed}, #{dueDate}, #{assignedTo.id},
+      #{workspaceId}, #{description}, #{completed}, #{dueDate}, #{assignedTo.id},
       <choose>
         <when test="person != null">#{person.id}</when>
         <otherwise>NULL</otherwise>
@@ -90,8 +102,18 @@
             <when test="deal != null">#{deal.id}</when>
             <otherwise>NULL</otherwise>
           </choose>
-    WHERE id = #{id}
+    WHERE workspace_id = #{workspaceId} AND id = #{id}
   </update>
 
-  <delete id="delete">DELETE FROM task WHERE id = #{id}</delete>
+  <delete id="delete">
+    DELETE FROM task WHERE workspace_id = #{workspaceId} AND id = #{id}
+  </delete>
+
+  <update id="complete">
+    UPDATE task
+    SET completed = TRUE
+    WHERE workspace_id = #{workspaceId}
+      AND id = #{id}
+      AND assigned_to_id = #{assignedToId}
+  </update>
 </mapper>

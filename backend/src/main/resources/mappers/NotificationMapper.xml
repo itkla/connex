@@ -1,0 +1,324 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="ooo.klae.connex.backend.mappers.NotificationMapper">
+
+  <resultMap id="NotificationResult" type="Notification">
+    <id property="id" column="id"/>
+    <result property="workspaceId" column="workspace_id"/>
+    <result property="recipientId" column="recipient_id"/>
+    <result property="type" column="type"/>
+    <result property="category" column="category"/>
+    <result property="severity" column="severity"/>
+    <result property="templateVersion" column="template_version"/>
+    <result property="title" column="title"/>
+    <result property="body" column="body"/>
+    <result property="actorId" column="actor_id"/>
+    <result property="actorLabel" column="actor_label"/>
+    <result property="sourceType" column="source_type"/>
+    <result property="sourceId" column="source_id"/>
+    <result property="sourceLabel" column="source_label"/>
+    <result property="contextType" column="context_type"/>
+    <result property="contextId" column="context_id"/>
+    <result property="contextLabel" column="context_label"/>
+    <result property="actionUrl" column="action_url"/>
+    <result property="data" column="data"/>
+    <result property="dedupeKey" column="dedupe_key"/>
+    <result property="triggeredAt" column="triggered_at"/>
+    <result property="readAt" column="read_at"/>
+    <result property="dismissedAt" column="dismissed_at"/>
+    <result property="resolvedAt" column="resolved_at"/>
+    <result property="createdAt" column="created_at"/>
+    <result property="updatedAt" column="updated_at"/>
+  </resultMap>
+
+  <resultMap id="TaskReminderCandidateResult" type="TaskReminderCandidate">
+    <result property="workspaceId" column="workspace_id"/>
+    <result property="taskId" column="task_id"/>
+    <result property="taskLabel" column="task_label"/>
+    <result property="dueDate" column="due_date"/>
+    <result property="recipientId" column="recipient_id"/>
+    <result property="recipientTimezone" column="recipient_timezone"/>
+    <result property="dealId" column="deal_id"/>
+    <result property="dealLabel" column="deal_label"/>
+    <result property="personId" column="person_id"/>
+    <result property="personLabel" column="person_label"/>
+  </resultMap>
+
+  <resultMap id="DealReminderCandidateResult" type="DealReminderCandidate">
+    <result property="workspaceId" column="workspace_id"/>
+    <result property="dealId" column="deal_id"/>
+    <result property="dealLabel" column="deal_label"/>
+    <result property="expectedCloseDate" column="expected_close_date"/>
+    <result property="recipientId" column="recipient_id"/>
+    <result property="recipientTimezone" column="recipient_timezone"/>
+  </resultMap>
+
+  <sql id="notificationColumns">
+    n.id, n.workspace_id, n.recipient_id, n.type, n.category, n.severity,
+    n.template_version, n.title, n.body, n.actor_id, n.actor_label,
+    n.source_type, n.source_id, n.source_label, n.context_type, n.context_id,
+    n.context_label, n.action_url, n.data, n.dedupe_key, n.triggered_at,
+    n.read_at, n.dismissed_at, n.resolved_at, n.created_at, n.updated_at
+  </sql>
+
+  <sql id="recipientScope">
+    n.workspace_id = #{workspaceId}
+    AND n.recipient_id = #{recipientId}
+  </sql>
+
+  <sql id="inboxFilters">
+    <choose>
+      <when test="state == 'active'">
+        AND n.dismissed_at IS NULL AND n.resolved_at IS NULL
+      </when>
+      <when test="state == 'unread'">
+        AND n.dismissed_at IS NULL AND n.resolved_at IS NULL AND n.read_at IS NULL
+      </when>
+      <when test="state == 'history'">
+        AND (n.dismissed_at IS NOT NULL OR n.resolved_at IS NOT NULL)
+      </when>
+    </choose>
+    <if test="category != null">
+      AND n.category = #{category}
+    </if>
+    <if test="contextType != null and contextId != null">
+      AND n.context_type = #{contextType} AND n.context_id = #{contextId}
+    </if>
+  </sql>
+
+  <select id="findPage" resultMap="NotificationResult">
+    SELECT <include refid="notificationColumns"/>
+    FROM notification n
+    WHERE <include refid="recipientScope"/>
+    <include refid="inboxFilters"/>
+    ORDER BY n.triggered_at DESC, n.id DESC
+    LIMIT #{limit} OFFSET #{offset}
+  </select>
+
+  <select id="countPage" resultType="long">
+    SELECT COUNT(*)
+    FROM notification n
+    WHERE <include refid="recipientScope"/>
+    <include refid="inboxFilters"/>
+  </select>
+
+  <select id="getUnreadCounts"
+          resultType="ooo.klae.connex.backend.dto.NotificationCountsDto">
+    SELECT COUNT(*) AS unread
+    FROM notification n
+    WHERE <include refid="recipientScope"/>
+      AND n.dismissed_at IS NULL
+      AND n.resolved_at IS NULL
+      AND n.read_at IS NULL
+  </select>
+
+  <select id="findById" resultMap="NotificationResult">
+    SELECT <include refid="notificationColumns"/>
+    FROM notification n
+    WHERE <include refid="recipientScope"/>
+      AND n.id = #{id}
+  </select>
+
+  <update id="markRead">
+    UPDATE notification
+    SET read_at = CURRENT_TIMESTAMP
+    WHERE workspace_id = #{workspaceId}
+      AND recipient_id = #{recipientId}
+      AND id = #{id}
+      AND read_at IS NULL
+  </update>
+
+  <update id="markUnread">
+    UPDATE notification
+    SET read_at = NULL
+    WHERE workspace_id = #{workspaceId}
+      AND recipient_id = #{recipientId}
+      AND id = #{id}
+      AND read_at IS NOT NULL
+  </update>
+
+  <update id="dismiss">
+    UPDATE notification
+    SET dismissed_at = CURRENT_TIMESTAMP
+    WHERE workspace_id = #{workspaceId}
+      AND recipient_id = #{recipientId}
+      AND id = #{id}
+      AND dismissed_at IS NULL
+      AND resolved_at IS NULL
+  </update>
+
+  <update id="restore">
+    UPDATE notification
+    SET dismissed_at = NULL, resolved_at = NULL, read_at = NULL
+    WHERE workspace_id = #{workspaceId}
+      AND recipient_id = #{recipientId}
+      AND id = #{id}
+      AND (dismissed_at IS NOT NULL OR resolved_at IS NOT NULL)
+  </update>
+
+  <update id="markAllRead">
+    UPDATE notification
+    SET read_at = CURRENT_TIMESTAMP
+    WHERE workspace_id = #{workspaceId}
+      AND recipient_id = #{recipientId}
+      AND dismissed_at IS NULL
+      AND resolved_at IS NULL
+      AND read_at IS NULL
+  </update>
+
+  <insert id="upsert" useGeneratedKeys="true" keyProperty="id">
+    INSERT INTO notification (
+      workspace_id, recipient_id, type, category, severity, template_version,
+      title, body, actor_id, actor_label, source_type, source_id, source_label,
+      context_type, context_id, context_label, action_url, data, dedupe_key,
+      triggered_at
+    )
+    VALUES (
+      #{workspaceId}, #{recipientId}, #{type}, #{category}, #{severity},
+      #{templateVersion}, #{title}, #{body}, #{actorId}, #{actorLabel},
+      #{sourceType}, #{sourceId}, #{sourceLabel}, #{contextType}, #{contextId},
+      #{contextLabel}, #{actionUrl}, #{data}, #{dedupeKey}, #{triggeredAt}
+    ) AS incoming
+    ON DUPLICATE KEY UPDATE
+      read_at = IF(
+        notification.severity &lt;&gt; incoming.severity
+          OR notification.resolved_at IS NOT NULL,
+        NULL,
+        notification.read_at
+      ),
+      dismissed_at = IF(
+        notification.severity &lt;&gt; incoming.severity
+          OR notification.resolved_at IS NOT NULL,
+        NULL,
+        notification.dismissed_at
+      ),
+      triggered_at = IF(
+        notification.severity &lt;&gt; incoming.severity
+          OR notification.resolved_at IS NOT NULL,
+        incoming.triggered_at,
+        notification.triggered_at
+      ),
+      resolved_at = IF(
+        notification.severity &lt;&gt; incoming.severity
+          OR notification.resolved_at IS NOT NULL,
+        NULL,
+        notification.resolved_at
+      ),
+      type = incoming.type,
+      category = incoming.category,
+      template_version = incoming.template_version,
+      title = incoming.title,
+      body = incoming.body,
+      actor_id = incoming.actor_id,
+      actor_label = incoming.actor_label,
+      source_type = incoming.source_type,
+      source_id = incoming.source_id,
+      source_label = incoming.source_label,
+      context_type = incoming.context_type,
+      context_id = incoming.context_id,
+      context_label = incoming.context_label,
+      action_url = incoming.action_url,
+      data = incoming.data,
+      severity = incoming.severity
+  </insert>
+
+  <select id="findReminderNotifications" resultMap="NotificationResult">
+    SELECT <include refid="notificationColumns"/>
+    FROM notification n
+    WHERE <include refid="recipientScope"/>
+      AND n.type IN ('task.due', 'deal.close')
+    ORDER BY n.id
+  </select>
+
+  <update id="resolveReminder">
+    UPDATE notification
+    SET resolved_at = #{resolvedAt}
+    WHERE workspace_id = #{workspaceId}
+      AND recipient_id = #{recipientId}
+      AND id = #{id}
+      AND type IN ('task.due', 'deal.close')
+      AND resolved_at IS NULL
+  </update>
+
+  <select id="findTaskReminderCandidates" resultMap="TaskReminderCandidateResult">
+    SELECT t.workspace_id,
+           t.id AS task_id,
+           t.description AS task_label,
+           t.due_date,
+           t.assigned_to_id AS recipient_id,
+           u.timezone AS recipient_timezone,
+           d.id AS deal_id,
+           d.name AS deal_label,
+           p.id AS person_id,
+           p.name AS person_label
+    FROM task t
+    JOIN workspace_member wm
+      ON wm.workspace_id = t.workspace_id
+     AND wm.user_id = t.assigned_to_id
+    JOIN app_user u ON u.id = t.assigned_to_id
+    LEFT JOIN deal d
+      ON d.workspace_id = t.workspace_id
+     AND d.id = t.deal_id
+    LEFT JOIN person p ON p.id = t.person_id
+    WHERE t.workspace_id = #{workspaceId}
+      AND t.completed = FALSE
+      AND t.due_date IS NOT NULL
+    ORDER BY t.id
+  </select>
+
+  <select id="findDealReminderCandidates" resultMap="DealReminderCandidateResult">
+    SELECT DISTINCT d.workspace_id,
+           d.id AS deal_id,
+           d.name AS deal_label,
+           d.expected_close_date,
+           recipients.recipient_id,
+           u.timezone AS recipient_timezone
+    FROM deal d
+    JOIN (
+      SELECT owned.workspace_id, owned.id AS deal_id, owned.owner_id AS recipient_id
+      FROM deal owned
+      WHERE owned.owner_id IS NOT NULL
+      UNION
+      SELECT collaborated.workspace_id, collaborated.id AS deal_id, dc.user_id AS recipient_id
+      FROM deal collaborated
+      JOIN deal_collaborator dc
+        ON dc.workspace_id = collaborated.workspace_id
+       AND dc.deal_id = collaborated.id
+      WHERE collaborated.owner_id IS NOT NULL
+    ) recipients
+      ON recipients.workspace_id = d.workspace_id
+     AND recipients.deal_id = d.id
+    JOIN workspace_member wm
+      ON wm.workspace_id = d.workspace_id
+     AND wm.user_id = recipients.recipient_id
+    JOIN app_user u ON u.id = recipients.recipient_id
+    WHERE d.workspace_id = #{workspaceId}
+      AND d.owner_id IS NOT NULL
+      AND d.won IS NULL
+      AND d.expected_close_date IS NOT NULL
+    ORDER BY d.id, recipients.recipient_id
+  </select>
+
+  <select id="findWorkspaceIds" resultType="int">
+    SELECT id
+    FROM workspace
+    ORDER BY id
+  </select>
+
+  <select id="findWorkspaceRecipientIds" resultType="int">
+    SELECT user_id
+    FROM workspace_member
+    WHERE workspace_id = #{workspaceId}
+    ORDER BY user_id
+  </select>
+
+  <delete id="purgeReminderHistory">
+    DELETE FROM notification
+    WHERE workspace_id = #{workspaceId}
+      AND recipient_id = #{recipientId}
+      AND type IN ('task.due', 'deal.close')
+      AND resolved_at IS NOT NULL
+      AND resolved_at &lt; #{cutoff}
+  </delete>
+</mapper>

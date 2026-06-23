@@ -1,7 +1,7 @@
 import { cookies } from 'next/headers';
 import Link from 'next/link';
 import { notFound, redirect } from 'next/navigation';
-import { ArrowLeftIcon, BuildingOffice2Icon, CalendarIcon, EllipsisVerticalIcon, PencilIcon, TrashIcon, InformationCircleIcon } from '@heroicons/react/24/outline';
+import { ArrowLeftIcon, BuildingOffice2Icon, CalendarIcon, InformationCircleIcon } from '@heroicons/react/24/outline';
 import { CheckCircleIcon, XCircleIcon } from '@heroicons/react/24/solid';
 import { getLocale, getTranslations } from 'next-intl/server';
 
@@ -13,7 +13,9 @@ import {
     getContactById,
     getContacts,
     getCurrentUserFromCookie,
+    getContextNotifications,
     getDealById,
+    getDealCollaborators,
     getDealPeople,
     getDeals,
     getNotesForDeal,
@@ -22,8 +24,6 @@ import {
     getTagsForDeal,
     getTasksForDeal,
     getUsers,
-    deleteTask,
-    updateTask,
 } from '@/app/lib/api';
 import {
     type Activity,
@@ -60,6 +60,7 @@ import { dealOutcome, type DealOutcome } from '@/app/components/records/deals/de
 // import { toast } from 'sonner';
 import DealTaskList from '@/app/components/records/deals/DealTaskList';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import EntityNotificationBanner from '@/app/components/notifications/EntityNotificationBanner';
 
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 
@@ -73,7 +74,7 @@ export default async function DealPage({ params }: { params: { id: number } }) {
     const t = await getTranslations('DealsPage');
     const locale = await getLocale();
 
-    const [deal, currentUser, activities, notes, tasks, tags, peopleRaw, allPipelines, allCompanies, allPersons, allDeals, allUsers, attachments] =
+    const [deal, currentUser, activities, notes, tasks, tags, peopleRaw, allPipelines, allCompanies, allPersons, allDeals, allUsers, attachments, notificationPage, collaborators] =
         await Promise.all([
             getDealById(id, init).catch(() => null),
             getCurrentUserFromCookie(cookie),
@@ -88,6 +89,8 @@ export default async function DealPage({ params }: { params: { id: number } }) {
             getDeals(init).catch(() => [] as Deal[]),
             getUsers(init).catch(() => [] as User[]),
             getAttachmentsFromCookie("deal", id, cookie),
+            getContextNotifications("deal", id, init),
+            getDealCollaborators(id, init),
         ]);
 
     if (!deal) notFound();
@@ -124,9 +127,7 @@ export default async function DealPage({ params }: { params: { id: number } }) {
     const variance =
         closed && deal.value > 0 ? (deal.actualValue - deal.value) / deal.value : null;
     const currency = deal.currency || 'USD';
-    const openTasks = tasks.filter((t) => !t.completed);
-
-    const now = Date.now();
+    const now = new Date().getTime();
     const firstWeekStart = now - 11 * WEEK_MS;
     const weeklyEngagement: EngagementPoint[] = Array.from({ length: 12 }, (_, i) => ({
         weekStart: firstWeekStart + i * WEEK_MS,
@@ -219,8 +220,11 @@ export default async function DealPage({ params }: { params: { id: number } }) {
                     currentUserId={currentUser.id}
                     persons={allPersons}
                     deals={allDeals}
+                    users={allUsers}
+                    collaborators={collaborators}
                 />
             </div>
+            <EntityNotificationBanner initialNotifications={notificationPage.items} />
 
             <div className="mt-8 mb-3 flex h-8 items-center gap-1.5">
                 <h2 className="px-6 text-xs font-medium uppercase tracking-[0.12em] text-muted-foreground">

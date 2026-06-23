@@ -19,6 +19,8 @@ import lombok.NoArgsConstructor;
 @NoArgsConstructor
 public class Deal {
     private int id;
+    private int workspaceId;
+    private Integer ownerId;
     private String name;
     private double value;
     private double actualValue;

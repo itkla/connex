@@ -42,6 +42,7 @@
   },
   "DealsActionsMenu": {
     "edit": "Edit",
+    "manageTeam": "Manage team",
     "viewInMap": "View in map",
     "add": "Add",
     "new": "New",

@@ -1,5 +1,7 @@
 package ooo.klae.connex.backend.mappers;
 
+import org.apache.ibatis.annotations.Param;
+
 import ooo.klae.connex.backend.beans.Task;
 
 import java.util.List;
@@ -11,13 +13,21 @@ import java.util.List;
  */
 
 public interface TaskMapper {
-    List<Task> getAllTasks();
-    List<Task> getTasksByAssignedToId(int assignedToId);
-    List<Task> getTasksByPersonId(int personId);
-    List<Task> getTasksByDealId(int dealId);
-    Task getTaskById(int id);
-    List<Task> search(String query);
+    List<Task> getAllTasks(int workspaceId);
+    List<Task> getTasksByAssignedToId(
+        @Param("workspaceId") int workspaceId,
+        @Param("assignedToId") int assignedToId
+    );
+    List<Task> getTasksByPersonId(@Param("workspaceId") int workspaceId, @Param("personId") int personId);
+    List<Task> getTasksByDealId(@Param("workspaceId") int workspaceId, @Param("dealId") int dealId);
+    Task getTaskById(@Param("workspaceId") int workspaceId, @Param("id") int id);
+    List<Task> search(@Param("workspaceId") int workspaceId, @Param("query") String query);
     int insert(Task task);
     int update(Task task);
-    int delete(int id);
+    int delete(@Param("workspaceId") int workspaceId, @Param("id") int id);
+    int complete(
+        @Param("workspaceId") int workspaceId,
+        @Param("id") int id,
+        @Param("assignedToId") int assignedToId
+    );
 }

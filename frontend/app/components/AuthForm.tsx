@@ -123,6 +123,7 @@ export function AuthForm({ mode, redirectUrl }: { mode: AuthMode; redirectUrl: s
                     email: values.email,
                     displayName: values.displayName,
                     password: values.password,
+                    timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
                 });
             }
 

@@ -12,7 +12,6 @@
     <association property="pipeline" javaType="Pipeline">
       <id property="id" column="pipeline_id"/>
     </association>
-    <collection property="deals" ofType="Deal" column="id" select="ooo.klae.connex.backend.mappers.DealMapper.getDealsByStageId"/>
   </resultMap>
 
   <resultMap id="PipelineFullResult" type="Pipeline">

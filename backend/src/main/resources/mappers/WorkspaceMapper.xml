@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="ooo.klae.connex.backend.mappers.WorkspaceMapper">
+
+  <select id="getWorkspacesForUser" resultType="Workspace">
+    SELECT w.id, w.name, w.slug, w.created_at, w.updated_at
+    FROM workspace w
+    JOIN workspace_member wm ON wm.workspace_id = w.id
+    WHERE wm.user_id = #{userId}
+    ORDER BY w.id
+  </select>
+
+  <select id="getDefaultWorkspace" resultType="Workspace">
+    SELECT id, name, slug, created_at, updated_at
+    FROM workspace
+    WHERE slug = 'default'
+    LIMIT 1
+  </select>
+
+  <select id="isMember" resultType="boolean">
+    SELECT EXISTS(
+      SELECT 1
+      FROM workspace_member
+      WHERE workspace_id = #{workspaceId} AND user_id = #{userId}
+    )
+  </select>
+
+  <select id="getMembers" resultType="User">
+    SELECT u.id, u.username, u.display_name, u.email, u.password_hash, u.timezone,
+           u.last_login_at, u.profile_picture_url, u.created_at, u.updated_at
+    FROM app_user u
+    JOIN workspace_member wm ON wm.user_id = u.id
+    WHERE wm.workspace_id = #{workspaceId}
+    ORDER BY u.display_name, u.id
+  </select>
+
+  <insert id="insert" useGeneratedKeys="true" keyProperty="id">
+    INSERT INTO workspace (name, slug)
+    VALUES (#{name}, #{slug})
+  </insert>
+
+  <insert id="addMember">
+    INSERT INTO workspace_member (workspace_id, user_id, role)
+    VALUES (#{workspaceId}, #{userId}, #{role})
+  </insert>
+</mapper>

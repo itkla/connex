@@ -7,6 +7,7 @@ const PROTECTED_PREFIXES = [
     '/records',
     '/library',
     '/activity',
+    '/notifications',
 ];
 
 const SESSION_COOKIE = 'JSESSIONID';
@@ -48,5 +49,6 @@ export const config = {
         '/records/:path*',
         '/library/:path*',
         '/activity/:path*',
+        '/notifications/:path*',
     ],
 };

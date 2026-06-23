@@ -7,7 +7,7 @@ export function formatShortDate(value: string | undefined, locale: string) {
         return '—';
     }
 
-    const date = new Date(value);
+    const date = dateForDisplay(value);
 
     if (Number.isNaN(date.getTime())) return value;
 
@@ -27,7 +27,7 @@ export function setLocaleCookie(locale: string) {
 
 export function timeOf(value?: string) {
     if (!value) return 0;
-    const t = new Date(value).getTime();
+    const t = isCalendarDate(value) ? parseCalendarDate(value) : new Date(value).getTime();
     return Number.isNaN(t) ? 0 : t;
 }
 
@@ -36,7 +36,7 @@ export function formatDate(value: string | undefined, locale: string) {
         return '—';
     }
 
-    const date = new Date(value);
+    const date = dateForDisplay(value);
 
     if (Number.isNaN(date.getTime())) {
         return value;
@@ -86,9 +86,49 @@ export function toMysqlDateTime(value?: string | Date | number): string {
  */
 export function parseMysqlDateTime(value?: string | null): number {
     if (!value) return NaN;
+    if (isCalendarDate(value)) return parseCalendarDate(value);
     const s = value.trim().replace(' ', 'T');
     const hasTz = /[Zz]$|[+-]\d{2}:?\d{2}$/.test(s);
     return Date.parse(hasTz ? s : s + 'Z');
+}
+
+export function parseCalendarDate(value?: string | null): number {
+    if (!value) return NaN;
+    const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value.trim());
+    if (!match) return NaN;
+    const year = Number(match[1]);
+    const month = Number(match[2]);
+    const day = Number(match[3]);
+    const date = new Date(year, month - 1, day);
+    if (
+        date.getFullYear() !== year ||
+        date.getMonth() !== month - 1 ||
+        date.getDate() !== day
+    ) {
+        return NaN;
+    }
+    return date.getTime();
+}
+
+export function calendarDateInputValue(value?: string | null): string {
+    if (!value) return '';
+    const date = value.trim().slice(0, 10);
+    return isCalendarDate(date) ? date : '';
+}
+
+export function startOfLocalDay(value: number | Date): number {
+    const date = value instanceof Date ? new Date(value) : new Date(value);
+    date.setHours(0, 0, 0, 0);
+    return date.getTime();
+}
+
+function isCalendarDate(value: string): boolean {
+    return /^\d{4}-\d{2}-\d{2}$/.test(value.trim());
+}
+
+function dateForDisplay(value: string): Date {
+    const timestamp = isCalendarDate(value) ? parseCalendarDate(value) : new Date(value).getTime();
+    return new Date(timestamp);
 }
 
 /**
@@ -125,10 +165,9 @@ export function formatRelativeTime(
 
     const diff = ms - now; // negative for the past
     const absSec = Math.abs(diff) / 1000;
-
-    if (absSec < 45) return 'just now';
-
     const rtf = new Intl.RelativeTimeFormat(locale, { numeric: 'auto', style: 'short' });
+
+    if (absSec < 45) return rtf.format(0, 'second');
     const minute = 60;
     const hour = 60 * minute;
     const day = 24 * hour;

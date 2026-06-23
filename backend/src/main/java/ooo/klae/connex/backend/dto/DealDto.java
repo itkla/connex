@@ -2,8 +2,11 @@ package ooo.klae.connex.backend.dto;
 
 import java.util.Arrays;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
+
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.PositiveOrZero;
 import jakarta.validation.constraints.Size;
 
@@ -23,6 +26,12 @@ import ooo.klae.connex.backend.beans.Task;
 public class DealDto {
 
     private Integer id;
+
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
+    private Integer workspaceId;
+
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
+    private Integer ownerId;
 
     @NotBlank
     @Size(max = 255)
@@ -46,7 +55,8 @@ public class DealDto {
 
     private Integer company;
 
-    @Size(max = 32)
+    @Size(max = 10)
+    @Pattern(regexp = "^\\d{4}-\\d{2}-\\d{2}$", message = "Expected close date must use YYYY-MM-DD")
     private String expectedCloseDate;
 
     @Size(max = 32)
@@ -72,6 +82,8 @@ public class DealDto {
         if (d == null) return null;
         DealDto dto = new DealDto();
         dto.id = d.getId();
+        dto.workspaceId = d.getWorkspaceId();
+        dto.ownerId = d.getOwnerId();
         dto.name = d.getName();
         dto.value = d.getValue();
         dto.actualValue = d.getActualValue();
@@ -100,6 +112,8 @@ public class DealDto {
     public Deal toBean() {
         Deal d = new Deal();
         if (id != null) d.setId(id);
+        if (workspaceId != null) d.setWorkspaceId(workspaceId);
+        d.setOwnerId(ownerId);
         d.setName(name);
         d.setValue(value);
         // if (actualValue != null && actualValue != 0) d.setActualValue(actualValue);

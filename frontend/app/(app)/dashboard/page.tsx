@@ -23,7 +23,7 @@ import {
     getUsers,
 } from '@/app/lib/api';
 import type { Attachment, AttachmentFacets, Page, User } from '@/app/lib/types';
-import { timeOf } from '@/app/lib/utils';
+import { startOfLocalDay, timeOf } from '@/app/lib/utils';
 
 import Greeting from '@/app/components/dashboard/Greeting';
 import OverviewCard from '@/app/components/dashboard/OverviewCard';
@@ -67,21 +67,22 @@ export default async function Dashboard() {
 
     // TODO: move this to it's own separate component so it can be reused elsewhere
     const now = new Date().getTime();
+    const todayStart = startOfLocalDay(now);
     const overdueTasks = tasks.filter((t) => {
         if (t.completed) return false;
         const due = timeOf(t.dueDate);
-        return due > 0 && due < now;
+        return due > 0 && due < todayStart;
     }).length;
     // TODO: use the function from @/app/components/dashboard/TaskSummary.tsx, or put it into the utils file and call it from both places idk just want to get this done rn
     const closingSoon = deals.filter((d) => {
         if (d.closedAt) return false;
         const t = timeOf(d.expectedCloseDate);
-        return t > 0 && t - now <= 7 * DAY && t - now >= -DAY;
+        return t >= todayStart && t - todayStart <= 7 * DAY;
     }).length;
     const dueSoon = tasks.filter((tk) => {
         if (tk.completed) return false;
         const due = timeOf(tk.dueDate);
-        return due >= now && due - now <= 7 * DAY;
+        return due >= todayStart && due - todayStart <= 7 * DAY;
     }).length;
     const upcomingActivities = activities.filter((a) => {
         const ts = timeOf(a.timestamp);

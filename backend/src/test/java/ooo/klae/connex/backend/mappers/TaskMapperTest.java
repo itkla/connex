@@ -18,6 +18,7 @@ import ooo.klae.connex.backend.beans.Pipeline;
 import ooo.klae.connex.backend.beans.Stage;
 import ooo.klae.connex.backend.beans.Task;
 import ooo.klae.connex.backend.beans.User;
+import ooo.klae.connex.backend.beans.Workspace;
 
 class TaskMapperTest extends AbstractMapperTest {
 
@@ -25,9 +26,10 @@ class TaskMapperTest extends AbstractMapperTest {
 
     private Task build(String description, User assignedTo, Person person, Deal deal) {
         Task task = new Task();
+        task.setWorkspaceId(workspace.getId());
         task.setDescription(description);
         task.setCompleted(false);
-        task.setDueDate("2024-12-31 17:00:00");
+        task.setDueDate("2024-12-31");
         task.setAssignedTo(assignedTo);
         task.setPerson(person);
         task.setDeal(deal);
@@ -61,7 +63,7 @@ class TaskMapperTest extends AbstractMapperTest {
         Task task = build("Send proposal", user, person, deal);
         taskMapper.insert(task);
 
-        Task found = taskMapper.getTaskById(task.getId());
+        Task found = taskMapper.getTaskById(workspace.getId(), task.getId());
 
         assertNotNull(found);
         assertEquals("Send proposal", found.getDescription());
@@ -77,7 +79,7 @@ class TaskMapperTest extends AbstractMapperTest {
      */
     @Test
     void getTaskById_returnsNullWhenMissing() {
-        assertNull(taskMapper.getTaskById(-1));
+        assertNull(taskMapper.getTaskById(workspace.getId(), -1));
     }
 
     /**
@@ -89,7 +91,7 @@ class TaskMapperTest extends AbstractMapperTest {
 
         taskMapper.insert(task);
 
-        Task found = taskMapper.getTaskById(task.getId());
+        Task found = taskMapper.getTaskById(workspace.getId(), task.getId());
         assertNotNull(found);
         assertTrue(found.getPerson() == null || found.getPerson().getId() == 0);
         assertTrue(found.getDeal() == null || found.getDeal().getId() == 0);
@@ -103,7 +105,7 @@ class TaskMapperTest extends AbstractMapperTest {
         Task task = build("In list", newUser(), null, null);
         taskMapper.insert(task);
 
-        List<Task> all = taskMapper.getAllTasks();
+        List<Task> all = taskMapper.getAllTasks(workspace.getId());
 
         assertTrue(all.stream().anyMatch(x -> x.getId() == task.getId()));
     }
@@ -122,7 +124,7 @@ class TaskMapperTest extends AbstractMapperTest {
 
         taskMapper.update(task);
 
-        Task found = taskMapper.getTaskById(task.getId());
+        Task found = taskMapper.getTaskById(workspace.getId(), task.getId());
         assertEquals("Updated", found.getDescription());
         assertTrue(found.isCompleted());
         assertNull(found.getDueDate());
@@ -136,9 +138,9 @@ class TaskMapperTest extends AbstractMapperTest {
         Task task = build("Delete me", newUser(), null, null);
         taskMapper.insert(task);
 
-        taskMapper.delete(task.getId());
+        taskMapper.delete(workspace.getId(), task.getId());
 
-        assertNull(taskMapper.getTaskById(task.getId()));
+        assertNull(taskMapper.getTaskById(workspace.getId(), task.getId()));
     }
 
     /**
@@ -154,7 +156,7 @@ class TaskMapperTest extends AbstractMapperTest {
         taskMapper.insert(task1);
         taskMapper.insert(task2);
 
-        List<Task> matched = taskMapper.getTasksByAssignedToId(user1.getId());
+        List<Task> matched = taskMapper.getTasksByAssignedToId(workspace.getId(), user1.getId());
 
         assertTrue(matched.stream().anyMatch(x -> x.getId() == task1.getId()));
         assertTrue(matched.stream().noneMatch(x -> x.getId() == task2.getId()));
@@ -174,7 +176,7 @@ class TaskMapperTest extends AbstractMapperTest {
         taskMapper.insert(task1);
         taskMapper.insert(task2);
 
-        List<Task> matched = taskMapper.getTasksByPersonId(person1.getId());
+        List<Task> matched = taskMapper.getTasksByPersonId(workspace.getId(), person1.getId());
 
         assertTrue(matched.stream().anyMatch(x -> x.getId() == task1.getId()));
         assertTrue(matched.stream().noneMatch(x -> x.getId() == task2.getId()));
@@ -196,9 +198,24 @@ class TaskMapperTest extends AbstractMapperTest {
         taskMapper.insert(task1);
         taskMapper.insert(task2);
 
-        List<Task> matched = taskMapper.getTasksByDealId(deal1.getId());
+        List<Task> matched = taskMapper.getTasksByDealId(workspace.getId(), deal1.getId());
 
         assertTrue(matched.stream().anyMatch(x -> x.getId() == task1.getId()));
         assertTrue(matched.stream().noneMatch(x -> x.getId() == task2.getId()));
+    }
+
+    @Test
+    void workspaceScopeHidesTasksAndBlocksCompletion() {
+        User user = newUser();
+        Task task = build("Scoped task", user, null, null);
+        taskMapper.insert(task);
+        Workspace other = new Workspace();
+        other.setName("Other Workspace");
+        other.setSlug("other-" + unique());
+        workspaceMapper.insert(other);
+
+        assertNull(taskMapper.getTaskById(other.getId(), task.getId()));
+        assertEquals(0, taskMapper.complete(other.getId(), task.getId(), user.getId()));
+        assertFalse(taskMapper.getTaskById(workspace.getId(), task.getId()).isCompleted());
     }
 }

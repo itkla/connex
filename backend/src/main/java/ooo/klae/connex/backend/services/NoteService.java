@@ -3,6 +3,7 @@ package ooo.klae.connex.backend.services;
 import org.springframework.stereotype.Service;
 
 import ooo.klae.connex.backend.mappers.NoteMapper;
+import ooo.klae.connex.backend.mappers.DealMapper;
 import ooo.klae.connex.backend.beans.Note;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 
@@ -21,7 +22,9 @@ import lombok.RequiredArgsConstructor;
 @RequiredArgsConstructor
 public class NoteService {
     private final NoteMapper noteMapper;
+    private final DealMapper dealMapper;
     private final AuditService auditService;
+    private final WorkspaceService workspaceService;
 
     private static final Set<String> AUDIT_FIELDS =
         Set.of("content");
@@ -35,6 +38,9 @@ public class NoteService {
     }
 
     public List<Note> getNotesByDealId(int dealId) {
+        if (!dealMapper.exists(workspaceService.getCurrentWorkspaceId(), dealId)) {
+            throw new ResourceNotFoundException("Deal not found with id: " + dealId);
+        }
         return noteMapper.getNotesByDealId(dealId);
     }
 

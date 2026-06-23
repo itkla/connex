@@ -1,4 +1,4 @@
-import { getAttachmentsFromCookie, getCompanies, getContactById, getContacts, getCurrentUserFromCookie, getDeals, getTags, getUserById } from "@/app/lib/api";
+import { getAttachmentsFromCookie, getCompanies, getContactById, getContacts, getContextNotifications, getCurrentUserFromCookie, getDeals, getTags, getUserById } from "@/app/lib/api";
 import { notFound, redirect } from "next/navigation";
 import { type Company, type Deal, type Tag, type Contact, type User } from "@/app/lib/types";
 import { cookies } from "next/headers";
@@ -18,6 +18,7 @@ import Timeline from "@/app/components/me/Timeline";
 import Attachments from "@/app/components/attachments/Attachments";
 import { formatCompactCurrency, formatDate, formatDateTime } from "@/app/lib/utils";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
+import EntityNotificationBanner from "@/app/components/notifications/EntityNotificationBanner";
 
 export default async function ContactPage({ params }: { params: { id: number } }) {
     const { id } = await params;
@@ -26,7 +27,7 @@ export default async function ContactPage({ params }: { params: { id: number } }
     const t = await getTranslations("ContactsPage");
     const locale = await getLocale();
 
-    const [contact, currentUser, allTags, allCompanies, allPersons, allDeals, attachments] = await Promise.all([
+    const [contact, currentUser, allTags, allCompanies, allPersons, allDeals, attachments, notificationPage] = await Promise.all([
         getContactById(id, init) as Promise<Contact>,
         getCurrentUserFromCookie((await cookies()).toString()),
         getTags(init).catch(() => [] as Tag[]),
@@ -34,6 +35,7 @@ export default async function ContactPage({ params }: { params: { id: number } }
         getContacts({}, init).catch(() => [] as Contact[]),
         getDeals(init).catch(() => [] as Deal[]),
         getAttachmentsFromCookie("person", id, cookie),
+        getContextNotifications("person", id, init),
     ]);
     if (!contact) {
         console.error(`Contact not found: ${id}`);
@@ -155,6 +157,7 @@ export default async function ContactPage({ params }: { params: { id: number } }
                     deals={allDeals}
                 />
             </div>
+            <EntityNotificationBanner initialNotifications={notificationPage.items} />
 
             <div className="mt-12 grid grid-cols-1 gap-8 md:grid-cols-[minmax(0,1fr)_minmax(0,2fr)] md:min-h-0 md:flex-1">
                 <aside>

@@ -37,6 +37,7 @@ public class PersonService {
     private final NoteMapper noteMapper;
     private final TaskMapper taskMapper;
     private final AuditService auditService;
+    private final WorkspaceService workspaceService;
 
     private static final Set<String> AUDIT_FIELDS =
         Set.of("name", "email", "phone", "title", "imageUrl");
@@ -50,7 +51,10 @@ public class PersonService {
     }
 
     public List<Person> getPersonsByCompanyId(int companyId) {
-        return personMapper.getPersonsByCompanyId(companyId);
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        return personMapper.getPersonsByCompanyId(companyId).stream()
+            .map(person -> hydrateScopedRelationships(person, workspaceId))
+            .toList();
     }
 
     public List<Person> getPersonsByTagId(int tagId) {
@@ -58,6 +62,10 @@ public class PersonService {
     }
 
     public List<Person> getPersonsByDealId(int dealId) {
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        if (!dealMapper.exists(workspaceId, dealId)) {
+            throw new ResourceNotFoundException("Deal not found with id: " + dealId);
+        }
         return personMapper.getPersonsByDealId(dealId);
     }
 
@@ -90,7 +98,7 @@ public class PersonService {
     public Person getPersonById(int id) {
         Person person = personMapper.getPersonById(id);
         if (person == null) throw new ResourceNotFoundException("Person not found with id: " + id);
-        return person;
+        return hydrateScopedRelationships(person, workspaceService.getCurrentWorkspaceId());
     }
 
     /**
@@ -205,7 +213,7 @@ public class PersonService {
      */
     public List<Deal> getDealsByPersonId(int personId) {
         if (personMapper.getPersonById(personId) == null) throw new ResourceNotFoundException("Person not found with id: " + personId);
-        return dealMapper.getDealsByPersonId(personId);
+        return dealMapper.getDealsByPersonId(workspaceService.getCurrentWorkspaceId(), personId);
     }
 
     /**
@@ -235,6 +243,12 @@ public class PersonService {
      */
     public List<Task> getTasksByPersonId(int personId) {
         if (personMapper.getPersonById(personId) == null) throw new ResourceNotFoundException("Person not found with id: " + personId);
-        return taskMapper.getTasksByPersonId(personId);
+        return taskMapper.getTasksByPersonId(workspaceService.getCurrentWorkspaceId(), personId);
+    }
+
+    private Person hydrateScopedRelationships(Person person, int workspaceId) {
+        person.setDeals(dealMapper.getDealsByPersonId(workspaceId, person.getId()).toArray(Deal[]::new));
+        person.setTasks(taskMapper.getTasksByPersonId(workspaceId, person.getId()).toArray(Task[]::new));
+        return person;
     }
 }

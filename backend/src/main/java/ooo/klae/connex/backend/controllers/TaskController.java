@@ -92,4 +92,9 @@ public class TaskController {
     public void deleteTask(@PathVariable int id) {
         taskService.delete(id);
     }
+
+    @PostMapping("/{id}/complete")
+    public TaskDto completeTask(@PathVariable int id) {
+        return TaskDto.from(taskService.complete(id));
+    }
 }

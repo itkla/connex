@@ -26,6 +26,7 @@ public class PipelineService {
     private final PipelineMapper pipelineMapper;
     private final DealMapper dealMapper;
     private final AuditService auditService;
+    private final WorkspaceService workspaceService;
 
     private static final Set<String> PIPELINE_AUDIT_FIELDS =
         Set.of("name");
@@ -40,6 +41,7 @@ public class PipelineService {
     public Pipeline getPipelineById(int id) {
         Pipeline pipeline = pipelineMapper.getPipelineById(id);
         if (pipeline == null) throw new ResourceNotFoundException("Pipeline not found with id: " + id);
+        hydrateStageDeals(pipeline.getStages());
         return pipeline;
     }
 
@@ -75,12 +77,18 @@ public class PipelineService {
 
     public List<Stage> getStagesByPipelineId(int pipelineId) {
         if (pipelineMapper.getPipelineById(pipelineId) == null) throw new ResourceNotFoundException("Pipeline not found with id: " + pipelineId);
-        return pipelineMapper.getStagesByPipelineId(pipelineId);
+        List<Stage> stages = pipelineMapper.getStagesByPipelineId(pipelineId);
+        hydrateStageDeals(stages.toArray(Stage[]::new));
+        return stages;
     }
 
     public Stage getStageById(int id) {
         Stage stage = pipelineMapper.getStageById(id);
         if (stage == null) throw new ResourceNotFoundException("Stage not found with id: " + id);
+        stage.setDeals(dealMapper.getDealsByStageId(
+            workspaceService.getCurrentWorkspaceId(),
+            id
+        ).toArray(Deal[]::new));
         return stage;
     }
 
@@ -148,7 +156,7 @@ public class PipelineService {
      */
     public List<Deal> getDealsByPipelineId(int pipelineId) {
         if (pipelineMapper.getPipelineById(pipelineId) == null) throw new ResourceNotFoundException("Pipeline not found with id: " + pipelineId);
-        return dealMapper.getDealsByPipelineId(pipelineId);
+        return dealMapper.getDealsByPipelineId(workspaceService.getCurrentWorkspaceId(), pipelineId);
     }
 
     /**
@@ -158,6 +166,14 @@ public class PipelineService {
      */
     public List<Deal> getDealsByStageId(int stageId) {
         if (pipelineMapper.getStageById(stageId) == null) throw new ResourceNotFoundException("Stage not found with id: " + stageId);
-        return dealMapper.getDealsByStageId(stageId);
+        return dealMapper.getDealsByStageId(workspaceService.getCurrentWorkspaceId(), stageId);
+    }
+
+    private void hydrateStageDeals(Stage[] stages) {
+        if (stages == null) return;
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        for (Stage stage : stages) {
+            stage.setDeals(dealMapper.getDealsByStageId(workspaceId, stage.getId()).toArray(Deal[]::new));
+        }
     }
 }

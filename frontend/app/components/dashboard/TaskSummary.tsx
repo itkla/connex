@@ -2,7 +2,7 @@ import Link from 'next/link';
 import { ExclamationTriangleIcon } from '@heroicons/react/16/solid';
 import { getLocale, getTranslations } from 'next-intl/server';
 import { type Task } from '@/app/lib/types';
-import { timeOf } from '@/app/lib/utils';
+import { startOfLocalDay, timeOf } from '@/app/lib/utils';
 import CountUp from '@/app/components/dashboard/CountUp';
 import UpcomingTasks from '@/app/components/dashboard/UpcomingTasks';
 import { Badge } from '@/components/ui/badge';
@@ -14,17 +14,18 @@ export default async function TaskSummary({ tasks }: { tasks: Task[] }) {
     const locale = await getLocale();
     const open = tasks.filter((tk) => !tk.completed);
     const now = new Date().getTime();
+    const todayStart = startOfLocalDay(now);
 
     // items that are > due and < now (e.g. overdue from today)
     const overdue = open.filter((tk) => {
         const due = timeOf(tk.dueDate);
-        return due > 0 && due < now;
+        return due > 0 && due < todayStart;
     }).length;
 
     // items that are >= now and < now + 7 days (e.g. due this week)
     const dueSoon = open.filter((tk) => {
         const due = timeOf(tk.dueDate);
-        return due >= now && due - now <= 7 * DAY;
+        return due >= todayStart && due - todayStart <= 7 * DAY;
     }).length;
 
     // items that are > now

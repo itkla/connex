@@ -31,7 +31,7 @@ class PersonServiceTest extends AbstractServiceTest {
         Deal linked = newDeal(pipeline, stage, company);
         Deal unlinked = newDeal(pipeline, stage, company);
         Person person = newPerson(company);
-        dealMapper.addPerson(linked.getId(), person.getId(), null);
+        dealMapper.addPerson(workspace.getId(), linked.getId(), person.getId(), null);
 
         List<Deal> deals = personService.getDealsByPersonId(person.getId());
 

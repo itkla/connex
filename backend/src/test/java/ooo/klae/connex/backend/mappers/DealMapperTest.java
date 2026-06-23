@@ -15,6 +15,7 @@ import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.beans.Pipeline;
 import ooo.klae.connex.backend.beans.Stage;
 import ooo.klae.connex.backend.beans.Tag;
+import ooo.klae.connex.backend.beans.Workspace;
 
 class DealMapperTest extends AbstractMapperTest {
 
@@ -44,7 +45,7 @@ class DealMapperTest extends AbstractMapperTest {
         Company company = newCompany();
         Deal deal = newDeal(pipeline, stage, company);
 
-        Deal found = dealMapper.getDealById(deal.getId());
+        Deal found = dealMapper.getDealById(workspace.getId(), deal.getId());
 
         assertNotNull(found);
         assertEquals(deal.getName(), found.getName());
@@ -60,7 +61,7 @@ class DealMapperTest extends AbstractMapperTest {
      */
     @Test
     void getDealById_returnsNullWhenMissing() {
-        assertNull(dealMapper.getDealById(-1));
+        assertNull(dealMapper.getDealById(workspace.getId(), -1));
     }
 
     /**
@@ -72,7 +73,7 @@ class DealMapperTest extends AbstractMapperTest {
         Stage stage = newStage(pipeline, 0);
         Deal deal = newDeal(pipeline, stage, newCompany());
 
-        List<Deal> all = dealMapper.getAllDeals();
+        List<Deal> all = dealMapper.getAllDeals(workspace.getId());
 
         assertTrue(all.stream().anyMatch(x -> x.getId() == deal.getId()));
     }
@@ -95,7 +96,7 @@ class DealMapperTest extends AbstractMapperTest {
 
         dealMapper.update(deal);
 
-        Deal found = dealMapper.getDealById(deal.getId());
+        Deal found = dealMapper.getDealById(workspace.getId(), deal.getId());
         assertEquals("Renamed Deal", found.getName());
         assertEquals(2500.50, found.getValue());
         assertEquals("JPY", found.getCurrency());
@@ -112,9 +113,9 @@ class DealMapperTest extends AbstractMapperTest {
         Stage stage = newStage(pipeline, 0);
         Deal deal = newDeal(pipeline, stage, newCompany());
 
-        dealMapper.delete(deal.getId());
+        dealMapper.delete(workspace.getId(), deal.getId());
 
-        assertNull(dealMapper.getDealById(deal.getId()));
+        assertNull(dealMapper.getDealById(workspace.getId(), deal.getId()));
     }
 
     /**
@@ -129,7 +130,7 @@ class DealMapperTest extends AbstractMapperTest {
         Deal dealA = newDeal(pipelineA, stageA, newCompany());
         Deal dealB = newDeal(pipelineB, stageB, newCompany());
 
-        List<Deal> matched = dealMapper.getDealsByPipelineId(pipelineA.getId());
+        List<Deal> matched = dealMapper.getDealsByPipelineId(workspace.getId(), pipelineA.getId());
 
         assertTrue(matched.stream().anyMatch(x -> x.getId() == dealA.getId()));
         assertTrue(matched.stream().noneMatch(x -> x.getId() == dealB.getId()));
@@ -146,7 +147,7 @@ class DealMapperTest extends AbstractMapperTest {
         Deal deal1 = newDeal(pipeline, stage1, newCompany());
         Deal deal2 = newDeal(pipeline, stage2, newCompany());
 
-        List<Deal> matched = dealMapper.getDealsByStageId(stage1.getId());
+        List<Deal> matched = dealMapper.getDealsByStageId(workspace.getId(), stage1.getId());
 
         assertTrue(matched.stream().anyMatch(x -> x.getId() == deal1.getId()));
         assertTrue(matched.stream().noneMatch(x -> x.getId() == deal2.getId()));
@@ -164,7 +165,7 @@ class DealMapperTest extends AbstractMapperTest {
         Deal deal1 = newDeal(pipeline, stage, company1);
         Deal deal2 = newDeal(pipeline, stage, company2);
 
-        List<Deal> matched = dealMapper.getDealsByCompanyId(company1.getId());
+        List<Deal> matched = dealMapper.getDealsByCompanyId(workspace.getId(), company1.getId());
 
         assertTrue(matched.stream().anyMatch(x -> x.getId() == deal1.getId()));
         assertTrue(matched.stream().noneMatch(x -> x.getId() == deal2.getId()));
@@ -181,9 +182,9 @@ class DealMapperTest extends AbstractMapperTest {
         Deal deal = newDeal(pipeline, stage, company);
         Person person = newPerson(company);
 
-        dealMapper.addPerson(deal.getId(), person.getId(), null);
+        dealMapper.addPerson(workspace.getId(), deal.getId(), person.getId(), null);
 
-        List<Deal> matched = dealMapper.getDealsByPersonId(person.getId());
+        List<Deal> matched = dealMapper.getDealsByPersonId(workspace.getId(), person.getId());
         assertTrue(matched.stream().anyMatch(x -> x.getId() == deal.getId()));
     }
 
@@ -197,10 +198,10 @@ class DealMapperTest extends AbstractMapperTest {
         Deal deal = newDeal(pipeline, stage, newCompany());
         Person person = newPerson(newCompany());
 
-        dealMapper.addPerson(deal.getId(), person.getId(), null);
-        dealMapper.addPerson(deal.getId(), person.getId(), null);
+        dealMapper.addPerson(workspace.getId(), deal.getId(), person.getId(), null);
+        dealMapper.addPerson(workspace.getId(), deal.getId(), person.getId(), null);
 
-        long matching = dealMapper.getDealsByPersonId(person.getId()).stream()
+        long matching = dealMapper.getDealsByPersonId(workspace.getId(), person.getId()).stream()
                 .filter(x -> x.getId() == deal.getId()).count();
         assertEquals(1, matching);
     }
@@ -214,11 +215,11 @@ class DealMapperTest extends AbstractMapperTest {
         Stage stage = newStage(pipeline, 0);
         Deal deal = newDeal(pipeline, stage, newCompany());
         Person person = newPerson(newCompany());
-        dealMapper.addPerson(deal.getId(), person.getId(), null);
+        dealMapper.addPerson(workspace.getId(), deal.getId(), person.getId(), null);
 
-        dealMapper.removePerson(deal.getId(), person.getId());
+        dealMapper.removePerson(workspace.getId(), deal.getId(), person.getId());
 
-        assertTrue(dealMapper.getDealsByPersonId(person.getId()).stream()
+        assertTrue(dealMapper.getDealsByPersonId(workspace.getId(), person.getId()).stream()
                 .noneMatch(x -> x.getId() == deal.getId()));
     }
 
@@ -232,9 +233,9 @@ class DealMapperTest extends AbstractMapperTest {
         Deal deal = newDeal(pipeline, stage, newCompany());
         Tag tag = newTag();
 
-        dealMapper.addTag(deal.getId(), tag.getId());
+        dealMapper.addTag(workspace.getId(), deal.getId(), tag.getId());
 
-        List<Deal> matched = dealMapper.getDealsByTagId(tag.getId());
+        List<Deal> matched = dealMapper.getDealsByTagId(workspace.getId(), tag.getId());
         assertTrue(matched.stream().anyMatch(x -> x.getId() == deal.getId()));
     }
 
@@ -247,11 +248,26 @@ class DealMapperTest extends AbstractMapperTest {
         Stage stage = newStage(pipeline, 0);
         Deal deal = newDeal(pipeline, stage, newCompany());
         Tag tag = newTag();
-        dealMapper.addTag(deal.getId(), tag.getId());
+        dealMapper.addTag(workspace.getId(), deal.getId(), tag.getId());
 
-        dealMapper.removeTag(deal.getId(), tag.getId());
+        dealMapper.removeTag(workspace.getId(), deal.getId(), tag.getId());
 
-        assertTrue(dealMapper.getDealsByTagId(tag.getId()).stream()
+        assertTrue(dealMapper.getDealsByTagId(workspace.getId(), tag.getId()).stream()
                 .noneMatch(x -> x.getId() == deal.getId()));
+    }
+
+    @Test
+    void workspaceScopeHidesDealsAndBlocksMutations() {
+        Pipeline pipeline = newPipeline();
+        Stage stage = newStage(pipeline, 0);
+        Deal deal = newDeal(pipeline, stage, newCompany());
+        Workspace other = new Workspace();
+        other.setName("Other Workspace");
+        other.setSlug("other-" + unique());
+        workspaceMapper.insert(other);
+
+        assertNull(dealMapper.getDealById(other.getId(), deal.getId()));
+        assertEquals(0, dealMapper.delete(other.getId(), deal.getId()));
+        assertNotNull(dealMapper.getDealById(workspace.getId(), deal.getId()));
     }
 }

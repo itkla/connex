@@ -14,6 +14,7 @@ import ooo.klae.connex.backend.beans.Note;
 import ooo.klae.connex.backend.beans.Task;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
+import ooo.klae.connex.backend.notifications.NotificationChangePublisher;
 
 import java.util.List;
 import java.util.Set;
@@ -34,10 +35,12 @@ public class UserService implements UserDetailsService {
     private final NoteMapper noteMapper;
     private final TaskMapper taskMapper;
     private final AuditService auditService;
+    private final WorkspaceService workspaceService;
+    private final NotificationChangePublisher notificationChanges;
 
     private static final Set<String> AUDIT_FIELDS =
         Set.of("username", "displayName", "email", "department", "title",
-               "employeeId", "phoneNumber", "profilePictureUrl");
+               "employeeId", "phoneNumber", "profilePictureUrl", "timezone");
 
     @Override
     public UserDetails loadUserByUsername(String username) throws UsernameNotFoundException {
@@ -47,10 +50,13 @@ public class UserService implements UserDetailsService {
     }
 
     public List<User> getAllUsers() {
-        return userMapper.getAllUsers();
+        return workspaceService.getMembers(workspaceService.getCurrentWorkspaceId());
     }
 
     public User getUserById(int id) {
+        if (!workspaceService.isMember(workspaceService.getCurrentWorkspaceId(), id)) {
+            throw new ResourceNotFoundException("User not found with id: " + id);
+        }
         User user = userMapper.getUserById(id);
         if (user == null) throw new ResourceNotFoundException("User not found with id: " + id);
         return user;
@@ -71,9 +77,13 @@ public class UserService implements UserDetailsService {
     }
 
     public User update(int id, User user) {
-        User before = userMapper.getUserById(id);
-        if (before == null) throw new ResourceNotFoundException("User not found with id: " + id);
+        User before = getUserById(id);
         user.setId(id);
+        if (user.getTimezone() == null || user.getTimezone().isBlank()) {
+            user.setTimezone(before.getTimezone());
+        } else {
+            user.setTimezone(TimezoneSupport.validate(user.getTimezone(), null));
+        }
         userMapper.update(user);
         auditService.record("user.update", "user", id, user.getUsername(),
             "Updated user " + user.getUsername(),
@@ -82,8 +92,7 @@ public class UserService implements UserDetailsService {
     }
 
     public void delete(int id) {
-        User before = userMapper.getUserById(id);
-        if (before == null) throw new ResourceNotFoundException("User not found with id: " + id);
+        User before = getUserById(id);
         userMapper.delete(id);
         auditService.record("user.delete", "user", id, before.getUsername(),
             "Deleted user " + before.getUsername(),
@@ -96,7 +105,7 @@ public class UserService implements UserDetailsService {
      * @return
      */
     public List<Activity> getActivitiesByUserId(int userId) {
-        if (userMapper.getUserById(userId) == null) throw new ResourceNotFoundException("User not found with id: " + userId);
+        getUserById(userId);
         return activityMapper.getActivitiesByCreatedById(userId);
     }
 
@@ -106,8 +115,8 @@ public class UserService implements UserDetailsService {
      * @return
      */
     public List<Task> getTasksByUserId(int userId) {
-        if (userMapper.getUserById(userId) == null) throw new ResourceNotFoundException("User not found with id: " + userId);
-        return taskMapper.getTasksByAssignedToId(userId);
+        getUserById(userId);
+        return taskMapper.getTasksByAssignedToId(workspaceService.getCurrentWorkspaceId(), userId);
     }
 
     /**
@@ -116,7 +125,7 @@ public class UserService implements UserDetailsService {
      * @return
      */
     public List<Note> getNotesByUserId(int userId) {
-        if (userMapper.getUserById(userId) == null) throw new ResourceNotFoundException("User not found with id: " + userId);
+        getUserById(userId);
         return noteMapper.getNotesByAuthorId(userId);
     }
 
@@ -127,12 +136,22 @@ public class UserService implements UserDetailsService {
      * @return
      */
     public User updateProfilePictureUrl(int userId, String profilePictureUrl) {
-        User before = userMapper.getUserById(userId);
-        if (before == null) throw new ResourceNotFoundException("User not found with id: " + userId);
+        User before = getUserById(userId);
         userMapper.updateProfilePictureUrl(userId, profilePictureUrl);
         auditService.record("user.updateAvatar", "user", userId, before.getUsername(),
             "Updated profile picture for " + before.getUsername(),
             auditService.singleChange("profilePictureUrl", before.getProfilePictureUrl(), profilePictureUrl));
+        return userMapper.getUserById(userId);
+    }
+
+    public User updateTimezone(int userId, String timezone) {
+        User before = getUserById(userId);
+        String validated = TimezoneSupport.validate(timezone, null);
+        userMapper.updateTimezone(userId, validated);
+        auditService.record("user.updateTimezone", "user", userId, before.getUsername(),
+            "Updated timezone for " + before.getUsername(),
+            auditService.singleChange("timezone", before.getTimezone(), validated));
+        notificationChanges.publish(workspaceService.getCurrentWorkspaceId(), "user", userId);
         return userMapper.getUserById(userId);
     }
 }

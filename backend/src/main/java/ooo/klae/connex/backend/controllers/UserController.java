@@ -3,6 +3,7 @@ package ooo.klae.connex.backend.controllers;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -13,6 +14,7 @@ import ooo.klae.connex.backend.dto.ActivityDto;
 import ooo.klae.connex.backend.dto.NoteDto;
 import ooo.klae.connex.backend.dto.RegisterDto;
 import ooo.klae.connex.backend.dto.TaskDto;
+import ooo.klae.connex.backend.dto.UpdateTimezoneDto;
 import ooo.klae.connex.backend.dto.UserDto;
 import ooo.klae.connex.backend.services.AuthService;
 import ooo.klae.connex.backend.services.UserService;
@@ -122,5 +124,10 @@ public class UserController {
     @PutMapping("/{id}/profile-picture")
     public UserDto updateProfilePicture(@PathVariable int id, @RequestBody String profilePictureUrl) {
         return UserDto.from(userService.updateProfilePictureUrl(id, profilePictureUrl));
+    }
+
+    @PatchMapping("/me")
+    public UserDto updateCurrentUser(@Valid @RequestBody UpdateTimezoneDto dto) {
+        return UserDto.from(userService.updateTimezone(authService.getCurrentUser().getId(), dto.getTimezone()));
     }
 }

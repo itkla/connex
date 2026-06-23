@@ -28,7 +28,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 
 import { ApiError, getCompanyPeople, getUsers, updateTask } from '@/app/lib/api';
 import { type Contact, type Deal, type Task, type UpdateTaskPayload, type User } from '@/app/lib/types';
-import { parseMysqlDateTime } from '@/app/lib/utils';
+import { calendarDateInputValue } from '@/app/lib/utils';
 
 const inputClass = 'w-full rounded-lg bg-muted px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground outline-none ring-1 ring-border transition focus:ring-2 focus:ring-brand';
 
@@ -41,21 +41,10 @@ type TaskDraft = {
     completed: boolean;
 };
 
-function toDateInputValue(value?: string | null): string {
-    if (!value) return '';
-    const ts = parseMysqlDateTime(value);
-    if (Number.isNaN(ts)) return '';
-    const d = new Date(ts);
-    const yyyy = d.getFullYear();
-    const mm = String(d.getMonth() + 1).padStart(2, '0');
-    const dd = String(d.getDate()).padStart(2, '0');
-    return `${yyyy}-${mm}-${dd}`;
-}
-
 function toDraft(t: Task): TaskDraft {
     return {
         description: t.description ?? '',
-        dueDate: toDateInputValue(t.dueDate),
+        dueDate: calendarDateInputValue(t.dueDate),
         assignedToId: t.assignedToId ?? 0,
         personId: t.personId != null ? t.personId.toString() : 'none',
         dealId: t.dealId != null ? t.dealId.toString() : 'none',

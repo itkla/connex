@@ -62,6 +62,14 @@ async function putJson<T>(path: string, body: unknown = {}, init: RequestInit = 
     });
 }
 
+async function patchJson<T>(path: string, body: unknown = {}, init: RequestInit = {}): Promise<T> {
+    return requestJson<T>(path, {
+        ...init,
+        method: "PATCH",
+        body: JSON.stringify(body),
+    });
+}
+
 async function deleteJson<T>(path: string, init: RequestInit = {}): Promise<T> {
     return requestJson<T>(path, {
         method: "DELETE",
@@ -212,6 +220,10 @@ export function updateUser(id: number, payload: Types.UpdateUserPayload) {
     return putJson<Types.User>(`/api/users/${id}`, payload);
 }
 
+export function updateMyTimezone(timezone: string) {
+    return patchJson<Types.User>("/api/users/me", { timezone });
+}
+
 export function createUser(payload: Types.RegisterPayload) {
     return postJson<Types.User>(`/api/users`, payload);
 }
@@ -276,6 +288,10 @@ export function updateTask(id: number, payload: Types.UpdateTaskPayload, init: R
     return putJson<Types.Task>(`/api/tasks/${id}`, payload, init);
 }
 
+export function completeTask(id: number, init: RequestInit = {}) {
+    return postJson<Types.Task>(`/api/tasks/${id}/complete`, {}, init);
+}
+
 /*
 * == Activity management
 */
@@ -314,11 +330,11 @@ export function getNotesFromCookie(cookie: string | null) { // authenticate then
 }
 
 export function createNote(payload: Types.CreateNotePayload, init: RequestInit = {}) {
-    return postJson<Types.Note>(`/api/notes`, payload);
+    return postJson<Types.Note>(`/api/notes`, payload, init);
 }
 
 export function updateNote(id: number, payload: Types.UpdateNotePayload, init: RequestInit = {}) {
-    return putJson<Types.Note>(`/api/notes/${id}`, payload);
+    return putJson<Types.Note>(`/api/notes/${id}`, payload, init);
 }
 
 export function deleteNote(id: number, init: RequestInit = {}) {
@@ -511,6 +527,18 @@ export function reopenDeal(id: number) {
     return postJson<Types.Deal>(`/api/deals/${id}/reopen`, {});
 }
 
+export function updateDealOwner(id: number, ownerId: number | null) {
+    return putJson<Types.Deal>(`/api/deals/${id}/owner`, { ownerId });
+}
+
+export function getDealCollaborators(id: number, init: RequestInit = {}) {
+    return getJson<Types.User[]>(`/api/deals/${id}/collaborators`, init);
+}
+
+export function replaceDealCollaborators(id: number, userIds: number[]) {
+    return putJson<Types.User[]>(`/api/deals/${id}/collaborators`, { userIds });
+}
+
 export function getDealPeople(id: number, init: RequestInit = {}) {
     return getJson<Types.Contact[]>(`/api/deals/${id}/people`, init);
 }
@@ -559,6 +587,55 @@ export function removeTagFromDeal(id: number, tagId: number, init: RequestInit =
 
 export function replaceTagsForDeal(id: number, tagIds: number[], init: RequestInit = {}) {
     return putJson<Types.Tag[]>(`/api/deals/${id}/tags`, tagIds, init);
+}
+
+/*
+* == Notifications
+*/
+
+export function getNotifications(params: Types.NotificationParams = {}, init: RequestInit = {}) {
+    return getJson<Types.Page<Types.Notification>>(`/api/notifications${buildQuery(params)}`, {
+        cache: "no-store",
+        ...init,
+    });
+}
+
+export function getNotificationCounts(init: RequestInit = {}) {
+    return getJson<Types.NotificationCounts>("/api/notifications/counts", {
+        cache: "no-store",
+        ...init,
+    });
+}
+
+export function getContextNotifications(
+    contextType: string,
+    contextId: number,
+    init: RequestInit = {},
+) {
+    return getNotifications(
+        { contextType, contextId, state: "unread", page: 1, size: 50 },
+        init,
+    );
+}
+
+export function markNotificationRead(id: number) {
+    return postJson<Types.Notification>(`/api/notifications/${id}/read`);
+}
+
+export function markNotificationUnread(id: number) {
+    return postJson<Types.Notification>(`/api/notifications/${id}/unread`);
+}
+
+export function dismissNotification(id: number) {
+    return postJson<Types.Notification>(`/api/notifications/${id}/dismiss`);
+}
+
+export function restoreNotification(id: number) {
+    return postJson<Types.Notification>(`/api/notifications/${id}/restore`);
+}
+
+export function markAllNotificationsRead() {
+    return postJson<void>("/api/notifications/read-all");
 }
 
 /*

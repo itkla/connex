@@ -36,6 +36,7 @@ class UserMapperTest extends AbstractMapperTest {
         assertEquals(user.getDisplayName(), found.getDisplayName());
         assertEquals(user.getEmail(), found.getEmail());
         assertEquals(user.getPasswordHash(), found.getPassword());
+        assertEquals("UTC", found.getTimezone());
     }
 
     /**
@@ -97,5 +98,14 @@ class UserMapperTest extends AbstractMapperTest {
         userMapper.delete(user.getId());
 
         assertNull(userMapper.getUserById(user.getId()));
+    }
+
+    @Test
+    void updateTimezone_persistsValue() {
+        User user = newUser();
+
+        userMapper.updateTimezone(user.getId(), "Asia/Tokyo");
+
+        assertEquals("Asia/Tokyo", userMapper.getUserById(user.getId()).getTimezone());
     }
 }

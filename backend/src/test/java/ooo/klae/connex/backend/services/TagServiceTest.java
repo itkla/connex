@@ -27,7 +27,7 @@ class TagServiceTest extends AbstractServiceTest {
         Deal linked = newDeal(pipeline, stage, newCompany());
         Deal unlinked = newDeal(pipeline, stage, newCompany());
         Tag tag = newTag();
-        dealMapper.addTag(linked.getId(), tag.getId());
+        dealMapper.addTag(workspace.getId(), linked.getId(), tag.getId());
 
         List<Deal> deals = tagService.getDealsByTagId(tag.getId());
 
