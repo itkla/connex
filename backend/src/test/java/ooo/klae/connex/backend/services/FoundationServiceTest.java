@@ -27,6 +27,7 @@ class FoundationServiceTest extends AbstractServiceTest {
     @Autowired TaskService taskService;
     @Autowired UserService userService;
     @Autowired WorkspaceService workspaceService;
+    @Autowired PipelineService pipelineService;
 
     @Test
     void createDealDefaultsWorkspaceAndOwner() {
@@ -102,6 +103,17 @@ class FoundationServiceTest extends AbstractServiceTest {
         // to the user's first/default workspace instead of failing closed.
         assertEquals(workspace.getId(), workspaceService.getCurrentWorkspaceId());
         assertDoesNotThrow(() -> dealService.getAllDeals());
+    }
+
+    @Test
+    void adminOpsRejectPlainMembers() {
+        Pipeline pipeline = newPipeline();
+
+        // a plain member of the active workspace
+        User member = newUser();
+        authenticate(member);
+
+        assertThrows(ForbiddenException.class, () -> pipelineService.deletePipeline(pipeline.getId()));
     }
 
     private User newUserInAnotherWorkspace() {

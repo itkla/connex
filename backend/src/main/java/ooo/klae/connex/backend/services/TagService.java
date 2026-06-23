@@ -58,6 +58,7 @@ public class TagService {
      * Creates a new {@code Tag} in the active workspace. The ID is auto-generated.
      */
     public Tag create(Tag tag) {
+        workspaceService.requireRole(WorkspaceService.Role.ADMIN);
         tag.setWorkspaceId(workspaceService.getCurrentWorkspaceId());
         tagMapper.insert(tag);
         auditService.record("tag.create", "tag", tag.getId(), tag.getName(),
@@ -70,6 +71,7 @@ public class TagService {
      * Updates an existing {@code Tag} in the active workspace.
      */
     public Tag update(int id, Tag tag) {
+        workspaceService.requireRole(WorkspaceService.Role.ADMIN);
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         Tag before = requireTag(workspaceId, id);
         tag.setId(id);
@@ -85,6 +87,7 @@ public class TagService {
      * Deletes a {@code Tag} in the active workspace.
      */
     public void delete(int id) {
+        workspaceService.requireRole(WorkspaceService.Role.ADMIN);
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         Tag before = requireTag(workspaceId, id);
         tagMapper.delete(workspaceId, id);

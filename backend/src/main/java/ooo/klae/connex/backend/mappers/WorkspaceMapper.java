@@ -26,4 +26,9 @@ public interface WorkspaceMapper {
         @Param("userId") int userId,
         @Param("role") String role
     );
+    int updateMemberRole(
+        @Param("workspaceId") int workspaceId,
+        @Param("userId") int userId,
+        @Param("role") String role
+    );
 }

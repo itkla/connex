@@ -60,6 +60,8 @@ abstract class AbstractServiceTest {
             workspaceMapper.insert(workspace);
         }
         currentUser = newUser();
+        // The session user owns the default test workspace so role-gated operations run as owner.
+        workspaceMapper.updateMemberRole(workspace.getId(), currentUser.getId(), "owner");
         SecurityContextHolder.getContext().setAuthentication(
             new UsernamePasswordAuthenticationToken(currentUser, null, currentUser.getAuthorities())
         );

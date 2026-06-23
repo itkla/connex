@@ -128,6 +128,11 @@ public class WorkspaceService {
         }
     }
 
+    /** Requires the current user to hold at least {@code min} role in the active workspace. */
+    public void requireRole(Role min) {
+        requireRole(getCurrentWorkspaceId(), currentUser().getId(), min);
+    }
+
     public boolean isMember(int workspaceId, int userId) {
         return workspaceMapper.isMember(workspaceId, userId);
     }

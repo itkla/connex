@@ -122,6 +122,7 @@ public class CompanyService {
      * Deletes a {@code Company} in the active workspace.
      */
     public void deleteCompany(int id) {
+        workspaceService.requireRole(WorkspaceService.Role.ADMIN);
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         Company before = companyMapper.getCompanyById(workspaceId, id);
         if (before == null) throw new ResourceNotFoundException("Company not found with id: " + id);
