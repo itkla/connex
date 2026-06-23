@@ -2,6 +2,7 @@ package ooo.klae.connex.backend.notifications;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.event.TransactionPhase;
 import org.springframework.transaction.event.TransactionalEventListener;
@@ -10,7 +11,7 @@ import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.services.NotificationReconciliationService;
 
 /**
- * Reconciles source changes after the source transaction commits.
+ * Reconciles source changes asynchronously after the source transaction commits, off the request thread.
  */
 @Component
 @RequiredArgsConstructor
@@ -19,6 +20,7 @@ public class NotificationSourceChangedListener {
 
     private final NotificationReconciliationService reconciliationService;
 
+    @Async
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT, fallbackExecution = true)
     public void onSourceChanged(NotificationSourceChangedEvent event) {
         try {
