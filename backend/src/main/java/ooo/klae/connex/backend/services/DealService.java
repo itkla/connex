@@ -281,7 +281,7 @@ public class DealService {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         Deal deal = dealMapper.getDealById(workspaceId, dealId);
         if (deal == null) throw new ResourceNotFoundException("Deal not found with id: " + dealId);
-        Tag tag = tagMapper.getTagById(tagId);
+        Tag tag = tagMapper.getTagById(workspaceId, tagId);
         if (tag == null) throw new ResourceNotFoundException("Tag not found with id: " + tagId);
         dealMapper.addTag(workspaceId, dealId, tagId);
         auditService.record("deal.addTag", "deal", dealId, deal.getName(),
@@ -298,7 +298,7 @@ public class DealService {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         Deal deal = dealMapper.getDealById(workspaceId, dealId);
         if (deal == null) throw new ResourceNotFoundException("Deal not found with id: " + dealId);
-        Tag tag = tagMapper.getTagById(tagId);
+        Tag tag = tagMapper.getTagById(workspaceId, tagId);
         dealMapper.removeTag(workspaceId, dealId, tagId);
         String tagName = tag != null ? tag.getName() : "#" + tagId;
         auditService.record("deal.removeTag", "deal", dealId, deal.getName(),
@@ -327,7 +327,7 @@ public class DealService {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         Deal deal = dealMapper.getDealById(workspaceId, dealId);
         if (deal == null) throw new ResourceNotFoundException("Deal not found with id: " + dealId);
-        Person person = personMapper.getPersonById(personId);
+        Person person = personMapper.getPersonById(workspaceId, personId);
         if (person == null) throw new ResourceNotFoundException("Person not found with id: " + personId);
         dealMapper.addPerson(workspaceId, dealId, personId, role);
         String label = contactLabel(person.getName(), role);
@@ -367,7 +367,7 @@ public class DealService {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         Deal deal = dealMapper.getDealById(workspaceId, dealId);
         if (deal == null) throw new ResourceNotFoundException("Deal not found with id: " + dealId);
-        Person person = personMapper.getPersonById(personId);
+        Person person = personMapper.getPersonById(workspaceId, personId);
         dealMapper.removePerson(workspaceId, dealId, personId);
         String name = person != null ? person.getName() : "#" + personId;
         auditService.record("deal.removePerson", "deal", dealId, deal.getName(),
@@ -414,7 +414,7 @@ public class DealService {
                 if (dealPerson == null || dealPerson.getPerson() == null) {
                     throw new BadRequestException("Each deal contact must include a person");
                 }
-                if (personMapper.getPersonById(dealPerson.getPerson().getId()) == null) {
+                if (personMapper.getPersonById(workspaceId, dealPerson.getPerson().getId()) == null) {
                     throw new ResourceNotFoundException("Person not found with id: " + dealPerson.getPerson().getId());
                 }
                 dealMapper.addPerson(
@@ -456,7 +456,7 @@ public class DealService {
     public List<Activity> getActivitiesByDealId(int dealId) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         if (dealMapper.getDealById(workspaceId, dealId) == null) throw new ResourceNotFoundException("Deal not found with id: " + dealId);
-        return activityMapper.getActivitiesByDealId(dealId);
+        return activityMapper.getActivitiesByDealId(workspaceId, dealId);
     }
 
     /**
@@ -467,7 +467,7 @@ public class DealService {
     public List<Note> getNotesByDealId(int dealId) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         if (dealMapper.getDealById(workspaceId, dealId) == null) throw new ResourceNotFoundException("Deal not found with id: " + dealId);
-        return noteMapper.getNotesByDealId(dealId);
+        return noteMapper.getNotesByDealId(workspaceId, dealId);
     }
 
     /**

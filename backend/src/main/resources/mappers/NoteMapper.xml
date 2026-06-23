@@ -5,6 +5,7 @@
 
   <resultMap id="NoteResult" type="Note">
     <id     property="id"        column="id"/>
+    <result property="workspaceId" column="workspace_id"/>
     <result property="content"   column="content"/>
     <result property="createdAt" column="created_at"/>
     <result property="updatedAt" column="updated_at"/>
@@ -20,34 +21,36 @@
   </resultMap>
 
   <sql id="noteColumns">
-    id, content, author_id, person_id, deal_id, created_at, updated_at
+    id, workspace_id, content, author_id, person_id, deal_id, created_at, updated_at
   </sql>
 
   <sql id="qualifiedNoteColumns">
-    n.id, n.content, n.author_id, n.person_id, n.deal_id, n.created_at, n.updated_at
+    n.id, n.workspace_id, n.content, n.author_id, n.person_id, n.deal_id, n.created_at, n.updated_at
   </sql>
 
   <select id="getAllNotes" resultMap="NoteResult">
-    SELECT <include refid="noteColumns"/> FROM note ORDER BY created_at DESC
+    SELECT <include refid="noteColumns"/> FROM note
+    WHERE workspace_id = #{workspaceId} ORDER BY created_at DESC
   </select>
 
   <select id="getNotesByPersonId" resultMap="NoteResult">
     SELECT <include refid="noteColumns"/> FROM note
-    WHERE person_id = #{personId} ORDER BY created_at DESC
+    WHERE workspace_id = #{workspaceId} AND person_id = #{personId} ORDER BY created_at DESC
   </select>
 
   <select id="getNotesByDealId" resultMap="NoteResult">
     SELECT <include refid="noteColumns"/> FROM note
-    WHERE deal_id = #{dealId} ORDER BY created_at DESC
+    WHERE workspace_id = #{workspaceId} AND deal_id = #{dealId} ORDER BY created_at DESC
   </select>
 
   <select id="getNotesByAuthorId" resultMap="NoteResult">
     SELECT <include refid="noteColumns"/> FROM note
-    WHERE author_id = #{authorId} ORDER BY created_at DESC
+    WHERE workspace_id = #{workspaceId} AND author_id = #{authorId} ORDER BY created_at DESC
   </select>
 
   <select id="getNoteById" resultMap="NoteResult">
-    SELECT <include refid="noteColumns"/> FROM note WHERE id = #{id}
+    SELECT <include refid="noteColumns"/> FROM note
+    WHERE workspace_id = #{workspaceId} AND id = #{id}
   </select>
 
   <select id="search" resultMap="NoteResult">
@@ -56,19 +59,20 @@
     LEFT JOIN app_user u ON u.id = n.author_id
     LEFT JOIN person   p ON p.id = n.person_id
     LEFT JOIN deal     d ON d.id = n.deal_id
-    WHERE n.content LIKE #{query}
-    OR u.display_name LIKE #{query}
-    OR u.username LIKE #{query}
-    OR p.name LIKE #{query}
-    OR d.name LIKE #{query}
+    WHERE n.workspace_id = #{workspaceId}
+      AND (n.content LIKE #{query}
+      OR u.display_name LIKE #{query}
+      OR u.username LIKE #{query}
+      OR p.name LIKE #{query}
+      OR d.name LIKE #{query})
     ORDER BY n.created_at DESC
     LIMIT 10
   </select>
 
   <insert id="insert" useGeneratedKeys="true" keyProperty="id">
-    INSERT INTO note (content, author_id, person_id, deal_id)
+    INSERT INTO note (workspace_id, content, author_id, person_id, deal_id)
     VALUES (
-      #{content}, #{author.id},
+      #{workspaceId}, #{content}, #{author.id},
       <choose>
         <when test="person != null">#{person.id}</when>
         <otherwise>NULL</otherwise>
@@ -94,8 +98,8 @@
             <when test="deal != null">#{deal.id}</when>
             <otherwise>NULL</otherwise>
           </choose>
-    WHERE id = #{id}
+    WHERE workspace_id = #{workspaceId} AND id = #{id}
   </update>
 
-  <delete id="delete">DELETE FROM note WHERE id = #{id}</delete>
+  <delete id="delete">DELETE FROM note WHERE workspace_id = #{workspaceId} AND id = #{id}</delete>
 </mapper>

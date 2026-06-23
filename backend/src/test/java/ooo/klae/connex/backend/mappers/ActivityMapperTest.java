@@ -17,6 +17,7 @@ import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.beans.Pipeline;
 import ooo.klae.connex.backend.beans.Stage;
 import ooo.klae.connex.backend.beans.User;
+import ooo.klae.connex.backend.beans.Workspace;
 
 class ActivityMapperTest extends AbstractMapperTest {
 
@@ -24,6 +25,7 @@ class ActivityMapperTest extends AbstractMapperTest {
 
     private Activity build(String type, String subject, Person person, Deal deal, User user) {
         Activity activity = new Activity();
+        activity.setWorkspaceId(workspace.getId());
         activity.setType(type);
         activity.setSubject(subject);
         activity.setNotes("notes-" + unique());
@@ -62,7 +64,7 @@ class ActivityMapperTest extends AbstractMapperTest {
         Activity activity = build("meeting", "Kickoff", person, deal, user);
         activityMapper.insert(activity);
 
-        Activity found = activityMapper.getActivityById(activity.getId());
+        Activity found = activityMapper.getActivityById(workspace.getId(), activity.getId());
 
         assertNotNull(found);
         assertEquals("meeting", found.getType());
@@ -75,11 +77,11 @@ class ActivityMapperTest extends AbstractMapperTest {
     }
 
     /**
-     * Gets an activity by ID and checks if the returned activity is null when the ID is negative.
+     * Gets an activity by ID and checks if the returned activity is null when the ID is missing.
      */
     @Test
     void getActivityById_returnsNullWhenMissing() {
-        assertNull(activityMapper.getActivityById(-1));
+        assertNull(activityMapper.getActivityById(workspace.getId(), -1));
     }
 
     /**
@@ -92,7 +94,7 @@ class ActivityMapperTest extends AbstractMapperTest {
 
         activityMapper.insert(activity);
 
-        Activity found = activityMapper.getActivityById(activity.getId());
+        Activity found = activityMapper.getActivityById(workspace.getId(), activity.getId());
         assertNotNull(found);
         // Result map always materializes the association; with null FK the association id is 0.
         assertTrue(found.getPerson() == null || found.getPerson().getId() == 0);
@@ -108,7 +110,7 @@ class ActivityMapperTest extends AbstractMapperTest {
         Activity activity = build("call", "Hello", null, null, user);
         activityMapper.insert(activity);
 
-        List<Activity> allActivities = activityMapper.getAllActivities();
+        List<Activity> allActivities = activityMapper.getAllActivities(workspace.getId());
 
         assertTrue(allActivities.stream().anyMatch(x -> x.getId() == activity.getId()));
     }
@@ -129,7 +131,7 @@ class ActivityMapperTest extends AbstractMapperTest {
 
         activityMapper.update(activity);
 
-        Activity found = activityMapper.getActivityById(activity.getId());
+        Activity found = activityMapper.getActivityById(workspace.getId(), activity.getId());
         assertEquals("email", found.getType());
         assertEquals("Updated", found.getSubject());
         assertEquals("changed", found.getNotes());
@@ -144,9 +146,9 @@ class ActivityMapperTest extends AbstractMapperTest {
         Activity activity = build("call", "Bye", null, null, user);
         activityMapper.insert(activity);
 
-        activityMapper.delete(activity.getId());
+        activityMapper.delete(workspace.getId(), activity.getId());
 
-        assertNull(activityMapper.getActivityById(activity.getId()));
+        assertNull(activityMapper.getActivityById(workspace.getId(), activity.getId()));
     }
 
     /**
@@ -163,7 +165,7 @@ class ActivityMapperTest extends AbstractMapperTest {
         activityMapper.insert(activity1);
         activityMapper.insert(activity2);
 
-        List<Activity> matched = activityMapper.getActivitiesByPersonId(person1.getId());
+        List<Activity> matched = activityMapper.getActivitiesByPersonId(workspace.getId(), person1.getId());
 
         assertTrue(matched.stream().anyMatch(x -> x.getId() == activity1.getId()));
         assertTrue(matched.stream().noneMatch(x -> x.getId() == activity2.getId()));
@@ -185,7 +187,7 @@ class ActivityMapperTest extends AbstractMapperTest {
         activityMapper.insert(activity1);
         activityMapper.insert(activity2);
 
-        List<Activity> matched = activityMapper.getActivitiesByDealId(deal1.getId());
+        List<Activity> matched = activityMapper.getActivitiesByDealId(workspace.getId(), deal1.getId());
 
         assertTrue(matched.stream().anyMatch(x -> x.getId() == activity1.getId()));
         assertTrue(matched.stream().noneMatch(x -> x.getId() == activity2.getId()));
@@ -204,9 +206,39 @@ class ActivityMapperTest extends AbstractMapperTest {
         activityMapper.insert(activity1);
         activityMapper.insert(activity2);
 
-        List<Activity> matched = activityMapper.getActivitiesByCreatedById(user1.getId());
+        List<Activity> matched = activityMapper.getActivitiesByCreatedById(workspace.getId(), user1.getId());
 
         assertTrue(matched.stream().anyMatch(x -> x.getId() == activity1.getId()));
         assertTrue(matched.stream().noneMatch(x -> x.getId() == activity2.getId()));
+    }
+
+    /**
+     * An activity in another workspace is invisible and immutable from this workspace.
+     */
+    @Test
+    void activities_areIsolatedByWorkspace() {
+        User user = newUser();
+        Activity mine = build("call", "mine", null, null, user);
+        activityMapper.insert(mine);
+
+        Workspace other = newWorkspace();
+        Activity foreign = build("call", "foreign", null, null, user);
+        foreign.setWorkspaceId(other.getId());
+        activityMapper.insert(foreign);
+
+        assertNull(activityMapper.getActivityById(workspace.getId(), foreign.getId()));
+        assertTrue(activityMapper.getAllActivities(workspace.getId()).stream().noneMatch(a -> a.getId() == foreign.getId()));
+        assertTrue(activityMapper.getAllActivities(workspace.getId()).stream().anyMatch(a -> a.getId() == mine.getId()));
+
+        assertEquals(0, activityMapper.delete(workspace.getId(), foreign.getId()));
+        assertNotNull(activityMapper.getActivityById(other.getId(), foreign.getId()));
+    }
+
+    private Workspace newWorkspace() {
+        Workspace ws = new Workspace();
+        ws.setName("WS " + unique());
+        ws.setSlug("ws_" + unique());
+        workspaceMapper.insert(ws);
+        return ws;
     }
 }

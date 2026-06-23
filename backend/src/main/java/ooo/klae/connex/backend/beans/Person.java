@@ -19,6 +19,7 @@ import lombok.NoArgsConstructor;
 @NoArgsConstructor
 public class Person {
     private int id;
+    private int workspaceId; // owning workspace
     private String name;
     private String email;
     private String phone;
@@ -40,6 +41,14 @@ public class Person {
 
     public void setId(int id) {
         this.id = id;
+    }
+
+    public int getWorkspaceId() {
+        return workspaceId;
+    }
+
+    public void setWorkspaceId(int workspaceId) {
+        this.workspaceId = workspaceId;
     }
 
     public String getName() {

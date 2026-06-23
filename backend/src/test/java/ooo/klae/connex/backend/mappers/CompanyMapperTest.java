@@ -3,6 +3,7 @@ package ooo.klae.connex.backend.mappers;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -11,6 +12,7 @@ import org.junit.jupiter.api.Test;
 
 import ooo.klae.connex.backend.beans.Company;
 import ooo.klae.connex.backend.beans.Tag;
+import ooo.klae.connex.backend.beans.Workspace;
 
 class CompanyMapperTest extends AbstractMapperTest {
 
@@ -30,9 +32,10 @@ class CompanyMapperTest extends AbstractMapperTest {
     void getCompanyById_returnsInsertedRow() {
         Company company = newCompany();
 
-        Company found = companyMapper.getCompanyById(company.getId());
+        Company found = companyMapper.getCompanyById(workspace.getId(), company.getId());
 
         assertNotNull(found);
+        assertEquals(workspace.getId(), found.getWorkspaceId());
         assertEquals(company.getName(), found.getName());
         assertEquals(company.getWebsite(), found.getWebsite());
         assertEquals("Tech", found.getIndustry());
@@ -43,11 +46,11 @@ class CompanyMapperTest extends AbstractMapperTest {
     }
 
     /**
-     * Gets a company by ID and checks if the returned company is null when the ID is negative.
+     * Gets a company by ID and checks if the returned company is null when the ID is missing.
      */
     @Test
     void getCompanyById_returnsNullWhenMissing() {
-        assertNull(companyMapper.getCompanyById(-1));
+        assertNull(companyMapper.getCompanyById(workspace.getId(), -1));
     }
 
     /**
@@ -57,7 +60,7 @@ class CompanyMapperTest extends AbstractMapperTest {
     void getAllCompanies_includesInsertedRow() {
         Company company = newCompany();
 
-        List<Company> allCompanies = companyMapper.getAllCompanies();
+        List<Company> allCompanies = companyMapper.getAllCompanies(workspace.getId());
 
         assertTrue(allCompanies.stream().anyMatch(x -> x.getId() == company.getId()));
     }
@@ -74,7 +77,7 @@ class CompanyMapperTest extends AbstractMapperTest {
 
         companyMapper.update(company);
 
-        Company found = companyMapper.getCompanyById(company.getId());
+        Company found = companyMapper.getCompanyById(workspace.getId(), company.getId());
         assertEquals("Renamed Co", found.getName());
         assertEquals("Finance", found.getIndustry());
         assertEquals("+1-555-9999", found.getPhone());
@@ -87,9 +90,9 @@ class CompanyMapperTest extends AbstractMapperTest {
     void delete_removesRow() {
         Company company = newCompany();
 
-        companyMapper.delete(company.getId());
+        companyMapper.delete(workspace.getId(), company.getId());
 
-        assertNull(companyMapper.getCompanyById(company.getId()));
+        assertNull(companyMapper.getCompanyById(workspace.getId(), company.getId()));
     }
 
     /**
@@ -102,7 +105,7 @@ class CompanyMapperTest extends AbstractMapperTest {
 
         companyMapper.addTag(company.getId(), tag.getId());
 
-        List<Company> companies = companyMapper.getCompaniesByTagId(tag.getId());
+        List<Company> companies = companyMapper.getCompaniesByTagId(workspace.getId(), tag.getId());
         assertTrue(companies.stream().anyMatch(x -> x.getId() == company.getId()));
     }
 
@@ -117,7 +120,7 @@ class CompanyMapperTest extends AbstractMapperTest {
         companyMapper.addTag(company.getId(), tag.getId());
         companyMapper.addTag(company.getId(), tag.getId());
 
-        List<Company> companies = companyMapper.getCompaniesByTagId(tag.getId());
+        List<Company> companies = companyMapper.getCompaniesByTagId(workspace.getId(), tag.getId());
         long matching = companies.stream().filter(x -> x.getId() == company.getId()).count();
         assertEquals(1, matching);
     }
@@ -133,7 +136,41 @@ class CompanyMapperTest extends AbstractMapperTest {
 
         companyMapper.removeTag(company.getId(), tag.getId());
 
-        List<Company> companies = companyMapper.getCompaniesByTagId(tag.getId());
+        List<Company> companies = companyMapper.getCompaniesByTagId(workspace.getId(), tag.getId());
         assertTrue(companies.stream().noneMatch(x -> x.getId() == company.getId()));
+    }
+
+    /**
+     * A company in another workspace is invisible and immutable from this workspace.
+     */
+    @Test
+    void companies_areIsolatedByWorkspace() {
+        Company mine = newCompany();
+        Company foreign = newCompanyIn(newWorkspace());
+
+        assertNull(companyMapper.getCompanyById(workspace.getId(), foreign.getId()));
+        assertFalse(companyMapper.exists(workspace.getId(), foreign.getId()));
+        assertTrue(companyMapper.getAllCompanies(workspace.getId()).stream().noneMatch(c -> c.getId() == foreign.getId()));
+        assertTrue(companyMapper.getAllCompanies(workspace.getId()).stream().anyMatch(c -> c.getId() == mine.getId()));
+
+        // cross-workspace mutation affects zero rows; the foreign row survives
+        assertEquals(0, companyMapper.delete(workspace.getId(), foreign.getId()));
+        assertTrue(companyMapper.exists(foreign.getWorkspaceId(), foreign.getId()));
+    }
+
+    private Workspace newWorkspace() {
+        Workspace ws = new Workspace();
+        ws.setName("WS " + unique());
+        ws.setSlug("ws_" + unique());
+        workspaceMapper.insert(ws);
+        return ws;
+    }
+
+    private Company newCompanyIn(Workspace ws) {
+        Company company = new Company();
+        company.setName("Company " + unique());
+        company.setWorkspaceId(ws.getId());
+        companyMapper.insert(company);
+        return company;
     }
 }

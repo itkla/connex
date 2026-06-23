@@ -1,0 +1,21 @@
+{
+  "WorkspaceSwitcher": {
+    "label": "Workspace",
+    "switchAria": "Switch workspace",
+    "oneWorkspace": "1 workspace",
+    "manyWorkspaces": "{count} workspaces",
+    "createOrJoin": "Create or join workspace"
+  },
+  "Onboarding": {
+    "title": "Create your workspace",
+    "subtitle": "A workspace holds your companies, contacts, and deals. Name yours to get started.",
+    "nameLabel": "Workspace name",
+    "namePlaceholder": "Acme Sales",
+    "createButton": "Create workspace",
+    "creating": "Creating",
+    "nameRequired": "Enter a workspace name",
+    "createFailed": "Could not create the workspace. Try again.",
+    "joinNote": "Joining an existing team? Ask a workspace admin to add you.",
+    "signOut": "Sign out"
+  }
+}

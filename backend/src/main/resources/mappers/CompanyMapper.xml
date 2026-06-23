@@ -4,11 +4,12 @@
 <mapper namespace="ooo.klae.connex.backend.mappers.CompanyMapper">
 
   <sql id="companyColumns">
-    id, name, website, industry, phone, address, created_at, updated_at, logo_url
+    id, workspace_id, name, website, industry, phone, address, created_at, updated_at, logo_url
   </sql>
 
   <resultMap id="CompanyFullResult" type="Company">
     <id property="id" column="id"/>
+    <result property="workspaceId" column="workspace_id"/>
     <result property="name" column="name"/>
     <result property="website" column="website"/>
     <result property="industry" column="industry"/>
@@ -17,41 +18,48 @@
     <result property="logoUrl" column="logo_url"/>
     <result property="createdAt" column="created_at"/>
     <result property="updatedAt" column="updated_at"/>
-    <collection property="people" ofType="Person" column="id" select="ooo.klae.connex.backend.mappers.PersonMapper.getPersonsByCompanyId"/>
+    <collection property="people" ofType="Person" column="{workspaceId=workspace_id,companyId=id}" select="ooo.klae.connex.backend.mappers.PersonMapper.getPersonsByCompanyId"/>
     <collection property="tags" ofType="Tag" column="id" select="ooo.klae.connex.backend.mappers.TagMapper.getTagsByCompanyId"/>
   </resultMap>
 
   <select id="getAllCompanies" resultType="Company">
-    SELECT <include refid="companyColumns"/> FROM company ORDER BY name
+    SELECT <include refid="companyColumns"/> FROM company WHERE workspace_id = #{workspaceId} ORDER BY name
   </select>
 
   <select id="getCompaniesByTagId" resultType="Company">
     SELECT
-      c.id, c.name, c.website, c.industry, c.phone, c.address, c.created_at, c.updated_at, c.logo_url
+      c.id, c.workspace_id, c.name, c.website, c.industry, c.phone, c.address, c.created_at, c.updated_at, c.logo_url
     FROM company c
     JOIN company_tag ct ON ct.company_id = c.id
-    WHERE ct.tag_id = #{tagId}
+    WHERE c.workspace_id = #{workspaceId} AND ct.tag_id = #{tagId}
     ORDER BY c.name
   </select>
 
   <select id="getCompanyById" resultMap="CompanyFullResult">
-    SELECT <include refid="companyColumns"/> FROM company WHERE id = #{id}
+    SELECT <include refid="companyColumns"/> FROM company WHERE workspace_id = #{workspaceId} AND id = #{id}
   </select>
 
   <select id="getCompaniesWithWebsite" resultType="Company">
-    SELECT id, website FROM company WHERE website IS NOT NULL AND website != ''
+    SELECT id, website FROM company WHERE workspace_id = #{workspaceId} AND website IS NOT NULL AND website != ''
+  </select>
+
+  <select id="exists" resultType="boolean">
+    SELECT EXISTS(
+      SELECT 1 FROM company WHERE workspace_id = #{workspaceId} AND id = #{id}
+    )
   </select>
 
   <select id="search" resultType="Company">
     SELECT <include refid="companyColumns"/> FROM company
-    WHERE name LIKE #{query} OR website LIKE #{query} OR industry LIKE #{query} OR phone LIKE #{query} OR address LIKE #{query}
+    WHERE workspace_id = #{workspaceId}
+      AND (name LIKE #{query} OR website LIKE #{query} OR industry LIKE #{query} OR phone LIKE #{query} OR address LIKE #{query})
     ORDER BY name
     LIMIT 10
   </select>
 
   <insert id="insert" useGeneratedKeys="true" keyProperty="id">
-    INSERT INTO company (name, website, industry, phone, address, logo_url)
-    VALUES (#{name}, #{website}, #{industry}, #{phone}, #{address}, #{logoUrl})
+    INSERT INTO company (workspace_id, name, website, industry, phone, address, logo_url)
+    VALUES (#{workspaceId}, #{name}, #{website}, #{industry}, #{phone}, #{address}, #{logoUrl})
   </insert>
 
   <update id="update">
@@ -62,10 +70,10 @@
         phone = #{phone},
         address = #{address},
         logo_url = #{logoUrl}
-    WHERE id = #{id}
+    WHERE workspace_id = #{workspaceId} AND id = #{id}
   </update>
 
-  <delete id="delete">DELETE FROM company WHERE id = #{id}</delete>
+  <delete id="delete">DELETE FROM company WHERE workspace_id = #{workspaceId} AND id = #{id}</delete>
 
   <insert id="addTag">
     INSERT IGNORE INTO company_tag (company_id, tag_id)

@@ -16,6 +16,7 @@ import lombok.NoArgsConstructor;
 @NoArgsConstructor
 public class Tag {
     private int id;
+    private int workspaceId; // owning workspace
     private String name;
     private String color; // hex color code, e.g. "#FF5733"
     private Person[] people;   // contacts labelled with this tag
@@ -28,6 +29,14 @@ public class Tag {
 
     public void setId(int id) {
         this.id = id;
+    }
+
+    public int getWorkspaceId() {
+        return workspaceId;
+    }
+
+    public void setWorkspaceId(int workspaceId) {
+        this.workspaceId = workspaceId;
     }
 
     public String getName() {

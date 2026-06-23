@@ -12,23 +12,26 @@ import java.util.List;
  */
 
 public interface PersonMapper {
-    List<Person> getAllPersons();
-    List<Person> getPersonsByCompanyId(int companyId);
-    List<Person> getPersonsByTagId(int tagId);
-    List<Person> getPersonsByDealId(int dealId);
-    Person getPersonById(int id);
-    List<Person> search(String query);
-    List<Person> getPersonsPage(@Param("query") String query, @Param("sort") String sort, @Param("dir") String dir,
+    List<Person> getAllPersons(int workspaceId);
+    List<Person> getPersonsByCompanyId(@Param("workspaceId") int workspaceId, @Param("companyId") int companyId);
+    List<Person> getPersonsByTagId(@Param("workspaceId") int workspaceId, @Param("tagId") int tagId);
+    List<Person> getPersonsByDealId(@Param("workspaceId") int workspaceId, @Param("dealId") int dealId);
+    Person getPersonById(@Param("workspaceId") int workspaceId, @Param("id") int id);
+    boolean exists(@Param("workspaceId") int workspaceId, @Param("id") int id);
+    List<Person> search(@Param("workspaceId") int workspaceId, @Param("query") String query);
+    List<Person> getPersonsPage(@Param("workspaceId") int workspaceId, @Param("query") String query,
+            @Param("sort") String sort, @Param("dir") String dir,
             @Param("companies") List<String> companies, @Param("titles") List<String> titles,
             @Param("noCompany") boolean noCompany, @Param("limit") int limit, @Param("offset") int offset);
-    long countPersons(@Param("query") String query, @Param("companies") List<String> companies,
+    long countPersons(@Param("workspaceId") int workspaceId, @Param("query") String query,
+            @Param("companies") List<String> companies,
             @Param("titles") List<String> titles, @Param("noCompany") boolean noCompany);
-    List<String> distinctCompanies();
-    List<String> distinctTitles();
-    boolean hasPersonWithoutCompany();
+    List<String> distinctCompanies(int workspaceId);
+    List<String> distinctTitles(int workspaceId);
+    boolean hasPersonWithoutCompany(int workspaceId);
     int insert(Person person);
     int update(Person person);
-    int delete(int id);
+    int delete(@Param("workspaceId") int workspaceId, @Param("id") int id);
 
     int addTag(@Param("personId") int personId, @Param("tagId") int tagId);
     int removeTag(@Param("personId") int personId, @Param("tagId") int tagId);

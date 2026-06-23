@@ -18,6 +18,7 @@ import lombok.NoArgsConstructor;
 @NoArgsConstructor
 public class Stage {
     private int id;
+    private int workspaceId; // owning workspace (denormalized from pipeline)
     private String name;
     @JsonIdentityReference(alwaysAsId = true)
     private Pipeline pipeline;
@@ -32,6 +33,14 @@ public class Stage {
 
     public void setId(int id) {
         this.id = id;
+    }
+
+    public int getWorkspaceId() {
+        return workspaceId;
+    }
+
+    public void setWorkspaceId(int workspaceId) {
+        this.workspaceId = workspaceId;
     }
 
     public String getName() {

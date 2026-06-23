@@ -1,5 +1,7 @@
 package ooo.klae.connex.backend.mappers;
 
+import org.apache.ibatis.annotations.Param;
+
 import ooo.klae.connex.backend.beans.Tag;
 import java.util.List;
 
@@ -10,13 +12,14 @@ import java.util.List;
  */
 
 public interface TagMapper {
-    List<Tag> getAllTags();
-    Tag getTagById(int id);
-    Tag getTagByName(String name);
-    List<Tag> search(String query);
+    List<Tag> getAllTags(int workspaceId);
+    Tag getTagById(@Param("workspaceId") int workspaceId, @Param("id") int id);
+    Tag getTagByName(@Param("workspaceId") int workspaceId, @Param("name") String name);
+    List<Tag> search(@Param("workspaceId") int workspaceId, @Param("query") String query);
+    boolean exists(@Param("workspaceId") int workspaceId, @Param("id") int id);
     int insert(Tag tag);
     int update(Tag tag);
-    int delete(int id);
+    int delete(@Param("workspaceId") int workspaceId, @Param("id") int id);
 
     List<Tag> getTagsByPersonId(int personId);
     List<Tag> getTagsByCompanyId(int companyId);

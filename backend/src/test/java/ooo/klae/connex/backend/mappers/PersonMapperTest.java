@@ -3,6 +3,7 @@ package ooo.klae.connex.backend.mappers;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -15,6 +16,7 @@ import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.beans.Pipeline;
 import ooo.klae.connex.backend.beans.Stage;
 import ooo.klae.connex.backend.beans.Tag;
+import ooo.klae.connex.backend.beans.Workspace;
 
 class PersonMapperTest extends AbstractMapperTest {
 
@@ -35,9 +37,10 @@ class PersonMapperTest extends AbstractMapperTest {
         Company company = newCompany();
         Person person = newPerson(company);
 
-        Person found = personMapper.getPersonById(person.getId());
+        Person found = personMapper.getPersonById(workspace.getId(), person.getId());
 
         assertNotNull(found);
+        assertEquals(workspace.getId(), found.getWorkspaceId());
         assertEquals(person.getName(), found.getName());
         assertEquals(person.getEmail(), found.getEmail());
         assertEquals(person.getPhone(), found.getPhone());
@@ -47,11 +50,11 @@ class PersonMapperTest extends AbstractMapperTest {
     }
 
     /**
-     * Gets a person by ID and checks if the returned person is null when the ID is negative.
+     * Gets a person by ID and checks if the returned person is null when the ID is missing.
      */
     @Test
     void getPersonById_returnsNullWhenMissing() {
-        assertNull(personMapper.getPersonById(-1));
+        assertNull(personMapper.getPersonById(workspace.getId(), -1));
     }
 
     /**
@@ -61,7 +64,7 @@ class PersonMapperTest extends AbstractMapperTest {
     void getAllPersons_includesInsertedRow() {
         Person person = newPerson(newCompany());
 
-        List<Person> all = personMapper.getAllPersons();
+        List<Person> all = personMapper.getAllPersons(workspace.getId());
 
         assertTrue(all.stream().anyMatch(x -> x.getId() == person.getId()));
     }
@@ -79,7 +82,7 @@ class PersonMapperTest extends AbstractMapperTest {
 
         personMapper.update(person);
 
-        Person found = personMapper.getPersonById(person.getId());
+        Person found = personMapper.getPersonById(workspace.getId(), person.getId());
         assertEquals("Renamed Person", found.getName());
         assertEquals("Director", found.getTitle());
         assertNull(found.getCompany());
@@ -92,9 +95,9 @@ class PersonMapperTest extends AbstractMapperTest {
     void delete_removesRow() {
         Person person = newPerson(newCompany());
 
-        personMapper.delete(person.getId());
+        personMapper.delete(workspace.getId(), person.getId());
 
-        assertNull(personMapper.getPersonById(person.getId()));
+        assertNull(personMapper.getPersonById(workspace.getId(), person.getId()));
     }
 
     /**
@@ -107,7 +110,7 @@ class PersonMapperTest extends AbstractMapperTest {
         Person person1 = newPerson(company1);
         Person person2 = newPerson(company2);
 
-        List<Person> in1 = personMapper.getPersonsByCompanyId(company1.getId());
+        List<Person> in1 = personMapper.getPersonsByCompanyId(workspace.getId(), company1.getId());
 
         assertTrue(in1.stream().anyMatch(x -> x.getId() == person1.getId()));
         assertTrue(in1.stream().noneMatch(x -> x.getId() == person2.getId()));
@@ -123,7 +126,7 @@ class PersonMapperTest extends AbstractMapperTest {
 
         personMapper.addTag(person.getId(), tag.getId());
 
-        List<Person> matched = personMapper.getPersonsByTagId(tag.getId());
+        List<Person> matched = personMapper.getPersonsByTagId(workspace.getId(), tag.getId());
         assertTrue(matched.stream().anyMatch(x -> x.getId() == person.getId()));
     }
 
@@ -138,7 +141,7 @@ class PersonMapperTest extends AbstractMapperTest {
         personMapper.addTag(person.getId(), tag.getId());
         personMapper.addTag(person.getId(), tag.getId());
 
-        long matching = personMapper.getPersonsByTagId(tag.getId()).stream()
+        long matching = personMapper.getPersonsByTagId(workspace.getId(), tag.getId()).stream()
                 .filter(x -> x.getId() == person.getId()).count();
         assertEquals(1, matching);
     }
@@ -154,7 +157,7 @@ class PersonMapperTest extends AbstractMapperTest {
 
         personMapper.removeTag(person.getId(), tag.getId());
 
-        assertTrue(personMapper.getPersonsByTagId(tag.getId()).stream()
+        assertTrue(personMapper.getPersonsByTagId(workspace.getId(), tag.getId()).stream()
                 .noneMatch(x -> x.getId() == person.getId()));
     }
 
@@ -170,8 +173,43 @@ class PersonMapperTest extends AbstractMapperTest {
         Deal deal = newDeal(pipeline, stage, company);
         dealMapper.addPerson(workspace.getId(), deal.getId(), person.getId(), null);
 
-        List<Person> matched = personMapper.getPersonsByDealId(deal.getId());
+        List<Person> matched = personMapper.getPersonsByDealId(workspace.getId(), deal.getId());
 
         assertTrue(matched.stream().anyMatch(x -> x.getId() == person.getId()));
+    }
+
+    /**
+     * A contact in another workspace is invisible and immutable from this workspace.
+     */
+    @Test
+    void people_areIsolatedByWorkspace() {
+        Person mine = newPerson(newCompany());
+        Workspace other = newWorkspace();
+        Person foreign = newPersonIn(other);
+
+        assertNull(personMapper.getPersonById(workspace.getId(), foreign.getId()));
+        assertFalse(personMapper.exists(workspace.getId(), foreign.getId()));
+        assertTrue(personMapper.getAllPersons(workspace.getId()).stream().noneMatch(p -> p.getId() == foreign.getId()));
+        assertTrue(personMapper.getAllPersons(workspace.getId()).stream().anyMatch(p -> p.getId() == mine.getId()));
+
+        assertEquals(0, personMapper.delete(workspace.getId(), foreign.getId()));
+        assertTrue(personMapper.exists(other.getId(), foreign.getId()));
+    }
+
+    private Workspace newWorkspace() {
+        Workspace ws = new Workspace();
+        ws.setName("WS " + unique());
+        ws.setSlug("ws_" + unique());
+        workspaceMapper.insert(ws);
+        return ws;
+    }
+
+    private Person newPersonIn(Workspace ws) {
+        Person p = new Person();
+        p.setName("Person " + unique());
+        p.setEmail(unique() + "@example.com");
+        p.setWorkspaceId(ws.getId());
+        personMapper.insert(p);
+        return p;
     }
 }

@@ -106,7 +106,7 @@ public class UserService implements UserDetailsService {
      */
     public List<Activity> getActivitiesByUserId(int userId) {
         getUserById(userId);
-        return activityMapper.getActivitiesByCreatedById(userId);
+        return activityMapper.getActivitiesByCreatedById(workspaceService.getCurrentWorkspaceId(), userId);
     }
 
     /**
@@ -126,7 +126,7 @@ public class UserService implements UserDetailsService {
      */
     public List<Note> getNotesByUserId(int userId) {
         getUserById(userId);
-        return noteMapper.getNotesByAuthorId(userId);
+        return noteMapper.getNotesByAuthorId(workspaceService.getCurrentWorkspaceId(), userId);
     }
 
     /**

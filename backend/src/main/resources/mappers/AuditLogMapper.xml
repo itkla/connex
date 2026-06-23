@@ -5,6 +5,7 @@
 
   <resultMap id="AuditLogResult" type="AuditLog">
     <id property="id" column="id"/>
+    <result property="workspaceId" column="workspace_id"/>
     <result property="action" column="action"/>
     <result property="entityType" column="entity_type"/>
     <result property="entityId" column="entity_id"/>
@@ -24,7 +25,7 @@
   </resultMap>
 
   <sql id="auditColumns">
-    al.id, al.action, al.entity_type, al.entity_id, al.actor_id, al.actor_label,
+    al.id, al.workspace_id, al.action, al.entity_type, al.entity_id, al.actor_id, al.actor_label,
     al.target_label, al.outcome, al.summary, al.changes, al.context, al.ip_address,
     al.user_agent, al.session_id, al.request_id, al.created_at,
     u.display_name AS current_actor_label
@@ -32,10 +33,10 @@
 
   <insert id="insert" useGeneratedKeys="true" keyProperty="id">
     INSERT INTO audit_log
-      (action, entity_type, entity_id, actor_id, actor_label, target_label,
+      (workspace_id, action, entity_type, entity_id, actor_id, actor_label, target_label,
        outcome, summary, changes, context, ip_address, user_agent, session_id, request_id)
     VALUES
-      (#{action}, #{entityType}, #{entityId}, #{actorId}, #{actorLabel}, #{targetLabel},
+      (#{workspaceId}, #{action}, #{entityType}, #{entityId}, #{actorId}, #{actorLabel}, #{targetLabel},
        #{outcome}, #{summary}, #{changes}, #{context}, #{ipAddress}, #{userAgent}, #{sessionId}, #{requestId})
   </insert>
 
@@ -43,6 +44,7 @@
     SELECT <include refid="auditColumns"/>
     FROM audit_log al
     LEFT JOIN app_user u ON u.id = al.actor_id
+    WHERE al.workspace_id = #{workspaceId}
     ORDER BY al.created_at DESC, al.id DESC
     LIMIT #{limit}
   </select>
@@ -51,7 +53,7 @@
     SELECT <include refid="auditColumns"/>
     FROM audit_log al
     LEFT JOIN app_user u ON u.id = al.actor_id
-    WHERE al.entity_type = #{entityType} AND al.entity_id = #{entityId}
+    WHERE al.workspace_id = #{workspaceId} AND al.entity_type = #{entityType} AND al.entity_id = #{entityId}
     ORDER BY al.created_at DESC, al.id DESC
     LIMIT #{limit}
   </select>

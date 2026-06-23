@@ -20,6 +20,7 @@ import lombok.NoArgsConstructor;
 @NoArgsConstructor
 public class Activity {
     private int id; // auto-incremented primary key
+    private int workspaceId; // owning workspace
     private String type; // e.g. "call", "email", "meeting"
     private String subject; 
     private String notes; 
@@ -37,6 +38,14 @@ public class Activity {
 
     public void setId(int id) {
         this.id = id;
+    }
+
+    public int getWorkspaceId() {
+        return workspaceId;
+    }
+
+    public void setWorkspaceId(int workspaceId) {
+        this.workspaceId = workspaceId;
     }
 
     public String getType() {

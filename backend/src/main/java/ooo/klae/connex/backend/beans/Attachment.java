@@ -22,6 +22,7 @@ import java.util.List;
 @NoArgsConstructor
 public class Attachment {
     private int id;
+    private int workspaceId; // owning workspace
     private String entityType;
     private int entityId;
     private String entityLabel;
@@ -41,6 +42,14 @@ public class Attachment {
 
     public void setId(int id) {
         this.id = id;
+    }
+
+    public int getWorkspaceId() {
+        return workspaceId;
+    }
+
+    public void setWorkspaceId(int workspaceId) {
+        this.workspaceId = workspaceId;
     }
 
     public String getEntityType() {

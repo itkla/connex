@@ -12,14 +12,15 @@ import java.util.List;
  */
 
 public interface CompanyMapper {
-    List<Company> getAllCompanies();
-    List<Company> getCompaniesByTagId(int tagId);
-    Company getCompanyById(int id);
-    List<Company> getCompaniesWithWebsite();
-    List<Company> search(String query);
+    List<Company> getAllCompanies(int workspaceId);
+    List<Company> getCompaniesByTagId(@Param("workspaceId") int workspaceId, @Param("tagId") int tagId);
+    Company getCompanyById(@Param("workspaceId") int workspaceId, @Param("id") int id);
+    List<Company> getCompaniesWithWebsite(int workspaceId);
+    List<Company> search(@Param("workspaceId") int workspaceId, @Param("query") String query);
+    boolean exists(@Param("workspaceId") int workspaceId, @Param("id") int id);
     int insert(Company company);
     int update(Company company);
-    int delete(int id);
+    int delete(@Param("workspaceId") int workspaceId, @Param("id") int id);
 
     int addTag(@Param("companyId") int companyId, @Param("tagId") int tagId);
     int removeTag(@Param("companyId") int companyId, @Param("tagId") int tagId);

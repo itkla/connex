@@ -17,6 +17,7 @@ import lombok.NoArgsConstructor;
 @NoArgsConstructor
 public class Company {
     private int id; // auto-incremented primary key
+    private int workspaceId; // owning workspace
     private String name;
     private String website;
     private String industry;
@@ -35,6 +36,14 @@ public class Company {
 
     public void setId(int id) {
         this.id = id;
+    }
+
+    public int getWorkspaceId() {
+        return workspaceId;
+    }
+
+    public void setWorkspaceId(int workspaceId) {
+        this.workspaceId = workspaceId;
     }
 
     public String getName() {

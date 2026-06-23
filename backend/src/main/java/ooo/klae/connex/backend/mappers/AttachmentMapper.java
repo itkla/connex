@@ -11,26 +11,26 @@ import java.util.List;
  */
 
 public interface AttachmentMapper {
-    List<Attachment> getByEntity(@Param("entityType") String entityType, @Param("entityId") int entityId);
-    List<Attachment> getAll();
-    Attachment getById(int id);
-    List<Attachment> search(String query);
+    List<Attachment> getByEntity(@Param("workspaceId") int workspaceId, @Param("entityType") String entityType, @Param("entityId") int entityId);
+    List<Attachment> getAll(int workspaceId);
+    Attachment getById(@Param("workspaceId") int workspaceId, @Param("id") int id);
+    List<Attachment> search(@Param("workspaceId") int workspaceId, @Param("query") String query);
     int insert(Attachment attachment);
-    int delete(int id);
-    int deleteByEntity(@Param("entityType") String entityType, @Param("entityId") int entityId);
-    List<Attachment> getPage(@Param("query") String query, @Param("sort") String sort,
+    int delete(@Param("workspaceId") int workspaceId, @Param("id") int id);
+    int deleteByEntity(@Param("workspaceId") int workspaceId, @Param("entityType") String entityType, @Param("entityId") int entityId);
+    List<Attachment> getPage(@Param("workspaceId") int workspaceId, @Param("query") String query, @Param("sort") String sort,
         @Param("types") List<String> types, @Param("kinds") List<String> kinds,
         @Param("tagIds") List<Integer> tagIds, @Param("orphaned") Boolean orphaned,
         @Param("limit") int limit, @Param("offset") int offset);
-    long countPage(@Param("query") String query, @Param("types") List<String> types,
+    long countPage(@Param("workspaceId") int workspaceId, @Param("query") String query, @Param("types") List<String> types,
         @Param("kinds") List<String> kinds, @Param("tagIds") List<Integer> tagIds,
         @Param("orphaned") Boolean orphaned);
-    List<FacetCount> countsBySource();
-    List<FacetCount> countsByKind();
-    List<FacetCount> countsByTag();
-    long countOrphaned();
-    long totalCount();
-    long totalSize();
+    List<FacetCount> countsBySource(int workspaceId);
+    List<FacetCount> countsByKind(int workspaceId);
+    List<FacetCount> countsByTag(int workspaceId);
+    long countOrphaned(int workspaceId);
+    long totalCount(int workspaceId);
+    long totalSize(int workspaceId);
 
     int addTag(@Param("attachmentId") int attachmentId, @Param("tagId") int tagId);
     int removeTag(@Param("attachmentId") int attachmentId, @Param("tagId") int tagId);
