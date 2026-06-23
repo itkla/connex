@@ -106,7 +106,7 @@ public class UserService implements UserDetailsService {
      */
     public List<Activity> getActivitiesByUserId(int userId) {
         getUserById(userId);
-        return activityMapper.getActivitiesByCreatedById(userId);
+        return activityMapper.getActivitiesByCreatedById(workspaceService.getCurrentWorkspaceId(), userId);
     }
 
     /**

@@ -26,7 +26,8 @@
     <collection property="people" ofType="DealPerson"
                 column="{workspaceId=workspace_id,dealId=id}"
                 select="ooo.klae.connex.backend.mappers.DealMapper.getDealPeopleByDealId"/>
-    <collection property="activities" ofType="Activity" column="id"
+    <collection property="activities" ofType="Activity"
+                column="{workspaceId=workspace_id,dealId=id}"
                 select="ooo.klae.connex.backend.mappers.ActivityMapper.getActivitiesByDealId"/>
     <collection property="notes" ofType="Note" column="id"
                 select="ooo.klae.connex.backend.mappers.NoteMapper.getNotesByDealId"/>

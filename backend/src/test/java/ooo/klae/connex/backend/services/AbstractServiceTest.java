@@ -156,6 +156,7 @@ abstract class AbstractServiceTest {
 
     protected Activity newActivity(User createdBy, Person person, Deal deal) {
         Activity activity = new Activity();
+        activity.setWorkspaceId(workspace.getId());
         activity.setType("call");
         activity.setSubject("subj_" + unique());
         activity.setNotes("notes_" + unique());

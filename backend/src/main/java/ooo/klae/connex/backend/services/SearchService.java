@@ -60,7 +60,7 @@ public class SearchService {
             dealMapper.search(workspaceId, pattern).stream().map(DealDto::from).toList(),
             pipelineMapper.search(workspaceId, pattern).stream().map(PipelineDto::from).toList(),
             tagMapper.search(workspaceId, pattern).stream().map(TagDto::from).toList(),
-            activityMapper.search(pattern).stream().map(ActivityDto::from).toList(),
+            activityMapper.search(workspaceId, pattern).stream().map(ActivityDto::from).toList(),
             noteMapper.search(pattern).stream().map(NoteDto::from).toList(),
             taskMapper.search(workspaceId, pattern).stream().map(TaskDto::from).toList(),
             userMapper.search(pattern).stream().map(UserDto::from).toList(),

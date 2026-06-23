@@ -21,7 +21,7 @@
   </resultMap>
 
   <resultMap id="PersonFullResult" type="Person" extends="PersonResult">
-    <collection property="activities" ofType="Activity" column="id" select="ooo.klae.connex.backend.mappers.ActivityMapper.getActivitiesByPersonId"/>
+    <collection property="activities" ofType="Activity" column="{workspaceId=workspace_id,personId=id}" select="ooo.klae.connex.backend.mappers.ActivityMapper.getActivitiesByPersonId"/>
     <collection property="notes" ofType="Note" column="id" select="ooo.klae.connex.backend.mappers.NoteMapper.getNotesByPersonId"/>
     <collection property="tags" ofType="Tag" column="id" select="ooo.klae.connex.backend.mappers.TagMapper.getTagsByPersonId"/>
   </resultMap>

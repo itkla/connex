@@ -204,8 +204,9 @@ public class PersonService {
      * Retrieves the activities associated with a person in the active workspace.
      */
     public List<Activity> getActivitiesByPersonId(int personId) {
-        requirePerson(workspaceService.getCurrentWorkspaceId(), personId);
-        return activityMapper.getActivitiesByPersonId(personId);
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        requirePerson(workspaceId, personId);
+        return activityMapper.getActivitiesByPersonId(workspaceId, personId);
     }
 
     /**

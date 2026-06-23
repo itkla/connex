@@ -5,6 +5,7 @@
 
   <resultMap id="ActivityResult" type="Activity">
     <id     property="id"        column="id"/>
+    <result property="workspaceId" column="workspace_id"/>
     <result property="type"      column="type"/>
     <result property="subject"   column="subject"/>
     <result property="notes"     column="notes"/>
@@ -21,43 +22,45 @@
   </resultMap>
 
   <sql id="activityColumns">
-    id, type, subject, notes, person_id, deal_id, created_by_id, timestamp
+    id, workspace_id, type, subject, notes, person_id, deal_id, created_by_id, timestamp
   </sql>
 
   <select id="getAllActivities" resultMap="ActivityResult">
-    SELECT <include refid="activityColumns"/> FROM activity ORDER BY timestamp DESC
+    SELECT <include refid="activityColumns"/> FROM activity
+    WHERE workspace_id = #{workspaceId} ORDER BY timestamp DESC
   </select>
 
   <select id="getActivitiesByPersonId" resultMap="ActivityResult">
     SELECT <include refid="activityColumns"/> FROM activity
-    WHERE person_id = #{personId} ORDER BY timestamp DESC
+    WHERE workspace_id = #{workspaceId} AND person_id = #{personId} ORDER BY timestamp DESC
   </select>
 
   <select id="getActivitiesByDealId" resultMap="ActivityResult">
     SELECT <include refid="activityColumns"/> FROM activity
-    WHERE deal_id = #{dealId} ORDER BY timestamp DESC
+    WHERE workspace_id = #{workspaceId} AND deal_id = #{dealId} ORDER BY timestamp DESC
   </select>
 
   <select id="getActivitiesByCreatedById" resultMap="ActivityResult">
     SELECT <include refid="activityColumns"/> FROM activity
-    WHERE created_by_id = #{createdById} ORDER BY timestamp DESC
+    WHERE workspace_id = #{workspaceId} AND created_by_id = #{createdById} ORDER BY timestamp DESC
   </select>
 
   <select id="getActivityById" resultMap="ActivityResult">
-    SELECT <include refid="activityColumns"/> FROM activity WHERE id = #{id}
+    SELECT <include refid="activityColumns"/> FROM activity
+    WHERE workspace_id = #{workspaceId} AND id = #{id}
   </select>
 
   <select id="search" resultMap="ActivityResult">
     SELECT <include refid="activityColumns"/> FROM activity
-    WHERE subject LIKE #{query} OR notes LIKE #{query}
+    WHERE workspace_id = #{workspaceId} AND (subject LIKE #{query} OR notes LIKE #{query})
     ORDER BY timestamp DESC
     LIMIT 10
   </select>
 
   <insert id="insert" useGeneratedKeys="true" keyProperty="id">
-    INSERT INTO activity (type, subject, notes, person_id, deal_id, created_by_id, timestamp)
+    INSERT INTO activity (workspace_id, type, subject, notes, person_id, deal_id, created_by_id, timestamp)
     VALUES (
-      #{type}, #{subject}, #{notes},
+      #{workspaceId}, #{type}, #{subject}, #{notes},
       <choose>
         <when test="person != null">#{person.id}</when>
         <otherwise>NULL</otherwise>
@@ -87,8 +90,8 @@
           </choose>,
         created_by_id = #{createdBy.id},
         timestamp = #{timestamp}
-    WHERE id = #{id}
+    WHERE workspace_id = #{workspaceId} AND id = #{id}
   </update>
 
-  <delete id="delete">DELETE FROM activity WHERE id = #{id}</delete>
+  <delete id="delete">DELETE FROM activity WHERE workspace_id = #{workspaceId} AND id = #{id}</delete>
 </mapper>
