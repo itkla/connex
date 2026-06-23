@@ -635,7 +635,7 @@ export function restoreNotification(id: number) {
 }
 
 export function markAllNotificationsRead() {
-    return postJson<void>("/api/notifications/read-all");
+    return postJson<Types.NotificationCounts>("/api/notifications/read-all");
 }
 
 /*

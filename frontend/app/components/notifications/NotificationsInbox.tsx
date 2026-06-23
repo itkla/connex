@@ -48,7 +48,7 @@ export default function NotificationsInbox() {
     const t = useTranslations("Notifications");
     const locale = useLocale();
     const router = useRouter();
-    const { unread, refreshUnread } = useNotifications();
+    const { unread, refreshUnread, setUnread } = useNotifications();
     const [state, setState] = useState<NotificationState>("active");
     const [items, setItems] = useState<Notification[]>([]);
     const [page, setPage] = useState(1);
@@ -123,9 +123,9 @@ export default function NotificationsInbox() {
 
     async function readAll() {
         try {
-            await markAllNotificationsRead();
+            const counts = await markAllNotificationsRead();
             setItems((current) => current.map((item) => ({ ...item, readAt: new Date().toISOString() })));
-            await refreshUnread();
+            setUnread(counts.unread);
         } catch {
             toastError(t("actionError"));
         }

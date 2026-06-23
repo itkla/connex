@@ -27,7 +27,7 @@ export default function NotificationBell() {
     const t = useTranslations("Notifications");
     const locale = useLocale();
     const router = useRouter();
-    const { unread, adjustUnread, refreshUnread } = useNotifications();
+    const { unread, adjustUnread, refreshUnread, setUnread } = useNotifications();
     const [items, setItems] = useState<Notification[]>([]);
     const [completing, setCompleting] = useState<Set<number>>(new Set());
     const [loading, setLoading] = useState(false);
@@ -90,9 +90,9 @@ export default function NotificationBell() {
 
     async function readAll() {
         try {
-            await markAllNotificationsRead();
+            const counts = await markAllNotificationsRead();
             setItems([]);
-            await refreshUnread();
+            setUnread(counts.unread);
         } catch {
             toastError(t("actionError"));
         }

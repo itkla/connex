@@ -8,6 +8,7 @@ type NotificationContextValue = {
     unread: number;
     refreshUnread: () => Promise<void>;
     adjustUnread: (delta: number) => void;
+    setUnread: (value: number) => void;
 };
 
 const NotificationContext = createContext<NotificationContextValue | null>(null);
@@ -57,7 +58,7 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
     }, []);
 
     return (
-        <NotificationContext.Provider value={{ unread, refreshUnread, adjustUnread }}>
+        <NotificationContext.Provider value={{ unread, refreshUnread, adjustUnread, setUnread }}>
             {children}
         </NotificationContext.Provider>
     );
