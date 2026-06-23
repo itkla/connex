@@ -64,7 +64,7 @@ public class SearchService {
             noteMapper.search(workspaceId, pattern).stream().map(NoteDto::from).toList(),
             taskMapper.search(workspaceId, pattern).stream().map(TaskDto::from).toList(),
             userMapper.search(pattern).stream().map(UserDto::from).toList(),
-            attachmentMapper.search(pattern).stream().map(AttachmentDto::from).toList()
+            attachmentMapper.search(workspaceId, pattern).stream().map(AttachmentDto::from).toList()
         );
     }
 

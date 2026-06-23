@@ -40,31 +40,32 @@ public class AttachmentService {
     }
 
     public List<Attachment> getByEntity(String entityType, int entityId) {
-        return attachmentMapper.getByEntity(normalizeType(entityType), entityId);
+        return attachmentMapper.getByEntity(workspaceService.getCurrentWorkspaceId(), normalizeType(entityType), entityId);
     }
 
     public List<Attachment> getAll() {
-        return attachmentMapper.getAll();
+        return attachmentMapper.getAll(workspaceService.getCurrentWorkspaceId());
     }
 
     public List<Attachment> getPage(String query, String sort, List<String> types, List<String> kinds,
             List<Integer> tagIds, Boolean orphaned, int limit, int offset) {
-        return attachmentMapper.getPage(query, sort, types, kinds, tagIds, orphaned, limit, offset);
+        return attachmentMapper.getPage(workspaceService.getCurrentWorkspaceId(), query, sort, types, kinds, tagIds, orphaned, limit, offset);
     }
 
     public long countPage(String query, List<String> types, List<String> kinds, List<Integer> tagIds,
             Boolean orphaned) {
-        return attachmentMapper.countPage(query, types, kinds, tagIds, orphaned);
+        return attachmentMapper.countPage(workspaceService.getCurrentWorkspaceId(), query, types, kinds, tagIds, orphaned);
     }
 
     public AttachmentFacets facets() {
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
         return new AttachmentFacets(
-            attachmentMapper.countsBySource(),
-            attachmentMapper.countsByKind(),
-            attachmentMapper.countsByTag(),
-            attachmentMapper.countOrphaned(),
-            attachmentMapper.totalCount(),
-            attachmentMapper.totalSize()
+            attachmentMapper.countsBySource(workspaceId),
+            attachmentMapper.countsByKind(workspaceId),
+            attachmentMapper.countsByTag(workspaceId),
+            attachmentMapper.countOrphaned(workspaceId),
+            attachmentMapper.totalCount(workspaceId),
+            attachmentMapper.totalSize(workspaceId)
         );
     }
 
@@ -136,7 +137,7 @@ public class AttachmentService {
      * @return
      */
     public Attachment getById(int id) {
-        Attachment attachment = attachmentMapper.getById(id);
+        Attachment attachment = attachmentMapper.getById(workspaceService.getCurrentWorkspaceId(), id);
         if (attachment == null) throw new ResourceNotFoundException("Attachment not found with id: " + id);
         return attachment;
     }
@@ -147,6 +148,8 @@ public class AttachmentService {
      * @return
      */
     public Attachment create(Attachment attachment) {
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        attachment.setWorkspaceId(workspaceId);
         attachment.setEntityType(normalizeType(attachment.getEntityType()));
         attachmentMapper.insert(attachment);
         // Audit from the inserted bean (id populated by the key generator) so a failed
@@ -154,7 +157,7 @@ public class AttachmentService {
         auditService.record("attachment.create", "attachment", attachment.getId(), attachment.getFileName(),
             "Uploaded attachment " + attachment.getFileName(),
             auditService.diff(null, attachment, AUDIT_FIELDS));
-        return attachmentMapper.getById(attachment.getId());
+        return attachmentMapper.getById(workspaceId, attachment.getId());
     }
 
     /**
@@ -162,9 +165,10 @@ public class AttachmentService {
      * @param id
      */
     public void delete(int id) {
-        Attachment before = attachmentMapper.getById(id);
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        Attachment before = attachmentMapper.getById(workspaceId, id);
         if (before == null) throw new ResourceNotFoundException("Attachment not found with id: " + id);
-        attachmentMapper.delete(id);
+        attachmentMapper.delete(workspaceId, id);
         auditService.record("attachment.delete", "attachment", id, before.getFileName(),
             "Deleted attachment " + before.getFileName(),
             auditService.diff(before, null, AUDIT_FIELDS));
