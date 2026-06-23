@@ -103,12 +103,12 @@ export default function NotificationBell() {
             <DropdownMenu.Trigger asChild>
                 <button
                     type="button"
-                    aria-label={t("bellLabel")}
+                    aria-label={unread > 0 ? `${t("bellLabel")} — ${t("unreadCount", { count: unread })}` : t("bellLabel")}
                     className="relative inline-flex size-9 items-center justify-center rounded-md text-muted-foreground transition hover:bg-sidebar-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
                 >
                     <BellIcon className="size-5" />
                     {unread > 0 ? (
-                        <span className="absolute -right-1 -top-1 min-w-5 rounded-full bg-destructive px-1 text-center text-[10px] font-semibold leading-5 text-white">
+                        <span aria-hidden="true" className="absolute -right-1 -top-1 min-w-5 rounded-full bg-destructive px-1 text-center text-[10px] font-semibold leading-5 text-white">
                             {unread > 99 ? "99+" : unread}
                         </span>
                     ) : null}
@@ -167,10 +167,9 @@ export default function NotificationBell() {
                                     key={item.id}
                                     className="group relative flex items-start gap-2 rounded-lg p-2 transition-colors hover:bg-muted"
                                 >
-                                    <button
-                                        type="button"
-                                        onClick={() => openItem(item)}
-                                        className="flex min-w-0 flex-1 items-start gap-3 text-left"
+                                    <DropdownMenu.Item
+                                        onSelect={() => openItem(item)}
+                                        className="flex min-w-0 flex-1 cursor-pointer items-start gap-3 rounded-md text-left outline-none data-[highlighted]:bg-muted"
                                     >
                                         <span
                                             className={cn(
@@ -192,7 +191,7 @@ export default function NotificationBell() {
                                                 {formatRelativeTime(item.triggeredAt, locale)}
                                             </p>
                                         </div>
-                                    </button>
+                                    </DropdownMenu.Item>
                                     {isTask ? (
                                         <div className="flex shrink-0 items-center self-center pr-1">
                                             <Checkbox
