@@ -4,16 +4,21 @@ spring:
     application:
         name: connex-backend
     datasource:
-        url: jdbc:mysql://localhost:3306/connexdb
+        url: jdbc:mysql://localhost:3306/connexdb?createDatabaseIfNotExist=true
         username: connexuser
         password: connexpassword
         # driver-class-name: com.mysql.cj.jdbc.Driver
         hikari:
             connection-init-sql: "SET time_zone = '+00:00'"
+    # Schema is owned by Flyway (classpath:db/migration). Legacy sql.init drop-and-recreate is off.
     sql:
         init:
-            # mode: always
+            mode: never
             encoding: UTF-8
+    flyway:
+        enabled: true
+        baseline-on-migrate: true
+        baseline-version: 0
     jackson:
         default-property-inclusion: non_null
 
