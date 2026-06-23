@@ -39,6 +39,7 @@ import { DropdownMenuItem, DropdownMenuPortal, DropdownMenuSub, DropdownMenuSubC
 // import {  } from "@heroicons/react/24/solid";
 import UserAvatar from '@/app/components/records/users/UserAvatar';
 import NotificationBell from '@/app/components/notifications/NotificationBell';
+import WorkspaceSwitcher from '@/app/components/WorkspaceSwitcher';
 
 type NavItem = {
     label: string;
@@ -325,9 +326,8 @@ export default function Sidebar({
                 className={`flex flex-col min-h-0 ${className ?? ""}`}
                 aria-label={t("ariaPrimarySidebar")}
             >
-                {/* TODO: make this section a menu so that the user can select the organization they want to use */}
-                <header className="mb-6 flex shrink-0 items-center justify-between gap-3">
-                    <h1 className="text-2xl font-bold tracking-tight">{process.env.ORG_NAME ?? t("brand")}</h1>
+                <header className="mb-6 flex shrink-0 items-center justify-between gap-2">
+                    <WorkspaceSwitcher />
                     <NotificationBell />
                 </header>
 
