@@ -80,6 +80,8 @@ public interface NotificationMapper {
         @Param("recipientId") int recipientId
     );
 
+    List<Notification> findWorkspaceReminderNotifications(@Param("workspaceId") int workspaceId);
+
     int resolveReminder(
         @Param("workspaceId") int workspaceId,
         @Param("recipientId") int recipientId,
@@ -98,6 +100,11 @@ public interface NotificationMapper {
     int purgeReminderHistory(
         @Param("workspaceId") int workspaceId,
         @Param("recipientId") int recipientId,
+        @Param("cutoff") String cutoff
+    );
+
+    int purgeWorkspaceReminderHistory(
+        @Param("workspaceId") int workspaceId,
         @Param("cutoff") String cutoff
     );
 }

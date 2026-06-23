@@ -231,6 +231,14 @@
     ORDER BY n.id
   </select>
 
+  <select id="findWorkspaceReminderNotifications" resultMap="NotificationResult">
+    SELECT <include refid="notificationColumns"/>
+    FROM notification n
+    WHERE n.workspace_id = #{workspaceId}
+      AND n.type IN ('task.due', 'deal.close')
+    ORDER BY n.recipient_id, n.id
+  </select>
+
   <update id="resolveReminder">
     UPDATE notification
     SET resolved_at = #{resolvedAt}
@@ -317,6 +325,14 @@
     DELETE FROM notification
     WHERE workspace_id = #{workspaceId}
       AND recipient_id = #{recipientId}
+      AND type IN ('task.due', 'deal.close')
+      AND resolved_at IS NOT NULL
+      AND resolved_at &lt; #{cutoff}
+  </delete>
+
+  <delete id="purgeWorkspaceReminderHistory">
+    DELETE FROM notification
+    WHERE workspace_id = #{workspaceId}
       AND type IN ('task.due', 'deal.close')
       AND resolved_at IS NOT NULL
       AND resolved_at &lt; #{cutoff}

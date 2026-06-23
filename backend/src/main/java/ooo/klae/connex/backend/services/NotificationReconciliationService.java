@@ -8,7 +8,6 @@ import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.util.LinkedHashMap;
-import java.util.List;
 import java.util.Map;
 
 import org.springframework.stereotype.Service;
@@ -51,8 +50,7 @@ public class NotificationReconciliationService {
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void reconcileWorkspace(int workspaceId) {
         String triggeredAt = utcTimestamp(clock.instant());
-        List<Integer> recipientIds = notificationMapper.findWorkspaceRecipientIds(workspaceId);
-        Map<ReminderKey, Notification> existing = loadExisting(workspaceId, recipientIds);
+        Map<ReminderKey, Notification> existing = loadExisting(workspaceId);
         Map<PreferenceKey, Boolean> preferences = loadPreferences(workspaceId);
         Map<ReminderKey, Notification> expected = new LinkedHashMap<>();
 
@@ -106,11 +104,7 @@ public class NotificationReconciliationService {
     public int purgeWorkspace(int workspaceId) {
         int retentionDays = Math.max(1, properties.getRetentionDays());
         String cutoff = utcTimestamp(clock.instant().minusSeconds(retentionDays * 86_400L));
-        int purged = 0;
-        for (Integer recipientId : notificationMapper.findWorkspaceRecipientIds(workspaceId)) {
-            purged += notificationMapper.purgeReminderHistory(workspaceId, recipientId, cutoff);
-        }
-        return purged;
+        return notificationMapper.purgeWorkspaceReminderHistory(workspaceId, cutoff);
     }
 
     static String classify(
@@ -127,16 +121,13 @@ public class NotificationReconciliationService {
         return dueDate.isAfter(today.plusDays(warningDays)) ? null : WARNING;
     }
 
-    private Map<ReminderKey, Notification> loadExisting(int workspaceId, List<Integer> recipientIds) {
+    private Map<ReminderKey, Notification> loadExisting(int workspaceId) {
         Map<ReminderKey, Notification> existing = new LinkedHashMap<>();
-        for (Integer recipientId : recipientIds) {
-            for (Notification notification :
-                    notificationMapper.findReminderNotifications(workspaceId, recipientId)) {
-                existing.put(
-                    new ReminderKey(workspaceId, recipientId, notification.getDedupeKey()),
-                    notification
-                );
-            }
+        for (Notification notification : notificationMapper.findWorkspaceReminderNotifications(workspaceId)) {
+            existing.put(
+                new ReminderKey(workspaceId, notification.getRecipientId(), notification.getDedupeKey()),
+                notification
+            );
         }
         return existing;
     }
