@@ -51,6 +51,7 @@ export default function UsersBrowser({ users }: { users: User[] }) {
                 label: t("columnName"),
                 getSortValue: (u) => u.displayName ?? null,
                 render: (u) => u.displayName,
+                widthClass: "min-w-48",
             },
             {
                 key: "username",

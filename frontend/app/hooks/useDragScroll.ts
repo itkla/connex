@@ -1,46 +1,106 @@
 'use client';
 
-import { useCallback, useRef } from 'react';
+import { useCallback, useRef, useState } from 'react';
 
-export function useDragScroll<T extends HTMLElement = HTMLElement>() {
+export interface ScrollEdges {
+    left: boolean;
+    right: boolean;
+}
+
+interface DragScrollOptions {
+    leftDragSelector?: string;
+}
+const LEFT_DRAG_THRESHOLD = 5;
+
+export function useDragScroll<T extends HTMLElement = HTMLElement>(options?: DragScrollOptions) {
+    const leftDragSelector = options?.leftDragSelector;
     const cleanupRef = useRef<(() => void) | null>(null);
+    const [edges, setEdges] = useState<ScrollEdges>({ left: false, right: false });
 
-    return useCallback((el: T | null) => {
+    const ref = useCallback((el: T | null) => {
         if (cleanupRef.current) {
             cleanupRef.current();
             cleanupRef.current = null;
         }
         if (!el) return;
 
+        const updateEdges = () => {
+            const { scrollLeft, scrollWidth, clientWidth } = el;
+            const max = scrollWidth - clientWidth;
+            setEdges({ left: scrollLeft > 1, right: scrollLeft < max - 1 });
+        };
+
+        const ro = new ResizeObserver(updateEdges);
+        ro.observe(el);
+        if (el.firstElementChild) ro.observe(el.firstElementChild);
+        el.addEventListener('scroll', updateEdges, { passive: true });
+        updateEdges();
+
         let dragging = false;
+        let pendingLeft = false;
+        let moved = false;
         let startX = 0;
         let startY = 0;
         let startLeft = 0;
         let startTop = 0;
 
-        const onPointerDown = (e: PointerEvent) => {
-            if (e.button !== 1) return;
+        const beginDrag = (e: PointerEvent) => {
             dragging = true;
-            startX = e.clientX;
-            startY = e.clientY;
-            startLeft = el.scrollLeft;
-            startTop = el.scrollTop;
             el.setPointerCapture(e.pointerId);
             el.dataset.dragging = 'true';
-            e.preventDefault();
+        };
+
+        const onPointerDown = (e: PointerEvent) => {
+            moved = false;
+            pendingLeft = false;
+            if (e.button === 1) {
+                startX = e.clientX;
+                startY = e.clientY;
+                startLeft = el.scrollLeft;
+                startTop = el.scrollTop;
+                beginDrag(e);
+                e.preventDefault();
+                return;
+            }
+            if (e.button === 0 && leftDragSelector && (e.target as Element | null)?.closest(leftDragSelector)) {
+                pendingLeft = true;
+                startX = e.clientX;
+                startY = e.clientY;
+                startLeft = el.scrollLeft;
+                startTop = el.scrollTop;
+            }
         };
 
         const onPointerMove = (e: PointerEvent) => {
+            if (pendingLeft && !dragging) {
+                if (
+                    Math.abs(e.clientX - startX) > LEFT_DRAG_THRESHOLD ||
+                    Math.abs(e.clientY - startY) > LEFT_DRAG_THRESHOLD
+                ) {
+                    moved = true;
+                    beginDrag(e);
+                }
+            }
             if (!dragging) return;
             el.scrollLeft = startLeft - (e.clientX - startX);
             el.scrollTop = startTop - (e.clientY - startY);
+            e.preventDefault();
         };
 
         const endDrag = (e: PointerEvent) => {
+            pendingLeft = false;
             if (!dragging) return;
             dragging = false;
             delete el.dataset.dragging;
             if (el.hasPointerCapture(e.pointerId)) el.releasePointerCapture(e.pointerId);
+        };
+
+        const onClickCapture = (e: MouseEvent) => {
+            if (moved) {
+                e.stopPropagation();
+                e.preventDefault();
+                moved = false;
+            }
         };
 
         const suppressAutoScroll = (e: MouseEvent) => {
@@ -51,16 +111,22 @@ export function useDragScroll<T extends HTMLElement = HTMLElement>() {
         el.addEventListener('pointermove', onPointerMove);
         el.addEventListener('pointerup', endDrag);
         el.addEventListener('pointercancel', endDrag);
+        el.addEventListener('click', onClickCapture, true);
         el.addEventListener('mousedown', suppressAutoScroll);
         el.addEventListener('auxclick', suppressAutoScroll);
 
         cleanupRef.current = () => {
+            ro.disconnect();
+            el.removeEventListener('scroll', updateEdges);
             el.removeEventListener('pointerdown', onPointerDown);
             el.removeEventListener('pointermove', onPointerMove);
             el.removeEventListener('pointerup', endDrag);
             el.removeEventListener('pointercancel', endDrag);
+            el.removeEventListener('click', onClickCapture, true);
             el.removeEventListener('mousedown', suppressAutoScroll);
             el.removeEventListener('auxclick', suppressAutoScroll);
         };
-    }, []);
+    }, [leftDragSelector]);
+
+    return { ref, edges };
 }

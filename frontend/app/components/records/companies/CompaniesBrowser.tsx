@@ -251,7 +251,7 @@ export default function CompaniesBrowser({ companies }: { companies: Company[] }
     };
 
     const columns: ColumnDef<Company>[] = useMemo(() => [
-        { key: 'name', label: t('columnName'), getSortValue: (c) => c.name ?? null },
+        { key: 'name', label: t('columnName'), getSortValue: (c) => c.name ?? null, widthClass: 'min-w-48' },
         {
             key: 'website',
             label: t('columnWebsite'),

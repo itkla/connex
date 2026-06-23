@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState, type ReactNode } from 'react';
+import { useCallback, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useRouter } from 'next/navigation';
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
 import {
@@ -113,7 +113,7 @@ export default function RecordsRenderView<T extends { id: SelectionId; name?: st
     const router = useRouter();
     const t = useTranslations('RecordsRenderView');
     const reduce = useReducedMotion() ?? false;
-    const scrollRef = useDragScroll<HTMLDivElement>();
+    const { ref: scrollRef, edges } = useDragScroll<HTMLDivElement>({ leftDragSelector: 'thead' });
     const [sortKey, setSortKey] = useState<string | null>(null);
     const [sortDirection, setSortDirection] = useState<SortDirection>('asc');
     const [pageSize, setPageSize] = useState(25);
@@ -174,6 +174,32 @@ export default function RecordsRenderView<T extends { id: SelectionId; name?: st
     };
 
     const hasRowActions = !!(onQuickEdit || onDelete);
+
+    const [frozenOffsets, setFrozenOffsets] = useState({ avatar: 0, name: 0 });
+    const frozenCleanup = useRef<(() => void) | null>(null);
+    const headerRowRef = useCallback(
+        (row: HTMLTableRowElement | null) => {
+            frozenCleanup.current?.();
+            frozenCleanup.current = null;
+            if (!row) return;
+            const measure = () => {
+                const cells = row.children;
+                const cb = (cells[0] as HTMLElement | undefined)?.offsetWidth ?? 0;
+                const av = renderAvatar ? (cells[1] as HTMLElement | undefined)?.offsetWidth ?? 0 : 0;
+                setFrozenOffsets({ avatar: cb, name: cb + av });
+            };
+            measure();
+            const ro = new ResizeObserver(measure);
+            Array.from(row.children).forEach((c) => ro.observe(c));
+            frozenCleanup.current = () => ro.disconnect();
+        },
+        [renderAvatar],
+    );
+    const stickySeam = cn(
+        "after:pointer-events-none after:absolute after:inset-y-0 after:right-0 after:w-4 after:translate-x-full after:bg-gradient-to-r after:from-black/15 after:to-transparent after:transition-opacity after:duration-200 after:content-[''] dark:after:from-black/45",
+        edges.left ? 'after:opacity-100' : 'after:opacity-0',
+    );
+    const stickyHeaderBg = "bg-card before:absolute before:inset-0 before:-z-10 before:bg-muted/60 before:content-['']";
 
     const gridSortOptions =
         sortOptions ?? columns.filter((c) => c.getSortValue).map((c) => ({ key: c.key, label: c.label }));
@@ -381,12 +407,12 @@ export default function RecordsRenderView<T extends { id: SelectionId; name?: st
 
     return (
         <>
-            <div className={cn('page-bleed overflow-hidden rounded-2xl bg-card ring-1 ring-border', loading && 'opacity-60 transition-opacity')} aria-busy={loading}>
-                <div ref={scrollRef} className="overflow-x-auto data-[dragging=true]:cursor-grabbing data-[dragging=true]:select-none">
-                    <table className="w-max min-w-full border-collapse text-left text-sm">
+            <div className={cn('relative overflow-hidden rounded-2xl bg-card ring-1 ring-border', loading && 'opacity-60 transition-opacity')} aria-busy={loading}>
+                <div ref={scrollRef} className="overflow-x-auto data-[dragging=true]:cursor-grabbing data-[dragging=true]:select-none data-[dragging=true]:[&_thead]:cursor-grabbing">
+                    <table className="w-full min-w-max border-collapse text-left text-sm">
                         <thead>
-                            <tr className="border-b border-border bg-muted/60">
-                                <th className="w-12 px-4 py-2.5">
+                            <tr ref={headerRowRef} className="cursor-grab border-b border-border bg-muted/60">
+                                <th className={cn('sticky left-0 z-20 w-12 px-4 py-2.5', stickyHeaderBg)}>
                                     <Checkbox
                                         checked={someSelected ? 'indeterminate' : allSelected}
                                         onCheckedChange={(checked) => toggleAll(checked === true)}
@@ -394,8 +420,8 @@ export default function RecordsRenderView<T extends { id: SelectionId; name?: st
                                         className={CHECKBOX_CLASS}
                                     />
                                 </th>
-                                {renderAvatar && <th className="w-12 px-4 py-2.5" aria-hidden />}
-                                {columns.map((col) => {
+                                {renderAvatar && <th className={cn('sticky z-20 w-12 px-4 py-2.5', stickyHeaderBg)} style={{ left: frozenOffsets.avatar }} aria-hidden />}
+                                {columns.map((col, colIndex) => {
                                     const active = activeSortKey === col.key;
                                     const sortable = !!col.getSortValue;
                                     const Icon = active
@@ -418,7 +444,9 @@ export default function RecordsRenderView<T extends { id: SelectionId; name?: st
                                             className={cn(
                                                 'px-4 py-2.5 text-xs font-semibold tracking-wide whitespace-nowrap text-muted-foreground uppercase',
                                                 col.widthClass,
+                                                colIndex === 0 && cn('sticky z-20', stickyHeaderBg, stickySeam),
                                             )}
+                                            style={colIndex === 0 ? { left: frozenOffsets.name } : undefined}
                                         >
                                             {sortable ? (
                                                 <button
@@ -445,6 +473,9 @@ export default function RecordsRenderView<T extends { id: SelectionId; name?: st
                             {pagedData.map((item) => {
                                 const isSelected = selectedIds.has(item.id);
                                 const clickable = !!(onRowClick || detailPath);
+                                const stickyBodyBg = isSelected
+                                    ? "bg-card before:absolute before:inset-0 before:-z-10 before:bg-brand-light/40 before:transition-colors before:content-[''] group-hover:before:bg-brand-light/55"
+                                    : 'bg-card transition-colors group-hover:bg-muted';
                                 return (
                                     <tr
                                         key={item.id}
@@ -459,7 +490,7 @@ export default function RecordsRenderView<T extends { id: SelectionId; name?: st
                                             else if (detailPath) router.push(detailPath(item));
                                         }}
                                     >
-                                        <td className="px-4 py-2.5" onClick={(e) => e.stopPropagation()}>
+                                        <td className={cn('sticky left-0 z-10 px-4 py-2.5', stickyBodyBg)} onClick={(e) => e.stopPropagation()}>
                                             <Checkbox
                                                 checked={isSelected}
                                                 onCheckedChange={(checked) => toggleOne(item.id, checked === true)}
@@ -467,8 +498,8 @@ export default function RecordsRenderView<T extends { id: SelectionId; name?: st
                                                 className={CHECKBOX_CLASS}
                                             />
                                         </td>
-                                        {renderAvatar && <td className="px-4 py-2.5">{renderAvatar(item)}</td>}
-                                        {columns.map((col) => {
+                                        {renderAvatar && <td className={cn('sticky z-10 px-4 py-2.5', stickyBodyBg)} style={{ left: frozenOffsets.avatar }}>{renderAvatar(item)}</td>}
+                                        {columns.map((col, colIndex) => {
                                             const content = col.render
                                                 ? col.render(item)
                                                 : (item as unknown as Record<string, ReactNode>)[col.key];
@@ -477,7 +508,11 @@ export default function RecordsRenderView<T extends { id: SelectionId; name?: st
                                                 return (
                                                     <td
                                                         key={col.key}
-                                                        className="px-4 py-2.5 whitespace-nowrap text-foreground transition-colors hover:text-brand-dark"
+                                                        className={cn(
+                                                            'px-4 py-2.5 whitespace-nowrap text-foreground transition-colors hover:text-brand-dark',
+                                                            colIndex === 0 && cn('sticky z-10', stickyBodyBg, stickySeam),
+                                                        )}
+                                                        style={colIndex === 0 ? { left: frozenOffsets.name } : undefined}
                                                         onClick={(e) => {
                                                             e.stopPropagation();
                                                             const v = getValue(item) ?? '';
@@ -493,7 +528,14 @@ export default function RecordsRenderView<T extends { id: SelectionId; name?: st
                                                 );
                                             }
                                             return (
-                                                <td key={col.key} className="px-4 py-2.5 whitespace-nowrap text-foreground">
+                                                <td
+                                                    key={col.key}
+                                                    className={cn(
+                                                        'px-4 py-2.5 whitespace-nowrap text-foreground',
+                                                        colIndex === 0 && cn('sticky z-10', stickyBodyBg, stickySeam),
+                                                    )}
+                                                    style={colIndex === 0 ? { left: frozenOffsets.name } : undefined}
+                                                >
                                                     {content}
                                                 </td>
                                             );
@@ -516,6 +558,13 @@ export default function RecordsRenderView<T extends { id: SelectionId; name?: st
                         </tbody>
                     </table>
                 </div>
+                <div
+                    aria-hidden
+                    className={cn(
+                        'pointer-events-none absolute inset-y-0 right-0 w-10 bg-gradient-to-l from-card to-transparent transition-opacity duration-200',
+                        edges.right ? 'opacity-100' : 'opacity-0',
+                    )}
+                />
             </div>
             {pager}
             {selectionBar}

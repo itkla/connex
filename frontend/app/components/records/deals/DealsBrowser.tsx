@@ -375,7 +375,7 @@ export default function DealsBrowser({ deals }: { deals: Deal[] }) {
     }, [dealsInCurrency]);
 
     const columns: ColumnDef<Deal>[] = useMemo(() => [
-        { key: 'name', label: t('columnName'), getSortValue: (d) => d.name ?? null },
+        { key: 'name', label: t('columnName'), getSortValue: (d) => d.name ?? null, widthClass: 'min-w-48' },
         {
             key: 'value',
             label: t('columnValue'),

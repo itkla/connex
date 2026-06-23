@@ -315,7 +315,7 @@ export default function ContactsBrowser() {
     };
 
     const columns: ColumnDef<Contact>[] = useMemo(() => [
-        { key: 'name', label: t('columnName'), getSortValue: (c) => c.name ?? null },
+        { key: 'name', label: t('columnName'), getSortValue: (c) => c.name ?? null, widthClass: 'min-w-48' },
         {
             key: 'email',
             label: t('columnEmail'),

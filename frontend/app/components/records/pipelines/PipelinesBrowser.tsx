@@ -401,7 +401,7 @@ export default function PipelinesBrowser({ pipelines }: { pipelines: Pipeline[] 
     };
 
     const columns: ColumnDef<Pipeline>[] = useMemo(() => [
-        { key: 'name', label: t('columnName'), getSortValue: (p) => p.name ?? null },
+        { key: 'name', label: t('columnName'), getSortValue: (p) => p.name ?? null, widthClass: 'min-w-48' },
         {
             key: 'createdAt',
             label: t('columnCreated'),
