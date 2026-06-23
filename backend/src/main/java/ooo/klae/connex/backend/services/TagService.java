@@ -131,8 +131,9 @@ public class TagService {
      * Retrieves the people labelled with a tag, in the active workspace.
      */
     public List<Person> getPersonsByTagId(int tagId) {
-        requireTag(workspaceService.getCurrentWorkspaceId(), tagId);
-        return personMapper.getPersonsByTagId(tagId);
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        requireTag(workspaceId, tagId);
+        return personMapper.getPersonsByTagId(workspaceId, tagId);
     }
 
     /**

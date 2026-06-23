@@ -56,7 +56,7 @@ public class SearchService {
         auditService.record("search", "search", null, query, "Search performed", null);
         return new SearchResultsDto(
             companyMapper.search(workspaceId, pattern).stream().map(CompanyDto::from).toList(),
-            personMapper.search(pattern).stream().map(PersonDto::from).toList(),
+            personMapper.search(workspaceId, pattern).stream().map(PersonDto::from).toList(),
             dealMapper.search(workspaceId, pattern).stream().map(DealDto::from).toList(),
             pipelineMapper.search(workspaceId, pattern).stream().map(PipelineDto::from).toList(),
             tagMapper.search(workspaceId, pattern).stream().map(TagDto::from).toList(),

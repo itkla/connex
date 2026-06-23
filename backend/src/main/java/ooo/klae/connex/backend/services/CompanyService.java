@@ -187,8 +187,9 @@ public class CompanyService {
      * Retrieves the people associated with a company in the active workspace.
      */
     public List<Person> getPersonsByCompanyId(int companyId) {
-        requireCompany(companyId);
-        return personMapper.getPersonsByCompanyId(companyId);
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        requireCompany(workspaceId, companyId);
+        return personMapper.getPersonsByCompanyId(workspaceId, companyId);
     }
 
     /**

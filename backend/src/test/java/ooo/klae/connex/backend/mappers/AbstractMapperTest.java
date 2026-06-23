@@ -107,6 +107,7 @@ abstract class AbstractMapperTest {
         person.setPhone("+81-90-2345-6789");
         person.setTitle("Engineer");
         person.setCompany(company);
+        person.setWorkspaceId(workspace.getId());
         personMapper.insert(person);
         return person;
     }

@@ -5,6 +5,7 @@
 
   <resultMap id="PersonResult" type="Person">
     <id     property="id"        column="id"/>
+    <result property="workspaceId" column="workspace_id"/>
     <result property="name"      column="name"/>
     <result property="email"     column="email"/>
     <result property="phone"     column="phone"/>
@@ -26,7 +27,7 @@
   </resultMap>
 
   <sql id="personColumns">
-    p.id, p.name, p.email, p.phone, p.company_id, p.title, p.created_at, p.updated_at, p.image_url
+    p.id, p.workspace_id, p.name, p.email, p.phone, p.company_id, p.title, p.created_at, p.updated_at, p.image_url
   </sql>
 
   <sql id="companyJoinColumns">
@@ -41,6 +42,7 @@
     SELECT <include refid="personColumns"/>, <include refid="companyJoinColumns"/>
     FROM person p
     <include refid="companyJoin"/>
+    WHERE p.workspace_id = #{workspaceId}
     ORDER BY p.name
   </select>
 
@@ -48,7 +50,7 @@
     SELECT <include refid="personColumns"/>, <include refid="companyJoinColumns"/>
     FROM person p
     <include refid="companyJoin"/>
-    WHERE p.company_id = #{companyId} ORDER BY p.name
+    WHERE p.workspace_id = #{workspaceId} AND p.company_id = #{companyId} ORDER BY p.name
   </select>
 
   <select id="getPersonsByTagId" resultMap="PersonResult">
@@ -56,7 +58,7 @@
     FROM person p
     <include refid="companyJoin"/>
     JOIN person_tag pt ON pt.person_id = p.id
-    WHERE pt.tag_id = #{tagId}
+    WHERE p.workspace_id = #{workspaceId} AND pt.tag_id = #{tagId}
     ORDER BY p.name
   </select>
 
@@ -65,7 +67,7 @@
     FROM person p
     <include refid="companyJoin"/>
     JOIN deal_person dp ON dp.person_id = p.id
-    WHERE dp.deal_id = #{dealId}
+    WHERE p.workspace_id = #{workspaceId} AND dp.deal_id = #{dealId}
     ORDER BY p.name
   </select>
 
@@ -73,11 +75,18 @@
     SELECT <include refid="personColumns"/>, <include refid="companyJoinColumns"/>
     FROM person p
     <include refid="companyJoin"/>
-    WHERE p.id = #{id}
+    WHERE p.workspace_id = #{workspaceId} AND p.id = #{id}
+  </select>
+
+  <select id="exists" resultType="boolean">
+    SELECT EXISTS(
+      SELECT 1 FROM person WHERE workspace_id = #{workspaceId} AND id = #{id}
+    )
   </select>
 
   <sql id="pageWhere">
     <where>
+      AND p.workspace_id = #{workspaceId}
       <if test="query != null">
         AND (p.name LIKE #{query} OR p.email LIKE #{query} OR p.phone LIKE #{query}
           OR p.title LIKE #{query} OR c.name LIKE #{query})
@@ -131,35 +140,36 @@
   <select id="distinctCompanies" resultType="string">
     SELECT DISTINCT c.name
     FROM person p JOIN company c ON c.id = p.company_id
-    WHERE c.name IS NOT NULL AND c.name &lt;&gt; ''
+    WHERE p.workspace_id = #{workspaceId} AND c.name IS NOT NULL AND c.name &lt;&gt; ''
     ORDER BY c.name
   </select>
 
   <select id="distinctTitles" resultType="string">
     SELECT DISTINCT p.title
     FROM person p
-    WHERE p.title IS NOT NULL AND p.title &lt;&gt; ''
+    WHERE p.workspace_id = #{workspaceId} AND p.title IS NOT NULL AND p.title &lt;&gt; ''
     ORDER BY p.title
   </select>
 
   <select id="hasPersonWithoutCompany" resultType="boolean">
-    SELECT EXISTS(SELECT 1 FROM person WHERE company_id IS NULL)
+    SELECT EXISTS(SELECT 1 FROM person WHERE workspace_id = #{workspaceId} AND company_id IS NULL)
   </select>
 
   <select id="search" resultMap="PersonResult">
     SELECT <include refid="personColumns"/>, <include refid="companyJoinColumns"/>
     FROM person p
     <include refid="companyJoin"/>
-    WHERE p.name LIKE #{query} OR p.email LIKE #{query} OR p.phone LIKE #{query} OR p.title LIKE #{query}
-    OR c.name LIKE #{query} OR c.website LIKE #{query} OR c.industry LIKE #{query} OR c.phone LIKE #{query} OR c.address LIKE #{query}
+    WHERE p.workspace_id = #{workspaceId}
+      AND (p.name LIKE #{query} OR p.email LIKE #{query} OR p.phone LIKE #{query} OR p.title LIKE #{query}
+      OR c.name LIKE #{query} OR c.website LIKE #{query} OR c.industry LIKE #{query} OR c.phone LIKE #{query} OR c.address LIKE #{query})
     ORDER BY p.name
     LIMIT 10
   </select>
 
   <insert id="insert" useGeneratedKeys="true" keyProperty="id">
-    INSERT INTO person (name, email, phone, company_id, title, image_url)
+    INSERT INTO person (workspace_id, name, email, phone, company_id, title, image_url)
     VALUES (
-      #{name}, #{email}, #{phone},
+      #{workspaceId}, #{name}, #{email}, #{phone},
       <choose>
         <when test="company != null">#{company.id}</when>
         <otherwise>NULL</otherwise>
@@ -179,10 +189,10 @@
       company_id = <choose><when test="company != null">#{company.id}</when><otherwise>NULL</otherwise></choose>,
       <if test="imageUrl != null">image_url = #{imageUrl},</if>
     </set>
-    WHERE id = #{id}
+    WHERE workspace_id = #{workspaceId} AND id = #{id}
   </update>
 
-  <delete id="delete">DELETE FROM person WHERE id = #{id}</delete>
+  <delete id="delete">DELETE FROM person WHERE workspace_id = #{workspaceId} AND id = #{id}</delete>
 
   <insert id="addTag">
     INSERT IGNORE INTO person_tag (person_id, tag_id)
