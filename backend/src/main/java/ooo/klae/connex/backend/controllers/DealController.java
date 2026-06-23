@@ -14,10 +14,13 @@ import ooo.klae.connex.backend.beans.Deal;
 import ooo.klae.connex.backend.beans.DealPerson;
 import ooo.klae.connex.backend.dto.ActivityDto;
 import ooo.klae.connex.backend.dto.CloseDealRequest;
+import ooo.klae.connex.backend.dto.DealCollaboratorsDto;
 import ooo.klae.connex.backend.dto.DealDto;
+import ooo.klae.connex.backend.dto.DealOwnerDto;
 import ooo.klae.connex.backend.dto.NoteDto;
 import ooo.klae.connex.backend.dto.TagDto;
 import ooo.klae.connex.backend.dto.TaskDto;
+import ooo.klae.connex.backend.dto.UserDto;
 import ooo.klae.connex.backend.services.DealService;
 
 import java.util.List;
@@ -249,5 +252,23 @@ public class DealController {
     @GetMapping("/{id}/tasks")
     public List<TaskDto> getTasksForDeal(@PathVariable int id) {
         return dealService.getTasksByDealId(id).stream().map(TaskDto::from).toList();
+    }
+
+    @PutMapping("/{id}/owner")
+    public DealDto updateOwner(@PathVariable int id, @Valid @RequestBody DealOwnerDto dto) {
+        return DealDto.from(dealService.updateOwner(id, dto.getOwnerId()));
+    }
+
+    @GetMapping("/{id}/collaborators")
+    public List<UserDto> getCollaborators(@PathVariable int id) {
+        return dealService.getCollaborators(id).stream().map(UserDto::from).toList();
+    }
+
+    @PutMapping("/{id}/collaborators")
+    public List<UserDto> replaceCollaborators(
+        @PathVariable int id,
+        @Valid @RequestBody DealCollaboratorsDto dto
+    ) {
+        return dealService.replaceCollaborators(id, dto.getUserIds()).stream().map(UserDto::from).toList();
     }
 }

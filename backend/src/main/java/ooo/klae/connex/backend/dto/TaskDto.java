@@ -1,7 +1,10 @@
 package ooo.klae.connex.backend.dto;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
+
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 
 import lombok.Data;
@@ -18,13 +21,17 @@ public class TaskDto {
 
     private int id;
 
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
+    private Integer workspaceId;
+
     @NotBlank
     @Size(max = 1000)
     private String description;
 
     private boolean completed;
 
-    @Size(max = 32)
+    @Size(max = 10)
+    @Pattern(regexp = "^\\d{4}-\\d{2}-\\d{2}$", message = "Due date must use YYYY-MM-DD")
     private String dueDate;
 
     // @JsonIdentityReference(alwaysAsId = true) // crashes deserialization in Jackson 3; using assignedToId for writes
@@ -50,6 +57,7 @@ public class TaskDto {
         if (t == null) return null;
         TaskDto dto = new TaskDto();
         dto.id = t.getId();
+        dto.workspaceId = t.getWorkspaceId();
         dto.description = t.getDescription();
         dto.completed = t.isCompleted();
         dto.dueDate = t.getDueDate();
@@ -67,6 +75,7 @@ public class TaskDto {
     public Task toBean() {
         Task t = new Task();
         t.setId(id);
+        if (workspaceId != null) t.setWorkspaceId(workspaceId);
         t.setDescription(description);
         t.setCompleted(completed);
         t.setDueDate(dueDate);

@@ -33,6 +33,9 @@ public class UserDto {
     @Pattern(regexp = "^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$", message = "Email must be a valid email address")
     private String email;
 
+    @Size(max = 64)
+    private String timezone;
+
     private String createdAt;
     private String updatedAt;
     private String lastLoginAt;
@@ -47,6 +50,7 @@ public class UserDto {
         dto.username = u.getUsername();
         dto.displayName = u.getDisplayName();
         dto.email = u.getEmail();
+        dto.timezone = u.getTimezone();
         dto.createdAt = u.getCreatedAt();
         dto.updatedAt = u.getUpdatedAt();
         dto.lastLoginAt = u.getLastLoginAt();
@@ -61,6 +65,7 @@ public class UserDto {
         u.setUsername(username);
         u.setDisplayName(displayName);
         u.setEmail(email);
+        u.setTimezone(timezone);
         u.setCreatedAt(createdAt);
         u.setUpdatedAt(updatedAt);
         u.setLastLoginAt(lastLoginAt);

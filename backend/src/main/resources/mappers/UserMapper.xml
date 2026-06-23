@@ -4,7 +4,7 @@
 <mapper namespace="ooo.klae.connex.backend.mappers.UserMapper">
 
   <sql id="userColumns">
-    id, username, display_name, email, password_hash, last_login_at, profile_picture_url, created_at, updated_at
+    id, username, display_name, email, password_hash, timezone, last_login_at, profile_picture_url, created_at, updated_at
   </sql>
 
   <select id="getAllUsers" resultType="User">
@@ -36,8 +36,8 @@
   </select>
 
   <insert id="insert" useGeneratedKeys="true" keyProperty="id">
-    INSERT INTO app_user (username, display_name, email, password_hash, profile_picture_url)
-    VALUES (#{username}, #{displayName}, #{email}, #{passwordHash}, #{profilePictureUrl})
+    INSERT INTO app_user (username, display_name, email, password_hash, timezone, profile_picture_url)
+    VALUES (#{username}, #{displayName}, #{email}, #{passwordHash}, COALESCE(#{timezone}, 'UTC'), #{profilePictureUrl})
   </insert>
 
   <update id="update">
@@ -46,6 +46,7 @@
       username = #{username},
       display_name = #{displayName},
       email = #{email},
+      timezone = COALESCE(#{timezone}, timezone),
       profile_picture_url = #{profilePictureUrl},
       <if test="passwordHash != null">password_hash = #{passwordHash},</if>
     </set>
@@ -61,6 +62,12 @@
   <update id="updateProfilePictureUrl">
     UPDATE app_user
     SET profile_picture_url = #{profilePictureUrl}
+    WHERE id = #{id}
+  </update>
+
+  <update id="updateTimezone">
+    UPDATE app_user
+    SET timezone = #{timezone}
     WHERE id = #{id}
   </update>
 

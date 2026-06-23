@@ -3,12 +3,23 @@
 USE connexdb;
 
 -- app_user
-INSERT INTO app_user (id, username, display_name, email, password_hash) VALUES
-    (1, 'alice',   'Alice Anderson', 'alice@connex.test',   '$2a$10$fjpXXw/Y3WgsJz7gHEhrJuIi6c660HFpkPz/QlbPT9hPeG1VmAkxm'),
-    (2, 'bob',     'Bob Brown',      'bob@connex.test',     '$2a$10$fjpXXw/Y3WgsJz7gHEhrJuIi6c660HFpkPz/QlbPT9hPeG1VmAkxm'),
-    (3, 'carol',   'Carol Chen',     'carol@connex.test',   '$2a$10$fjpXXw/Y3WgsJz7gHEhrJuIi6c660HFpkPz/QlbPT9hPeG1VmAkxm'),
-    (4, 'dave',    'Dave Davis',     'dave@connex.test',    '$2a$10$fjpXXw/Y3WgsJz7gHEhrJuIi6c660HFpkPz/QlbPT9hPeG1VmAkxm'),
-    (5, 'eve',     'Eve Edwards',    'eve@connex.test',     '$2a$10$fjpXXw/Y3WgsJz7gHEhrJuIi6c660HFpkPz/QlbPT9hPeG1VmAkxm');
+INSERT INTO app_user (id, username, display_name, email, password_hash, timezone) VALUES
+    (1, 'alice',   'Alice Anderson', 'alice@connex.test',   '$2a$10$fjpXXw/Y3WgsJz7gHEhrJuIi6c660HFpkPz/QlbPT9hPeG1VmAkxm', 'Asia/Tokyo'),
+    (2, 'bob',     'Bob Brown',      'bob@connex.test',     '$2a$10$fjpXXw/Y3WgsJz7gHEhrJuIi6c660HFpkPz/QlbPT9hPeG1VmAkxm', 'Asia/Tokyo'),
+    (3, 'carol',   'Carol Chen',     'carol@connex.test',   '$2a$10$fjpXXw/Y3WgsJz7gHEhrJuIi6c660HFpkPz/QlbPT9hPeG1VmAkxm', 'Asia/Tokyo'),
+    (4, 'dave',    'Dave Davis',     'dave@connex.test',    '$2a$10$fjpXXw/Y3WgsJz7gHEhrJuIi6c660HFpkPz/QlbPT9hPeG1VmAkxm', 'Asia/Tokyo'),
+    (5, 'eve',     'Eve Edwards',    'eve@connex.test',     '$2a$10$fjpXXw/Y3WgsJz7gHEhrJuIi6c660HFpkPz/QlbPT9hPeG1VmAkxm', 'Asia/Tokyo');
+
+-- workspace
+INSERT INTO workspace (id, name, slug) VALUES
+    (1, 'Connex Workspace', 'default');
+
+INSERT INTO workspace_member (workspace_id, user_id, role) VALUES
+    (1, 1, 'owner'),
+    (1, 2, 'member'),
+    (1, 3, 'member'),
+    (1, 4, 'member'),
+    (1, 5, 'member');
 
 -- company
 INSERT INTO company (id, name, website, industry, phone, address, logo_url) VALUES
@@ -71,19 +82,19 @@ INSERT INTO person (id, name, email, phone, company_id, title, image_url) VALUES
     (15, 'Solo Sven',            'sven@freelance.test',           '+1-555-000-1115', NULL, 'Freelancer', null);
 
 -- deal
-INSERT INTO deal (id, name, value, currency, pipeline_id, stage_id, company_id, expected_close_date, closed_at, won) VALUES
-    (1,  'Acme - Anvil Restock Q3',           45000.00,  'USD', 1, 2, 1,    '2026-07-15 00:00:00', NULL,                  NULL),
-    (2,  'Globex - Enterprise License',       250000.00, 'USD', 1, 3, 2,    '2026-08-01 00:00:00', NULL,                  NULL),
-    (3,  'Initech - TPS Reporting Module',    75000.00,  'USD', 1, 4, 3,    '2026-06-30 00:00:00', NULL,                  NULL),
-    (4,  'Soylent - Bulk Supply Agreement',   180000.00, 'USD', 1, 5, 4,    '2026-04-10 00:00:00', '2026-04-08 14:30:00', TRUE),
-    (5,  'Umbrella - Lab Equipment',          92000.00,  'USD', 1, 6, 5,    '2026-03-15 00:00:00', '2026-03-20 09:00:00', FALSE),
-    (6,  'Stark - Defense Contract',          1500000.00,'USD', 1, 4, 6,    '2026-09-30 00:00:00', NULL,                  NULL),
-    (7,  'Wayne - Security Overhaul',         420000.00, 'USD', 1, 3, 7,    '2026-07-22 00:00:00', NULL,                  NULL),
-    (8,  'Cyberdyne - AI Platform Trial',     35000.00,  'USD', 1, 1, 8,    '2026-08-15 00:00:00', NULL,                  NULL),
-    (9,  'Freelance - Imani Retainer',        12000.00,  'USD', 1, 2, NULL, '2026-06-01 00:00:00', NULL,                  NULL),
-    (10, 'Acme - Annual License Renewal',     60000.00,  'USD', 2, 8, 1,    '2026-06-30 00:00:00', NULL,                  NULL),
-    (11, 'Globex - Renewal',                  300000.00, 'USD', 2, 9, 2,    '2026-05-01 00:00:00', '2026-04-28 11:15:00', TRUE),
-    (12, 'Initech - Renewal',                 80000.00,  'USD', 2, 10, 3,   '2026-04-30 00:00:00', '2026-05-02 16:45:00', FALSE);
+INSERT INTO deal (id, workspace_id, owner_id, name, value, currency, pipeline_id, stage_id, company_id, expected_close_date, closed_at, won) VALUES
+    (1,  1, 2, 'Acme - Anvil Restock Q3',           45000.00,  'USD', 1, 2, 1,    '2026-07-15', NULL,                  NULL),
+    (2,  1, 1, 'Globex - Enterprise License',       250000.00, 'USD', 1, 3, 2,    '2026-08-01', NULL,                  NULL),
+    (3,  1, 3, 'Initech - TPS Reporting Module',    75000.00,  'USD', 1, 4, 3,    '2026-06-30', NULL,                  NULL),
+    (4,  1, 1, 'Soylent - Bulk Supply Agreement',   180000.00, 'USD', 1, 5, 4,    '2026-04-10', '2026-04-08 14:30:00', TRUE),
+    (5,  1, 4, 'Umbrella - Lab Equipment',          92000.00,  'USD', 1, 6, 5,    '2026-03-15', '2026-03-20 09:00:00', FALSE),
+    (6,  1, 1, 'Stark - Defense Contract',          1500000.00,'USD', 1, 4, 6,    '2026-09-30', NULL,                  NULL),
+    (7,  1, 2, 'Wayne - Security Overhaul',         420000.00, 'USD', 1, 3, 7,    '2026-07-22', NULL,                  NULL),
+    (8,  1, 5, 'Cyberdyne - AI Platform Trial',     35000.00,  'USD', 1, 1, 8,    '2026-08-15', NULL,                  NULL),
+    (9,  1, 3, 'Freelance - Imani Retainer',        12000.00,  'USD', 1, 2, NULL, '2026-06-01', NULL,                  NULL),
+    (10, 1, 2, 'Acme - Annual License Renewal',     60000.00,  'USD', 2, 8, 1,    '2026-06-30', NULL,                  NULL),
+    (11, 1, 1, 'Globex - Renewal',                  300000.00, 'USD', 2, 9, 2,    '2026-05-01', '2026-04-28 11:15:00', TRUE),
+    (12, 1, 3, 'Initech - Renewal',                 80000.00,  'USD', 2, 10, 3,   '2026-04-30', '2026-05-02 16:45:00', FALSE);
 
 -- activity
 INSERT INTO activity (id, type, subject, notes, person_id, deal_id, created_by_id, timestamp) VALUES
@@ -109,22 +120,22 @@ INSERT INTO activity (id, type, subject, notes, person_id, deal_id, created_by_i
     (20, 'call',    'Champion building - Pepper',           'Cultivating Pepper as internal champion.',              11,   6,    1, '2026-04-14 10:30:00');
 
 -- task
-INSERT INTO task (id, description, completed, due_date, assigned_to_id, person_id, deal_id) VALUES
-    (1,  'Send follow-up pricing PDF to Acme',         TRUE,  '2026-04-03 17:00:00', 2, 1,    1),
-    (2,  'Schedule onsite with Globex',                TRUE,  '2026-04-05 12:00:00', 1, 3,    2),
-    (3,  'Draft proposal v2 for Initech',              TRUE,  '2026-04-08 17:00:00', 3, 4,    3),
-    (4,  'Prepare Stark contract redlines',            FALSE, '2026-05-15 17:00:00', 1, 10,   6),
-    (5,  'Wayne - submit security questionnaire',      FALSE, '2026-05-12 12:00:00', 2, 12,   7),
-    (6,  'Confirm Cyberdyne pilot accounts',           FALSE, '2026-05-10 09:00:00', 5, 13,   8),
-    (7,  'Imani - draft retainer SOW',                 FALSE, '2026-05-09 17:00:00', 3, 14,   9),
-    (8,  'Acme renewal - send updated quote',          FALSE, '2026-05-20 17:00:00', 2, 1,    10),
-    (9,  'Internal: update CRM stage hygiene',         FALSE, '2026-05-30 17:00:00', 4, NULL, NULL),
-    (10, 'Quarterly forecast review',                  FALSE, '2026-05-31 17:00:00', 4, NULL, NULL),
-    (11, 'Call back Sven re: partnership',             FALSE, '2026-05-11 15:00:00', 5, 15,   NULL),
-    (12, 'Stark - get clearance docs from legal',      FALSE, '2026-05-18 12:00:00', 1, 11,   6),
-    (13, 'Send post-loss thank you to Umbrella',       TRUE,  '2026-03-25 17:00:00', 4, 9,    5),
-    (14, 'Initech churn - exit interview',             TRUE,  '2026-05-04 14:00:00', 3, 4,    12),
-    (15, 'Welcome call for Globex renewal',            FALSE, '2026-05-15 11:00:00', 1, 3,    11);
+INSERT INTO task (id, workspace_id, description, completed, due_date, assigned_to_id, person_id, deal_id) VALUES
+    (1,  1, 'Send follow-up pricing PDF to Acme',         TRUE,  '2026-04-03', 2, 1,    1),
+    (2,  1, 'Schedule onsite with Globex',                TRUE,  '2026-04-05', 1, 3,    2),
+    (3,  1, 'Draft proposal v2 for Initech',              TRUE,  '2026-04-08', 3, 4,    3),
+    (4,  1, 'Prepare Stark contract redlines',            FALSE, '2026-05-15', 1, 10,   6),
+    (5,  1, 'Wayne - submit security questionnaire',      FALSE, '2026-05-12', 2, 12,   7),
+    (6,  1, 'Confirm Cyberdyne pilot accounts',           FALSE, '2026-05-10', 5, 13,   8),
+    (7,  1, 'Imani - draft retainer SOW',                 FALSE, '2026-05-09', 3, 14,   9),
+    (8,  1, 'Acme renewal - send updated quote',          FALSE, '2026-05-20', 2, 1,    10),
+    (9,  1, 'Internal: update CRM stage hygiene',         FALSE, '2026-05-30', 4, NULL, NULL),
+    (10, 1, 'Quarterly forecast review',                  FALSE, '2026-05-31', 4, NULL, NULL),
+    (11, 1, 'Call back Sven re: partnership',             FALSE, '2026-05-11', 5, 15,   NULL),
+    (12, 1, 'Stark - get clearance docs from legal',      FALSE, '2026-05-18', 1, 11,   6),
+    (13, 1, 'Send post-loss thank you to Umbrella',       TRUE,  '2026-03-25', 4, 9,    5),
+    (14, 1, 'Initech churn - exit interview',             TRUE,  '2026-05-04', 3, 4,    12),
+    (15, 1, 'Welcome call for Globex renewal',            FALSE, '2026-05-15', 1, 3,    11);
 
 -- note
 INSERT INTO note (id, content, author_id, person_id, deal_id) VALUES
@@ -168,6 +179,18 @@ INSERT INTO deal_person (deal_id, person_id, role) VALUES
     (10, 2,  'Operations'),
     (11, 3,  'Renewal Contact'),
     (12, 4,  'Renewal Contact');
+
+INSERT INTO deal_collaborator (workspace_id, deal_id, user_id) VALUES
+    (1, 1,  1),
+    (1, 2,  2),
+    (1, 2,  3),
+    (1, 3,  1),
+    (1, 6,  2),
+    (1, 6,  5),
+    (1, 7,  1),
+    (1, 8,  1),
+    (1, 9,  2),
+    (1, 10, 1);
 
 -- person_tag
 INSERT INTO person_tag (person_id, tag_id) VALUES

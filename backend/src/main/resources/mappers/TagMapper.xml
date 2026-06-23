@@ -9,7 +9,6 @@
     <result property="color" column="color"/>
     <collection property="people" ofType="Person" column="id" select="ooo.klae.connex.backend.mappers.PersonMapper.getPersonsByTagId"/>
     <collection property="companies" ofType="Company" column="id" select="ooo.klae.connex.backend.mappers.CompanyMapper.getCompaniesByTagId"/>
-    <collection property="deals" ofType="Deal" column="id" select="ooo.klae.connex.backend.mappers.DealMapper.getDealsByTagId"/>
   </resultMap>
 
   <select id="getAllTags" resultType="Tag">

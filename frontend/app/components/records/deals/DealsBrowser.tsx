@@ -23,7 +23,6 @@ import DeleteRecordDialog from '@/app/components/records/DeleteRecordDialog';
 import { useRecordsBrowser } from '@/app/hooks/useRecordsBrowser';
 import { type ColumnDef, applyRecordFilters, deriveFilterOptions, facetChips, countActiveFilters } from '@/app/components/records/types';
 import DealCard from '@/app/components/records/deals/DealCard';
-import DealAvatar from '@/app/components/records/deals/DealAvatar';
 import NewDealDialog from '@/app/components/records/deals/NewDealDialog';
 import QuickEditDealSheet, { type DealDraft } from '@/app/components/records/deals/QuickEditDealSheet';
 import {
@@ -38,7 +37,7 @@ import {
     getDealPeople,
     isFieldError,
 } from '@/app/lib/api';
-import { formatCompactCurrency, formatDateTime, pickDominantCurrency } from '@/app/lib/utils';
+import { formatCompactCurrency, formatDate, formatDateTime, parseCalendarDate, pickDominantCurrency } from '@/app/lib/utils';
 import {
     type Company,
     type CreateDealPayload,
@@ -112,16 +111,15 @@ export default function DealsBrowser({ deals }: { deals: Deal[] }) {
 
     useEffect(() => {
         const freelancerDeals = deals.filter((d) => d.company == null);
-        if (freelancerDeals.length === 0) {
-            setContactByDealId(new Map());
-            return;
-        }
-        Promise.all(
-            freelancerDeals.map(async (d) => {
-                const people = await getDealPeople(d.id).catch(() => [] as Contact[]);
-                return [d.id, people[0]] as const;
-            }),
-        ).then((entries) => {
+        const request = freelancerDeals.length === 0
+            ? Promise.resolve([] as readonly (readonly [number, Contact | undefined])[])
+            : Promise.all(
+                freelancerDeals.map(async (d) => {
+                    const people = await getDealPeople(d.id).catch(() => [] as Contact[]);
+                    return [d.id, people[0]] as const;
+                }),
+            );
+        request.then((entries) => {
             const m = new Map<number, Contact>();
             for (const [id, contact] of entries) {
                 if (contact) m.set(id, contact);
@@ -414,9 +412,8 @@ export default function DealsBrowser({ deals }: { deals: Deal[] }) {
         {
             key: 'expectedCloseDate',
             label: t('columnExpectedClose'),
-            getSortValue: (d) => (d.expectedCloseDate ? Date.parse(d.expectedCloseDate) : null),
-            // render: (d) => formatShortDate(d.expectedCloseDate, locale),
-            render: (d) => formatDateTime(d.expectedCloseDate, locale),
+            getSortValue: (d) => (d.expectedCloseDate ? parseCalendarDate(d.expectedCloseDate) : null),
+            render: (d) => formatDate(d.expectedCloseDate, locale),
         },
         {
             key: 'status',

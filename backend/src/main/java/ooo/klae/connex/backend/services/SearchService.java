@@ -42,6 +42,7 @@ public class SearchService {
     private final UserMapper userMapper;
     private final AttachmentMapper attachmentMapper;
     private final AuditService auditService;
+    private final WorkspaceService workspaceService;
 
     public SearchResultsDto search(String query) {
         if (query == null || query.isBlank()) {
@@ -51,16 +52,17 @@ public class SearchService {
 
         // search may contain special characters, so we need to escape them
         String pattern = "%" + escapeLike(query.trim()) + "%";
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
         auditService.record("search", "search", null, query, "Search performed", null);
         return new SearchResultsDto(
             companyMapper.search(pattern).stream().map(CompanyDto::from).toList(),
             personMapper.search(pattern).stream().map(PersonDto::from).toList(),
-            dealMapper.search(pattern).stream().map(DealDto::from).toList(),
+            dealMapper.search(workspaceId, pattern).stream().map(DealDto::from).toList(),
             pipelineMapper.search(pattern).stream().map(PipelineDto::from).toList(),
             tagMapper.search(pattern).stream().map(TagDto::from).toList(),
             activityMapper.search(pattern).stream().map(ActivityDto::from).toList(),
             noteMapper.search(pattern).stream().map(NoteDto::from).toList(),
-            taskMapper.search(pattern).stream().map(TaskDto::from).toList(),
+            taskMapper.search(workspaceId, pattern).stream().map(TaskDto::from).toList(),
             userMapper.search(pattern).stream().map(UserDto::from).toList(),
             attachmentMapper.search(pattern).stream().map(AttachmentDto::from).toList()
         );

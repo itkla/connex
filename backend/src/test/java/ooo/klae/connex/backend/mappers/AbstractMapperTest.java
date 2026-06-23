@@ -5,6 +5,7 @@ import java.util.UUID;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.transaction.annotation.Transactional;
+import org.junit.jupiter.api.BeforeEach;
 
 import ooo.klae.connex.backend.beans.Company;
 import ooo.klae.connex.backend.beans.Deal;
@@ -13,6 +14,7 @@ import ooo.klae.connex.backend.beans.Pipeline;
 import ooo.klae.connex.backend.beans.Stage;
 import ooo.klae.connex.backend.beans.Tag;
 import ooo.klae.connex.backend.beans.User;
+import ooo.klae.connex.backend.beans.Workspace;
 
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.NONE)
 @Transactional
@@ -24,6 +26,20 @@ abstract class AbstractMapperTest {
     @Autowired protected TagMapper tagMapper;
     @Autowired protected PersonMapper personMapper;
     @Autowired protected DealMapper dealMapper;
+    @Autowired protected WorkspaceMapper workspaceMapper;
+
+    protected Workspace workspace;
+
+    @BeforeEach
+    void setUpWorkspace() {
+        workspace = workspaceMapper.getDefaultWorkspace();
+        if (workspace == null) {
+            workspace = new Workspace();
+            workspace.setName("Test Workspace");
+            workspace.setSlug("default");
+            workspaceMapper.insert(workspace);
+        }
+    }
 
     protected static String unique() {
         return UUID.randomUUID().toString().substring(0, 8);
@@ -37,7 +53,9 @@ abstract class AbstractMapperTest {
         user.setDisplayName("User " + s);
         user.setEmail(s + "@example.com");
         user.setPasswordHash("hash_" + s);
+        user.setTimezone("UTC");
         userMapper.insert(user);
+        workspaceMapper.addMember(workspace.getId(), user.getId(), "member");
         return user;
     }
 
@@ -92,6 +110,7 @@ abstract class AbstractMapperTest {
     protected Deal newDeal(Pipeline pipeline, Stage stage, Company company) {
         Deal deal = new Deal();
         deal.setName("Deal " + unique());
+        deal.setWorkspaceId(workspace.getId());
         deal.setValue(1000.0);
         deal.setCurrency("JPY");
         deal.setPipelineId(pipeline.getId());

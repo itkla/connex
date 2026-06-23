@@ -30,6 +30,7 @@ public class TagService {
     private final PersonMapper personMapper;
     private final CompanyMapper companyMapper;
     private final AuditService auditService;
+    private final WorkspaceService workspaceService;
 
     private static final Set<String> AUDIT_FIELDS =
         Set.of("name", "color");
@@ -50,6 +51,10 @@ public class TagService {
     public Tag getTagById(int id) {
         Tag tag = tagMapper.getTagById(id);
         if (tag == null) throw new ResourceNotFoundException("Tag not found with id: " + id);
+        tag.setDeals(dealMapper.getDealsByTagId(
+            workspaceService.getCurrentWorkspaceId(),
+            id
+        ).toArray(Deal[]::new));
         return tag;
     }
 
@@ -120,6 +125,10 @@ public class TagService {
      * @return
      */
     public List<Tag> getTagsByDealId(int dealId) {
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        if (!dealMapper.exists(workspaceId, dealId)) {
+            throw new ResourceNotFoundException("Deal not found with id: " + dealId);
+        }
         return tagMapper.getTagsByDealId(dealId);
     }
 
@@ -130,7 +139,7 @@ public class TagService {
      */
     public List<Deal> getDealsByTagId(int tagId) {
         if (tagMapper.getTagById(tagId) == null) throw new ResourceNotFoundException("Tag not found with id: " + tagId);
-        return dealMapper.getDealsByTagId(tagId);
+        return dealMapper.getDealsByTagId(workspaceService.getCurrentWorkspaceId(), tagId);
     }
 
     /**

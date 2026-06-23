@@ -12,6 +12,10 @@ CREATE DATABASE connexdb CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 USE connexdb;
 
 DROP TABLE IF EXISTS audit_log;
+DROP TABLE IF EXISTS notification_preference;
+DROP TABLE IF EXISTS notification;
+DROP TABLE IF EXISTS deal_collaborator;
+DROP TABLE IF EXISTS attachment_tag;
 DROP TABLE IF EXISTS attachment;
 DROP TABLE IF EXISTS deal_tag;
 DROP TABLE IF EXISTS company_tag;
@@ -26,6 +30,8 @@ DROP TABLE IF EXISTS pipeline;
 DROP TABLE IF EXISTS person;
 DROP TABLE IF EXISTS tag;
 DROP TABLE IF EXISTS company;
+DROP TABLE IF EXISTS workspace_member;
+DROP TABLE IF EXISTS workspace;
 DROP TABLE IF EXISTS app_user;
 
 SET FOREIGN_KEY_CHECKS = 1;
@@ -42,9 +48,37 @@ CREATE TABLE app_user (
     password_hash   VARCHAR(255) COMMENT 'Hashed password',
     last_login_at   DATETIME COMMENT 'Most recent login timestamp',
     profile_picture_url VARCHAR(2048) COMMENT 'Profile picture URL',
+    timezone        VARCHAR(64) NOT NULL DEFAULT 'UTC' COMMENT 'IANA timezone',
     created_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT 'Creation timestamp',
     updated_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT 'Last update timestamp'
 ) DEFAULT CHARSET=utf8mb4 COMMENT='Application users';
+
+
+-- ----------------------------------------------------------------------------
+-- workspace : tenant boundary for workspace-scoped records.
+-- ----------------------------------------------------------------------------
+CREATE TABLE workspace (
+    id          INT AUTO_INCREMENT PRIMARY KEY COMMENT 'Workspace ID',
+    name        VARCHAR(128) NOT NULL COMMENT 'Workspace name',
+    slug        VARCHAR(128) NOT NULL UNIQUE COMMENT 'Workspace slug',
+    created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT 'Creation timestamp',
+    updated_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT 'Last update timestamp'
+) DEFAULT CHARSET=utf8mb4 COMMENT='Workspaces';
+
+
+-- ----------------------------------------------------------------------------
+-- workspace_member : users belonging to a workspace.
+-- ----------------------------------------------------------------------------
+CREATE TABLE workspace_member (
+    workspace_id INT NOT NULL COMMENT 'Workspace ID',
+    user_id      INT NOT NULL COMMENT 'Member User ID',
+    role         VARCHAR(32) NOT NULL DEFAULT 'member' COMMENT 'Workspace role',
+    created_at   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT 'Membership creation timestamp',
+    PRIMARY KEY (workspace_id, user_id),
+    CONSTRAINT fk_workspace_member_workspace FOREIGN KEY (workspace_id) REFERENCES workspace(id) ON DELETE CASCADE,
+    CONSTRAINT fk_workspace_member_user FOREIGN KEY (user_id) REFERENCES app_user(id) ON DELETE CASCADE,
+    INDEX idx_workspace_member_user (user_id, workspace_id)
+) DEFAULT CHARSET=utf8mb4 COMMENT='Workspace memberships';
 
 
 -- ----------------------------------------------------------------------------
@@ -127,6 +161,8 @@ CREATE TABLE stage (
 -- ----------------------------------------------------------------------------
 CREATE TABLE deal (
     id                  INT AUTO_INCREMENT PRIMARY KEY COMMENT 'Deal ID',
+    workspace_id        INT NOT NULL COMMENT 'Workspace ID',
+    owner_id            INT COMMENT 'Owning workspace member User ID',
     name                VARCHAR(255) NOT NULL COMMENT 'Deal name',
     value               DECIMAL(15, 2) NOT NULL DEFAULT 0,
     actual_value        DECIMAL(15, 2) NOT NULL DEFAULT 0,
@@ -134,12 +170,14 @@ CREATE TABLE deal (
     pipeline_id         INT NOT NULL COMMENT 'Pipeline ID',
     stage_id            INT NOT NULL COMMENT 'Stage ID',
     company_id          INT COMMENT 'Company ID',
-    expected_close_date DATETIME COMMENT 'Expected close date',
+    expected_close_date DATE COMMENT 'Expected close date',
     closed_at           DATETIME COMMENT 'When the deal was closed (NULL = open). The stage_id at close records where it closed.',
     closed_reason       VARCHAR(255) COMMENT 'Reason the deal was closed (won/lost)',
     won                 BOOLEAN COMMENT 'Outcome when closed: TRUE = won, FALSE = lost, NULL = open. Set by the client and independent of stage — a deal may be won/lost at any stage. closed_at follows this.',
     created_at          DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT 'Creation timestamp',
     updated_at          DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT 'Last update timestamp',
+    CONSTRAINT fk_deal_workspace FOREIGN KEY (workspace_id) REFERENCES workspace(id) ON DELETE RESTRICT,
+    CONSTRAINT fk_deal_owner FOREIGN KEY (owner_id) REFERENCES app_user(id) ON DELETE SET NULL,
     CONSTRAINT fk_deal_pipeline FOREIGN KEY (pipeline_id) REFERENCES pipeline(id) ON DELETE RESTRICT,
     CONSTRAINT fk_deal_stage    FOREIGN KEY (stage_id)    REFERENCES stage(id)    ON DELETE RESTRICT,
     CONSTRAINT fk_deal_company  FOREIGN KEY (company_id)  REFERENCES company(id)  ON DELETE SET NULL,
@@ -148,6 +186,10 @@ CREATE TABLE deal (
     CONSTRAINT chk_deal_reason_requires_close CHECK (
         closed_reason IS NULL OR closed_at IS NOT NULL
     ),
+    UNIQUE KEY uq_deal_workspace_id (workspace_id, id),
+    INDEX idx_deal_workspace (workspace_id),
+    INDEX idx_deal_owner (workspace_id, owner_id),
+    INDEX idx_deal_reminder (workspace_id, won, expected_close_date),
     INDEX idx_deal_pipeline (pipeline_id),
     INDEX idx_deal_stage    (stage_id),
     INDEX idx_deal_company  (company_id),
@@ -183,17 +225,22 @@ CREATE TABLE activity (
 -- ----------------------------------------------------------------------------
 CREATE TABLE task (
     id              INT AUTO_INCREMENT PRIMARY KEY COMMENT 'Task ID',
+    workspace_id    INT NOT NULL COMMENT 'Workspace ID',
     description     TEXT NOT NULL COMMENT 'Task description',
     completed       BOOLEAN NOT NULL DEFAULT FALSE COMMENT 'Completion status',
-    due_date        DATETIME COMMENT 'Due date',
+    due_date        DATE COMMENT 'Due date',
     assigned_to_id  INT NOT NULL COMMENT 'Assigned to User ID',
     person_id       INT COMMENT 'Person ID',
     deal_id         INT COMMENT 'Deal ID',
     created_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT 'Creation timestamp',
     updated_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT 'Last update timestamp',
-    CONSTRAINT fk_task_assigned FOREIGN KEY (assigned_to_id) REFERENCES app_user(id) ON DELETE RESTRICT,
+    CONSTRAINT fk_task_workspace FOREIGN KEY (workspace_id) REFERENCES workspace(id) ON DELETE RESTRICT,
+    CONSTRAINT fk_task_assigned_member FOREIGN KEY (workspace_id, assigned_to_id) REFERENCES workspace_member(workspace_id, user_id) ON DELETE RESTRICT,
     CONSTRAINT fk_task_person   FOREIGN KEY (person_id)      REFERENCES person(id)   ON DELETE SET NULL,
-    CONSTRAINT fk_task_deal     FOREIGN KEY (deal_id)        REFERENCES deal(id)     ON DELETE SET NULL,
+    CONSTRAINT fk_task_deal FOREIGN KEY (deal_id) REFERENCES deal(id) ON DELETE SET NULL,
+    INDEX idx_task_workspace (workspace_id),
+    INDEX idx_task_workspace_assigned (workspace_id, assigned_to_id),
+    INDEX idx_task_reminder (workspace_id, completed, due_date, assigned_to_id),
     INDEX idx_task_assigned  (assigned_to_id),
     INDEX idx_task_person    (person_id),
     INDEX idx_task_deal      (deal_id),
@@ -257,6 +304,17 @@ CREATE TABLE deal_person (
     INDEX idx_deal_person_person (person_id)
 ) DEFAULT CHARSET=utf8mb4 COMMENT='Deal-Person Relationships';
 
+CREATE TABLE deal_collaborator (
+    workspace_id INT NOT NULL COMMENT 'Workspace ID',
+    deal_id      INT NOT NULL COMMENT 'Collaborated deal ID',
+    user_id      INT NOT NULL COMMENT 'Collaborator User ID',
+    created_at   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT 'Collaboration creation timestamp',
+    PRIMARY KEY (workspace_id, deal_id, user_id),
+    CONSTRAINT fk_deal_collaborator_deal FOREIGN KEY (workspace_id, deal_id) REFERENCES deal(workspace_id, id) ON DELETE CASCADE,
+    CONSTRAINT fk_deal_collaborator_member FOREIGN KEY (workspace_id, user_id) REFERENCES workspace_member(workspace_id, user_id) ON DELETE CASCADE,
+    INDEX idx_deal_collaborator_user (workspace_id, user_id, deal_id)
+) DEFAULT CHARSET=utf8mb4 COMMENT='Deal collaborators';
+
 -- person_tag, company_tag, deal_tag - labels for records
 CREATE TABLE person_tag (
     person_id INT NOT NULL,
@@ -293,6 +351,57 @@ CREATE TABLE attachment_tag (
     CONSTRAINT fk_attachment_tag_tag        FOREIGN KEY (tag_id)        REFERENCES tag(id)        ON DELETE CASCADE,
     INDEX idx_attachment_tag_tag (tag_id)
 ) DEFAULT CHARSET=utf8mb4 COMMENT='Attachment-Tag Relationships';
+
+-- ============================================================================
+-- Notifications
+-- ============================================================================
+CREATE TABLE notification (
+    id                  INT AUTO_INCREMENT PRIMARY KEY COMMENT 'Notification ID',
+    workspace_id        INT NOT NULL COMMENT 'Workspace ID',
+    recipient_id        INT NOT NULL COMMENT 'Recipient User ID',
+    type                VARCHAR(64) NOT NULL COMMENT 'Stable notification type',
+    category            VARCHAR(32) NOT NULL COMMENT 'Notification category',
+    severity            VARCHAR(16) NOT NULL COMMENT 'Current notification severity',
+    template_version    INT NOT NULL DEFAULT 1 COMMENT 'Message template version',
+    title               VARCHAR(255) NOT NULL COMMENT 'Rendered title snapshot',
+    body                TEXT NULL COMMENT 'Rendered body snapshot',
+    actor_id            INT NULL COMMENT 'Actor User ID when applicable',
+    actor_label         VARCHAR(255) NULL COMMENT 'Actor label snapshot',
+    source_type         VARCHAR(64) NULL COMMENT 'Source entity type',
+    source_id           INT NULL COMMENT 'Source entity ID',
+    source_label        VARCHAR(255) NULL COMMENT 'Source entity label snapshot',
+    context_type        VARCHAR(64) NULL COMMENT 'Context entity type',
+    context_id          INT NULL COMMENT 'Context entity ID',
+    context_label       VARCHAR(255) NULL COMMENT 'Context entity label snapshot',
+    action_url          VARCHAR(2048) NULL COMMENT 'Internal notification action URL',
+    data                JSON NULL COMMENT 'Structured rendering and action data',
+    dedupe_key          VARCHAR(255) NOT NULL COMMENT 'Stable event identity within a recipient workspace',
+    triggered_at        DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT 'Most recent material trigger timestamp',
+    read_at             DATETIME NULL COMMENT 'Read timestamp',
+    dismissed_at        DATETIME NULL COMMENT 'Dismissal timestamp',
+    resolved_at         DATETIME NULL COMMENT 'Condition resolution timestamp',
+    created_at          DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT 'Creation timestamp',
+    updated_at          DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT 'Last update timestamp',
+    CONSTRAINT fk_notification_recipient_member FOREIGN KEY (workspace_id, recipient_id) REFERENCES workspace_member(workspace_id, user_id) ON DELETE CASCADE,
+    CONSTRAINT fk_notification_actor FOREIGN KEY (actor_id) REFERENCES app_user(id) ON DELETE SET NULL,
+    UNIQUE KEY uq_notification_dedupe (workspace_id, recipient_id, dedupe_key),
+    INDEX idx_notification_inbox (workspace_id, recipient_id, dismissed_at, resolved_at, read_at, triggered_at),
+    INDEX idx_notification_context (workspace_id, recipient_id, context_type, context_id, dismissed_at, resolved_at),
+    INDEX idx_notification_source (workspace_id, source_type, source_id, type),
+    INDEX idx_notification_actor (actor_id)
+) DEFAULT CHARSET=utf8mb4 COMMENT='Durable user notifications';
+
+CREATE TABLE notification_preference (
+    id          INT AUTO_INCREMENT PRIMARY KEY COMMENT 'Notification preference ID',
+    user_id     INT NOT NULL COMMENT 'User ID',
+    type        VARCHAR(64) NOT NULL COMMENT 'Notification type or wildcard',
+    channel     VARCHAR(32) NOT NULL COMMENT 'Delivery channel',
+    enabled     BOOLEAN NOT NULL DEFAULT TRUE COMMENT 'Whether delivery is enabled',
+    created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT 'Creation timestamp',
+    updated_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT 'Last update timestamp',
+    CONSTRAINT fk_notification_preference_user FOREIGN KEY (user_id) REFERENCES app_user(id) ON DELETE CASCADE,
+    UNIQUE KEY uq_notification_preference (user_id, type, channel)
+) DEFAULT CHARSET=utf8mb4 COMMENT='Per-user notification channel preferences';
 
 -- ============================================================================
 -- audit_log : append-only record of "who did what, when"

@@ -31,4 +31,7 @@ public class RegisterDto {
     @Email
     @Size(max = 255)
     private String email;
+
+    @Size(max = 64)
+    private String timezone;
 }

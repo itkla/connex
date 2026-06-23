@@ -33,6 +33,7 @@ public class CompanyService {
     private final PersonMapper personMapper;
     private final DealMapper dealMapper;
     private final AuditService auditService;
+    private final WorkspaceService workspaceService;
 
     private static final Set<String> AUDIT_FIELDS =
         Set.of("name", "website", "industry", "phone", "address", "logoUrl");
@@ -60,6 +61,10 @@ public class CompanyService {
     public Company getCompanyById(int id) {
         Company company = companyMapper.getCompanyById(id);
         if (company == null) throw new ResourceNotFoundException("Company not found with id: " + id);
+        company.setDeals(dealMapper.getDealsByCompanyId(
+            workspaceService.getCurrentWorkspaceId(),
+            id
+        ).toArray(Deal[]::new));
         return company;
     }
 
@@ -220,6 +225,6 @@ public class CompanyService {
      */
     public List<Deal> getDealsByCompanyId(int companyId) {
         if (companyMapper.getCompanyById(companyId) == null) throw new ResourceNotFoundException("Company not found with id: " + companyId);
-        return dealMapper.getDealsByCompanyId(companyId);
+        return dealMapper.getDealsByCompanyId(workspaceService.getCurrentWorkspaceId(), companyId);
     }
 }

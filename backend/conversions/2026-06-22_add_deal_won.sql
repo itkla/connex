@@ -16,42 +16,82 @@
 
 USE connexdb;
 
--- ---------------------------------------------------------------------------
--- 0. PRE-CHECK (review before running). Closed deals NOT on a terminal stage have
---    no win/lose signal in the old data; step 3 will default them to lost (FALSE).
---    Inspect them first and fix by hand if any should be 'won':
---
---   SELECT d.id, d.name, d.stage_id, s.name AS stage, s.is_success, s.is_failure, d.closed_at
---   FROM deal d JOIN stage s ON s.id = d.stage_id
---   WHERE d.closed_at IS NOT NULL AND s.is_success = FALSE AND s.is_failure = FALSE;
--- ---------------------------------------------------------------------------
+DELIMITER $$
 
--- 1. Add the column (every existing row defaults to NULL = open; backfilled below).
-ALTER TABLE deal
-    ADD COLUMN won BOOLEAN NULL
-        COMMENT 'Outcome when closed: TRUE = won, FALSE = lost, NULL = open. Set by the client and independent of stage; closed_at follows this.'
-        AFTER closed_reason;
+DROP PROCEDURE IF EXISTS migrate_deal_won$$
+CREATE PROCEDURE migrate_deal_won()
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = DATABASE()
+          AND table_name = 'deal'
+          AND column_name = 'closed_reason'
+    ) THEN
+        ALTER TABLE deal
+            ADD COLUMN closed_reason VARCHAR(255) NULL
+                COMMENT 'Reason the deal was closed (won/lost)'
+                AFTER closed_at;
+    END IF;
 
--- 2. Backfill won from the stage flags for deals that are already closed.
-UPDATE deal d
-JOIN stage s ON s.id = d.stage_id
-SET d.won = CASE
-        WHEN s.is_success THEN TRUE
-        WHEN s.is_failure THEN FALSE
-        ELSE NULL
-    END
-WHERE d.closed_at IS NOT NULL;
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = DATABASE()
+          AND table_name = 'deal'
+          AND column_name = 'won'
+    ) THEN
+        ALTER TABLE deal
+            ADD COLUMN won BOOLEAN NULL
+                COMMENT 'Outcome when closed: TRUE = won, FALSE = lost, NULL = open. Set by the client and independent of stage; closed_at follows this.'
+                AFTER closed_reason;
+    END IF;
 
--- 3. Defensive: a closed deal that wasn't on a terminal stage (shouldn't exist under the
---    old logic, which only closed on terminal stages) still needs an outcome to satisfy
---    the invariant. Treat unknown closures as lost; the pre-check above lists them for review.
-UPDATE deal SET won = FALSE WHERE closed_at IS NOT NULL AND won IS NULL;
+    UPDATE deal d
+    JOIN stage s ON s.id = d.stage_id
+    SET d.won = CASE
+            WHEN s.is_success THEN TRUE
+            WHEN s.is_failure THEN FALSE
+            ELSE NULL
+        END
+    WHERE d.closed_at IS NOT NULL
+      AND d.won IS NULL;
 
--- 4. Clear any reason on a deal that isn't closed (keeps chk_deal_reason_requires_close happy).
-UPDATE deal SET closed_reason = NULL WHERE closed_at IS NULL AND closed_reason IS NOT NULL;
+    UPDATE deal SET won = FALSE WHERE closed_at IS NOT NULL AND won IS NULL;
+    UPDATE deal SET won = NULL WHERE closed_at IS NULL AND won IS NOT NULL;
+    UPDATE deal SET closed_reason = NULL WHERE closed_at IS NULL AND closed_reason IS NOT NULL;
 
--- 5. Enforce the invariants and index the outcome.
-ALTER TABLE deal
-    ADD CONSTRAINT chk_deal_outcome_closed CHECK ((won IS NULL) = (closed_at IS NULL)),
-    ADD CONSTRAINT chk_deal_reason_requires_close CHECK (closed_reason IS NULL OR closed_at IS NOT NULL),
-    ADD INDEX idx_deal_won (won);
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.table_constraints
+        WHERE constraint_schema = DATABASE()
+          AND table_name = 'deal'
+          AND constraint_name = 'chk_deal_outcome_closed'
+    ) THEN
+        ALTER TABLE deal
+            ADD CONSTRAINT chk_deal_outcome_closed
+                CHECK ((won IS NULL) = (closed_at IS NULL));
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.table_constraints
+        WHERE constraint_schema = DATABASE()
+          AND table_name = 'deal'
+          AND constraint_name = 'chk_deal_reason_requires_close'
+    ) THEN
+        ALTER TABLE deal
+            ADD CONSTRAINT chk_deal_reason_requires_close
+                CHECK (closed_reason IS NULL OR closed_at IS NOT NULL);
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.statistics
+        WHERE table_schema = DATABASE()
+          AND table_name = 'deal'
+          AND index_name = 'idx_deal_won'
+    ) THEN
+        ALTER TABLE deal ADD INDEX idx_deal_won (won);
+    END IF;
+END$$
+
+CALL migrate_deal_won()$$
+DROP PROCEDURE migrate_deal_won$$
+
+DELIMITER ;

@@ -4,108 +4,137 @@
 <mapper namespace="ooo.klae.connex.backend.mappers.DealMapper">
 
   <resultMap id="DealResult" type="Deal">
-    <id     property="id"                column="id"/>
-    <result property="name"              column="name"/>
-    <result property="value"             column="value"/>
-    <result property="actualValue"       column="actual_value"/>
-    <result property="currency"          column="currency"/>
-    <result property="pipelineId"        column="pipeline_id"/>
-    <result property="stageId"           column="stage_id"/>
-    <result property="companyId"         column="company_id"/>
+    <id property="id" column="id"/>
+    <result property="workspaceId" column="workspace_id"/>
+    <result property="ownerId" column="owner_id"/>
+    <result property="name" column="name"/>
+    <result property="value" column="value"/>
+    <result property="actualValue" column="actual_value"/>
+    <result property="currency" column="currency"/>
+    <result property="pipelineId" column="pipeline_id"/>
+    <result property="stageId" column="stage_id"/>
+    <result property="companyId" column="company_id"/>
     <result property="expectedCloseDate" column="expected_close_date"/>
-    <result property="closedAt"          column="closed_at"/>
-    <result property="closedReason"      column="closed_reason"/>
-    <result property="won"               column="won"/>
-    <result property="createdAt"         column="created_at"/>
-    <result property="updatedAt"         column="updated_at"/>
+    <result property="closedAt" column="closed_at"/>
+    <result property="closedReason" column="closed_reason"/>
+    <result property="won" column="won"/>
+    <result property="createdAt" column="created_at"/>
+    <result property="updatedAt" column="updated_at"/>
   </resultMap>
 
   <resultMap id="DealFullResult" type="Deal" extends="DealResult">
-    <collection property="people" ofType="DealPerson" column="id" select="ooo.klae.connex.backend.mappers.DealMapper.getDealPeopleByDealId"/>
-    <collection property="activities" ofType="Activity" column="id" select="ooo.klae.connex.backend.mappers.ActivityMapper.getActivitiesByDealId"/>
-    <collection property="notes" ofType="Note" column="id" select="ooo.klae.connex.backend.mappers.NoteMapper.getNotesByDealId"/>
-    <collection property="tasks" ofType="Task" column="id" select="ooo.klae.connex.backend.mappers.TaskMapper.getTasksByDealId"/>
-    <collection property="tags" ofType="Tag" column="id" select="ooo.klae.connex.backend.mappers.TagMapper.getTagsByDealId"/>
+    <collection property="people" ofType="DealPerson"
+                column="{workspaceId=workspace_id,dealId=id}"
+                select="ooo.klae.connex.backend.mappers.DealMapper.getDealPeopleByDealId"/>
+    <collection property="activities" ofType="Activity" column="id"
+                select="ooo.klae.connex.backend.mappers.ActivityMapper.getActivitiesByDealId"/>
+    <collection property="notes" ofType="Note" column="id"
+                select="ooo.klae.connex.backend.mappers.NoteMapper.getNotesByDealId"/>
+    <collection property="tasks" ofType="Task"
+                column="{workspaceId=workspace_id,dealId=id}"
+                select="ooo.klae.connex.backend.mappers.TaskMapper.getTasksByDealId"/>
+    <collection property="tags" ofType="Tag" column="id"
+                select="ooo.klae.connex.backend.mappers.TagMapper.getTagsByDealId"/>
   </resultMap>
 
   <resultMap id="DealPersonResult" type="DealPerson">
     <id column="deal_person_pid"/>
     <result property="role" column="role"/>
-    <association property="person" javaType="Person" resultMap="ooo.klae.connex.backend.mappers.PersonMapper.PersonResult"/>
+    <association property="person" javaType="Person"
+                 resultMap="ooo.klae.connex.backend.mappers.PersonMapper.PersonResult"/>
   </resultMap>
 
+  <sql id="dealColumns">
+    id, workspace_id, owner_id, name, value, actual_value, currency, pipeline_id, stage_id, company_id,
+    expected_close_date, closed_at, closed_reason, won, created_at, updated_at
+  </sql>
+
+  <sql id="qualifiedDealColumns">
+    d.id, d.workspace_id, d.owner_id, d.name, d.value, d.actual_value, d.currency,
+    d.pipeline_id, d.stage_id, d.company_id, d.expected_close_date, d.closed_at,
+    d.closed_reason, d.won, d.created_at, d.updated_at
+  </sql>
+
   <select id="getDealPeopleByDealId" resultMap="DealPersonResult">
-    SELECT
-      dp.person_id AS deal_person_pid,
-      p.id, p.name, p.email, p.phone, p.company_id, p.title, p.created_at, p.updated_at,
-      dp.role
+    SELECT dp.person_id AS deal_person_pid,
+           p.id, p.name, p.email, p.phone, p.company_id, p.title, p.created_at, p.updated_at,
+           dp.role
     FROM deal_person dp
+    JOIN deal d ON d.id = dp.deal_id
     JOIN person p ON p.id = dp.person_id
-    WHERE dp.deal_id = #{dealId}
+    WHERE d.workspace_id = #{workspaceId} AND dp.deal_id = #{dealId}
     ORDER BY p.name
   </select>
 
-  <sql id="dealColumns">
-    id, name, value, actual_value, currency, pipeline_id, stage_id, company_id,
-    expected_close_date, closed_at, closed_reason, won, created_at, updated_at
-</sql>
-
-  <sql id="qualifiedDealColumns">
-    d.id, d.name, d.value, d.actual_value, d.currency, d.pipeline_id, d.stage_id, d.company_id,
-    d.expected_close_date, d.closed_at, d.closed_reason, d.won, d.created_at, d.updated_at
-</sql>
-
   <select id="getAllDeals" resultMap="DealResult">
-    SELECT <include refid="dealColumns"/> FROM deal
+    SELECT <include refid="dealColumns"/>
+    FROM deal
+    WHERE workspace_id = #{workspaceId}
   </select>
 
   <select id="getDealsByPipelineId" resultMap="DealResult">
-    SELECT <include refid="dealColumns"/> FROM deal WHERE pipeline_id = #{pipelineId}
+    SELECT <include refid="dealColumns"/>
+    FROM deal
+    WHERE workspace_id = #{workspaceId} AND pipeline_id = #{pipelineId}
   </select>
 
   <select id="getDealsByStageId" resultMap="DealResult">
-    SELECT <include refid="dealColumns"/> FROM deal WHERE stage_id = #{stageId}
+    SELECT <include refid="dealColumns"/>
+    FROM deal
+    WHERE workspace_id = #{workspaceId} AND stage_id = #{stageId}
   </select>
 
   <select id="getDealsByCompanyId" resultMap="DealFullResult">
-    SELECT <include refid="dealColumns"/> FROM deal WHERE company_id = #{companyId}
+    SELECT <include refid="dealColumns"/>
+    FROM deal
+    WHERE workspace_id = #{workspaceId} AND company_id = #{companyId}
   </select>
 
   <select id="getDealsByPersonId" resultMap="DealFullResult">
     SELECT <include refid="qualifiedDealColumns"/>
     FROM deal d
     JOIN deal_person dp ON dp.deal_id = d.id
-    WHERE dp.person_id = #{personId}
+    WHERE d.workspace_id = #{workspaceId} AND dp.person_id = #{personId}
   </select>
 
   <select id="getDealsByTagId" resultMap="DealResult">
     SELECT <include refid="qualifiedDealColumns"/>
     FROM deal d
     JOIN deal_tag dt ON dt.deal_id = d.id
-    WHERE dt.tag_id = #{tagId}
+    WHERE d.workspace_id = #{workspaceId} AND dt.tag_id = #{tagId}
   </select>
 
   <select id="getDealById" resultMap="DealFullResult">
-    SELECT <include refid="dealColumns"/> FROM deal WHERE id = #{id}
+    SELECT <include refid="dealColumns"/>
+    FROM deal
+    WHERE workspace_id = #{workspaceId} AND id = #{id}
+  </select>
+
+  <select id="exists" resultType="boolean">
+    SELECT EXISTS(
+      SELECT 1 FROM deal WHERE workspace_id = #{workspaceId} AND id = #{id}
+    )
   </select>
 
   <select id="search" resultMap="DealResult">
     SELECT <include refid="qualifiedDealColumns"/>
     FROM deal d
     LEFT JOIN company c ON c.id = d.company_id
-    WHERE d.name LIKE #{query}
-    OR d.currency LIKE #{query}
-    OR c.name LIKE #{query}
+    WHERE d.workspace_id = #{workspaceId}
+      AND (d.name LIKE #{query} OR d.currency LIKE #{query} OR c.name LIKE #{query})
     ORDER BY d.name
     LIMIT 10
   </select>
 
   <insert id="insert" useGeneratedKeys="true" keyProperty="id">
-    INSERT INTO deal (name, value, actual_value, currency, pipeline_id, stage_id, company_id,
-                      expected_close_date, closed_at, closed_reason, won)
+    INSERT INTO deal (
+      workspace_id, owner_id, name, value, actual_value, currency, pipeline_id, stage_id, company_id,
+      expected_close_date, closed_at, closed_reason, won
+    )
     VALUES (
-      #{name}, #{value}, #{actualValue}, #{currency}, #{pipelineId}, #{stageId}, #{companyId},
-      #{expectedCloseDate}, #{closedAt}, #{closedReason}, #{won}
+      #{workspaceId}, #{ownerId,jdbcType=INTEGER}, #{name}, #{value}, #{actualValue}, #{currency},
+      #{pipelineId}, #{stageId}, #{companyId}, #{expectedCloseDate}, #{closedAt},
+      #{closedReason}, #{won}
     )
   </insert>
 
@@ -122,10 +151,12 @@
         closed_at = #{closedAt},
         closed_reason = #{closedReason},
         won = #{won}
-    WHERE id = #{id}
+    WHERE workspace_id = #{workspaceId} AND id = #{id}
   </update>
 
-  <delete id="delete">DELETE FROM deal WHERE id = #{id}</delete>
+  <delete id="delete">
+    DELETE FROM deal WHERE workspace_id = #{workspaceId} AND id = #{id}
+  </delete>
 
   <select id="getStageOutcome" resultType="string">
     SELECT CASE WHEN is_success THEN 'won' WHEN is_failure THEN 'lost' ELSE 'normal' END
@@ -141,50 +172,106 @@
 
   <insert id="addTag">
     INSERT IGNORE INTO deal_tag (deal_id, tag_id)
-    VALUES (#{dealId}, #{tagId})
+    SELECT d.id, #{tagId}
+    FROM deal d
+    WHERE d.workspace_id = #{workspaceId} AND d.id = #{dealId}
   </insert>
 
   <delete id="removeTag">
-    DELETE FROM deal_tag
-    WHERE deal_id = #{dealId} AND tag_id = #{tagId}
+    DELETE dt
+    FROM deal_tag dt
+    JOIN deal d ON d.id = dt.deal_id
+    WHERE d.workspace_id = #{workspaceId} AND dt.deal_id = #{dealId} AND dt.tag_id = #{tagId}
   </delete>
+
+  <delete id="clearTags">
+    DELETE dt
+    FROM deal_tag dt
+    JOIN deal d ON d.id = dt.deal_id
+    WHERE d.workspace_id = #{workspaceId} AND dt.deal_id = #{dealId}
+  </delete>
+
+  <insert id="insertTags">
+    INSERT IGNORE INTO deal_tag (deal_id, tag_id)
+    SELECT d.id, t.id
+    FROM deal d
+    JOIN tag t ON t.id IN
+    <foreach collection="tagIds" item="tagId" open="(" separator="," close=")">
+      #{tagId}
+    </foreach>
+    WHERE d.workspace_id = #{workspaceId} AND d.id = #{dealId}
+  </insert>
 
   <insert id="addPerson">
     INSERT INTO deal_person (deal_id, person_id, role)
-    VALUES (#{dealId}, #{personId}, #{role})
+    SELECT d.id, #{personId}, #{role}
+    FROM deal d
+    WHERE d.workspace_id = #{workspaceId} AND d.id = #{dealId}
     ON DUPLICATE KEY UPDATE role = VALUES(role)
   </insert>
 
   <update id="updatePersonRole">
-    UPDATE deal_person SET role = #{role}
-    WHERE deal_id = #{dealId} AND person_id = #{personId}
+    UPDATE deal_person dp
+    JOIN deal d ON d.id = dp.deal_id
+    SET dp.role = #{role}
+    WHERE d.workspace_id = #{workspaceId}
+      AND dp.deal_id = #{dealId}
+      AND dp.person_id = #{personId}
   </update>
 
   <delete id="removePerson">
-    DELETE FROM deal_person
-    WHERE deal_id = #{dealId} AND person_id = #{personId}
+    DELETE dp
+    FROM deal_person dp
+    JOIN deal d ON d.id = dp.deal_id
+    WHERE d.workspace_id = #{workspaceId}
+      AND dp.deal_id = #{dealId}
+      AND dp.person_id = #{personId}
   </delete>
-
-  <delete id="clearTags">
-    DELETE FROM deal_tag WHERE deal_id = #{dealId}
-  </delete>
-
-  <insert id="insertTags">
-    INSERT IGNORE INTO deal_tag (deal_id, tag_id) VALUES
-    <foreach collection="tagIds" item="tagId" separator=",">
-      (#{dealId}, #{tagId})
-    </foreach>
-  </insert>
 
   <delete id="clearPeople">
-    DELETE FROM deal_person WHERE deal_id = #{dealId}
+    DELETE dp
+    FROM deal_person dp
+    JOIN deal d ON d.id = dp.deal_id
+    WHERE d.workspace_id = #{workspaceId} AND dp.deal_id = #{dealId}
   </delete>
 
-  <insert id="insertPeople">
-    INSERT INTO deal_person (deal_id, person_id, role) VALUES
-    <foreach collection="people" item="dp" separator=",">
-      (#{dealId}, #{dp.person.id}, #{dp.role})
-    </foreach>
-    ON DUPLICATE KEY UPDATE role = VALUES(role)
+  <update id="updateOwner">
+    UPDATE deal
+    SET owner_id = #{ownerId,jdbcType=INTEGER}
+    WHERE workspace_id = #{workspaceId} AND id = #{dealId}
+  </update>
+
+  <select id="getCollaborators" resultType="User">
+    SELECT u.id, u.username, u.display_name, u.email, u.password_hash, u.timezone,
+           u.last_login_at, u.profile_picture_url, u.created_at, u.updated_at
+    FROM deal_collaborator dc
+    JOIN app_user u ON u.id = dc.user_id
+    WHERE dc.workspace_id = #{workspaceId} AND dc.deal_id = #{dealId}
+    ORDER BY u.display_name, u.id
+  </select>
+
+  <delete id="clearCollaborators">
+    DELETE FROM deal_collaborator
+    WHERE workspace_id = #{workspaceId} AND deal_id = #{dealId}
+  </delete>
+
+  <delete id="removeCollaborator">
+    DELETE FROM deal_collaborator
+    WHERE workspace_id = #{workspaceId}
+      AND deal_id = #{dealId}
+      AND user_id = #{userId}
+  </delete>
+
+  <insert id="insertCollaborators">
+    INSERT INTO deal_collaborator (workspace_id, deal_id, user_id)
+    SELECT d.workspace_id, d.id, wm.user_id
+    FROM deal d
+    JOIN workspace_member wm ON wm.workspace_id = d.workspace_id
+    WHERE d.workspace_id = #{workspaceId}
+      AND d.id = #{dealId}
+      AND wm.user_id IN
+      <foreach collection="userIds" item="userId" open="(" separator="," close=")">
+        #{userId}
+      </foreach>
   </insert>
 </mapper>

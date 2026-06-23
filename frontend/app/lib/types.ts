@@ -34,6 +34,7 @@ export type User = {
     updatedAt: string;
     lastLoginAt?: string;
     profilePictureUrl?: string;
+    timezone: string;
 };
 
 export type LoginPayload = {
@@ -46,6 +47,7 @@ export type RegisterPayload = {
     password: string;
     displayName: string;
     email: string;
+    timezone?: string;
 };
 
 export type AuthResponse = {
@@ -107,6 +109,7 @@ export type Task = {
     assignedToId: number;
     personId?: number | null;
     dealId?: number | null;
+    workspaceId?: number;
     createdAt: string;
     updatedAt: string;
 };
@@ -242,6 +245,8 @@ export type Deal = {
     pipeline: number | null;
     stage: number | null;
     company: number | null;
+    workspaceId?: number;
+    ownerId?: number | null;
     expectedCloseDate?: string;
     closedAt?: string;
     closedReason?: string;
@@ -259,6 +264,7 @@ export type CreateDealPayload = {
     pipeline: number | null;
     stage: number | null;
     company?: number | null;
+    ownerId?: number | null;
     expectedCloseDate?: string;
     closedAt?: string;
     closedReason?: string;
@@ -273,6 +279,7 @@ export type UpdateDealPayload = {
     pipeline: number;
     stage: number;
     company?: number | null;
+    ownerId?: number | null;
     expectedCloseDate?: string | null;
     closedAt?: string | null;
     closedReason?: string | null;
@@ -389,6 +396,47 @@ export type UpdateTaskPayload = {
     assignedToId?: number;
     personId?: number;
     dealId?: number;
+};
+
+export type NotificationState = 'active' | 'unread' | 'history' | 'all';
+
+export type Notification = {
+    id: number;
+    type: string;
+    category: string;
+    severity: 'info' | 'warning' | 'critical' | string;
+    templateVersion: number;
+    title: string;
+    body?: string | null;
+    actorId?: number | null;
+    actorLabel?: string | null;
+    sourceType?: string | null;
+    sourceId?: number | null;
+    sourceLabel?: string | null;
+    contextType?: string | null;
+    contextId?: number | null;
+    contextLabel?: string | null;
+    actionUrl?: string | null;
+    data?: Record<string, unknown> | null;
+    triggeredAt: string;
+    readAt?: string | null;
+    dismissedAt?: string | null;
+    resolvedAt?: string | null;
+    createdAt: string;
+    updatedAt: string;
+};
+
+export type NotificationCounts = {
+    unread: number;
+};
+
+export type NotificationParams = {
+    state?: NotificationState;
+    category?: string;
+    contextType?: string;
+    contextId?: number;
+    page?: number;
+    size?: number;
 };
 
 export type AttachmentEntityType = 'company' | 'person' | 'deal' | 'user';

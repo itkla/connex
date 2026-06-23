@@ -42,6 +42,7 @@
   },
   "DealsActionsMenu": {
     "edit": "編集",
+    "manageTeam": "チームを管理",
     "viewInMap": "マップで表示",
     "add": "追加",
     "new": "新規",

@@ -7,7 +7,6 @@ import {
     ChatBubbleLeftRightIcon,
     CheckCircleIcon,
     ChevronDownIcon,
-    ChevronUpDownIcon,
     DocumentTextIcon,
     FolderIcon,
     FunnelIcon,
@@ -20,7 +19,6 @@ import {
     CalendarIcon,
     MapIcon,
     ChartBarIcon,
-    ChartPieIcon,
     PresentationChartLineIcon,
     GlobeAltIcon,
     ClipboardDocumentListIcon,
@@ -29,7 +27,6 @@ import {
     ComputerDesktopIcon,
     CheckIcon,
 } from "@heroicons/react/24/outline";
-import Image from "next/image";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useState } from "react";
@@ -41,6 +38,7 @@ import { useTheme } from "next-themes";
 import { DropdownMenuItem, DropdownMenuPortal, DropdownMenuSub, DropdownMenuSubContent, DropdownMenuSubTrigger } from "@/components/ui/dropdown-menu";
 // import {  } from "@heroicons/react/24/solid";
 import UserAvatar from '@/app/components/records/users/UserAvatar';
+import NotificationBell from '@/app/components/notifications/NotificationBell';
 
 type NavItem = {
     label: string;
@@ -328,8 +326,9 @@ export default function Sidebar({
                 aria-label={t("ariaPrimarySidebar")}
             >
                 {/* TODO: make this section a menu so that the user can select the organization they want to use */}
-                <header className="mb-6 shrink-0">
+                <header className="mb-6 flex shrink-0 items-center justify-between gap-3">
                     <h1 className="text-2xl font-bold tracking-tight">{process.env.ORG_NAME ?? t("brand")}</h1>
+                    <NotificationBell />
                 </header>
 
                 <nav className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto pr-1">

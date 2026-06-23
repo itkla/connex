@@ -133,7 +133,7 @@ class TagMapperTest extends AbstractMapperTest {
         Stage stage = newStage(pipeline, 0);
         Company company = newCompany();
         Deal deal = newDeal(pipeline, stage, company);
-        dealMapper.addTag(deal.getId(), tag.getId());
+        dealMapper.addTag(workspace.getId(), deal.getId(), tag.getId());
 
         List<Tag> tags = tagMapper.getTagsByDealId(deal.getId());
 

@@ -7,7 +7,7 @@ import { useTranslations } from 'next-intl';
 import { Checkbox } from '@/components/ui/checkbox';
 import { updateTask } from '@/app/lib/api';
 import { toastError, toastSuccess } from '@/app/lib/toast';
-import { formatShortDate, timeOf } from '@/app/lib/utils';
+import { formatShortDate, startOfLocalDay, timeOf } from '@/app/lib/utils';
 import { type Task } from '@/app/lib/types';
 import { cn } from '@/lib/utils';
 
@@ -15,6 +15,7 @@ export default function UpcomingTasks({ tasks, locale }: { tasks: Task[]; locale
     const router = useRouter();
     const t = useTranslations('DashboardTaskSummary');
     const [now] = useState(() => new Date().getTime());
+    const todayStart = startOfLocalDay(now);
     const [doneIds, setDoneIds] = useState<Set<number>>(new Set());
 
     async function complete(task: Task) {
@@ -63,7 +64,7 @@ export default function UpcomingTasks({ tasks, locale }: { tasks: Task[]; locale
         <ul className="mt-6 divide-y divide-border border-t border-border">
             {visible.map((task) => {
                 const due = timeOf(task.dueDate);
-                const isOverdue = due > 0 && due < now;
+                const isOverdue = due > 0 && due < todayStart;
                 return (
                     <li key={task.id} className="flex items-center gap-3 py-3">
                         <Checkbox

@@ -18,6 +18,7 @@ import lombok.NoArgsConstructor;
 @NoArgsConstructor
 public class Task {
     private int id;
+    private int workspaceId;
     private String description;
     private boolean completed;
     private String dueDate;
