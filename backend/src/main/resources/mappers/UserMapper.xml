@@ -28,10 +28,12 @@
   </select>
 
   <select id="search" resultType="User">
-    SELECT <include refid="userColumns"/>
-    FROM app_user
-    WHERE username LIKE #{query} OR display_name LIKE #{query} OR email LIKE #{query}
-    ORDER BY username
+    SELECT u.id, u.username, u.display_name, u.email, u.password_hash, u.timezone,
+           u.last_login_at, u.profile_picture_url, u.created_at, u.updated_at
+    FROM app_user u
+    JOIN workspace_member wm ON wm.user_id = u.id AND wm.workspace_id = #{workspaceId}
+    WHERE u.username LIKE #{query} OR u.display_name LIKE #{query} OR u.email LIKE #{query}
+    ORDER BY u.username
     LIMIT 10
   </select>
 
