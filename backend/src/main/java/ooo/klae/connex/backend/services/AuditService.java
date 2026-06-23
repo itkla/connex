@@ -18,6 +18,7 @@ import org.springframework.web.context.request.ServletRequestAttributes;
 import ooo.klae.connex.backend.beans.AuditLog;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.mappers.AuditLogMapper;
+import ooo.klae.connex.backend.tenant.TenantContext;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -50,6 +51,7 @@ public class AuditService {
 
     private final AuditLogMapper auditLogMapper;
     private final ObjectMapper objectMapper;
+    private final TenantContext tenantContext;
 
     /**
      * Records a single successful audit event. Never throws.
@@ -110,6 +112,7 @@ public class AuditService {
             entry.setChanges(toJson(changes));
             entry.setContext(toJson(context));
 
+            entry.setWorkspaceId(tenantContext.getWorkspaceId());
             resolveActor(entry);
             resolveRequest(entry);
 
@@ -167,7 +170,7 @@ public class AuditService {
      * @return
      */
     public List<AuditLog> recent(int limit) {
-        return auditLogMapper.findRecent(cap(limit));
+        return auditLogMapper.findRecent(tenantContext.getWorkspaceId(), cap(limit));
     }
 
     /**
@@ -178,7 +181,7 @@ public class AuditService {
      * @return
      */
     public List<AuditLog> forEntity(String entityType, int entityId, int limit) {
-        return auditLogMapper.findByEntity(entityType, entityId, cap(limit));
+        return auditLogMapper.findByEntity(tenantContext.getWorkspaceId(), entityType, entityId, cap(limit));
     }
 
     /**

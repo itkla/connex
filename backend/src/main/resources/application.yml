@@ -4,9 +4,9 @@ spring:
     application:
         name: connex-backend
     datasource:
-        url: jdbc:mysql://localhost:3306/connexdb?createDatabaseIfNotExist=true
-        username: connexuser
-        password: connexpassword
+        url: ${CONNEX_DB_URL:jdbc:mysql://localhost:3306/connexdb?createDatabaseIfNotExist=true}
+        username: ${CONNEX_DB_USERNAME:connexuser}
+        password: ${CONNEX_DB_PASSWORD:connexpassword}
         # driver-class-name: com.mysql.cj.jdbc.Driver
         hikari:
             connection-init-sql: "SET time_zone = '+00:00'"
@@ -42,3 +42,12 @@ mybatis:
     type-aliases-package: ooo.klae.connex.backend.beans
     configuration:
         map-underscore-to-camel-case: true
+
+server:
+    servlet:
+        session:
+            cookie:
+                http-only: true
+                same-site: lax
+                # Secure should be true wherever the app is served over HTTPS.
+                secure: ${CONNEX_SESSION_COOKIE_SECURE:false}
