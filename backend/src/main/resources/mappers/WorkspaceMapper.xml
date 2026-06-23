@@ -11,12 +11,33 @@
     ORDER BY w.id
   </select>
 
+  <select id="getMembershipsForUser" resultType="ooo.klae.connex.backend.dto.WorkspaceMembershipDto">
+    SELECT w.id, w.name, w.slug, wm.role
+    FROM workspace w
+    JOIN workspace_member wm ON wm.workspace_id = w.id
+    WHERE wm.user_id = #{userId}
+    ORDER BY w.name, w.id
+  </select>
+
   <select id="getDefaultWorkspace" resultType="Workspace">
     SELECT id, name, slug, created_at, updated_at
     FROM workspace
     WHERE slug = 'default'
     LIMIT 1
   </select>
+
+  <select id="getRole" resultType="string">
+    SELECT role FROM workspace_member
+    WHERE workspace_id = #{workspaceId} AND user_id = #{userId}
+  </select>
+
+  <select id="getLastActiveWorkspaceId" resultType="java.lang.Integer">
+    SELECT last_active_workspace_id FROM app_user WHERE id = #{userId}
+  </select>
+
+  <update id="setLastActiveWorkspaceId">
+    UPDATE app_user SET last_active_workspace_id = #{workspaceId} WHERE id = #{userId}
+  </update>
 
   <select id="isMember" resultType="boolean">
     SELECT EXISTS(
@@ -44,4 +65,9 @@
     INSERT INTO workspace_member (workspace_id, user_id, role)
     VALUES (#{workspaceId}, #{userId}, #{role})
   </insert>
+
+  <update id="updateMemberRole">
+    UPDATE workspace_member SET role = #{role}
+    WHERE workspace_id = #{workspaceId} AND user_id = #{userId}
+  </update>
 </mapper>

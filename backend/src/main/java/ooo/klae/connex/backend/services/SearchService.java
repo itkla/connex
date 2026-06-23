@@ -55,16 +55,16 @@ public class SearchService {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         auditService.record("search", "search", null, query, "Search performed", null);
         return new SearchResultsDto(
-            companyMapper.search(pattern).stream().map(CompanyDto::from).toList(),
-            personMapper.search(pattern).stream().map(PersonDto::from).toList(),
+            companyMapper.search(workspaceId, pattern).stream().map(CompanyDto::from).toList(),
+            personMapper.search(workspaceId, pattern).stream().map(PersonDto::from).toList(),
             dealMapper.search(workspaceId, pattern).stream().map(DealDto::from).toList(),
-            pipelineMapper.search(pattern).stream().map(PipelineDto::from).toList(),
-            tagMapper.search(pattern).stream().map(TagDto::from).toList(),
-            activityMapper.search(pattern).stream().map(ActivityDto::from).toList(),
-            noteMapper.search(pattern).stream().map(NoteDto::from).toList(),
+            pipelineMapper.search(workspaceId, pattern).stream().map(PipelineDto::from).toList(),
+            tagMapper.search(workspaceId, pattern).stream().map(TagDto::from).toList(),
+            activityMapper.search(workspaceId, pattern).stream().map(ActivityDto::from).toList(),
+            noteMapper.search(workspaceId, pattern).stream().map(NoteDto::from).toList(),
             taskMapper.search(workspaceId, pattern).stream().map(TaskDto::from).toList(),
-            userMapper.search(pattern).stream().map(UserDto::from).toList(),
-            attachmentMapper.search(pattern).stream().map(AttachmentDto::from).toList()
+            userMapper.search(workspaceId, pattern).stream().map(UserDto::from).toList(),
+            attachmentMapper.search(workspaceId, pattern).stream().map(AttachmentDto::from).toList()
         );
     }
 

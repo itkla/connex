@@ -17,7 +17,7 @@ public interface UserMapper {
     User getUserById(int id);
     User getUserByUsername(String username);
     User getUserByEmail(String email);
-    List<User> search(String query);
+    List<User> search(@Param("workspaceId") int workspaceId, @Param("query") String query);
     int insert(User user);
     int update(User user);
     int delete(int id);

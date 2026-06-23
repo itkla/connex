@@ -1,5 +1,7 @@
 package ooo.klae.connex.backend.mappers;
 
+import org.apache.ibatis.annotations.Param;
+
 import ooo.klae.connex.backend.beans.Note;
 import java.util.List;
 
@@ -10,13 +12,13 @@ import java.util.List;
  */
 
 public interface NoteMapper {
-    List<Note> getAllNotes();
-    List<Note> getNotesByPersonId(int personId);
-    List<Note> getNotesByDealId(int dealId);
-    List<Note> getNotesByAuthorId(int authorId);
-    Note getNoteById(int id);
-    List<Note> search(String query);
+    List<Note> getAllNotes(int workspaceId);
+    List<Note> getNotesByPersonId(@Param("workspaceId") int workspaceId, @Param("personId") int personId);
+    List<Note> getNotesByDealId(@Param("workspaceId") int workspaceId, @Param("dealId") int dealId);
+    List<Note> getNotesByAuthorId(@Param("workspaceId") int workspaceId, @Param("authorId") int authorId);
+    Note getNoteById(@Param("workspaceId") int workspaceId, @Param("id") int id);
+    List<Note> search(@Param("workspaceId") int workspaceId, @Param("query") String query);
     int insert(Note note);
     int update(Note note);
-    int delete(int id);
+    int delete(@Param("workspaceId") int workspaceId, @Param("id") int id);
 }

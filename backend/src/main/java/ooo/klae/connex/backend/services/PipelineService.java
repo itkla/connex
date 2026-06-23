@@ -16,8 +16,8 @@ import lombok.RequiredArgsConstructor;
 
 /**
  * Business logic for {@code Pipeline} and {@code Stage} management.
- * Handles mapping between {@code PipelineDto} and the {@code Pipeline}/{@code Stage} beans.
- * Delegates persistence to {@code PipelineMapper}.
+ * Every read/write is scoped to the caller's active workspace; a stage inherits
+ * its workspace from its pipeline. Delegates persistence to {@code PipelineMapper}.
  */
 
 @Service
@@ -35,17 +35,19 @@ public class PipelineService {
         Set.of("name", "position", "success", "failure");
 
     public List<Pipeline> getAllPipelines() {
-        return pipelineMapper.getAllPipelines();
+        return pipelineMapper.getAllPipelines(workspaceService.getCurrentWorkspaceId());
     }
 
     public Pipeline getPipelineById(int id) {
-        Pipeline pipeline = pipelineMapper.getPipelineById(id);
+        Pipeline pipeline = pipelineMapper.getPipelineById(workspaceService.getCurrentWorkspaceId(), id);
         if (pipeline == null) throw new ResourceNotFoundException("Pipeline not found with id: " + id);
         hydrateStageDeals(pipeline.getStages());
         return pipeline;
     }
 
     public Pipeline createPipeline(Pipeline pipeline) {
+        workspaceService.requireRole(WorkspaceService.Role.ADMIN);
+        pipeline.setWorkspaceId(workspaceService.getCurrentWorkspaceId());
         pipelineMapper.insertPipeline(pipeline);
         auditService.record("pipeline.create", "pipeline", pipeline.getId(), pipeline.getName(),
             "Created pipeline " + pipeline.getName(),
@@ -54,9 +56,11 @@ public class PipelineService {
     }
 
     public Pipeline updatePipeline(int id, Pipeline pipeline) {
-        Pipeline before = pipelineMapper.getPipelineById(id);
-        if (before == null) throw new ResourceNotFoundException("Pipeline not found with id: " + id);
+        workspaceService.requireRole(WorkspaceService.Role.ADMIN);
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        Pipeline before = requirePipeline(workspaceId, id);
         pipeline.setId(id);
+        pipeline.setWorkspaceId(workspaceId);
         pipelineMapper.updatePipeline(pipeline);
         auditService.record("pipeline.update", "pipeline", id, pipeline.getName(),
             "Updated pipeline " + pipeline.getName(),
@@ -65,9 +69,10 @@ public class PipelineService {
     }
 
     public void deletePipeline(int id) {
-        Pipeline before = pipelineMapper.getPipelineById(id);
-        if (before == null) throw new ResourceNotFoundException("Pipeline not found with id: " + id);
-        pipelineMapper.deletePipeline(id);
+        workspaceService.requireRole(WorkspaceService.Role.ADMIN);
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        Pipeline before = requirePipeline(workspaceId, id);
+        pipelineMapper.deletePipeline(workspaceId, id);
         auditService.record("pipeline.delete", "pipeline", id, before.getName(),
             "Deleted pipeline " + before.getName(),
             auditService.diff(before, null, PIPELINE_AUDIT_FIELDS));
@@ -76,28 +81,29 @@ public class PipelineService {
     // Stage operations (will likely move to separate StageService in the future)
 
     public List<Stage> getStagesByPipelineId(int pipelineId) {
-        if (pipelineMapper.getPipelineById(pipelineId) == null) throw new ResourceNotFoundException("Pipeline not found with id: " + pipelineId);
-        List<Stage> stages = pipelineMapper.getStagesByPipelineId(pipelineId);
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        requirePipeline(workspaceId, pipelineId);
+        List<Stage> stages = pipelineMapper.getStagesByPipelineId(workspaceId, pipelineId);
         hydrateStageDeals(stages.toArray(Stage[]::new));
         return stages;
     }
 
     public Stage getStageById(int id) {
-        Stage stage = pipelineMapper.getStageById(id);
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        Stage stage = pipelineMapper.getStageById(workspaceId, id);
         if (stage == null) throw new ResourceNotFoundException("Stage not found with id: " + id);
-        stage.setDeals(dealMapper.getDealsByStageId(
-            workspaceService.getCurrentWorkspaceId(),
-            id
-        ).toArray(Deal[]::new));
+        stage.setDeals(dealMapper.getDealsByStageId(workspaceId, id).toArray(Deal[]::new));
         return stage;
     }
 
     public Stage createStage(int pipelineId, Stage stage) {
-        Pipeline pipeline = pipelineMapper.getPipelineById(pipelineId);
-        if (pipeline == null) throw new ResourceNotFoundException("Pipeline not found with id: " + pipelineId);
+        workspaceService.requireRole(WorkspaceService.Role.ADMIN);
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        Pipeline pipeline = requirePipeline(workspaceId, pipelineId);
         stage.setPipeline(pipeline);
-        assertSingleTerminalOfType(pipelineId, stage);
-        assertUniqueName(pipelineId, stage);
+        stage.setWorkspaceId(workspaceId);
+        assertSingleTerminalOfType(workspaceId, pipelineId, stage);
+        assertUniqueName(workspaceId, pipelineId, stage);
         pipelineMapper.insertStage(stage);
         auditService.record("stage.create", "stage", stage.getId(), stage.getName(),
             "Created stage " + stage.getName(),
@@ -106,12 +112,15 @@ public class PipelineService {
     }
 
     public Stage updateStage(int id, Stage stage) {
-        Stage existing = pipelineMapper.getStageById(id);
+        workspaceService.requireRole(WorkspaceService.Role.ADMIN);
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        Stage existing = pipelineMapper.getStageById(workspaceId, id);
         if (existing == null) throw new ResourceNotFoundException("Stage not found with id: " + id);
         stage.setId(id);
+        stage.setWorkspaceId(workspaceId);
         stage.setPipeline(existing.getPipeline());
-        assertSingleTerminalOfType(existing.getPipeline().getId(), stage);
-        assertUniqueName(existing.getPipeline().getId(), stage);
+        assertSingleTerminalOfType(workspaceId, existing.getPipeline().getId(), stage);
+        assertUniqueName(workspaceId, existing.getPipeline().getId(), stage);
         pipelineMapper.updateStage(stage);
         auditService.record("stage.update", "stage", id, stage.getName(),
             "Updated stage " + stage.getName(),
@@ -119,19 +128,19 @@ public class PipelineService {
         return stage;
     }
 
-    private void assertUniqueName(int pipelineId, Stage stage) {
+    private void assertUniqueName(int workspaceId, int pipelineId, Stage stage) {
         String name = stage.getName() == null ? "" : stage.getName().trim();
         if (name.isEmpty()) return;
-        for (Stage sibling : pipelineMapper.getStagesByPipelineId(pipelineId)) {
+        for (Stage sibling : pipelineMapper.getStagesByPipelineId(workspaceId, pipelineId)) {
             if (sibling.getId() == stage.getId()) continue;
             if (sibling.getName() != null && name.equalsIgnoreCase(sibling.getName().trim()))
                 throw new DuplicateResourceException("name", "A stage with this name already exists in this pipeline");
         }
     }
 
-    private void assertSingleTerminalOfType(int pipelineId, Stage stage) {
+    private void assertSingleTerminalOfType(int workspaceId, int pipelineId, Stage stage) {
         if (!stage.isSuccess() && !stage.isFailure()) return;
-        for (Stage sibling : pipelineMapper.getStagesByPipelineId(pipelineId)) {
+        for (Stage sibling : pipelineMapper.getStagesByPipelineId(workspaceId, pipelineId)) {
             if (sibling.getId() == stage.getId()) continue; // skip self on update
             if (stage.isSuccess() && sibling.isSuccess())
                 throw new DuplicateResourceException("This pipeline already has a Won stage");
@@ -141,32 +150,38 @@ public class PipelineService {
     }
 
     public void deleteStage(int id) {
-        Stage before = pipelineMapper.getStageById(id);
+        workspaceService.requireRole(WorkspaceService.Role.ADMIN);
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        Stage before = pipelineMapper.getStageById(workspaceId, id);
         if (before == null) throw new ResourceNotFoundException("Stage not found with id: " + id);
-        pipelineMapper.deleteStage(id);
+        pipelineMapper.deleteStage(workspaceId, id);
         auditService.record("stage.delete", "stage", id, before.getName(),
             "Deleted stage " + before.getName(),
             auditService.diff(before, null, STAGE_AUDIT_FIELDS));
     }
 
     /**
-     * Retrieves the deals associated with a pipeline.
-     * @param pipelineId
-     * @return
+     * Retrieves the deals associated with a pipeline in the active workspace.
      */
     public List<Deal> getDealsByPipelineId(int pipelineId) {
-        if (pipelineMapper.getPipelineById(pipelineId) == null) throw new ResourceNotFoundException("Pipeline not found with id: " + pipelineId);
-        return dealMapper.getDealsByPipelineId(workspaceService.getCurrentWorkspaceId(), pipelineId);
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        requirePipeline(workspaceId, pipelineId);
+        return dealMapper.getDealsByPipelineId(workspaceId, pipelineId);
     }
 
     /**
-     * Retrieves the deals associated with a stage.
-     * @param stageId
-     * @return
+     * Retrieves the deals associated with a stage in the active workspace.
      */
     public List<Deal> getDealsByStageId(int stageId) {
-        if (pipelineMapper.getStageById(stageId) == null) throw new ResourceNotFoundException("Stage not found with id: " + stageId);
-        return dealMapper.getDealsByStageId(workspaceService.getCurrentWorkspaceId(), stageId);
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        if (pipelineMapper.getStageById(workspaceId, stageId) == null) throw new ResourceNotFoundException("Stage not found with id: " + stageId);
+        return dealMapper.getDealsByStageId(workspaceId, stageId);
+    }
+
+    private Pipeline requirePipeline(int workspaceId, int pipelineId) {
+        Pipeline pipeline = pipelineMapper.getPipelineById(workspaceId, pipelineId);
+        if (pipeline == null) throw new ResourceNotFoundException("Pipeline not found with id: " + pipelineId);
+        return pipeline;
     }
 
     private void hydrateStageDeals(Stage[] stages) {

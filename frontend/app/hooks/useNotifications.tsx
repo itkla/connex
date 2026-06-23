@@ -3,6 +3,7 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
 
 import { getNotificationCounts } from "@/app/lib/api";
+import { useWorkspace } from "@/app/hooks/useWorkspace";
 
 type NotificationContextValue = {
     unread: number;
@@ -14,6 +15,7 @@ type NotificationContextValue = {
 const NotificationContext = createContext<NotificationContextValue | null>(null);
 
 export function NotificationProvider({ children }: { children: React.ReactNode }) {
+    const { activeWorkspaceId } = useWorkspace();
     const [unread, setUnread] = useState(0);
     const requestRef = useRef<AbortController | null>(null);
     const loadingRef = useRef(false);
@@ -51,7 +53,8 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
             document.removeEventListener("visibilitychange", onVisibilityChange);
             requestRef.current?.abort();
         };
-    }, [refreshUnread]);
+        // activeWorkspaceId is a dependency so the count refreshes when the user switches workspace.
+    }, [refreshUnread, activeWorkspaceId]);
 
     const adjustUnread = useCallback((delta: number) => {
         setUnread((value) => Math.max(0, value + delta));

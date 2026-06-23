@@ -1,5 +1,7 @@
 package ooo.klae.connex.backend.mappers;
 
+import org.apache.ibatis.annotations.Param;
+
 import ooo.klae.connex.backend.beans.Pipeline;
 import ooo.klae.connex.backend.beans.Stage;
 import java.util.List;
@@ -11,16 +13,17 @@ import java.util.List;
  */
 
 public interface PipelineMapper {
-    List<Pipeline> getAllPipelines();
-    Pipeline getPipelineById(int id);
-    List<Pipeline> search(String query);
+    List<Pipeline> getAllPipelines(int workspaceId);
+    Pipeline getPipelineById(@Param("workspaceId") int workspaceId, @Param("id") int id);
+    List<Pipeline> search(@Param("workspaceId") int workspaceId, @Param("query") String query);
+    boolean pipelineExists(@Param("workspaceId") int workspaceId, @Param("id") int id);
     int insertPipeline(Pipeline pipeline);
     int updatePipeline(Pipeline pipeline);
-    int deletePipeline(int id);
+    int deletePipeline(@Param("workspaceId") int workspaceId, @Param("id") int id);
 
-    Stage getStageById(int id);
-    List<Stage> getStagesByPipelineId(int pipelineId);
+    Stage getStageById(@Param("workspaceId") int workspaceId, @Param("id") int id);
+    List<Stage> getStagesByPipelineId(@Param("workspaceId") int workspaceId, @Param("pipelineId") int pipelineId);
     int insertStage(Stage stage);
     int updateStage(Stage stage);
-    int deleteStage(int id);
+    int deleteStage(@Param("workspaceId") int workspaceId, @Param("id") int id);
 }

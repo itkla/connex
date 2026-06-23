@@ -10,6 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.Test;
 
 import ooo.klae.connex.backend.beans.User;
+import ooo.klae.connex.backend.beans.Workspace;
 
 class UserMapperTest extends AbstractMapperTest {
 
@@ -107,5 +108,34 @@ class UserMapperTest extends AbstractMapperTest {
         userMapper.updateTimezone(user.getId(), "Asia/Tokyo");
 
         assertEquals("Asia/Tokyo", userMapper.getUserById(user.getId()).getTimezone());
+    }
+
+    /**
+     * Search only returns members of the searching workspace, never a user who
+     * belongs solely to another workspace.
+     */
+    @Test
+    void search_isScopedToWorkspaceMembers() {
+        User mine = newUser(); // member of the default workspace
+
+        Workspace other = new Workspace();
+        other.setName("WS " + unique());
+        other.setSlug("ws_" + unique());
+        workspaceMapper.insert(other);
+
+        String s = unique();
+        User foreign = new User();
+        foreign.setUsername("zz_" + s);
+        foreign.setDisplayName("Zz " + s);
+        foreign.setEmail(s + "@foreign.example.com");
+        foreign.setPasswordHash("hash_" + s);
+        foreign.setTimezone("UTC");
+        userMapper.insert(foreign);
+        workspaceMapper.addMember(other.getId(), foreign.getId(), "member");
+
+        assertTrue(userMapper.search(workspace.getId(), "%" + foreign.getUsername() + "%")
+                .stream().noneMatch(u -> u.getId() == foreign.getId()));
+        assertTrue(userMapper.search(workspace.getId(), "%" + mine.getUsername() + "%")
+                .stream().anyMatch(u -> u.getId() == mine.getId()));
     }
 }

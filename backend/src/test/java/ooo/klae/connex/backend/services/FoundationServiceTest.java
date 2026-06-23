@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.services;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -25,6 +26,8 @@ class FoundationServiceTest extends AbstractServiceTest {
     @Autowired DealService dealService;
     @Autowired TaskService taskService;
     @Autowired UserService userService;
+    @Autowired WorkspaceService workspaceService;
+    @Autowired PipelineService pipelineService;
 
     @Test
     void createDealDefaultsWorkspaceAndOwner() {
@@ -50,9 +53,9 @@ class FoundationServiceTest extends AbstractServiceTest {
         Deal deal = newDeal(pipeline, stage, newCompany());
         User outsider = newUserInAnotherWorkspace();
 
-        assertThrows(BadRequestException.class, () -> dealService.updateOwner(deal.getId(), outsider.getId()));
+        assertThrows(ForbiddenException.class, () -> dealService.updateOwner(deal.getId(), outsider.getId()));
         assertThrows(
-            BadRequestException.class,
+            ForbiddenException.class,
             () -> dealService.replaceCollaborators(deal.getId(), List.of(outsider.getId()))
         );
     }
@@ -64,7 +67,7 @@ class FoundationServiceTest extends AbstractServiceTest {
         task.setDescription("Cross workspace");
         task.setAssignedTo(outsider);
 
-        assertThrows(BadRequestException.class, () -> taskService.create(task));
+        assertThrows(ForbiddenException.class, () -> taskService.create(task));
     }
 
     @Test
@@ -89,14 +92,28 @@ class FoundationServiceTest extends AbstractServiceTest {
     }
 
     @Test
-    void multipleMembershipsFailClosed() {
+    void multipleMembershipsResolveToDefaultWorkspace() {
         Workspace other = new Workspace();
         other.setName("Second Workspace");
         other.setSlug("second-" + unique());
         workspaceMapper.insert(other);
         workspaceMapper.addMember(other.getId(), currentUser.getId(), "member");
 
-        assertThrows(IllegalStateException.class, () -> dealService.getAllDeals());
+        // Multi-membership is now supported. Off the request thread the resolver falls back
+        // to the user's first/default workspace instead of failing closed.
+        assertEquals(workspace.getId(), workspaceService.getCurrentWorkspaceId());
+        assertDoesNotThrow(() -> dealService.getAllDeals());
+    }
+
+    @Test
+    void adminOpsRejectPlainMembers() {
+        Pipeline pipeline = newPipeline();
+
+        // a plain member of the active workspace
+        User member = newUser();
+        authenticate(member);
+
+        assertThrows(ForbiddenException.class, () -> pipelineService.deletePipeline(pipeline.getId()));
     }
 
     private User newUserInAnotherWorkspace() {

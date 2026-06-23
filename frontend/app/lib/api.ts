@@ -14,17 +14,29 @@ function clientLocale(): string | null {
     return match ? decodeURIComponent(match[1]) : null;
 }
 
+// The active workspace, read from the non-HttpOnly connex_workspace cookie and sent as a
+// header on every client request. SSR callers forward the cookie itself (see safeWithCookie).
+function clientWorkspaceId(): string | null {
+    if (typeof document === "undefined") {
+        return null;
+    }
+    const match = document.cookie.match(/(?:^|;\s*)connex_workspace=([^;]+)/);
+    return match ? decodeURIComponent(match[1]) : null;
+}
+
 async function requestJson<T>(
     path: string,
     init: RequestInit = {},
 ): Promise<T> {
     const locale = clientLocale();
+    const workspaceId = clientWorkspaceId();
     const res = await fetch(`${API_BASE}${path}`, {
         ...init,
         credentials: "include",
         headers: {
             ...(init.body ? { "Content-Type": "application/json" } : {}),
             ...(locale ? { "Accept-Language": locale } : {}),
+            ...(workspaceId ? { "X-Workspace-Id": workspaceId } : {}),
             ...init.headers,
         },
     });
@@ -831,4 +843,31 @@ export function deleteAttachment(id: number, init: RequestInit = {}) {
 
 export function getAuditLogs(params: Types.AuditLogParams = {}, init: RequestInit = {}) {
     return getJson<Types.AuditLogEntry[]>(`/api/audit${buildQuery(params)}`, init);
+}
+
+/*
+* == Workspaces (tenancy)
+*/
+
+const EMPTY_WORKSPACES: Types.MyWorkspaces = { workspaces: [], activeWorkspaceId: null };
+
+export function getMyWorkspaces(init: RequestInit = {}) {
+    return getJson<Types.MyWorkspaces>(`/api/workspaces`, { cache: "no-store", ...init });
+}
+
+export async function getMyWorkspacesFromCookie(cookie: string | null): Promise<Types.MyWorkspaces> {
+    if (!cookie) return EMPTY_WORKSPACES;
+    try {
+        return await getMyWorkspaces({ headers: { cookie }, cache: "no-store" });
+    } catch {
+        return EMPTY_WORKSPACES;
+    }
+}
+
+export function createWorkspace(name: string) {
+    return postJson<Types.Workspace>(`/api/workspaces`, { name });
+}
+
+export function switchWorkspace(id: number) {
+    return postJson<void>(`/api/workspaces/${id}/switch`, {});
 }

@@ -4,22 +4,31 @@ spring:
     application:
         name: connex-backend
     datasource:
-        url: jdbc:mysql://localhost:3306/connexdb
-        username: connexuser
-        password: connexpassword
+        url: ${CONNEX_DB_URL:jdbc:mysql://localhost:3306/connexdb?createDatabaseIfNotExist=true}
+        username: ${CONNEX_DB_USERNAME:connexuser}
+        password: ${CONNEX_DB_PASSWORD:connexpassword}
         # driver-class-name: com.mysql.cj.jdbc.Driver
         hikari:
             connection-init-sql: "SET time_zone = '+00:00'"
+    # Schema is owned by Flyway (classpath:db/migration). Legacy sql.init drop-and-recreate is off.
     sql:
         init:
-            # mode: always
+            mode: never
             encoding: UTF-8
+    flyway:
+        enabled: true
+        baseline-on-migrate: true
+        baseline-version: 0
     jackson:
         default-property-inclusion: non_null
 
 connex:
     cors:
         allowed-origins: ${CONNEX_CORS_ALLOWED_ORIGINS:http://localhost:3000}
+    workspaces:
+        # When false, new registrations and the create endpoint cannot make workspaces
+        # (invite-only mode); users onboard by accepting an invite instead.
+        allow-self-service-creation: ${CONNEX_WORKSPACES_ALLOW_CREATION:true}
     notifications:
         scheduling-enabled: ${CONNEX_NOTIFICATIONS_SCHEDULING_ENABLED:true}
         reconciliation-delay-ms: ${CONNEX_NOTIFICATIONS_RECONCILIATION_DELAY_MS:300000}
@@ -33,3 +42,12 @@ mybatis:
     type-aliases-package: ooo.klae.connex.backend.beans
     configuration:
         map-underscore-to-camel-case: true
+
+server:
+    servlet:
+        session:
+            cookie:
+                http-only: true
+                same-site: lax
+                # Secure should be true wherever the app is served over HTTPS.
+                secure: ${CONNEX_SESSION_COOKIE_SECURE:false}

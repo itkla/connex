@@ -67,6 +67,7 @@ abstract class AbstractMapperTest {
         company.setIndustry("Tech");
         company.setPhone("+81-90-1234-5678");
         company.setAddress("1-1-1 Shinjuku, Tokyo, Japan");
+        company.setWorkspaceId(workspace.getId());
         companyMapper.insert(company);
         return company;
     }
@@ -74,6 +75,7 @@ abstract class AbstractMapperTest {
     protected Pipeline newPipeline() {
         Pipeline pipeline = new Pipeline();
         pipeline.setName("Pipeline " + unique());
+        pipeline.setWorkspaceId(workspace.getId());
         pipelineMapper.insertPipeline(pipeline);
         return pipeline;
     }
@@ -83,6 +85,7 @@ abstract class AbstractMapperTest {
         stage.setName("Stage " + unique());
         stage.setPipeline(pipeline);
         stage.setPosition(position);
+        stage.setWorkspaceId(workspace.getId());
         pipelineMapper.insertStage(stage);
         return stage;
     }
@@ -91,6 +94,7 @@ abstract class AbstractMapperTest {
         Tag tag = new Tag();
         tag.setName("tag_" + unique());
         tag.setColor("#abcdef");
+        tag.setWorkspaceId(workspace.getId());
         tagMapper.insert(tag);
         return tag;
     }
@@ -103,6 +107,7 @@ abstract class AbstractMapperTest {
         person.setPhone("+81-90-2345-6789");
         person.setTitle("Engineer");
         person.setCompany(company);
+        person.setWorkspaceId(workspace.getId());
         personMapper.insert(person);
         return person;
     }

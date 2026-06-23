@@ -512,6 +512,20 @@ export type AuditChange = {
     new: unknown;
 };
 
+export type WorkspaceRole = "owner" | "admin" | "member";
+
+export type Workspace = {
+    id: number;
+    name: string;
+    slug: string;
+    role: WorkspaceRole;
+};
+
+export type MyWorkspaces = {
+    workspaces: Workspace[];
+    activeWorkspaceId: number | null;
+};
+
 export type AuditLogEntry = {
     id: number;
     action: string;

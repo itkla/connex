@@ -1,41 +1,9 @@
 -- ============================================================================
--- Connex CRM : MySQL Schema
--- This file is the source of truth, and should be defined first before any Java entity classes or MyBatis mappers. DO NOT FORGET TO CHANGE THIS BAD BOY
+-- Connex CRM : V1 baseline (Flyway)
+-- Source of truth for the schema. Subsequent changes ship as new V<n>__*.sql
+-- migrations, never by editing this file. Runs inside the connected schema
+-- (connexdb); database creation is handled by the JDBC url / ops, not here.
 -- ============================================================================
-
-
-SET FOREIGN_KEY_CHECKS = 0;
-
--- DROP DATABASE IF EXISTS connexdb; is set due to testing. I will remove it later because application.yml specifies recreating the database on every run
-DROP DATABASE IF EXISTS connexdb;
-CREATE DATABASE connexdb CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-USE connexdb;
-
-DROP TABLE IF EXISTS audit_log;
-DROP TABLE IF EXISTS notification_preference;
-DROP TABLE IF EXISTS notification;
-DROP TABLE IF EXISTS deal_collaborator;
-DROP TABLE IF EXISTS attachment_tag;
-DROP TABLE IF EXISTS attachment;
-DROP TABLE IF EXISTS deal_tag;
-DROP TABLE IF EXISTS company_tag;
-DROP TABLE IF EXISTS person_tag;
-DROP TABLE IF EXISTS deal_person;
-DROP TABLE IF EXISTS note;
-DROP TABLE IF EXISTS task;
-DROP TABLE IF EXISTS activity;
-DROP TABLE IF EXISTS deal;
-DROP TABLE IF EXISTS stage;
-DROP TABLE IF EXISTS pipeline;
-DROP TABLE IF EXISTS person;
-DROP TABLE IF EXISTS tag;
-DROP TABLE IF EXISTS company;
-DROP TABLE IF EXISTS workspace_member;
-DROP TABLE IF EXISTS workspace;
-DROP TABLE IF EXISTS app_user;
-
-SET FOREIGN_KEY_CHECKS = 1;
-
 
 -- ----------------------------------------------------------------------------
 -- app_user :  Connex account holder. Mapped to User bean. NOT Person (contacts)

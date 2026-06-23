@@ -1,9 +1,10 @@
 import Sidebar from "@/app/components/Sidebar";
 import ContentShell from "@/app/components/ContentShell";
-import { getCurrentUserFromCookie } from "@/app/lib/api";
+import { getCurrentUserFromCookie, getMyWorkspacesFromCookie } from "@/app/lib/api";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { NotificationProvider } from "@/app/hooks/useNotifications";
+import { WorkspaceProvider } from "@/app/hooks/useWorkspace";
 
 export default async function AppLayout({
     children,
@@ -20,18 +21,25 @@ export default async function AppLayout({
         redirect(`/auth/login?redirect=${encodeURIComponent(pathname)}`);
     }
 
+    const { workspaces, activeWorkspaceId } = await getMyWorkspacesFromCookie(cookie);
+    if (workspaces.length === 0) {
+        redirect('/onboarding');
+    }
+
     return (
-        <NotificationProvider>
-            <ContentShell
-                sidebar={
-                    <Sidebar
-                        user={user}
-                        className="w-64 bg-sidebar h-full p-6 rounded-xl border border-sidebar-border shadow-xl"
-                    />
-                }
-            >
-                {children}
-            </ContentShell>
-        </NotificationProvider>
+        <WorkspaceProvider initialWorkspaces={workspaces} initialActiveId={activeWorkspaceId}>
+            <NotificationProvider>
+                <ContentShell
+                    sidebar={
+                        <Sidebar
+                            user={user}
+                            className="w-64 bg-sidebar h-full p-6 rounded-xl border border-sidebar-border shadow-xl"
+                        />
+                    }
+                >
+                    {children}
+                </ContentShell>
+            </NotificationProvider>
+        </WorkspaceProvider>
     );
 }

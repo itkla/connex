@@ -60,6 +60,8 @@ abstract class AbstractServiceTest {
             workspaceMapper.insert(workspace);
         }
         currentUser = newUser();
+        // The session user owns the default test workspace so role-gated operations run as owner.
+        workspaceMapper.updateMemberRole(workspace.getId(), currentUser.getId(), "owner");
         SecurityContextHolder.getContext().setAuthentication(
             new UsernamePasswordAuthenticationToken(currentUser, null, currentUser.getAuthorities())
         );
@@ -95,6 +97,7 @@ abstract class AbstractServiceTest {
         company.setIndustry("Tech");
         company.setPhone("+81-90-1234-5678");
         company.setAddress("1-1-1 Shinjuku, Tokyo, Japan");
+        company.setWorkspaceId(workspace.getId());
         companyMapper.insert(company);
         return company;
     }
@@ -102,6 +105,7 @@ abstract class AbstractServiceTest {
     protected Pipeline newPipeline() {
         Pipeline pipeline = new Pipeline();
         pipeline.setName("Pipeline " + unique());
+        pipeline.setWorkspaceId(workspace.getId());
         pipelineMapper.insertPipeline(pipeline);
         return pipeline;
     }
@@ -111,6 +115,7 @@ abstract class AbstractServiceTest {
         stage.setName("Stage " + unique());
         stage.setPipeline(pipeline);
         stage.setPosition(position);
+        stage.setWorkspaceId(workspace.getId());
         pipelineMapper.insertStage(stage);
         return stage;
     }
@@ -119,6 +124,7 @@ abstract class AbstractServiceTest {
         Tag tag = new Tag();
         tag.setName("tag_" + unique());
         tag.setColor("#abcdef");
+        tag.setWorkspaceId(workspace.getId());
         tagMapper.insert(tag);
         return tag;
     }
@@ -131,6 +137,7 @@ abstract class AbstractServiceTest {
         person.setPhone("+81-90-2345-6789");
         person.setTitle("Engineer");
         person.setCompany(company);
+        person.setWorkspaceId(workspace.getId());
         personMapper.insert(person);
         return person;
     }
@@ -151,6 +158,7 @@ abstract class AbstractServiceTest {
 
     protected Activity newActivity(User createdBy, Person person, Deal deal) {
         Activity activity = new Activity();
+        activity.setWorkspaceId(workspace.getId());
         activity.setType("call");
         activity.setSubject("subj_" + unique());
         activity.setNotes("notes_" + unique());
@@ -164,6 +172,7 @@ abstract class AbstractServiceTest {
 
     protected Note newNote(User author, Person person, Deal deal) {
         Note note = new Note();
+        note.setWorkspaceId(workspace.getId());
         note.setContent("note_" + unique());
         note.setAuthor(author);
         note.setPerson(person);
