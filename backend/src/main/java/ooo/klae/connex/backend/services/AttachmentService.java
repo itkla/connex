@@ -27,6 +27,7 @@ public class AttachmentService {
     private final AttachmentMapper attachmentMapper;
     private final TagMapper tagMapper;
     private final AuditService auditService;
+    private final WorkspaceService workspaceService;
 
     private static final Set<String> AUDIT_FIELDS =
         Set.of("fileName", "entityType", "entityId", "url", "contentType", "size");
@@ -79,7 +80,7 @@ public class AttachmentService {
      */
     public void addTag(int attachmentId, int tagId) {
         Attachment attachment = getById(attachmentId);
-        Tag tag = tagMapper.getTagById(tagId);
+        Tag tag = tagMapper.getTagById(workspaceService.getCurrentWorkspaceId(), tagId);
         if (tag == null) {
             auditService.recordFailure("attachment.addTag", "attachment", attachmentId, attachment.getFileName(),
                     "Tag not found", "Tag not found with id: " + tagId);
@@ -98,7 +99,7 @@ public class AttachmentService {
      */
     public void removeTag(int attachmentId, int tagId) {
         Attachment attachment = getById(attachmentId);
-        Tag tag = tagMapper.getTagById(tagId);
+        Tag tag = tagMapper.getTagById(workspaceService.getCurrentWorkspaceId(), tagId);
         if (tag == null) {
             auditService.recordFailure("attachment.removeTag", "attachment", attachmentId, attachment.getFileName(),
                     "Tag not found", "Tag not found with id: " + tagId);

@@ -143,8 +143,9 @@ public class CompanyService {
      * Adds a tag to a company in the active workspace.
      */
     public void addTag(int companyId, int tagId) {
-        Company company = requireCompany(companyId);
-        Tag tag = tagMapper.getTagById(tagId);
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        Company company = requireCompany(workspaceId, companyId);
+        Tag tag = tagMapper.getTagById(workspaceId, tagId);
         if (tag == null) throw new ResourceNotFoundException("Tag not found with id: " + tagId);
         companyMapper.addTag(companyId, tagId);
         auditService.record("company.addTag", "company", companyId, company.getName(),
@@ -156,8 +157,9 @@ public class CompanyService {
      * Removes a tag from a company in the active workspace.
      */
     public void removeTag(int companyId, int tagId) {
-        Company company = requireCompany(companyId);
-        Tag tag = tagMapper.getTagById(tagId);
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        Company company = requireCompany(workspaceId, companyId);
+        Tag tag = tagMapper.getTagById(workspaceId, tagId);
         companyMapper.removeTag(companyId, tagId);
         String tagName = tag != null ? tag.getName() : "#" + tagId;
         auditService.record("company.removeTag", "company", companyId, company.getName(),

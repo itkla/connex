@@ -94,6 +94,7 @@ abstract class AbstractMapperTest {
         Tag tag = new Tag();
         tag.setName("tag_" + unique());
         tag.setColor("#abcdef");
+        tag.setWorkspaceId(workspace.getId());
         tagMapper.insert(tag);
         return tag;
     }

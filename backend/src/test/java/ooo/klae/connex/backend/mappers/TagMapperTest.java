@@ -3,6 +3,7 @@ package ooo.klae.connex.backend.mappers;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -15,6 +16,7 @@ import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.beans.Pipeline;
 import ooo.klae.connex.backend.beans.Stage;
 import ooo.klae.connex.backend.beans.Tag;
+import ooo.klae.connex.backend.beans.Workspace;
 
 class TagMapperTest extends AbstractMapperTest {
 
@@ -34,9 +36,10 @@ class TagMapperTest extends AbstractMapperTest {
     void getTagById_returnsInsertedRow() {
         Tag tag = newTag();
 
-        Tag found = tagMapper.getTagById(tag.getId());
+        Tag found = tagMapper.getTagById(workspace.getId(), tag.getId());
 
         assertNotNull(found);
+        assertEquals(workspace.getId(), found.getWorkspaceId());
         assertEquals(tag.getName(), found.getName());
         assertEquals("#abcdef", found.getColor());
     }
@@ -48,7 +51,7 @@ class TagMapperTest extends AbstractMapperTest {
     void getTagByName_returnsRow() {
         Tag tag = newTag();
 
-        Tag found = tagMapper.getTagByName(tag.getName());
+        Tag found = tagMapper.getTagByName(workspace.getId(), tag.getName());
 
         assertNotNull(found);
         assertEquals(tag.getId(), found.getId());
@@ -61,7 +64,7 @@ class TagMapperTest extends AbstractMapperTest {
     void getAllTags_includesInsertedRow() {
         Tag tag = newTag();
 
-        List<Tag> all = tagMapper.getAllTags();
+        List<Tag> all = tagMapper.getAllTags(workspace.getId());
 
         assertTrue(all.stream().anyMatch(x -> x.getId() == tag.getId()));
     }
@@ -77,7 +80,7 @@ class TagMapperTest extends AbstractMapperTest {
 
         tagMapper.update(tag);
 
-        Tag found = tagMapper.getTagById(tag.getId());
+        Tag found = tagMapper.getTagById(workspace.getId(), tag.getId());
         assertEquals(tag.getName(), found.getName());
         assertEquals("#123456", found.getColor());
     }
@@ -89,9 +92,9 @@ class TagMapperTest extends AbstractMapperTest {
     void delete_removesRow() {
         Tag tag = newTag();
 
-        tagMapper.delete(tag.getId());
+        tagMapper.delete(workspace.getId(), tag.getId());
 
-        assertNull(tagMapper.getTagById(tag.getId()));
+        assertNull(tagMapper.getTagById(workspace.getId(), tag.getId()));
     }
 
     /**
@@ -138,5 +141,58 @@ class TagMapperTest extends AbstractMapperTest {
         List<Tag> tags = tagMapper.getTagsByDealId(deal.getId());
 
         assertTrue(tags.stream().anyMatch(x -> x.getId() == tag.getId()));
+    }
+
+    /**
+     * A tag in another workspace is invisible and immutable from this workspace.
+     */
+    @Test
+    void tags_areIsolatedByWorkspace() {
+        Tag mine = newTag();
+        Workspace other = newWorkspace();
+        Tag foreign = newTagIn(other);
+
+        assertNull(tagMapper.getTagById(workspace.getId(), foreign.getId()));
+        assertFalse(tagMapper.exists(workspace.getId(), foreign.getId()));
+        assertTrue(tagMapper.getAllTags(workspace.getId()).stream().noneMatch(t -> t.getId() == foreign.getId()));
+        assertTrue(tagMapper.getAllTags(workspace.getId()).stream().anyMatch(t -> t.getId() == mine.getId()));
+
+        assertEquals(0, tagMapper.delete(workspace.getId(), foreign.getId()));
+        assertTrue(tagMapper.exists(other.getId(), foreign.getId()));
+    }
+
+    /**
+     * The same tag name can exist in two workspaces (per-tenant uniqueness replaced the global one).
+     */
+    @Test
+    void sameTagName_allowedInDifferentWorkspaces() {
+        Tag mine = newTag();
+        Workspace other = newWorkspace();
+
+        Tag clone = new Tag();
+        clone.setName(mine.getName());
+        clone.setColor("#000000");
+        clone.setWorkspaceId(other.getId());
+        tagMapper.insert(clone);
+
+        assertNotEquals(0, clone.getId());
+        assertNotEquals(mine.getId(), clone.getId());
+    }
+
+    private Workspace newWorkspace() {
+        Workspace ws = new Workspace();
+        ws.setName("WS " + unique());
+        ws.setSlug("ws_" + unique());
+        workspaceMapper.insert(ws);
+        return ws;
+    }
+
+    private Tag newTagIn(Workspace ws) {
+        Tag tag = new Tag();
+        tag.setName("tag_" + unique());
+        tag.setColor("#abcdef");
+        tag.setWorkspaceId(ws.getId());
+        tagMapper.insert(tag);
+        return tag;
     }
 }

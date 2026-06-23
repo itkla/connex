@@ -162,7 +162,7 @@ public class PersonService {
     public void addTag(int personId, int tagId) {
         Person person = personMapper.getPersonById(personId);
         if (person == null) throw new ResourceNotFoundException("Person not found with id: " + personId);
-        Tag tag = tagMapper.getTagById(tagId);
+        Tag tag = tagMapper.getTagById(workspaceService.getCurrentWorkspaceId(), tagId);
         if (tag == null) throw new ResourceNotFoundException("Tag not found with id: " + tagId);
         personMapper.addTag(personId, tagId);
         auditService.record("person.addTag", "person", personId, person.getName(),
@@ -178,7 +178,7 @@ public class PersonService {
     public void removeTag(int personId, int tagId) {
         Person person = personMapper.getPersonById(personId);
         if (person == null) throw new ResourceNotFoundException("Person not found with id: " + personId);
-        Tag tag = tagMapper.getTagById(tagId);
+        Tag tag = tagMapper.getTagById(workspaceService.getCurrentWorkspaceId(), tagId);
         personMapper.removeTag(personId, tagId);
         String tagName = tag != null ? tag.getName() : "#" + tagId;
         auditService.record("person.removeTag", "person", personId, person.getName(),

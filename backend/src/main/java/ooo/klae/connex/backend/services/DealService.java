@@ -281,7 +281,7 @@ public class DealService {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         Deal deal = dealMapper.getDealById(workspaceId, dealId);
         if (deal == null) throw new ResourceNotFoundException("Deal not found with id: " + dealId);
-        Tag tag = tagMapper.getTagById(tagId);
+        Tag tag = tagMapper.getTagById(workspaceId, tagId);
         if (tag == null) throw new ResourceNotFoundException("Tag not found with id: " + tagId);
         dealMapper.addTag(workspaceId, dealId, tagId);
         auditService.record("deal.addTag", "deal", dealId, deal.getName(),
@@ -298,7 +298,7 @@ public class DealService {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         Deal deal = dealMapper.getDealById(workspaceId, dealId);
         if (deal == null) throw new ResourceNotFoundException("Deal not found with id: " + dealId);
-        Tag tag = tagMapper.getTagById(tagId);
+        Tag tag = tagMapper.getTagById(workspaceId, tagId);
         dealMapper.removeTag(workspaceId, dealId, tagId);
         String tagName = tag != null ? tag.getName() : "#" + tagId;
         auditService.record("deal.removeTag", "deal", dealId, deal.getName(),
