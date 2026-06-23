@@ -13,13 +13,12 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import ooo.klae.connex.backend.beans.User;
-import ooo.klae.connex.backend.beans.Workspace;
 import ooo.klae.connex.backend.dto.LoginDto;
 import ooo.klae.connex.backend.dto.RegisterDto;
 import ooo.klae.connex.backend.exceptions.DuplicateResourceException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.UserMapper;
-import ooo.klae.connex.backend.mappers.WorkspaceMapper;
+import ooo.klae.connex.backend.tenant.WorkspaceCookie;
 
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
@@ -38,7 +37,7 @@ public class AuthService {
     private final PasswordEncoder passwordEncoder;
     private final AuthenticationManager authenticationManager;
     private final AuditService auditService;
-    private final WorkspaceMapper workspaceMapper;
+    private final WorkspaceService workspaceService;
     private final SecurityContextRepository securityContextRepository = new HttpSessionSecurityContextRepository();
 
     /**
@@ -64,11 +63,11 @@ public class AuthService {
             user.setTimezone(TimezoneSupport.validate(request.getTimezone(), "UTC"));
             user.setPasswordHash(passwordEncoder.encode(request.getPassword()));
             userMapper.insert(user);
-            Workspace defaultWorkspace = workspaceMapper.getDefaultWorkspace();
-            if (defaultWorkspace == null) {
-                throw new IllegalStateException("Default workspace is not configured");
+            // New users get their own owned workspace unless the instance restricts creation
+            // (invite-only mode), in which case they onboard by accepting an invite.
+            if (workspaceService.isSelfServiceCreationAllowed()) {
+                workspaceService.createWorkspace(user.getDisplayName() + "'s Workspace", user.getId());
             }
-            workspaceMapper.addMember(defaultWorkspace.getId(), user.getId(), "member");
             auditService.record("auth.register", "user", user.getId(), user.getDisplayName(), "User registered", null);
             return user;
         } catch (Exception e) {
@@ -108,6 +107,14 @@ public class AuthService {
         ));
         SecurityContextHolder.setContext(context);
         securityContextRepository.saveContext(context, httpRequest, httpResponse);
+
+        // Pin the active workspace for the new session so SSR and the first requests are scoped.
+        Integer activeWorkspaceId = workspaceService.defaultWorkspaceIdFor(refreshedUser.getId());
+        if (activeWorkspaceId != null) {
+            workspaceService.rememberActive(refreshedUser.getId(), activeWorkspaceId);
+            WorkspaceCookie.set(httpResponse, activeWorkspaceId);
+        }
+
         auditService.record("auth.login", "user", refreshedUser.getId(), refreshedUser.getDisplayName(),
                 refreshedUser.getDisplayName() + " logged in", null);
         return refreshedUser;

@@ -1,7 +1,9 @@
 package ooo.klae.connex.backend.services;
 
 import java.util.List;
+import java.util.UUID;
 
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
@@ -25,6 +27,9 @@ import ooo.klae.connex.backend.tenant.TenantContext;
 public class WorkspaceService {
     private final WorkspaceMapper workspaceMapper;
     private final TenantContext tenantContext;
+
+    @Value("${connex.workspaces.allow-self-service-creation:true}")
+    private boolean selfServiceCreationAllowed;
 
     /** Workspace roles in ascending privilege order. */
     public enum Role {
@@ -78,6 +83,36 @@ public class WorkspaceService {
 
     public void rememberActive(int userId, int workspaceId) {
         workspaceMapper.setLastActiveWorkspaceId(userId, workspaceId);
+    }
+
+    public boolean isSelfServiceCreationAllowed() {
+        return selfServiceCreationAllowed;
+    }
+
+    /**
+     * Creates a workspace owned by the given user. Used by registration (when
+     * self-service creation is enabled) and the create endpoint.
+     */
+    public WorkspaceMembershipDto createWorkspace(String name, int ownerUserId) {
+        if (!selfServiceCreationAllowed) {
+            throw new ForbiddenException("Workspace creation is disabled on this instance");
+        }
+        Workspace workspace = new Workspace();
+        workspace.setName(name.trim());
+        workspace.setSlug(generateSlug(name));
+        workspaceMapper.insert(workspace);
+        workspaceMapper.addMember(workspace.getId(), ownerUserId, "owner");
+        return new WorkspaceMembershipDto(workspace.getId(), workspace.getName(), workspace.getSlug(), "owner");
+    }
+
+    private String generateSlug(String name) {
+        String base = name.trim().toLowerCase()
+            .replaceAll("[^a-z0-9]+", "-")
+            .replaceAll("(^-|-$)", "");
+        if (base.isEmpty()) {
+            base = "workspace";
+        }
+        return base + "-" + UUID.randomUUID().toString().substring(0, 8);
     }
 
     public void requireMember(int workspaceId, int userId) {
