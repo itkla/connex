@@ -303,7 +303,7 @@
     JOIN app_user u ON u.id = recipients.recipient_id
     WHERE d.workspace_id = #{workspaceId}
       AND d.owner_id IS NOT NULL
-      AND d.won IS NULL
+      AND d.closed_at IS NULL
       AND d.expected_close_date IS NOT NULL
     ORDER BY d.id, recipients.recipient_id
   </select>
