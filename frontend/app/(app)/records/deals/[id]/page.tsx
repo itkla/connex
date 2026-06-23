@@ -89,8 +89,8 @@ export default async function DealPage({ params }: { params: { id: number } }) {
             getDeals(init).catch(() => [] as Deal[]),
             getUsers(init).catch(() => [] as User[]),
             getAttachmentsFromCookie("deal", id, cookie),
-            getContextNotifications("deal", id, init),
-            getDealCollaborators(id, init),
+            getContextNotifications("deal", id, init).catch(() => ({ items: [], total: 0 })),
+            getDealCollaborators(id, init).catch(() => [] as User[]),
         ]);
 
     if (!deal) notFound();

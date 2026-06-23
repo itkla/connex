@@ -35,7 +35,7 @@ export default async function ContactPage({ params }: { params: { id: number } }
         getContacts({}, init).catch(() => [] as Contact[]),
         getDeals(init).catch(() => [] as Deal[]),
         getAttachmentsFromCookie("person", id, cookie),
-        getContextNotifications("person", id, init),
+        getContextNotifications("person", id, init).catch(() => ({ items: [], total: 0 })),
     ]);
     if (!contact) {
         console.error(`Contact not found: ${id}`);
