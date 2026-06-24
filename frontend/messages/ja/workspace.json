@@ -111,6 +111,22 @@
     "nameRequired": "ロール名を入力してください",
     "noAccess": "ロールを管理できるのはワークスペースのオーナーのみです。",
     "empty": "カスタムロールはまだありません。",
-    "permissionCount": "{count} 件の権限"
+    "permissionCount": "{count} 件の権限",
+    "defaultRolesLabel": "標準ロール",
+    "customRolesLabel": "カスタムロール",
+    "builtInBadge": "標準",
+    "builtInSubtitle": "標準のアクセスレベルです。これらは編集できません。",
+    "fullAccess": "すべての権限",
+    "noPermissions": "権限なし",
+    "createTitle": "新しいロール",
+    "editTitle": "ロールを編集",
+    "createDescription": "ロール名と、このロールが実行できるアクションを選択します。",
+    "permissionsLabel": "権限",
+    "selectedCount": "{count} 件選択中",
+    "selectAll": "すべて選択",
+    "clearAll": "クリア",
+    "create": "ロールを作成",
+    "noPermissionsHint": "このロールに許可するアクションを少なくとも 1 つ選択してください。",
+    "roleEntityLabel": "ロール"
   }
 }

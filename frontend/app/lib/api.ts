@@ -933,6 +933,10 @@ export function getWorkspaceRoles(workspaceId: number, init: RequestInit = {}) {
     return getJson<Types.CustomRole[]>(`/api/workspaces/${workspaceId}/roles`, { cache: "no-store", ...init });
 }
 
+export function getBuiltInRoles(workspaceId: number, init: RequestInit = {}) {
+    return getJson<Types.CustomRole[]>(`/api/workspaces/${workspaceId}/roles/built-in`, { cache: "no-store", ...init });
+}
+
 export function createWorkspaceRole(workspaceId: number, name: string, permissions: string[]) {
     return postJson<Types.CustomRole>(`/api/workspaces/${workspaceId}/roles`, { name, permissions });
 }

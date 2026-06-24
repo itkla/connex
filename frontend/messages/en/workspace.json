@@ -111,6 +111,22 @@
     "nameRequired": "Enter a role name",
     "noAccess": "Only workspace owners can manage roles.",
     "empty": "No custom roles yet.",
-    "permissionCount": "{count} permissions"
+    "permissionCount": "{count} permissions",
+    "defaultRolesLabel": "Built-in roles",
+    "customRolesLabel": "Custom roles",
+    "builtInBadge": "Built-in",
+    "builtInSubtitle": "Standard access levels. These can't be edited.",
+    "fullAccess": "Full access",
+    "noPermissions": "No permissions",
+    "createTitle": "New role",
+    "editTitle": "Edit role",
+    "createDescription": "Pick a name and the exact actions this role can take.",
+    "permissionsLabel": "Permissions",
+    "selectedCount": "{count} selected",
+    "selectAll": "Select all",
+    "clearAll": "Clear",
+    "create": "Create role",
+    "noPermissionsHint": "Select at least the actions this role should allow.",
+    "roleEntityLabel": "role"
   }
 }
