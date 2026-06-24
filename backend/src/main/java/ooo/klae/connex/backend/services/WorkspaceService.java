@@ -1,6 +1,8 @@
 package ooo.klae.connex.backend.services;
 
+import java.util.EnumSet;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 
 import org.springframework.beans.factory.annotation.Value;
@@ -16,7 +18,9 @@ import ooo.klae.connex.backend.dto.WorkspaceMembershipDto;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
+import ooo.klae.connex.backend.mappers.RoleMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
+import ooo.klae.connex.backend.tenant.Permission;
 import ooo.klae.connex.backend.tenant.TenantContext;
 
 /**
@@ -29,8 +33,33 @@ import ooo.klae.connex.backend.tenant.TenantContext;
 @RequiredArgsConstructor
 public class WorkspaceService {
     private final WorkspaceMapper workspaceMapper;
+    private final RoleMapper roleMapper;
     private final TenantContext tenantContext;
     private final AuditService auditService;
+
+    /** Built-in role permission bundles. Owner gets the full catalog. */
+    private static final Set<Permission> MEMBER_PERMISSIONS = memberPermissions();
+    private static final Set<Permission> ADMIN_PERMISSIONS = adminPermissions();
+    private static final Set<Permission> OWNER_PERMISSIONS = EnumSet.allOf(Permission.class);
+
+    private static EnumSet<Permission> memberPermissions() {
+        return EnumSet.of(
+            Permission.COMPANY_CREATE, Permission.COMPANY_UPDATE,
+            Permission.PERSON_CREATE, Permission.PERSON_UPDATE, Permission.PERSON_DELETE,
+            Permission.DEAL_CREATE, Permission.DEAL_UPDATE, Permission.DEAL_DELETE,
+            Permission.ACTIVITY_CREATE, Permission.ACTIVITY_UPDATE, Permission.ACTIVITY_DELETE,
+            Permission.NOTE_CREATE, Permission.NOTE_UPDATE, Permission.NOTE_DELETE,
+            Permission.TASK_CREATE, Permission.TASK_UPDATE, Permission.TASK_DELETE,
+            Permission.ATTACHMENT_CREATE, Permission.ATTACHMENT_DELETE);
+    }
+
+    private static EnumSet<Permission> adminPermissions() {
+        EnumSet<Permission> permissions = memberPermissions();
+        permissions.addAll(EnumSet.of(
+            Permission.COMPANY_DELETE, Permission.PIPELINE_MANAGE, Permission.TAG_MANAGE,
+            Permission.MEMBER_MANAGE, Permission.AUDIT_READ, Permission.WORKSPACE_SETTINGS));
+        return permissions;
+    }
 
     @Value("${connex.workspaces.allow-self-service-creation:true}")
     private boolean selfServiceCreationAllowed;
@@ -137,6 +166,65 @@ public class WorkspaceService {
         requireRole(getCurrentWorkspaceId(), currentUser().getId(), min);
     }
 
+    /**
+     * The effective permission set for a member: their custom role's granted
+     * permissions when one is assigned, otherwise their built-in role bundle.
+     */
+    public Set<Permission> permissionsFor(int workspaceId, int userId) {
+        Integer roleId = workspaceMapper.getMemberRoleId(workspaceId, userId);
+        if (roleId != null) {
+            return parsePermissions(roleMapper.findPermissions(roleId));
+        }
+        Role role = Role.of(workspaceMapper.getRole(workspaceId, userId));
+        if (role == null) {
+            return EnumSet.noneOf(Permission.class);
+        }
+        return switch (role) {
+            case OWNER -> OWNER_PERMISSIONS;
+            case ADMIN -> ADMIN_PERMISSIONS;
+            case MEMBER -> MEMBER_PERMISSIONS;
+        };
+    }
+
+    public void requirePermission(int workspaceId, int userId, Permission permission) {
+        if (!permissionsFor(workspaceId, userId).contains(permission)) {
+            throw new ForbiddenException("Requires the " + permission + " permission in this workspace");
+        }
+    }
+
+    /** Requires the current user to hold {@code permission} in the active workspace. */
+    public void requirePermission(Permission permission) {
+        requirePermission(getCurrentWorkspaceId(), currentUser().getId(), permission);
+    }
+
+    private static Set<Permission> parsePermissions(List<String> raw) {
+        EnumSet<Permission> permissions = EnumSet.noneOf(Permission.class);
+        for (String value : raw) {
+            try {
+                permissions.add(Permission.valueOf(value));
+            } catch (IllegalArgumentException ignored) {
+                // Unknown catalog key (e.g. a removed permission); skip it.
+            }
+        }
+        return permissions;
+    }
+
+    /** Assigns a custom role to a member; managing roles requires the ROLE_MANAGE permission. */
+    public MemberDto assignCustomRole(int workspaceId, int actorId, int targetUserId, int roleId) {
+        requirePermission(workspaceId, actorId, Permission.ROLE_MANAGE);
+        MemberDto target = workspaceMapper.getMember(workspaceId, targetUserId);
+        if (target == null) {
+            throw new ResourceNotFoundException("User is not a member of this workspace");
+        }
+        if (!roleMapper.roleExists(workspaceId, roleId)) {
+            throw new ResourceNotFoundException("Role not found in this workspace");
+        }
+        workspaceMapper.setMemberCustomRole(workspaceId, targetUserId, roleId);
+        auditService.record("workspace.member.role", "workspace", workspaceId, target.getDisplayName(),
+                "Assigned a custom role to " + target.getDisplayName(), null);
+        return workspaceMapper.getMember(workspaceId, targetUserId);
+    }
+
     public boolean isMember(int workspaceId, int userId) {
         return workspaceMapper.isMember(workspaceId, userId);
     }
@@ -156,7 +244,7 @@ public class WorkspaceService {
      * ownership, and the last owner cannot be demoted.
      */
     public MemberDto changeMemberRole(int workspaceId, int actorId, int targetUserId, String roleRaw) {
-        requireRole(workspaceId, actorId, Role.ADMIN);
+        requirePermission(workspaceId, actorId, Permission.MEMBER_MANAGE);
         Role newRole = parseAssignableRole(roleRaw);
         MemberDto target = workspaceMapper.getMember(workspaceId, targetUserId);
         if (target == null) {
@@ -181,7 +269,7 @@ public class WorkspaceService {
      * never the last one.
      */
     public void removeMember(int workspaceId, int actorId, int targetUserId) {
-        requireRole(workspaceId, actorId, Role.ADMIN);
+        requirePermission(workspaceId, actorId, Permission.MEMBER_MANAGE);
         MemberDto target = workspaceMapper.getMember(workspaceId, targetUserId);
         if (target == null) {
             throw new ResourceNotFoundException("User is not a member of this workspace");

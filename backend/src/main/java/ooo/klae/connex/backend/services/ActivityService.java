@@ -6,6 +6,7 @@ import ooo.klae.connex.backend.mappers.ActivityMapper;
 import ooo.klae.connex.backend.mappers.DealMapper;
 import ooo.klae.connex.backend.beans.Activity;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
+import ooo.klae.connex.backend.tenant.Permission;
 
 import java.util.List;
 import java.util.Set;
@@ -62,6 +63,7 @@ public class ActivityService {
      * Creates a new activity in the active workspace.
      */
     public Activity create(Activity activity) {
+        workspaceService.requirePermission(Permission.ACTIVITY_CREATE);
         try {
             activity.setWorkspaceId(workspaceService.getCurrentWorkspaceId());
             activityMapper.insert(activity);
@@ -80,6 +82,7 @@ public class ActivityService {
      * Updates a workspace-scoped activity.
      */
     public Activity update(int id, Activity activity) {
+        workspaceService.requirePermission(Permission.ACTIVITY_UPDATE);
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         Activity before = activityMapper.getActivityById(workspaceId, id);
         if (before == null) {
@@ -100,6 +103,7 @@ public class ActivityService {
      * Deletes a workspace-scoped activity.
      */
     public void delete(int id) {
+        workspaceService.requirePermission(Permission.ACTIVITY_DELETE);
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         Activity before = activityMapper.getActivityById(workspaceId, id);
         if (before == null) {

@@ -21,6 +21,8 @@ public interface WorkspaceMapper {
     List<User> getMembers(int workspaceId);
     List<MemberDto> getMembersWithRoles(int workspaceId);
     MemberDto getMember(@Param("workspaceId") int workspaceId, @Param("userId") int userId);
+    Integer getMemberRoleId(@Param("workspaceId") int workspaceId, @Param("userId") int userId);
+    int setMemberCustomRole(@Param("workspaceId") int workspaceId, @Param("userId") int userId, @Param("roleId") int roleId);
     int countOwners(int workspaceId);
     int removeMember(@Param("workspaceId") int workspaceId, @Param("userId") int userId);
     int unassignMemberTasks(@Param("workspaceId") int workspaceId, @Param("userId") int userId);

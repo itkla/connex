@@ -1,0 +1,87 @@
+package ooo.klae.connex.backend.services;
+
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+import java.util.List;
+import java.util.Set;
+
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+
+import ooo.klae.connex.backend.beans.User;
+import ooo.klae.connex.backend.beans.WorkspaceRole;
+import ooo.klae.connex.backend.dto.WorkspaceMembershipDto;
+import ooo.klae.connex.backend.exceptions.ForbiddenException;
+import ooo.klae.connex.backend.tenant.Permission;
+
+class RbacTest extends AbstractServiceTest {
+
+    @Autowired WorkspaceService workspaceService;
+    @Autowired RoleService roleService;
+
+    @Test
+    void builtInRolesMapToExpectedPermissions() {
+        WorkspaceMembershipDto ws = workspaceService.createWorkspace("RBAC WS", currentUser.getId());
+        User member = newUser();
+        workspaceMapper.addMember(ws.getId(), member.getId(), "member");
+
+        Set<Permission> ownerPerms = workspaceService.permissionsFor(ws.getId(), currentUser.getId());
+        assertTrue(ownerPerms.contains(Permission.ROLE_MANAGE));
+        assertTrue(ownerPerms.contains(Permission.WORKSPACE_DELETE));
+
+        Set<Permission> memberPerms = workspaceService.permissionsFor(ws.getId(), member.getId());
+        assertTrue(memberPerms.contains(Permission.DEAL_DELETE));
+        assertTrue(memberPerms.contains(Permission.PERSON_CREATE));
+        assertFalse(memberPerms.contains(Permission.COMPANY_DELETE));
+        assertFalse(memberPerms.contains(Permission.TAG_MANAGE));
+        assertFalse(memberPerms.contains(Permission.MEMBER_MANAGE));
+    }
+
+    @Test
+    void customRoleReplacesBuiltInPermissions() {
+        WorkspaceMembershipDto ws = workspaceService.createWorkspace("Custom WS", currentUser.getId());
+        User member = newUser();
+        workspaceMapper.addMember(ws.getId(), member.getId(), "member");
+
+        WorkspaceRole role = roleService.createRole(ws.getId(), currentUser.getId(), "Creator",
+            List.of("COMPANY_CREATE", "PERSON_CREATE"));
+        workspaceService.assignCustomRole(ws.getId(), currentUser.getId(), member.getId(), role.getId());
+
+        Set<Permission> perms = workspaceService.permissionsFor(ws.getId(), member.getId());
+        assertEquals(Set.of(Permission.COMPANY_CREATE, Permission.PERSON_CREATE), perms);
+
+        assertThrows(ForbiddenException.class,
+            () -> workspaceService.requirePermission(ws.getId(), member.getId(), Permission.DEAL_DELETE));
+        assertDoesNotThrow(
+            () -> workspaceService.requirePermission(ws.getId(), member.getId(), Permission.COMPANY_CREATE));
+    }
+
+    @Test
+    void deletingCustomRoleRevertsMemberToBuiltIn() {
+        WorkspaceMembershipDto ws = workspaceService.createWorkspace("Revert WS", currentUser.getId());
+        User member = newUser();
+        workspaceMapper.addMember(ws.getId(), member.getId(), "member");
+        WorkspaceRole role = roleService.createRole(ws.getId(), currentUser.getId(), "Tmp",
+            List.of("COMPANY_CREATE"));
+        workspaceService.assignCustomRole(ws.getId(), currentUser.getId(), member.getId(), role.getId());
+
+        roleService.deleteRole(ws.getId(), currentUser.getId(), role.getId());
+
+        Set<Permission> perms = workspaceService.permissionsFor(ws.getId(), member.getId());
+        assertTrue(perms.contains(Permission.DEAL_DELETE));
+    }
+
+    @Test
+    void roleManagementRequiresPermission() {
+        WorkspaceMembershipDto ws = workspaceService.createWorkspace("Gate WS", currentUser.getId());
+        User member = newUser();
+        workspaceMapper.addMember(ws.getId(), member.getId(), "member");
+
+        assertThrows(ForbiddenException.class,
+            () -> roleService.createRole(ws.getId(), member.getId(), "Nope", List.of()));
+    }
+}

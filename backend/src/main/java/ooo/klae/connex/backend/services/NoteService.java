@@ -6,6 +6,7 @@ import ooo.klae.connex.backend.mappers.NoteMapper;
 import ooo.klae.connex.backend.mappers.DealMapper;
 import ooo.klae.connex.backend.beans.Note;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
+import ooo.klae.connex.backend.tenant.Permission;
 
 import java.util.List;
 import java.util.Set;
@@ -56,6 +57,7 @@ public class NoteService {
     }
 
     public Note create(Note note) {
+        workspaceService.requirePermission(Permission.NOTE_CREATE);
         note.setWorkspaceId(workspaceService.getCurrentWorkspaceId());
         noteMapper.insert(note);
         auditService.record("note.create", "note", note.getId(), note.getContent(),
@@ -65,6 +67,7 @@ public class NoteService {
     }
 
     public Note update(int id, Note note) {
+        workspaceService.requirePermission(Permission.NOTE_UPDATE);
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         Note before = noteMapper.getNoteById(workspaceId, id);
         if (before == null) throw new ResourceNotFoundException("Note not found with id: " + id);
@@ -78,6 +81,7 @@ public class NoteService {
     }
 
     public void delete(int id) {
+        workspaceService.requirePermission(Permission.NOTE_DELETE);
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         Note before = noteMapper.getNoteById(workspaceId, id);
         if (before == null) throw new ResourceNotFoundException("Note not found with id: " + id);

@@ -1,14 +1,13 @@
 package ooo.klae.connex.backend.dto;
 
-import jakarta.validation.constraints.NotBlank;
-
 import lombok.Data;
 
 /**
- * Request body for changing a workspace member's role.
+ * Request body for changing a workspace member's role. Supply either a built-in
+ * {@code role} (owner/admin/member) or a custom {@code roleId}.
  */
 @Data
 public class UpdateMemberRoleRequest {
-    @NotBlank
     private String role;
+    private Integer roleId;
 }

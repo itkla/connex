@@ -11,6 +11,7 @@ import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.notifications.NotificationChangePublisher;
+import ooo.klae.connex.backend.tenant.Permission;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -59,6 +60,7 @@ public class TaskService {
     }
 
     public Task create(Task task) {
+        workspaceService.requirePermission(Permission.TASK_CREATE);
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         task.setWorkspaceId(workspaceId);
         validateReferences(task, workspaceId);
@@ -71,6 +73,7 @@ public class TaskService {
     }
 
     public Task update(int id, Task task) {
+        workspaceService.requirePermission(Permission.TASK_UPDATE);
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         Task before = taskMapper.getTaskById(workspaceId, id);
         if (before == null) throw new ResourceNotFoundException("Task not found with id: " + id);
@@ -86,6 +89,7 @@ public class TaskService {
     }
 
     public void delete(int id) {
+        workspaceService.requirePermission(Permission.TASK_DELETE);
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         Task before = taskMapper.getTaskById(workspaceId, id);
         if (before == null) throw new ResourceNotFoundException("Task not found with id: " + id);

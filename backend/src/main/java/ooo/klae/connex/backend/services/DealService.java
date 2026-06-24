@@ -20,6 +20,7 @@ import ooo.klae.connex.backend.beans.Task;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
+import ooo.klae.connex.backend.tenant.Permission;
 import ooo.klae.connex.backend.mappers.ActivityMapper;
 import ooo.klae.connex.backend.mappers.DealMapper;
 import ooo.klae.connex.backend.mappers.NoteMapper;
@@ -150,6 +151,7 @@ public class DealService {
      * @return
      */
     public Deal create(Deal deal) {
+        workspaceService.requirePermission(Permission.DEAL_CREATE);
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         deal.setWorkspaceId(workspaceId);
         deal.setOwnerId(authService.getCurrentUser().getId());
@@ -169,6 +171,7 @@ public class DealService {
      * @return
      */
     public Deal update(int id, Deal deal) {
+        workspaceService.requirePermission(Permission.DEAL_UPDATE);
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         Deal before = dealMapper.getDealById(workspaceId, id);
         if (before == null) throw new ResourceNotFoundException("Deal not found with id: " + id);
@@ -251,6 +254,7 @@ public class DealService {
      * @param id
      */
     public void delete(int id) {
+        workspaceService.requirePermission(Permission.DEAL_DELETE);
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         Deal before = dealMapper.getDealById(workspaceId, id);
         if (before == null) throw new ResourceNotFoundException("Deal not found with id: " + id);

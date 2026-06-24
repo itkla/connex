@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="ooo.klae.connex.backend.mappers.RoleMapper">
+
+  <resultMap id="RoleResult" type="WorkspaceRole">
+    <id property="id" column="id"/>
+    <result property="workspaceId" column="workspace_id"/>
+    <result property="name" column="name"/>
+    <result property="createdAt" column="created_at"/>
+    <result property="updatedAt" column="updated_at"/>
+    <collection property="permissions" ofType="string" column="id" select="findPermissions"/>
+  </resultMap>
+
+  <insert id="insertRole" useGeneratedKeys="true" keyProperty="id">
+    INSERT INTO workspace_role (workspace_id, name)
+    VALUES (#{workspaceId}, #{name})
+  </insert>
+
+  <select id="findRolesByWorkspace" resultMap="RoleResult">
+    SELECT id, workspace_id, name, created_at, updated_at
+    FROM workspace_role
+    WHERE workspace_id = #{workspaceId}
+    ORDER BY name, id
+  </select>
+
+  <select id="findRole" resultMap="RoleResult">
+    SELECT id, workspace_id, name, created_at, updated_at
+    FROM workspace_role
+    WHERE workspace_id = #{workspaceId} AND id = #{id}
+  </select>
+
+  <update id="updateRoleName">
+    UPDATE workspace_role SET name = #{name}
+    WHERE workspace_id = #{workspaceId} AND id = #{id}
+  </update>
+
+  <delete id="deleteRole">
+    DELETE FROM workspace_role
+    WHERE workspace_id = #{workspaceId} AND id = #{id}
+  </delete>
+
+  <select id="findPermissions" resultType="string">
+    SELECT permission FROM workspace_role_permission
+    WHERE workspace_role_id = #{roleId}
+  </select>
+
+  <delete id="clearPermissions">
+    DELETE FROM workspace_role_permission WHERE workspace_role_id = #{roleId}
+  </delete>
+
+  <insert id="insertPermissions">
+    INSERT INTO workspace_role_permission (workspace_role_id, permission)
+    VALUES
+    <foreach collection="permissions" item="permission" separator=",">
+      (#{roleId}, #{permission})
+    </foreach>
+  </insert>
+
+  <select id="roleExists" resultType="boolean">
+    SELECT EXISTS(
+      SELECT 1 FROM workspace_role WHERE workspace_id = #{workspaceId} AND id = #{id}
+    )
+  </select>
+</mapper>

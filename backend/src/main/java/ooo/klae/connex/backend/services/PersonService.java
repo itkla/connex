@@ -16,6 +16,7 @@ import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.beans.Tag;
 import ooo.klae.connex.backend.beans.Task;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
+import ooo.klae.connex.backend.tenant.Permission;
 import java.util.List;
 import java.util.Set;
 
@@ -104,6 +105,7 @@ public class PersonService {
      * Creates a new {@code Person} in the active workspace. The ID is auto-generated.
      */
     public Person create(Person person) {
+        workspaceService.requirePermission(Permission.PERSON_CREATE);
         person.setWorkspaceId(workspaceService.getCurrentWorkspaceId());
         personMapper.insert(person);
         auditService.record("person.create", "person", person.getId(), person.getName(),
@@ -116,6 +118,7 @@ public class PersonService {
      * Updates an existing {@code Person} in the active workspace.
      */
     public Person update(int id, Person person) {
+        workspaceService.requirePermission(Permission.PERSON_UPDATE);
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         Person before = requirePerson(workspaceId, id);
         person.setId(id);
@@ -131,6 +134,7 @@ public class PersonService {
      * Deletes a {@code Person} in the active workspace.
      */
     public void delete(int id) {
+        workspaceService.requirePermission(Permission.PERSON_DELETE);
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         Person before = requirePerson(workspaceId, id);
         personMapper.delete(workspaceId, id);

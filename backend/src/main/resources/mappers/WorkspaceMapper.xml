@@ -57,19 +57,33 @@
   </select>
 
   <select id="getMembersWithRoles" resultType="ooo.klae.connex.backend.dto.MemberDto">
-    SELECT u.id, u.username, u.display_name AS displayName, u.email, wm.role
+    SELECT u.id, u.username, u.display_name AS displayName, u.email,
+           COALESCE(wr.name, wm.role) AS role, wm.role_id AS roleId
     FROM app_user u
     JOIN workspace_member wm ON wm.user_id = u.id
+    LEFT JOIN workspace_role wr ON wr.id = wm.role_id
     WHERE wm.workspace_id = #{workspaceId}
     ORDER BY FIELD(wm.role, 'owner', 'admin', 'member'), u.display_name, u.id
   </select>
 
   <select id="getMember" resultType="ooo.klae.connex.backend.dto.MemberDto">
-    SELECT u.id, u.username, u.display_name AS displayName, u.email, wm.role
+    SELECT u.id, u.username, u.display_name AS displayName, u.email,
+           COALESCE(wr.name, wm.role) AS role, wm.role_id AS roleId
     FROM app_user u
     JOIN workspace_member wm ON wm.user_id = u.id
+    LEFT JOIN workspace_role wr ON wr.id = wm.role_id
     WHERE wm.workspace_id = #{workspaceId} AND wm.user_id = #{userId}
   </select>
+
+  <select id="getMemberRoleId" resultType="java.lang.Integer">
+    SELECT role_id FROM workspace_member
+    WHERE workspace_id = #{workspaceId} AND user_id = #{userId}
+  </select>
+
+  <update id="setMemberCustomRole">
+    UPDATE workspace_member SET role_id = #{roleId}
+    WHERE workspace_id = #{workspaceId} AND user_id = #{userId}
+  </update>
 
   <select id="countOwners" resultType="int">
     SELECT COUNT(*) FROM workspace_member
@@ -102,7 +116,7 @@
   </insert>
 
   <update id="updateMemberRole">
-    UPDATE workspace_member SET role = #{role}
+    UPDATE workspace_member SET role = #{role}, role_id = NULL
     WHERE workspace_id = #{workspaceId} AND user_id = #{userId}
   </update>
 </mapper>

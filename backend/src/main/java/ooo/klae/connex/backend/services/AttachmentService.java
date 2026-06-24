@@ -11,6 +11,7 @@ import ooo.klae.connex.backend.dto.AttachmentFacets;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.AttachmentMapper;
 import ooo.klae.connex.backend.mappers.TagMapper;
+import ooo.klae.connex.backend.tenant.Permission;
 
 import java.util.List;
 import java.util.Set;
@@ -148,6 +149,7 @@ public class AttachmentService {
      * @return
      */
     public Attachment create(Attachment attachment) {
+        workspaceService.requirePermission(Permission.ATTACHMENT_CREATE);
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         attachment.setWorkspaceId(workspaceId);
         attachment.setEntityType(normalizeType(attachment.getEntityType()));
@@ -165,6 +167,7 @@ public class AttachmentService {
      * @param id
      */
     public void delete(int id) {
+        workspaceService.requirePermission(Permission.ATTACHMENT_DELETE);
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         Attachment before = attachmentMapper.getById(workspaceId, id);
         if (before == null) throw new ResourceNotFoundException("Attachment not found with id: " + id);

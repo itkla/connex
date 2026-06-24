@@ -13,6 +13,7 @@ import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.beans.Tag;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.exceptions.DuplicateResourceException;
+import ooo.klae.connex.backend.tenant.Permission;
 
 import java.util.List;
 import java.util.Set;
@@ -66,6 +67,7 @@ public class CompanyService {
      * Creates a new {@code Company} in the active workspace. The ID is auto-generated.
      */
     public Company createCompany(Company company) {
+        workspaceService.requirePermission(Permission.COMPANY_CREATE);
         company.setWorkspaceId(workspaceService.getCurrentWorkspaceId());
         assertUniqueWebsite(company);
         companyMapper.insert(company);
@@ -105,6 +107,7 @@ public class CompanyService {
      * Updates an existing {@code Company} in the active workspace.
      */
     public Company updateCompany(int id, Company company) {
+        workspaceService.requirePermission(Permission.COMPANY_UPDATE);
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         Company before = companyMapper.getCompanyById(workspaceId, id);
         if (before == null) throw new ResourceNotFoundException("Company not found with id: " + id);
@@ -122,7 +125,7 @@ public class CompanyService {
      * Deletes a {@code Company} in the active workspace.
      */
     public void deleteCompany(int id) {
-        workspaceService.requireRole(WorkspaceService.Role.ADMIN);
+        workspaceService.requirePermission(Permission.COMPANY_DELETE);
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         Company before = companyMapper.getCompanyById(workspaceId, id);
         if (before == null) throw new ResourceNotFoundException("Company not found with id: " + id);

@@ -98,7 +98,11 @@ public class WorkspaceController {
     @PatchMapping("/{id}/members/{userId}")
     public MemberDto updateMemberRole(@PathVariable int id, @PathVariable int userId,
             @Valid @RequestBody UpdateMemberRoleRequest request) {
-        return workspaceService.changeMemberRole(id, authService.getCurrentUser().getId(), userId, request.getRole());
+        int actorId = authService.getCurrentUser().getId();
+        if (request.getRoleId() != null) {
+            return workspaceService.assignCustomRole(id, actorId, userId, request.getRoleId());
+        }
+        return workspaceService.changeMemberRole(id, actorId, userId, request.getRole());
     }
 
     @DeleteMapping("/{id}/members/{userId}")

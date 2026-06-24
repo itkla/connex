@@ -9,6 +9,8 @@ import org.springframework.web.bind.annotation.RequestBody;
 
 import ooo.klae.connex.backend.beans.AuditLog;
 import ooo.klae.connex.backend.services.AuditService;
+import ooo.klae.connex.backend.services.WorkspaceService;
+import ooo.klae.connex.backend.tenant.Permission;
 
 import java.util.List;
 
@@ -23,6 +25,7 @@ import lombok.RequiredArgsConstructor;
 @RequiredArgsConstructor
 public class AuditController {
     private final AuditService auditService;
+    private final WorkspaceService workspaceService;
 
     @GetMapping
     public List<AuditLog> getAuditLog(
@@ -30,6 +33,7 @@ public class AuditController {
         @RequestParam(required = false) Integer entityId,
         @RequestParam(defaultValue = "50") int limit
     ) {
+        workspaceService.requirePermission(Permission.AUDIT_READ);
         if (entityType != null && entityId != null) {
             return auditService.forEntity(entityType, entityId, limit);
         }

@@ -19,7 +19,7 @@ import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.InviteMapper;
 import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
-import ooo.klae.connex.backend.services.WorkspaceService.Role;
+import ooo.klae.connex.backend.tenant.Permission;
 
 /**
  * The two workspace onboarding flows: email-token invites (create / list /
@@ -41,7 +41,7 @@ public class InviteService {
 
     /** Creates a pending invite, superseding any earlier pending invite for the same email. */
     public InviteDto createInvite(int workspaceId, User actor, String emailRaw, String roleRaw) {
-        workspaceService.requireRole(workspaceId, actor.getId(), Role.ADMIN);
+        workspaceService.requirePermission(workspaceId, actor.getId(), Permission.MEMBER_MANAGE);
         String email = normalizeEmail(emailRaw);
         String role = normalizeRole(roleRaw);
 
@@ -78,13 +78,13 @@ public class InviteService {
 
     /** Lists the workspace's still-pending invites. */
     public List<InviteDto> listInvites(int workspaceId, int actorId) {
-        workspaceService.requireRole(workspaceId, actorId, Role.ADMIN);
+        workspaceService.requirePermission(workspaceId, actorId, Permission.MEMBER_MANAGE);
         return inviteMapper.findPendingByWorkspace(workspaceId);
     }
 
     /** Revokes a pending invite. */
     public void revokeInvite(int workspaceId, int inviteId, int actorId) {
-        workspaceService.requireRole(workspaceId, actorId, Role.ADMIN);
+        workspaceService.requirePermission(workspaceId, actorId, Permission.MEMBER_MANAGE);
         if (inviteMapper.markRevoked(inviteId, workspaceId) == 0) {
             throw new ResourceNotFoundException("Invite not found");
         }
@@ -130,7 +130,7 @@ public class InviteService {
 
     /** Adds an existing Connex user to the workspace by email. */
     public MemberDto addExistingMember(int workspaceId, int actorId, String emailRaw, String roleRaw) {
-        workspaceService.requireRole(workspaceId, actorId, Role.ADMIN);
+        workspaceService.requirePermission(workspaceId, actorId, Permission.MEMBER_MANAGE);
         String email = normalizeEmail(emailRaw);
         String role = normalizeRole(roleRaw);
 
@@ -144,7 +144,7 @@ public class InviteService {
         workspaceMapper.addMember(workspaceId, user.getId(), role);
         auditService.record("workspace.member.add", "workspace", workspaceId, user.getDisplayName(),
                 "Added " + user.getDisplayName() + " as " + role, null);
-        return new MemberDto(user.getId(), user.getUsername(), user.getDisplayName(), user.getEmail(), role);
+        return new MemberDto(user.getId(), user.getUsername(), user.getDisplayName(), user.getEmail(), role, null);
     }
 
     private WorkspaceMembershipDto membership(int userId, int workspaceId) {
