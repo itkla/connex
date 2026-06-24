@@ -6,6 +6,7 @@ import org.apache.ibatis.annotations.Param;
 
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.beans.Workspace;
+import ooo.klae.connex.backend.dto.MemberDto;
 import ooo.klae.connex.backend.dto.WorkspaceMembershipDto;
 
 /**
@@ -18,6 +19,12 @@ public interface WorkspaceMapper {
     boolean isMember(@Param("workspaceId") int workspaceId, @Param("userId") int userId);
     String getRole(@Param("workspaceId") int workspaceId, @Param("userId") int userId);
     List<User> getMembers(int workspaceId);
+    List<MemberDto> getMembersWithRoles(int workspaceId);
+    MemberDto getMember(@Param("workspaceId") int workspaceId, @Param("userId") int userId);
+    int countOwners(int workspaceId);
+    int removeMember(@Param("workspaceId") int workspaceId, @Param("userId") int userId);
+    int unassignMemberTasks(@Param("workspaceId") int workspaceId, @Param("userId") int userId);
+    int clearMemberDealOwnership(@Param("workspaceId") int workspaceId, @Param("userId") int userId);
     Integer getLastActiveWorkspaceId(int userId);
     int setLastActiveWorkspaceId(@Param("userId") int userId, @Param("workspaceId") int workspaceId);
     int insert(Workspace workspace);

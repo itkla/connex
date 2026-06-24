@@ -56,6 +56,41 @@
     ORDER BY u.display_name, u.id
   </select>
 
+  <select id="getMembersWithRoles" resultType="ooo.klae.connex.backend.dto.MemberDto">
+    SELECT u.id, u.username, u.display_name AS displayName, u.email, wm.role
+    FROM app_user u
+    JOIN workspace_member wm ON wm.user_id = u.id
+    WHERE wm.workspace_id = #{workspaceId}
+    ORDER BY FIELD(wm.role, 'owner', 'admin', 'member'), u.display_name, u.id
+  </select>
+
+  <select id="getMember" resultType="ooo.klae.connex.backend.dto.MemberDto">
+    SELECT u.id, u.username, u.display_name AS displayName, u.email, wm.role
+    FROM app_user u
+    JOIN workspace_member wm ON wm.user_id = u.id
+    WHERE wm.workspace_id = #{workspaceId} AND wm.user_id = #{userId}
+  </select>
+
+  <select id="countOwners" resultType="int">
+    SELECT COUNT(*) FROM workspace_member
+    WHERE workspace_id = #{workspaceId} AND role = 'owner'
+  </select>
+
+  <delete id="removeMember">
+    DELETE FROM workspace_member
+    WHERE workspace_id = #{workspaceId} AND user_id = #{userId}
+  </delete>
+
+  <update id="unassignMemberTasks">
+    UPDATE task SET assigned_to_id = NULL
+    WHERE workspace_id = #{workspaceId} AND assigned_to_id = #{userId}
+  </update>
+
+  <update id="clearMemberDealOwnership">
+    UPDATE deal SET owner_id = NULL
+    WHERE workspace_id = #{workspaceId} AND owner_id = #{userId}
+  </update>
+
   <insert id="insert" useGeneratedKeys="true" keyProperty="id">
     INSERT INTO workspace (name, slug)
     VALUES (#{name}, #{slug})

@@ -11,8 +11,11 @@ import org.springframework.stereotype.Service;
 import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.beans.Workspace;
+import ooo.klae.connex.backend.dto.MemberDto;
 import ooo.klae.connex.backend.dto.WorkspaceMembershipDto;
+import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
+import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
 import ooo.klae.connex.backend.tenant.TenantContext;
 
@@ -27,6 +30,7 @@ import ooo.klae.connex.backend.tenant.TenantContext;
 public class WorkspaceService {
     private final WorkspaceMapper workspaceMapper;
     private final TenantContext tenantContext;
+    private final AuditService auditService;
 
     @Value("${connex.workspaces.allow-self-service-creation:true}")
     private boolean selfServiceCreationAllowed;
@@ -139,6 +143,71 @@ public class WorkspaceService {
 
     public List<User> getMembers(int workspaceId) {
         return workspaceMapper.getMembers(workspaceId);
+    }
+
+    /** Lists the workspace's members with their roles. Visible to any member. */
+    public List<MemberDto> getMembersWithRoles(int workspaceId, int actorId) {
+        requireMember(workspaceId, actorId);
+        return workspaceMapper.getMembersWithRoles(workspaceId);
+    }
+
+    /**
+     * Changes a member's role. Admins manage member/admin; only an owner may grant
+     * ownership, and the last owner cannot be demoted.
+     */
+    public MemberDto changeMemberRole(int workspaceId, int actorId, int targetUserId, String roleRaw) {
+        requireRole(workspaceId, actorId, Role.ADMIN);
+        Role newRole = parseAssignableRole(roleRaw);
+        MemberDto target = workspaceMapper.getMember(workspaceId, targetUserId);
+        if (target == null) {
+            throw new ResourceNotFoundException("User is not a member of this workspace");
+        }
+        if (newRole == Role.OWNER) {
+            requireRole(workspaceId, actorId, Role.OWNER);
+        }
+        if ("owner".equals(target.getRole()) && newRole != Role.OWNER
+                && workspaceMapper.countOwners(workspaceId) <= 1) {
+            throw new BadRequestException("A workspace must keep at least one owner");
+        }
+        workspaceMapper.updateMemberRole(workspaceId, targetUserId, newRole.name().toLowerCase());
+        auditService.record("workspace.member.role", "workspace", workspaceId, target.getDisplayName(),
+                "Changed " + target.getDisplayName() + " to " + newRole.name().toLowerCase(), null);
+        return workspaceMapper.getMember(workspaceId, targetUserId);
+    }
+
+    /**
+     * Removes a member, unassigning their tasks and clearing their deal ownership
+     * first so authored history survives. Only an owner may remove an owner, and
+     * never the last one.
+     */
+    public void removeMember(int workspaceId, int actorId, int targetUserId) {
+        requireRole(workspaceId, actorId, Role.ADMIN);
+        MemberDto target = workspaceMapper.getMember(workspaceId, targetUserId);
+        if (target == null) {
+            throw new ResourceNotFoundException("User is not a member of this workspace");
+        }
+        if ("owner".equals(target.getRole())) {
+            requireRole(workspaceId, actorId, Role.OWNER);
+            if (workspaceMapper.countOwners(workspaceId) <= 1) {
+                throw new BadRequestException("A workspace must keep at least one owner");
+            }
+        }
+        workspaceMapper.unassignMemberTasks(workspaceId, targetUserId);
+        workspaceMapper.clearMemberDealOwnership(workspaceId, targetUserId);
+        workspaceMapper.removeMember(workspaceId, targetUserId);
+        auditService.record("workspace.member.remove", "workspace", workspaceId, target.getDisplayName(),
+                "Removed " + target.getDisplayName() + " from the workspace", null);
+    }
+
+    private Role parseAssignableRole(String raw) {
+        if (raw == null || raw.isBlank()) {
+            throw new BadRequestException("Role is required");
+        }
+        try {
+            return Role.valueOf(raw.trim().toUpperCase());
+        } catch (IllegalArgumentException e) {
+            throw new BadRequestException("Role must be owner, admin, or member");
+        }
     }
 
     private User currentUser() {

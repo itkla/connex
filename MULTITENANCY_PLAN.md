@@ -386,8 +386,11 @@ becomes the migration-only backfill target.
 > (`workspace_invite`, migration V11) via `InviteService` + `WorkspaceController` `POST/GET/DELETE
 > /api/workspaces/{id}/invites` (admin-gated) and token-addressed `GET /api/invites/{token}` +
 > `POST /api/invites/{token}/accept` (email-bound, expiry-checked). Admin-adds-existing via
-> `POST /api/workspaces/{id}/members`. Role-change and member removal remain (removal must respect the
-> `task.assigned_to_id` `RESTRICT` member FK).
+> `POST /api/workspaces/{id}/members`. Member management ships too: `GET /api/workspaces/{id}/members`,
+> `PATCH .../members/{userId}` (role change, owner-protected + last-owner guard), `DELETE
+> .../members/{userId}`. Per the §12 resolution, V12 makes `task.assigned_to_id` nullable (`SET NULL` FK to
+> `app_user`) so removal unassigns tasks while preserving them; deal ownership is nulled too. **Frontend
+> note:** task views must render an unassigned task gracefully.
 
 ## 5. Frontend
 
