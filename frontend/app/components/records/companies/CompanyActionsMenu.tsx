@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { LoaderCircle } from 'lucide-react';
 import { toastError, toastSuccess } from '@/app/lib/toast';
-import { EllipsisVerticalIcon, PencilSquareIcon, EyeIcon, PaperClipIcon, TrashIcon, PlusIcon, UserIcon, BriefcaseIcon } from '@heroicons/react/24/outline';
+import { EllipsisVerticalIcon, PencilSquareIcon, EyeIcon, PaperClipIcon, TrashIcon, PlusIcon, UserIcon, BriefcaseIcon, ShareIcon } from '@heroicons/react/24/outline';
 
 import { useAttachmentUploader } from '@/app/components/attachments/useAttachmentUploader';
 
@@ -19,6 +19,7 @@ import { Button } from '@/components/ui/button';
 import { ButtonGroup } from '@/components/ui/button-group';
 
 import DeleteRecordDialog from '@/app/components/records/DeleteRecordDialog';
+import ShareDialog from '@/app/components/records/ShareDialog';
 import EditCompanySheet from '@/app/components/records/companies/EditCompanySheet';
 import NewContactDialog from '@/app/components/records/contacts/NewContactDialog';
 import NewDealDialog from '@/app/components/records/deals/NewDealDialog';
@@ -36,6 +37,7 @@ export default function CompanyActionsMenu({
     const t = useTranslations('CompaniesActionsMenu');
     const { inputRef: attachmentInputRef, uploading: attachmentsUploading, openPicker: openAttachmentPicker, onFilesSelected: onAttachmentFilesSelected } = useAttachmentUploader('company', company.id);
     const [deleteOpen, setDeleteOpen] = useState(false);
+    const [shareOpen, setShareOpen] = useState(false);
     const [isDeleting, setIsDeleting] = useState(false);
     const [editOpen, setEditOpen] = useState(false);
     const [newContactDialogOpen, setNewContactDialogOpen] = useState(false);
@@ -240,6 +242,15 @@ export default function CompanyActionsMenu({
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end" className="w-48">
                         <DropdownMenuItem
+                            onSelect={(e) => {
+                                e.preventDefault();
+                                setShareOpen(true);
+                            }}
+                        >
+                            <ShareIcon className="size-4" />
+                            <span>{t('share')}</span>
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
                             variant="destructive"
                             onSelect={(e) => {
                                 e.preventDefault();
@@ -263,6 +274,14 @@ export default function CompanyActionsMenu({
             />
 
             <EditCompanySheet company={company} open={editOpen} onOpenChange={setEditOpen} />
+
+            <ShareDialog
+                type="company"
+                entityId={company.id}
+                entityName={company.name}
+                open={shareOpen}
+                onOpenChange={setShareOpen}
+            />
 
             <DeleteRecordDialog
                 open={deleteOpen}

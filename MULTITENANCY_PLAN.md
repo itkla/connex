@@ -62,6 +62,16 @@ These three (+ `stage` via pipeline) are **workspace-owned but shareable**, not 
 > composite FKs everywhere). The §2/§3 composite-FK guidance now applies **only to private↔private
 > references**; private→shareable references are plain-FK + checked.
 
+> **✅ Sharing enabled (2026-06-24, Phase 6):** the dormant `company_share`/`person_share`/`pipeline_share`
+> junctions are wired. Read paths (getAll/getById/search/exists for all three; person page + contacts
+> filter; pipeline stages) now use an **owned-or-shared** predicate; writes stay owned-only (read-only
+> shares). `ShareService` + `ShareController` (`/api/shares/{type}/{id}`) let an owner/admin (`SHARE_MANAGE`)
+> share a record they own to **another workspace they belong to** (no workspace-id probing). Kill-switch:
+> `connex.sharing.enabled`. Frontend: a reusable `ShareDialog` (wired into the company actions menu; the
+> same dialog serves person/pipeline by `type`). **Follow-ups:** per-workspace overlay refinements
+> (A's tags/notes hidden from B beyond the existing workspace-scoped child queries), `can_edit` write
+> grants, and person/pipeline share triggers in their detail menus.
+
 ### 0.2 RBAC — custom roles (answer #10)
 
 Built-in `owner`/`admin`/`member` ship in Phase 2 (#90). A later dedicated phase adds owner-defined

@@ -949,6 +949,18 @@ export function getPermissionCatalog(init: RequestInit = {}) {
     return getJson<string[]>(`/api/permissions`, { cache: "no-store", ...init });
 }
 
+export function getShares(type: string, id: number, init: RequestInit = {}) {
+    return getJson<Types.Share[]>(`/api/shares/${type}/${id}`, { cache: "no-store", ...init });
+}
+
+export function shareRecord(type: string, id: number, workspaceId: number, canEdit = false) {
+    return postJson<void>(`/api/shares/${type}/${id}`, { workspaceId, canEdit });
+}
+
+export function unshareRecord(type: string, id: number, workspaceId: number) {
+    return deleteJson<void>(`/api/shares/${type}/${id}/${workspaceId}`);
+}
+
 export function removeWorkspaceMember(workspaceId: number, userId: number) {
     return deleteJson<void>(`/api/workspaces/${workspaceId}/members/${userId}`);
 }

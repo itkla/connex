@@ -29,6 +29,7 @@ public enum Permission {
     ATTACHMENT_DELETE,
     PIPELINE_MANAGE,
     TAG_MANAGE,
+    SHARE_MANAGE,
     MEMBER_MANAGE,
     ROLE_MANAGE,
     AUDIT_READ,

@@ -57,7 +57,8 @@ public class WorkspaceService {
         EnumSet<Permission> permissions = memberPermissions();
         permissions.addAll(EnumSet.of(
             Permission.COMPANY_DELETE, Permission.PIPELINE_MANAGE, Permission.TAG_MANAGE,
-            Permission.MEMBER_MANAGE, Permission.AUDIT_READ, Permission.WORKSPACE_SETTINGS));
+            Permission.SHARE_MANAGE, Permission.MEMBER_MANAGE, Permission.AUDIT_READ,
+            Permission.WORKSPACE_SETTINGS));
         return permissions;
     }
 

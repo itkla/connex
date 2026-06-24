@@ -38,11 +38,18 @@
     LEFT JOIN company c ON c.id = p.company_id
   </sql>
 
+  <!-- Owned-or-shared visibility: a person is visible to its owning workspace and any workspace it
+       has been shared with (person_share). Writes stay owned-only. Requires the table aliased `p`. -->
+  <sql id="visible">
+    (p.workspace_id = #{workspaceId}
+     OR EXISTS (SELECT 1 FROM person_share ps WHERE ps.person_id = p.id AND ps.workspace_id = #{workspaceId}))
+  </sql>
+
   <select id="getAllPersons" resultMap="PersonResult">
     SELECT <include refid="personColumns"/>, <include refid="companyJoinColumns"/>
     FROM person p
     <include refid="companyJoin"/>
-    WHERE p.workspace_id = #{workspaceId}
+    WHERE <include refid="visible"/>
     ORDER BY p.name
   </select>
 
@@ -75,18 +82,21 @@
     SELECT <include refid="personColumns"/>, <include refid="companyJoinColumns"/>
     FROM person p
     <include refid="companyJoin"/>
-    WHERE p.workspace_id = #{workspaceId} AND p.id = #{id}
+    WHERE <include refid="visible"/> AND p.id = #{id}
   </select>
 
   <select id="exists" resultType="boolean">
     SELECT EXISTS(
-      SELECT 1 FROM person WHERE workspace_id = #{workspaceId} AND id = #{id}
+      SELECT 1 FROM person
+      WHERE (person.workspace_id = #{workspaceId}
+             OR EXISTS (SELECT 1 FROM person_share ps WHERE ps.person_id = person.id AND ps.workspace_id = #{workspaceId}))
+        AND id = #{id}
     )
   </select>
 
   <sql id="pageWhere">
     <where>
-      AND p.workspace_id = #{workspaceId}
+      AND <include refid="visible"/>
       <if test="query != null">
         AND (p.name LIKE #{query} OR p.email LIKE #{query} OR p.phone LIKE #{query}
           OR p.title LIKE #{query} OR c.name LIKE #{query})
@@ -159,7 +169,7 @@
     SELECT <include refid="personColumns"/>, <include refid="companyJoinColumns"/>
     FROM person p
     <include refid="companyJoin"/>
-    WHERE p.workspace_id = #{workspaceId}
+    WHERE <include refid="visible"/>
       AND (p.name LIKE #{query} OR p.email LIKE #{query} OR p.phone LIKE #{query} OR p.title LIKE #{query}
       OR c.name LIKE #{query} OR c.website LIKE #{query} OR c.industry LIKE #{query} OR c.phone LIKE #{query} OR c.address LIKE #{query})
     ORDER BY p.name

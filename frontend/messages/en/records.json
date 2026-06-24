@@ -1,4 +1,19 @@
 {
+  "ShareDialog": {
+    "title": "Share {name}",
+    "description": "Give another workspace you belong to read access to this record.",
+    "sharedWith": "Shared with",
+    "noShares": "Not shared with any workspace yet.",
+    "shareWith": "Choose a workspace",
+    "shareButton": "Share",
+    "noTargets": "No other workspaces available",
+    "shared": "Shared",
+    "shareFailed": "Could not share this record.",
+    "revoke": "Revoke",
+    "revoked": "Sharing revoked",
+    "revokeFailed": "Could not revoke sharing.",
+    "loadFailed": "Could not load shares."
+  },
   "RecordsRenderView": {
     "selectAllAria": "Select all {entityLabel}s",
     "selectItemAria": "Select {name}",

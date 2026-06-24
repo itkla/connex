@@ -26,25 +26,32 @@
                 select="ooo.klae.connex.backend.mappers.PipelineMapper.getStagesByPipelineId"/>
   </resultMap>
 
+  <!-- Owned-or-shared visibility: a pipeline is visible to its owning workspace and any workspace it
+       has been shared with (pipeline_share). Writes stay owned-only. Requires `FROM pipeline` unaliased. -->
+  <sql id="visible">
+    (pipeline.workspace_id = #{workspaceId}
+     OR EXISTS (SELECT 1 FROM pipeline_share ps WHERE ps.pipeline_id = pipeline.id AND ps.workspace_id = #{workspaceId}))
+  </sql>
+
   <select id="getAllPipelines" resultType="Pipeline">
-    SELECT id, workspace_id, name, created_at, updated_at FROM pipeline WHERE workspace_id = #{workspaceId}
+    SELECT id, workspace_id, name, created_at, updated_at FROM pipeline WHERE <include refid="visible"/>
   </select>
 
   <select id="getPipelineById" resultMap="PipelineFullResult">
     SELECT id, workspace_id, name, created_at, updated_at FROM pipeline
-    WHERE workspace_id = #{workspaceId} AND id = #{id}
+    WHERE <include refid="visible"/> AND id = #{id}
   </select>
 
   <select id="search" resultType="Pipeline">
     SELECT id, workspace_id, name, created_at, updated_at FROM pipeline
-    WHERE workspace_id = #{workspaceId} AND name LIKE #{query}
+    WHERE <include refid="visible"/> AND name LIKE #{query}
     ORDER BY name
     LIMIT 10
   </select>
 
   <select id="pipelineExists" resultType="boolean">
     SELECT EXISTS(
-      SELECT 1 FROM pipeline WHERE workspace_id = #{workspaceId} AND id = #{id}
+      SELECT 1 FROM pipeline WHERE <include refid="visible"/> AND id = #{id}
     )
   </select>
 
@@ -65,7 +72,9 @@
 
   <select id="getStagesByPipelineId" resultMap="StageResult">
     SELECT id, workspace_id, name, pipeline_id, position, is_success, is_failure FROM stage
-    WHERE workspace_id = #{workspaceId} AND pipeline_id = #{pipelineId}
+    WHERE pipeline_id = #{pipelineId}
+      AND (stage.workspace_id = #{workspaceId}
+           OR EXISTS (SELECT 1 FROM pipeline_share ps WHERE ps.pipeline_id = #{pipelineId} AND ps.workspace_id = #{workspaceId}))
     ORDER BY position
   </select>
 

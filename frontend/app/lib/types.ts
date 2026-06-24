@@ -543,6 +543,13 @@ export type CustomRole = {
     permissions: string[];
 };
 
+export type Share = {
+    workspaceId: number;
+    workspaceName: string;
+    canEdit: boolean;
+    createdAt: string;
+};
+
 export type WorkspaceInvite = {
     id: number;
     email: string;

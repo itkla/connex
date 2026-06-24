@@ -22,8 +22,15 @@
     <collection property="tags" ofType="Tag" column="id" select="ooo.klae.connex.backend.mappers.TagMapper.getTagsByCompanyId"/>
   </resultMap>
 
+  <!-- Visibility is owned-or-shared: a company is visible to its owning workspace and to any
+       workspace it has been shared with (company_share). Writes stay owned-only. -->
+  <sql id="visible">
+    (company.workspace_id = #{workspaceId}
+     OR EXISTS (SELECT 1 FROM company_share cs WHERE cs.company_id = company.id AND cs.workspace_id = #{workspaceId}))
+  </sql>
+
   <select id="getAllCompanies" resultType="Company">
-    SELECT <include refid="companyColumns"/> FROM company WHERE workspace_id = #{workspaceId} ORDER BY name
+    SELECT <include refid="companyColumns"/> FROM company WHERE <include refid="visible"/> ORDER BY name
   </select>
 
   <select id="getCompaniesByTagId" resultType="Company">
@@ -31,12 +38,14 @@
       c.id, c.workspace_id, c.name, c.website, c.industry, c.phone, c.address, c.created_at, c.updated_at, c.logo_url
     FROM company c
     JOIN company_tag ct ON ct.company_id = c.id
-    WHERE c.workspace_id = #{workspaceId} AND ct.tag_id = #{tagId}
+    WHERE (c.workspace_id = #{workspaceId}
+           OR EXISTS (SELECT 1 FROM company_share cs WHERE cs.company_id = c.id AND cs.workspace_id = #{workspaceId}))
+      AND ct.tag_id = #{tagId}
     ORDER BY c.name
   </select>
 
   <select id="getCompanyById" resultMap="CompanyFullResult">
-    SELECT <include refid="companyColumns"/> FROM company WHERE workspace_id = #{workspaceId} AND id = #{id}
+    SELECT <include refid="companyColumns"/> FROM company WHERE <include refid="visible"/> AND id = #{id}
   </select>
 
   <select id="getCompaniesWithWebsite" resultType="Company">
@@ -45,13 +54,13 @@
 
   <select id="exists" resultType="boolean">
     SELECT EXISTS(
-      SELECT 1 FROM company WHERE workspace_id = #{workspaceId} AND id = #{id}
+      SELECT 1 FROM company WHERE <include refid="visible"/> AND id = #{id}
     )
   </select>
 
   <select id="search" resultType="Company">
     SELECT <include refid="companyColumns"/> FROM company
-    WHERE workspace_id = #{workspaceId}
+    WHERE <include refid="visible"/>
       AND (name LIKE #{query} OR website LIKE #{query} OR industry LIKE #{query} OR phone LIKE #{query} OR address LIKE #{query})
     ORDER BY name
     LIMIT 10

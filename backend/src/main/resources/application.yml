@@ -37,6 +37,10 @@ connex:
         # CSRF protection for state-changing requests. The SPA fetches the token from
         # GET /api/auth/csrf and echoes it in the X-XSRF-TOKEN header. Kill-switch for cutover.
         csrf-enabled: ${CONNEX_SECURITY_CSRF_ENABLED:true}
+    sharing:
+        # Gates the cross-workspace share/unshare API. The owned-or-shared read predicate is always
+        # applied (harmless when no shares exist).
+        enabled: ${CONNEX_SHARING_ENABLED:true}
     notifications:
         scheduling-enabled: ${CONNEX_NOTIFICATIONS_SCHEDULING_ENABLED:true}
         reconciliation-delay-ms: ${CONNEX_NOTIFICATIONS_RECONCILIATION_DELAY_MS:300000}

@@ -1,4 +1,19 @@
 {
+  "ShareDialog": {
+    "title": "{name} を共有",
+    "description": "あなたが所属する別のワークスペースに、このレコードへの閲覧アクセスを付与します。",
+    "sharedWith": "共有先",
+    "noShares": "まだどのワークスペースとも共有されていません。",
+    "shareWith": "ワークスペースを選択",
+    "shareButton": "共有",
+    "noTargets": "利用可能な他のワークスペースがありません",
+    "shared": "共有しました",
+    "shareFailed": "このレコードを共有できませんでした。",
+    "revoke": "取り消し",
+    "revoked": "共有を取り消しました",
+    "revokeFailed": "共有を取り消せませんでした。",
+    "loadFailed": "共有を読み込めませんでした。"
+  },
   "RecordsRenderView": {
     "selectAllAria": "すべての {entityLabel} を選択",
     "selectItemAria": "{name} を選択",
