@@ -5,14 +5,20 @@
 -- phase; for now the application keeps stage.workspace_id = pipeline.workspace_id.
 -- ============================================================================
 
+-- Backfill pre-existing rows (pre-Flyway schema) to the first workspace; stage
+-- inherits its workspace from its parent pipeline. Empty on a fresh DB.
+ALTER TABLE pipeline ADD COLUMN workspace_id INT NOT NULL DEFAULT 0 AFTER id;
+UPDATE pipeline SET workspace_id = (SELECT id FROM workspace ORDER BY id LIMIT 1) WHERE EXISTS (SELECT 1 FROM workspace);
 ALTER TABLE pipeline
-    ADD COLUMN workspace_id INT NOT NULL AFTER id,
+    ALTER COLUMN workspace_id DROP DEFAULT,
     ADD CONSTRAINT fk_pipeline_workspace FOREIGN KEY (workspace_id) REFERENCES workspace(id) ON DELETE RESTRICT,
     ADD UNIQUE KEY uq_pipeline_workspace_id (workspace_id, id),
     ADD INDEX idx_pipeline_workspace (workspace_id);
 
+ALTER TABLE stage ADD COLUMN workspace_id INT NOT NULL DEFAULT 0 AFTER id;
+UPDATE stage s JOIN pipeline p ON s.pipeline_id = p.id SET s.workspace_id = p.workspace_id;
 ALTER TABLE stage
-    ADD COLUMN workspace_id INT NOT NULL AFTER id,
+    ALTER COLUMN workspace_id DROP DEFAULT,
     ADD CONSTRAINT fk_stage_workspace FOREIGN KEY (workspace_id) REFERENCES workspace(id) ON DELETE RESTRICT,
     ADD UNIQUE KEY uq_stage_workspace_id (workspace_id, id),
     ADD INDEX idx_stage_workspace (workspace_id);

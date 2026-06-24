@@ -5,8 +5,15 @@
 -- while the uq(workspace_id, id) anchor is kept for same-workspace composite FKs.
 -- ============================================================================
 
+-- Add the column with a temporary default so any pre-existing rows (from the
+-- pre-Flyway/MyBatis schema) get a value, backfill them to the first workspace,
+-- then drop the default and add the FK + indexes. On a fresh DB the table is
+-- empty so the backfill is a no-op and the end state is identical to a plain
+-- NOT NULL column with no default.
+ALTER TABLE company ADD COLUMN workspace_id INT NOT NULL DEFAULT 0 AFTER id;
+UPDATE company SET workspace_id = (SELECT id FROM workspace ORDER BY id LIMIT 1) WHERE EXISTS (SELECT 1 FROM workspace);
 ALTER TABLE company
-    ADD COLUMN workspace_id INT NOT NULL AFTER id,
+    ALTER COLUMN workspace_id DROP DEFAULT,
     ADD CONSTRAINT fk_company_workspace FOREIGN KEY (workspace_id) REFERENCES workspace(id) ON DELETE RESTRICT,
     ADD UNIQUE KEY uq_company_workspace_id (workspace_id, id),
     ADD INDEX idx_company_workspace (workspace_id);

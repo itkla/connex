@@ -4,7 +4,7 @@ import { createContext, useCallback, useContext, useMemo, useState } from "react
 import { useRouter } from "next/navigation";
 
 import type { Workspace } from "@/app/lib/types";
-import { switchWorkspace } from "@/app/lib/api";
+import { createWorkspace, switchWorkspace } from "@/app/lib/api";
 
 const WORKSPACE_COOKIE = "connex_workspace";
 
@@ -18,6 +18,7 @@ type WorkspaceContextValue = {
     activeWorkspace: Workspace | null;
     switching: boolean;
     switchTo: (id: number) => Promise<void>;
+    create: (name: string) => Promise<Workspace>;
 };
 
 const WorkspaceContext = createContext<WorkspaceContextValue | null>(null);
@@ -32,7 +33,7 @@ export function WorkspaceProvider({
     children: React.ReactNode;
 }) {
     const router = useRouter();
-    const [workspaces] = useState(initialWorkspaces);
+    const [workspaces, setWorkspaces] = useState(initialWorkspaces);
     const [activeWorkspaceId, setActiveWorkspaceId] = useState<number | null>(initialActiveId);
     const [switching, setSwitching] = useState(false);
 
@@ -53,14 +54,26 @@ export function WorkspaceProvider({
         [activeWorkspaceId, switching, router],
     );
 
+    const create = useCallback(
+        async (name: string) => {
+            const workspace = await createWorkspace(name);
+            writeWorkspaceCookie(workspace.id);
+            setWorkspaces((prev) => [...prev, workspace]);
+            setActiveWorkspaceId(workspace.id);
+            router.refresh();
+            return workspace;
+        },
+        [router],
+    );
+
     const activeWorkspace = useMemo(
         () => workspaces.find((w) => w.id === activeWorkspaceId) ?? null,
         [workspaces, activeWorkspaceId],
     );
 
     const value = useMemo(
-        () => ({ workspaces, activeWorkspaceId, activeWorkspace, switching, switchTo }),
-        [workspaces, activeWorkspaceId, activeWorkspace, switching, switchTo],
+        () => ({ workspaces, activeWorkspaceId, activeWorkspace, switching, switchTo, create }),
+        [workspaces, activeWorkspaceId, activeWorkspace, switching, switchTo, create],
     );
 
     return <WorkspaceContext.Provider value={value}>{children}</WorkspaceContext.Provider>;

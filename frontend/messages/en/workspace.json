@@ -4,7 +4,17 @@
     "switchAria": "Switch workspace",
     "oneWorkspace": "1 workspace",
     "manyWorkspaces": "{count} workspaces",
-    "createOrJoin": "Create or join workspace"
+    "createOrJoin": "Add workspace",
+    "createTitle": "Create workspace",
+    "createDescription": "A workspace holds its own companies, contacts, and deals.",
+    "nameLabel": "Workspace name",
+    "namePlaceholder": "Acme Sales",
+    "cancel": "Cancel",
+    "createButton": "Create",
+    "creating": "Creating",
+    "nameRequired": "Enter a workspace name",
+    "created": "Workspace created",
+    "createFailed": "Could not create the workspace. Try again."
   },
   "Onboarding": {
     "title": "Create your workspace",

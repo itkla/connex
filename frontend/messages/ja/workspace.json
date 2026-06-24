@@ -4,7 +4,17 @@
     "switchAria": "ワークスペースを切り替え",
     "oneWorkspace": "1 件のワークスペース",
     "manyWorkspaces": "{count} 件のワークスペース",
-    "createOrJoin": "ワークスペースを作成または参加"
+    "createOrJoin": "ワークスペースを追加",
+    "createTitle": "ワークスペースを作成",
+    "createDescription": "ワークスペースには独自の会社・連絡先・商談が含まれます。",
+    "nameLabel": "ワークスペース名",
+    "namePlaceholder": "Acme Sales",
+    "cancel": "キャンセル",
+    "createButton": "作成",
+    "creating": "作成中",
+    "nameRequired": "ワークスペース名を入力してください",
+    "created": "ワークスペースを作成しました",
+    "createFailed": "ワークスペースを作成できませんでした。もう一度お試しください。"
   },
   "Onboarding": {
     "title": "ワークスペースを作成",

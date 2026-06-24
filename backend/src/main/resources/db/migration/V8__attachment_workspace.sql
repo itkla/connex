@@ -5,8 +5,12 @@
 -- anchors the attachment_tag junction.
 -- ============================================================================
 
+-- Backfill pre-existing rows (pre-Flyway schema) to the first workspace before
+-- enforcing the FK. Empty on a fresh DB.
+ALTER TABLE attachment ADD COLUMN workspace_id INT NOT NULL DEFAULT 0 AFTER id;
+UPDATE attachment SET workspace_id = (SELECT id FROM workspace ORDER BY id LIMIT 1) WHERE EXISTS (SELECT 1 FROM workspace);
 ALTER TABLE attachment
-    ADD COLUMN workspace_id INT NOT NULL AFTER id,
+    ALTER COLUMN workspace_id DROP DEFAULT,
     ADD CONSTRAINT fk_attachment_workspace FOREIGN KEY (workspace_id) REFERENCES workspace(id) ON DELETE RESTRICT,
     ADD UNIQUE KEY uq_attachment_workspace_id (workspace_id, id),
     DROP INDEX idx_attachment_entity,
