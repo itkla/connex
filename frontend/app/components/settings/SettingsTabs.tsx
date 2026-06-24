@@ -9,6 +9,7 @@ import { cn } from "@/lib/utils";
 const TABS = [
     { key: "tabMembers", href: "/settings/members" },
     { key: "tabRoles", href: "/settings/roles" },
+    { key: "tabMembership", href: "/settings/membership" },
 ] as const;
 
 export default function SettingsTabs() {

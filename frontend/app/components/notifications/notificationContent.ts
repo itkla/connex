@@ -1,4 +1,4 @@
-import { BellIcon, BriefcaseIcon, CheckCircleIcon } from "@heroicons/react/24/outline";
+import { BellIcon, BriefcaseIcon, CheckCircleIcon, UserGroupIcon } from "@heroicons/react/24/outline";
 
 import { type Notification } from "@/app/lib/types";
 import { formatDate } from "@/app/lib/utils";
@@ -32,6 +32,12 @@ export function notificationContent(notification: Notification, t: Translator, l
             }),
         };
     }
+    if (notification.type === "workspace.join") {
+        return {
+            title: t("workspaceJoinTitle"),
+            body: t("workspaceJoinBody", { workspace: notification.workspaceName ?? "" }),
+        };
+    }
     return { title: notification.title, body: notification.body ?? "" };
 }
 
@@ -43,6 +49,7 @@ export function safeNotificationUrl(value?: string | null) {
 export function notificationIcon(notification: Notification) {
     if (notification.type.startsWith("task.")) return CheckCircleIcon;
     if (notification.type.startsWith("deal.")) return BriefcaseIcon;
+    if (notification.type.startsWith("workspace.")) return UserGroupIcon;
     return BellIcon;
 }
 

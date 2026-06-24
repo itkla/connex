@@ -51,7 +51,8 @@
     "title": "設定",
     "subtitle": "このワークスペースにアクセスできる人と、その権限を管理します。",
     "tabMembers": "メンバー",
-    "tabRoles": "ロール"
+    "tabRoles": "ロール",
+    "tabMembership": "メンバーシップ"
   },
   "WorkspaceMembers": {
     "title": "メンバー",
@@ -128,5 +129,25 @@
     "create": "ロールを作成",
     "noPermissionsHint": "このロールに許可するアクションを少なくとも 1 つ選択してください。",
     "roleEntityLabel": "ロール"
+  },
+  "WorkspaceMembership": {
+    "pendingTitle": "保留中の招待",
+    "pendingSubtitle": "招待されたワークスペース。承認すると参加できます。",
+    "pendingEmpty": "保留中の招待はありません。",
+    "accept": "承認",
+    "decline": "辞退",
+    "accepted": "{workspace} に参加しました",
+    "acceptFailed": "招待を承認できませんでした。",
+    "declined": "招待を辞退しました",
+    "declineFailed": "招待を辞退できませんでした。",
+    "loadFailed": "招待を読み込めませんでした。",
+    "leaveTitle": "ワークスペースを退出",
+    "leaveSubtitle": "{workspace} を退出し、データへのアクセスを失います。",
+    "leave": "ワークスペースを退出",
+    "leaveConfirmTitle": "{workspace} を退出しますか？",
+    "leaveConfirmBody": "このワークスペースへのアクセスを失います。割り当てられたタスクは未割り当てになり、所有する商談は所有者を失います。",
+    "cancel": "キャンセル",
+    "left": "ワークスペースを退出しました",
+    "leaveFailed": "ワークスペースを退出できませんでした。"
   }
 }

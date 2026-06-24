@@ -23,6 +23,8 @@
     "filterAria": "Filter notifications",
     "page": "Page {page} of {pageCount}",
     "completeTask": "Complete task",
+    "workspaceJoinTitle": "Workspace invitation",
+    "workspaceJoinBody": "You've been invited to join {workspace}. Accept in Settings to join.",
     "taskDueTitle": "Task due soon",
     "taskDueBody": "{task} is due {date}.",
     "taskOverdueTitle": "Task overdue",

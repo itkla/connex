@@ -913,6 +913,22 @@ export function switchWorkspace(id: number) {
     return postJson<void>(`/api/workspaces/${id}/switch`, {});
 }
 
+export function getPendingWorkspaces(init: RequestInit = {}) {
+    return getJson<Types.Workspace[]>(`/api/workspaces/pending`, { cache: "no-store", ...init });
+}
+
+export function acceptWorkspace(id: number) {
+    return postJson<Types.Workspace>(`/api/workspaces/${id}/accept`, {});
+}
+
+export function declineWorkspace(id: number) {
+    return postJson<void>(`/api/workspaces/${id}/decline`, {});
+}
+
+export function leaveWorkspace(id: number) {
+    return postJson<void>(`/api/workspaces/${id}/leave`, {});
+}
+
 export function getWorkspaceMembers(workspaceId: number, init: RequestInit = {}) {
     return getJson<Types.WorkspaceMember[]>(`/api/workspaces/${workspaceId}/members`, { cache: "no-store", ...init });
 }

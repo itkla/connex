@@ -51,7 +51,8 @@
     "title": "Settings",
     "subtitle": "Manage who can access this workspace and what they can do.",
     "tabMembers": "Members",
-    "tabRoles": "Roles"
+    "tabRoles": "Roles",
+    "tabMembership": "Membership"
   },
   "WorkspaceMembers": {
     "title": "Members",
@@ -128,5 +129,25 @@
     "create": "Create role",
     "noPermissionsHint": "Select at least the actions this role should allow.",
     "roleEntityLabel": "role"
+  },
+  "WorkspaceMembership": {
+    "pendingTitle": "Pending invitations",
+    "pendingSubtitle": "Workspaces you've been invited to. Accept to join.",
+    "pendingEmpty": "No pending invitations.",
+    "accept": "Accept",
+    "decline": "Decline",
+    "accepted": "Joined {workspace}",
+    "acceptFailed": "Could not accept the invitation.",
+    "declined": "Invitation declined",
+    "declineFailed": "Could not decline the invitation.",
+    "loadFailed": "Could not load invitations.",
+    "leaveTitle": "Leave workspace",
+    "leaveSubtitle": "Leave {workspace} and lose access to its data.",
+    "leave": "Leave workspace",
+    "leaveConfirmTitle": "Leave {workspace}?",
+    "leaveConfirmBody": "You'll lose access to this workspace. Your assigned tasks become unassigned and deals you own lose their owner.",
+    "cancel": "Cancel",
+    "left": "You left the workspace",
+    "leaveFailed": "Could not leave the workspace."
   }
 }

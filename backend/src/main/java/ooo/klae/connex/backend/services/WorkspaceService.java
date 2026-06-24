@@ -376,7 +376,7 @@ public class WorkspaceService {
             notification.setBody("You have a pending workspace invitation.");
             notification.setActorId(actor.getId());
             notification.setActorLabel(actor.getDisplayName());
-            notification.setActionUrl("/settings/members");
+            notification.setActionUrl("/settings/membership");
             notification.setDedupeKey("workspace.join:" + workspaceId);
             notification.setTriggeredAt(LocalDateTime.now(ZoneOffset.UTC).format(TS));
             notificationMapper.upsert(notification);
