@@ -41,6 +41,16 @@ export function proxy(request: NextRequest) {
         return NextResponse.next();
     }
 
+    // Accepting an invite needs a session but no workspace (invite-only users have none yet).
+    if (pathname.startsWith('/invite/')) {
+        if (!hasSession) {
+            const loginUrl = new URL('/auth/login', request.url);
+            loginUrl.searchParams.set('redirect', pathname + search);
+            return NextResponse.redirect(loginUrl);
+        }
+        return NextResponse.next();
+    }
+
     if (hasSession && pathname.startsWith('/auth/') && !searchParams.has('redirect')) {
         return NextResponse.redirect(new URL('/dashboard', request.url));
     }
@@ -66,5 +76,6 @@ export const config = {
         '/activity/:path*',
         '/notifications/:path*',
         '/onboarding',
+        '/invite/:path*',
     ],
 };

@@ -26,7 +26,26 @@
     "nameRequired": "ワークスペース名を入力してください",
     "createFailed": "ワークスペースを作成できませんでした。もう一度お試しください。",
     "joinNote": "既存のチームに参加しますか？ワークスペース管理者に追加を依頼してください。",
-    "signOut": "サインアウト"
+    "signOut": "サインアウト",
+    "joinTitle": "招待リンクをお持ちですか？",
+    "joinPlaceholder": "招待リンクを貼り付け",
+    "joinButton": "続行",
+    "joinInvalid": "有効な招待リンクではないようです。"
+  },
+  "InviteAccept": {
+    "heading": "{workspace} に参加",
+    "roleLine": "{role} として招待されています。",
+    "invitedBy": "{name} が招待",
+    "accept": "招待を承認",
+    "accepting": "参加中",
+    "acceptFailed": "招待を承認できませんでした。",
+    "invalidTitle": "招待は利用できません",
+    "invalidBody": "この招待は期限切れか、すでに使用されています。",
+    "mismatchBody": "この招待は {email} 宛てですが、{current} としてサインインしています。",
+    "backToApp": "ダッシュボードへ",
+    "roleOwner": "オーナー",
+    "roleAdmin": "管理者",
+    "roleMember": "メンバー"
   },
   "WorkspaceSettings": {
     "title": "設定",

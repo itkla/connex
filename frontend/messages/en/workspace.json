@@ -26,7 +26,26 @@
     "nameRequired": "Enter a workspace name",
     "createFailed": "Could not create the workspace. Try again.",
     "joinNote": "Joining an existing team? Ask a workspace admin to add you.",
-    "signOut": "Sign out"
+    "signOut": "Sign out",
+    "joinTitle": "Have an invite link?",
+    "joinPlaceholder": "Paste your invite link",
+    "joinButton": "Continue",
+    "joinInvalid": "That doesn't look like a valid invite link."
+  },
+  "InviteAccept": {
+    "heading": "Join {workspace}",
+    "roleLine": "You've been invited as {role}.",
+    "invitedBy": "Invited by {name}",
+    "accept": "Accept invitation",
+    "accepting": "Joining",
+    "acceptFailed": "Could not accept the invitation.",
+    "invalidTitle": "Invitation unavailable",
+    "invalidBody": "This invitation has expired or has already been used.",
+    "mismatchBody": "This invitation was sent to {email}, but you're signed in as {current}.",
+    "backToApp": "Go to dashboard",
+    "roleOwner": "an owner",
+    "roleAdmin": "an admin",
+    "roleMember": "a member"
   },
   "WorkspaceSettings": {
     "title": "Settings",

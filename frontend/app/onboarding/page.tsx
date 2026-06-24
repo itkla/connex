@@ -18,6 +18,7 @@ export default function OnboardingPage() {
     const reduce = useReducedMotion();
     const [name, setName] = useState("");
     const [submitting, setSubmitting] = useState(false);
+    const [joinValue, setJoinValue] = useState("");
 
     const enter = reduce
         ? { initial: false as const }
@@ -45,6 +46,20 @@ export default function OnboardingPage() {
             toastError(err instanceof ApiError ? err.message : t("createFailed"));
             setSubmitting(false);
         }
+    }
+
+    function handleJoin(e: React.FormEvent<HTMLFormElement>) {
+        e.preventDefault();
+        const raw = joinValue.trim();
+        if (!raw) return;
+        const marker = "/invite/";
+        const idx = raw.indexOf(marker);
+        const token = (idx >= 0 ? raw.slice(idx + marker.length) : raw).split(/[?#/]/)[0];
+        if (!token) {
+            toastError(t("joinInvalid"));
+            return;
+        }
+        router.push(`/invite/${token}`);
     }
 
     async function handleSignOut() {
@@ -102,7 +117,26 @@ export default function OnboardingPage() {
                             </button>
                         </form>
 
-                        <p className="mt-6 text-sm text-neutral-400">{t("joinNote")}</p>
+                        <div className="mt-8 border-t border-neutral-200 pt-6">
+                            <span className="block text-sm font-medium text-neutral-700">
+                                {t("joinTitle")}
+                            </span>
+                            <form onSubmit={handleJoin} className="mt-2 flex gap-2">
+                                <input
+                                    type="text"
+                                    value={joinValue}
+                                    onChange={(e) => setJoinValue(e.target.value)}
+                                    placeholder={t("joinPlaceholder")}
+                                    className="h-11 flex-1 rounded-xl bg-neutral-100 px-4 text-sm text-neutral-900 ring-1 ring-black/5 transition focus:bg-white focus:outline-none focus:ring-2 focus:ring-brand"
+                                />
+                                <button
+                                    type="submit"
+                                    className="h-11 shrink-0 rounded-xl px-4 text-sm font-semibold text-neutral-700 ring-1 ring-neutral-200 transition hover:bg-neutral-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
+                                >
+                                    {t("joinButton")}
+                                </button>
+                            </form>
+                        </div>
                     </motion.div>
                 </div>
             </div>

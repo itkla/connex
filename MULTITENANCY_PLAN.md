@@ -397,8 +397,9 @@ becomes the migration-only backfill target.
 > **✅ Members settings UI shipped (2026-06-24):** `/settings` hub (sidebar Team entry) with a Members tab
 > (`MembersPanel`): role change, inline-confirm removal, invite-by-email with a copyable `/invite/{token}`
 > link, and pending-invite revoke — all admin-gated client-side off `useWorkspace().activeWorkspace.role`.
-> API wrappers + types added; EN/JA parity kept. Remaining: the `/invite/{token}` accept page + onboarding
-> join path.
+> API wrappers + types added; EN/JA parity kept. The `/invite/{token}` accept page (`AcceptInvite`,
+> email-match + validity aware, gated in `proxy.ts` for session-without-workspace users) and an onboarding
+> "paste your invite link" join path complete the flow end-to-end.
 
 **Transport: header + cookie** (aligns with §4.1; no URL segment). `api.ts` funnels ~120 wrappers
 through one `requestJson` (`api.ts:17-43`) → inject the active workspace **once** there.
