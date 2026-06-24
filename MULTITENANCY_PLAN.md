@@ -76,7 +76,9 @@ reference a role (built-in or custom). Independent of tenant isolation — seque
 > roles map to fixed permission bundles; `WorkspaceService.requirePermission(...)` is wired into every entity
 > mutation + structural/member/audit gate (replacing the `requireRole` sites). `RoleController`
 > (`/api/workspaces/{id}/roles` CRUD) + `GET /api/permissions` catalog + custom-role assignment via the
-> member PATCH. Reads stay membership-gated (not in the catalog). Frontend roles UI pending.
+> member PATCH. Reads stay membership-gated (not in the catalog). Frontend: a Roles tab in `/settings`
+> (`RolesPanel`: create/edit roles with grouped permission toggles, delete) and a custom-role option in the
+> member role selector (owner-only). EN/JA parity kept.
 
 ### 0.3 Cross-workspace notifications (answer #13)
 

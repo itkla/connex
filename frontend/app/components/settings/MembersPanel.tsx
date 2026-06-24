@@ -10,11 +10,13 @@ import {
     XMarkIcon,
 } from "@heroicons/react/24/outline";
 
-import type { WorkspaceInvite, WorkspaceMember, WorkspaceRole } from "@/app/lib/types";
+import type { CustomRole, WorkspaceInvite, WorkspaceMember, WorkspaceRole } from "@/app/lib/types";
 import {
+    assignMemberCustomRole,
     createWorkspaceInvite,
     getWorkspaceInvites,
     getWorkspaceMembers,
+    getWorkspaceRoles,
     removeWorkspaceMember,
     revokeWorkspaceInvite,
     updateMemberRole,
@@ -39,7 +41,7 @@ function MemberAvatar({ name }: { name: string }) {
     );
 }
 
-function RoleBadge({ role, label }: { role: WorkspaceRole; label: string }) {
+function RoleBadge({ role, label }: { role: string; label: string }) {
     return (
         <span
             className={cn(
@@ -64,6 +66,7 @@ export default function MembersPanel({ currentUserId }: { currentUserId: number 
 
     const [members, setMembers] = useState<WorkspaceMember[]>([]);
     const [invites, setInvites] = useState<WorkspaceInvite[]>([]);
+    const [customRoles, setCustomRoles] = useState<CustomRole[]>([]);
     const [loading, setLoading] = useState(true);
 
     const [inviteEmail, setInviteEmail] = useState("");
@@ -76,7 +79,8 @@ export default function MembersPanel({ currentUserId }: { currentUserId: number 
     const [busyInviteId, setBusyInviteId] = useState<number | null>(null);
 
     const roleLabel = useCallback(
-        (r: WorkspaceRole) => t(r === "owner" ? "roleOwner" : r === "admin" ? "roleAdmin" : "roleMember"),
+        (r: string) =>
+            r === "owner" ? t("roleOwner") : r === "admin" ? t("roleAdmin") : r === "member" ? t("roleMember") : r,
         [t],
     );
 
@@ -93,6 +97,10 @@ export default function MembersPanel({ currentUserId }: { currentUserId: number 
                     const loadedInvites = await getWorkspaceInvites(workspaceId);
                     if (!cancelled) setInvites(loadedInvites);
                 }
+                if (isOwner) {
+                    const loadedRoles = await getWorkspaceRoles(workspaceId);
+                    if (!cancelled) setCustomRoles(loadedRoles);
+                }
             } catch {
                 if (!cancelled) toastError(t("loadFailed"));
             } finally {
@@ -102,13 +110,27 @@ export default function MembersPanel({ currentUserId }: { currentUserId: number 
         return () => {
             cancelled = true;
         };
-    }, [workspaceId, isAdmin, t]);
+    }, [workspaceId, isAdmin, isOwner, t]);
 
     const changeRole = async (userId: number, next: WorkspaceRole) => {
         if (!workspaceId) return;
         setBusyMemberId(userId);
         try {
             const updated = await updateMemberRole(workspaceId, userId, next);
+            setMembers((prev) => prev.map((m) => (m.id === userId ? updated : m)));
+            toastSuccess(t("roleChanged"));
+        } catch (err) {
+            toastError(err instanceof Error ? err.message : t("roleChangeFailed"));
+        } finally {
+            setBusyMemberId(null);
+        }
+    };
+
+    const assignCustom = async (userId: number, roleId: number) => {
+        if (!workspaceId) return;
+        setBusyMemberId(userId);
+        try {
+            const updated = await assignMemberCustomRole(workspaceId, userId, roleId);
             setMembers((prev) => prev.map((m) => (m.id === userId ? updated : m)));
             toastSuccess(t("roleChanged"));
         } catch (err) {
@@ -219,11 +241,15 @@ export default function MembersPanel({ currentUserId }: { currentUserId: number 
                                         <span className="truncate text-xs text-muted-foreground">{member.email}</span>
                                     </div>
 
-                                    {isAdmin ? (
+                                    {isAdmin && (member.roleId == null || isOwner) ? (
                                         <select
-                                            value={member.role}
+                                            value={member.roleId ? `custom:${member.roleId}` : member.role}
                                             disabled={busy}
-                                            onChange={(e) => changeRole(member.id, e.target.value as WorkspaceRole)}
+                                            onChange={(e) => {
+                                                const value = e.target.value;
+                                                if (value.startsWith("custom:")) assignCustom(member.id, Number(value.slice(7)));
+                                                else changeRole(member.id, value as WorkspaceRole);
+                                            }}
                                             aria-label={t("roleLabel")}
                                             className={cn(
                                                 fieldInputClass,
@@ -235,6 +261,15 @@ export default function MembersPanel({ currentUserId }: { currentUserId: number 
                                                     {roleLabel(r)}
                                                 </option>
                                             ))}
+                                            {isOwner && customRoles.length > 0 && (
+                                                <optgroup label={t("customRoles")}>
+                                                    {customRoles.map((r) => (
+                                                        <option key={r.id} value={`custom:${r.id}`}>
+                                                            {r.name}
+                                                        </option>
+                                                    ))}
+                                                </optgroup>
+                                            )}
                                         </select>
                                     ) : (
                                         <RoleBadge role={member.role} label={roleLabel(member.role)} />

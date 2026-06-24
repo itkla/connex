@@ -6,7 +6,10 @@ import { useTranslations } from "next-intl";
 
 import { cn } from "@/lib/utils";
 
-const TABS = [{ key: "tabMembers", href: "/settings/members" }] as const;
+const TABS = [
+    { key: "tabMembers", href: "/settings/members" },
+    { key: "tabRoles", href: "/settings/roles" },
+] as const;
 
 export default function SettingsTabs() {
     const pathname = usePathname() ?? "";

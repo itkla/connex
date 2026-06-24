@@ -49,7 +49,8 @@
   },
   "WorkspaceSettings": {
     "title": "設定",
-    "tabMembers": "メンバー"
+    "tabMembers": "メンバー",
+    "tabRoles": "ロール"
   },
   "WorkspaceMembers": {
     "title": "メンバー",
@@ -85,6 +86,28 @@
     "revoked": "招待を取り消しました",
     "revokeFailed": "招待を取り消せませんでした。",
     "invitedBy": "{name} が招待",
-    "expires": "有効期限 {date}"
+    "expires": "有効期限 {date}",
+    "customRoles": "カスタムロール"
+  },
+  "WorkspaceRoles": {
+    "title": "ロール",
+    "subtitle": "メンバーに必要な権限だけを持つカスタムロールを定義します。",
+    "newRole": "新しいロール",
+    "roleName": "ロール名",
+    "roleNamePlaceholder": "例：閲覧専用アナリスト",
+    "save": "ロールを保存",
+    "cancel": "キャンセル",
+    "edit": "編集",
+    "delete": "削除",
+    "created": "ロールを作成しました",
+    "updated": "ロールを更新しました",
+    "deleted": "ロールを削除しました",
+    "saveFailed": "ロールを保存できませんでした。",
+    "deleteFailed": "ロールを削除できませんでした。",
+    "loadFailed": "ロールを読み込めませんでした。",
+    "nameRequired": "ロール名を入力してください",
+    "noAccess": "ロールを管理できるのはワークスペースのオーナーのみです。",
+    "empty": "カスタムロールはまだありません。",
+    "permissionCount": "{count} 件の権限"
   }
 }

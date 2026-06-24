@@ -925,6 +925,30 @@ export function updateMemberRole(workspaceId: number, userId: number, role: Type
     return patchJson<Types.WorkspaceMember>(`/api/workspaces/${workspaceId}/members/${userId}`, { role });
 }
 
+export function assignMemberCustomRole(workspaceId: number, userId: number, roleId: number) {
+    return patchJson<Types.WorkspaceMember>(`/api/workspaces/${workspaceId}/members/${userId}`, { roleId });
+}
+
+export function getWorkspaceRoles(workspaceId: number, init: RequestInit = {}) {
+    return getJson<Types.CustomRole[]>(`/api/workspaces/${workspaceId}/roles`, { cache: "no-store", ...init });
+}
+
+export function createWorkspaceRole(workspaceId: number, name: string, permissions: string[]) {
+    return postJson<Types.CustomRole>(`/api/workspaces/${workspaceId}/roles`, { name, permissions });
+}
+
+export function updateWorkspaceRole(workspaceId: number, roleId: number, name: string, permissions: string[]) {
+    return putJson<Types.CustomRole>(`/api/workspaces/${workspaceId}/roles/${roleId}`, { name, permissions });
+}
+
+export function deleteWorkspaceRole(workspaceId: number, roleId: number) {
+    return deleteJson<void>(`/api/workspaces/${workspaceId}/roles/${roleId}`);
+}
+
+export function getPermissionCatalog(init: RequestInit = {}) {
+    return getJson<string[]>(`/api/permissions`, { cache: "no-store", ...init });
+}
+
 export function removeWorkspaceMember(workspaceId: number, userId: number) {
     return deleteJson<void>(`/api/workspaces/${workspaceId}/members/${userId}`);
 }

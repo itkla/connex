@@ -533,7 +533,14 @@ export type WorkspaceMember = {
     username: string;
     displayName: string;
     email: string;
-    role: WorkspaceRole;
+    role: string;
+    roleId?: number | null;
+};
+
+export type CustomRole = {
+    id: number;
+    name: string;
+    permissions: string[];
 };
 
 export type WorkspaceInvite = {
