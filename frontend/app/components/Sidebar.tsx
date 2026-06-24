@@ -26,6 +26,7 @@ import {
     MoonIcon,
     ComputerDesktopIcon,
     CheckIcon,
+    Cog6ToothIcon,
 } from "@heroicons/react/24/outline";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
@@ -95,6 +96,7 @@ function useSections(): NavSection[] {
             label: t("sectionTeam"),
             items: [
                 { label: t("navUsers"), href: "/users", icon: UserGroupIcon },
+                { label: t("navSettings"), href: "/settings/members", icon: Cog6ToothIcon },
                 { label: t("navAuditLog"), href: "/admin/logs", icon: ClipboardDocumentListIcon },
             ],
         },

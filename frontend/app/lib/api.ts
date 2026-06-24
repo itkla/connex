@@ -871,3 +871,39 @@ export function createWorkspace(name: string) {
 export function switchWorkspace(id: number) {
     return postJson<void>(`/api/workspaces/${id}/switch`, {});
 }
+
+export function getWorkspaceMembers(workspaceId: number, init: RequestInit = {}) {
+    return getJson<Types.WorkspaceMember[]>(`/api/workspaces/${workspaceId}/members`, { cache: "no-store", ...init });
+}
+
+export function addWorkspaceMember(workspaceId: number, email: string, role: Types.WorkspaceRole) {
+    return postJson<Types.WorkspaceMember>(`/api/workspaces/${workspaceId}/members`, { email, role });
+}
+
+export function updateMemberRole(workspaceId: number, userId: number, role: Types.WorkspaceRole) {
+    return patchJson<Types.WorkspaceMember>(`/api/workspaces/${workspaceId}/members/${userId}`, { role });
+}
+
+export function removeWorkspaceMember(workspaceId: number, userId: number) {
+    return deleteJson<void>(`/api/workspaces/${workspaceId}/members/${userId}`);
+}
+
+export function getWorkspaceInvites(workspaceId: number, init: RequestInit = {}) {
+    return getJson<Types.WorkspaceInvite[]>(`/api/workspaces/${workspaceId}/invites`, { cache: "no-store", ...init });
+}
+
+export function createWorkspaceInvite(workspaceId: number, email: string, role: Types.WorkspaceRole) {
+    return postJson<Types.WorkspaceInvite>(`/api/workspaces/${workspaceId}/invites`, { email, role });
+}
+
+export function revokeWorkspaceInvite(workspaceId: number, inviteId: number) {
+    return deleteJson<void>(`/api/workspaces/${workspaceId}/invites/${inviteId}`);
+}
+
+export function getInvitePreview(token: string, init: RequestInit = {}) {
+    return getJson<Types.InvitePreview>(`/api/invites/${token}`, { cache: "no-store", ...init });
+}
+
+export function acceptInvite(token: string) {
+    return postJson<Types.Workspace>(`/api/invites/${token}/accept`, {});
+}

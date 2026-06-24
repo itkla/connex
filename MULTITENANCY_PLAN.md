@@ -394,6 +394,12 @@ becomes the migration-only backfill target.
 
 ## 5. Frontend
 
+> **✅ Members settings UI shipped (2026-06-24):** `/settings` hub (sidebar Team entry) with a Members tab
+> (`MembersPanel`): role change, inline-confirm removal, invite-by-email with a copyable `/invite/{token}`
+> link, and pending-invite revoke — all admin-gated client-side off `useWorkspace().activeWorkspace.role`.
+> API wrappers + types added; EN/JA parity kept. Remaining: the `/invite/{token}` accept page + onboarding
+> join path.
+
 **Transport: header + cookie** (aligns with §4.1; no URL segment). `api.ts` funnels ~120 wrappers
 through one `requestJson` (`api.ts:17-43`) → inject the active workspace **once** there.
 

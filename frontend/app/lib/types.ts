@@ -526,6 +526,35 @@ export type MyWorkspaces = {
     activeWorkspaceId: number | null;
 };
 
+export type WorkspaceMember = {
+    id: number;
+    username: string;
+    displayName: string;
+    email: string;
+    role: WorkspaceRole;
+};
+
+export type WorkspaceInvite = {
+    id: number;
+    email: string;
+    role: WorkspaceRole;
+    status: string;
+    token: string;
+    invitedByLabel: string | null;
+    expiresAt: string;
+    createdAt: string;
+};
+
+export type InvitePreview = {
+    workspaceId: number;
+    workspaceName: string;
+    email: string;
+    role: WorkspaceRole;
+    invitedByLabel: string | null;
+    status: string;
+    valid: boolean;
+};
+
 export type AuditLogEntry = {
     id: number;
     action: string;
