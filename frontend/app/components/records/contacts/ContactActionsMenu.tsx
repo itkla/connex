@@ -6,7 +6,7 @@ import { useTranslations } from 'next-intl';
 import { LoaderCircle } from 'lucide-react';
 import { toastError, toastSuccess } from '@/app/lib/toast';
 import { EllipsisVerticalIcon, PencilSquareIcon, EyeIcon, PlusIcon, ChatBubbleLeftRightIcon, DocumentTextIcon, CheckCircleIcon, PaperClipIcon } from '@heroicons/react/24/outline';
-import { BuildingOffice2Icon, NoSymbolIcon, TrashIcon } from '@heroicons/react/24/outline';
+import { BuildingOffice2Icon, NoSymbolIcon, TrashIcon, ShareIcon } from '@heroicons/react/24/outline';
 
 import { useAttachmentUploader } from '@/app/components/attachments/useAttachmentUploader';
 
@@ -22,6 +22,8 @@ import { ButtonGroup } from '@/components/ui/button-group';
 
 import ChangeCompanyDialog from '@/app/components/records/contacts/ChangeCompanyDialog';
 import DeleteRecordDialog from '@/app/components/records/DeleteRecordDialog';
+import ShareDialog from '@/app/components/records/ShareDialog';
+import { useWorkspace } from '@/app/hooks/useWorkspace';
 import NewActivityDialog from '@/app/components/records/contacts/NewActivityDialog';
 import NewTaskDialog from '@/app/components/records/contacts/NewTaskDialog';
 import NewNoteDialog from '@/app/components/activity/notes/NoteDialog';
@@ -54,6 +56,9 @@ export default function ContactActionsMenu({
     const [activityOpen, setActivityOpen] = useState(false);
     const [taskOpen, setTaskOpen] = useState(false);
     const [noteOpen, setNoteOpen] = useState(false);
+    const [shareOpen, setShareOpen] = useState(false);
+    const { activeWorkspaceId } = useWorkspace();
+    const owned = contact.workspaceId == null || contact.workspaceId === activeWorkspaceId;
     const handleRemoveCompany = async () => {
         if (!contact.company) return;
         setRemovingCompany(true);
@@ -186,6 +191,17 @@ export default function ContactActionsMenu({
                                     <span>{t('removeFromCompanyNamed', { companyName: contact.company.name })}</span>
                                 </DropdownMenuItem>
                             ) : null}
+                            {owned && (
+                                <DropdownMenuItem
+                                    onSelect={(e) => {
+                                        e.preventDefault();
+                                        setShareOpen(true);
+                                    }}
+                                >
+                                    <ShareIcon className="size-4" />
+                                    <span>{t('share')}</span>
+                                </DropdownMenuItem>
+                            )}
                             <DropdownMenuSeparator />
                             <DropdownMenuItem
                                 variant="destructive"
@@ -254,6 +270,14 @@ export default function ContactActionsMenu({
                     getDisplayName={(c) => c.name}
                     isDeleting={isDeleting}
                     confirmDelete={confirmDelete}
+                />
+
+                <ShareDialog
+                    type="person"
+                    entityId={contact.id}
+                    entityName={contact.name}
+                    open={shareOpen}
+                    onOpenChange={setShareOpen}
                 />
             </div>
         </>

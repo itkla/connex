@@ -8,7 +8,7 @@ import { ButtonGroup } from '@/components/ui/button-group';
 import { toast } from 'sonner';
 import { toastError, toastInfo, toastSuccess } from '@/app/lib/toast';
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from '@/components/ui/dropdown-menu';
-import { PlusIcon, TrashIcon, PencilIcon, EllipsisVerticalIcon, EyeIcon } from '@heroicons/react/24/solid';
+import { PlusIcon, TrashIcon, PencilIcon, EllipsisVerticalIcon, EyeIcon, ShareIcon } from '@heroicons/react/24/solid';
 import {
     Squares2X2Icon,
 } from '@heroicons/react/24/outline';
@@ -17,6 +17,8 @@ import { useReducedMotion } from 'motion/react';
 import RecordsRenderView from '@/app/components/records/RecordsRenderView';
 import { SearchField, FilterBar, type FilterChipData } from '@/app/components/filters';
 import DeleteRecordDialog from '@/app/components/records/DeleteRecordDialog';
+import ShareDialog from '@/app/components/records/ShareDialog';
+import { useWorkspace } from '@/app/hooks/useWorkspace';
 import { useRecordsBrowser } from '@/app/hooks/useRecordsBrowser';
 import { type ColumnDef } from '@/app/components/records/types';
 import PipelineCard from '@/app/components/records/pipelines/PipelineCard';
@@ -99,6 +101,8 @@ export default function PipelinesBrowser({ pipelines }: { pipelines: Pipeline[] 
     });
 
     const [isDeleting, setIsDeleting] = useState(false);
+    const [shareOpen, setShareOpen] = useState(false);
+    const { activeWorkspaceId } = useWorkspace();
     const [editSheetOpen, setEditSheetOpen] = useState(false);
     const [drafts, setDrafts] = useState<Record<number, PipelineDraft>>({});
     const [isSaving, setIsSaving] = useState(false);
@@ -505,6 +509,13 @@ export default function PipelinesBrowser({ pipelines }: { pipelines: Pipeline[] 
                     </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent>
+                    {selectedPipelines.length === 1 &&
+                        (selectedPipelines[0].workspaceId == null || selectedPipelines[0].workspaceId === activeWorkspaceId) && (
+                            <DropdownMenuItem onSelect={(e) => { e.preventDefault(); setShareOpen(true); }}>
+                                <ShareIcon />
+                                {t('share')}
+                            </DropdownMenuItem>
+                        )}
                     <DropdownMenuItem variant="destructive" onSelect={(e) => { e.preventDefault(); setDeleteDialogOpen(true); }}>
                         <TrashIcon />
                         {t('delete')}
@@ -618,6 +629,16 @@ export default function PipelinesBrowser({ pipelines }: { pipelines: Pipeline[] 
                 isDeleting={isDeleting}
                 confirmDelete={confirmDelete}
             />
+
+            {selectedPipelines.length === 1 && (
+                <ShareDialog
+                    type="pipeline"
+                    entityId={selectedPipelines[0].id}
+                    entityName={selectedPipelines[0].name}
+                    open={shareOpen}
+                    onOpenChange={setShareOpen}
+                />
+            )}
         </div>
     );
 }

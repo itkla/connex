@@ -90,6 +90,7 @@
     "addActivity": "Add activity",
     "addNote": "Add note",
     "addTask": "Add task",
+    "share": "Share",
     "changeCompany": "Change company",
     "associateWithCompany": "Associate with company",
     "removeFromCompanyNamed": "Remove from {companyName}",

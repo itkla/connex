@@ -158,6 +158,7 @@ export type UpdateNotePayload = {
 
 export type Company = {
     id: number;
+    workspaceId?: number;
     name: string;
     website: string;
     industry: string;
@@ -219,6 +220,7 @@ export type UpdateCompanyPayload = {
 
 export type Contact = {
     id: number;
+    workspaceId?: number;
     name: string;
     email: string;
     phone: string;
@@ -288,6 +290,7 @@ export type UpdateDealPayload = {
 
 export type Pipeline = {
     id: number;
+    workspaceId?: number;
     name: string;
     createdAt: string;
     updatedAt: string;

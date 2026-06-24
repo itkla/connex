@@ -8,6 +8,7 @@
     "tableViewAriaLabel": "Table view",
     "selectedCount": "{count} selected",
     "quickEdit": "Quick edit",
+    "share": "Share",
     "delete": "Delete",
     "searchPlaceholder": "Search pipelines",
     "columnName": "Name",

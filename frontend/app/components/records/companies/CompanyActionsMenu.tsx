@@ -27,6 +27,7 @@ import NewDealDialog from '@/app/components/records/deals/NewDealDialog';
 import { createContact, createDeal, deleteCompany, getPipelines, getStagesByPipelineId, updateContact, isFieldError } from '@/app/lib/api';
 import { CreateContactPayload, type Company, type CreateDealPayload, type Pipeline, type Stage } from '@/app/lib/types';
 import { uploadContactPicture } from '@/app/lib/utils';
+import { useWorkspace } from '@/app/hooks/useWorkspace';
 
 export default function CompanyActionsMenu({
     company,
@@ -35,6 +36,8 @@ export default function CompanyActionsMenu({
 }) {
     const router = useRouter();
     const t = useTranslations('CompaniesActionsMenu');
+    const { activeWorkspaceId } = useWorkspace();
+    const owned = company.workspaceId == null || company.workspaceId === activeWorkspaceId;
     const { inputRef: attachmentInputRef, uploading: attachmentsUploading, openPicker: openAttachmentPicker, onFilesSelected: onAttachmentFilesSelected } = useAttachmentUploader('company', company.id);
     const [deleteOpen, setDeleteOpen] = useState(false);
     const [shareOpen, setShareOpen] = useState(false);
@@ -241,15 +244,17 @@ export default function CompanyActionsMenu({
                         </Button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end" className="w-48">
-                        <DropdownMenuItem
-                            onSelect={(e) => {
-                                e.preventDefault();
-                                setShareOpen(true);
-                            }}
-                        >
-                            <ShareIcon className="size-4" />
-                            <span>{t('share')}</span>
-                        </DropdownMenuItem>
+                        {owned && (
+                            <DropdownMenuItem
+                                onSelect={(e) => {
+                                    e.preventDefault();
+                                    setShareOpen(true);
+                                }}
+                            >
+                                <ShareIcon className="size-4" />
+                                <span>{t('share')}</span>
+                            </DropdownMenuItem>
+                        )}
                         <DropdownMenuItem
                             variant="destructive"
                             onSelect={(e) => {

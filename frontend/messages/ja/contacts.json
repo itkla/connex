@@ -90,6 +90,7 @@
     "addActivity": "アクティビティを追加",
     "addNote": "メモを追加",
     "addTask": "タスクを追加",
+    "share": "共有",
     "changeCompany": "会社を変更",
     "associateWithCompany": "会社に関連付け",
     "removeFromCompanyNamed": "{companyName} から削除",
