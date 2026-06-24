@@ -22,7 +22,6 @@ import ooo.klae.connex.backend.notifications.NotificationProperties;
 @ExtendWith(MockitoExtension.class)
 class NotificationServiceTest {
     @Mock private NotificationMapper notificationMapper;
-    @Mock private WorkspaceService workspaceService;
     @Mock private AuthService authService;
 
     private NotificationService service;
@@ -31,50 +30,44 @@ class NotificationServiceTest {
     void setUp() {
         NotificationProperties properties = new NotificationProperties();
         properties.setMaxPageSize(100);
-        service = new NotificationService(
-            notificationMapper,
-            workspaceService,
-            authService,
-            properties
-        );
+        service = new NotificationService(notificationMapper, authService, properties);
         User user = new User();
         user.setId(42);
-        when(workspaceService.getCurrentWorkspaceId()).thenReturn(7);
         when(authService.getCurrentUser()).thenReturn(user);
     }
 
     @Test
-    void pageUsesOffsetPaginationAndRecipientWorkspaceScope() {
-        when(notificationMapper.findPage(7, 42, "unread", "task", "deal", 55, 20, 40))
+    void pageUsesOffsetPaginationScopedToTheRecipientAcrossWorkspaces() {
+        when(notificationMapper.findPage(42, "unread", "task", "deal", 55, 20, 40))
             .thenReturn(List.of());
-        when(notificationMapper.countPage(7, 42, "unread", "task", "deal", 55))
+        when(notificationMapper.countPage(42, "unread", "task", "deal", 55))
             .thenReturn(0L);
 
         service.getPage("unread", "task", "deal", 55, 3, 20);
 
-        verify(notificationMapper).findPage(7, 42, "unread", "task", "deal", 55, 20, 40);
-        verify(notificationMapper).countPage(7, 42, "unread", "task", "deal", 55);
+        verify(notificationMapper).findPage(42, "unread", "task", "deal", 55, 20, 40);
+        verify(notificationMapper).countPage(42, "unread", "task", "deal", 55);
     }
 
     @Test
     void zeroRowMutationIsNotFoundAfterScopedRead() {
         Notification current = new Notification();
         current.setId(99);
-        when(notificationMapper.findById(7, 42, 99)).thenReturn(current);
-        when(notificationMapper.markRead(7, 42, 99)).thenReturn(0);
+        when(notificationMapper.findById(42, 99)).thenReturn(current);
+        when(notificationMapper.markRead(42, 99)).thenReturn(0);
 
         assertThrows(ResourceNotFoundException.class, () -> service.markRead(99));
 
-        verify(notificationMapper).findById(7, 42, 99);
-        verify(notificationMapper).markRead(7, 42, 99);
+        verify(notificationMapper).findById(42, 99);
+        verify(notificationMapper).markRead(42, 99);
     }
 
     @Test
     void mutationCannotCrossRecipientScope() {
-        when(notificationMapper.findById(7, 42, 99)).thenReturn(null);
+        when(notificationMapper.findById(42, 99)).thenReturn(null);
 
         assertThrows(ResourceNotFoundException.class, () -> service.markRead(99));
 
-        verify(notificationMapper, never()).markRead(7, 42, 99);
+        verify(notificationMapper, never()).markRead(42, 99);
     }
 }

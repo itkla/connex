@@ -13,6 +13,7 @@ import lombok.NoArgsConstructor;
 public class Notification {
     private int id;
     private int workspaceId;
+    private String workspaceName;
     private int recipientId;
     private String type;
     private String category;

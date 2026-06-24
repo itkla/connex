@@ -14,7 +14,6 @@ import ooo.klae.connex.backend.dto.NotificationCountsDto;
  */
 public interface NotificationMapper {
     List<Notification> findPage(
-        @Param("workspaceId") int workspaceId,
         @Param("recipientId") int recipientId,
         @Param("state") String state,
         @Param("category") String category,
@@ -25,7 +24,6 @@ public interface NotificationMapper {
     );
 
     long countPage(
-        @Param("workspaceId") int workspaceId,
         @Param("recipientId") int recipientId,
         @Param("state") String state,
         @Param("category") String category,
@@ -33,45 +31,34 @@ public interface NotificationMapper {
         @Param("contextId") Integer contextId
     );
 
-    NotificationCountsDto getUnreadCounts(
-        @Param("workspaceId") int workspaceId,
-        @Param("recipientId") int recipientId
-    );
+    NotificationCountsDto getUnreadCounts(@Param("recipientId") int recipientId);
 
     Notification findById(
-        @Param("workspaceId") int workspaceId,
         @Param("recipientId") int recipientId,
         @Param("id") int id
     );
 
     int markRead(
-        @Param("workspaceId") int workspaceId,
         @Param("recipientId") int recipientId,
         @Param("id") int id
     );
 
     int markUnread(
-        @Param("workspaceId") int workspaceId,
         @Param("recipientId") int recipientId,
         @Param("id") int id
     );
 
     int dismiss(
-        @Param("workspaceId") int workspaceId,
         @Param("recipientId") int recipientId,
         @Param("id") int id
     );
 
     int restore(
-        @Param("workspaceId") int workspaceId,
         @Param("recipientId") int recipientId,
         @Param("id") int id
     );
 
-    int markAllRead(
-        @Param("workspaceId") int workspaceId,
-        @Param("recipientId") int recipientId
-    );
+    int markAllRead(@Param("recipientId") int recipientId);
 
     int upsert(Notification notification);
 

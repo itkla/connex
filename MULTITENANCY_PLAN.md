@@ -75,6 +75,12 @@ The inbox/bell is **recipient-scoped across every workspace the user belongs to*
 nothing is missed while viewing another workspace; each notification is labeled with its source
 workspace. Delivery prefs stay per-user-global. (The reminder *generation* jobs still run per-workspace.)
 
+> **✅ Implemented (2026-06-24):** inbox reads/mutations are recipient-scoped across all memberships
+> (`inboxScope`, no `workspace_id` filter); `findPage`/`findById` join `workspace` for a `workspace_name`
+> label surfaced on `NotificationDto`. Reconciliation/reminder queries are untouched (still per-workspace,
+> off-thread). Frontend shows the workspace chip in the bell + inbox and drops the active-workspace poller
+> dependency.
+
 ### 0.4 Data-layer enforcement is primary (issue #89)
 
 Per #89, scoping is enforced **in the data layer via a mandatory MyBatis interceptor**, not by trusting

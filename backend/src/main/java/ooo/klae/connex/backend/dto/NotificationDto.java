@@ -13,6 +13,8 @@ import ooo.klae.connex.backend.beans.Notification;
 @NoArgsConstructor
 public class NotificationDto {
     private int id;
+    private int workspaceId;
+    private String workspaceName;
     private String type;
     private String category;
     private String severity;
@@ -44,6 +46,8 @@ public class NotificationDto {
     public static NotificationDto from(Notification notification) {
         NotificationDto dto = new NotificationDto();
         dto.setId(notification.getId());
+        dto.setWorkspaceId(notification.getWorkspaceId());
+        dto.setWorkspaceName(notification.getWorkspaceName());
         dto.setType(notification.getType());
         dto.setCategory(notification.getCategory());
         dto.setSeverity(notification.getSeverity());

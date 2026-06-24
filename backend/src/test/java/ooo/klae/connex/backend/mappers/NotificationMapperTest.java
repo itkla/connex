@@ -22,6 +22,7 @@ import ooo.klae.connex.backend.beans.Stage;
 import ooo.klae.connex.backend.beans.Task;
 import ooo.klae.connex.backend.beans.TaskReminderCandidate;
 import ooo.klae.connex.backend.beans.User;
+import ooo.klae.connex.backend.beans.Workspace;
 
 class NotificationMapperTest extends AbstractMapperTest {
     @Autowired private NotificationMapper notificationMapper;
@@ -34,8 +35,8 @@ class NotificationMapperTest extends AbstractMapperTest {
         notificationMapper.upsert(notification);
 
         Notification stored = onlyReminder(recipient);
-        assertEquals(1, notificationMapper.markRead(workspace.getId(), recipient.getId(), stored.getId()));
-        assertEquals(1, notificationMapper.dismiss(workspace.getId(), recipient.getId(), stored.getId()));
+        assertEquals(1, notificationMapper.markRead(recipient.getId(), stored.getId()));
+        assertEquals(1, notificationMapper.dismiss(recipient.getId(), stored.getId()));
 
         notification.setTitle("Refreshed snapshot");
         notification.setTriggeredAt("2026-06-24 00:00:00");
@@ -84,10 +85,10 @@ class NotificationMapperTest extends AbstractMapperTest {
 
         assertEquals(
             0,
-            notificationMapper.markRead(workspace.getId(), otherRecipient.getId(), stored.getId())
+            notificationMapper.markRead(otherRecipient.getId(), stored.getId())
         );
         assertNull(
-            notificationMapper.findById(workspace.getId(), otherRecipient.getId(), stored.getId())
+            notificationMapper.findById(otherRecipient.getId(), stored.getId())
         );
     }
 
@@ -140,11 +141,7 @@ class NotificationMapperTest extends AbstractMapperTest {
         Notification dismissed = reminder(recipient, "warning", "2026-01-01 00:00:00");
         notificationMapper.upsert(dismissed);
         Notification storedDismissed = onlyReminder(recipient);
-        notificationMapper.dismiss(
-            workspace.getId(),
-            recipient.getId(),
-            storedDismissed.getId()
-        );
+        notificationMapper.dismiss(recipient.getId(), storedDismissed.getId());
 
         Notification resolved = reminder(recipient, "warning", "2026-01-01 00:00:00");
         resolved.setSourceId(92);
@@ -192,17 +189,44 @@ class NotificationMapperTest extends AbstractMapperTest {
         notificationMapper.upsert(reminder(recipient, "warning", "2026-06-23 00:00:00"));
         Notification stored = onlyReminder(recipient);
 
-        notificationMapper.markRead(workspace.getId(), recipient.getId(), stored.getId());
-        notificationMapper.dismiss(workspace.getId(), recipient.getId(), stored.getId());
+        notificationMapper.markRead(recipient.getId(), stored.getId());
+        notificationMapper.dismiss(recipient.getId(), stored.getId());
 
-        assertEquals(1, notificationMapper.restore(workspace.getId(), recipient.getId(), stored.getId()));
+        assertEquals(1, notificationMapper.restore(recipient.getId(), stored.getId()));
 
         Notification restored = onlyReminder(recipient);
         assertNull(restored.getReadAt());
         assertNull(restored.getDismissedAt());
         assertNull(restored.getResolvedAt());
 
-        assertEquals(0, notificationMapper.restore(workspace.getId(), recipient.getId(), stored.getId()));
+        assertEquals(0, notificationMapper.restore(recipient.getId(), stored.getId()));
+    }
+
+    @Test
+    void inboxSpansEveryWorkspaceTheRecipientBelongsTo() {
+        User recipient = newUser();
+        Workspace second = new Workspace();
+        second.setName("Second WS");
+        second.setSlug("second-" + unique());
+        workspaceMapper.insert(second);
+        workspaceMapper.addMember(second.getId(), recipient.getId(), "member");
+
+        notificationMapper.upsert(reminder(recipient, "warning", "2026-06-23 00:00:00"));
+        Notification other = reminder(recipient, "warning", "2026-06-24 00:00:00");
+        other.setWorkspaceId(second.getId());
+        other.setSourceId(777);
+        other.setDedupeKey("task.due:777");
+        notificationMapper.upsert(other);
+
+        List<Notification> page = notificationMapper.findPage(
+            recipient.getId(), "active", null, null, null, 50, 0);
+
+        Set<Integer> workspaceIds = page.stream()
+            .map(Notification::getWorkspaceId)
+            .collect(Collectors.toSet());
+        assertTrue(workspaceIds.contains(workspace.getId()));
+        assertTrue(workspaceIds.contains(second.getId()));
+        assertTrue(page.stream().allMatch(n -> n.getWorkspaceName() != null));
     }
 
     private Notification onlyReminder(User recipient) {

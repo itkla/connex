@@ -8,7 +8,6 @@ import org.springframework.stereotype.Service;
 
 import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.beans.Notification;
-import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.dto.NotificationCountsDto;
 import ooo.klae.connex.backend.dto.NotificationDto;
 import ooo.klae.connex.backend.dto.PageResponse;
@@ -26,7 +25,6 @@ public class NotificationService {
     private static final Set<String> STATES = Set.of("active", "unread", "history", "all");
 
     private final NotificationMapper notificationMapper;
-    private final WorkspaceService workspaceService;
     private final AuthService authService;
     private final NotificationProperties properties;
 
@@ -38,7 +36,7 @@ public class NotificationService {
         int page,
         int size
     ) {
-        Scope scope = currentScope();
+        int recipientId = currentRecipientId();
         String normalizedState = normalizeState(state);
         String normalizedCategory = blankToNull(category);
         String normalizedContextType = blankToNull(contextType);
@@ -51,8 +49,7 @@ public class NotificationService {
         }
         int offset = (int) offsetValue;
         List<NotificationDto> items = notificationMapper.findPage(
-            scope.workspaceId(),
-            scope.recipientId(),
+            recipientId,
             normalizedState,
             normalizedCategory,
             normalizedContextType,
@@ -61,8 +58,7 @@ public class NotificationService {
             offset
         ).stream().map(NotificationDto::from).toList();
         long total = notificationMapper.countPage(
-            scope.workspaceId(),
-            scope.recipientId(),
+            recipientId,
             normalizedState,
             normalizedCategory,
             normalizedContextType,
@@ -72,64 +68,61 @@ public class NotificationService {
     }
 
     public NotificationCountsDto getUnreadCounts() {
-        Scope scope = currentScope();
-        return notificationMapper.getUnreadCounts(scope.workspaceId(), scope.recipientId());
+        return notificationMapper.getUnreadCounts(currentRecipientId());
     }
 
     public NotificationDto markRead(int id) {
-        Scope scope = currentScope();
-        Notification current = requireNotification(scope, id);
+        int recipientId = currentRecipientId();
+        Notification current = requireNotification(recipientId, id);
         if (current.getReadAt() != null) {
             return NotificationDto.from(current);
         }
-        requireMutation(notificationMapper.markRead(scope.workspaceId(), scope.recipientId(), id), id);
-        return NotificationDto.from(requireNotification(scope, id));
+        requireMutation(notificationMapper.markRead(recipientId, id), id);
+        return NotificationDto.from(requireNotification(recipientId, id));
     }
 
     public NotificationDto markUnread(int id) {
-        Scope scope = currentScope();
-        Notification current = requireNotification(scope, id);
+        int recipientId = currentRecipientId();
+        Notification current = requireNotification(recipientId, id);
         if (current.getReadAt() == null) {
             return NotificationDto.from(current);
         }
-        requireMutation(notificationMapper.markUnread(scope.workspaceId(), scope.recipientId(), id), id);
-        return NotificationDto.from(requireNotification(scope, id));
+        requireMutation(notificationMapper.markUnread(recipientId, id), id);
+        return NotificationDto.from(requireNotification(recipientId, id));
     }
 
     public NotificationDto dismiss(int id) {
-        Scope scope = currentScope();
-        Notification current = requireNotification(scope, id);
+        int recipientId = currentRecipientId();
+        Notification current = requireNotification(recipientId, id);
         if (current.getDismissedAt() != null || current.getResolvedAt() != null) {
             return NotificationDto.from(current);
         }
-        requireMutation(notificationMapper.dismiss(scope.workspaceId(), scope.recipientId(), id), id);
-        return NotificationDto.from(requireNotification(scope, id));
+        requireMutation(notificationMapper.dismiss(recipientId, id), id);
+        return NotificationDto.from(requireNotification(recipientId, id));
     }
 
     public NotificationDto restore(int id) {
-        Scope scope = currentScope();
-        Notification current = requireNotification(scope, id);
+        int recipientId = currentRecipientId();
+        Notification current = requireNotification(recipientId, id);
         if (current.getDismissedAt() == null && current.getResolvedAt() == null) {
             return NotificationDto.from(current);
         }
-        requireMutation(notificationMapper.restore(scope.workspaceId(), scope.recipientId(), id), id);
-        return NotificationDto.from(requireNotification(scope, id));
+        requireMutation(notificationMapper.restore(recipientId, id), id);
+        return NotificationDto.from(requireNotification(recipientId, id));
     }
 
     public NotificationCountsDto markAllRead() {
-        Scope scope = currentScope();
-        notificationMapper.markAllRead(scope.workspaceId(), scope.recipientId());
-        return notificationMapper.getUnreadCounts(scope.workspaceId(), scope.recipientId());
+        int recipientId = currentRecipientId();
+        notificationMapper.markAllRead(recipientId);
+        return notificationMapper.getUnreadCounts(recipientId);
     }
 
-    private Scope currentScope() {
-        int workspaceId = workspaceService.getCurrentWorkspaceId();
-        User user = authService.getCurrentUser();
-        return new Scope(workspaceId, user.getId());
+    private int currentRecipientId() {
+        return authService.getCurrentUser().getId();
     }
 
-    private Notification requireNotification(Scope scope, int id) {
-        Notification notification = notificationMapper.findById(scope.workspaceId(), scope.recipientId(), id);
+    private Notification requireNotification(int recipientId, int id) {
+        Notification notification = notificationMapper.findById(recipientId, id);
         if (notification == null) {
             throw notFound(id);
         }
@@ -164,6 +157,4 @@ public class NotificationService {
     private static String blankToNull(String value) {
         return value == null || value.isBlank() ? null : value.trim();
     }
-
-    private record Scope(int workspaceId, int recipientId) {}
 }

@@ -402,6 +402,8 @@ export type NotificationState = 'active' | 'unread' | 'history' | 'all';
 
 export type Notification = {
     id: number;
+    workspaceId?: number;
+    workspaceName?: string | null;
     type: string;
     category: string;
     severity: 'info' | 'warning' | 'critical' | string;

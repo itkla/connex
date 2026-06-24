@@ -187,8 +187,13 @@ export default function NotificationBell() {
                                                 {!item.readAt ? <span className={cn("size-1.5 shrink-0 rounded-full", style.dot)} /> : null}
                                             </div>
                                             <p className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">{content.body}</p>
-                                            <p className="mt-1 text-[11px] text-muted-foreground">
+                                            <p className="mt-1 flex items-center gap-1.5 text-[11px] text-muted-foreground">
                                                 {formatRelativeTime(item.triggeredAt, locale)}
+                                                {item.workspaceName ? (
+                                                    <span className="rounded-full bg-muted px-1.5 py-0.5 font-medium">
+                                                        {item.workspaceName}
+                                                    </span>
+                                                ) : null}
                                             </p>
                                         </div>
                                     </DropdownMenu.Item>

@@ -228,6 +228,11 @@ export default function NotificationsInbox() {
                                             <span className="text-xs text-muted-foreground">
                                                 {formatRelativeTime(item.triggeredAt, locale)}
                                             </span>
+                                            {item.workspaceName ? (
+                                                <span className="rounded-full bg-muted px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground">
+                                                    {item.workspaceName}
+                                                </span>
+                                            ) : null}
                                         </div>
                                         {content.body ? <p className="mt-1 text-sm text-muted-foreground">{content.body}</p> : null}
                                     </button>

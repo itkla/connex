@@ -6,6 +6,7 @@
   <resultMap id="NotificationResult" type="Notification">
     <id property="id" column="id"/>
     <result property="workspaceId" column="workspace_id"/>
+    <result property="workspaceName" column="workspace_name"/>
     <result property="recipientId" column="recipient_id"/>
     <result property="type" column="type"/>
     <result property="category" column="category"/>
@@ -67,6 +68,13 @@
     AND n.recipient_id = #{recipientId}
   </sql>
 
+  <!-- The inbox/bell is recipient-scoped across every workspace the user belongs to (not the active
+       one), so nothing is missed while viewing another workspace. Each row is labeled with its source
+       workspace. Member removal cascades a member's notifications, so rows always map to live memberships. -->
+  <sql id="inboxScope">
+    n.recipient_id = #{recipientId}
+  </sql>
+
   <sql id="inboxFilters">
     <choose>
       <when test="state == 'active'">
@@ -88,9 +96,10 @@
   </sql>
 
   <select id="findPage" resultMap="NotificationResult">
-    SELECT <include refid="notificationColumns"/>
+    SELECT <include refid="notificationColumns"/>, w.name AS workspace_name
     FROM notification n
-    WHERE <include refid="recipientScope"/>
+    JOIN workspace w ON w.id = n.workspace_id
+    WHERE <include refid="inboxScope"/>
     <include refid="inboxFilters"/>
     ORDER BY n.triggered_at DESC, n.id DESC
     LIMIT #{limit} OFFSET #{offset}
@@ -99,7 +108,7 @@
   <select id="countPage" resultType="long">
     SELECT COUNT(*)
     FROM notification n
-    WHERE <include refid="recipientScope"/>
+    WHERE <include refid="inboxScope"/>
     <include refid="inboxFilters"/>
   </select>
 
@@ -107,24 +116,24 @@
           resultType="ooo.klae.connex.backend.dto.NotificationCountsDto">
     SELECT COUNT(*) AS unread
     FROM notification n
-    WHERE <include refid="recipientScope"/>
+    WHERE <include refid="inboxScope"/>
       AND n.dismissed_at IS NULL
       AND n.resolved_at IS NULL
       AND n.read_at IS NULL
   </select>
 
   <select id="findById" resultMap="NotificationResult">
-    SELECT <include refid="notificationColumns"/>
+    SELECT <include refid="notificationColumns"/>, w.name AS workspace_name
     FROM notification n
-    WHERE <include refid="recipientScope"/>
+    JOIN workspace w ON w.id = n.workspace_id
+    WHERE <include refid="inboxScope"/>
       AND n.id = #{id}
   </select>
 
   <update id="markRead">
     UPDATE notification
     SET read_at = CURRENT_TIMESTAMP
-    WHERE workspace_id = #{workspaceId}
-      AND recipient_id = #{recipientId}
+    WHERE recipient_id = #{recipientId}
       AND id = #{id}
       AND read_at IS NULL
   </update>
@@ -132,8 +141,7 @@
   <update id="markUnread">
     UPDATE notification
     SET read_at = NULL
-    WHERE workspace_id = #{workspaceId}
-      AND recipient_id = #{recipientId}
+    WHERE recipient_id = #{recipientId}
       AND id = #{id}
       AND read_at IS NOT NULL
   </update>
@@ -141,8 +149,7 @@
   <update id="dismiss">
     UPDATE notification
     SET dismissed_at = CURRENT_TIMESTAMP
-    WHERE workspace_id = #{workspaceId}
-      AND recipient_id = #{recipientId}
+    WHERE recipient_id = #{recipientId}
       AND id = #{id}
       AND dismissed_at IS NULL
       AND resolved_at IS NULL
@@ -151,8 +158,7 @@
   <update id="restore">
     UPDATE notification
     SET dismissed_at = NULL, resolved_at = NULL, read_at = NULL
-    WHERE workspace_id = #{workspaceId}
-      AND recipient_id = #{recipientId}
+    WHERE recipient_id = #{recipientId}
       AND id = #{id}
       AND (dismissed_at IS NOT NULL OR resolved_at IS NOT NULL)
   </update>
@@ -160,8 +166,7 @@
   <update id="markAllRead">
     UPDATE notification
     SET read_at = CURRENT_TIMESTAMP
-    WHERE workspace_id = #{workspaceId}
-      AND recipient_id = #{recipientId}
+    WHERE recipient_id = #{recipientId}
       AND dismissed_at IS NULL
       AND resolved_at IS NULL
       AND read_at IS NULL
