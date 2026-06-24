@@ -49,6 +49,7 @@
   },
   "WorkspaceSettings": {
     "title": "Settings",
+    "subtitle": "Manage who can access this workspace and what they can do.",
     "tabMembers": "Members",
     "tabRoles": "Roles"
   },
@@ -60,6 +61,8 @@
     "roleAdmin": "Admin",
     "roleMember": "Member",
     "you": "You",
+    "pending": "Pending",
+    "memberEntityLabel": "member",
     "remove": "Remove",
     "removeConfirm": "Confirm",
     "cancel": "Cancel",

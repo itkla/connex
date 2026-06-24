@@ -49,6 +49,7 @@
   },
   "WorkspaceSettings": {
     "title": "設定",
+    "subtitle": "このワークスペースにアクセスできる人と、その権限を管理します。",
     "tabMembers": "メンバー",
     "tabRoles": "ロール"
   },
@@ -60,6 +61,8 @@
     "roleAdmin": "管理者",
     "roleMember": "メンバー",
     "you": "あなた",
+    "pending": "保留中",
+    "memberEntityLabel": "メンバー",
     "remove": "削除",
     "removeConfirm": "確認",
     "cancel": "キャンセル",

@@ -3,12 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useTranslations } from "next-intl";
 import { Loader2Icon } from "lucide-react";
-import {
-    EnvelopeIcon,
-    LinkIcon,
-    TrashIcon,
-    XMarkIcon,
-} from "@heroicons/react/24/outline";
+import { EnvelopeIcon, LinkIcon, TrashIcon } from "@heroicons/react/24/outline";
 
 import type { CustomRole, WorkspaceInvite, WorkspaceMember, WorkspaceRole } from "@/app/lib/types";
 import {
@@ -26,15 +21,22 @@ import { useFieldErrors } from "@/app/hooks/useFieldErrors";
 import { toastError, toastSuccess } from "@/app/lib/toast";
 import { fieldErrorClass, fieldInputClass } from "@/components/ui/dialog-status-cover";
 import { Button } from "@/components/ui/button";
+import DeleteRecordDialog from "@/app/components/records/DeleteRecordDialog";
 import { cn } from "@/lib/utils";
 
 const ASSIGNABLE: WorkspaceRole[] = ["member", "admin"];
+
+function SectionLabel({ children }: { children: React.ReactNode }) {
+    return (
+        <h2 className="text-xs font-medium tracking-[0.12em] text-muted-foreground uppercase">{children}</h2>
+    );
+}
 
 function MemberAvatar({ name }: { name: string }) {
     return (
         <span
             aria-hidden
-            className="grid size-9 shrink-0 place-items-center rounded-lg bg-muted text-sm font-medium text-muted-foreground"
+            className="grid size-9 shrink-0 place-items-center rounded-lg bg-background text-sm font-medium text-muted-foreground ring-1 ring-border"
         >
             {name.trim().charAt(0).toUpperCase() || "?"}
         </span>
@@ -48,7 +50,7 @@ function RoleBadge({ role, label }: { role: string; label: string }) {
                 "inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium",
                 role === "owner"
                     ? "bg-brand-light text-brand-dark"
-                    : "bg-muted text-muted-foreground ring-1 ring-border",
+                    : "bg-background text-muted-foreground ring-1 ring-border",
             )}
         >
             {label}
@@ -75,7 +77,8 @@ export default function MembersPanel({ currentUserId }: { currentUserId: number 
     const { fieldErrors, reset: resetFieldErrors, clearError, captureFieldErrors } = useFieldErrors();
 
     const [busyMemberId, setBusyMemberId] = useState<number | null>(null);
-    const [confirmRemoveId, setConfirmRemoveId] = useState<number | null>(null);
+    const [removeTarget, setRemoveTarget] = useState<WorkspaceMember | null>(null);
+    const [isRemoving, setIsRemoving] = useState(false);
     const [busyInviteId, setBusyInviteId] = useState<number | null>(null);
 
     const roleLabel = useCallback(
@@ -140,18 +143,18 @@ export default function MembersPanel({ currentUserId }: { currentUserId: number 
         }
     };
 
-    const remove = async (userId: number) => {
-        if (!workspaceId) return;
-        setBusyMemberId(userId);
+    const confirmRemove = async () => {
+        if (!workspaceId || !removeTarget) return;
+        setIsRemoving(true);
         try {
-            await removeWorkspaceMember(workspaceId, userId);
-            setMembers((prev) => prev.filter((m) => m.id !== userId));
+            await removeWorkspaceMember(workspaceId, removeTarget.id);
+            setMembers((prev) => prev.filter((m) => m.id !== removeTarget.id));
             toastSuccess(t("removed"));
+            setRemoveTarget(null);
         } catch (err) {
             toastError(err instanceof Error ? err.message : t("removeFailed"));
         } finally {
-            setBusyMemberId(null);
-            setConfirmRemoveId(null);
+            setIsRemoving(false);
         }
     };
 
@@ -205,25 +208,22 @@ export default function MembersPanel({ currentUserId }: { currentUserId: number 
 
     return (
         <div className="space-y-10">
-            <section>
-                <header className="mb-4">
-                    <h2 className="text-lg font-semibold tracking-tight text-foreground">{t("title")}</h2>
-                    <p className="text-sm text-muted-foreground">
-                        {t("subtitle", { workspace: activeWorkspace?.name ?? "" })}
-                    </p>
-                </header>
+            <section className="space-y-3">
+                <div className="flex items-baseline justify-between">
+                    <SectionLabel>{t("title")}</SectionLabel>
+                    <span className="text-xs text-muted-foreground">{t("count", { count: members.length })}</span>
+                </div>
 
                 {loading ? (
                     <MemberSkeleton />
                 ) : members.length === 0 ? (
-                    <p className="rounded-lg border border-border bg-card px-4 py-8 text-center text-sm text-muted-foreground">
-                        {t("membersEmpty")}
-                    </p>
+                    <EmptyCard>{t("membersEmpty")}</EmptyCard>
                 ) : (
-                    <ul className="divide-y divide-border overflow-hidden rounded-lg border border-border bg-card">
+                    <ul className="divide-y divide-border overflow-hidden rounded-2xl bg-muted ring-1 ring-border">
                         {members.map((member) => {
                             const isSelf = member.id === currentUserId;
                             const busy = busyMemberId === member.id;
+                            const pending = member.status === "pending";
                             return (
                                 <li key={member.id} className="flex items-center gap-3 px-4 py-3">
                                     <MemberAvatar name={member.displayName} />
@@ -233,8 +233,13 @@ export default function MembersPanel({ currentUserId }: { currentUserId: number 
                                                 {member.displayName}
                                             </span>
                                             {isSelf && (
-                                                <span className="rounded-full bg-muted px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground">
+                                                <span className="rounded-full bg-background px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground ring-1 ring-border">
                                                     {t("you")}
+                                                </span>
+                                            )}
+                                            {pending && (
+                                                <span className="rounded-full bg-amber-500/10 px-1.5 py-0.5 text-[11px] font-medium text-amber-600 dark:text-amber-400">
+                                                    {t("pending")}
                                                 </span>
                                             )}
                                         </div>
@@ -253,7 +258,7 @@ export default function MembersPanel({ currentUserId }: { currentUserId: number 
                                             aria-label={t("roleLabel")}
                                             className={cn(
                                                 fieldInputClass,
-                                                "w-auto cursor-pointer px-2 py-1 text-xs disabled:opacity-50",
+                                                "w-auto cursor-pointer bg-background px-2 py-1 text-xs disabled:opacity-50",
                                             )}
                                         >
                                             {selectableRoles.map((r) => (
@@ -276,42 +281,14 @@ export default function MembersPanel({ currentUserId }: { currentUserId: number 
                                     )}
 
                                     {isAdmin && !isSelf && (
-                                        <div className="w-24 shrink-0 text-right">
-                                            {confirmRemoveId === member.id ? (
-                                                <div className="inline-flex items-center gap-1">
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => remove(member.id)}
-                                                        disabled={busy}
-                                                        className="rounded-md bg-destructive px-2 py-1 text-xs font-medium text-white transition hover:opacity-90 disabled:opacity-50"
-                                                    >
-                                                        {busy ? (
-                                                            <Loader2Icon className="size-3.5 animate-spin" />
-                                                        ) : (
-                                                            t("removeConfirm")
-                                                        )}
-                                                    </button>
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => setConfirmRemoveId(null)}
-                                                        disabled={busy}
-                                                        aria-label={t("cancel")}
-                                                        className="rounded-md p-1 text-muted-foreground transition hover:bg-muted hover:text-foreground"
-                                                    >
-                                                        <XMarkIcon className="size-4" />
-                                                    </button>
-                                                </div>
-                                            ) : (
-                                                <button
-                                                    type="button"
-                                                    onClick={() => setConfirmRemoveId(member.id)}
-                                                    aria-label={t("remove")}
-                                                    className="rounded-md p-1.5 text-muted-foreground transition hover:bg-destructive/10 hover:text-destructive"
-                                                >
-                                                    <TrashIcon className="size-4" />
-                                                </button>
-                                            )}
-                                        </div>
+                                        <button
+                                            type="button"
+                                            onClick={() => setRemoveTarget(member)}
+                                            aria-label={t("remove")}
+                                            className="rounded-md p-1.5 text-muted-foreground transition hover:bg-destructive/10 hover:text-destructive"
+                                        >
+                                            <TrashIcon className="size-4" />
+                                        </button>
                                     )}
                                 </li>
                             );
@@ -321,11 +298,9 @@ export default function MembersPanel({ currentUserId }: { currentUserId: number 
             </section>
 
             {isAdmin && (
-                <section>
-                    <header className="mb-4">
-                        <h2 className="text-lg font-semibold tracking-tight text-foreground">{t("inviteTitle")}</h2>
-                        <p className="text-sm text-muted-foreground">{t("inviteSubtitle")}</p>
-                    </header>
+                <section className="space-y-3">
+                    <SectionLabel>{t("inviteTitle")}</SectionLabel>
+                    <p className="text-sm text-muted-foreground">{t("inviteSubtitle")}</p>
 
                     <form
                         onSubmit={(e) => {
@@ -375,14 +350,12 @@ export default function MembersPanel({ currentUserId }: { currentUserId: number 
                         </Button>
                     </form>
 
-                    <div className="mt-6">
+                    <div className="pt-2">
                         <h3 className="mb-2 text-sm font-medium text-foreground">{t("pendingTitle")}</h3>
                         {invites.length === 0 ? (
-                            <p className="rounded-lg border border-dashed border-border px-4 py-6 text-center text-sm text-muted-foreground">
-                                {t("pendingEmpty")}
-                            </p>
+                            <EmptyCard dashed>{t("pendingEmpty")}</EmptyCard>
                         ) : (
-                            <ul className="divide-y divide-border overflow-hidden rounded-lg border border-border bg-card">
+                            <ul className="divide-y divide-border overflow-hidden rounded-2xl bg-muted ring-1 ring-border">
                                 {invites.map((invite) => (
                                     <li key={invite.id} className="flex items-center gap-3 px-4 py-3">
                                         <div className="min-w-0 flex-1">
@@ -399,7 +372,7 @@ export default function MembersPanel({ currentUserId }: { currentUserId: number 
                                         <button
                                             type="button"
                                             onClick={() => copyInviteLink(invite.token)}
-                                            className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium text-muted-foreground transition hover:bg-muted hover:text-foreground"
+                                            className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium text-muted-foreground transition hover:bg-background hover:text-foreground"
                                         >
                                             <LinkIcon className="size-3.5" />
                                             {t("copyLink")}
@@ -423,21 +396,47 @@ export default function MembersPanel({ currentUserId }: { currentUserId: number 
                     </div>
                 </section>
             )}
+
+            <DeleteRecordDialog
+                open={removeTarget !== null}
+                onOpenChange={(open) => {
+                    if (!open) setRemoveTarget(null);
+                }}
+                selectedIds={new Set(removeTarget ? [removeTarget.id] : [])}
+                selectedItems={removeTarget ? [removeTarget] : []}
+                entityLabel={t("memberEntityLabel")}
+                getDisplayName={(m) => m.displayName}
+                isDeleting={isRemoving}
+                confirmDelete={confirmRemove}
+            />
         </div>
+    );
+}
+
+function EmptyCard({ children, dashed = false }: { children: React.ReactNode; dashed?: boolean }) {
+    return (
+        <p
+            className={cn(
+                "rounded-2xl px-4 py-8 text-center text-sm text-muted-foreground",
+                dashed ? "border border-dashed border-border" : "bg-muted ring-1 ring-border",
+            )}
+        >
+            {children}
+        </p>
     );
 }
 
 function MemberSkeleton() {
     return (
-        <ul className="divide-y divide-border overflow-hidden rounded-lg border border-border bg-card">
+        <ul className="divide-y divide-border overflow-hidden rounded-2xl bg-muted ring-1 ring-border">
             {[0, 1, 2].map((i) => (
                 <li key={i} className="flex items-center gap-3 px-4 py-3">
-                    <span className="size-9 shrink-0 animate-pulse rounded-lg bg-muted" />
+                    <span className="size-9 shrink-0 animate-pulse rounded-lg bg-background" />
                     <div className="flex-1 space-y-2">
-                        <span className="block h-3.5 w-32 animate-pulse rounded bg-muted" />
-                        <span className="block h-3 w-48 animate-pulse rounded bg-muted" />
+                        <span className="block h-3.5 w-32 animate-pulse rounded bg-background" />
+                        <span className="block h-3 w-48 animate-pulse rounded bg-background" />
                     </div>
-                    <span className="h-6 w-16 animate-pulse rounded-full bg-muted" />
+                    <span className="h-6 w-16 animate-pulse rounded-full bg-background" />
                 </li>
             ))}
         </ul>

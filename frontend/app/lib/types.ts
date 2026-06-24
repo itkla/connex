@@ -535,6 +535,7 @@ export type WorkspaceMember = {
     email: string;
     role: string;
     roleId?: number | null;
+    status?: string;
 };
 
 export type CustomRole = {
