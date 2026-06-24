@@ -84,6 +84,11 @@ hand-written `WHERE` clauses. §4.2 is revised: the interceptor is the **primary
 reason (multi-table joins, aggregates, the polymorphic attachment query). For **shareable** entities the
 interceptor enforces the owned-or-shared visibility predicate.
 
+> **✅ Implemented (2026-06-24):** `TenantScopeInterceptor` (registered via `MyBatisConfig`). It does not
+> rewrite SQL; it throws `ForbiddenException` when a workspace-scoped statement runs on a request thread
+> with an unresolved `TenantContext`, and stays out of the way of background jobs (off the request thread)
+> and the nullable-workspace audit insert. Toggle with `connex.tenancy.enforce-scope`.
+
 ---
 
 ## 1. Diagnosis

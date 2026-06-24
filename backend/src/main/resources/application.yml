@@ -29,6 +29,10 @@ connex:
         # When false, new registrations and the create endpoint cannot make workspaces
         # (invite-only mode); users onboard by accepting an invite instead.
         allow-self-service-creation: ${CONNEX_WORKSPACES_ALLOW_CREATION:true}
+    tenancy:
+        # Fail-closed MyBatis backstop: rejects workspace-scoped queries that run
+        # without a resolved tenant context. Disable only to debug isolation issues.
+        enforce-scope: ${CONNEX_TENANCY_ENFORCE_SCOPE:true}
     notifications:
         scheduling-enabled: ${CONNEX_NOTIFICATIONS_SCHEDULING_ENABLED:true}
         reconciliation-delay-ms: ${CONNEX_NOTIFICATIONS_RECONCILIATION_DELAY_MS:300000}
