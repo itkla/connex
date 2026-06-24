@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="ooo.klae.connex.backend.mappers.InviteMapper">
+
+  <insert id="insert" useGeneratedKeys="true" keyProperty="id">
+    INSERT INTO workspace_invite (workspace_id, email, role, token, status, invited_by_id, expires_at)
+    VALUES (#{workspaceId}, #{email}, #{role}, #{token}, 'pending', #{invitedById},
+            DATE_ADD(UTC_TIMESTAMP(), INTERVAL 14 DAY))
+  </insert>
+
+  <select id="findByToken" resultType="WorkspaceInvite">
+    SELECT id, workspace_id, email, role, token, status, invited_by_id, accepted_by_id,
+           expires_at, accepted_at, created_at, updated_at
+    FROM workspace_invite
+    WHERE token = #{token}
+  </select>
+
+  <select id="findPreviewByToken" resultType="ooo.klae.connex.backend.dto.InvitePreviewDto">
+    SELECT i.workspace_id AS workspaceId, w.name AS workspaceName, i.email, i.role, i.status,
+           u.display_name AS invitedByLabel,
+           (i.status = 'pending' AND i.expires_at > UTC_TIMESTAMP()) AS valid
+    FROM workspace_invite i
+    JOIN workspace w ON w.id = i.workspace_id
+    LEFT JOIN app_user u ON u.id = i.invited_by_id
+    WHERE i.token = #{token}
+  </select>
+
+  <select id="findPendingByWorkspace" resultType="ooo.klae.connex.backend.dto.InviteDto">
+    SELECT i.id, i.email, i.role, i.status, i.token,
+           i.expires_at AS expiresAt, i.created_at AS createdAt,
+           u.display_name AS invitedByLabel
+    FROM workspace_invite i
+    LEFT JOIN app_user u ON u.id = i.invited_by_id
+    WHERE i.workspace_id = #{workspaceId} AND i.status = 'pending'
+    ORDER BY i.created_at DESC, i.id DESC
+  </select>
+
+  <select id="isRedeemable" resultType="boolean">
+    SELECT EXISTS(
+      SELECT 1 FROM workspace_invite
+      WHERE token = #{token} AND status = 'pending' AND expires_at > UTC_TIMESTAMP()
+    )
+  </select>
+
+  <update id="markAccepted">
+    UPDATE workspace_invite
+    SET status = 'accepted', accepted_by_id = #{userId}, accepted_at = UTC_TIMESTAMP()
+    WHERE id = #{id} AND status = 'pending'
+  </update>
+
+  <update id="markRevoked">
+    UPDATE workspace_invite
+    SET status = 'revoked'
+    WHERE id = #{id} AND workspace_id = #{workspaceId} AND status = 'pending'
+  </update>
+
+  <update id="revokePendingForEmail">
+    UPDATE workspace_invite
+    SET status = 'revoked'
+    WHERE workspace_id = #{workspaceId} AND email = #{email} AND status = 'pending'
+  </update>
+</mapper>

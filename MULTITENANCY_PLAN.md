@@ -382,7 +382,12 @@ membership (unlike `register`) — route through `addMember`, gate `admin`+. `re
 **new owned workspace** (or invite/accept) instead of force-joining `default`; `getDefaultWorkspace()`
 becomes the migration-only backfill target.
 
----
+> **✅ Invite flows implemented (2026-06-24, #11):** both flows ship. Email-token invites
+> (`workspace_invite`, migration V11) via `InviteService` + `WorkspaceController` `POST/GET/DELETE
+> /api/workspaces/{id}/invites` (admin-gated) and token-addressed `GET /api/invites/{token}` +
+> `POST /api/invites/{token}/accept` (email-bound, expiry-checked). Admin-adds-existing via
+> `POST /api/workspaces/{id}/members`. Role-change and member removal remain (removal must respect the
+> `task.assigned_to_id` `RESTRICT` member FK).
 
 ## 5. Frontend
 

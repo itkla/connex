@@ -1,20 +1,30 @@
 package ooo.klae.connex.backend.controllers;
 
+import java.util.List;
+
 import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
 
+import org.springframework.http.HttpStatus;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
 import lombok.RequiredArgsConstructor;
+import ooo.klae.connex.backend.dto.AddMemberRequest;
+import ooo.klae.connex.backend.dto.CreateInviteRequest;
 import ooo.klae.connex.backend.dto.CreateWorkspaceRequest;
+import ooo.klae.connex.backend.dto.InviteDto;
+import ooo.klae.connex.backend.dto.MemberDto;
 import ooo.klae.connex.backend.dto.MyWorkspacesDto;
 import ooo.klae.connex.backend.dto.WorkspaceMembershipDto;
 import ooo.klae.connex.backend.services.AuthService;
+import ooo.klae.connex.backend.services.InviteService;
 import ooo.klae.connex.backend.services.WorkspaceService;
 import ooo.klae.connex.backend.tenant.WorkspaceCookie;
 
@@ -27,6 +37,7 @@ import ooo.klae.connex.backend.tenant.WorkspaceCookie;
 @RequiredArgsConstructor
 public class WorkspaceController {
     private final WorkspaceService workspaceService;
+    private final InviteService inviteService;
     private final AuthService authService;
 
     @GetMapping
@@ -54,5 +65,26 @@ public class WorkspaceController {
         workspaceService.requireMember(id, userId);
         workspaceService.rememberActive(userId, id);
         WorkspaceCookie.set(response, id);
+    }
+
+    @PostMapping("/{id}/invites")
+    public InviteDto invite(@PathVariable int id, @Valid @RequestBody CreateInviteRequest request) {
+        return inviteService.createInvite(id, authService.getCurrentUser(), request.getEmail(), request.getRole());
+    }
+
+    @GetMapping("/{id}/invites")
+    public List<InviteDto> invites(@PathVariable int id) {
+        return inviteService.listInvites(id, authService.getCurrentUser().getId());
+    }
+
+    @DeleteMapping("/{id}/invites/{inviteId}")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void revokeInvite(@PathVariable int id, @PathVariable int inviteId) {
+        inviteService.revokeInvite(id, inviteId, authService.getCurrentUser().getId());
+    }
+
+    @PostMapping("/{id}/members")
+    public MemberDto addMember(@PathVariable int id, @Valid @RequestBody AddMemberRequest request) {
+        return inviteService.addExistingMember(id, authService.getCurrentUser().getId(), request.getEmail(), request.getRole());
     }
 }
