@@ -19,6 +19,8 @@ public class PipelineDto {
 
     private Integer id;
 
+    private Integer workspaceId;
+
     @NotBlank
     @Size(max = 128)
     private String name;
@@ -32,6 +34,7 @@ public class PipelineDto {
         if (p == null) return null;
         PipelineDto dto = new PipelineDto();
         dto.id = p.getId();
+        dto.workspaceId = p.getWorkspaceId();
         dto.name = p.getName();
         dto.stageIds = p.getStages() == null ? null : Arrays.stream(p.getStages()).mapToInt(Stage::getId).toArray();
         dto.createdAt = p.getCreatedAt();

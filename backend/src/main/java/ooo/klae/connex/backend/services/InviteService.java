@@ -128,7 +128,7 @@ public class InviteService {
         return membership(user.getId(), workspaceId);
     }
 
-    /** Adds an existing Connex user to the workspace by email. */
+    /** Invites an existing Connex user to the workspace by email; they join after accepting. */
     public MemberDto addExistingMember(int workspaceId, int actorId, String emailRaw, String roleRaw) {
         workspaceService.requirePermission(workspaceId, actorId, Permission.MEMBER_MANAGE);
         String email = normalizeEmail(emailRaw);
@@ -138,13 +138,11 @@ public class InviteService {
         if (user == null) {
             throw new BadRequestException("No Connex account uses that email; send an invite instead");
         }
-        if (workspaceMapper.isMember(workspaceId, user.getId())) {
-            throw new BadRequestException("That person is already a member of this workspace");
+        if (workspaceMapper.getMember(workspaceId, user.getId()) != null) {
+            throw new BadRequestException("That person is already a member of or invited to this workspace");
         }
-        workspaceMapper.addMember(workspaceId, user.getId(), role);
-        auditService.record("workspace.member.add", "workspace", workspaceId, user.getDisplayName(),
-                "Added " + user.getDisplayName() + " as " + role, null);
-        return new MemberDto(user.getId(), user.getUsername(), user.getDisplayName(), user.getEmail(), role, null);
+        User actor = userMapper.getUserById(actorId);
+        return workspaceService.addPendingMember(workspaceId, actor, user, role);
     }
 
     private WorkspaceMembershipDto membership(int userId, int workspaceId) {

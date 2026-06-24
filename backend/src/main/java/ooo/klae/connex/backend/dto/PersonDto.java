@@ -27,6 +27,8 @@ public class PersonDto {
 
     private Integer id;
 
+    private Integer workspaceId;
+
     @NotBlank
     @Size(max = 255)
     private String name;
@@ -65,6 +67,7 @@ public class PersonDto {
     // if !dto, then create a new PersonDto with the values from the Person object
     protected static <T extends PersonDto> T populate(T dto, Person p) {
         dto.setId(p.getId());
+        dto.setWorkspaceId(p.getWorkspaceId());
         dto.setName(p.getName());
         dto.setEmail(p.getEmail());
         dto.setPhone(p.getPhone());

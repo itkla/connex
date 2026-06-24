@@ -17,4 +17,5 @@ public class MemberDto {
     private String email;
     private String role;
     private Integer roleId;
+    private String status;
 }

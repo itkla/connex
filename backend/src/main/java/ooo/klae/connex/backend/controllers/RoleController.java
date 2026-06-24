@@ -36,6 +36,11 @@ public class RoleController {
         return roleService.listRoles(workspaceId, authService.getCurrentUser().getId());
     }
 
+    @GetMapping("/built-in")
+    public List<WorkspaceRole> builtIn(@PathVariable int workspaceId) {
+        return roleService.builtInRoles(workspaceId, authService.getCurrentUser().getId());
+    }
+
     @PostMapping
     public WorkspaceRole create(@PathVariable int workspaceId, @Valid @RequestBody RoleRequest request) {
         return roleService.createRole(workspaceId, authService.getCurrentUser().getId(),

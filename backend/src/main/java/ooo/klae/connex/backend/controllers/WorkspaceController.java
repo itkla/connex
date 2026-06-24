@@ -69,6 +69,32 @@ public class WorkspaceController {
         WorkspaceCookie.set(response, id);
     }
 
+    @GetMapping("/pending")
+    public List<WorkspaceMembershipDto> pending() {
+        return workspaceService.pendingMemberships(authService.getCurrentUser().getId());
+    }
+
+    @PostMapping("/{id}/accept")
+    public WorkspaceMembershipDto accept(@PathVariable int id, HttpServletResponse response) {
+        int userId = authService.getCurrentUser().getId();
+        WorkspaceMembershipDto membership = workspaceService.approveMembership(id, userId);
+        workspaceService.rememberActive(userId, id);
+        WorkspaceCookie.set(response, id);
+        return membership;
+    }
+
+    @PostMapping("/{id}/decline")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void decline(@PathVariable int id) {
+        workspaceService.declineMembership(id, authService.getCurrentUser().getId());
+    }
+
+    @PostMapping("/{id}/leave")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void leave(@PathVariable int id) {
+        workspaceService.leaveWorkspace(id, authService.getCurrentUser().getId());
+    }
+
     @PostMapping("/{id}/invites")
     public InviteDto invite(@PathVariable int id, @Valid @RequestBody CreateInviteRequest request) {
         return inviteService.createInvite(id, authService.getCurrentUser(), request.getEmail(), request.getRole());

@@ -1,5 +1,8 @@
 package ooo.klae.connex.backend.services;
 
+import java.time.LocalDateTime;
+import java.time.ZoneOffset;
+import java.time.format.DateTimeFormatter;
 import java.util.EnumSet;
 import java.util.List;
 import java.util.Set;
@@ -11,13 +14,16 @@ import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 
 import lombok.RequiredArgsConstructor;
+import ooo.klae.connex.backend.beans.Notification;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.beans.Workspace;
+import ooo.klae.connex.backend.beans.WorkspaceRole;
 import ooo.klae.connex.backend.dto.MemberDto;
 import ooo.klae.connex.backend.dto.WorkspaceMembershipDto;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
+import ooo.klae.connex.backend.mappers.NotificationMapper;
 import ooo.klae.connex.backend.mappers.RoleMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
 import ooo.klae.connex.backend.tenant.Permission;
@@ -34,8 +40,11 @@ import ooo.klae.connex.backend.tenant.TenantContext;
 public class WorkspaceService {
     private final WorkspaceMapper workspaceMapper;
     private final RoleMapper roleMapper;
+    private final NotificationMapper notificationMapper;
     private final TenantContext tenantContext;
     private final AuditService auditService;
+
+    private static final DateTimeFormatter TS = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
     /** Built-in role permission bundles. Owner gets the full catalog. */
     private static final Set<Permission> MEMBER_PERMISSIONS = memberPermissions();
@@ -198,6 +207,21 @@ public class WorkspaceService {
         requirePermission(getCurrentWorkspaceId(), currentUser().getId(), permission);
     }
 
+    /** The built-in roles and their fixed permission bundles, shown read-only in the role editor. */
+    public List<WorkspaceRole> builtInRoles() {
+        return List.of(
+            builtInRole("owner", OWNER_PERMISSIONS),
+            builtInRole("admin", ADMIN_PERMISSIONS),
+            builtInRole("member", MEMBER_PERMISSIONS));
+    }
+
+    private static WorkspaceRole builtInRole(String name, Set<Permission> permissions) {
+        WorkspaceRole role = new WorkspaceRole();
+        role.setName(name);
+        role.setPermissions(permissions.stream().map(Permission::name).sorted().toList());
+        return role;
+    }
+
     private static Set<Permission> parsePermissions(List<String> raw) {
         EnumSet<Permission> permissions = EnumSet.noneOf(Permission.class);
         for (String value : raw) {
@@ -286,6 +310,79 @@ public class WorkspaceService {
         workspaceMapper.removeMember(workspaceId, targetUserId);
         auditService.record("workspace.member.remove", "workspace", workspaceId, target.getDisplayName(),
                 "Removed " + target.getDisplayName() + " from the workspace", null);
+    }
+
+    /** Adds a user as a PENDING member and notifies them to accept; they aren't a real member until they do. */
+    public MemberDto addPendingMember(int workspaceId, User actor, User target, String role) {
+        workspaceMapper.addPendingMember(workspaceId, target.getId(), role);
+        notifyJoinRequest(workspaceId, target.getId(), actor);
+        auditService.record("workspace.member.invite", "workspace", workspaceId, target.getDisplayName(),
+                "Invited " + target.getDisplayName() + " to join", null);
+        return workspaceMapper.getMember(workspaceId, target.getId());
+    }
+
+    /** Workspaces the user has been added to but not yet accepted. */
+    public List<WorkspaceMembershipDto> pendingMemberships(int userId) {
+        return workspaceMapper.getPendingMemberships(userId);
+    }
+
+    /** The user accepts a pending invitation, becoming an active member. */
+    public WorkspaceMembershipDto approveMembership(int workspaceId, int userId) {
+        if (workspaceMapper.activateMember(workspaceId, userId) == 0) {
+            throw new ResourceNotFoundException("No pending invitation for this workspace");
+        }
+        auditService.record("workspace.member.join", "workspace", workspaceId, null, "Accepted invitation", null);
+        return workspaceMapper.getMembershipsForUser(userId).stream()
+            .filter(m -> m.getId() == workspaceId)
+            .findFirst()
+            .orElseThrow(() -> new ResourceNotFoundException("Membership not found"));
+    }
+
+    /** The user declines a pending invitation; the row (and its notification) is removed. */
+    public void declineMembership(int workspaceId, int userId) {
+        MemberDto member = workspaceMapper.getMember(workspaceId, userId);
+        if (member == null || !"pending".equals(member.getStatus())) {
+            throw new ResourceNotFoundException("No pending invitation for this workspace");
+        }
+        workspaceMapper.removeMember(workspaceId, userId);
+        auditService.record("workspace.member.decline", "workspace", workspaceId, null, "Declined invitation", null);
+    }
+
+    /** The user leaves a workspace they belong to, unassigning their tasks and clearing deal ownership. */
+    public void leaveWorkspace(int workspaceId, int userId) {
+        String role = workspaceMapper.getRole(workspaceId, userId);
+        if (role == null) {
+            throw new ResourceNotFoundException("You are not a member of this workspace");
+        }
+        if ("owner".equals(role) && workspaceMapper.countOwners(workspaceId) <= 1) {
+            throw new BadRequestException("Transfer ownership before leaving; a workspace must keep an owner");
+        }
+        workspaceMapper.unassignMemberTasks(workspaceId, userId);
+        workspaceMapper.clearMemberDealOwnership(workspaceId, userId);
+        workspaceMapper.removeMember(workspaceId, userId);
+        auditService.record("workspace.member.leave", "workspace", workspaceId, null, "Left the workspace", null);
+    }
+
+    private void notifyJoinRequest(int workspaceId, int recipientId, User actor) {
+        try {
+            Notification notification = new Notification();
+            notification.setWorkspaceId(workspaceId);
+            notification.setRecipientId(recipientId);
+            notification.setType("workspace.join");
+            notification.setCategory("workspace");
+            notification.setSeverity("info");
+            notification.setTemplateVersion(1);
+            notification.setTitle("Workspace invitation");
+            notification.setBody("You have a pending workspace invitation.");
+            notification.setActorId(actor.getId());
+            notification.setActorLabel(actor.getDisplayName());
+            notification.setActionUrl("/settings/members");
+            notification.setDedupeKey("workspace.join:" + workspaceId);
+            notification.setTriggeredAt(LocalDateTime.now(ZoneOffset.UTC).format(TS));
+            notificationMapper.upsert(notification);
+        } catch (RuntimeException e) {
+            // Best-effort: the pending membership row is the source of truth.
+        }
     }
 
     private Role parseAssignableRole(String raw) {

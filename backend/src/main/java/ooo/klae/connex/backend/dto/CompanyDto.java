@@ -23,6 +23,8 @@ public class CompanyDto {
 
     private Integer id;
 
+    private Integer workspaceId;
+
     @NotBlank
     @Size(max = 255)
     private String name;
@@ -54,6 +56,7 @@ public class CompanyDto {
         if (c == null) return null;
         CompanyDto dto = new CompanyDto();
         dto.id = c.getId();
+        dto.workspaceId = c.getWorkspaceId();
         dto.name = c.getName();
         dto.website = c.getWebsite();
         dto.industry = c.getIndustry();

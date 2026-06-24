@@ -79,7 +79,7 @@ class InviteServiceTest extends AbstractServiceTest {
     }
 
     @Test
-    void addExistingMember_addsByEmail() {
+    void addExistingMember_createsPendingMembership() {
         WorkspaceMembershipDto ws = workspaceService.createWorkspace("Direct WS", currentUser.getId());
         User existing = newUser();
 
@@ -87,7 +87,9 @@ class InviteServiceTest extends AbstractServiceTest {
 
         assertEquals("admin", added.getRole());
         assertEquals(existing.getId(), added.getId());
-        assertTrue(workspaceMapper.isMember(ws.getId(), existing.getId()));
+        assertEquals("pending", added.getStatus());
+        // Pending members are not active members until they accept.
+        assertFalse(workspaceMapper.isMember(ws.getId(), existing.getId()));
     }
 
     @Test

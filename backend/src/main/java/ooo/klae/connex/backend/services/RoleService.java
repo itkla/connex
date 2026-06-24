@@ -29,6 +29,11 @@ public class RoleService {
         return roleMapper.findRolesByWorkspace(workspaceId);
     }
 
+    public List<WorkspaceRole> builtInRoles(int workspaceId, int actorId) {
+        workspaceService.requirePermission(workspaceId, actorId, Permission.ROLE_MANAGE);
+        return workspaceService.builtInRoles();
+    }
+
     @Transactional
     public WorkspaceRole createRole(int workspaceId, int actorId, String name, List<String> permissions) {
         workspaceService.requirePermission(workspaceId, actorId, Permission.ROLE_MANAGE);

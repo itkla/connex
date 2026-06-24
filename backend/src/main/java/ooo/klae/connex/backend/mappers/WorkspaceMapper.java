@@ -35,6 +35,13 @@ public interface WorkspaceMapper {
         @Param("userId") int userId,
         @Param("role") String role
     );
+    int addPendingMember(
+        @Param("workspaceId") int workspaceId,
+        @Param("userId") int userId,
+        @Param("role") String role
+    );
+    int activateMember(@Param("workspaceId") int workspaceId, @Param("userId") int userId);
+    List<WorkspaceMembershipDto> getPendingMemberships(int userId);
     int updateMemberRole(
         @Param("workspaceId") int workspaceId,
         @Param("userId") int userId,
