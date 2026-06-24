@@ -1,15 +1,18 @@
 package ooo.klae.connex.backend.config;
 
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.config.annotation.authentication.configuration.AuthenticationConfiguration;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
+import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.web.csrf.CsrfTokenRequestAttributeHandler;
 
 /**
  * Spring Security configuration.
@@ -35,9 +38,19 @@ public class SecurityConfig {
     }
 
     @Bean
-    SecurityFilterChain chain(HttpSecurity http) throws Exception {
+    SecurityFilterChain chain(HttpSecurity http,
+            @Value("${connex.security.csrf-enabled:true}") boolean csrfEnabled) throws Exception {
+        if (csrfEnabled) {
+            // Session-stored token (default repo), echoed by the SPA in a header it fetches from
+            // GET /api/auth/csrf. A plain (non-XOR) handler keeps the token stable so the client can
+            // cache it. The auth handshake is exempt since there is no session to protect pre-login.
+            http.csrf(csrf -> csrf
+                .csrfTokenRequestHandler(new CsrfTokenRequestAttributeHandler())
+                .ignoringRequestMatchers("/api/auth/**"));
+        } else {
+            http.csrf(AbstractHttpConfigurer::disable);
+        }
         http
-            .csrf(csrf -> csrf.disable())
             .authorizeHttpRequests(auth -> auth
                 .requestMatchers("/api/auth/**").permitAll()
                 .anyRequest().authenticated()

@@ -33,6 +33,10 @@ connex:
         # Fail-closed MyBatis backstop: rejects workspace-scoped queries that run
         # without a resolved tenant context. Disable only to debug isolation issues.
         enforce-scope: ${CONNEX_TENANCY_ENFORCE_SCOPE:true}
+    security:
+        # CSRF protection for state-changing requests. The SPA fetches the token from
+        # GET /api/auth/csrf and echoes it in the X-XSRF-TOKEN header. Kill-switch for cutover.
+        csrf-enabled: ${CONNEX_SECURITY_CSRF_ENABLED:true}
     notifications:
         scheduling-enabled: ${CONNEX_NOTIFICATIONS_SCHEDULING_ENABLED:true}
         reconciliation-delay-ms: ${CONNEX_NOTIFICATIONS_RECONCILIATION_DELAY_MS:300000}

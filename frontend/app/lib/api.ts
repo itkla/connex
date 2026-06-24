@@ -24,22 +24,63 @@ function clientWorkspaceId(): string | null {
     return match ? decodeURIComponent(match[1]) : null;
 }
 
+// CSRF token, fetched once from the backend and echoed in a header on state-changing requests.
+// The frontend and backend can be different origins, so the token is delivered via this endpoint
+// rather than a cookie the JS would otherwise be unable to read cross-origin.
+let csrfTokenCache: { token: string; headerName: string } | null = null;
+
+async function fetchCsrfToken(): Promise<{ token: string; headerName: string } | null> {
+    try {
+        const res = await fetch(`${API_BASE}/api/auth/csrf`, { credentials: "include" });
+        if (!res.ok) return null;
+        const text = await res.text();
+        if (!text) return null;
+        const data = JSON.parse(text) as { token?: string; headerName?: string };
+        return data.token && data.headerName ? { token: data.token, headerName: data.headerName } : null;
+    } catch {
+        return null;
+    }
+}
+
+async function csrfHeader(forceRefresh = false): Promise<Record<string, string>> {
+    if (typeof window === "undefined") return {}; // SSR issues GETs only; CSRF does not apply
+    if (forceRefresh) csrfTokenCache = null;
+    if (!csrfTokenCache) csrfTokenCache = await fetchCsrfToken();
+    return csrfTokenCache ? { [csrfTokenCache.headerName]: csrfTokenCache.token } : {};
+}
+
+function isMutating(method?: string): boolean {
+    const m = (method ?? "GET").toUpperCase();
+    return m !== "GET" && m !== "HEAD" && m !== "OPTIONS";
+}
+
 async function requestJson<T>(
     path: string,
     init: RequestInit = {},
 ): Promise<T> {
     const locale = clientLocale();
     const workspaceId = clientWorkspaceId();
-    const res = await fetch(`${API_BASE}${path}`, {
-        ...init,
-        credentials: "include",
-        headers: {
-            ...(init.body ? { "Content-Type": "application/json" } : {}),
-            ...(locale ? { "Accept-Language": locale } : {}),
-            ...(workspaceId ? { "X-Workspace-Id": workspaceId } : {}),
-            ...init.headers,
-        },
-    });
+    const mutating = isMutating(init.method);
+
+    const send = (csrf: Record<string, string>) =>
+        fetch(`${API_BASE}${path}`, {
+            ...init,
+            credentials: "include",
+            headers: {
+                ...(init.body ? { "Content-Type": "application/json" } : {}),
+                ...(locale ? { "Accept-Language": locale } : {}),
+                ...(workspaceId ? { "X-Workspace-Id": workspaceId } : {}),
+                ...csrf,
+                ...init.headers,
+            },
+        });
+
+    let res = await send(mutating ? await csrfHeader() : {});
+
+    // A stale or missing CSRF token surfaces as 403; refresh it once and retry.
+    if (res.status === 403 && mutating && typeof window !== "undefined") {
+        res = await send(await csrfHeader(true));
+    }
 
     if (!res.ok) {
         throw await getApiError(res);

@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.controllers;
 
+import org.springframework.security.web.csrf.CsrfToken;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -60,5 +61,14 @@ public class AuthController {
     @GetMapping("/me")
     public User me() {
         return authService.getCurrentUser();
+    }
+
+    /**
+     * Exposes the CSRF token so the SPA can echo it in the configured header on
+     * state-changing requests. Returns null when CSRF protection is disabled.
+     */
+    @GetMapping("/csrf")
+    public CsrfToken csrf(CsrfToken token) {
+        return token;
     }
 }

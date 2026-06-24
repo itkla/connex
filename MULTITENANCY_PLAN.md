@@ -290,6 +290,13 @@ header is a *mild* CSRF mitigation. **The header is always a hint:** the resolve
 it forces rewriting every `<Link>`/`router.push` and `proxy.ts` matcher for no security gain (membership
 still must be validated server-side).
 
+> **✅ CSRF re-enabled (2026-06-24, Phase 0):** session-stored token (default repo) + plain request
+> handler; the SPA fetches it from `GET /api/auth/csrf` and echoes `X-XSRF-TOKEN` on mutations
+> (`requestJson` caches it and refresh-retries once on 403). Chosen over the cookie double-submit because
+> dev runs the SPA and API on different origins, where JS cannot read the API's cookie. The `/api/auth/**`
+> handshake is exempt. Kill-switch: `connex.security.csrf-enabled`. Login now rotates the session id
+> (fixation defense, #79). DB creds + `HttpOnly`/`SameSite`/`Secure` session cookies landed earlier (#88).
+
 - **Login** (`AuthService.login`, after `:110`): seed `session.activeWorkspaceId` from the user's
   remembered-last or first membership.
 - **Switch**: new `WorkspaceController` `POST /api/workspaces/{id}/switch` → `requireMember` → set
