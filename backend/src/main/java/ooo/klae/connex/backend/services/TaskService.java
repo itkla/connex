@@ -12,6 +12,7 @@ import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.notifications.NotificationChangePublisher;
 import ooo.klae.connex.backend.tenant.Permission;
+import ooo.klae.connex.backend.tenant.RequirePermission;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -59,8 +60,8 @@ public class TaskService {
         return task;
     }
 
+    @RequirePermission(Permission.TASK_CREATE)
     public Task create(Task task) {
-        workspaceService.requirePermission(Permission.TASK_CREATE);
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         task.setWorkspaceId(workspaceId);
         validateReferences(task, workspaceId);
@@ -72,8 +73,8 @@ public class TaskService {
         return task;
     }
 
+    @RequirePermission(Permission.TASK_UPDATE)
     public Task update(int id, Task task) {
-        workspaceService.requirePermission(Permission.TASK_UPDATE);
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         Task before = taskMapper.getTaskById(workspaceId, id);
         if (before == null) throw new ResourceNotFoundException("Task not found with id: " + id);
@@ -88,8 +89,8 @@ public class TaskService {
         return task;
     }
 
+    @RequirePermission(Permission.TASK_DELETE)
     public void delete(int id) {
-        workspaceService.requirePermission(Permission.TASK_DELETE);
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         Task before = taskMapper.getTaskById(workspaceId, id);
         if (before == null) throw new ResourceNotFoundException("Task not found with id: " + id);
@@ -101,6 +102,7 @@ public class TaskService {
     }
 
     @Transactional
+    @RequirePermission(Permission.TASK_UPDATE)
     public Task complete(int id) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         User currentUser = authService.getCurrentUser();

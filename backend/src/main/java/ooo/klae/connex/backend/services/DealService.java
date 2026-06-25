@@ -21,6 +21,7 @@ import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.tenant.Permission;
+import ooo.klae.connex.backend.tenant.RequirePermission;
 import ooo.klae.connex.backend.mappers.ActivityMapper;
 import ooo.klae.connex.backend.mappers.DealMapper;
 import ooo.klae.connex.backend.mappers.NoteMapper;
@@ -150,8 +151,8 @@ public class DealService {
      * @param deal
      * @return
      */
+    @RequirePermission(Permission.DEAL_CREATE)
     public Deal create(Deal deal) {
-        workspaceService.requirePermission(Permission.DEAL_CREATE);
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         deal.setWorkspaceId(workspaceId);
         deal.setOwnerId(authService.getCurrentUser().getId());
@@ -170,8 +171,8 @@ public class DealService {
      * @param deal
      * @return
      */
+    @RequirePermission(Permission.DEAL_UPDATE)
     public Deal update(int id, Deal deal) {
-        workspaceService.requirePermission(Permission.DEAL_UPDATE);
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         Deal before = dealMapper.getDealById(workspaceId, id);
         if (before == null) throw new ResourceNotFoundException("Deal not found with id: " + id);
@@ -199,6 +200,7 @@ public class DealService {
      * @return the closed deal
      */
     @Transactional
+    @RequirePermission(Permission.DEAL_UPDATE)
     public Deal close(int id, Boolean won, String reason, Double actualValue) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         Deal before = dealMapper.getDealById(workspaceId, id);
@@ -222,6 +224,7 @@ public class DealService {
      * @return
      */
     @Transactional
+    @RequirePermission(Permission.DEAL_UPDATE)
     public Deal reopen(int id) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         Deal before = dealMapper.getDealById(workspaceId, id);
@@ -253,8 +256,8 @@ public class DealService {
      * Deletes a {@code Deal} record by ID, throwing a {@code ResourceNotFoundException} if not found.
      * @param id
      */
+    @RequirePermission(Permission.DEAL_DELETE)
     public void delete(int id) {
-        workspaceService.requirePermission(Permission.DEAL_DELETE);
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         Deal before = dealMapper.getDealById(workspaceId, id);
         if (before == null) throw new ResourceNotFoundException("Deal not found with id: " + id);
@@ -281,6 +284,7 @@ public class DealService {
      * @param dealId
      * @param tagId
      */
+    @RequirePermission(Permission.DEAL_UPDATE)
     public void addTag(int dealId, int tagId) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         Deal deal = dealMapper.getDealById(workspaceId, dealId);
@@ -298,6 +302,7 @@ public class DealService {
      * @param dealId
      * @param tagId
      */
+    @RequirePermission(Permission.DEAL_UPDATE)
     public void removeTag(int dealId, int tagId) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         Deal deal = dealMapper.getDealById(workspaceId, dealId);
@@ -327,6 +332,7 @@ public class DealService {
      * @param personId
      * @param role
      */
+    @RequirePermission(Permission.DEAL_UPDATE)
     public void addPerson(int dealId, int personId, String role) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         Deal deal = dealMapper.getDealById(workspaceId, dealId);
@@ -346,6 +352,7 @@ public class DealService {
      * @param personId
      * @param role
      */
+    @RequirePermission(Permission.DEAL_UPDATE)
     public void updatePersonRole(int dealId, int personId, String role) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         Deal deal = dealMapper.getDealById(workspaceId, dealId);
@@ -367,6 +374,7 @@ public class DealService {
      * @param dealId
      * @param personId
      */
+    @RequirePermission(Permission.DEAL_UPDATE)
     public void removePerson(int dealId, int personId) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         Deal deal = dealMapper.getDealById(workspaceId, dealId);
@@ -386,6 +394,7 @@ public class DealService {
      * @return
      */
     @Transactional
+    @RequirePermission(Permission.DEAL_UPDATE)
     public List<Tag> replaceTags(int dealId, List<Integer> tagIds) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         Deal deal = dealMapper.getDealById(workspaceId, dealId);
@@ -407,6 +416,7 @@ public class DealService {
      * @return
      */
     @Transactional
+    @RequirePermission(Permission.DEAL_UPDATE)
     public List<DealPerson> replacePeople(int dealId, List<DealPerson> people) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         Deal deal = dealMapper.getDealById(workspaceId, dealId);
@@ -486,6 +496,7 @@ public class DealService {
     }
 
     @Transactional
+    @RequirePermission(Permission.DEAL_UPDATE)
     public Deal updateOwner(int dealId, Integer ownerId) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         Deal deal = dealMapper.getDealById(workspaceId, dealId);
@@ -511,6 +522,7 @@ public class DealService {
     }
 
     @Transactional
+    @RequirePermission(Permission.DEAL_UPDATE)
     public List<User> replaceCollaborators(int dealId, List<Integer> userIds) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         Deal deal = dealMapper.getDealById(workspaceId, dealId);
