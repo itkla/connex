@@ -10,6 +10,7 @@ import ooo.klae.connex.backend.beans.Stage;
 import ooo.klae.connex.backend.exceptions.DuplicateResourceException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.tenant.Permission;
+import ooo.klae.connex.backend.tenant.RequirePermission;
 import java.util.List;
 import java.util.Set;
 
@@ -46,8 +47,8 @@ public class PipelineService {
         return pipeline;
     }
 
+    @RequirePermission(Permission.PIPELINE_MANAGE)
     public Pipeline createPipeline(Pipeline pipeline) {
-        workspaceService.requirePermission(Permission.PIPELINE_MANAGE);
         pipeline.setWorkspaceId(workspaceService.getCurrentWorkspaceId());
         pipelineMapper.insertPipeline(pipeline);
         auditService.record("pipeline.create", "pipeline", pipeline.getId(), pipeline.getName(),
@@ -56,8 +57,8 @@ public class PipelineService {
         return pipeline;
     }
 
+    @RequirePermission(Permission.PIPELINE_MANAGE)
     public Pipeline updatePipeline(int id, Pipeline pipeline) {
-        workspaceService.requirePermission(Permission.PIPELINE_MANAGE);
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         Pipeline before = requirePipeline(workspaceId, id);
         pipeline.setId(id);
@@ -69,8 +70,8 @@ public class PipelineService {
         return pipeline;
     }
 
+    @RequirePermission(Permission.PIPELINE_MANAGE)
     public void deletePipeline(int id) {
-        workspaceService.requirePermission(Permission.PIPELINE_MANAGE);
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         Pipeline before = requirePipeline(workspaceId, id);
         pipelineMapper.deletePipeline(workspaceId, id);
@@ -97,8 +98,8 @@ public class PipelineService {
         return stage;
     }
 
+    @RequirePermission(Permission.PIPELINE_MANAGE)
     public Stage createStage(int pipelineId, Stage stage) {
-        workspaceService.requirePermission(Permission.PIPELINE_MANAGE);
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         Pipeline pipeline = requirePipeline(workspaceId, pipelineId);
         stage.setPipeline(pipeline);
@@ -112,8 +113,8 @@ public class PipelineService {
         return stage;
     }
 
+    @RequirePermission(Permission.PIPELINE_MANAGE)
     public Stage updateStage(int id, Stage stage) {
-        workspaceService.requirePermission(Permission.PIPELINE_MANAGE);
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         Stage existing = pipelineMapper.getStageById(workspaceId, id);
         if (existing == null) throw new ResourceNotFoundException("Stage not found with id: " + id);
@@ -150,8 +151,8 @@ public class PipelineService {
         }
     }
 
+    @RequirePermission(Permission.PIPELINE_MANAGE)
     public void deleteStage(int id) {
-        workspaceService.requirePermission(Permission.PIPELINE_MANAGE);
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         Stage before = pipelineMapper.getStageById(workspaceId, id);
         if (before == null) throw new ResourceNotFoundException("Stage not found with id: " + id);

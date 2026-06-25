@@ -14,6 +14,7 @@ import ooo.klae.connex.backend.beans.Tag;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.exceptions.DuplicateResourceException;
 import ooo.klae.connex.backend.tenant.Permission;
+import ooo.klae.connex.backend.tenant.RequirePermission;
 
 import java.util.List;
 import java.util.Set;
@@ -66,8 +67,8 @@ public class CompanyService {
     /**
      * Creates a new {@code Company} in the active workspace. The ID is auto-generated.
      */
+    @RequirePermission(Permission.COMPANY_CREATE)
     public Company createCompany(Company company) {
-        workspaceService.requirePermission(Permission.COMPANY_CREATE);
         company.setWorkspaceId(workspaceService.getCurrentWorkspaceId());
         assertUniqueWebsite(company);
         companyMapper.insert(company);
@@ -106,8 +107,8 @@ public class CompanyService {
     /**
      * Updates an existing {@code Company} in the active workspace.
      */
+    @RequirePermission(Permission.COMPANY_UPDATE)
     public Company updateCompany(int id, Company company) {
-        workspaceService.requirePermission(Permission.COMPANY_UPDATE);
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         Company before = companyMapper.getCompanyById(workspaceId, id);
         if (before == null) throw new ResourceNotFoundException("Company not found with id: " + id);
@@ -124,8 +125,8 @@ public class CompanyService {
     /**
      * Deletes a {@code Company} in the active workspace.
      */
+    @RequirePermission(Permission.COMPANY_DELETE)
     public void deleteCompany(int id) {
-        workspaceService.requirePermission(Permission.COMPANY_DELETE);
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         Company before = companyMapper.getCompanyById(workspaceId, id);
         if (before == null) throw new ResourceNotFoundException("Company not found with id: " + id);
@@ -146,6 +147,7 @@ public class CompanyService {
     /**
      * Adds a tag to a company in the active workspace.
      */
+    @RequirePermission(Permission.COMPANY_UPDATE)
     public void addTag(int companyId, int tagId) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         Company company = requireCompany(workspaceId, companyId);
@@ -160,6 +162,7 @@ public class CompanyService {
     /**
      * Removes a tag from a company in the active workspace.
      */
+    @RequirePermission(Permission.COMPANY_UPDATE)
     public void removeTag(int companyId, int tagId) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         Company company = requireCompany(workspaceId, companyId);
@@ -175,6 +178,7 @@ public class CompanyService {
      * Replaces the tags associated with a company in the active workspace.
      */
     @Transactional
+    @RequirePermission(Permission.COMPANY_UPDATE)
     public List<Tag> replaceTags(int companyId, List<Integer> tagIds) {
         Company company = requireCompany(companyId);
         List<String> before = tagMapper.getTagsByCompanyId(companyId).stream().map(Tag::getName).toList();

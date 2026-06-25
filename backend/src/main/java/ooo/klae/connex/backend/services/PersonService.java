@@ -17,6 +17,7 @@ import ooo.klae.connex.backend.beans.Tag;
 import ooo.klae.connex.backend.beans.Task;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.tenant.Permission;
+import ooo.klae.connex.backend.tenant.RequirePermission;
 import java.util.List;
 import java.util.Set;
 
@@ -104,8 +105,8 @@ public class PersonService {
     /**
      * Creates a new {@code Person} in the active workspace. The ID is auto-generated.
      */
+    @RequirePermission(Permission.PERSON_CREATE)
     public Person create(Person person) {
-        workspaceService.requirePermission(Permission.PERSON_CREATE);
         person.setWorkspaceId(workspaceService.getCurrentWorkspaceId());
         personMapper.insert(person);
         auditService.record("person.create", "person", person.getId(), person.getName(),
@@ -117,8 +118,8 @@ public class PersonService {
     /**
      * Updates an existing {@code Person} in the active workspace.
      */
+    @RequirePermission(Permission.PERSON_UPDATE)
     public Person update(int id, Person person) {
-        workspaceService.requirePermission(Permission.PERSON_UPDATE);
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         Person before = requirePerson(workspaceId, id);
         person.setId(id);
@@ -133,8 +134,8 @@ public class PersonService {
     /**
      * Deletes a {@code Person} in the active workspace.
      */
+    @RequirePermission(Permission.PERSON_DELETE)
     public void delete(int id) {
-        workspaceService.requirePermission(Permission.PERSON_DELETE);
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         Person before = requirePerson(workspaceId, id);
         personMapper.delete(workspaceId, id);
@@ -154,6 +155,7 @@ public class PersonService {
     /**
      * Adds a tag to a person in the active workspace.
      */
+    @RequirePermission(Permission.PERSON_UPDATE)
     public void addTag(int personId, int tagId) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         Person person = requirePerson(workspaceId, personId);
@@ -168,6 +170,7 @@ public class PersonService {
     /**
      * Removes a tag from a person in the active workspace.
      */
+    @RequirePermission(Permission.PERSON_UPDATE)
     public void removeTag(int personId, int tagId) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         Person person = requirePerson(workspaceId, personId);
@@ -183,6 +186,7 @@ public class PersonService {
      * Replaces the tags associated with a person in the active workspace.
      */
     @Transactional
+    @RequirePermission(Permission.PERSON_UPDATE)
     public List<Tag> replaceTags(int personId, List<Integer> tagIds) {
         Person person = requirePerson(workspaceService.getCurrentWorkspaceId(), personId);
         List<String> before = tagMapper.getTagsByPersonId(personId).stream().map(Tag::getName).toList();

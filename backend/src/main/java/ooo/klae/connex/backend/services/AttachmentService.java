@@ -12,6 +12,7 @@ import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.AttachmentMapper;
 import ooo.klae.connex.backend.mappers.TagMapper;
 import ooo.klae.connex.backend.tenant.Permission;
+import ooo.klae.connex.backend.tenant.RequirePermission;
 
 import java.util.List;
 import java.util.Set;
@@ -80,6 +81,7 @@ public class AttachmentService {
      * @param attachmentId
      * @param tagId
      */
+    @RequirePermission(Permission.ATTACHMENT_CREATE)
     public void addTag(int attachmentId, int tagId) {
         Attachment attachment = getById(attachmentId);
         Tag tag = tagMapper.getTagById(workspaceService.getCurrentWorkspaceId(), tagId);
@@ -99,6 +101,7 @@ public class AttachmentService {
      * @param attachmentId
      * @param tagId
      */
+    @RequirePermission(Permission.ATTACHMENT_CREATE)
     public void removeTag(int attachmentId, int tagId) {
         Attachment attachment = getById(attachmentId);
         Tag tag = tagMapper.getTagById(workspaceService.getCurrentWorkspaceId(), tagId);
@@ -120,6 +123,7 @@ public class AttachmentService {
      * @return
      */
     @Transactional
+    @RequirePermission(Permission.ATTACHMENT_CREATE)
     public List<Tag> replaceTags(int attachmentId, List<Integer> tagIds) {
         Attachment attachment = getById(attachmentId);
         List<String> before = tagMapper.getTagsByAttachmentId(attachmentId).stream().map(Tag::getName).toList();
@@ -148,8 +152,8 @@ public class AttachmentService {
      * @param attachment
      * @return
      */
+    @RequirePermission(Permission.ATTACHMENT_CREATE)
     public Attachment create(Attachment attachment) {
-        workspaceService.requirePermission(Permission.ATTACHMENT_CREATE);
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         attachment.setWorkspaceId(workspaceId);
         attachment.setEntityType(normalizeType(attachment.getEntityType()));
@@ -166,8 +170,8 @@ public class AttachmentService {
      * Deletes an attachment by ID.
      * @param id
      */
+    @RequirePermission(Permission.ATTACHMENT_DELETE)
     public void delete(int id) {
-        workspaceService.requirePermission(Permission.ATTACHMENT_DELETE);
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         Attachment before = attachmentMapper.getById(workspaceId, id);
         if (before == null) throw new ResourceNotFoundException("Attachment not found with id: " + id);
