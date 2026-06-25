@@ -536,6 +536,7 @@ export type WorkspaceMember = {
     username: string;
     displayName: string;
     email: string;
+    profilePictureUrl?: string;
     role: string;
     roleId?: number | null;
     status?: string;

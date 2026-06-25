@@ -15,6 +15,7 @@ public class MemberDto {
     private String username;
     private String displayName;
     private String email;
+    private String profilePictureUrl;
     private String role;
     private Integer roleId;
     private String status;

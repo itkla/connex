@@ -14,6 +14,7 @@ import {
 } from "@/app/lib/api";
 import { useWorkspace } from "@/app/hooks/useWorkspace";
 import { toastError, toastSuccess } from "@/app/lib/toast";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import {
     Dialog,
@@ -24,6 +25,7 @@ import {
     DialogHeader,
     DialogTitle,
 } from "@/components/ui/dialog";
+import { Skeleton } from "@/components/ui/skeleton";
 
 function SectionLabel({ children }: { children: React.ReactNode }) {
     return (
@@ -121,23 +123,27 @@ export default function MembershipPanel() {
                 <p className="text-sm text-muted-foreground">{t("pendingSubtitle")}</p>
 
                 {loading ? (
-                    <div className="h-16 animate-pulse rounded-2xl bg-muted ring-1 ring-border" />
+                    <div className="overflow-hidden rounded-2xl bg-card ring-1 ring-border">
+                        <div className="flex items-center gap-3 px-4 py-3">
+                            <Skeleton className="size-8 shrink-0 rounded-full" />
+                            <Skeleton className="h-3.5 w-40" />
+                        </div>
+                    </div>
                 ) : pending.length === 0 ? (
-                    <p className="rounded-2xl bg-muted px-4 py-8 text-center text-sm text-muted-foreground ring-1 ring-border">
+                    <p className="rounded-2xl bg-card px-4 py-6 text-center text-sm text-muted-foreground ring-1 ring-border">
                         {t("pendingEmpty")}
                     </p>
                 ) : (
-                    <ul className="divide-y divide-border overflow-hidden rounded-2xl bg-muted ring-1 ring-border">
+                    <ul className="divide-y divide-border overflow-hidden rounded-2xl bg-card ring-1 ring-border">
                         {pending.map((workspace) => {
                             const busy = busyId === workspace.id;
                             return (
                                 <li key={workspace.id} className="flex items-center gap-3 px-4 py-3">
-                                    <span
-                                        aria-hidden
-                                        className="grid size-9 shrink-0 place-items-center rounded-lg bg-brand text-sm font-semibold text-neutral-950"
-                                    >
-                                        {workspace.name.trim().charAt(0).toUpperCase() || "?"}
-                                    </span>
+                                    <Avatar>
+                                        <AvatarFallback className="bg-brand-light font-medium text-brand-dark">
+                                            {workspace.name.trim().charAt(0).toUpperCase() || "?"}
+                                        </AvatarFallback>
+                                    </Avatar>
                                     <span className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">
                                         {workspace.name}
                                     </span>
@@ -153,7 +159,7 @@ export default function MembershipPanel() {
                                         size="sm"
                                         disabled={busy}
                                         onClick={() => accept(workspace)}
-                                        className="bg-brand text-white shadow-sm transition hover:bg-brand-hover"
+                                        className="bg-brand text-white hover:bg-brand-hover"
                                     >
                                         {busy ? <Loader2Icon className="size-4 animate-spin" /> : t("accept")}
                                     </Button>
@@ -166,15 +172,14 @@ export default function MembershipPanel() {
 
             <section className="space-y-3">
                 <SectionLabel>{t("leaveTitle")}</SectionLabel>
-                <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl bg-muted px-4 py-4 ring-1 ring-border">
+                <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl bg-card px-4 py-4 ring-1 ring-border">
                     <p className="text-sm text-muted-foreground">
                         {t("leaveSubtitle", { workspace: activeWorkspace?.name ?? "" })}
                     </p>
                     <Button
-                        variant="outline"
+                        variant="destructive"
                         disabled={!activeWorkspaceId}
                         onClick={() => setLeaveOpen(true)}
-                        className="text-destructive ring-1 ring-destructive/30 hover:bg-destructive/10 hover:text-destructive"
                     >
                         {t("leave")}
                     </Button>

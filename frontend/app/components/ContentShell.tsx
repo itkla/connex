@@ -32,6 +32,19 @@ export default function ContentShell({
         return () => mql.removeEventListener("change", onChange);
     }, []);
 
+    // Lock the document scroll while the app shell is mounted so the window itself
+    // never scrolls (only the <main> content area does). A window scrollbar would drag
+    // the whole shell, sidebar included. Restored on unmount so marketing/auth pages
+    // outside the shell scroll normally.
+    useEffect(() => {
+        const html = document.documentElement;
+        const previous = html.style.overflow;
+        html.style.overflow = "hidden";
+        return () => {
+            html.style.overflow = previous;
+        };
+    }, []);
+
     useEffect(() => {
         if (!mobileOpen) return;
         const onKeyDown = (e: KeyboardEvent) => {
@@ -47,7 +60,7 @@ export default function ContentShell({
     }, [mobileOpen]);
 
     return (
-        <div className="flex h-screen">
+        <div className="flex h-screen overflow-hidden">
             <div
                 aria-hidden
                 onClick={() => setMobileOpen(false)}
@@ -100,7 +113,7 @@ export default function ContentShell({
                     </div>
                 </div>
 
-                <main className="flex-1 p-6 overflow-y-auto">{children}</main>
+                <main className="flex-1 overflow-x-hidden overflow-y-auto p-6">{children}</main>
             </div>
         </div>
     );

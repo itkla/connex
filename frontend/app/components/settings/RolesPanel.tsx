@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useTranslations } from "next-intl";
 import {
+    EllipsisHorizontalIcon,
     LockClosedIcon,
     PencilSquareIcon,
     PlusIcon,
@@ -21,10 +22,21 @@ import {
 } from "@/app/lib/api";
 import { useWorkspace } from "@/app/hooks/useWorkspace";
 import { toastError, toastSuccess } from "@/app/lib/toast";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import {
+    DropdownMenu,
+    DropdownMenuContent,
+    DropdownMenuItem,
+    DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { Skeleton } from "@/components/ui/skeleton";
 import DeleteRecordDialog from "@/app/components/records/DeleteRecordDialog";
 import RoleDialog from "./RoleDialog";
 import { groupPermissions, type PermissionGroup } from "./permissions";
+
+const rowActionTrigger =
+    "flex size-7 items-center justify-center rounded-full text-muted-foreground opacity-0 transition hover:bg-muted/70 hover:text-foreground group-hover:opacity-100 focus:opacity-100 focus-visible:opacity-100 data-[state=open]:opacity-100";
 
 function SectionLabel({ children }: { children: React.ReactNode }) {
     return (
@@ -36,7 +48,7 @@ function RoleIcon({ locked }: { locked?: boolean }) {
     return (
         <span
             aria-hidden
-            className="grid size-9 shrink-0 place-items-center rounded-lg bg-background text-muted-foreground ring-1 ring-border"
+            className="grid size-9 shrink-0 place-items-center rounded-lg bg-muted text-muted-foreground ring-1 ring-border"
         >
             {locked ? <LockClosedIcon className="size-4" /> : <ShieldCheckIcon className="size-4" />}
         </span>
@@ -68,7 +80,7 @@ function PermissionSummary({
                 return (
                     <span
                         key={group}
-                        className="inline-flex items-center gap-1 rounded-full bg-background px-2 py-0.5 text-[11px] font-medium text-muted-foreground ring-1 ring-border"
+                        className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-[11px] font-medium text-muted-foreground ring-1 ring-border"
                     >
                         {label}
                         <span className="text-muted-foreground/60">{on}</span>
@@ -174,7 +186,7 @@ export default function RolesPanel() {
 
     if (accessDenied) {
         return (
-            <p className="rounded-2xl bg-muted px-4 py-8 text-center text-sm text-muted-foreground ring-1 ring-border">
+            <p className="rounded-2xl bg-card px-4 py-6 text-center text-sm text-muted-foreground ring-1 ring-border">
                 {t("noAccess")}
             </p>
         );
@@ -191,10 +203,7 @@ export default function RolesPanel() {
                         <p className="text-sm text-muted-foreground">{t("builtInSubtitle")}</p>
                     </div>
                     {!loading && (
-                        <Button
-                            onClick={openCreate}
-                            className="shrink-0 bg-brand text-white shadow-sm transition hover:bg-brand-hover hover:shadow-md"
-                        >
+                        <Button onClick={openCreate} className="shrink-0 bg-brand text-white hover:bg-brand-hover">
                             <PlusIcon className="size-4" />
                             {t("newRole")}
                         </Button>
@@ -204,7 +213,7 @@ export default function RolesPanel() {
                 {loading ? (
                     <RoleSkeleton rows={3} />
                 ) : (
-                    <ul className="divide-y divide-border overflow-hidden rounded-2xl bg-muted ring-1 ring-border">
+                    <ul className="divide-y divide-border overflow-hidden rounded-2xl bg-card ring-1 ring-border">
                         {builtIn.map((role) => (
                             <li key={role.name} className="flex items-start gap-3 px-4 py-3.5">
                                 <RoleIcon locked />
@@ -213,10 +222,10 @@ export default function RolesPanel() {
                                         <span className="truncate text-sm font-medium capitalize text-foreground">
                                             {role.name}
                                         </span>
-                                        <span className="inline-flex items-center gap-1 rounded-full bg-background px-2 py-0.5 text-[11px] font-medium text-muted-foreground ring-1 ring-border">
+                                        <Badge variant="secondary" className="text-muted-foreground">
                                             <LockClosedIcon className="size-3" />
                                             {t("builtInBadge")}
-                                        </span>
+                                        </Badge>
                                     </div>
                                     <PermissionSummary
                                         role={role}
@@ -243,13 +252,13 @@ export default function RolesPanel() {
                 {loading ? (
                     <RoleSkeleton rows={2} />
                 ) : roles.length === 0 ? (
-                    <p className="rounded-2xl border border-dashed border-border px-4 py-10 text-center text-sm text-muted-foreground">
+                    <p className="rounded-2xl bg-card px-4 py-6 text-center text-sm text-muted-foreground ring-1 ring-border">
                         {t("empty")}
                     </p>
                 ) : (
-                    <ul className="divide-y divide-border overflow-hidden rounded-2xl bg-muted ring-1 ring-border">
+                    <ul className="divide-y divide-border overflow-hidden rounded-2xl bg-card ring-1 ring-border">
                         {roles.map((role) => (
-                            <li key={role.id} className="flex items-start gap-3 px-4 py-3.5">
+                            <li key={role.id} className="group flex items-start gap-3 px-4 py-3.5">
                                 <RoleIcon />
                                 <div className="min-w-0 flex-1 space-y-1.5">
                                     <span className="block truncate text-sm font-medium text-foreground">
@@ -261,24 +270,30 @@ export default function RolesPanel() {
                                         totalPermissions={totalPermissions}
                                     />
                                 </div>
-                                <div className="flex shrink-0 items-center gap-1">
-                                    <button
-                                        type="button"
-                                        onClick={() => openEdit(role)}
-                                        aria-label={t("edit")}
-                                        className="rounded-md p-1.5 text-muted-foreground transition hover:bg-background hover:text-foreground"
-                                    >
-                                        <PencilSquareIcon className="size-4" />
-                                    </button>
-                                    <button
-                                        type="button"
-                                        onClick={() => setRemoveTarget(role)}
-                                        aria-label={t("delete")}
-                                        className="rounded-md p-1.5 text-muted-foreground transition hover:bg-destructive/10 hover:text-destructive"
-                                    >
-                                        <TrashIcon className="size-4" />
-                                    </button>
-                                </div>
+                                <DropdownMenu>
+                                    <DropdownMenuTrigger asChild>
+                                        <button
+                                            type="button"
+                                            aria-label={t("roleActions")}
+                                            className={rowActionTrigger}
+                                        >
+                                            <EllipsisHorizontalIcon className="size-5" />
+                                        </button>
+                                    </DropdownMenuTrigger>
+                                    <DropdownMenuContent align="end" className="w-40">
+                                        <DropdownMenuItem onSelect={() => openEdit(role)}>
+                                            <PencilSquareIcon className="size-4" />
+                                            {t("edit")}
+                                        </DropdownMenuItem>
+                                        <DropdownMenuItem
+                                            variant="destructive"
+                                            onSelect={() => setRemoveTarget(role)}
+                                        >
+                                            <TrashIcon className="size-4" />
+                                            {t("delete")}
+                                        </DropdownMenuItem>
+                                    </DropdownMenuContent>
+                                </DropdownMenu>
                             </li>
                         ))}
                     </ul>
@@ -311,13 +326,13 @@ export default function RolesPanel() {
 
 function RoleSkeleton({ rows }: { rows: number }) {
     return (
-        <ul className="divide-y divide-border overflow-hidden rounded-2xl bg-muted ring-1 ring-border">
+        <ul className="divide-y divide-border overflow-hidden rounded-2xl bg-card ring-1 ring-border">
             {Array.from({ length: rows }, (_, i) => (
                 <li key={i} className="flex items-center gap-3 px-4 py-3.5">
-                    <span className="size-9 shrink-0 animate-pulse rounded-lg bg-background" />
+                    <Skeleton className="size-9 shrink-0 rounded-lg" />
                     <div className="flex-1 space-y-2">
-                        <span className="block h-3.5 w-28 animate-pulse rounded bg-background" />
-                        <span className="block h-3 w-44 animate-pulse rounded bg-background" />
+                        <Skeleton className="h-3.5 w-28" />
+                        <Skeleton className="h-3 w-44" />
                     </div>
                 </li>
             ))}

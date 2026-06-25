@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useTranslations } from "next-intl";
 import { Loader2Icon } from "lucide-react";
-import { EnvelopeIcon, LinkIcon, TrashIcon } from "@heroicons/react/24/outline";
+import { EllipsisHorizontalIcon, EnvelopeIcon, LinkIcon, TrashIcon } from "@heroicons/react/24/outline";
 
 import type { CustomRole, WorkspaceInvite, WorkspaceMember, WorkspaceRole } from "@/app/lib/types";
 import {
@@ -19,12 +19,36 @@ import {
 import { useWorkspace } from "@/app/hooks/useWorkspace";
 import { useFieldErrors } from "@/app/hooks/useFieldErrors";
 import { toastError, toastSuccess } from "@/app/lib/toast";
-import { fieldErrorClass, fieldInputClass } from "@/components/ui/dialog-status-cover";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import {
+    DropdownMenu,
+    DropdownMenuContent,
+    DropdownMenuItem,
+    DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { InputGroup, InputGroupAddon, InputGroupInput } from "@/components/ui/input-group";
+import {
+    Select,
+    SelectContent,
+    SelectGroup,
+    SelectItem,
+    SelectLabel,
+    SelectTrigger,
+    SelectValue,
+} from "@/components/ui/select";
+import { Skeleton } from "@/components/ui/skeleton";
 import DeleteRecordDialog from "@/app/components/records/DeleteRecordDialog";
-import { cn } from "@/lib/utils";
 
 const ASSIGNABLE: WorkspaceRole[] = ["member", "admin"];
+
+const rowActionTrigger =
+    "flex size-7 items-center justify-center rounded-full text-muted-foreground opacity-0 transition hover:bg-muted/70 hover:text-foreground group-hover:opacity-100 focus:opacity-100 focus-visible:opacity-100 data-[state=open]:opacity-100";
+
+function initial(name: string) {
+    return name.trim().charAt(0).toUpperCase() || "?";
+}
 
 function SectionLabel({ children }: { children: React.ReactNode }) {
     return (
@@ -32,29 +56,27 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
     );
 }
 
-function MemberAvatar({ name }: { name: string }) {
-    return (
-        <span
-            aria-hidden
-            className="grid size-9 shrink-0 place-items-center rounded-lg bg-background text-sm font-medium text-muted-foreground ring-1 ring-border"
-        >
-            {name.trim().charAt(0).toUpperCase() || "?"}
-        </span>
+function RoleBadge({ role, label }: { role: string; label: string }) {
+    return role === "owner" ? (
+        <Badge className="border-transparent bg-brand-light text-brand-dark">{label}</Badge>
+    ) : (
+        <Badge variant="secondary">{label}</Badge>
     );
 }
 
-function RoleBadge({ role, label }: { role: string; label: string }) {
+function ListCard({ children }: { children: React.ReactNode }) {
     return (
-        <span
-            className={cn(
-                "inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium",
-                role === "owner"
-                    ? "bg-brand-light text-brand-dark"
-                    : "bg-background text-muted-foreground ring-1 ring-border",
-            )}
-        >
-            {label}
-        </span>
+        <ul className="divide-y divide-border overflow-hidden rounded-2xl bg-card ring-1 ring-border">
+            {children}
+        </ul>
+    );
+}
+
+function EmptyRow({ children }: { children: React.ReactNode }) {
+    return (
+        <p className="rounded-2xl bg-card px-4 py-6 text-center text-sm text-muted-foreground ring-1 ring-border">
+            {children}
+        </p>
     );
 }
 
@@ -211,96 +233,121 @@ export default function MembersPanel({ currentUserId }: { currentUserId: number 
             <section className="space-y-3">
                 <div className="flex items-baseline justify-between">
                     <SectionLabel>{t("title")}</SectionLabel>
-                    <span className="text-xs text-muted-foreground">{t("count", { count: members.length })}</span>
+                    <span className="text-xs text-muted-foreground tabular-nums">
+                        {t("count", { count: members.length })}
+                    </span>
                 </div>
 
                 {loading ? (
                     <MemberSkeleton />
                 ) : members.length === 0 ? (
-                    <EmptyCard>{t("membersEmpty")}</EmptyCard>
+                    <EmptyRow>{t("membersEmpty")}</EmptyRow>
                 ) : (
-                    <ul className="divide-y divide-border overflow-hidden rounded-2xl bg-muted ring-1 ring-border">
+                    <ListCard>
                         {members.map((member) => {
                             const isSelf = member.id === currentUserId;
                             const busy = busyMemberId === member.id;
                             const pending = member.status === "pending";
+                            const editable = isAdmin && (member.roleId == null || isOwner);
                             return (
-                                <li key={member.id} className="flex items-center gap-3 px-4 py-3">
-                                    <MemberAvatar name={member.displayName} />
+                                <li key={member.id} className="group flex items-center gap-3 px-4 py-3">
+                                    <Avatar>
+                                        {member.profilePictureUrl && (
+                                            <AvatarImage
+                                                src={member.profilePictureUrl}
+                                                alt={member.displayName}
+                                            />
+                                        )}
+                                        <AvatarFallback>{initial(member.displayName)}</AvatarFallback>
+                                    </Avatar>
                                     <div className="min-w-0 flex-1">
                                         <div className="flex items-center gap-2">
                                             <span className="truncate text-sm font-medium text-foreground">
                                                 {member.displayName}
                                             </span>
                                             {isSelf && (
-                                                <span className="rounded-full bg-background px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground ring-1 ring-border">
+                                                <Badge variant="outline" className="text-muted-foreground">
                                                     {t("you")}
-                                                </span>
+                                                </Badge>
                                             )}
                                             {pending && (
-                                                <span className="rounded-full bg-amber-500/10 px-1.5 py-0.5 text-[11px] font-medium text-amber-600 dark:text-amber-400">
+                                                <Badge className="border-transparent bg-amber-500/10 text-amber-600 dark:text-amber-400">
                                                     {t("pending")}
-                                                </span>
+                                                </Badge>
                                             )}
                                         </div>
-                                        <span className="truncate text-xs text-muted-foreground">{member.email}</span>
+                                        <p className="truncate text-xs text-muted-foreground">{member.email}</p>
                                     </div>
 
-                                    {isAdmin && (member.roleId == null || isOwner) ? (
-                                        <select
+                                    {editable ? (
+                                        <Select
                                             value={member.roleId ? `custom:${member.roleId}` : member.role}
                                             disabled={busy}
-                                            onChange={(e) => {
-                                                const value = e.target.value;
+                                            onValueChange={(value) => {
                                                 if (value.startsWith("custom:")) assignCustom(member.id, Number(value.slice(7)));
                                                 else changeRole(member.id, value as WorkspaceRole);
                                             }}
-                                            aria-label={t("roleLabel")}
-                                            className={cn(
-                                                fieldInputClass,
-                                                "w-auto cursor-pointer bg-background px-2 py-1 text-xs disabled:opacity-50",
-                                            )}
                                         >
-                                            {selectableRoles.map((r) => (
-                                                <option key={r} value={r}>
-                                                    {roleLabel(r)}
-                                                </option>
-                                            ))}
-                                            {isOwner && customRoles.length > 0 && (
-                                                <optgroup label={t("customRoles")}>
-                                                    {customRoles.map((r) => (
-                                                        <option key={r.id} value={`custom:${r.id}`}>
-                                                            {r.name}
-                                                        </option>
-                                                    ))}
-                                                </optgroup>
-                                            )}
-                                        </select>
+                                            <SelectTrigger size="sm" className="w-auto" aria-label={t("roleLabel")}>
+                                                <SelectValue />
+                                            </SelectTrigger>
+                                            <SelectContent align="end">
+                                                {selectableRoles.map((r) => (
+                                                    <SelectItem key={r} value={r}>
+                                                        {roleLabel(r)}
+                                                    </SelectItem>
+                                                ))}
+                                                {isOwner && customRoles.length > 0 && (
+                                                    <SelectGroup>
+                                                        <SelectLabel>{t("customRoles")}</SelectLabel>
+                                                        {customRoles.map((r) => (
+                                                            <SelectItem key={r.id} value={`custom:${r.id}`}>
+                                                                {r.name}
+                                                            </SelectItem>
+                                                        ))}
+                                                    </SelectGroup>
+                                                )}
+                                            </SelectContent>
+                                        </Select>
                                     ) : (
                                         <RoleBadge role={member.role} label={roleLabel(member.role)} />
                                     )}
 
                                     {isAdmin && !isSelf && (
-                                        <button
-                                            type="button"
-                                            onClick={() => setRemoveTarget(member)}
-                                            aria-label={t("remove")}
-                                            className="rounded-md p-1.5 text-muted-foreground transition hover:bg-destructive/10 hover:text-destructive"
-                                        >
-                                            <TrashIcon className="size-4" />
-                                        </button>
+                                        <DropdownMenu>
+                                            <DropdownMenuTrigger asChild>
+                                                <button
+                                                    type="button"
+                                                    aria-label={t("memberActions")}
+                                                    className={rowActionTrigger}
+                                                >
+                                                    <EllipsisHorizontalIcon className="size-5" />
+                                                </button>
+                                            </DropdownMenuTrigger>
+                                            <DropdownMenuContent align="end" className="w-40">
+                                                <DropdownMenuItem
+                                                    variant="destructive"
+                                                    onSelect={() => setRemoveTarget(member)}
+                                                >
+                                                    <TrashIcon className="size-4" />
+                                                    {t("remove")}
+                                                </DropdownMenuItem>
+                                            </DropdownMenuContent>
+                                        </DropdownMenu>
                                     )}
                                 </li>
                             );
                         })}
-                    </ul>
+                    </ListCard>
                 )}
             </section>
 
             {isAdmin && (
-                <section className="space-y-3">
-                    <SectionLabel>{t("inviteTitle")}</SectionLabel>
-                    <p className="text-sm text-muted-foreground">{t("inviteSubtitle")}</p>
+                <section className="space-y-4">
+                    <div className="space-y-1">
+                        <SectionLabel>{t("inviteTitle")}</SectionLabel>
+                        <p className="text-sm text-muted-foreground">{t("inviteSubtitle")}</p>
+                    </div>
 
                     <form
                         onSubmit={(e) => {
@@ -310,9 +357,11 @@ export default function MembersPanel({ currentUserId }: { currentUserId: number 
                         className="flex flex-col gap-3 sm:flex-row sm:items-start"
                     >
                         <div className="flex-1">
-                            <div className="group relative">
-                                <EnvelopeIcon className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground transition-colors group-focus-within:text-brand" />
-                                <input
+                            <InputGroup>
+                                <InputGroupAddon>
+                                    <EnvelopeIcon />
+                                </InputGroupAddon>
+                                <InputGroupInput
                                     type="email"
                                     value={inviteEmail}
                                     onChange={(e) => {
@@ -322,76 +371,86 @@ export default function MembersPanel({ currentUserId }: { currentUserId: number 
                                     placeholder={t("emailPlaceholder")}
                                     aria-label={t("emailLabel")}
                                     aria-invalid={Boolean(fieldErrors.email)}
-                                    className={cn(fieldInputClass, "pl-9 pr-3", fieldErrors.email && fieldErrorClass)}
                                 />
-                            </div>
+                            </InputGroup>
                             {fieldErrors.email && (
-                                <p className="mt-1 text-sm text-destructive">{fieldErrors.email}</p>
+                                <p className="mt-1.5 text-sm text-destructive">{fieldErrors.email}</p>
                             )}
                         </div>
-                        <select
-                            value={inviteRole}
-                            onChange={(e) => setInviteRole(e.target.value as WorkspaceRole)}
-                            aria-label={t("roleLabel")}
-                            className={cn(fieldInputClass, "w-full cursor-pointer px-3 sm:w-32")}
-                        >
-                            {selectableRoles.map((r) => (
-                                <option key={r} value={r}>
-                                    {roleLabel(r)}
-                                </option>
-                            ))}
-                        </select>
+                        <Select value={inviteRole} onValueChange={(v) => setInviteRole(v as WorkspaceRole)}>
+                            <SelectTrigger className="w-full sm:w-36" aria-label={t("roleLabel")}>
+                                <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent align="end">
+                                {selectableRoles.map((r) => (
+                                    <SelectItem key={r} value={r}>
+                                        {roleLabel(r)}
+                                    </SelectItem>
+                                ))}
+                            </SelectContent>
+                        </Select>
                         <Button
                             type="submit"
                             disabled={sending || inviteEmail.trim().length === 0}
-                            className="min-w-28 bg-brand text-white shadow-sm transition hover:bg-brand-hover hover:shadow-md"
+                            className="min-w-28 bg-brand text-white hover:bg-brand-hover"
                         >
                             {sending ? <Loader2Icon className="size-4 animate-spin" /> : t("sendInvite")}
                         </Button>
                     </form>
 
-                    <div className="pt-2">
-                        <h3 className="mb-2 text-sm font-medium text-foreground">{t("pendingTitle")}</h3>
+                    <div className="space-y-2 pt-2">
+                        <SectionLabel>{t("pendingTitle")}</SectionLabel>
                         {invites.length === 0 ? (
-                            <EmptyCard dashed>{t("pendingEmpty")}</EmptyCard>
+                            <EmptyRow>{t("pendingEmpty")}</EmptyRow>
                         ) : (
-                            <ul className="divide-y divide-border overflow-hidden rounded-2xl bg-muted ring-1 ring-border">
-                                {invites.map((invite) => (
-                                    <li key={invite.id} className="flex items-center gap-3 px-4 py-3">
-                                        <div className="min-w-0 flex-1">
-                                            <div className="flex items-center gap-2">
-                                                <span className="truncate text-sm font-medium text-foreground">
-                                                    {invite.email}
-                                                </span>
-                                                <RoleBadge role={invite.role} label={roleLabel(invite.role)} />
+                            <ListCard>
+                                {invites.map((invite) => {
+                                    const busy = busyInviteId === invite.id;
+                                    return (
+                                        <li key={invite.id} className="group flex items-center gap-3 px-4 py-3">
+                                            <div className="min-w-0 flex-1">
+                                                <div className="flex items-center gap-2">
+                                                    <span className="truncate text-sm font-medium text-foreground">
+                                                        {invite.email}
+                                                    </span>
+                                                    <RoleBadge role={invite.role} label={roleLabel(invite.role)} />
+                                                </div>
+                                                <p className="text-xs text-muted-foreground">
+                                                    {t("expires", { date: invite.expiresAt.slice(0, 10) })}
+                                                </p>
                                             </div>
-                                            <span className="text-xs text-muted-foreground">
-                                                {t("expires", { date: invite.expiresAt.slice(0, 10) })}
-                                            </span>
-                                        </div>
-                                        <button
-                                            type="button"
-                                            onClick={() => copyInviteLink(invite.token)}
-                                            className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium text-muted-foreground transition hover:bg-background hover:text-foreground"
-                                        >
-                                            <LinkIcon className="size-3.5" />
-                                            {t("copyLink")}
-                                        </button>
-                                        <button
-                                            type="button"
-                                            onClick={() => revoke(invite.id)}
-                                            disabled={busyInviteId === invite.id}
-                                            className="rounded-md px-2 py-1 text-xs font-medium text-muted-foreground transition hover:bg-destructive/10 hover:text-destructive disabled:opacity-50"
-                                        >
-                                            {busyInviteId === invite.id ? (
-                                                <Loader2Icon className="size-3.5 animate-spin" />
+                                            {busy ? (
+                                                <Loader2Icon className="size-4 animate-spin text-muted-foreground" />
                                             ) : (
-                                                t("revoke")
+                                                <DropdownMenu>
+                                                    <DropdownMenuTrigger asChild>
+                                                        <button
+                                                            type="button"
+                                                            aria-label={t("inviteActions")}
+                                                            className={rowActionTrigger}
+                                                        >
+                                                            <EllipsisHorizontalIcon className="size-5" />
+                                                        </button>
+                                                    </DropdownMenuTrigger>
+                                                    <DropdownMenuContent align="end" className="w-44">
+                                                        <DropdownMenuItem onSelect={() => copyInviteLink(invite.token)}>
+                                                            <LinkIcon className="size-4" />
+                                                            {t("copyLink")}
+                                                        </DropdownMenuItem>
+                                                        <DropdownMenuItem
+                                                            variant="destructive"
+                                                            onSelect={() => revoke(invite.id)}
+                                                        >
+                                                            <TrashIcon className="size-4" />
+                                                            {t("revoke")}
+                                                        </DropdownMenuItem>
+                                                    </DropdownMenuContent>
+                                                </DropdownMenu>
                                             )}
-                                        </button>
-                                    </li>
-                                ))}
-                            </ul>
+                                        </li>
+                                    );
+                                })}
+                            </ListCard>
                         )}
                     </div>
                 </section>
@@ -413,30 +472,17 @@ export default function MembersPanel({ currentUserId }: { currentUserId: number 
     );
 }
 
-function EmptyCard({ children, dashed = false }: { children: React.ReactNode; dashed?: boolean }) {
-    return (
-        <p
-            className={cn(
-                "rounded-2xl px-4 py-8 text-center text-sm text-muted-foreground",
-                dashed ? "border border-dashed border-border" : "bg-muted ring-1 ring-border",
-            )}
-        >
-            {children}
-        </p>
-    );
-}
-
 function MemberSkeleton() {
     return (
-        <ul className="divide-y divide-border overflow-hidden rounded-2xl bg-muted ring-1 ring-border">
+        <ul className="divide-y divide-border overflow-hidden rounded-2xl bg-card ring-1 ring-border">
             {[0, 1, 2].map((i) => (
                 <li key={i} className="flex items-center gap-3 px-4 py-3">
-                    <span className="size-9 shrink-0 animate-pulse rounded-lg bg-background" />
+                    <Skeleton className="size-8 shrink-0 rounded-full" />
                     <div className="flex-1 space-y-2">
-                        <span className="block h-3.5 w-32 animate-pulse rounded bg-background" />
-                        <span className="block h-3 w-48 animate-pulse rounded bg-background" />
+                        <Skeleton className="h-3.5 w-32" />
+                        <Skeleton className="h-3 w-48" />
                     </div>
-                    <span className="h-6 w-16 animate-pulse rounded-full bg-background" />
+                    <Skeleton className="h-5 w-16 rounded-full" />
                 </li>
             ))}
         </ul>

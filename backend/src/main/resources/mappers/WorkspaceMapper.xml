@@ -58,6 +58,7 @@
 
   <select id="getMembersWithRoles" resultType="ooo.klae.connex.backend.dto.MemberDto">
     SELECT u.id, u.username, u.display_name AS displayName, u.email,
+           u.profile_picture_url AS profilePictureUrl,
            COALESCE(wr.name, wm.role) AS role, wm.role_id AS roleId, wm.status AS status
     FROM app_user u
     JOIN workspace_member wm ON wm.user_id = u.id
@@ -68,6 +69,7 @@
 
   <select id="getMember" resultType="ooo.klae.connex.backend.dto.MemberDto">
     SELECT u.id, u.username, u.display_name AS displayName, u.email,
+           u.profile_picture_url AS profilePictureUrl,
            COALESCE(wr.name, wm.role) AS role, wm.role_id AS roleId, wm.status AS status
     FROM app_user u
     JOIN workspace_member wm ON wm.user_id = u.id
