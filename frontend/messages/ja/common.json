@@ -141,6 +141,7 @@
     "cool": "クール",
     "cold": "コールド",
     "never": "アクティビティなし",
-    "tooltip": "温度 {score}% · 最終接触 {lastTouch}"
+    "tooltip": "温度 {score}% · 最終接触 {lastTouch}",
+    "goesCold": "{when} に冷め込み"
   }
 }

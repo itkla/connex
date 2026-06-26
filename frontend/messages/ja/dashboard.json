@@ -21,7 +21,12 @@
   "CoolingRelationships": {
     "empty": "すべての関係が良好です。冷め込みはありません。",
     "quiet": "{days}日間接触なし",
-    "noCompany": "会社なし"
+    "goesColdIn": "あと{days}日で冷め込み",
+    "noCompany": "会社なし",
+    "scheduleFollowUp": "冷め込む前にフォローアップを予約",
+    "followUpWith": "{name} にフォローアップ",
+    "scheduled": "フォローアップを予約しました",
+    "scheduleFailed": "フォローアップを予約できませんでした。"
   },
   "RecentMoves": {
     "empty": "ネットワーク内で最近の転職はありません。",

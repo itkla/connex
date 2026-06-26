@@ -175,7 +175,7 @@ export default async function Dashboard() {
                                 </Link>
                             }
                         />
-                        <CoolingRelationships items={coolingContacts} />
+                        <CoolingRelationships items={coolingContacts} currentUserId={user.id} />
                     </Rise>
                     <Rise delay={0.36} className="flex flex-col">
                         <SectionHeader

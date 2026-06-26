@@ -61,6 +61,10 @@ public class ScoringService {
     private static final double HALF_LIFE_DAYS = 30.0;
     /** Decayed-weight sum that maps to a ~63 score; tunes how quickly warmth saturates. */
     private static final double SATURATION = 0.7;
+    /** Score at/below which a relationship is "cold"; also the target for predictive decay. */
+    private static final int COLD_SCORE = 15;
+    /** Decayed-weight sum at which the score reaches {@link #COLD_SCORE}; the predictive decay floor. */
+    private static final double RAW_COLD = -SATURATION * log2(1.0 - COLD_SCORE / 100.0);
     /** Recent window (days) used for trend detection and the contextual touch count. */
     private static final int RECENT_WINDOW_DAYS = 21;
     /** Prior window (days) compared against the recent window to detect cooling. */
@@ -164,7 +168,7 @@ public class ScoringService {
     /** Collapses a contact's or company's touches into a single temperature reading. */
     private RelationshipTemperatureDto temperature(int id, List<Touch> touches, long now) {
         if (touches.isEmpty()) {
-            return new RelationshipTemperatureDto(id, 0, "cold", "steady", null, null, 0);
+            return new RelationshipTemperatureDto(id, 0, "cold", "steady", null, null, 0, null, null);
         }
         double raw = 0, recent = 0, prior = 0;
         long lastTs = Long.MIN_VALUE;
@@ -197,7 +201,22 @@ public class ScoringService {
 
         String lastTouchAt = LocalDateTime.ofInstant(Instant.ofEpochMilli(lastTs), ZoneOffset.UTC)
             .format(MYSQL_DATETIME);
-        return new RelationshipTemperatureDto(id, score, band, trend, lastTouchAt, (int) daysSince, recentCount);
+
+        Integer daysUntilCold = null;
+        String goesColdAt = null;
+        if (raw > RAW_COLD) {
+            double daysToCold = HALF_LIFE_DAYS * log2(raw / RAW_COLD);
+            daysUntilCold = (int) Math.round(daysToCold);
+            goesColdAt = LocalDateTime.ofInstant(
+                Instant.ofEpochMilli(now + Math.round(daysToCold * DAY_MS)), ZoneOffset.UTC).format(MYSQL_DATETIME);
+        }
+
+        return new RelationshipTemperatureDto(id, score, band, trend, lastTouchAt, (int) daysSince, recentCount,
+            goesColdAt, daysUntilCold);
+    }
+
+    private static double log2(double value) {
+        return Math.log(value) / Math.log(2.0);
     }
 
     /** Attributes a touch to its contact's company and/or its deal's company (deduplicated). */

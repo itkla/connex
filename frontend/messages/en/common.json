@@ -141,6 +141,7 @@
     "cool": "Cool",
     "cold": "Cold",
     "never": "no activity yet",
-    "tooltip": "{score}% warm · last touch {lastTouch}"
+    "tooltip": "{score}% warm · last touch {lastTouch}",
+    "goesCold": "goes cold {when}"
   }
 }

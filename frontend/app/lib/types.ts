@@ -40,6 +40,10 @@ export type RelationshipTemperature = {
     lastTouchAt?: string | null;
     daysSinceTouch?: number | null;
     touchCount: number;
+    /** Predicted date the relationship decays into "cold" if untouched; null if already cold. */
+    goesColdAt?: string | null;
+    /** Whole days until {@link goesColdAt}; null if already cold or no activity. */
+    daysUntilCold?: number | null;
 };
 
 /** One stint in a contact's employment history. The row with {@code current} is the present company. */

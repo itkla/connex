@@ -21,7 +21,12 @@
   "CoolingRelationships": {
     "empty": "Every relationship is warm — nothing cooling off.",
     "quiet": "{days, plural, =1 {# day quiet} other {# days quiet}}",
-    "noCompany": "No company"
+    "goesColdIn": "goes cold in {days, plural, =1 {# day} other {# days}}",
+    "noCompany": "No company",
+    "scheduleFollowUp": "Schedule a follow-up before it goes cold",
+    "followUpWith": "Follow up with {name}",
+    "scheduled": "Follow-up scheduled",
+    "scheduleFailed": "Couldn't schedule the follow-up."
   },
   "RecentMoves": {
     "empty": "No recent job changes in your network.",

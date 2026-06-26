@@ -33,7 +33,14 @@ export default function TemperaturePill({ temp }: { temp?: RelationshipTemperatu
                     {t(temp.band)}
                 </span>
             </TooltipTrigger>
-            <TooltipContent>{t('tooltip', { score: temp.score, lastTouch })}</TooltipContent>
+            <TooltipContent>
+                <div>{t('tooltip', { score: temp.score, lastTouch })}</div>
+                {temp.daysUntilCold != null && temp.goesColdAt ? (
+                    <div className="opacity-80">
+                        {t('goesCold', { when: formatRelativeTime(temp.goesColdAt, locale) })}
+                    </div>
+                ) : null}
+            </TooltipContent>
         </Tooltip>
     );
 }

@@ -33,4 +33,11 @@ public class RelationshipTemperatureDto {
     private Integer daysSinceTouch;
     /** Number of touches inside the recent window, surfaced for context/tooltips. */
     private int touchCount;
+    /**
+     * Predicted UTC date the relationship decays into the "cold" band if left untouched, or
+     * {@code null} when it is already cold or has no activity to decay.
+     */
+    private String goesColdAt;
+    /** Whole days from now until {@link #goesColdAt}, or {@code null} when not applicable. */
+    private Integer daysUntilCold;
 }
