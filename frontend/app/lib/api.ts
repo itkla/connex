@@ -1038,6 +1038,23 @@ export function deleteCustomField(id: number, init: RequestInit = {}) {
     return deleteJson<void>(`/api/custom-fields/${id}`, init);
 }
 
+function customFieldEntityPath(entityType: Types.CustomFieldEntityType, id: number) {
+    const segment = entityType === "person" ? "persons" : entityType === "company" ? "companies" : "deals";
+    return `/api/${segment}/${id}/custom-fields`;
+}
+
+export function getEntityCustomFields(entityType: Types.CustomFieldEntityType, id: number, init: RequestInit = {}) {
+    return getJson<Types.CustomFieldEntry[]>(customFieldEntityPath(entityType, id), { cache: "no-store", ...init });
+}
+
+export function updateEntityCustomFields(
+    entityType: Types.CustomFieldEntityType,
+    id: number,
+    values: Record<number, unknown>,
+) {
+    return putJson<Types.CustomFieldEntry[]>(customFieldEntityPath(entityType, id), { values });
+}
+
 export function getShares(type: string, id: number, init: RequestInit = {}) {
     return getJson<Types.Share[]>(`/api/shares/${type}/${id}`, { cache: "no-store", ...init });
 }

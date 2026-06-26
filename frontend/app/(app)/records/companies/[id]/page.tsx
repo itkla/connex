@@ -41,6 +41,7 @@ import ContactCard from "@/app/components/records/contacts/ContactCard";
 import QuickEditSheet from "@/app/components/records/contacts/QuickEditSheet";
 import ContactsGrid from "@/app/components/records/companies/ContactsGrid";
 import Attachments from "@/app/components/attachments/Attachments";
+import CustomFieldsCard from "@/app/components/records/CustomFieldsCard";
 
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 
@@ -242,6 +243,8 @@ export default async function CompanyPage({ params }: { params: { id: number } }
                         <InfoRow label={t("added")} value={formatDate(company.createdAt, locale)} />
                         <InfoRow label={t("updated")} value={formatDateTime(company.updatedAt, locale)} />
                     </dl>
+
+                    <CustomFieldsCard entityType="company" entityId={company.id} className="mt-6" />
 
                     <Attachments
                         entityType="company"

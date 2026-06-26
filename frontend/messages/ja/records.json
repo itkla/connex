@@ -1,4 +1,15 @@
 {
+  "RecordCustomFields": {
+    "heading": "カスタムフィールド",
+    "edit": "編集",
+    "editDescription": "このレコードのカスタムフィールドを更新します。",
+    "save": "保存",
+    "cancel": "キャンセル",
+    "yes": "はい",
+    "no": "いいえ",
+    "saved": "カスタムフィールドを更新しました",
+    "saveFailed": "カスタムフィールドを保存できませんでした。"
+  },
   "ShareDialog": {
     "title": "{name} を共有",
     "description": "あなたが所属する別のワークスペースに、このレコードへの閲覧アクセスを付与します。",

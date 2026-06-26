@@ -17,6 +17,7 @@ import { Avatar, AvatarFallback, AvatarGroup, AvatarImage } from "@/components/u
 import InfoRow from "@/app/components/me/InfoRow";
 import Timeline from "@/app/components/me/Timeline";
 import Attachments from "@/app/components/attachments/Attachments";
+import CustomFieldsCard from "@/app/components/records/CustomFieldsCard";
 import { formatCompactCurrency, formatDate, formatDateTime, formatShortDate } from "@/app/lib/utils";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
 import EntityNotificationBanner from "@/app/components/notifications/EntityNotificationBanner";
@@ -178,6 +179,8 @@ export default async function ContactPage({ params }: { params: { id: number } }
                         <InfoRow label={t("added")} value={formatDate(contact.createdAt, locale)} />
                         <InfoRow label={t("updated")} value={formatDateTime(contact.updatedAt, locale)} />
                     </dl>
+
+                    <CustomFieldsCard entityType="person" entityId={contact.id} surfaceClass="bg-card" className="mt-6" />
 
                     {employment.length > 0 && (
                         <div className="mt-6">

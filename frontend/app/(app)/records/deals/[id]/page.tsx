@@ -61,6 +61,7 @@ import { dealOutcome, type DealOutcome } from '@/app/components/records/deals/de
 import DealTaskList from '@/app/components/records/deals/DealTaskList';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import EntityNotificationBanner from '@/app/components/notifications/EntityNotificationBanner';
+import CustomFieldsCard from '@/app/components/records/CustomFieldsCard';
 
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 
@@ -338,6 +339,8 @@ export default async function DealPage({ params }: { params: { id: number } }) {
                         <InfoRow label={t('created')} value={formatDate(deal.createdAt, locale)} />
                         <InfoRow label={t('updated')} value={formatDateTime(deal.updatedAt, locale)} />
                     </dl>
+
+                    <CustomFieldsCard entityType="deal" entityId={deal.id} className="mt-6" />
 
                     <Attachments
                         entityType="deal"

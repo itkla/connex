@@ -1,4 +1,15 @@
 {
+  "RecordCustomFields": {
+    "heading": "Custom fields",
+    "edit": "Edit",
+    "editDescription": "Update this record's custom fields.",
+    "save": "Save",
+    "cancel": "Cancel",
+    "yes": "Yes",
+    "no": "No",
+    "saved": "Custom fields updated",
+    "saveFailed": "Could not save the custom fields."
+  },
   "ShareDialog": {
     "title": "Share {name}",
     "description": "Give another workspace you belong to read access to this record.",
