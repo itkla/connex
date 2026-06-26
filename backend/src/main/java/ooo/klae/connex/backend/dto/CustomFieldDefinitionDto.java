@@ -54,11 +54,11 @@ public class CustomFieldDefinitionDto {
     @Valid
     private List<CustomFieldOption> options;
 
-    private boolean required;
+    private Boolean required;
 
-    private int position;
+    private Integer position;
 
-    private boolean archived;
+    private Boolean archived;
 
     @JsonProperty(access = JsonProperty.Access.READ_ONLY)
     private String createdAt;
@@ -91,9 +91,9 @@ public class CustomFieldDefinitionDto {
         d.setFieldKey(fieldKey);
         d.setLabel(label);
         d.setFieldType(fieldType);
-        d.setRequired(required);
-        d.setPosition(position);
-        d.setArchived(archived);
+        d.setRequired(required != null && required);
+        d.setPosition(position != null ? position : 0);
+        d.setArchived(archived != null && archived);
         return d;
     }
 
