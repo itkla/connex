@@ -13,12 +13,17 @@ import ooo.klae.connex.backend.beans.Activity;
 import ooo.klae.connex.backend.beans.Deal;
 import ooo.klae.connex.backend.beans.Note;
 import ooo.klae.connex.backend.beans.Person;
+import ooo.klae.connex.backend.beans.PersonEmployment;
 import ooo.klae.connex.backend.beans.Tag;
 import ooo.klae.connex.backend.beans.Task;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.tenant.Permission;
 import ooo.klae.connex.backend.tenant.RequirePermission;
+import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 
 import lombok.RequiredArgsConstructor;
@@ -40,9 +45,14 @@ public class PersonService {
     private final TaskMapper taskMapper;
     private final AuditService auditService;
     private final WorkspaceService workspaceService;
+    private final ScoringService scoringService;
+    private final EmploymentService employmentService;
 
     private static final Set<String> AUDIT_FIELDS =
         Set.of("name", "email", "phone", "title", "imageUrl");
+
+    /** Sort key that orders the contacts page by relationship temperature (computed in Java). */
+    private static final String WARMTH_SORT = "warmth";
 
     /**
      * Retrieves all {@code Person} records in the active workspace.
@@ -72,8 +82,33 @@ public class PersonService {
 
     public List<Person> getPersonsPage(String query, String sort, String dir, List<String> companies,
             List<String> titles, boolean noCompany, int limit, int offset) {
-        return personMapper.getPersonsPage(workspaceService.getCurrentWorkspaceId(), query, sort, dir,
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        if (WARMTH_SORT.equalsIgnoreCase(sort)) {
+            return warmthSortedPage(workspaceId, query, dir, companies, titles, noCompany, limit, offset);
+        }
+        return personMapper.getPersonsPage(workspaceId, query, sort, dir,
             companies, titles, noCompany, limit, offset);
+    }
+
+    /**
+     * Orders the filtered contacts by relationship temperature, then pages in memory. Warmth is not a
+     * stored column, so this reuses {@link ScoringService}'s single formula instead of duplicating it
+     * in SQL. The page total still comes from {@code countPersons}, so the same filter predicates apply.
+     *
+     * <p>Default (and the natural "warmth" reading) is warmest first; ascending lists coldest first.
+     * Name stays an ascending tiebreak either way so equal-score rows have a stable order.
+     */
+    private List<Person> warmthSortedPage(int workspaceId, String query, String dir, List<String> companies,
+            List<String> titles, boolean noCompany, int limit, int offset) {
+        List<Person> filtered = new ArrayList<>(
+            personMapper.getPersonsFiltered(workspaceId, query, companies, titles, noCompany));
+        Map<Integer, Integer> scores = scoringService.contactScoreMap(workspaceId);
+        boolean ascending = "asc".equalsIgnoreCase(dir);
+        Comparator<Person> byScore = Comparator.comparingInt((Person p) -> scores.getOrDefault(p.getId(), 0));
+        filtered.sort((ascending ? byScore : byScore.reversed())
+            .thenComparing(p -> p.getName() == null ? "" : p.getName(), String.CASE_INSENSITIVE_ORDER));
+        if (offset >= filtered.size()) return List.of();
+        return filtered.subList(offset, Math.min(offset + limit, filtered.size()));
     }
 
     public long countPersons(String query, List<String> companies, List<String> titles, boolean noCompany) {
@@ -103,12 +138,16 @@ public class PersonService {
     }
 
     /**
-     * Creates a new {@code Person} in the active workspace. The ID is auto-generated.
+     * Creates a new {@code Person} in the active workspace. The ID is auto-generated. When the
+     * contact is created with a company, an opening employment-history row is recorded.
      */
+    @Transactional
     @RequirePermission(Permission.PERSON_CREATE)
     public Person create(Person person) {
-        person.setWorkspaceId(workspaceService.getCurrentWorkspaceId());
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        person.setWorkspaceId(workspaceId);
         personMapper.insert(person);
+        employmentService.recordInitial(workspaceId, person.getId(), companyIdOf(person), person.getTitle());
         auditService.record("person.create", "person", person.getId(), person.getName(),
             "Created person " + person.getName(),
             auditService.diff(null, person, AUDIT_FIELDS));
@@ -116,8 +155,11 @@ public class PersonService {
     }
 
     /**
-     * Updates an existing {@code Person} in the active workspace.
+     * Updates an existing {@code Person} in the active workspace. When the contact's company changes,
+     * the employment history is updated: the current stint is closed and (if they moved to a new
+     * company) a new current stint is opened.
      */
+    @Transactional
     @RequirePermission(Permission.PERSON_UPDATE)
     public Person update(int id, Person person) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
@@ -125,10 +167,28 @@ public class PersonService {
         person.setId(id);
         person.setWorkspaceId(workspaceId);
         personMapper.update(person);
+        if (!Objects.equals(companyIdOf(before), companyIdOf(person))) {
+            employmentService.recordTransition(workspaceId, id, companyIdOf(person), person.getTitle());
+        }
         auditService.record("person.update", "person", id, person.getName(),
             "Updated person " + person.getName(),
             auditService.diff(before, person, AUDIT_FIELDS));
         return person;
+    }
+
+    /** Resolved company id for a person, treating an absent or zero-id company as {@code null}. */
+    private static Integer companyIdOf(Person person) {
+        return (person.getCompany() == null || person.getCompany().getId() == 0)
+            ? null : person.getCompany().getId();
+    }
+
+    /**
+     * Employment history for a workspace-scoped contact, current stint first. Throws if the contact
+     * is not visible to the active workspace.
+     */
+    public List<PersonEmployment> getEmploymentHistory(int id) {
+        requirePerson(workspaceService.getCurrentWorkspaceId(), id);
+        return employmentService.getHistory(id);
     }
 
     /**

@@ -134,5 +134,14 @@
     "sampleName": "Tahm Kench",
     "sampleCompany": "LOL Inc.",
     "sampleRole": "CTO"
+  },
+  "Temperature": {
+    "hot": "Hot",
+    "warm": "Warm",
+    "cool": "Cool",
+    "cold": "Cold",
+    "never": "no activity yet",
+    "tooltip": "{score}% warm · last touch {lastTouch}",
+    "goesCold": "goes cold {when}"
   }
 }

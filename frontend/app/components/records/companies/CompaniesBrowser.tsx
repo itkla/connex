@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { useReducedMotion } from 'motion/react';
@@ -27,10 +27,11 @@ import CompanyCard from '@/app/components/records/companies/CompanyCard';
 import CompanyAvatar from '@/app/components/records/companies/CompanyAvatar';
 import NewCompanyDialog from '@/app/components/records/companies/NewCompanyDialog';
 import QuickEditCompanySheet, { type CompanyDraft } from '@/app/components/records/companies/QuickEditCompanySheet';
-import { createCompany, deleteCompany, getUsers, getTasks, getDeals, updateCompany, getActivities, getNotes, isFieldError } from '@/app/lib/api';
+import { createCompany, deleteCompany, getUsers, getTasks, getDeals, updateCompany, getActivities, getNotes, getCompanyTemperatures, isFieldError } from '@/app/lib/api';
 import { uploadCompanyLogo, pickDominantCurrency, parseMysqlDateTime } from '@/app/lib/utils';
-import { type Company, type CreateCompanyPayload, type UpdateCompanyPayload, type Contact, type Activity, type Note, type Task, type User, type Deal, type CompanyMetrics, type LoadStatus } from '@/app/lib/types';
+import { type Company, type CreateCompanyPayload, type UpdateCompanyPayload, type Contact, type Activity, type Note, type Task, type User, type Deal, type CompanyMetrics, type LoadStatus, type RelationshipTemperature } from '@/app/lib/types';
 import { getContacts } from '@/app/lib/api';
+import TemperaturePill from '@/app/components/records/TemperaturePill';
 import { isDealClosed } from '@/app/components/records/deals/dealOutcome';
 
 function toDraft(c: Company): CompanyDraft {
@@ -99,6 +100,13 @@ export default function CompaniesBrowser({ companies }: { companies: Company[] }
     const [allNotes, setAllNotes] = useState<Note[]>([]);
     const [allUsers, setAllUsers] = useState<User[]>([]);
     const [metricsStatus, setMetricsStatus] = useState<LoadStatus>('idle');
+
+    const [tempByCompanyId, setTempByCompanyId] = useState<Map<number, RelationshipTemperature>>(new Map());
+    useEffect(() => {
+        getCompanyTemperatures()
+            .then((temps) => setTempByCompanyId(new Map(temps.map((temp) => [temp.id, temp]))))
+            .catch(() => setTempByCompanyId(new Map()));
+    }, []);
 
     const ensureMetricsLoaded = useCallback(() => {
         if (metricsStatus === 'loading' || metricsStatus === 'ready') return;
@@ -253,6 +261,12 @@ export default function CompaniesBrowser({ companies }: { companies: Company[] }
     const columns: ColumnDef<Company>[] = useMemo(() => [
         { key: 'name', label: t('columnName'), getSortValue: (c) => c.name ?? null, widthClass: 'min-w-48' },
         {
+            key: 'warmth',
+            label: t('columnWarmth'),
+            getSortValue: (c) => tempByCompanyId.get(c.id)?.score ?? null,
+            render: (c) => <TemperaturePill temp={tempByCompanyId.get(c.id)} />,
+        },
+        {
             key: 'website',
             label: t('columnWebsite'),
             getSortValue: (c) => c.website ?? null,
@@ -288,7 +302,7 @@ export default function CompaniesBrowser({ companies }: { companies: Company[] }
             getSortValue: (c) => (c.updatedAt ? Date.parse(c.updatedAt) : null),
             render: (c) => c.updatedAt,
         },
-    ], [t]);
+    ], [t, tempByCompanyId]);
 
     const visibleCompanies = useMemo(
         () => applyRecordFilters(filteredCompanies, columns, filterState),

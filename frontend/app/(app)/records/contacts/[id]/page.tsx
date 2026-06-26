@@ -1,6 +1,6 @@
-import { getAttachmentsFromCookie, getCompanies, getContactById, getContacts, getContextNotifications, getCurrentUserFromCookie, getDeals, getTags, getUserById } from "@/app/lib/api";
+import { getAttachmentsFromCookie, getCompanies, getContactById, getContactConnections, getContactEmployment, getContactIntroPath, getContacts, getContextNotifications, getCurrentUserFromCookie, getDeals, getTags, getUserById } from "@/app/lib/api";
 import { notFound, redirect } from "next/navigation";
-import { type Company, type Deal, type Tag, type Contact, type User } from "@/app/lib/types";
+import { type Company, type Deal, type Tag, type Contact, type IntroPath, type PersonConnection, type PersonEmployment, type User } from "@/app/lib/types";
 import { cookies } from "next/headers";
 import Link from "next/link";
 import { ArrowLeftIcon, UserIcon } from "@heroicons/react/24/outline";
@@ -8,6 +8,7 @@ import { getLocale, getTranslations } from "next-intl/server";
 
 import ContactActionsMenu from "@/app/components/records/contacts/ContactActionsMenu";
 import ContactAvatar from "@/app/components/records/contacts/ContactAvatar";
+import ContactConnections from "@/app/components/records/contacts/ContactConnections";
 import ContactStatCard from "@/app/components/records/contacts/ContactStatCard";
 import NewActivityDialog from "@/app/components/records/contacts/NewActivityDialog";
 import NewTaskDialog from "@/app/components/records/contacts/NewTaskDialog";
@@ -16,7 +17,7 @@ import { Avatar, AvatarFallback, AvatarGroup, AvatarImage } from "@/components/u
 import InfoRow from "@/app/components/me/InfoRow";
 import Timeline from "@/app/components/me/Timeline";
 import Attachments from "@/app/components/attachments/Attachments";
-import { formatCompactCurrency, formatDate, formatDateTime } from "@/app/lib/utils";
+import { formatCompactCurrency, formatDate, formatDateTime, formatShortDate } from "@/app/lib/utils";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
 import EntityNotificationBanner from "@/app/components/notifications/EntityNotificationBanner";
 
@@ -27,7 +28,7 @@ export default async function ContactPage({ params }: { params: { id: number } }
     const t = await getTranslations("ContactsPage");
     const locale = await getLocale();
 
-    const [contact, currentUser, allTags, allCompanies, allPersons, allDeals, attachments, notificationPage] = await Promise.all([
+    const [contact, currentUser, allTags, allCompanies, allPersons, allDeals, attachments, notificationPage, employment, connections, introPath] = await Promise.all([
         getContactById(id, init) as Promise<Contact>,
         getCurrentUserFromCookie((await cookies()).toString()),
         getTags(init).catch(() => [] as Tag[]),
@@ -36,6 +37,9 @@ export default async function ContactPage({ params }: { params: { id: number } }
         getDeals(init).catch(() => [] as Deal[]),
         getAttachmentsFromCookie("person", id, cookie),
         getContextNotifications("person", id, init).catch(() => ({ items: [], total: 0 })),
+        getContactEmployment(id, init).catch(() => [] as PersonEmployment[]),
+        getContactConnections(id, init).catch(() => [] as PersonConnection[]),
+        getContactIntroPath(id, init).catch(() => ({ reachable: false, directlyKnown: false, steps: [] }) as IntroPath),
     ]);
     if (!contact) {
         console.error(`Contact not found: ${id}`);
@@ -175,6 +179,47 @@ export default async function ContactPage({ params }: { params: { id: number } }
                         <InfoRow label={t("updated")} value={formatDateTime(contact.updatedAt, locale)} />
                     </dl>
 
+                    {employment.length > 0 && (
+                        <div className="mt-6">
+                            <div className="mb-3 flex h-8 items-center">
+                                <h2 className="px-6 text-xs font-medium tracking-[0.12em] text-muted-foreground uppercase">
+                                    {t("employmentHistory")}
+                                </h2>
+                            </div>
+                            <ol className="divide-y divide-border overflow-hidden rounded-2xl bg-card ring-1 ring-border">
+                                {employment.map((stint) => (
+                                    <li key={stint.id} className="px-6 py-4">
+                                        <div className="flex items-center justify-between gap-2">
+                                            {stint.companyId ? (
+                                                <Link
+                                                    href={`/records/companies/${stint.companyId}`}
+                                                    className="truncate text-sm font-medium text-foreground transition-colors hover:text-brand-hover"
+                                                >
+                                                    {stint.companyName ?? t("unknownCompany")}
+                                                </Link>
+                                            ) : (
+                                                <span className="truncate text-sm font-medium text-foreground">
+                                                    {stint.companyName ?? t("unknownCompany")}
+                                                </span>
+                                            )}
+                                            {stint.current && (
+                                                <span className="shrink-0 rounded-full bg-brand-light px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-brand-dark">
+                                                    {t("current")}
+                                                </span>
+                                            )}
+                                        </div>
+                                        {stint.title ? (
+                                            <p className="mt-0.5 text-xs text-muted-foreground">{stint.title}</p>
+                                        ) : null}
+                                        <p className="mt-1 text-xs tabular-nums text-muted-foreground">
+                                            {formatShortDate(stint.startedAt ?? undefined, locale)} – {stint.endedAt ? formatShortDate(stint.endedAt, locale) : t("present")}
+                                        </p>
+                                    </li>
+                                ))}
+                            </ol>
+                        </div>
+                    )}
+
                     <Attachments
                         entityType="person"
                         entityId={contact.id}
@@ -254,6 +299,19 @@ export default async function ContactPage({ params }: { params: { id: number } }
                             </ul>
                         )}
                     </div>
+
+                    <div className="mt-6 mb-3 flex h-8 items-center">
+                        <h2 className="px-6 text-xs font-medium tracking-[0.12em] text-muted-foreground uppercase">
+                            {t("connections")}
+                        </h2>
+                    </div>
+                    <ContactConnections
+                        contactId={contact.id}
+                        contactName={contact.name}
+                        contacts={allPersons}
+                        initialConnections={connections}
+                        initialIntroPath={introPath}
+                    />
 
                     <div className="mt-6 mb-3 flex h-8 items-center">
                         <h2 className="px-6 text-xs font-medium tracking-[0.12em] text-muted-foreground uppercase">

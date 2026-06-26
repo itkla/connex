@@ -25,6 +25,88 @@ export type PersonFacets = {
     hasNoCompany: boolean;
 };
 
+export type TemperatureBand = 'hot' | 'warm' | 'cool' | 'cold';
+export type TemperatureTrend = 'rising' | 'steady' | 'cooling';
+
+/**
+ * Computed relationship "temperature" for a contact or company. Derived on read by the backend
+ * from interaction recency/frequency; consumed by the map, dashboard, and records tables.
+ */
+export type RelationshipTemperature = {
+    id: number;
+    score: number;
+    band: TemperatureBand;
+    trend: TemperatureTrend;
+    lastTouchAt?: string | null;
+    daysSinceTouch?: number | null;
+    touchCount: number;
+    /** Predicted date the relationship decays into "cold" if untouched; null if already cold. */
+    goesColdAt?: string | null;
+    /** Whole days until {@link goesColdAt}; null if already cold or no activity. */
+    daysUntilCold?: number | null;
+};
+
+/** One stint in a contact's employment history. The row with {@code current} is the present company. */
+export type PersonEmployment = {
+    id: number;
+    personId: number;
+    companyId?: number | null;
+    companyName?: string | null;
+    title?: string | null;
+    startedAt?: string | null;
+    endedAt?: string | null;
+    current: boolean;
+};
+
+/** A contact who recently changed companies — the "recently moved" feed row. */
+export type JobMove = {
+    personId: number;
+    personName: string;
+    personImageUrl?: string | null;
+    fromCompanyId?: number | null;
+    fromCompanyName?: string | null;
+    toCompanyId?: number | null;
+    toCompanyName?: string | null;
+    movedAt?: string | null;
+};
+
+export type ConnectionType = 'knows' | 'colleague' | 'former_colleague' | 'friend';
+
+/** A contact's connection to another contact in the warm-intro graph (from that contact's view). */
+export type PersonConnection = {
+    id: number;
+    personId: number;
+    personName: string;
+    companyId?: number | null;
+    companyName?: string | null;
+    type: string;
+    strength: number;
+    note?: string | null;
+};
+
+export type ConnectionPayload = {
+    targetPersonId: number;
+    type?: string;
+    strength?: number;
+    note?: string;
+};
+
+/** One contact along a warm-introduction path. */
+export type IntroPathStep = {
+    personId: number;
+    personName?: string | null;
+    companyName?: string | null;
+    connectionType?: string | null;
+    engaged: boolean;
+};
+
+/** The warmest introduction path to a contact: ordered from an engaged contact to the target. */
+export type IntroPath = {
+    reachable: boolean;
+    directlyKnown: boolean;
+    steps: IntroPathStep[];
+};
+
 export type User = {
     id: number;
     username: string;

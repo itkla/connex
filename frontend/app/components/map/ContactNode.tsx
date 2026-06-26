@@ -5,6 +5,7 @@ import { memo } from 'react';
 import { motion, useReducedMotion } from 'motion/react';
 import { ChevronRightIcon, EnvelopeIcon, PhoneIcon } from '@heroicons/react/24/outline';
 import { cn } from '@/lib/utils';
+import { warmthBorderClass, warmthDotClass } from '@/app/lib/utils';
 import ContactAvatar from '@/app/components/records/contacts/ContactAvatar';
 import type { ContactNode as ContactNodeType } from './graph/types';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
@@ -17,7 +18,7 @@ const EASE_OUT: [number, number, number, number] = [0.23, 1, 0.32, 1];
 
 function ContactNodeImpl({ id, data }: NodeProps<ContactNodeType>) {
     const { updateNodeData } = useReactFlow();
-    const { contact, hasActivity, expanded, hovered } = data;
+    const { contact, hasActivity, warmth, expanded, hovered } = data;
     const dotEnabled = useDotEnabled();
     const reduceMotion = useReducedMotion();
     const toggle = () => updateNodeData(id, { expanded: !expanded });
@@ -25,14 +26,20 @@ function ContactNodeImpl({ id, data }: NodeProps<ContactNodeType>) {
     // TODO: fix the misalignment bug where the image isn't perfectly centered in the ring
     const ring = cn(
         'flex items-center justify-center rounded-full border-2 p-0.5 transition-transform hover:scale-110',
-        hasActivity ? 'border-solid border-emerald-500 dark:border-emerald-400' : 'border-dashed border-border',
+        warmth
+            ? cn('border-solid', warmthBorderClass(warmth))
+            : hasActivity ? 'border-solid border-emerald-500 dark:border-emerald-400' : 'border-dashed border-border',
     );
 
     if (dotEnabled && !expanded && !hovered) {
         return (
             <NodeDot
                 shape="circle"
-                className={hasActivity ? 'bg-emerald-500 dark:bg-emerald-400' : 'bg-muted-foreground/50'}
+                className={
+                    warmth
+                        ? warmthDotClass(warmth)
+                        : hasActivity ? 'bg-emerald-500 dark:bg-emerald-400' : 'bg-muted-foreground/50'
+                }
                 title={contact.name}
                 onClick={toggle}
             />

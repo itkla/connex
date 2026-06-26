@@ -11,9 +11,26 @@
     "tasks": "Tasks",
     "recentActivity": "Recent activity",
     "viewAll": "View all",
+    "viewMap": "View map",
+    "coolingRelationships": "Cooling relationships",
+    "recentlyMoved": "Recently moved",
     "files": "Files",
     "storageUsed": "{count, plural, =1 {# file} other {# files}} · {size}",
     "noFiles": "No files yet"
+  },
+  "CoolingRelationships": {
+    "empty": "Every relationship is warm — nothing cooling off.",
+    "quiet": "{days, plural, =1 {# day quiet} other {# days quiet}}",
+    "goesColdIn": "goes cold in {days, plural, =1 {# day} other {# days}}",
+    "noCompany": "No company",
+    "scheduleFollowUp": "Schedule a follow-up before it goes cold",
+    "followUpWith": "Follow up with {name}",
+    "scheduled": "Follow-up scheduled",
+    "scheduleFailed": "Couldn't schedule the follow-up."
+  },
+  "RecentMoves": {
+    "empty": "No recent job changes in your network.",
+    "unknown": "Unknown"
   },
   "DashboardGreeting": {
     "workingLate": "Working late,",

@@ -29,9 +29,10 @@ import ContactAvatar from '@/app/components/records/contacts/ContactAvatar';
 import NewContactDialog from '@/app/components/records/contacts/NewContactDialog';
 import ChangeCompanyDialog from '@/app/components/records/contacts/ChangeCompanyDialog';
 import QuickEditSheet, { type ContactDraft } from '@/app/components/records/contacts/QuickEditSheet';
-import { deleteContact, updateContact, createContact, getCompanies, getContactsPage, getPersonFacets, isFieldError } from '@/app/lib/api';
+import { deleteContact, updateContact, createContact, getCompanies, getContactsPage, getContactTemperatures, getPersonFacets, isFieldError } from '@/app/lib/api';
 import { uploadContactPicture } from '@/app/lib/utils';
-import { type Contact, type UpdateContactPayload, type Company, type CreateContactPayload, type ContactsPageParams, type PersonFacets } from '@/app/lib/types';
+import { type Contact, type UpdateContactPayload, type Company, type CreateContactPayload, type ContactsPageParams, type PersonFacets, type RelationshipTemperature } from '@/app/lib/types';
+import TemperaturePill from '@/app/components/records/TemperaturePill';
 
 const NO_ITEMS: Contact[] = [];
 const searchFields = (c: Contact) => [c.name, c.email, c.phone, c.title];
@@ -142,6 +143,13 @@ export default function ContactsBrowser() {
     const [companies, setCompanies] = useState<Company[]>([]);
     useEffect(() => {
         getCompanies({}).then(setCompanies).catch(() => setCompanies([]));
+    }, []);
+
+    const [tempByContactId, setTempByContactId] = useState<Map<number, RelationshipTemperature>>(new Map());
+    useEffect(() => {
+        getContactTemperatures()
+            .then((temps) => setTempByContactId(new Map(temps.map((temp) => [temp.id, temp]))))
+            .catch(() => setTempByContactId(new Map()));
     }, []);
 
     const emptyContactDraft: CreateContactPayload = { name: '', email: '', phone: '', title: '' };
@@ -317,6 +325,12 @@ export default function ContactsBrowser() {
     const columns: ColumnDef<Contact>[] = useMemo(() => [
         { key: 'name', label: t('columnName'), getSortValue: (c) => c.name ?? null, widthClass: 'min-w-48' },
         {
+            key: 'warmth',
+            label: t('columnWarmth'),
+            getSortValue: (c) => tempByContactId.get(c.id)?.score ?? null,
+            render: (c) => <TemperaturePill temp={tempByContactId.get(c.id)} />,
+        },
+        {
             key: 'email',
             label: t('columnEmail'),
             getSortValue: (c) => c.email ?? null,
@@ -354,7 +368,7 @@ export default function ContactsBrowser() {
             getSortValue: (c) => (c.updatedAt ? Date.parse(c.updatedAt) : null),
             render: (c) => c.updatedAt,
         },
-    ], [t]);
+    ], [t, tempByContactId]);
 
     // const visibleContacts = useMemo(
     //     () => applyRecordFilters(filteredContacts, columns, filterState),

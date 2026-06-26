@@ -466,6 +466,54 @@ export function getContactById(id: number, init: RequestInit = {}) {
     return getJson<Types.Contact>(`/api/persons/${id}`, init);
 }
 
+export function getContactEmployment(id: number, init: RequestInit = {}) {
+    return getJson<Types.PersonEmployment[]>(`/api/persons/${id}/employment`, init);
+}
+
+export function getRecentMoves(init: RequestInit = {}) {
+    return getJson<Types.JobMove[]>(`/api/persons/recent-moves`, init);
+}
+
+export function getRecentMovesFromCookie(cookie: string | null) {
+    return safeWithCookie<Types.JobMove>((init) => getRecentMoves(init), cookie);
+}
+
+export function getContactConnections(id: number, init: RequestInit = {}) {
+    return getJson<Types.PersonConnection[]>(`/api/persons/${id}/connections`, init);
+}
+
+export function addContactConnection(id: number, payload: Types.ConnectionPayload, init: RequestInit = {}) {
+    return postJson<void>(`/api/persons/${id}/connections`, payload, init);
+}
+
+export function removeContactConnection(id: number, targetId: number, init: RequestInit = {}) {
+    return deleteJson<void>(`/api/persons/${id}/connections/${targetId}`, init);
+}
+
+export function getContactIntroPath(id: number, init: RequestInit = {}) {
+    return getJson<Types.IntroPath>(`/api/persons/${id}/intro-path`, init);
+}
+
+/*
+* == Relationship temperature (warmth) scoring
+*/
+
+export function getContactTemperatures(init: RequestInit = {}) {
+    return getJson<Types.RelationshipTemperature[]>(`/api/scoring/contacts`, init);
+}
+
+export function getContactTemperaturesFromCookie(cookie: string | null) {
+    return safeWithCookie<Types.RelationshipTemperature>((init) => getContactTemperatures(init), cookie);
+}
+
+export function getCompanyTemperatures(init: RequestInit = {}) {
+    return getJson<Types.RelationshipTemperature[]>(`/api/scoring/companies`, init);
+}
+
+export function getCompanyTemperaturesFromCookie(cookie: string | null) {
+    return safeWithCookie<Types.RelationshipTemperature>((init) => getCompanyTemperatures(init), cookie);
+}
+
 export function createContact(payload: Types.CreateContactPayload) {
     return postJson<Types.Contact>(`/api/persons`, payload);
 }

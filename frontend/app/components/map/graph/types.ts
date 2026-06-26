@@ -1,5 +1,5 @@
 import type { Node, Edge } from '@xyflow/react';
-import type { Activity, Company, CompanyMetrics, Contact, Deal, Note, Task, User } from '@/app/lib/types';
+import type { Activity, Company, CompanyMetrics, Contact, Deal, Note, Task, TemperatureBand, User } from '@/app/lib/types';
 import type { DealOutcome } from '@/app/components/records/deals/dealOutcome';
 
 // note to hunter in the future: yo this type file is ONLY used by the graph; it isn't a general object definition file like the other type.ts is. therefore you should keep the file here as-is
@@ -20,6 +20,8 @@ export type CompanyNodeData = {
     kind: 'company';
     company: Company;
     metrics: CompanyMetrics;
+    /** Relationship-warmth band, used to colour the node; absent until scores load. */
+    warmth?: TemperatureBand;
     expanded: boolean;
     hovered?: boolean; // transient: this node's tree is hovered, so bloom to a logo
 };
@@ -28,6 +30,8 @@ export type ContactNodeData = {
     kind: 'contact';
     contact: Contact;
     hasActivity: boolean;
+    /** Relationship-warmth band, used to colour the node; absent until scores load. */
+    warmth?: TemperatureBand;
     expanded: boolean;
     hovered?: boolean; // transient: this node's tree is hovered, so bloom to a pfp
 };
@@ -73,4 +77,8 @@ export type GraphInput = {
     notes: Note[];
     stageNames: Map<number, string>;
     ucLabel: string;
+    /** Contact id → warmth band; nodes fall back to a neutral style when absent. */
+    contactWarmth?: Map<number, TemperatureBand>;
+    /** Company id → warmth band; nodes fall back to a neutral style when absent. */
+    companyWarmth?: Map<number, TemperatureBand>;
 };

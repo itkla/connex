@@ -10,6 +10,7 @@ import { EngagementSparkline, RevenueTiles } from '@/app/components/records/comp
 import { Avatar, AvatarFallback, AvatarGroup, AvatarImage } from '@/components/ui/avatar';
 import { buttonVariants } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
+import { warmthDotClass } from '@/app/lib/utils';
 import type { CompanyNode as CompanyNodeType } from './graph/types';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import NodeDot from '@/app/components/map/NodeDot';
@@ -36,7 +37,7 @@ function StatStrip({ items }: { items: { label: string; value: number }[] }) {
 
 function CompanyNodeImpl({ id, data }: NodeProps<CompanyNodeType>) {
     const { updateNodeData } = useReactFlow();
-    const { company, metrics, expanded, hovered } = data;
+    const { company, metrics, warmth, expanded, hovered } = data;
     const dotEnabled = useDotEnabled();
     const reduceMotion = useReducedMotion();
     const toggle = () => updateNodeData(id, { expanded: !expanded });
@@ -45,7 +46,7 @@ function CompanyNodeImpl({ id, data }: NodeProps<CompanyNodeType>) {
         return (
             <NodeDot
                 shape="square"
-                className="bg-muted-foreground/50"
+                className={warmth ? warmthDotClass(warmth) : 'bg-muted-foreground/50'}
                 title={company.name}
                 onClick={toggle}
             />

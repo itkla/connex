@@ -1,6 +1,6 @@
 // transplanted from /me 
 
-import { type UploadedFile } from '@/app/lib/types';
+import { type TemperatureBand, type UploadedFile } from '@/app/lib/types';
 
 export function formatShortDate(value: string | undefined, locale: string) {
     if (!value) {
@@ -487,4 +487,43 @@ export function initials(name: string) {
         .slice(0, 2)
         .join("")
         .toUpperCase();
+}
+
+const WARMTH_DOT: Record<TemperatureBand, string> = {
+    hot: 'bg-warmth-hot',
+    warm: 'bg-warmth-warm',
+    cool: 'bg-warmth-cool',
+    cold: 'bg-warmth-cold',
+};
+
+const WARMTH_SURFACE: Record<TemperatureBand, string> = {
+    hot: 'bg-warmth-hot/10 ring-warmth-hot/25',
+    warm: 'bg-warmth-warm/12 ring-warmth-warm/25',
+    cool: 'bg-warmth-cool/14 ring-warmth-cool/30',
+    cold: 'bg-warmth-cold/10 ring-warmth-cold/25',
+};
+
+const WARMTH_BORDER: Record<TemperatureBand, string> = {
+    hot: 'border-warmth-hot',
+    warm: 'border-warmth-warm',
+    cool: 'border-warmth-cool',
+    cold: 'border-warmth-cold',
+};
+
+/**
+ * Solid background class for a warmth band — used for the map node dots and the contact ring.
+ * Class literals are static so Tailwind's JIT picks them up.
+ */
+export function warmthDotClass(band: TemperatureBand): string {
+    return WARMTH_DOT[band] ?? WARMTH_DOT.cold;
+}
+
+/** Tinted background + ring classes for a warmth pill/badge surface. */
+export function warmthSurfaceClasses(band: TemperatureBand): string {
+    return WARMTH_SURFACE[band] ?? WARMTH_SURFACE.cold;
+}
+
+/** Border-colour class for a warmth band — used for the map contact ring. */
+export function warmthBorderClass(band: TemperatureBand): string {
+    return WARMTH_BORDER[band] ?? WARMTH_BORDER.cold;
 }
