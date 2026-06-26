@@ -20,9 +20,9 @@ import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 
 /**
- * REST controller for the custom-field catalog. Listing and reads are
- * membership-gated; create/update/delete require {@code CUSTOM_FIELD_MANAGE},
- * enforced on the service.
+ * REST controller for the custom-field catalog. Every operation requires
+ * {@code CUSTOM_FIELD_MANAGE} (enforced on the service) — this is the admin
+ * management surface, not the member-facing record read path.
  */
 @RestController
 @RequestMapping("/api/custom-fields")
@@ -38,7 +38,7 @@ public class CustomFieldController {
         List<CustomFieldDefinition> definitions = (entityType == null || entityType.isBlank())
             ? definitionService.getAll()
             : definitionService.getByEntityType(entityType);
-        return definitions.stream().map(CustomFieldDefinitionDto::from).toList();
+        return definitions.stream().map(this::toDto).toList();
     }
 
     /**
@@ -46,7 +46,7 @@ public class CustomFieldController {
      */
     @GetMapping("/{id}")
     public CustomFieldDefinitionDto getById(@PathVariable int id) {
-        return CustomFieldDefinitionDto.from(definitionService.getById(id));
+        return toDto(definitionService.getById(id));
     }
 
     /**
@@ -54,7 +54,7 @@ public class CustomFieldController {
      */
     @PostMapping
     public CustomFieldDefinitionDto create(@Valid @RequestBody CustomFieldDefinitionDto dto) {
-        return CustomFieldDefinitionDto.from(definitionService.create(dto.toBean(), dto.getOptions()));
+        return toDto(definitionService.create(dto.toBean(), dto.getOptions()));
     }
 
     /**
@@ -62,7 +62,7 @@ public class CustomFieldController {
      */
     @PutMapping("/{id}")
     public CustomFieldDefinitionDto update(@PathVariable int id, @Valid @RequestBody CustomFieldDefinitionDto dto) {
-        return CustomFieldDefinitionDto.from(definitionService.update(id, dto.toBean(), dto.getOptions()));
+        return toDto(definitionService.update(id, dto.toBean(), dto.getOptions()));
     }
 
     /**
@@ -71,5 +71,15 @@ public class CustomFieldController {
     @DeleteMapping("/{id}")
     public void delete(@PathVariable int id) {
         definitionService.delete(id);
+    }
+
+    /**
+     * Maps a definition to its API form, attaching the typed options the service parses
+     * from the stored {@code options_json}.
+     */
+    private CustomFieldDefinitionDto toDto(CustomFieldDefinition def) {
+        CustomFieldDefinitionDto dto = CustomFieldDefinitionDto.from(def);
+        dto.setOptions(definitionService.parseOptions(def.getOptionsJson()));
+        return dto;
     }
 }

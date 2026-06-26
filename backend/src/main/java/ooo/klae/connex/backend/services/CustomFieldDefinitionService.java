@@ -4,10 +4,11 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.ObjectMapper;
 
 import lombok.RequiredArgsConstructor;
 
@@ -21,20 +22,24 @@ import ooo.klae.connex.backend.tenant.Permission;
 import ooo.klae.connex.backend.tenant.RequirePermission;
 
 /**
- * Business logic for the custom-field catalog. Defining fields is an admin act
- * ({@code CUSTOM_FIELD_MANAGE}); reads are membership-gated so any member can
- * render a record's fields. {@code entityType} and {@code fieldKey} are fixed at
- * creation; everything else is editable. Delegates persistence to
- * {@code CustomFieldDefinitionMapper}.
+ * Business logic for the custom-field catalog — the admin surface for managing
+ * which fields a workspace's records may carry. Every operation, reads included,
+ * requires {@code CUSTOM_FIELD_MANAGE}; member-facing field rendering reads
+ * definitions through the record (entity) endpoints, not this catalog.
+ * {@code entityType}, {@code fieldKey}, and {@code fieldType} are fixed at
+ * creation; label, options, required, position, and archived are editable.
+ * Delegates persistence to {@code CustomFieldDefinitionMapper}.
  */
 @Service
 @RequiredArgsConstructor
 public class CustomFieldDefinitionService {
+    private static final Logger log = LoggerFactory.getLogger(CustomFieldDefinitionService.class);
+
     private final CustomFieldDefinitionMapper definitionMapper;
     private final AuditService auditService;
     private final WorkspaceService workspaceService;
+    private final ObjectMapper objectMapper;
 
-    private static final ObjectMapper MAPPER = new ObjectMapper();
     private static final Set<String> ENTITY_TYPES = Set.of("company", "person", "deal");
     private static final Set<String> FIELD_TYPES =
         Set.of("text", "textarea", "number", "date", "boolean", "select", "url");
@@ -77,7 +82,7 @@ public class CustomFieldDefinitionService {
         def.setEntityType(normalize(def.getEntityType()));
         validateShape(def, options);
         def.setOptionsJson(serializeOptions(def.getFieldType(), options));
-        assertUniqueKey(workspaceId, def.getEntityType(), def.getFieldKey(), 0);
+        assertUniqueKey(workspaceId, def.getEntityType(), def.getFieldKey());
         definitionMapper.insert(def);
         auditService.record("custom_field.create", "custom_field", def.getId(), def.getLabel(),
             "Created custom field " + def.getLabel(),
@@ -86,8 +91,9 @@ public class CustomFieldDefinitionService {
     }
 
     /**
-     * Updates an existing field's editable attributes. {@code entityType} and
-     * {@code fieldKey} are preserved from the stored record.
+     * Updates a field's editable attributes. {@code entityType}, {@code fieldKey},
+     * and {@code fieldType} are immutable — preserved from the stored record so a
+     * structural change can never orphan existing values.
      */
     @RequirePermission(Permission.CUSTOM_FIELD_MANAGE)
     public CustomFieldDefinition update(int id, CustomFieldDefinition def, List<CustomFieldOption> options) {
@@ -98,6 +104,7 @@ public class CustomFieldDefinitionService {
         def.setWorkspaceId(workspaceId);
         def.setEntityType(before.getEntityType());
         def.setFieldKey(before.getFieldKey());
+        def.setFieldType(before.getFieldType());
         validateShape(def, options);
         def.setOptionsJson(serializeOptions(def.getFieldType(), options));
         definitionMapper.update(def);
@@ -122,9 +129,26 @@ public class CustomFieldDefinitionService {
     }
 
     /**
-     * Validates entity type, field type, and the select-option invariants.
+     * Parses the stored {@code options_json} into typed options for the API; null
+     * when a field has no options. Malformed JSON is logged and treated as none.
+     */
+    public List<CustomFieldOption> parseOptions(String json) {
+        if (json == null || json.isBlank()) return null;
+        try {
+            return List.of(objectMapper.readValue(json, CustomFieldOption[].class));
+        } catch (Exception e) {
+            log.warn("Failed to parse custom-field options JSON", e);
+            return null;
+        }
+    }
+
+    /**
+     * Validates label, entity type, field type, and the select-option invariants.
      */
     private void validateShape(CustomFieldDefinition def, List<CustomFieldOption> options) {
+        if (def.getLabel() == null || def.getLabel().isBlank()) {
+            throw new BadRequestException("A field label is required");
+        }
         if (!ENTITY_TYPES.contains(def.getEntityType())) {
             throw new BadRequestException("Unsupported entity type: " + def.getEntityType());
         }
@@ -140,6 +164,9 @@ public class CustomFieldDefinitionService {
                 if (option.getKey() == null || option.getKey().isBlank()) {
                     throw new BadRequestException("Select options require a key");
                 }
+                if (option.getLabel() == null || option.getLabel().isBlank()) {
+                    throw new BadRequestException("Select options require a label");
+                }
                 if (!keys.add(option.getKey())) {
                     throw new BadRequestException("Duplicate option key: " + option.getKey());
                 }
@@ -150,23 +177,23 @@ public class CustomFieldDefinitionService {
     }
 
     /**
-     * Serializes select options to JSON; returns null for non-select fields.
+     * Serializes select options to JSON; null for non-select fields.
      */
     private String serializeOptions(String fieldType, List<CustomFieldOption> options) {
         if (!"select".equals(fieldType) || options == null || options.isEmpty()) return null;
         try {
-            return MAPPER.writeValueAsString(options);
-        } catch (JsonProcessingException e) {
+            return objectMapper.writeValueAsString(options);
+        } catch (Exception e) {
             throw new BadRequestException("Invalid select options");
         }
     }
 
     /**
-     * Rejects a duplicate (entity type, field key) within the workspace.
+     * Rejects a duplicate (entity type, field key) within the workspace. The unique
+     * index is the authoritative guard; this returns a field-specific 409.
      */
-    private void assertUniqueKey(int workspaceId, String entityType, String fieldKey, int selfId) {
-        CustomFieldDefinition existing = definitionMapper.getByKey(workspaceId, entityType, fieldKey);
-        if (existing != null && existing.getId() != selfId) {
+    private void assertUniqueKey(int workspaceId, String entityType, String fieldKey) {
+        if (definitionMapper.getByKey(workspaceId, entityType, fieldKey) != null) {
             throw new DuplicateResourceException("fieldKey",
                 "A " + entityType + " field with key '" + fieldKey + "' already exists");
         }

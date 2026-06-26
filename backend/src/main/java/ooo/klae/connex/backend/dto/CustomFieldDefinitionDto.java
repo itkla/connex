@@ -3,12 +3,11 @@ package ooo.klae.connex.backend.dto;
 import java.util.List;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
 
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Pattern;
+import jakarta.validation.constraints.PositiveOrZero;
 import jakarta.validation.constraints.Size;
 
 import lombok.AllArgsConstructor;
@@ -18,16 +17,15 @@ import lombok.NoArgsConstructor;
 import ooo.klae.connex.backend.beans.CustomFieldDefinition;
 
 /**
- * API representation of a {@link CustomFieldDefinition}. {@code options} is
- * exposed as a typed list and persisted as JSON in the bean's {@code optionsJson};
- * {@code entityType} and {@code fieldKey} are immutable once a field is created.
+ * API representation of a {@link CustomFieldDefinition}. {@code options} is a typed
+ * list on the wire; the service serializes it to / parses it from the stored
+ * {@code options_json}, so the DTO itself never touches JSON. {@code entityType},
+ * {@code fieldKey}, and {@code fieldType} are immutable once a field is created.
  */
 @Data
 @NoArgsConstructor
 @AllArgsConstructor
 public class CustomFieldDefinitionDto {
-
-    private static final ObjectMapper MAPPER = new ObjectMapper();
 
     @JsonProperty(access = JsonProperty.Access.READ_ONLY)
     private Integer id;
@@ -56,6 +54,7 @@ public class CustomFieldDefinitionDto {
 
     private Boolean required;
 
+    @PositiveOrZero
     private Integer position;
 
     private Boolean archived;
@@ -75,7 +74,6 @@ public class CustomFieldDefinitionDto {
         dto.fieldKey = d.getFieldKey();
         dto.label = d.getLabel();
         dto.fieldType = d.getFieldType();
-        dto.options = parseOptions(d.getOptionsJson());
         dto.required = d.isRequired();
         dto.position = d.getPosition();
         dto.archived = d.isArchived();
@@ -95,15 +93,5 @@ public class CustomFieldDefinitionDto {
         d.setPosition(position != null ? position : 0);
         d.setArchived(archived != null && archived);
         return d;
-    }
-
-    private static List<CustomFieldOption> parseOptions(String json) {
-        if (json == null || json.isBlank()) return null;
-        try {
-            return MAPPER.readValue(json, MAPPER.getTypeFactory()
-                .constructCollectionType(List.class, CustomFieldOption.class));
-        } catch (JsonProcessingException e) {
-            return null;
-        }
     }
 }

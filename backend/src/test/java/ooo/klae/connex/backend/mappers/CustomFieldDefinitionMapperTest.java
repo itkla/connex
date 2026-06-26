@@ -129,6 +129,24 @@ class CustomFieldDefinitionMapperTest extends AbstractMapperTest {
         assertNotEquals(mine.getId(), clone.getId());
     }
 
+    @Test
+    void optionsJson_persistsAndReads() {
+        CustomFieldDefinition def = new CustomFieldDefinition();
+        def.setWorkspaceId(workspace.getId());
+        def.setEntityType("deal");
+        def.setFieldKey("key_" + unique());
+        def.setLabel("Band");
+        def.setFieldType("select");
+        def.setOptionsJson("[{\"key\":\"hot\",\"label\":\"Hot\"}]");
+        definitionMapper.insert(def);
+
+        CustomFieldDefinition found = definitionMapper.getById(workspace.getId(), def.getId());
+
+        assertNotNull(found.getOptionsJson());
+        assertTrue(found.getOptionsJson().contains("hot"));
+        assertTrue(found.getOptionsJson().contains("Hot"));
+    }
+
     private CustomFieldDefinition newDefinition() {
         return newDefinitionIn(workspace);
     }
