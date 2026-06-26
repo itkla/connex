@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useTranslations } from "next-intl";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { Loader2Icon } from "lucide-react";
@@ -63,7 +63,19 @@ function slugify(value: string) {
         .slice(0, 64);
 }
 
-type OptionRow = { id: number; label: string };
+function fallbackKey(value: string) {
+    let hash = 0;
+    for (let i = 0; i < value.length; i++) {
+        hash = (Math.imul(31, hash) + value.charCodeAt(i)) >>> 0;
+    }
+    return `field_${hash.toString(36)}`;
+}
+
+function toKey(value: string) {
+    return slugify(value) || fallbackKey(value);
+}
+
+type OptionRow = { id: number; key: string; label: string };
 
 type Props = {
     open: boolean;
@@ -125,9 +137,10 @@ function CustomFieldForm({
     const [required, setRequired] = useState(field?.required ?? false);
     const [options, setOptions] = useState<OptionRow[]>(
         field?.options?.length
-            ? field.options.map((option, index) => ({ id: index, label: option.label }))
-            : [{ id: 0, label: "" }],
+            ? field.options.map((option, index) => ({ id: index, key: option.key, label: option.label }))
+            : [{ id: 0, key: "", label: "" }],
     );
+    const nextOptionId = useRef(field?.options?.length ?? 1);
     const [succeeded, setSucceeded] = useState(false);
     const status = resolveDialogStatus({ isLoading: submitting, isSuccess: succeeded });
 
@@ -142,22 +155,21 @@ function CustomFieldForm({
     };
 
     const trimmedLabel = label.trim();
-    const derivedKey = mode === "edit" && field ? field.fieldKey : slugify(label);
+    const derivedKey = mode === "edit" && field ? field.fieldKey : trimmedLabel ? toKey(trimmedLabel) : "";
     const keyValid = /^[a-z][a-z0-9_]{0,63}$/.test(derivedKey);
     const isSelect = fieldType === "select";
 
-    const cleanLabels = options.map((option) => option.label.trim()).filter((value) => value.length > 0);
-    const optionKeys = cleanLabels.map(slugify).filter((key) => key.length > 0);
-    const optionsUnique = new Set(optionKeys).size === optionKeys.length && optionKeys.length === cleanLabels.length;
-    const optionsValid = !isSelect || (cleanLabels.length > 0 && optionsUnique);
+    const submitOptions = options
+        .filter((option) => option.label.trim().length > 0)
+        .map((option) => ({ key: option.key || toKey(option.label.trim()), label: option.label.trim() }));
+    const optionKeys = submitOptions.map((option) => option.key);
+    const optionsUnique = new Set(optionKeys).size === optionKeys.length;
+    const optionsValid = !isSelect || (submitOptions.length > 0 && optionsUnique);
 
     const canSubmit = trimmedLabel.length > 0 && keyValid && optionsValid && !submitting && !succeeded;
 
     const addOption = () =>
-        setOptions((prev) => [
-            ...prev,
-            { id: prev.reduce((max, option) => Math.max(max, option.id), -1) + 1, label: "" },
-        ]);
+        setOptions((prev) => [...prev, { id: nextOptionId.current++, key: "", label: "" }]);
     const updateOption = (id: number, value: string) =>
         setOptions((prev) => prev.map((option) => (option.id === id ? { ...option, label: value } : option)));
     const removeOption = (id: number) =>
@@ -170,7 +182,7 @@ function CustomFieldForm({
             return;
         }
         if (isSelect && !optionsValid) {
-            toastError(cleanLabels.length === 0 ? t("dialog.optionsRequired") : t("dialog.optionsDuplicate"));
+            toastError(submitOptions.length === 0 ? t("dialog.optionsRequired") : t("dialog.optionsDuplicate"));
             return;
         }
         setSubmitting(true);
@@ -181,7 +193,9 @@ function CustomFieldForm({
                 label: trimmedLabel,
                 fieldType,
                 required,
-                options: isSelect ? cleanLabels.map((value) => ({ key: slugify(value), label: value })) : null,
+                options: isSelect ? submitOptions : null,
+                position: field?.position ?? 0,
+                archived: field?.archived ?? false,
             };
             const saved =
                 mode === "create"
@@ -232,14 +246,15 @@ function CustomFieldForm({
                                 {t("dialog.keyHint", { key: derivedKey })}
                             </p>
                         )}
-                        {trimmedLabel.length > 0 && !keyValid && (
-                            <p className="text-xs text-destructive">{t("dialog.keyInvalid")}</p>
-                        )}
                     </div>
 
                     <div className="ncd-rise grid gap-1.5" style={{ animationDelay: "140ms" }}>
                         <Label htmlFor="cf-type">{t("dialog.typeLabel")}</Label>
-                        <Select value={fieldType} onValueChange={(value) => setFieldType(value as CustomFieldType)}>
+                        <Select
+                            value={fieldType}
+                            onValueChange={(value) => setFieldType(value as CustomFieldType)}
+                            disabled={mode === "edit"}
+                        >
                             <SelectTrigger id="cf-type" className="w-full">
                                 <SelectValue />
                             </SelectTrigger>
@@ -279,6 +294,7 @@ function CustomFieldForm({
                                                     value={option.label}
                                                     onChange={(e) => updateOption(option.id, e.target.value)}
                                                     placeholder={t("dialog.optionPlaceholder")}
+                                                    aria-label={t("dialog.optionPlaceholder")}
                                                     className={cn(fieldInputClass, "px-3")}
                                                     maxLength={128}
                                                 />
