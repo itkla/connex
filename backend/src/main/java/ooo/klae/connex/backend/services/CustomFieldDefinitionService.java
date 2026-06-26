@@ -44,6 +44,7 @@ public class CustomFieldDefinitionService {
     /**
      * All field definitions in the active workspace, across entity types.
      */
+    @RequirePermission(Permission.CUSTOM_FIELD_MANAGE)
     public List<CustomFieldDefinition> getAll() {
         return definitionMapper.getAll(workspaceService.getCurrentWorkspaceId());
     }
@@ -51,6 +52,7 @@ public class CustomFieldDefinitionService {
     /**
      * Field definitions for one entity type in the active workspace.
      */
+    @RequirePermission(Permission.CUSTOM_FIELD_MANAGE)
     public List<CustomFieldDefinition> getByEntityType(String entityType) {
         return definitionMapper.getByEntityType(workspaceService.getCurrentWorkspaceId(), normalize(entityType));
     }
@@ -58,6 +60,7 @@ public class CustomFieldDefinitionService {
     /**
      * A single definition by ID, scoped to the active workspace.
      */
+    @RequirePermission(Permission.CUSTOM_FIELD_MANAGE)
     public CustomFieldDefinition getById(int id) {
         CustomFieldDefinition def = definitionMapper.getById(workspaceService.getCurrentWorkspaceId(), id);
         if (def == null) throw new ResourceNotFoundException("Custom field not found with id: " + id);
