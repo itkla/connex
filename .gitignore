@@ -4,3 +4,6 @@ PRODUCT.md
 frontend/pnpm-workspace.yaml
 plans/
 .claude/
+.agents/
+skills-lock.json
+.impeccable/
