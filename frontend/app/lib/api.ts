@@ -478,6 +478,22 @@ export function getRecentMovesFromCookie(cookie: string | null) {
     return safeWithCookie<Types.JobMove>((init) => getRecentMoves(init), cookie);
 }
 
+export function getContactConnections(id: number, init: RequestInit = {}) {
+    return getJson<Types.PersonConnection[]>(`/api/persons/${id}/connections`, init);
+}
+
+export function addContactConnection(id: number, payload: Types.ConnectionPayload, init: RequestInit = {}) {
+    return postJson<void>(`/api/persons/${id}/connections`, payload, init);
+}
+
+export function removeContactConnection(id: number, targetId: number, init: RequestInit = {}) {
+    return deleteJson<void>(`/api/persons/${id}/connections/${targetId}`, init);
+}
+
+export function getContactIntroPath(id: number, init: RequestInit = {}) {
+    return getJson<Types.IntroPath>(`/api/persons/${id}/intro-path`, init);
+}
+
 /*
 * == Relationship temperature (warmth) scoring
 */

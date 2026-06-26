@@ -33,6 +33,8 @@ public interface PersonMapper {
     List<String> distinctCompanies(int workspaceId);
     List<String> distinctTitles(int workspaceId);
     boolean hasPersonWithoutCompany(int workspaceId);
+    /** Ids of contacts the team has engaged (has any activity, note, or task), used as warm-intro entry points. */
+    List<Integer> getEngagedPersonIds(int workspaceId);
     int insert(Person person);
     int update(Person person);
     int delete(@Param("workspaceId") int workspaceId, @Param("id") int id);

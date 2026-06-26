@@ -175,6 +175,15 @@
     SELECT EXISTS(SELECT 1 FROM person WHERE workspace_id = #{workspaceId} AND company_id IS NULL)
   </select>
 
+  <!-- Contacts the team has engaged (any activity, note, or task): warm-intro entry points. -->
+  <select id="getEngagedPersonIds" resultType="int">
+    SELECT DISTINCT person_id FROM (
+      SELECT person_id FROM activity WHERE workspace_id = #{workspaceId} AND person_id IS NOT NULL
+      UNION SELECT person_id FROM note WHERE workspace_id = #{workspaceId} AND person_id IS NOT NULL
+      UNION SELECT person_id FROM task WHERE workspace_id = #{workspaceId} AND person_id IS NOT NULL
+    ) engaged
+  </select>
+
   <select id="search" resultMap="PersonResult">
     SELECT <include refid="personColumns"/>, <include refid="companyJoinColumns"/>
     FROM person p

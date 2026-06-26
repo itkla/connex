@@ -66,6 +66,43 @@ export type JobMove = {
     movedAt?: string | null;
 };
 
+export type ConnectionType = 'knows' | 'colleague' | 'former_colleague' | 'friend';
+
+/** A contact's connection to another contact in the warm-intro graph (from that contact's view). */
+export type PersonConnection = {
+    id: number;
+    personId: number;
+    personName: string;
+    companyId?: number | null;
+    companyName?: string | null;
+    type: string;
+    strength: number;
+    note?: string | null;
+};
+
+export type ConnectionPayload = {
+    targetPersonId: number;
+    type?: string;
+    strength?: number;
+    note?: string;
+};
+
+/** One contact along a warm-introduction path. */
+export type IntroPathStep = {
+    personId: number;
+    personName?: string | null;
+    companyName?: string | null;
+    connectionType?: string | null;
+    engaged: boolean;
+};
+
+/** The warmest introduction path to a contact: ordered from an engaged contact to the target. */
+export type IntroPath = {
+    reachable: boolean;
+    directlyKnown: boolean;
+    steps: IntroPathStep[];
+};
+
 export type User = {
     id: number;
     username: string;

@@ -41,7 +41,8 @@ class RbacEnforcementArchTest {
      */
     private static final List<String> ENTITY_SERVICES = List.of(
         "CompanyService", "PersonService", "DealService", "ActivityService",
-        "NoteService", "TaskService", "TagService", "PipelineService", "AttachmentService");
+        "NoteService", "TaskService", "TagService", "PipelineService", "AttachmentService",
+        "ConnectionService");
 
     /** Verb prefixes that denote a state-changing public method in these services. */
     private static final Pattern MUTATOR = Pattern.compile(

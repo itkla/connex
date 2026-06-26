@@ -1,6 +1,6 @@
-import { getAttachmentsFromCookie, getCompanies, getContactById, getContactEmployment, getContacts, getContextNotifications, getCurrentUserFromCookie, getDeals, getTags, getUserById } from "@/app/lib/api";
+import { getAttachmentsFromCookie, getCompanies, getContactById, getContactConnections, getContactEmployment, getContactIntroPath, getContacts, getContextNotifications, getCurrentUserFromCookie, getDeals, getTags, getUserById } from "@/app/lib/api";
 import { notFound, redirect } from "next/navigation";
-import { type Company, type Deal, type Tag, type Contact, type PersonEmployment, type User } from "@/app/lib/types";
+import { type Company, type Deal, type Tag, type Contact, type IntroPath, type PersonConnection, type PersonEmployment, type User } from "@/app/lib/types";
 import { cookies } from "next/headers";
 import Link from "next/link";
 import { ArrowLeftIcon, UserIcon } from "@heroicons/react/24/outline";
@@ -8,6 +8,7 @@ import { getLocale, getTranslations } from "next-intl/server";
 
 import ContactActionsMenu from "@/app/components/records/contacts/ContactActionsMenu";
 import ContactAvatar from "@/app/components/records/contacts/ContactAvatar";
+import ContactConnections from "@/app/components/records/contacts/ContactConnections";
 import ContactStatCard from "@/app/components/records/contacts/ContactStatCard";
 import NewActivityDialog from "@/app/components/records/contacts/NewActivityDialog";
 import NewTaskDialog from "@/app/components/records/contacts/NewTaskDialog";
@@ -27,7 +28,7 @@ export default async function ContactPage({ params }: { params: { id: number } }
     const t = await getTranslations("ContactsPage");
     const locale = await getLocale();
 
-    const [contact, currentUser, allTags, allCompanies, allPersons, allDeals, attachments, notificationPage, employment] = await Promise.all([
+    const [contact, currentUser, allTags, allCompanies, allPersons, allDeals, attachments, notificationPage, employment, connections, introPath] = await Promise.all([
         getContactById(id, init) as Promise<Contact>,
         getCurrentUserFromCookie((await cookies()).toString()),
         getTags(init).catch(() => [] as Tag[]),
@@ -37,6 +38,8 @@ export default async function ContactPage({ params }: { params: { id: number } }
         getAttachmentsFromCookie("person", id, cookie),
         getContextNotifications("person", id, init).catch(() => ({ items: [], total: 0 })),
         getContactEmployment(id, init).catch(() => [] as PersonEmployment[]),
+        getContactConnections(id, init).catch(() => [] as PersonConnection[]),
+        getContactIntroPath(id, init).catch(() => ({ reachable: false, directlyKnown: false, steps: [] }) as IntroPath),
     ]);
     if (!contact) {
         console.error(`Contact not found: ${id}`);
@@ -296,6 +299,19 @@ export default async function ContactPage({ params }: { params: { id: number } }
                             </ul>
                         )}
                     </div>
+
+                    <div className="mt-6 mb-3 flex h-8 items-center">
+                        <h2 className="px-6 text-xs font-medium tracking-[0.12em] text-muted-foreground uppercase">
+                            {t("connections")}
+                        </h2>
+                    </div>
+                    <ContactConnections
+                        contactId={contact.id}
+                        contactName={contact.name}
+                        contacts={allPersons}
+                        initialConnections={connections}
+                        initialIntroPath={introPath}
+                    />
 
                     <div className="mt-6 mb-3 flex h-8 items-center">
                         <h2 className="px-6 text-xs font-medium tracking-[0.12em] text-muted-foreground uppercase">

@@ -12,16 +12,20 @@ import org.springframework.web.bind.annotation.RestController;
 
 import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.dto.ActivityDto;
+import ooo.klae.connex.backend.dto.ConnectionRequestDto;
 import ooo.klae.connex.backend.dto.DealDto;
+import ooo.klae.connex.backend.dto.IntroPathDto;
 import ooo.klae.connex.backend.dto.JobMoveDto;
 import ooo.klae.connex.backend.dto.NoteDto;
 import ooo.klae.connex.backend.dto.PageResponse;
+import ooo.klae.connex.backend.dto.PersonConnectionDto;
 import ooo.klae.connex.backend.dto.PersonEmploymentDto;
 import ooo.klae.connex.backend.dto.PersonFacets;
 import ooo.klae.connex.backend.dto.PersonDetailDto;
 import ooo.klae.connex.backend.dto.PersonDto;
 import ooo.klae.connex.backend.dto.TagDto;
 import ooo.klae.connex.backend.dto.TaskDto;
+import ooo.klae.connex.backend.services.ConnectionService;
 import ooo.klae.connex.backend.services.EmploymentService;
 import ooo.klae.connex.backend.services.PersonService;
 
@@ -41,6 +45,7 @@ import lombok.RequiredArgsConstructor;
 public class PersonController {
     private final PersonService personService;
     private final EmploymentService employmentService;
+    private final ConnectionService connectionService;
 
     /**
      * GET endpoint for the "recently moved" feed: contacts who recently changed companies.
@@ -249,5 +254,46 @@ public class PersonController {
     @GetMapping("/{id}/employment")
     public List<PersonEmploymentDto> getEmploymentHistory(@PathVariable int id) {
         return personService.getEmploymentHistory(id).stream().map(PersonEmploymentDto::from).toList();
+    }
+
+    /**
+     * GET endpoint to retrieve a contact's connections in the warm-intro graph.
+     * @param id
+     * @return
+     */
+    @GetMapping("/{id}/connections")
+    public List<PersonConnectionDto> getConnections(@PathVariable int id) {
+        return connectionService.getConnections(id);
+    }
+
+    /**
+     * POST endpoint to connect a contact to another contact (idempotent; re-adding edits the edge).
+     * @param id
+     * @param request
+     */
+    @PostMapping("/{id}/connections")
+    public void addConnection(@PathVariable int id, @Valid @RequestBody ConnectionRequestDto request) {
+        connectionService.addConnection(id, request.getTargetPersonId(), request.getType(),
+            request.getStrength(), request.getNote());
+    }
+
+    /**
+     * DELETE endpoint to remove a connection between two contacts.
+     * @param id
+     * @param targetId
+     */
+    @DeleteMapping("/{id}/connections/{targetId}")
+    public void removeConnection(@PathVariable int id, @PathVariable int targetId) {
+        connectionService.removeConnection(id, targetId);
+    }
+
+    /**
+     * GET endpoint for the warm-introduction path to reach a contact.
+     * @param id
+     * @return
+     */
+    @GetMapping("/{id}/intro-path")
+    public IntroPathDto getIntroPath(@PathVariable int id) {
+        return connectionService.findIntroPath(id);
     }
 }
