@@ -14,6 +14,8 @@ import ooo.klae.connex.backend.beans.Deal;
 import ooo.klae.connex.backend.beans.DealPerson;
 import ooo.klae.connex.backend.dto.ActivityDto;
 import ooo.klae.connex.backend.dto.CloseDealRequest;
+import ooo.klae.connex.backend.dto.CustomFieldEntryDto;
+import ooo.klae.connex.backend.dto.CustomFieldValuesRequest;
 import ooo.klae.connex.backend.dto.DealCollaboratorsDto;
 import ooo.klae.connex.backend.dto.DealDto;
 import ooo.klae.connex.backend.dto.DealOwnerDto;
@@ -270,5 +272,22 @@ public class DealController {
         @Valid @RequestBody DealCollaboratorsDto dto
     ) {
         return dealService.replaceCollaborators(id, dto.getUserIds()).stream().map(UserDto::from).toList();
+    }
+
+    /**
+     * GET retrieves the custom-field values for a deal.
+     */
+    @GetMapping("/{id}/custom-fields")
+    public List<CustomFieldEntryDto> getCustomFieldsForDeal(@PathVariable int id) {
+        return dealService.getCustomFields(id);
+    }
+
+    /**
+     * PUT replaces the custom-field values for a deal.
+     */
+    @PutMapping("/{id}/custom-fields")
+    public List<CustomFieldEntryDto> updateCustomFieldsForDeal(@PathVariable int id,
+            @RequestBody CustomFieldValuesRequest request) {
+        return dealService.updateCustomFields(id, request.getValues());
     }
 }

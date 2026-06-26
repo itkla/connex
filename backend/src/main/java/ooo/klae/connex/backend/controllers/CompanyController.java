@@ -12,6 +12,8 @@ import org.springframework.web.bind.annotation.RestController;
 
 import ooo.klae.connex.backend.beans.Company;
 import ooo.klae.connex.backend.dto.CompanyDto;
+import ooo.klae.connex.backend.dto.CustomFieldEntryDto;
+import ooo.klae.connex.backend.dto.CustomFieldValuesRequest;
 import ooo.klae.connex.backend.dto.DealDto;
 import ooo.klae.connex.backend.dto.PersonDto;
 import ooo.klae.connex.backend.dto.TagDto;
@@ -142,5 +144,22 @@ public class CompanyController {
     @GetMapping("/{id}/deals")
     public List<DealDto> getDealsForCompany(@PathVariable int id) {
         return companyService.getDealsByCompanyId(id).stream().map(DealDto::from).toList();
+    }
+
+    /**
+     * GET retrieves the custom-field values for a company.
+     */
+    @GetMapping("/{id}/custom-fields")
+    public List<CustomFieldEntryDto> getCustomFieldsForCompany(@PathVariable int id) {
+        return companyService.getCustomFields(id);
+    }
+
+    /**
+     * PUT replaces the custom-field values for a company.
+     */
+    @PutMapping("/{id}/custom-fields")
+    public List<CustomFieldEntryDto> updateCustomFieldsForCompany(@PathVariable int id,
+            @RequestBody CustomFieldValuesRequest request) {
+        return companyService.updateCustomFields(id, request.getValues());
     }
 }

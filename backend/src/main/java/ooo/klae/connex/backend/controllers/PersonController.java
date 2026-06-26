@@ -13,6 +13,8 @@ import org.springframework.web.bind.annotation.RestController;
 import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.dto.ActivityDto;
 import ooo.klae.connex.backend.dto.ConnectionRequestDto;
+import ooo.klae.connex.backend.dto.CustomFieldEntryDto;
+import ooo.klae.connex.backend.dto.CustomFieldValuesRequest;
 import ooo.klae.connex.backend.dto.DealDto;
 import ooo.klae.connex.backend.dto.IntroPathDto;
 import ooo.klae.connex.backend.dto.JobMoveDto;
@@ -295,5 +297,22 @@ public class PersonController {
     @GetMapping("/{id}/intro-path")
     public IntroPathDto getIntroPath(@PathVariable int id) {
         return connectionService.findIntroPath(id);
+    }
+
+    /**
+     * GET retrieves the custom-field values for a contact.
+     */
+    @GetMapping("/{id}/custom-fields")
+    public List<CustomFieldEntryDto> getCustomFieldsForPerson(@PathVariable int id) {
+        return personService.getCustomFields(id);
+    }
+
+    /**
+     * PUT replaces the custom-field values for a contact.
+     */
+    @PutMapping("/{id}/custom-fields")
+    public List<CustomFieldEntryDto> updateCustomFieldsForPerson(@PathVariable int id,
+            @RequestBody CustomFieldValuesRequest request) {
+        return personService.updateCustomFields(id, request.getValues());
     }
 }

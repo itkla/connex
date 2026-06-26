@@ -16,6 +16,7 @@ import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.beans.PersonEmployment;
 import ooo.klae.connex.backend.beans.Tag;
 import ooo.klae.connex.backend.beans.Task;
+import ooo.klae.connex.backend.dto.CustomFieldEntryDto;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.tenant.Permission;
 import ooo.klae.connex.backend.tenant.RequirePermission;
@@ -47,6 +48,7 @@ public class PersonService {
     private final WorkspaceService workspaceService;
     private final ScoringService scoringService;
     private final EmploymentService employmentService;
+    private final CustomFieldValueService customFieldValueService;
 
     private static final Set<String> AUDIT_FIELDS =
         Set.of("name", "email", "phone", "title", "imageUrl");
@@ -198,6 +200,7 @@ public class PersonService {
     public void delete(int id) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         Person before = requirePerson(workspaceId, id);
+        customFieldValueService.deleteByEntity("person", id);
         personMapper.delete(workspaceId, id);
         auditService.record("person.delete", "person", id, before.getName(),
             "Deleted person " + before.getName(),
@@ -293,6 +296,26 @@ public class PersonService {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         requirePerson(workspaceId, personId);
         return taskMapper.getTasksByPersonId(workspaceId, personId);
+    }
+
+    /**
+     * Custom-field values for a contact. Readable by any member who can see the contact.
+     */
+    public List<CustomFieldEntryDto> getCustomFields(int personId) {
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        requirePerson(workspaceId, personId);
+        return customFieldValueService.getForEntity("person", personId);
+    }
+
+    /**
+     * Replaces a contact's custom-field values.
+     */
+    @Transactional
+    @RequirePermission(Permission.PERSON_UPDATE)
+    public List<CustomFieldEntryDto> updateCustomFields(int personId, Map<Integer, Object> values) {
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        requirePerson(workspaceId, personId);
+        return customFieldValueService.applyValues("person", personId, values);
     }
 
     private Person requirePerson(int workspaceId, int personId) {
