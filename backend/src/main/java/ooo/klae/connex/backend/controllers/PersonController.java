@@ -13,13 +13,16 @@ import org.springframework.web.bind.annotation.RestController;
 import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.dto.ActivityDto;
 import ooo.klae.connex.backend.dto.DealDto;
+import ooo.klae.connex.backend.dto.JobMoveDto;
 import ooo.klae.connex.backend.dto.NoteDto;
 import ooo.klae.connex.backend.dto.PageResponse;
+import ooo.klae.connex.backend.dto.PersonEmploymentDto;
 import ooo.klae.connex.backend.dto.PersonFacets;
 import ooo.klae.connex.backend.dto.PersonDetailDto;
 import ooo.klae.connex.backend.dto.PersonDto;
 import ooo.klae.connex.backend.dto.TagDto;
 import ooo.klae.connex.backend.dto.TaskDto;
+import ooo.klae.connex.backend.services.EmploymentService;
 import ooo.klae.connex.backend.services.PersonService;
 
 import java.util.List;
@@ -37,6 +40,16 @@ import lombok.RequiredArgsConstructor;
 @RequiredArgsConstructor
 public class PersonController {
     private final PersonService personService;
+    private final EmploymentService employmentService;
+
+    /**
+     * GET endpoint for the "recently moved" feed: contacts who recently changed companies.
+     * @return
+     */
+    @GetMapping("/recent-moves")
+    public List<JobMoveDto> getRecentMoves() {
+        return employmentService.getRecentMoves();
+    }
 
     /**
      * GET endpoint to retrieve people, with filtering by companyId, tagId, or dealId.
@@ -226,5 +239,15 @@ public class PersonController {
     @GetMapping("/{id}/tasks")
     public List<TaskDto> getTasksForPerson(@PathVariable int id) {
         return personService.getTasksByPersonId(id).stream().map(TaskDto::from).toList();
+    }
+
+    /**
+     * GET endpoint to retrieve a contact's employment history, current stint first.
+     * @param id
+     * @return
+     */
+    @GetMapping("/{id}/employment")
+    public List<PersonEmploymentDto> getEmploymentHistory(@PathVariable int id) {
+        return personService.getEmploymentHistory(id).stream().map(PersonEmploymentDto::from).toList();
     }
 }

@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="ooo.klae.connex.backend.mappers.PersonEmploymentMapper">
+
+  <resultMap id="PersonEmploymentResult" type="PersonEmployment">
+    <id     property="id"          column="id"/>
+    <result property="workspaceId" column="workspace_id"/>
+    <result property="personId"    column="person_id"/>
+    <result property="companyId"   column="company_id"/>
+    <result property="companyName" column="company_name"/>
+    <result property="title"       column="title"/>
+    <result property="startedAt"   column="started_at"/>
+    <result property="endedAt"     column="ended_at"/>
+    <result property="createdAt"   column="created_at"/>
+  </resultMap>
+
+  <insert id="insert" useGeneratedKeys="true" keyProperty="id">
+    INSERT INTO person_employment (workspace_id, person_id, company_id, company_name, title, started_at, ended_at)
+    VALUES (#{workspaceId}, #{personId}, #{companyId}, #{companyName}, #{title}, #{startedAt}, #{endedAt})
+  </insert>
+
+  <update id="closeCurrent">
+    UPDATE person_employment
+    SET ended_at = #{endedAt}
+    WHERE workspace_id = #{workspaceId} AND person_id = #{personId} AND ended_at IS NULL
+  </update>
+
+  <select id="getByPersonId" resultMap="PersonEmploymentResult">
+    SELECT id, workspace_id, person_id, company_id, company_name, title, started_at, ended_at, created_at
+    FROM person_employment
+    WHERE workspace_id = #{workspaceId} AND person_id = #{personId}
+    ORDER BY (ended_at IS NULL) DESC, started_at DESC, id DESC
+  </select>
+
+  <!-- A "move" is a current employment (ended_at IS NULL) whose start is recent, joined to the
+       person's most-recent prior (ended) employment as the company they came from. Contacts that
+       only ever had one employer (incl. the migration backfill) have no prior row and are excluded. -->
+  <select id="getRecentMoves" resultType="ooo.klae.connex.backend.dto.JobMoveDto">
+    SELECT cur.person_id        AS person_id,
+           p.name               AS person_name,
+           p.image_url          AS person_image_url,
+           prev.company_id      AS from_company_id,
+           prev.company_name    AS from_company_name,
+           cur.company_id       AS to_company_id,
+           cur.company_name     AS to_company_name,
+           cur.started_at       AS moved_at
+    FROM person_employment cur
+    JOIN person p ON p.id = cur.person_id
+    JOIN person_employment prev ON prev.person_id = cur.person_id
+         AND prev.ended_at IS NOT NULL
+         AND prev.ended_at = (
+             SELECT MAX(pe.ended_at) FROM person_employment pe
+             WHERE pe.person_id = cur.person_id AND pe.ended_at IS NOT NULL
+         )
+    WHERE cur.workspace_id = #{workspaceId}
+      AND cur.ended_at IS NULL
+      AND cur.started_at IS NOT NULL
+      AND cur.started_at &gt;= #{since}
+    ORDER BY cur.started_at DESC
+    LIMIT #{limit}
+  </select>
+</mapper>

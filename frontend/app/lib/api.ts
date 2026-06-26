@@ -466,6 +466,18 @@ export function getContactById(id: number, init: RequestInit = {}) {
     return getJson<Types.Contact>(`/api/persons/${id}`, init);
 }
 
+export function getContactEmployment(id: number, init: RequestInit = {}) {
+    return getJson<Types.PersonEmployment[]>(`/api/persons/${id}/employment`, init);
+}
+
+export function getRecentMoves(init: RequestInit = {}) {
+    return getJson<Types.JobMove[]>(`/api/persons/recent-moves`, init);
+}
+
+export function getRecentMovesFromCookie(cookie: string | null) {
+    return safeWithCookie<Types.JobMove>((init) => getRecentMoves(init), cookie);
+}
+
 /*
 * == Relationship temperature (warmth) scoring
 */

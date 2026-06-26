@@ -20,6 +20,7 @@ import {
     getDealsFromCookie,
     getNotesFromCookie,
     getPipelinesFromCookie,
+    getRecentMovesFromCookie,
     getTasksFromCookie,
     getUsers,
 } from '@/app/lib/api';
@@ -31,6 +32,7 @@ import Greeting from '@/app/components/dashboard/Greeting';
 import OverviewCard from '@/app/components/dashboard/OverviewCard';
 import PipelineChart from '@/app/components/dashboard/PipelineChart';
 import RecentFiles from '@/app/components/dashboard/RecentFiles';
+import RecentMoves from '@/app/components/dashboard/RecentMoves';
 import Rise from '@/app/components/dashboard/Rise';
 import SectionHeader from '@/app/components/dashboard/SectionHeader';
 import TaskSummary from '@/app/components/dashboard/TaskSummary';
@@ -51,7 +53,7 @@ export default async function Dashboard() {
 
     const init = { headers: { cookie: cookie ?? '' } } as const;
     const emptyFacets: AttachmentFacets = { sources: [], kinds: [], tags: [], orphaned: 0, total: 0, totalSize: 0 };
-    const [companies, contacts, deals, pipelines, tasks, activities, notes, users, recentFiles, fileFacets, contactTemps] =
+    const [companies, contacts, deals, pipelines, tasks, activities, notes, users, recentFiles, fileFacets, contactTemps, recentMoves] =
         await Promise.all([
             getCompaniesFromCookie(cookie),
             getContactsFromCookie(cookie),
@@ -66,6 +68,7 @@ export default async function Dashboard() {
             ),
             getAttachmentFacets(init).catch(() => emptyFacets),
             getContactTemperaturesFromCookie(cookie),
+            getRecentMovesFromCookie(cookie),
         ]);
 
     const tempByContactId = new Map(contactTemps.map((temp) => [temp.id, temp]));
@@ -159,8 +162,8 @@ export default async function Dashboard() {
                     </Rise>
                 </div>
 
-                <Rise delay={0.33}>
-                    <section>
+                <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+                    <Rise delay={0.33} className="flex flex-col">
                         <SectionHeader
                             title={t('coolingRelationships')}
                             action={
@@ -173,10 +176,24 @@ export default async function Dashboard() {
                             }
                         />
                         <CoolingRelationships items={coolingContacts} />
-                    </section>
-                </Rise>
+                    </Rise>
+                    <Rise delay={0.36} className="flex flex-col">
+                        <SectionHeader
+                            title={t('recentlyMoved')}
+                            action={
+                                <Link
+                                    href="/records/contacts"
+                                    className="text-xs text-brand hover:text-brand-hover"
+                                >
+                                    {t('viewAll')}
+                                </Link>
+                            }
+                        />
+                        <RecentMoves moves={recentMoves} />
+                    </Rise>
+                </div>
 
-                <Rise delay={0.36}>
+                <Rise delay={0.39}>
                     <section>
                         <SectionHeader
                             title={t('files')}
@@ -197,7 +214,7 @@ export default async function Dashboard() {
                     </section>
                 </Rise>
 
-                <Rise delay={0.39}>
+                <Rise delay={0.42}>
                     <section>
                         <SectionHeader
                             title={t('recentActivity')}

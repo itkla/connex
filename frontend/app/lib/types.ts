@@ -42,6 +42,30 @@ export type RelationshipTemperature = {
     touchCount: number;
 };
 
+/** One stint in a contact's employment history. The row with {@code current} is the present company. */
+export type PersonEmployment = {
+    id: number;
+    personId: number;
+    companyId?: number | null;
+    companyName?: string | null;
+    title?: string | null;
+    startedAt?: string | null;
+    endedAt?: string | null;
+    current: boolean;
+};
+
+/** A contact who recently changed companies — the "recently moved" feed row. */
+export type JobMove = {
+    personId: number;
+    personName: string;
+    personImageUrl?: string | null;
+    fromCompanyId?: number | null;
+    fromCompanyName?: string | null;
+    toCompanyId?: number | null;
+    toCompanyName?: string | null;
+    movedAt?: string | null;
+};
+
 export type User = {
     id: number;
     username: string;

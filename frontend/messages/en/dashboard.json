@@ -13,6 +13,7 @@
     "viewAll": "View all",
     "viewMap": "View map",
     "coolingRelationships": "Cooling relationships",
+    "recentlyMoved": "Recently moved",
     "files": "Files",
     "storageUsed": "{count, plural, =1 {# file} other {# files}} · {size}",
     "noFiles": "No files yet"
@@ -21,6 +22,10 @@
     "empty": "Every relationship is warm — nothing cooling off.",
     "quiet": "{days, plural, =1 {# day quiet} other {# days quiet}}",
     "noCompany": "No company"
+  },
+  "RecentMoves": {
+    "empty": "No recent job changes in your network.",
+    "unknown": "Unknown"
   },
   "DashboardGreeting": {
     "workingLate": "Working late,",
