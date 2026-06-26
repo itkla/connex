@@ -33,6 +33,7 @@
     "delete": "削除",
     "searchPlaceholder": "企業を検索",
     "columnName": "名前",
+    "columnWarmth": "温度",
     "columnWebsite": "ウェブサイト",
     "columnIndustry": "業界",
     "columnPhone": "電話",

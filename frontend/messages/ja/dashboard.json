@@ -11,9 +11,16 @@
     "tasks": "タスク",
     "recentActivity": "最近のアクティビティ",
     "viewAll": "すべて表示",
+    "viewMap": "マップを表示",
+    "coolingRelationships": "冷め込んでいる関係",
     "files": "ファイル",
     "storageUsed": "{count}件のファイル · {size}",
     "noFiles": "ファイルはまだありません"
+  },
+  "CoolingRelationships": {
+    "empty": "すべての関係が良好です。冷め込みはありません。",
+    "quiet": "{days}日間接触なし",
+    "noCompany": "会社なし"
   },
   "DashboardGreeting": {
     "workingLate": "遅くまでお疲れさまです、",

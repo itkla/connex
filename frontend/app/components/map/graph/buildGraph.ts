@@ -36,7 +36,7 @@ function ccColorFor(summaries: DealSummary[]): string {
 }
 
 export function buildGraph(input: GraphInput): Graph {
-    const { companies, contacts, deals, users, activities, tasks, notes, stageNames, ucLabel } = input;
+    const { companies, contacts, deals, users, activities, tasks, notes, stageNames, ucLabel, contactWarmth, companyWarmth } = input;
 
     const metricsLists = { contacts, deals, activities, tasks, notes, users };
     const activeContactIds = collectActiveContactIds(activities, tasks, notes);
@@ -83,7 +83,7 @@ export function buildGraph(input: GraphInput): Graph {
             id: companyNodeId(c.id),
             type: 'company',
             position: { x: 0, y: 0 },
-            data: { kind: 'company', company: c, metrics, expanded: false },
+            data: { kind: 'company', company: c, metrics, warmth: companyWarmth?.get(c.id), expanded: false },
         });
 
         const companyDeals = dealsByCompany.get(c.id) ?? [];
@@ -126,7 +126,7 @@ export function buildGraph(input: GraphInput): Graph {
             id: contactNodeId(c.id),
             type: 'contact',
             position: { x: 0, y: 0 },
-            data: { kind: 'contact', contact: c, hasActivity: activeContactIds.has(c.id), expanded: false },
+            data: { kind: 'contact', contact: c, hasActivity: activeContactIds.has(c.id), warmth: contactWarmth?.get(c.id), expanded: false },
         });
 
         const parent =

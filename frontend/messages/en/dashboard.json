@@ -11,9 +11,16 @@
     "tasks": "Tasks",
     "recentActivity": "Recent activity",
     "viewAll": "View all",
+    "viewMap": "View map",
+    "coolingRelationships": "Cooling relationships",
     "files": "Files",
     "storageUsed": "{count, plural, =1 {# file} other {# files}} · {size}",
     "noFiles": "No files yet"
+  },
+  "CoolingRelationships": {
+    "empty": "Every relationship is warm — nothing cooling off.",
+    "quiet": "{days, plural, =1 {# day quiet} other {# days quiet}}",
+    "noCompany": "No company"
   },
   "DashboardGreeting": {
     "workingLate": "Working late,",

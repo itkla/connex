@@ -37,6 +37,7 @@
     "delete": "削除",
     "searchPlaceholder": "コンタクトを検索",
     "columnName": "名前",
+    "columnWarmth": "温度",
     "columnEmail": "メール",
     "columnPhone": "電話",
     "columnCompany": "会社",

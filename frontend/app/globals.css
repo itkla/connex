@@ -33,6 +33,10 @@
   --color-chart-won: var(--chart-won);
   --color-chart-lost: var(--chart-lost);
   --color-chart-open: var(--chart-open);
+  --color-warmth-hot: var(--warmth-hot);
+  --color-warmth-warm: var(--warmth-warm);
+  --color-warmth-cool: var(--warmth-cool);
+  --color-warmth-cold: var(--warmth-cold);
   --color-ring: var(--ring);
   --color-input: var(--input);
   --color-border: var(--border);
@@ -100,6 +104,10 @@
   --chart-won: oklch(0.65 0.16 155);
   --chart-lost: oklch(0.58 0.21 27);
   --chart-open: oklch(0.80 0.15 85);
+  --warmth-hot: oklch(0.65 0.16 155);
+  --warmth-warm: oklch(0.76 0.17 128);
+  --warmth-cool: oklch(0.80 0.15 85);
+  --warmth-cold: oklch(0.62 0.03 240);
   --radius: 0.625rem;
   --sidebar: oklch(0.985 0 0);
   --sidebar-foreground: oklch(0.145 0 0);
@@ -138,6 +146,10 @@
   --chart-won: oklch(0.72 0.16 155);
   --chart-lost: oklch(0.65 0.20 27);
   --chart-open: oklch(0.83 0.14 85);
+  --warmth-hot: oklch(0.72 0.16 155);
+  --warmth-warm: oklch(0.80 0.17 128);
+  --warmth-cool: oklch(0.83 0.14 85);
+  --warmth-cold: oklch(0.70 0.03 240);
   --sidebar: oklch(0.205 0 0);
   --sidebar-foreground: oklch(0.985 0 0);
   --sidebar-primary: oklch(0.78 0.20 130);

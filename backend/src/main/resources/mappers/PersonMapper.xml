@@ -147,6 +147,16 @@
     <include refid="pageWhere"/>
   </select>
 
+  <!-- Every person matching the page filters, unpaginated. Backs the warmth sort, which is
+       ordered in Java (PersonService) so the single scoring formula is reused rather than rebuilt in SQL. -->
+  <select id="getPersonsFiltered" resultMap="PersonResult">
+    SELECT <include refid="personColumns"/>, <include refid="companyJoinColumns"/>
+    FROM person p
+    <include refid="companyJoin"/>
+    <include refid="pageWhere"/>
+    ORDER BY p.name
+  </select>
+
   <select id="distinctCompanies" resultType="string">
     SELECT DISTINCT c.name
     FROM person p JOIN company c ON c.id = p.company_id

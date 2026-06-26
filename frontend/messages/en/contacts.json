@@ -37,6 +37,7 @@
     "delete": "Delete",
     "searchPlaceholder": "Search contacts",
     "columnName": "Name",
+    "columnWarmth": "Warmth",
     "columnEmail": "Email",
     "columnPhone": "Phone",
     "columnCompany": "Company",

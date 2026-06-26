@@ -25,6 +25,23 @@ export type PersonFacets = {
     hasNoCompany: boolean;
 };
 
+export type TemperatureBand = 'hot' | 'warm' | 'cool' | 'cold';
+export type TemperatureTrend = 'rising' | 'steady' | 'cooling';
+
+/**
+ * Computed relationship "temperature" for a contact or company. Derived on read by the backend
+ * from interaction recency/frequency; consumed by the map, dashboard, and records tables.
+ */
+export type RelationshipTemperature = {
+    id: number;
+    score: number;
+    band: TemperatureBand;
+    trend: TemperatureTrend;
+    lastTouchAt?: string | null;
+    daysSinceTouch?: number | null;
+    touchCount: number;
+};
+
 export type User = {
     id: number;
     username: string;

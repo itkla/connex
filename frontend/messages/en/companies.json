@@ -33,6 +33,7 @@
     "delete": "Delete",
     "searchPlaceholder": "Search companies",
     "columnName": "Name",
+    "columnWarmth": "Warmth",
     "columnWebsite": "Website",
     "columnIndustry": "Industry",
     "columnPhone": "Phone",

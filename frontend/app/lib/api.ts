@@ -466,6 +466,26 @@ export function getContactById(id: number, init: RequestInit = {}) {
     return getJson<Types.Contact>(`/api/persons/${id}`, init);
 }
 
+/*
+* == Relationship temperature (warmth) scoring
+*/
+
+export function getContactTemperatures(init: RequestInit = {}) {
+    return getJson<Types.RelationshipTemperature[]>(`/api/scoring/contacts`, init);
+}
+
+export function getContactTemperaturesFromCookie(cookie: string | null) {
+    return safeWithCookie<Types.RelationshipTemperature>((init) => getContactTemperatures(init), cookie);
+}
+
+export function getCompanyTemperatures(init: RequestInit = {}) {
+    return getJson<Types.RelationshipTemperature[]>(`/api/scoring/companies`, init);
+}
+
+export function getCompanyTemperaturesFromCookie(cookie: string | null) {
+    return safeWithCookie<Types.RelationshipTemperature>((init) => getCompanyTemperatures(init), cookie);
+}
+
 export function createContact(payload: Types.CreateContactPayload) {
     return postJson<Types.Contact>(`/api/persons`, payload);
 }

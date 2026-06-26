@@ -18,7 +18,10 @@ import ooo.klae.connex.backend.beans.Task;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.tenant.Permission;
 import ooo.klae.connex.backend.tenant.RequirePermission;
+import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 import lombok.RequiredArgsConstructor;
@@ -40,9 +43,13 @@ public class PersonService {
     private final TaskMapper taskMapper;
     private final AuditService auditService;
     private final WorkspaceService workspaceService;
+    private final ScoringService scoringService;
 
     private static final Set<String> AUDIT_FIELDS =
         Set.of("name", "email", "phone", "title", "imageUrl");
+
+    /** Sort key that orders the contacts page by relationship temperature (computed in Java). */
+    private static final String WARMTH_SORT = "warmth";
 
     /**
      * Retrieves all {@code Person} records in the active workspace.
@@ -72,8 +79,33 @@ public class PersonService {
 
     public List<Person> getPersonsPage(String query, String sort, String dir, List<String> companies,
             List<String> titles, boolean noCompany, int limit, int offset) {
-        return personMapper.getPersonsPage(workspaceService.getCurrentWorkspaceId(), query, sort, dir,
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        if (WARMTH_SORT.equalsIgnoreCase(sort)) {
+            return warmthSortedPage(workspaceId, query, dir, companies, titles, noCompany, limit, offset);
+        }
+        return personMapper.getPersonsPage(workspaceId, query, sort, dir,
             companies, titles, noCompany, limit, offset);
+    }
+
+    /**
+     * Orders the filtered contacts by relationship temperature, then pages in memory. Warmth is not a
+     * stored column, so this reuses {@link ScoringService}'s single formula instead of duplicating it
+     * in SQL. The page total still comes from {@code countPersons}, so the same filter predicates apply.
+     *
+     * <p>Default (and the natural "warmth" reading) is warmest first; ascending lists coldest first.
+     * Name stays an ascending tiebreak either way so equal-score rows have a stable order.
+     */
+    private List<Person> warmthSortedPage(int workspaceId, String query, String dir, List<String> companies,
+            List<String> titles, boolean noCompany, int limit, int offset) {
+        List<Person> filtered = new ArrayList<>(
+            personMapper.getPersonsFiltered(workspaceId, query, companies, titles, noCompany));
+        Map<Integer, Integer> scores = scoringService.contactScoreMap(workspaceId);
+        boolean ascending = "asc".equalsIgnoreCase(dir);
+        Comparator<Person> byScore = Comparator.comparingInt((Person p) -> scores.getOrDefault(p.getId(), 0));
+        filtered.sort((ascending ? byScore : byScore.reversed())
+            .thenComparing(p -> p.getName() == null ? "" : p.getName(), String.CASE_INSENSITIVE_ORDER));
+        if (offset >= filtered.size()) return List.of();
+        return filtered.subList(offset, Math.min(offset + limit, filtered.size()));
     }
 
     public long countPersons(String query, List<String> companies, List<String> titles, boolean noCompany) {

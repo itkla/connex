@@ -134,5 +134,13 @@
     "sampleName": "Tahm Kench",
     "sampleCompany": "LOL Inc.",
     "sampleRole": "CTO"
+  },
+  "Temperature": {
+    "hot": "ホット",
+    "warm": "ウォーム",
+    "cool": "クール",
+    "cold": "コールド",
+    "never": "アクティビティなし",
+    "tooltip": "温度 {score}% · 最終接触 {lastTouch}"
   }
 }
