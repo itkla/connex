@@ -1017,6 +1017,27 @@ export function getPermissionCatalog(init: RequestInit = {}) {
     return getJson<string[]>(`/api/permissions`, { cache: "no-store", ...init });
 }
 
+/*
+* == Custom field management
+*/
+
+export function getCustomFields(entityType?: Types.CustomFieldEntityType, init: RequestInit = {}) {
+    const query = entityType ? `?entityType=${entityType}` : "";
+    return getJson<Types.CustomFieldDefinition[]>(`/api/custom-fields${query}`, { cache: "no-store", ...init });
+}
+
+export function createCustomField(payload: Types.CustomFieldInput) {
+    return postJson<Types.CustomFieldDefinition>(`/api/custom-fields`, payload);
+}
+
+export function updateCustomField(id: number, payload: Types.CustomFieldInput) {
+    return putJson<Types.CustomFieldDefinition>(`/api/custom-fields/${id}`, payload);
+}
+
+export function deleteCustomField(id: number, init: RequestInit = {}) {
+    return deleteJson<void>(`/api/custom-fields/${id}`, init);
+}
+
 export function getShares(type: string, id: number, init: RequestInit = {}) {
     return getJson<Types.Share[]>(`/api/shares/${type}/${id}`, { cache: "no-store", ...init });
 }
