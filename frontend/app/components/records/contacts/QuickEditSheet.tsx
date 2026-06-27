@@ -1,3 +1,4 @@
+import { type ReactNode } from 'react';
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription, SheetFooter, SheetClose } from '@/components/ui/sheet';
 import { Button } from '@/components/ui/button';
 import { Loader2Icon, UserIcon } from 'lucide-react';
@@ -30,6 +31,7 @@ type Props = {
     updateImageFile?: (id: number, file: File | null) => void;
     isSaving: boolean;
     saveEdits: () => void;
+    customFieldsSlot?: ReactNode;
 };
 
 export default function QuickEditSheet({
@@ -43,6 +45,7 @@ export default function QuickEditSheet({
     updateImageFile,
     isSaving,
     saveEdits,
+    customFieldsSlot,
 }: Props) {
     const t = useTranslations('ContactsQuickEditSheet');
     return (
@@ -145,6 +148,7 @@ export default function QuickEditSheet({
                             );
                         })}
                     </div>
+                    {customFieldsSlot}
                 </div>
 
                 <SheetFooter className="border-t">

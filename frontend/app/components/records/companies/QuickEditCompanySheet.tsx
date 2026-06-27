@@ -1,5 +1,6 @@
 'use client';
 
+import { type ReactNode } from 'react';
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription, SheetFooter, SheetClose } from '@/components/ui/sheet';
 import { Button } from '@/components/ui/button';
 import { Loader2Icon } from 'lucide-react';
@@ -31,6 +32,7 @@ type Props = {
     updateLogoFile?: (id: number, file: File | null) => void;
     isSaving: boolean;
     saveEdits: () => void;
+    customFieldsSlot?: ReactNode;
 };
 
 export default function QuickEditCompanySheet({
@@ -44,6 +46,7 @@ export default function QuickEditCompanySheet({
     updateLogoFile,
     isSaving,
     saveEdits,
+    customFieldsSlot,
 }: Props) {
     const t = useTranslations('CompaniesQuickEditSheet');
     return (
@@ -174,6 +177,7 @@ export default function QuickEditCompanySheet({
                             );
                         })}
                     </div>
+                    {customFieldsSlot}
                 </div>
 
                 <SheetFooter className="border-t">

@@ -1,12 +1,13 @@
 'use client';
 
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { toast } from 'sonner';
 import { toastError, toastSuccess } from '@/app/lib/toast';
 
 import QuickEditSheet, { type ContactDraft } from '@/app/components/records/contacts/QuickEditSheet';
+import { CustomFieldsEditSection, type CustomFieldsEditHandle } from '@/app/components/records/CustomFieldsEditSection';
 import { getContactById, updateContact } from '@/app/lib/api';
 import { type Contact, type UpdateContactPayload } from '@/app/lib/types';
 import { uploadContactPicture } from '@/app/lib/utils';
@@ -38,6 +39,7 @@ export default function EditContactSheet({
     const [draft, setDraft] = useState<ContactDraft>(() => toDraft(contact));
     const [imageFile, setImageFile] = useState<File | null>(null);
     const [isSaving, setIsSaving] = useState(false);
+    const cfRef = useRef<CustomFieldsEditHandle>(null);
 
     const handleOpenChange = (next: boolean) => {
         onOpenChange(next);
@@ -51,8 +53,9 @@ export default function EditContactSheet({
         const original = toDraft(contact);
         const textChanged = diffDraft(original, draft);
         const pictureChanged = imageFile !== null;
+        const customChanged = cfRef.current?.hasChanges() ?? false;
 
-        if (!textChanged && !pictureChanged) {
+        if (!textChanged && !pictureChanged && !customChanged) {
             toast.info(t('toastNoChanges'));
             handleOpenChange(false);
             return;
@@ -70,15 +73,19 @@ export default function EditContactSheet({
                 imageUrl = await uploadContactPicture(contact.id, imageFile);
             }
 
-            const payload: UpdateContactPayload = {
-                name: draft.name.trim(),
-                email: draft.email.trim() || undefined,
-                phone: draft.phone.trim() || undefined,
-                title: draft.title.trim() || undefined,
-                companyId: contact.companyId ?? contact.company?.id ?? null,
-                imageUrl: imageUrl ?? contact.imageUrl ?? undefined,
-            };
-            await updateContact(contact.id, payload);
+            if (textChanged || pictureChanged) {
+                const payload: UpdateContactPayload = {
+                    name: draft.name.trim(),
+                    email: draft.email.trim() || undefined,
+                    phone: draft.phone.trim() || undefined,
+                    title: draft.title.trim() || undefined,
+                    companyId: contact.companyId ?? contact.company?.id ?? null,
+                    imageUrl: imageUrl ?? contact.imageUrl ?? undefined,
+                };
+                await updateContact(contact.id, payload);
+            }
+
+            await cfRef.current?.save();
 
             toastSuccess(t('toastContactUpdated'));
             handleOpenChange(false);
@@ -114,6 +121,7 @@ export default function EditContactSheet({
             updateImageFile={(_id, file) => setImageFile(file)}
             isSaving={isSaving}
             saveEdits={saveEdits}
+            customFieldsSlot={<CustomFieldsEditSection ref={cfRef} entityType="person" entityId={contact.id} />}
         />
     );
 }

@@ -7,6 +7,7 @@ import { toastError, toastSuccess } from '@/app/lib/toast';
 import { useTranslations } from 'next-intl';
 
 import QuickEditDealSheet, { type DealDraft } from '@/app/components/records/deals/QuickEditDealSheet';
+import { CustomFieldsEditSection, type CustomFieldsEditHandle } from '@/app/components/records/CustomFieldsEditSection';
 import { updateDeal } from '@/app/lib/api';
 import { type Company, type Deal, type Pipeline, type Stage, type UpdateDealPayload } from '@/app/lib/types';
 
@@ -45,6 +46,7 @@ export default function EditDealSheet({
     const t = useTranslations('DealsEditSheet');
     const [draft, setDraft] = useState<DealDraft>(() => toDraft(deal));
     const [isSaving, setIsSaving] = useState(false);
+    const cfRef = useRef<CustomFieldsEditHandle>(null);
 
     const wasOpen = useRef(open);
     useEffect(() => {
@@ -78,6 +80,7 @@ export default function EditDealSheet({
                 won: draft.won,
             };
             await updateDeal(deal.id, payload);
+            await cfRef.current?.save();
             toastSuccess(t('dealUpdated'));
             onOpenChange(false);
             router.refresh();
@@ -101,6 +104,7 @@ export default function EditDealSheet({
             stagesByPipeline={stagesByPipeline}
             isSaving={isSaving}
             saveEdits={saveEdits}
+            customFieldsSlot={<CustomFieldsEditSection ref={cfRef} entityType="deal" entityId={deal.id} />}
         />
     );
 }

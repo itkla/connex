@@ -2,7 +2,7 @@
 
 // TODO: use quickEditSheet composition and extend it
 
-import { WheelEvent } from 'react';
+import { type ReactNode, WheelEvent } from 'react';
 import { useTranslations } from 'next-intl';
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription, SheetFooter, SheetClose } from '@/components/ui/sheet';
 import { Button } from '@/components/ui/button';
@@ -40,6 +40,7 @@ type Props = {
     stagesByPipeline: Record<number, Stage[]>;
     isSaving: boolean;
     saveEdits: () => void;
+    customFieldsSlot?: ReactNode;
 };
 
 export default function QuickEditDealSheet({
@@ -54,6 +55,7 @@ export default function QuickEditDealSheet({
     stagesByPipeline,
     isSaving,
     saveEdits,
+    customFieldsSlot,
 }: Props) {
     const t = useTranslations('DealsQuickEditSheet');
     const handleListWheel = (e: WheelEvent<HTMLDivElement>) => {
@@ -314,6 +316,7 @@ export default function QuickEditDealSheet({
                             );
                         })}
                     </div>
+                    {customFieldsSlot}
                 </div>
 
                 <SheetFooter className="border-t">
