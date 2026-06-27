@@ -280,9 +280,30 @@ public class DealService {
     }
 
     /**
+     * Sets or clears a single custom-field value on a deal.
+     */
+    @Transactional
+    @RequirePermission(Permission.DEAL_UPDATE)
+    public List<CustomFieldEntryDto> updateCustomField(int dealId, int definitionId, Object value) {
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        if (dealMapper.getDealById(workspaceId, dealId) == null) {
+            throw new ResourceNotFoundException("Deal not found with id: " + dealId);
+        }
+        return customFieldValueService.applyValue("deal", dealId, definitionId, value);
+    }
+
+    /**
+     * Filled custom-field values for many deals, keyed by deal id then definition id.
+     */
+    public Map<Integer, Map<Integer, Object>> getCustomFieldValues(List<Integer> dealIds) {
+        return customFieldValueService.getForEntities("deal", dealIds);
+    }
+
+    /**
      * Deletes a {@code Deal} record by ID, throwing a {@code ResourceNotFoundException} if not found.
      * @param id
      */
+    @Transactional
     @RequirePermission(Permission.DEAL_DELETE)
     public void delete(int id) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();

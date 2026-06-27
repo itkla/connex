@@ -15,6 +15,7 @@ import ooo.klae.connex.backend.beans.DealPerson;
 import ooo.klae.connex.backend.dto.ActivityDto;
 import ooo.klae.connex.backend.dto.CloseDealRequest;
 import ooo.klae.connex.backend.dto.CustomFieldEntryDto;
+import ooo.klae.connex.backend.dto.CustomFieldValueRequest;
 import ooo.klae.connex.backend.dto.CustomFieldValuesRequest;
 import ooo.klae.connex.backend.dto.DealCollaboratorsDto;
 import ooo.klae.connex.backend.dto.DealDto;
@@ -26,6 +27,7 @@ import ooo.klae.connex.backend.dto.UserDto;
 import ooo.klae.connex.backend.services.DealService;
 
 import java.util.List;
+import java.util.Map;
 
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -287,7 +289,24 @@ public class DealController {
      */
     @PutMapping("/{id}/custom-fields")
     public List<CustomFieldEntryDto> updateCustomFieldsForDeal(@PathVariable int id,
-            @RequestBody CustomFieldValuesRequest request) {
+            @Valid @RequestBody CustomFieldValuesRequest request) {
         return dealService.updateCustomFields(id, request.getValues());
+    }
+
+    /**
+     * PUT sets or clears a single custom-field value on a deal.
+     */
+    @PutMapping("/{id}/custom-fields/{definitionId}")
+    public List<CustomFieldEntryDto> updateCustomFieldForDeal(@PathVariable int id,
+            @PathVariable int definitionId, @Valid @RequestBody CustomFieldValueRequest request) {
+        return dealService.updateCustomField(id, definitionId, request.getValue());
+    }
+
+    /**
+     * GET filled custom-field values for many deals, keyed by deal id.
+     */
+    @GetMapping("/custom-field-values")
+    public Map<Integer, Map<Integer, Object>> getCustomFieldValuesForDeals(@RequestParam List<Integer> ids) {
+        return dealService.getCustomFieldValues(ids);
     }
 }

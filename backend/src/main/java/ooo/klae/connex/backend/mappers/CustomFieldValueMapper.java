@@ -13,6 +13,8 @@ import java.util.List;
 public interface CustomFieldValueMapper {
     List<CustomFieldValue> getForEntity(@Param("workspaceId") int workspaceId,
         @Param("entityType") String entityType, @Param("entityId") int entityId);
+    List<CustomFieldValue> getForEntities(@Param("workspaceId") int workspaceId,
+        @Param("entityType") String entityType, @Param("entityIds") List<Integer> entityIds);
     int upsert(CustomFieldValue value);
     int deleteByDefinitionAndEntity(@Param("workspaceId") int workspaceId,
         @Param("definitionId") int definitionId, @Param("entityId") int entityId);

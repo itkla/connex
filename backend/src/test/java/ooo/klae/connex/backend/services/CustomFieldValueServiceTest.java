@@ -17,6 +17,7 @@ import ooo.klae.connex.backend.beans.CustomFieldDefinition;
 import ooo.klae.connex.backend.dto.CustomFieldEntryDto;
 import ooo.klae.connex.backend.dto.CustomFieldOption;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
+import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.CustomFieldValueMapper;
 
 class CustomFieldValueServiceTest extends AbstractServiceTest {
@@ -59,6 +60,20 @@ class CustomFieldValueServiceTest extends AbstractServiceTest {
     }
 
     @Test
+    void applyValues_isPartial_doesNotWipeOmittedFields() {
+        Company company = newCompany();
+        CustomFieldDefinition a = companyField("a", "text", null);
+        CustomFieldDefinition b = companyField("b", "text", null);
+        valueService.applyValues("company", company.getId(), Map.of(a.getId(), "AA", b.getId(), "BB"));
+
+        valueService.applyValues("company", company.getId(), Map.of(a.getId(), "changed"));
+
+        List<CustomFieldEntryDto> entries = valueService.getForEntity("company", company.getId());
+        assertEquals("changed", value(entries, a.getId()));
+        assertEquals("BB", value(entries, b.getId()));
+    }
+
+    @Test
     void applyValues_rejectsBadValues() {
         Company company = newCompany();
         CustomFieldDefinition number = companyField("n", "number", null);
@@ -74,14 +89,24 @@ class CustomFieldValueServiceTest extends AbstractServiceTest {
     }
 
     @Test
-    void applyValues_emptyClearsTheValue() {
+    void applyValues_clearingRequiredField_rejected() {
         Company company = newCompany();
-        CustomFieldDefinition def = companyField("tier", "text", null);
-        valueService.applyValues("company", company.getId(), Map.of(def.getId(), "Gold"));
+        CustomFieldDefinition required = companyField("must", "text", null, true);
+        valueService.applyValue("company", company.getId(), required.getId(), "set");
 
-        valueService.applyValues("company", company.getId(), Map.of(def.getId(), ""));
+        assertThrows(BadRequestException.class,
+            () -> valueService.applyValues("company", company.getId(), Map.of(required.getId(), "")));
+    }
 
-        assertNull(value(valueService.getForEntity("company", company.getId()), def.getId()));
+    @Test
+    void applyValues_omittingRequiredField_doesNotBlockOtherSaves() {
+        Company company = newCompany();
+        companyField("must", "text", null, true);
+        CustomFieldDefinition other = companyField("other", "text", null);
+
+        valueService.applyValues("company", company.getId(), Map.of(other.getId(), "ok"));
+
+        assertEquals("ok", value(valueService.getForEntity("company", company.getId()), other.getId()));
     }
 
     @Test
@@ -92,26 +117,98 @@ class CustomFieldValueServiceTest extends AbstractServiceTest {
     }
 
     @Test
-    void applyValues_enforcesRequired() {
+    void applyValue_setsAndClearsSingleField() {
         Company company = newCompany();
-        companyField("must", "text", null, true);
+        CustomFieldDefinition def = companyField("tier", "text", null);
 
-        assertThrows(BadRequestException.class,
-            () -> valueService.applyValues("company", company.getId(), Map.of()));
+        valueService.applyValue("company", company.getId(), def.getId(), "Gold");
+        assertEquals("Gold", value(valueService.getForEntity("company", company.getId()), def.getId()));
+
+        valueService.applyValue("company", company.getId(), def.getId(), "");
+        assertNull(value(valueService.getForEntity("company", company.getId()), def.getId()));
     }
 
     @Test
-    void companyService_updateAndReadThenDeleteCleansUp() {
+    void applyValue_clearingRequiredField_rejected() {
+        Company company = newCompany();
+        CustomFieldDefinition required = companyField("must", "text", null, true);
+
+        assertThrows(BadRequestException.class,
+            () -> valueService.applyValue("company", company.getId(), required.getId(), ""));
+    }
+
+    @Test
+    void applyValue_booleanFalseRoundTripsAndIsDistinctFromUnset() {
+        Company company = newCompany();
+        CustomFieldDefinition flag = companyField("flag", "boolean", null);
+
+        valueService.applyValue("company", company.getId(), flag.getId(), false);
+        assertEquals(false, value(valueService.getForEntity("company", company.getId()), flag.getId()));
+
+        valueService.applyValue("company", company.getId(), flag.getId(), "");
+        assertNull(value(valueService.getForEntity("company", company.getId()), flag.getId()));
+    }
+
+    @Test
+    void applyValue_numberRoundsToScaleAndRejectsTooLarge() {
+        Company company = newCompany();
+        CustomFieldDefinition number = companyField("n", "number", null);
+
+        valueService.applyValue("company", company.getId(), number.getId(), "42.123456");
+        assertEquals(0, new BigDecimal("42.1235")
+            .compareTo((BigDecimal) value(valueService.getForEntity("company", company.getId()), number.getId())));
+
+        assertThrows(BadRequestException.class,
+            () -> valueService.applyValue("company", company.getId(), number.getId(), "123456789012345678901"));
+    }
+
+    @Test
+    void applyValue_urlValidation() {
+        Company company = newCompany();
+        CustomFieldDefinition url = companyField("site", "url", null);
+
+        valueService.applyValue("company", company.getId(), url.getId(), "https://example.com");
+        assertEquals("https://example.com",
+            value(valueService.getForEntity("company", company.getId()), url.getId()));
+
+        assertThrows(BadRequestException.class,
+            () -> valueService.applyValue("company", company.getId(), url.getId(), "not-a-url"));
+    }
+
+    @Test
+    void getForEntities_groupsValuesByEntity() {
+        CustomFieldDefinition def = companyField("tier", "text", null);
+        Company a = newCompany();
+        Company b = newCompany();
+        valueService.applyValue("company", a.getId(), def.getId(), "Gold");
+        valueService.applyValue("company", b.getId(), def.getId(), "Silver");
+
+        Map<Integer, Map<Integer, Object>> values =
+            valueService.getForEntities("company", List.of(a.getId(), b.getId()));
+
+        assertEquals("Gold", values.get(a.getId()).get(def.getId()));
+        assertEquals("Silver", values.get(b.getId()).get(def.getId()));
+    }
+
+    @Test
+    void companyService_updateFieldThenDeleteCleansUp() {
         CustomFieldDefinition def = companyField("tier", "text", null);
         Company company = newCompany();
 
-        companyService.updateCustomFields(company.getId(), Map.of(def.getId(), "Gold"));
+        companyService.updateCustomField(company.getId(), def.getId(), "Gold");
         assertEquals("Gold", value(companyService.getCustomFields(company.getId()), def.getId()));
 
         companyService.deleteCompany(company.getId());
-        boolean anyValue = valueMapper.getForEntity(workspace.getId(), "company", company.getId()).stream()
-            .anyMatch(v -> v.getValueText() != null);
-        assertTrue(!anyValue);
+        assertTrue(valueMapper.getForEntity(workspace.getId(), "company", company.getId()).stream()
+            .noneMatch(v -> v.getValueText() != null));
+    }
+
+    @Test
+    void companyService_customFieldMethodsGuardInvisibleRecord() {
+        CustomFieldDefinition def = companyField("tier", "text", null);
+        assertThrows(ResourceNotFoundException.class, () -> companyService.getCustomFields(-1));
+        assertThrows(ResourceNotFoundException.class, () -> companyService.updateCustomFields(-1, Map.of()));
+        assertThrows(ResourceNotFoundException.class, () -> companyService.updateCustomField(-1, def.getId(), "x"));
     }
 
     private Object value(List<CustomFieldEntryDto> entries, int definitionId) {

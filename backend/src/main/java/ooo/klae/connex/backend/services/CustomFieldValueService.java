@@ -1,8 +1,9 @@
 package ooo.klae.connex.backend.services;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.LocalDate;
-import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -26,6 +27,10 @@ import ooo.klae.connex.backend.mappers.CustomFieldValueMapper;
  * entity's update permission and assert the record is visible first. Definitions are
  * read straight from the mapper (not the admin-gated catalog service), so any member
  * who can see a record can render and fill its fields.
+ *
+ * <p>Writes are partial: {@link #applyValues} and {@link #applyValue} only touch the
+ * fields they are given, leaving the rest untouched. Clearing a required field is
+ * rejected; a record is never blocked from saving one field by the state of another.
  */
 @Service
 @RequiredArgsConstructor
@@ -34,6 +39,9 @@ public class CustomFieldValueService {
     private final CustomFieldDefinitionMapper definitionMapper;
     private final CustomFieldDefinitionService definitionService;
     private final WorkspaceService workspaceService;
+
+    private static final int MAX_NUMERIC_DIGITS = 20;
+    private static final int NUMERIC_SCALE = 4;
 
     /**
      * Every non-archived field for the entity type, with this record's value (null if unset).
@@ -45,37 +53,48 @@ public class CustomFieldValueService {
     }
 
     /**
-     * Replaces the record's custom-field values with the supplied set
-     * ({@code definitionId → value}), coercing each by its field type and enforcing
-     * required fields. Returns the resulting entries.
+     * Filled custom-field values for many records of one entity type, keyed by entity id
+     * then definition id. Unset fields are simply absent. Used to populate table cells
+     * without an N+1 of per-record reads.
+     */
+    public Map<Integer, Map<Integer, Object>> getForEntities(String entityType, List<Integer> entityIds) {
+        if (entityIds == null || entityIds.isEmpty()) {
+            return Map.of();
+        }
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        Map<Integer, Map<Integer, Object>> byEntity = new LinkedHashMap<>();
+        for (CustomFieldValue value : valueMapper.getForEntities(workspaceId, normalize(entityType), entityIds)) {
+            byEntity.computeIfAbsent(value.getEntityId(), id -> new LinkedHashMap<>())
+                .put(value.getDefinitionId(), resolveValue(value));
+        }
+        return byEntity;
+    }
+
+    /**
+     * Partial update: writes only the supplied fields ({@code definitionId → value}),
+     * leaving the rest untouched. A blank value clears that field; clearing a required
+     * field is rejected. Returns the record's resulting entries.
      */
     public List<CustomFieldEntryDto> applyValues(String entityType, int entityId, Map<Integer, Object> values) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         String type = normalize(entityType);
-        Map<Integer, CustomFieldDefinition> defs = definitionMapper.getByEntityType(workspaceId, type).stream()
-            .filter(def -> !def.isArchived())
-            .collect(Collectors.toMap(CustomFieldDefinition::getId, def -> def));
-        Map<Integer, Object> input = values == null ? Map.of() : values;
-        for (Integer definitionId : input.keySet()) {
-            if (!defs.containsKey(definitionId)) {
-                throw new BadRequestException("Unknown custom field: " + definitionId);
+        if (values != null && !values.isEmpty()) {
+            Map<Integer, CustomFieldDefinition> defs = activeDefs(workspaceId, type);
+            for (Map.Entry<Integer, Object> entry : values.entrySet()) {
+                writeOne(workspaceId, type, entityId, requireDef(defs, entry.getKey()), entry.getValue());
             }
         }
-        List<CustomFieldValue> toUpsert = new ArrayList<>();
-        List<Integer> toClear = new ArrayList<>();
-        for (CustomFieldDefinition def : defs.values()) {
-            CustomFieldValue value = coerce(workspaceId, type, entityId, def, input.get(def.getId()));
-            if (value == null) {
-                if (def.isRequired()) {
-                    throw new BadRequestException("A value is required for '" + def.getLabel() + "'");
-                }
-                toClear.add(def.getId());
-            } else {
-                toUpsert.add(value);
-            }
-        }
-        toClear.forEach(definitionId -> valueMapper.deleteByDefinitionAndEntity(workspaceId, definitionId, entityId));
-        toUpsert.forEach(valueMapper::upsert);
+        return valueMapper.getForEntity(workspaceId, type, entityId).stream().map(this::toEntry).toList();
+    }
+
+    /**
+     * Sets or clears a single custom-field value on a record. A blank value clears it;
+     * clearing a required field is rejected. Returns the record's resulting entries.
+     */
+    public List<CustomFieldEntryDto> applyValue(String entityType, int entityId, int definitionId, Object raw) {
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        String type = normalize(entityType);
+        writeOne(workspaceId, type, entityId, requireDef(activeDefs(workspaceId, type), definitionId), raw);
         return valueMapper.getForEntity(workspaceId, type, entityId).stream().map(this::toEntry).toList();
     }
 
@@ -84,6 +103,32 @@ public class CustomFieldValueService {
      */
     public void deleteByEntity(String entityType, int entityId) {
         valueMapper.deleteByEntity(workspaceService.getCurrentWorkspaceId(), normalize(entityType), entityId);
+    }
+
+    private void writeOne(int workspaceId, String entityType, int entityId, CustomFieldDefinition def, Object raw) {
+        CustomFieldValue value = coerce(workspaceId, entityType, entityId, def, raw);
+        if (value == null) {
+            if (def.isRequired()) {
+                throw new BadRequestException("A value is required for '" + def.getLabel() + "'");
+            }
+            valueMapper.deleteByDefinitionAndEntity(workspaceId, def.getId(), entityId);
+        } else {
+            valueMapper.upsert(value);
+        }
+    }
+
+    private Map<Integer, CustomFieldDefinition> activeDefs(int workspaceId, String entityType) {
+        return definitionMapper.getByEntityType(workspaceId, entityType).stream()
+            .filter(def -> !def.isArchived())
+            .collect(Collectors.toMap(CustomFieldDefinition::getId, def -> def));
+    }
+
+    private CustomFieldDefinition requireDef(Map<Integer, CustomFieldDefinition> defs, Integer definitionId) {
+        CustomFieldDefinition def = defs.get(definitionId);
+        if (def == null) {
+            throw new BadRequestException("Unknown custom field: " + definitionId);
+        }
+        return def;
     }
 
     private CustomFieldEntryDto toEntry(CustomFieldValue v) {
@@ -111,7 +156,9 @@ public class CustomFieldValueService {
     private CustomFieldValue coerce(int workspaceId, String entityType, int entityId,
             CustomFieldDefinition def, Object raw) {
         String text = raw == null ? "" : raw.toString().trim();
-        if (text.isEmpty()) return null;
+        if (text.isEmpty()) {
+            return null;
+        }
         CustomFieldValue value = new CustomFieldValue();
         value.setWorkspaceId(workspaceId);
         value.setDefinitionId(def.getId());
@@ -138,11 +185,16 @@ public class CustomFieldValueService {
     }
 
     private BigDecimal parseNumber(CustomFieldDefinition def, String text) {
+        BigDecimal number;
         try {
-            return new BigDecimal(text);
+            number = new BigDecimal(text).setScale(NUMERIC_SCALE, RoundingMode.HALF_UP);
         } catch (NumberFormatException e) {
             throw new BadRequestException("'" + def.getLabel() + "' must be a number");
         }
+        if (number.precision() > MAX_NUMERIC_DIGITS) {
+            throw new BadRequestException("'" + def.getLabel() + "' is too large");
+        }
+        return number;
     }
 
     private String parseDate(CustomFieldDefinition def, String text) {

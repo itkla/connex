@@ -128,6 +128,7 @@ public class CompanyService {
     /**
      * Deletes a {@code Company} in the active workspace.
      */
+    @Transactional
     @RequirePermission(Permission.COMPANY_DELETE)
     public void deleteCompany(int id) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
@@ -232,6 +233,24 @@ public class CompanyService {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         requireCompany(workspaceId, companyId);
         return customFieldValueService.applyValues("company", companyId, values);
+    }
+
+    /**
+     * Sets or clears a single custom-field value on a company.
+     */
+    @Transactional
+    @RequirePermission(Permission.COMPANY_UPDATE)
+    public List<CustomFieldEntryDto> updateCustomField(int companyId, int definitionId, Object value) {
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        requireCompany(workspaceId, companyId);
+        return customFieldValueService.applyValue("company", companyId, definitionId, value);
+    }
+
+    /**
+     * Filled custom-field values for many companies, keyed by company id then definition id.
+     */
+    public Map<Integer, Map<Integer, Object>> getCustomFieldValues(List<Integer> companyIds) {
+        return customFieldValueService.getForEntities("company", companyIds);
     }
 
     /**

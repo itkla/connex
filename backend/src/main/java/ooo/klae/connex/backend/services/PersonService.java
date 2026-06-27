@@ -196,6 +196,7 @@ public class PersonService {
     /**
      * Deletes a {@code Person} in the active workspace.
      */
+    @Transactional
     @RequirePermission(Permission.PERSON_DELETE)
     public void delete(int id) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
@@ -316,6 +317,24 @@ public class PersonService {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         requirePerson(workspaceId, personId);
         return customFieldValueService.applyValues("person", personId, values);
+    }
+
+    /**
+     * Sets or clears a single custom-field value on a contact.
+     */
+    @Transactional
+    @RequirePermission(Permission.PERSON_UPDATE)
+    public List<CustomFieldEntryDto> updateCustomField(int personId, int definitionId, Object value) {
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        requirePerson(workspaceId, personId);
+        return customFieldValueService.applyValue("person", personId, definitionId, value);
+    }
+
+    /**
+     * Filled custom-field values for many contacts, keyed by contact id then definition id.
+     */
+    public Map<Integer, Map<Integer, Object>> getCustomFieldValues(List<Integer> personIds) {
+        return customFieldValueService.getForEntities("person", personIds);
     }
 
     private Person requirePerson(int workspaceId, int personId) {

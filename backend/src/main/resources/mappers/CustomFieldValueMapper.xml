@@ -14,6 +14,18 @@
     ORDER BY d.position, d.id
   </select>
 
+  <select id="getForEntities" resultType="CustomFieldValue">
+    SELECT
+      v.entity_id, v.definition_id, d.field_type,
+      v.value_text, v.value_number, v.value_date, v.value_bool
+    FROM custom_field_value v
+    JOIN custom_field_definition d
+      ON d.workspace_id = v.workspace_id AND d.id = v.definition_id
+    WHERE v.workspace_id = #{workspaceId} AND v.entity_type = #{entityType} AND d.archived = FALSE
+      AND v.entity_id IN
+      <foreach item="id" collection="entityIds" open="(" separator="," close=")">#{id}</foreach>
+  </select>
+
   <insert id="upsert">
     INSERT INTO custom_field_value
       (workspace_id, definition_id, entity_type, entity_id, value_text, value_number, value_date, value_bool)
