@@ -17,6 +17,7 @@ import ooo.klae.connex.backend.dto.PageResponse;
 import ooo.klae.connex.backend.dto.TagDto;
 import ooo.klae.connex.backend.services.AttachmentService;
 import ooo.klae.connex.backend.services.AuthService;
+import ooo.klae.connex.backend.util.LikePattern;
 
 import java.util.List;
 
@@ -70,7 +71,9 @@ public class AttachmentController {
         @RequestParam(required = false) List<Integer> tagIds,
         @RequestParam(required = false) Boolean orphaned
     ) {
-        String query = (q == null || q.isBlank()) ? null : "%" + q + "%";
+        size = Math.min(Math.max(size, 1), 100);
+        page = Math.max(page, 1);
+        String query = (q == null || q.isBlank()) ? null : LikePattern.containing(q);
         int offset = Math.max(0, (page - 1) * size);
         List<AttachmentDto> items = attachmentService.getPage(query, sort, types, kinds, tagIds, orphaned, size, offset)
             .stream().map(AttachmentDto::from).toList();
