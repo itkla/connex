@@ -6,6 +6,8 @@ import java.util.Set;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import lombok.RequiredArgsConstructor;
 import tools.jackson.databind.ObjectMapper;
@@ -30,6 +32,7 @@ public class SavedViewService {
     private final WorkspaceService workspaceService;
     private final AuthService authService;
     private final ObjectMapper objectMapper;
+    private static final Logger log = LoggerFactory.getLogger(SavedViewService.class);
 
     private static final int MAX_NAME_LENGTH = 128;
     private static final int MAX_CONFIG_BYTES = 16384;
@@ -112,12 +115,9 @@ public class SavedViewService {
 
     @Transactional
     public void delete(int id) {
-        int workspaceId = workspaceService.getCurrentWorkspaceId();
-        int userId = currentUserId();
-        if (viewMapper.getById(workspaceId, userId, id) == null) {
+        if (viewMapper.delete(workspaceService.getCurrentWorkspaceId(), currentUserId(), id) == 0) {
             throw new ResourceNotFoundException("Saved view not found with id: " + id);
         }
-        viewMapper.delete(workspaceId, userId, id);
     }
 
     /**
@@ -130,6 +130,7 @@ public class SavedViewService {
         try {
             return objectMapper.readValue(configJson, Object.class);
         } catch (Exception e) {
+            log.warn("Failed to parse saved-view config JSON", e);
             return null;
         }
     }

@@ -2,7 +2,6 @@ import { headers } from "next/headers";
 import { getCompaniesFromCookie, getCurrentUserFromCookie, getSavedViewsFromCookie } from "@/app/lib/api";
 import { Company, type SavedView } from "@/app/lib/types";
 import { redirect } from "next/navigation";
-// import ContactsBrowser from "@/app/components/records/contacts/ContactsBrowser";
 import CompaniesBrowser from "@/app/components/records/companies/CompaniesBrowser";
 
 export default async function CompaniesPage() {

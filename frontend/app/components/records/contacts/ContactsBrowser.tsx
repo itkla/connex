@@ -100,6 +100,7 @@ export default function ContactsBrowser({ savedViews }: { savedViews: SavedView[
         setSize,
         query,
         setQuery,
+        applyQuery,
         sortKey,
         sortDirection,
         onSortChange,
@@ -426,10 +427,10 @@ export default function ContactsBrowser({ savedViews }: { savedViews: SavedView[
     const applyView = useCallback(
         (config: SavedViewConfig) => {
             setFilterState(config.filters ?? {});
-            setQuery(config.query ?? '');
+            applyQuery(config.query ?? '');
             applySort(config.sortKey ?? null, config.sortDirection ?? 'asc');
         },
-        [setFilterState, setQuery, applySort],
+        [setFilterState, applyQuery, applySort],
     );
 
     return (

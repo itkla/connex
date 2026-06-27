@@ -29,8 +29,8 @@ import { toastError, toastSuccess } from "@/app/lib/toast";
 import type { SavedView, SavedViewConfig, SavedViewRecordType } from "@/app/lib/types";
 
 /** Canonical string for a config, so two configs compare equal regardless of key/value order. */
-function canonical(config: SavedViewConfig): string {
-    const filters = config.filters ?? {};
+function canonical(config: SavedViewConfig | null | undefined): string {
+    const filters = config?.filters ?? {};
     const sorted: Record<string, string[]> = {};
     for (const key of Object.keys(filters).sort()) {
         const values = filters[key];
@@ -38,17 +38,17 @@ function canonical(config: SavedViewConfig): string {
     }
     return JSON.stringify({
         filters: sorted,
-        query: (config.query ?? "").trim(),
-        sortKey: config.sortKey ?? null,
-        sortDirection: config.sortDirection ?? "asc",
+        query: (config?.query ?? "").trim(),
+        sortKey: config?.sortKey ?? null,
+        sortDirection: config?.sortDirection ?? "asc",
     });
 }
 
 /** A config is "empty" (= the All view) when it carries no filters, no search, and no sort. */
-function isEmpty(config: SavedViewConfig): boolean {
-    const filters = config.filters ?? {};
+function isEmpty(config: SavedViewConfig | null | undefined): boolean {
+    const filters = config?.filters ?? {};
     const hasFilters = Object.values(filters).some((values) => values && values.length > 0);
-    return !hasFilters && !(config.query ?? "").trim() && !config.sortKey;
+    return !hasFilters && !(config?.query ?? "").trim() && !config?.sortKey;
 }
 
 /**

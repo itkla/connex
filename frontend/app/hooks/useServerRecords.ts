@@ -70,11 +70,17 @@ export function useServerRecords<T, P extends PageParams = PageParams>(
         setPage(1);
     }, []);
 
+    const applyQuery = useCallback((q: string) => {
+        setQuery(q);
+        setDebouncedQuery(q.trim());
+        setPage(1);
+    }, []);
+
     return {
         items, total, loading,
         page, setPage,
         size, setSize: changeSize,
-        query, setQuery,
+        query, setQuery, applyQuery,
         sortKey, sortDirection, onSortChange, applySort,
         reload: load,
     };
