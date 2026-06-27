@@ -46,10 +46,12 @@ export function useCustomFieldColumns<T extends { id: number }>(
     const [definitions, setDefinitions] = useState<CustomFieldDefinition[]>([]);
     const [canManage, setCanManage] = useState(false);
     const [values, setValues] = useState<EntityCustomFieldValues>({});
+    const [schemaToken, setSchemaToken] = useState(0);
 
     const firstId = rows.length > 0 ? rows[0].id : null;
+    const refreshSchema = useCallback(() => setSchemaToken((token) => token + 1), []);
 
-    const loadSchema = useCallback(() => {
+    useEffect(() => {
         let cancelled = false;
         getCustomFields(entityType)
             .then((defs) => {
@@ -60,25 +62,28 @@ export function useCustomFieldColumns<T extends { id: number }>(
                 setFields(active.map(definitionField));
             })
             .catch(() => {
-                if (cancelled) return;
-                setCanManage(false);
-                setDefinitions([]);
-                if (firstId == null) {
-                    setFields([]);
-                    return;
+                if (!cancelled) {
+                    setCanManage(false);
+                    setDefinitions([]);
                 }
-                getEntityCustomFields(entityType, firstId)
-                    .then((entries) => {
-                        if (!cancelled) setFields(entries.map(entryField));
-                    })
-                    .catch(() => {});
             });
         return () => {
             cancelled = true;
         };
-    }, [entityType, firstId]);
+    }, [entityType, schemaToken]);
 
-    useEffect(() => loadSchema(), [loadSchema]);
+    useEffect(() => {
+        if (canManage || firstId == null) return;
+        let cancelled = false;
+        getEntityCustomFields(entityType, firstId)
+            .then((entries) => {
+                if (!cancelled) setFields(entries.map(entryField));
+            })
+            .catch(() => {});
+        return () => {
+            cancelled = true;
+        };
+    }, [entityType, firstId, canManage]);
 
     const rowIdsKey = useMemo(() => rows.map((row) => row.id).sort((a, b) => a - b).join(","), [rows]);
     useEffect(() => {
@@ -111,7 +116,7 @@ export function useCustomFieldColumns<T extends { id: number }>(
                     ? () => {
                           const def = definitions.find((d) => d.id === field.definitionId);
                           return def ? (
-                              <CustomFieldColumnHeader definition={def} entityType={entityType} onChanged={loadSchema} />
+                              <CustomFieldColumnHeader definition={def} entityType={entityType} onChanged={refreshSchema} />
                           ) : (
                               <span>{field.label}</span>
                           );
@@ -124,13 +129,14 @@ export function useCustomFieldColumns<T extends { id: number }>(
                         field={field}
                         value={values[String(item.id)]?.[String(field.definitionId)] ?? null}
                         onChange={(value) => setCellValue(item.id, field.definitionId, value)}
+                        align={field.fieldType === "number" ? "right" : "left"}
                     />
                 ),
             })),
-        [fields, definitions, values, canManage, entityType, loadSchema, setCellValue],
+        [fields, definitions, values, canManage, entityType, refreshSchema, setCellValue],
     );
 
-    const addColumnSlot = canManage ? <AddCustomFieldColumn entityType={entityType} onCreated={loadSchema} /> : null;
+    const addColumnSlot = canManage ? <AddCustomFieldColumn entityType={entityType} onCreated={refreshSchema} /> : null;
 
     return { columns, addColumnSlot };
 }
@@ -183,7 +189,7 @@ function CustomFieldColumnHeader({
             setRemoveOpen(false);
             onChanged();
         } catch {
-            toastError(t("saveFailed"));
+            toastError(t("deleteFailed"));
         } finally {
             setRemoving(false);
         }

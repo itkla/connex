@@ -1082,18 +1082,30 @@ export function updateEntityCustomField(
     return putJson<Types.CustomFieldEntry[]>(`${customFieldEntityPath(entityType, id)}/${definitionId}`, { value });
 }
 
-export function getEntityCustomFieldValues(
+const CUSTOM_FIELD_VALUE_ID_BATCH = 150;
+
+export async function getEntityCustomFieldValues(
     entityType: Types.CustomFieldEntityType,
     ids: number[],
     init: RequestInit = {},
-) {
+): Promise<Types.EntityCustomFieldValues> {
     if (ids.length === 0) {
-        return Promise.resolve({} as Types.EntityCustomFieldValues);
+        return {};
     }
-    return getJson<Types.EntityCustomFieldValues>(
-        `/api/${customFieldEntitySegment(entityType)}/custom-field-values?ids=${ids.join(",")}`,
-        { cache: "no-store", ...init },
+    const segment = customFieldEntitySegment(entityType);
+    const batches: number[][] = [];
+    for (let i = 0; i < ids.length; i += CUSTOM_FIELD_VALUE_ID_BATCH) {
+        batches.push(ids.slice(i, i + CUSTOM_FIELD_VALUE_ID_BATCH));
+    }
+    const parts = await Promise.all(
+        batches.map((batch) =>
+            getJson<Types.EntityCustomFieldValues>(
+                `/api/${segment}/custom-field-values?ids=${batch.join(",")}`,
+                { cache: "no-store", ...init },
+            ),
+        ),
     );
+    return Object.assign({}, ...parts);
 }
 
 export async function getEntityCustomFieldValuesFromCookie(

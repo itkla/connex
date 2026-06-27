@@ -60,12 +60,14 @@ export function CustomFieldValueCell({
 
     const commit = async (raw: CustomFieldCellValue) => {
         setEditing(false);
-        if (raw === value) return;
+        if (String(raw ?? "") === String(value ?? "")) return;
         const previous = value;
         onChange(raw);
         setSaving(true);
         try {
-            await updateEntityCustomField(entityType, entityId, field.definitionId, raw ?? "");
+            const entries = await updateEntityCustomField(entityType, entityId, field.definitionId, raw ?? "");
+            const saved = entries.find((entry) => entry.definitionId === field.definitionId);
+            if (saved) onChange(saved.value);
         } catch (err) {
             onChange(previous);
             toastError(err instanceof ApiError ? err.message : t("saveFailed"));
@@ -101,7 +103,10 @@ export function CustomFieldValueCell({
     return (
         <button
             type="button"
-            onClick={stop}
+            onClick={(e) => {
+                e.stopPropagation();
+                if (e.detail === 0) setEditing(true);
+            }}
             onDoubleClick={() => setEditing(true)}
             title={t("doubleClickToEdit")}
             className={cn(
