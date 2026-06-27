@@ -514,16 +514,15 @@ export default function DealsBrowser({ deals, savedViews }: { deals: Deal[]; sav
     );
 
     const currentConfig: SavedViewConfig = useMemo(
-        () => ({ filters: filterState, query, displayMode }),
-        [filterState, query, displayMode],
+        () => ({ filters: filterState, query }),
+        [filterState, query],
     );
     const applyView = useCallback(
         (config: SavedViewConfig) => {
             setFilterState(config.filters ?? {});
             setQuery(config.query ?? '');
-            setDisplayMode(config.displayMode ?? 'table');
         },
-        [setFilterState, setQuery, setDisplayMode],
+        [setFilterState, setQuery],
     );
 
     return (

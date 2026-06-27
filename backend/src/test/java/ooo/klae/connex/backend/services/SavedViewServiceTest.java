@@ -104,6 +104,23 @@ class SavedViewServiceTest extends AbstractServiceTest {
         assertTrue(service.list("company").stream().noneMatch(v -> v.getId() == theirs.getId()));
     }
 
+    @Test
+    void update_isScopedToCurrentUser() {
+        SavedView mine = service.create("company", "mine-upd", Map.of());
+        authAs(newUser());
+        assertThrows(ResourceNotFoundException.class, () -> service.update(mine.getId(), "hacked", Map.of(), null));
+    }
+
+    @Test
+    void create_nameTooLong_throws() {
+        assertThrows(BadRequestException.class, () -> service.create("company", "x".repeat(129), Map.of()));
+    }
+
+    @Test
+    void create_configTooLarge_throws() {
+        assertThrows(BadRequestException.class, () -> service.create("company", "big", Map.of("blob", "y".repeat(20000))));
+    }
+
     private void authAs(User user) {
         SecurityContextHolder.getContext().setAuthentication(
             new UsernamePasswordAuthenticationToken(user, null, user.getAuthorities()));

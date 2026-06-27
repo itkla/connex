@@ -420,17 +420,16 @@ export default function ContactsBrowser({ savedViews }: { savedViews: SavedView[
     );
 
     const currentConfig: SavedViewConfig = useMemo(
-        () => ({ filters: filterState, query, displayMode, sortKey, sortDirection }),
-        [filterState, query, displayMode, sortKey, sortDirection],
+        () => ({ filters: filterState, query, sortKey, sortDirection }),
+        [filterState, query, sortKey, sortDirection],
     );
     const applyView = useCallback(
         (config: SavedViewConfig) => {
             setFilterState(config.filters ?? {});
             setQuery(config.query ?? '');
-            setDisplayMode(config.displayMode ?? 'table');
             applySort(config.sortKey ?? null, config.sortDirection ?? 'asc');
         },
-        [setFilterState, setQuery, setDisplayMode, applySort],
+        [setFilterState, setQuery, applySort],
     );
 
     return (

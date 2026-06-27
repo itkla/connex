@@ -39,7 +39,6 @@ function canonical(config: SavedViewConfig): string {
     return JSON.stringify({
         filters: sorted,
         query: (config.query ?? "").trim(),
-        displayMode: config.displayMode ?? "table",
         sortKey: config.sortKey ?? null,
         sortDirection: config.sortDirection ?? "asc",
     });
@@ -55,7 +54,9 @@ function isEmpty(config: SavedViewConfig): boolean {
 /**
  * The Views tab bar for a records list: an "All" tab plus the user's saved views, with
  * apply, save (new / update), rename, and delete. A view bundles the current filters,
- * search, sort, and display mode; applying one drives the browser via {@code onApply}.
+ * search, and sort; applying one drives the browser via {@code onApply}. The highlighted
+ * tab is whichever view the current config matches (so it survives a reload), and the
+ * explicitly-applied view stays the edit target while it is being modified.
  */
 export default function SavedViewsBar({
     recordType,
@@ -73,20 +74,22 @@ export default function SavedViewsBar({
     const [activeId, setActiveId] = useState<number | null>(null);
     const [dialog, setDialog] = useState<{ mode: "create" | "rename"; view?: SavedView } | null>(null);
 
-    const activeView = views.find((view) => view.id === activeId) ?? null;
-    const modified = activeView
-        ? canonical(currentConfig) !== canonical(activeView.config)
-        : !isEmpty(currentConfig);
+    const currentKey = canonical(currentConfig);
+    const explicitView = activeId !== null ? (views.find((view) => view.id === activeId) ?? null) : null;
+    const matchedView = views.find((view) => canonical(view.config) === currentKey) ?? null;
+    const activeView = explicitView ?? matchedView;
+    const modified = explicitView != null && canonical(explicitView.config) !== currentKey;
+    const canSaveNew = !matchedView && !isEmpty(currentConfig);
 
     const applyView = (view: SavedView | null) => {
         setActiveId(view?.id ?? null);
-        onApply(view ? view.config : { filters: {}, query: "", sortKey: null, sortDirection: "asc", displayMode: currentConfig.displayMode });
+        onApply(view ? view.config : { filters: {}, query: "", sortKey: null, sortDirection: "asc" });
     };
 
     const saveCurrent = async () => {
-        if (!activeView) return;
+        if (!explicitView) return;
         try {
-            const saved = await updateSavedView(activeView.id, { recordType, name: activeView.name, config: currentConfig });
+            const saved = await updateSavedView(explicitView.id, { recordType, name: explicitView.name, config: currentConfig });
             setViews((prev) => prev.map((view) => (view.id === saved.id ? saved : view)));
             toastSuccess(t("saved"));
         } catch (err) {
@@ -98,7 +101,7 @@ export default function SavedViewsBar({
         try {
             await deleteSavedView(view.id);
             setViews((prev) => prev.filter((other) => other.id !== view.id));
-            if (activeId === view.id) applyView(null);
+            if (activeId === view.id) setActiveId(null);
             toastSuccess(t("deleted"));
         } catch (err) {
             toastError(err instanceof ApiError ? err.message : t("deleteFailed"));
@@ -123,31 +126,32 @@ export default function SavedViewsBar({
 
     return (
         <div className="flex items-center gap-1 overflow-x-auto">
-            <ViewTab label={t("all")} active={activeId === null} onClick={() => applyView(null)} />
+            <ViewTab label={t("all")} active={activeView === null} onClick={() => applyView(null)} />
             {views.map((view) => (
                 <ViewTab
                     key={view.id}
                     label={view.name}
-                    active={activeId === view.id}
-                    dirty={activeId === view.id && modified}
+                    active={view === activeView}
+                    dirty={view === explicitView && modified}
+                    dirtyLabel={t("modified")}
                     onClick={() => applyView(view)}
                 />
             ))}
 
-            {modified &&
-                (activeView ? (
-                    <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                            <Button size="xs" variant="ghost" className="ml-1 text-brand hover:text-brand-hover">
-                                {t("save")}
-                            </Button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="start">
-                            <DropdownMenuItem onSelect={saveCurrent}>{t("updateView", { name: activeView.name })}</DropdownMenuItem>
-                            <DropdownMenuItem onSelect={() => setDialog({ mode: "create" })}>{t("saveAsNew")}</DropdownMenuItem>
-                        </DropdownMenuContent>
-                    </DropdownMenu>
-                ) : (
+            {explicitView && modified ? (
+                <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                        <Button size="xs" variant="ghost" className="ml-1 text-brand hover:text-brand-hover">
+                            {t("save")}
+                        </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="start">
+                        <DropdownMenuItem onSelect={saveCurrent}>{t("updateView", { name: explicitView.name })}</DropdownMenuItem>
+                        <DropdownMenuItem onSelect={() => setDialog({ mode: "create" })}>{t("saveAsNew")}</DropdownMenuItem>
+                    </DropdownMenuContent>
+                </DropdownMenu>
+            ) : (
+                canSaveNew && (
                     <Button
                         size="xs"
                         variant="ghost"
@@ -157,7 +161,8 @@ export default function SavedViewsBar({
                         <PlusIcon className="size-3.5" />
                         {t("saveView")}
                     </Button>
-                ))}
+                )
+            )}
 
             {activeView && (
                 <DropdownMenu>
@@ -189,11 +194,13 @@ function ViewTab({
     label,
     active,
     dirty,
+    dirtyLabel,
     onClick,
 }: {
     label: string;
     active: boolean;
     dirty?: boolean;
+    dirtyLabel?: string;
     onClick: () => void;
 }) {
     return (
@@ -207,7 +214,12 @@ function ViewTab({
             )}
         >
             {label}
-            {dirty && <span className="ml-1.5 inline-block size-1.5 rounded-full bg-brand align-middle" />}
+            {dirty && (
+                <>
+                    <span className="ml-1.5 inline-block size-1.5 rounded-full bg-brand align-middle" aria-hidden="true" />
+                    <span className="sr-only">{dirtyLabel}</span>
+                </>
+            )}
         </button>
     );
 }

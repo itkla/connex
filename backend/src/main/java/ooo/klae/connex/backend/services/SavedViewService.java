@@ -55,12 +55,16 @@ public class SavedViewService {
         return view;
     }
 
-    @Transactional
     public SavedView create(String recordType, String name, Object config) {
+        return create(recordType, name, config, null);
+    }
+
+    @Transactional
+    public SavedView create(String recordType, String name, Object config, Integer position) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         int userId = currentUserId();
         String type = normalize(recordType);
-        if (!RECORD_TYPES.contains(type)) {
+        if (type == null || !RECORD_TYPES.contains(type)) {
             throw new BadRequestException("Invalid record type: " + recordType);
         }
         String trimmed = validateName(name);
@@ -73,6 +77,7 @@ public class SavedViewService {
         view.setRecordType(type);
         view.setName(trimmed);
         view.setConfigJson(serializeConfig(config));
+        view.setPosition(position != null ? position : 0);
         viewMapper.insert(view);
         return view;
     }

@@ -50,7 +50,7 @@ public class SavedViewController {
      */
     @PostMapping
     public SavedViewDto create(@Valid @RequestBody SavedViewDto dto) {
-        return toDto(viewService.create(dto.getRecordType(), dto.getName(), dto.getConfig()));
+        return toDto(viewService.create(dto.getRecordType(), dto.getName(), dto.getConfig(), dto.getPosition()));
     }
 
     /**

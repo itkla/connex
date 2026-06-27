@@ -8,6 +8,7 @@
     "viewActions": "View actions",
     "rename": "Rename",
     "delete": "Delete",
+    "modified": "Modified",
     "saved": "View saved",
     "deleted": "View deleted",
     "saveFailed": "Could not save the view.",

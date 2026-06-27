@@ -8,6 +8,7 @@
     "viewActions": "ビューの操作",
     "rename": "名前を変更",
     "delete": "削除",
+    "modified": "変更あり",
     "saved": "ビューを保存しました",
     "deleted": "ビューを削除しました",
     "saveFailed": "ビューを保存できませんでした。",

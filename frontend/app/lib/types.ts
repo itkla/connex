@@ -511,7 +511,6 @@ export type SavedViewRecordType = "company" | "person" | "deal";
 export type SavedViewConfig = {
     filters?: Record<string, string[]>;
     query?: string;
-    displayMode?: "grid" | "table";
     sortKey?: string | null;
     sortDirection?: "asc" | "desc";
 };
