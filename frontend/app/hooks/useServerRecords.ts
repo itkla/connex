@@ -64,12 +64,18 @@ export function useServerRecords<T, P extends PageParams = PageParams>(
         setPage(1);
     }, [sortKey]);
 
+    const applySort = useCallback((key: string | null, direction: SortDir) => {
+        setSortKey(key);
+        setSortDirection(direction);
+        setPage(1);
+    }, []);
+
     return {
         items, total, loading,
         page, setPage,
         size, setSize: changeSize,
         query, setQuery,
-        sortKey, sortDirection, onSortChange,
+        sortKey, sortDirection, onSortChange, applySort,
         reload: load,
     };
 }

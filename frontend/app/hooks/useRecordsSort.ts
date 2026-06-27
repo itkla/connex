@@ -19,10 +19,15 @@ export function useRecordsSort(initialKey: string | null = null) {
         });
     }, []);
 
+    const applySort = useCallback((key: string | null, direction: SortDirection) => {
+        setSortKey(key);
+        setSortDirection(direction);
+    }, []);
+
     const sortState = useMemo(
         () => ({ key: sortKey, direction: sortDirection, onSortChange }),
         [sortKey, sortDirection, onSortChange],
     );
 
-    return { sortKey, sortDirection, onSortChange, sortState };
+    return { sortKey, sortDirection, onSortChange, applySort, sortState };
 }

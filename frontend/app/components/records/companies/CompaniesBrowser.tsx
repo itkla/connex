@@ -17,6 +17,7 @@ import {
 
 import RecordsRenderView from '@/app/components/records/RecordsRenderView';
 import { useCustomFieldColumns } from '@/app/components/records/CustomFieldColumns';
+import SavedViewsBar from '@/app/components/records/SavedViewsBar';
 import RecordsSortMenu from '@/app/components/records/RecordsSortMenu';
 import RecordsFilterPills from '@/app/components/records/RecordsFilterPills';
 import { SearchField, FilterBar, SegmentedToggle, type FilterChipData } from '@/app/components/filters';
@@ -30,7 +31,7 @@ import NewCompanyDialog from '@/app/components/records/companies/NewCompanyDialo
 import QuickEditCompanySheet, { type CompanyDraft } from '@/app/components/records/companies/QuickEditCompanySheet';
 import { createCompany, deleteCompany, getUsers, getTasks, getDeals, updateCompany, getActivities, getNotes, getCompanyTemperatures, isFieldError } from '@/app/lib/api';
 import { uploadCompanyLogo, pickDominantCurrency, parseMysqlDateTime } from '@/app/lib/utils';
-import { type Company, type CreateCompanyPayload, type UpdateCompanyPayload, type Contact, type Activity, type Note, type Task, type User, type Deal, type CompanyMetrics, type LoadStatus, type RelationshipTemperature } from '@/app/lib/types';
+import { type Company, type CreateCompanyPayload, type UpdateCompanyPayload, type Contact, type Activity, type Note, type Task, type User, type Deal, type CompanyMetrics, type LoadStatus, type RelationshipTemperature, type SavedView, type SavedViewConfig } from '@/app/lib/types';
 import { getContacts } from '@/app/lib/api';
 import TemperaturePill from '@/app/components/records/TemperaturePill';
 import { isDealClosed } from '@/app/components/records/deals/dealOutcome';
@@ -57,7 +58,7 @@ function diffDraft(original: CompanyDraft, draft: CompanyDraft): boolean {
 
 const searchFields = (c: Company) => [c.name, c.website, c.industry, c.phone, c.address];
 
-export default function CompaniesBrowser({ companies }: { companies: Company[] }) {
+export default function CompaniesBrowser({ companies, savedViews }: { companies: Company[]; savedViews: SavedView[] }) {
     const router = useRouter();
     const t = useTranslations('CompaniesBrowser');
     const tf = useTranslations('Filters');
@@ -80,7 +81,7 @@ export default function CompaniesBrowser({ companies }: { companies: Company[] }
         storageKey: 'companies:view',
         searchFields,
     });
-    const { sortKey, sortDirection, onSortChange, sortState } = useRecordsSort();
+    const { sortKey, sortDirection, onSortChange, applySort, sortState } = useRecordsSort();
 
     const [isDeleting, setIsDeleting] = useState(false);
     const [editSheetOpen, setEditSheetOpen] = useState(false);
@@ -421,6 +422,20 @@ export default function CompaniesBrowser({ companies }: { companies: Company[] }
         </ButtonGroup>
     );
 
+    const currentConfig: SavedViewConfig = useMemo(
+        () => ({ filters: filterState, query, displayMode, sortKey, sortDirection }),
+        [filterState, query, displayMode, sortKey, sortDirection],
+    );
+    const applyView = useCallback(
+        (config: SavedViewConfig) => {
+            setFilterState(config.filters ?? {});
+            setQuery(config.query ?? '');
+            setDisplayMode(config.displayMode ?? 'table');
+            applySort(config.sortKey ?? null, config.sortDirection ?? 'asc');
+        },
+        [setFilterState, setQuery, setDisplayMode, applySort],
+    );
+
     return (
         <div className="page-grid gap-y-6">
             <div className="flex items-center justify-between">
@@ -430,6 +445,13 @@ export default function CompaniesBrowser({ companies }: { companies: Company[] }
                     {t('new')}
                 </Button>
             </div>
+
+            <SavedViewsBar
+                recordType="company"
+                initialViews={savedViews}
+                currentConfig={currentConfig}
+                onApply={applyView}
+            />
 
             <FilterBar
                 reduce={reduce}

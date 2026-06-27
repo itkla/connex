@@ -506,6 +506,31 @@ export type CustomFieldCellValue = string | number | boolean | null;
 
 export type EntityCustomFieldValues = Record<string, Record<string, CustomFieldCellValue>>;
 
+export type SavedViewRecordType = "company" | "person" | "deal";
+
+export type SavedViewConfig = {
+    filters?: Record<string, string[]>;
+    query?: string;
+    displayMode?: "grid" | "table";
+    sortKey?: string | null;
+    sortDirection?: "asc" | "desc";
+};
+
+export type SavedView = {
+    id: number;
+    recordType: SavedViewRecordType;
+    name: string;
+    config: SavedViewConfig;
+    position: number;
+};
+
+export type SavedViewInput = {
+    recordType: SavedViewRecordType;
+    name: string;
+    config: SavedViewConfig;
+    position?: number;
+};
+
 export type UpdateContactPayload = {
     name?: string;
     email?: string;

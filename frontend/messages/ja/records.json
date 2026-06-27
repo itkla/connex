@@ -1,4 +1,24 @@
 {
+  "SavedViews": {
+    "all": "すべて",
+    "save": "保存",
+    "saveView": "ビューを保存",
+    "updateView": "「{name}」を更新",
+    "saveAsNew": "新しいビューとして保存",
+    "viewActions": "ビューの操作",
+    "rename": "名前を変更",
+    "delete": "削除",
+    "saved": "ビューを保存しました",
+    "deleted": "ビューを削除しました",
+    "saveFailed": "ビューを保存できませんでした。",
+    "deleteFailed": "ビューを削除できませんでした。",
+    "renameTitle": "ビュー名を変更",
+    "saveViewTitle": "ビューを保存",
+    "nameDescription": "このビューに名前を付けて、後で切り替えられるようにします。",
+    "nameLabel": "名前",
+    "namePlaceholder": "例: 有望な見込み客",
+    "cancel": "キャンセル"
+  },
   "RecordCustomFields": {
     "heading": "カスタムフィールド",
     "edit": "編集",
