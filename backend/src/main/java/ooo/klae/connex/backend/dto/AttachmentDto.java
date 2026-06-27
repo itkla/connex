@@ -4,6 +4,8 @@ import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
+
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
@@ -47,7 +49,7 @@ public class AttachmentDto {
 
     private Long size;
 
-    // resolved server-side from the authenticated user, never trusted from the client
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
     private Integer uploadedBy;
     private String uploadedByName;
 
