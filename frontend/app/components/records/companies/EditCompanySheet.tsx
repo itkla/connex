@@ -1,12 +1,13 @@
 'use client';
 
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { toast } from 'sonner';
 import { toastError, toastSuccess } from '@/app/lib/toast';
 
 import QuickEditCompanySheet, { type CompanyDraft } from '@/app/components/records/companies/QuickEditCompanySheet';
+import { CustomFieldsEditSection, type CustomFieldsEditHandle } from '@/app/components/records/CustomFieldsEditSection';
 import { getCompanyById, updateCompany } from '@/app/lib/api';
 import { type Company, type UpdateCompanyPayload } from '@/app/lib/types';
 import { uploadCompanyLogo } from '@/app/lib/utils';
@@ -45,6 +46,7 @@ export default function EditCompanySheet({
     const [draft, setDraft] = useState<CompanyDraft>(() => toDraft(company));
     const [logoFile, setLogoFile] = useState<File | null>(null);
     const [isSaving, setIsSaving] = useState(false);
+    const cfRef = useRef<CustomFieldsEditHandle>(null);
 
     const handleOpenChange = (next: boolean) => {
         onOpenChange(next);
@@ -58,8 +60,9 @@ export default function EditCompanySheet({
         const original = toDraft(company);
         const textChanged = diffDraft(original, draft);
         const logoChanged = logoFile !== null;
+        const customChanged = cfRef.current?.hasChanges() ?? false;
 
-        if (!textChanged && !logoChanged) {
+        if (!textChanged && !logoChanged && !customChanged) {
             toast.info(t('toastNoChanges'));
             handleOpenChange(false);
             return;
@@ -78,15 +81,19 @@ export default function EditCompanySheet({
                 logoUrl = await uploadCompanyLogo(company.id, logoFile);
             }
 
-            const payload: UpdateCompanyPayload = {
-                name: draft.name.trim(),
-                website: draft.website.trim() || undefined,
-                industry: draft.industry.trim() || undefined,
-                phone: draft.phone.trim() || undefined,
-                address: draft.address.trim() || undefined,
-                logoUrl: logoUrl ?? company.logoUrl ?? undefined,
-            };
-            await updateCompany(company.id, payload);
+            if (textChanged || logoChanged) {
+                const payload: UpdateCompanyPayload = {
+                    name: draft.name.trim(),
+                    website: draft.website.trim() || undefined,
+                    industry: draft.industry.trim() || undefined,
+                    phone: draft.phone.trim() || undefined,
+                    address: draft.address.trim() || undefined,
+                    logoUrl: logoUrl ?? company.logoUrl ?? undefined,
+                };
+                await updateCompany(company.id, payload);
+            }
+
+            await cfRef.current?.save();
 
             toastSuccess(t('toastCompanyUpdated'));
             handleOpenChange(false);
@@ -117,6 +124,7 @@ export default function EditCompanySheet({
             updateLogoFile={(_id, file) => setLogoFile(file)}
             isSaving={isSaving}
             saveEdits={saveEdits}
+            customFieldsSlot={<CustomFieldsEditSection ref={cfRef} entityType="company" entityId={company.id} />}
         />
     );
 }

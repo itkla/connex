@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="ooo.klae.connex.backend.mappers.CustomFieldValueMapper">
+
+  <select id="getForEntity" resultType="CustomFieldValue">
+    SELECT
+      d.id AS definition_id, d.field_key, d.label, d.field_type, d.options_json, d.required, d.position,
+      v.value_text, v.value_number, v.value_date, v.value_bool
+    FROM custom_field_definition d
+    LEFT JOIN custom_field_value v
+      ON v.workspace_id = d.workspace_id AND v.definition_id = d.id AND v.entity_id = #{entityId}
+    WHERE d.workspace_id = #{workspaceId} AND d.entity_type = #{entityType} AND d.archived = FALSE
+    ORDER BY d.position, d.id
+  </select>
+
+  <select id="getForEntities" resultType="CustomFieldValue">
+    SELECT
+      v.entity_id, v.definition_id, d.field_type,
+      v.value_text, v.value_number, v.value_date, v.value_bool
+    FROM custom_field_value v
+    JOIN custom_field_definition d
+      ON d.workspace_id = v.workspace_id AND d.id = v.definition_id
+    WHERE v.workspace_id = #{workspaceId} AND v.entity_type = #{entityType} AND d.archived = FALSE
+      AND v.entity_id IN
+      <foreach item="id" collection="entityIds" open="(" separator="," close=")">#{id}</foreach>
+  </select>
+
+  <insert id="upsert">
+    INSERT INTO custom_field_value
+      (workspace_id, definition_id, entity_type, entity_id, value_text, value_number, value_date, value_bool)
+    VALUES
+      (#{workspaceId}, #{definitionId}, #{entityType}, #{entityId},
+       #{valueText}, #{valueNumber}, #{valueDate}, #{valueBool})
+    AS incoming
+    ON DUPLICATE KEY UPDATE
+      value_text = incoming.value_text,
+      value_number = incoming.value_number,
+      value_date = incoming.value_date,
+      value_bool = incoming.value_bool
+  </insert>
+
+  <delete id="deleteByDefinitionAndEntity">
+    DELETE FROM custom_field_value
+    WHERE workspace_id = #{workspaceId} AND definition_id = #{definitionId} AND entity_id = #{entityId}
+  </delete>
+
+  <delete id="deleteByEntity">
+    DELETE FROM custom_field_value
+    WHERE workspace_id = #{workspaceId} AND entity_type = #{entityType} AND entity_id = #{entityId}
+  </delete>
+</mapper>

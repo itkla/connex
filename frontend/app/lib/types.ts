@@ -492,6 +492,20 @@ export type CustomFieldInput = {
     archived?: boolean;
 };
 
+export type CustomFieldEntry = {
+    definitionId: number;
+    fieldKey: string;
+    label: string;
+    fieldType: CustomFieldType;
+    options: CustomFieldOption[] | null;
+    required: boolean;
+    value: CustomFieldCellValue;
+};
+
+export type CustomFieldCellValue = string | number | boolean | null;
+
+export type EntityCustomFieldValues = Record<string, Record<string, CustomFieldCellValue>>;
+
 export type UpdateContactPayload = {
     name?: string;
     email?: string;

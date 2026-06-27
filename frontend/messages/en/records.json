@@ -1,4 +1,22 @@
 {
+  "RecordCustomFields": {
+    "heading": "Custom fields",
+    "edit": "Edit",
+    "editDescription": "Update this record's custom fields.",
+    "save": "Save",
+    "cancel": "Cancel",
+    "yes": "Yes",
+    "no": "No",
+    "saved": "Custom fields updated",
+    "saveFailed": "Could not save the custom fields.",
+    "doubleClickToEdit": "Double-click to edit",
+    "addColumn": "Add field",
+    "configureColumn": "Configure",
+    "deleteColumn": "Delete field",
+    "columnDeleted": "Field deleted",
+    "deleteFailed": "Could not delete the field.",
+    "fieldLabel": "custom field"
+  },
   "ShareDialog": {
     "title": "Share {name}",
     "description": "Give another workspace you belong to read access to this record.",

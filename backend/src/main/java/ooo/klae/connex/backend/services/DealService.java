@@ -4,6 +4,7 @@ import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 import org.springframework.stereotype.Service;
@@ -18,6 +19,7 @@ import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.beans.Tag;
 import ooo.klae.connex.backend.beans.Task;
 import ooo.klae.connex.backend.beans.User;
+import ooo.klae.connex.backend.dto.CustomFieldEntryDto;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.tenant.Permission;
@@ -49,6 +51,7 @@ public class DealService {
     private final WorkspaceService workspaceService;
     private final AuthService authService;
     private final NotificationChangePublisher notificationChanges;
+    private final CustomFieldValueService customFieldValueService;
 
     private static final DateTimeFormatter MYSQL_DATETIME = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
@@ -253,14 +256,60 @@ public class DealService {
     }
 
     /**
+     * Custom-field values for a deal. Readable by any member who can see the deal.
+     */
+    public List<CustomFieldEntryDto> getCustomFields(int dealId) {
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        if (dealMapper.getDealById(workspaceId, dealId) == null) {
+            throw new ResourceNotFoundException("Deal not found with id: " + dealId);
+        }
+        return customFieldValueService.getForEntity("deal", dealId);
+    }
+
+    /**
+     * Replaces a deal's custom-field values.
+     */
+    @Transactional
+    @RequirePermission(Permission.DEAL_UPDATE)
+    public List<CustomFieldEntryDto> updateCustomFields(int dealId, Map<Integer, Object> values) {
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        if (dealMapper.getDealById(workspaceId, dealId) == null) {
+            throw new ResourceNotFoundException("Deal not found with id: " + dealId);
+        }
+        return customFieldValueService.applyValues("deal", dealId, values);
+    }
+
+    /**
+     * Sets or clears a single custom-field value on a deal.
+     */
+    @Transactional
+    @RequirePermission(Permission.DEAL_UPDATE)
+    public List<CustomFieldEntryDto> updateCustomField(int dealId, int definitionId, Object value) {
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        if (dealMapper.getDealById(workspaceId, dealId) == null) {
+            throw new ResourceNotFoundException("Deal not found with id: " + dealId);
+        }
+        return customFieldValueService.applyValue("deal", dealId, definitionId, value);
+    }
+
+    /**
+     * Filled custom-field values for many deals, keyed by deal id then definition id.
+     */
+    public Map<Integer, Map<Integer, Object>> getCustomFieldValues(List<Integer> dealIds) {
+        return customFieldValueService.getForEntities("deal", dealIds);
+    }
+
+    /**
      * Deletes a {@code Deal} record by ID, throwing a {@code ResourceNotFoundException} if not found.
      * @param id
      */
+    @Transactional
     @RequirePermission(Permission.DEAL_DELETE)
     public void delete(int id) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         Deal before = dealMapper.getDealById(workspaceId, id);
         if (before == null) throw new ResourceNotFoundException("Deal not found with id: " + id);
+        customFieldValueService.deleteByEntity("deal", id);
         dealMapper.delete(workspaceId, id);
         auditService.record("deal.delete", "deal", id, before.getName(),
             "Deleted deal " + before.getName(),

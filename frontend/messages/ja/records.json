@@ -1,4 +1,22 @@
 {
+  "RecordCustomFields": {
+    "heading": "カスタムフィールド",
+    "edit": "編集",
+    "editDescription": "このレコードのカスタムフィールドを更新します。",
+    "save": "保存",
+    "cancel": "キャンセル",
+    "yes": "はい",
+    "no": "いいえ",
+    "saved": "カスタムフィールドを更新しました",
+    "saveFailed": "カスタムフィールドを保存できませんでした。",
+    "doubleClickToEdit": "ダブルクリックで編集",
+    "addColumn": "フィールドを追加",
+    "configureColumn": "設定",
+    "deleteColumn": "フィールドを削除",
+    "columnDeleted": "フィールドを削除しました",
+    "deleteFailed": "フィールドを削除できませんでした。",
+    "fieldLabel": "カスタムフィールド"
+  },
   "ShareDialog": {
     "title": "{name} を共有",
     "description": "あなたが所属する別のワークスペースに、このレコードへの閲覧アクセスを付与します。",

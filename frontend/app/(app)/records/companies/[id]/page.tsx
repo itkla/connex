@@ -18,6 +18,7 @@ import {
     getCompanyPeople,
     getCompanyTags,
     getCurrentUserFromCookie,
+    getEntityCustomFieldsFromCookie,
     getNotes,
     getTags,
     getTasks,
@@ -41,6 +42,7 @@ import ContactCard from "@/app/components/records/contacts/ContactCard";
 import QuickEditSheet from "@/app/components/records/contacts/QuickEditSheet";
 import ContactsGrid from "@/app/components/records/companies/ContactsGrid";
 import Attachments from "@/app/components/attachments/Attachments";
+import CustomFieldRows from "@/app/components/records/CustomFieldRows";
 
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 
@@ -62,6 +64,7 @@ export default async function CompanyPage({ params }: { params: { id: number } }
         allActivities,
         allNotes,
         attachments,
+        customFields,
     ] = await Promise.all([
         getCompanyById(id, init) as Promise<Company>,
         getCurrentUserFromCookie(cookie),
@@ -73,6 +76,7 @@ export default async function CompanyPage({ params }: { params: { id: number } }
         getActivities(init).catch(() => [] as Activity[]),
         getNotes(init).catch(() => [] as Note[]),
         getAttachmentsFromCookie("company", id, cookie),
+        getEntityCustomFieldsFromCookie("company", id, cookie),
     ]);
 
     if (!company) {
@@ -241,6 +245,7 @@ export default async function CompanyPage({ params }: { params: { id: number } }
                         <InfoRow label={t("industry")} value={company.industry ?? ''} />
                         <InfoRow label={t("added")} value={formatDate(company.createdAt, locale)} />
                         <InfoRow label={t("updated")} value={formatDateTime(company.updatedAt, locale)} />
+                        <CustomFieldRows entityType="company" entityId={company.id} initialEntries={customFields} />
                     </dl>
 
                     <Attachments

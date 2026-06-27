@@ -11,12 +11,14 @@ import ooo.klae.connex.backend.beans.Company;
 import ooo.klae.connex.backend.beans.Deal;
 import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.beans.Tag;
+import ooo.klae.connex.backend.dto.CustomFieldEntryDto;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.exceptions.DuplicateResourceException;
 import ooo.klae.connex.backend.tenant.Permission;
 import ooo.klae.connex.backend.tenant.RequirePermission;
 
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 import lombok.RequiredArgsConstructor;
@@ -37,6 +39,7 @@ public class CompanyService {
     private final DealMapper dealMapper;
     private final AuditService auditService;
     private final WorkspaceService workspaceService;
+    private final CustomFieldValueService customFieldValueService;
 
     private static final Set<String> AUDIT_FIELDS =
         Set.of("name", "website", "industry", "phone", "address", "logoUrl");
@@ -125,11 +128,13 @@ public class CompanyService {
     /**
      * Deletes a {@code Company} in the active workspace.
      */
+    @Transactional
     @RequirePermission(Permission.COMPANY_DELETE)
     public void deleteCompany(int id) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         Company before = companyMapper.getCompanyById(workspaceId, id);
         if (before == null) throw new ResourceNotFoundException("Company not found with id: " + id);
+        customFieldValueService.deleteByEntity("company", id);
         companyMapper.delete(workspaceId, id);
         auditService.record("company.delete", "company", id, before.getName(),
             "Deleted company " + before.getName(),
@@ -207,6 +212,45 @@ public class CompanyService {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         requireCompany(workspaceId, companyId);
         return dealMapper.getDealsByCompanyId(workspaceId, companyId);
+    }
+
+    /**
+     * Custom-field values for a company — every non-archived company field with this
+     * record's value. Readable by any member who can see the company.
+     */
+    public List<CustomFieldEntryDto> getCustomFields(int companyId) {
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        requireCompany(workspaceId, companyId);
+        return customFieldValueService.getForEntity("company", companyId);
+    }
+
+    /**
+     * Replaces a company's custom-field values.
+     */
+    @Transactional
+    @RequirePermission(Permission.COMPANY_UPDATE)
+    public List<CustomFieldEntryDto> updateCustomFields(int companyId, Map<Integer, Object> values) {
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        requireCompany(workspaceId, companyId);
+        return customFieldValueService.applyValues("company", companyId, values);
+    }
+
+    /**
+     * Sets or clears a single custom-field value on a company.
+     */
+    @Transactional
+    @RequirePermission(Permission.COMPANY_UPDATE)
+    public List<CustomFieldEntryDto> updateCustomField(int companyId, int definitionId, Object value) {
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        requireCompany(workspaceId, companyId);
+        return customFieldValueService.applyValue("company", companyId, definitionId, value);
+    }
+
+    /**
+     * Filled custom-field values for many companies, keyed by company id then definition id.
+     */
+    public Map<Integer, Map<Integer, Object>> getCustomFieldValues(List<Integer> companyIds) {
+        return customFieldValueService.getForEntities("company", companyIds);
     }
 
     /**

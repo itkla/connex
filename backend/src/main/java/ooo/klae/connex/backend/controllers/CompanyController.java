@@ -12,12 +12,16 @@ import org.springframework.web.bind.annotation.RestController;
 
 import ooo.klae.connex.backend.beans.Company;
 import ooo.klae.connex.backend.dto.CompanyDto;
+import ooo.klae.connex.backend.dto.CustomFieldEntryDto;
+import ooo.klae.connex.backend.dto.CustomFieldValueRequest;
+import ooo.klae.connex.backend.dto.CustomFieldValuesRequest;
 import ooo.klae.connex.backend.dto.DealDto;
 import ooo.klae.connex.backend.dto.PersonDto;
 import ooo.klae.connex.backend.dto.TagDto;
 import ooo.klae.connex.backend.services.CompanyService;
 
 import java.util.List;
+import java.util.Map;
 
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -142,5 +146,39 @@ public class CompanyController {
     @GetMapping("/{id}/deals")
     public List<DealDto> getDealsForCompany(@PathVariable int id) {
         return companyService.getDealsByCompanyId(id).stream().map(DealDto::from).toList();
+    }
+
+    /**
+     * GET retrieves the custom-field values for a company.
+     */
+    @GetMapping("/{id}/custom-fields")
+    public List<CustomFieldEntryDto> getCustomFieldsForCompany(@PathVariable int id) {
+        return companyService.getCustomFields(id);
+    }
+
+    /**
+     * PUT replaces the custom-field values for a company.
+     */
+    @PutMapping("/{id}/custom-fields")
+    public List<CustomFieldEntryDto> updateCustomFieldsForCompany(@PathVariable int id,
+            @Valid @RequestBody CustomFieldValuesRequest request) {
+        return companyService.updateCustomFields(id, request.getValues());
+    }
+
+    /**
+     * PUT sets or clears a single custom-field value on a company.
+     */
+    @PutMapping("/{id}/custom-fields/{definitionId}")
+    public List<CustomFieldEntryDto> updateCustomFieldForCompany(@PathVariable int id,
+            @PathVariable int definitionId, @Valid @RequestBody CustomFieldValueRequest request) {
+        return companyService.updateCustomField(id, definitionId, request.getValue());
+    }
+
+    /**
+     * GET filled custom-field values for many companies, keyed by company id.
+     */
+    @GetMapping("/custom-field-values")
+    public Map<Integer, Map<Integer, Object>> getCustomFieldValuesForCompanies(@RequestParam List<Integer> ids) {
+        return companyService.getCustomFieldValues(ids);
     }
 }

@@ -1,4 +1,4 @@
-import { getAttachmentsFromCookie, getCompanies, getContactById, getContactConnections, getContactEmployment, getContactIntroPath, getContacts, getContextNotifications, getCurrentUserFromCookie, getDeals, getTags, getUserById } from "@/app/lib/api";
+import { getAttachmentsFromCookie, getCompanies, getContactById, getContactConnections, getContactEmployment, getContactIntroPath, getContacts, getContextNotifications, getCurrentUserFromCookie, getDeals, getEntityCustomFieldsFromCookie, getTags, getUserById } from "@/app/lib/api";
 import { notFound, redirect } from "next/navigation";
 import { type Company, type Deal, type Tag, type Contact, type IntroPath, type PersonConnection, type PersonEmployment, type User } from "@/app/lib/types";
 import { cookies } from "next/headers";
@@ -17,6 +17,7 @@ import { Avatar, AvatarFallback, AvatarGroup, AvatarImage } from "@/components/u
 import InfoRow from "@/app/components/me/InfoRow";
 import Timeline from "@/app/components/me/Timeline";
 import Attachments from "@/app/components/attachments/Attachments";
+import CustomFieldRows from "@/app/components/records/CustomFieldRows";
 import { formatCompactCurrency, formatDate, formatDateTime, formatShortDate } from "@/app/lib/utils";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
 import EntityNotificationBanner from "@/app/components/notifications/EntityNotificationBanner";
@@ -28,7 +29,7 @@ export default async function ContactPage({ params }: { params: { id: number } }
     const t = await getTranslations("ContactsPage");
     const locale = await getLocale();
 
-    const [contact, currentUser, allTags, allCompanies, allPersons, allDeals, attachments, notificationPage, employment, connections, introPath] = await Promise.all([
+    const [contact, currentUser, allTags, allCompanies, allPersons, allDeals, attachments, notificationPage, employment, connections, introPath, customFields] = await Promise.all([
         getContactById(id, init) as Promise<Contact>,
         getCurrentUserFromCookie((await cookies()).toString()),
         getTags(init).catch(() => [] as Tag[]),
@@ -40,6 +41,7 @@ export default async function ContactPage({ params }: { params: { id: number } }
         getContactEmployment(id, init).catch(() => [] as PersonEmployment[]),
         getContactConnections(id, init).catch(() => [] as PersonConnection[]),
         getContactIntroPath(id, init).catch(() => ({ reachable: false, directlyKnown: false, steps: [] }) as IntroPath),
+        getEntityCustomFieldsFromCookie("person", id, cookie),
     ]);
     if (!contact) {
         console.error(`Contact not found: ${id}`);
@@ -177,6 +179,7 @@ export default async function ContactPage({ params }: { params: { id: number } }
                         <InfoRow label={t("company")} value={contact.company?.name ?? t("companyPlaceholder")} />
                         <InfoRow label={t("added")} value={formatDate(contact.createdAt, locale)} />
                         <InfoRow label={t("updated")} value={formatDateTime(contact.updatedAt, locale)} />
+                        <CustomFieldRows entityType="person" entityId={contact.id} initialEntries={customFields} />
                     </dl>
 
                     {employment.length > 0 && (

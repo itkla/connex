@@ -13,6 +13,9 @@ import org.springframework.web.bind.annotation.RestController;
 import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.dto.ActivityDto;
 import ooo.klae.connex.backend.dto.ConnectionRequestDto;
+import ooo.klae.connex.backend.dto.CustomFieldEntryDto;
+import ooo.klae.connex.backend.dto.CustomFieldValueRequest;
+import ooo.klae.connex.backend.dto.CustomFieldValuesRequest;
 import ooo.klae.connex.backend.dto.DealDto;
 import ooo.klae.connex.backend.dto.IntroPathDto;
 import ooo.klae.connex.backend.dto.JobMoveDto;
@@ -30,6 +33,7 @@ import ooo.klae.connex.backend.services.EmploymentService;
 import ooo.klae.connex.backend.services.PersonService;
 
 import java.util.List;
+import java.util.Map;
 
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -295,5 +299,39 @@ public class PersonController {
     @GetMapping("/{id}/intro-path")
     public IntroPathDto getIntroPath(@PathVariable int id) {
         return connectionService.findIntroPath(id);
+    }
+
+    /**
+     * GET retrieves the custom-field values for a contact.
+     */
+    @GetMapping("/{id}/custom-fields")
+    public List<CustomFieldEntryDto> getCustomFieldsForPerson(@PathVariable int id) {
+        return personService.getCustomFields(id);
+    }
+
+    /**
+     * PUT replaces the custom-field values for a contact.
+     */
+    @PutMapping("/{id}/custom-fields")
+    public List<CustomFieldEntryDto> updateCustomFieldsForPerson(@PathVariable int id,
+            @Valid @RequestBody CustomFieldValuesRequest request) {
+        return personService.updateCustomFields(id, request.getValues());
+    }
+
+    /**
+     * PUT sets or clears a single custom-field value on a contact.
+     */
+    @PutMapping("/{id}/custom-fields/{definitionId}")
+    public List<CustomFieldEntryDto> updateCustomFieldForPerson(@PathVariable int id,
+            @PathVariable int definitionId, @Valid @RequestBody CustomFieldValueRequest request) {
+        return personService.updateCustomField(id, definitionId, request.getValue());
+    }
+
+    /**
+     * GET filled custom-field values for many contacts, keyed by contact id.
+     */
+    @GetMapping("/custom-field-values")
+    public Map<Integer, Map<Integer, Object>> getCustomFieldValuesForPersons(@RequestParam List<Integer> ids) {
+        return personService.getCustomFieldValues(ids);
     }
 }
