@@ -450,6 +450,48 @@ export type UpdateTagPayload = {
     color?: string;
 };
 
+export type CustomFieldEntityType = 'company' | 'person' | 'deal';
+
+export type CustomFieldType =
+    | 'text'
+    | 'textarea'
+    | 'number'
+    | 'date'
+    | 'boolean'
+    | 'select'
+    | 'url';
+
+export type CustomFieldOption = {
+    key: string;
+    label: string;
+};
+
+export type CustomFieldDefinition = {
+    id: number;
+    workspaceId: number;
+    entityType: CustomFieldEntityType;
+    fieldKey: string;
+    label: string;
+    fieldType: CustomFieldType;
+    options: CustomFieldOption[] | null;
+    required: boolean;
+    position: number;
+    archived: boolean;
+    createdAt: string;
+    updatedAt: string;
+};
+
+export type CustomFieldInput = {
+    entityType: CustomFieldEntityType;
+    fieldKey: string;
+    label: string;
+    fieldType: CustomFieldType;
+    options?: CustomFieldOption[] | null;
+    required?: boolean;
+    position?: number;
+    archived?: boolean;
+};
+
 export type UpdateContactPayload = {
     name?: string;
     email?: string;
