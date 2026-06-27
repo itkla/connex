@@ -22,6 +22,7 @@ import ooo.klae.connex.backend.dto.SearchResultsDto;
 import ooo.klae.connex.backend.dto.TagDto;
 import ooo.klae.connex.backend.dto.TaskDto;
 import ooo.klae.connex.backend.dto.UserDto;
+import ooo.klae.connex.backend.util.LikePattern;
 
 import org.springframework.stereotype.Service;
 
@@ -50,8 +51,7 @@ public class SearchService {
                     List.of(), List.of(), List.of(), List.of(), List.of(), List.of());
         }
 
-        // search may contain special characters, so we need to escape them
-        String pattern = "%" + escapeLike(query.trim()) + "%";
+        String pattern = LikePattern.containing(query.trim());
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         auditService.record("search", "search", null, query, "Search performed", null);
         return new SearchResultsDto(
@@ -66,11 +66,5 @@ public class SearchService {
             userMapper.search(workspaceId, pattern).stream().map(UserDto::from).toList(),
             attachmentMapper.search(workspaceId, pattern).stream().map(AttachmentDto::from).toList()
         );
-    }
-
-    private String escapeLike(String input) {
-        return input.replace("\\", "\\\\")
-                    .replace("%", "\\%")
-                    .replace("_", "\\_");
     }
 }

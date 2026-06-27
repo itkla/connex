@@ -130,8 +130,9 @@ export function AuthForm({ mode, redirectUrl }: { mode: AuthMode; redirectUrl: s
             toastSuccess(tMode("successMessage"));
             // The backend sets connex_workspace when the account has a workspace; otherwise onboard.
             const hasWorkspace = /(?:^|;\s*)connex_workspace=/.test(document.cookie);
-            if (redirectUrl) {
-                router.push(redirectUrl);
+            const safeRedirect = redirectUrl && /^\/(?![/\\])/.test(redirectUrl) ? redirectUrl : null;
+            if (safeRedirect) {
+                router.push(safeRedirect);
             } else if (!hasWorkspace) {
                 router.replace("/onboarding");
             } else {

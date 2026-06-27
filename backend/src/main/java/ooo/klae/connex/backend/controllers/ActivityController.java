@@ -42,8 +42,8 @@ public class ActivityController {
         @RequestParam(required = false) Integer personId,
         @RequestParam(required = false) Integer dealId,
         @RequestParam(required = false) Integer createdById,
-        @RequestParam(required = false) String paginationRange,
-        @RequestParam(required = false) String itemsPerPage
+        @RequestParam(required = false) Integer paginationRange,
+        @RequestParam(required = false) Integer itemsPerPage
     ) {
         List<Activity> activities;
         if (personId != null) activities = activityService.getActivitiesByPersonId(personId);
@@ -52,10 +52,10 @@ public class ActivityController {
         else activities = activityService.getAllActivities();
         List<ActivityDto> dtos = activities.stream().map(ActivityDto::from).toList();
         if (itemsPerPage == null) return dtos;
-        int size = Integer.parseInt(itemsPerPage);
-        int page = paginationRange == null ? 1 : Integer.parseInt(paginationRange);
-        int from = Math.max(0, (page - 1) * size);
-        if (size <= 0 || from >= dtos.size()) return List.of();
+        int size = Math.min(Math.max(itemsPerPage, 1), 200);
+        int page = paginationRange == null ? 1 : Math.max(paginationRange, 1);
+        int from = (int) Math.min(Integer.MAX_VALUE, (long) (page - 1) * size);
+        if (from >= dtos.size()) return List.of();
         return dtos.subList(from, Math.min(dtos.size(), from + size));
     }
 

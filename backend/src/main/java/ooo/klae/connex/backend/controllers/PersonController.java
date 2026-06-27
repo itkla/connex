@@ -11,6 +11,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import ooo.klae.connex.backend.beans.Person;
+import ooo.klae.connex.backend.util.LikePattern;
 import ooo.klae.connex.backend.dto.ActivityDto;
 import ooo.klae.connex.backend.dto.ConnectionRequestDto;
 import ooo.klae.connex.backend.dto.CustomFieldEntryDto;
@@ -106,7 +107,9 @@ public class PersonController {
         @RequestParam(required = false) List<String> titles,
         @RequestParam(defaultValue = "false") boolean noCompany
     ) {
-        String query = (q == null || q.isBlank()) ? null : "%" + q + "%";
+        size = Math.min(Math.max(size, 1), 100);
+        page = Math.max(page, 1);
+        String query = (q == null || q.isBlank()) ? null : LikePattern.containing(q);
         int offset = Math.max(0, (page - 1) * size);
         List<PersonDto> items = personService.getPersonsPage(query, sort, dir, companies, titles, noCompany, size, offset)
             .stream().map(PersonDto::from).toList();

@@ -34,9 +34,6 @@ public class TaskDto {
     @Pattern(regexp = "^\\d{4}-\\d{2}-\\d{2}$", message = "Due date must use YYYY-MM-DD")
     private String dueDate;
 
-    // @JsonIdentityReference(alwaysAsId = true) // crashes deserialization in Jackson 3; using assignedToId for writes
-    private User assignedTo;
-
     @NotNull
     private Integer assignedToId;
 
@@ -61,7 +58,6 @@ public class TaskDto {
         dto.description = t.getDescription();
         dto.completed = t.isCompleted();
         dto.dueDate = t.getDueDate();
-        dto.assignedTo = t.getAssignedTo();
         dto.assignedToId = t.getAssignedTo() == null ? null : t.getAssignedTo().getId();
         dto.person = t.getPerson();
         dto.personId = t.getPerson() == null ? null : t.getPerson().getId();
@@ -83,8 +79,6 @@ public class TaskDto {
             User u = new User();
             u.setId(assignedToId);
             t.setAssignedTo(u);
-        } else {
-            t.setAssignedTo(assignedTo);
         }
         if (personId != null) {
             Person p = new Person();

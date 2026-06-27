@@ -1,8 +1,9 @@
 package ooo.klae.connex.backend.dto;
 
 import jakarta.validation.constraints.NotBlank;
-import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
+
+import com.fasterxml.jackson.annotation.JsonProperty;
 
 import lombok.Data;
 import lombok.NoArgsConstructor;
@@ -10,7 +11,6 @@ import lombok.NoArgsConstructor;
 import ooo.klae.connex.backend.beans.Activity;
 import ooo.klae.connex.backend.beans.Deal;
 import ooo.klae.connex.backend.beans.Person;
-import ooo.klae.connex.backend.beans.User;
 // import ooo.klae.connex.backend.util.DateTimes;
 
 @Data
@@ -39,10 +39,7 @@ public class ActivityDto {
 
     private Integer dealId;
 
-    // @JsonIdentityReference(alwaysAsId = true)
-    private User createdBy;
-
-    @NotNull
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
     private Integer createdById;
 
     @Size(max = 32)
@@ -59,7 +56,6 @@ public class ActivityDto {
         dto.personId = a.getPerson() == null ? null : a.getPerson().getId();
         dto.deal = a.getDeal();
         dto.dealId = a.getDeal() == null ? null : a.getDeal().getId();
-        dto.createdBy = a.getCreatedBy();
         dto.createdById = a.getCreatedBy() == null ? null : a.getCreatedBy().getId();
         dto.timestamp = a.getTimestamp();
         return dto;
@@ -85,13 +81,6 @@ public class ActivityDto {
             a.setDeal(d);
         } else {
             a.setDeal(deal);
-        }
-        if (createdById != null) {
-            User u = new User();
-            u.setId(createdById);
-            a.setCreatedBy(u);
-        } else {
-            a.setCreatedBy(createdBy);
         }
         // a.setTimestamp(DateTimes.toMysqlDateTime(timestamp));
         // assuming the frontend will format the timestamp to the correct format

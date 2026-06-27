@@ -9,6 +9,8 @@ import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.tenant.Permission;
 import ooo.klae.connex.backend.tenant.RequirePermission;
 
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.Set;
 
@@ -27,9 +29,11 @@ public class ActivityService {
     private final DealMapper dealMapper;
     private final AuditService auditService;
     private final WorkspaceService workspaceService;
+    private final AuthService authService;
 
     private static final Set<String> AUDIT_FIELDS =
         Set.of("type", "subject", "notes", "timestamp");
+    private static final DateTimeFormatter TIMESTAMP_FORMAT = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
     public List<Activity> getAllActivities() {
         return activityMapper.getAllActivities(workspaceService.getCurrentWorkspaceId());
@@ -67,6 +71,8 @@ public class ActivityService {
     public Activity create(Activity activity) {
         try {
             activity.setWorkspaceId(workspaceService.getCurrentWorkspaceId());
+            activity.setCreatedBy(authService.getCurrentUser());
+            activity.setTimestamp(resolveTimestamp(activity.getTimestamp(), null));
             activityMapper.insert(activity);
             auditService.record("activity.create", "activity", activity.getId(), activity.getSubject(),
                     "Created activity " + activity.getSubject(),
@@ -93,6 +99,8 @@ public class ActivityService {
         }
         activity.setId(id);
         activity.setWorkspaceId(workspaceId);
+        activity.setCreatedBy(before.getCreatedBy());
+        activity.setTimestamp(resolveTimestamp(activity.getTimestamp(), before.getTimestamp()));
         activityMapper.update(activity);
         auditService.record("activity.update", "activity", id, activity.getSubject(),
             "Updated activity " + activity.getSubject(),
@@ -116,5 +124,15 @@ public class ActivityService {
         auditService.record("activity.delete", "activity", id, before.getSubject(),
             "Deleted activity " + before.getSubject(),
             auditService.diff(before, null, AUDIT_FIELDS));
+    }
+
+    private static String resolveTimestamp(String provided, String fallback) {
+        if (provided != null && !provided.isBlank()) {
+            return provided;
+        }
+        if (fallback != null && !fallback.isBlank()) {
+            return fallback;
+        }
+        return LocalDateTime.now().format(TIMESTAMP_FORMAT);
     }
 }
