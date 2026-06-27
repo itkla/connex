@@ -13,6 +13,7 @@ import {
     getContactById,
     getContacts,
     getCurrentUserFromCookie,
+    getEntityCustomFieldsFromCookie,
     getContextNotifications,
     getDealById,
     getDealCollaborators,
@@ -61,7 +62,7 @@ import { dealOutcome, type DealOutcome } from '@/app/components/records/deals/de
 import DealTaskList from '@/app/components/records/deals/DealTaskList';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import EntityNotificationBanner from '@/app/components/notifications/EntityNotificationBanner';
-import CustomFieldsCard from '@/app/components/records/CustomFieldsCard';
+import CustomFieldRows from '@/app/components/records/CustomFieldRows';
 
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 
@@ -75,7 +76,7 @@ export default async function DealPage({ params }: { params: { id: number } }) {
     const t = await getTranslations('DealsPage');
     const locale = await getLocale();
 
-    const [deal, currentUser, activities, notes, tasks, tags, peopleRaw, allPipelines, allCompanies, allPersons, allDeals, allUsers, attachments, notificationPage, collaborators] =
+    const [deal, currentUser, activities, notes, tasks, tags, peopleRaw, allPipelines, allCompanies, allPersons, allDeals, allUsers, attachments, notificationPage, collaborators, customFields] =
         await Promise.all([
             getDealById(id, init).catch(() => null),
             getCurrentUserFromCookie(cookie),
@@ -92,6 +93,7 @@ export default async function DealPage({ params }: { params: { id: number } }) {
             getAttachmentsFromCookie("deal", id, cookie),
             getContextNotifications("deal", id, init).catch(() => ({ items: [], total: 0 })),
             getDealCollaborators(id, init).catch(() => [] as User[]),
+            getEntityCustomFieldsFromCookie("deal", id, cookie),
         ]);
 
     if (!deal) notFound();
@@ -338,9 +340,8 @@ export default async function DealPage({ params }: { params: { id: number } }) {
                         <InfoRow label={t('closedAt')} value={closed ? formatDate(deal.closedAt, locale) : '—'} />
                         <InfoRow label={t('created')} value={formatDate(deal.createdAt, locale)} />
                         <InfoRow label={t('updated')} value={formatDateTime(deal.updatedAt, locale)} />
+                        <CustomFieldRows entityType="deal" entityId={deal.id} initialEntries={customFields} />
                     </dl>
-
-                    <CustomFieldsCard entityType="deal" entityId={deal.id} className="mt-6" />
 
                     <Attachments
                         entityType="deal"

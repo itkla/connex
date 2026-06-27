@@ -8,7 +8,8 @@
     "yes": "Yes",
     "no": "No",
     "saved": "Custom fields updated",
-    "saveFailed": "Could not save the custom fields."
+    "saveFailed": "Could not save the custom fields.",
+    "doubleClickToEdit": "Double-click to edit"
   },
   "ShareDialog": {
     "title": "Share {name}",

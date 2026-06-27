@@ -8,7 +8,8 @@
     "yes": "はい",
     "no": "いいえ",
     "saved": "カスタムフィールドを更新しました",
-    "saveFailed": "カスタムフィールドを保存できませんでした。"
+    "saveFailed": "カスタムフィールドを保存できませんでした。",
+    "doubleClickToEdit": "ダブルクリックで編集"
   },
   "ShareDialog": {
     "title": "{name} を共有",

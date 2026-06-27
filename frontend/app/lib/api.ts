@@ -1038,13 +1038,31 @@ export function deleteCustomField(id: number, init: RequestInit = {}) {
     return deleteJson<void>(`/api/custom-fields/${id}`, init);
 }
 
+function customFieldEntitySegment(entityType: Types.CustomFieldEntityType): string {
+    switch (entityType) {
+        case "person":
+            return "persons";
+        case "company":
+            return "companies";
+        case "deal":
+            return "deals";
+    }
+}
+
 function customFieldEntityPath(entityType: Types.CustomFieldEntityType, id: number) {
-    const segment = entityType === "person" ? "persons" : entityType === "company" ? "companies" : "deals";
-    return `/api/${segment}/${id}/custom-fields`;
+    return `/api/${customFieldEntitySegment(entityType)}/${id}/custom-fields`;
 }
 
 export function getEntityCustomFields(entityType: Types.CustomFieldEntityType, id: number, init: RequestInit = {}) {
     return getJson<Types.CustomFieldEntry[]>(customFieldEntityPath(entityType, id), { cache: "no-store", ...init });
+}
+
+export function getEntityCustomFieldsFromCookie(
+    entityType: Types.CustomFieldEntityType,
+    id: number,
+    cookie: string | null,
+) {
+    return safeWithCookie<Types.CustomFieldEntry>((init) => getEntityCustomFields(entityType, id, init), cookie);
 }
 
 export function updateEntityCustomFields(
@@ -1053,6 +1071,44 @@ export function updateEntityCustomFields(
     values: Record<number, unknown>,
 ) {
     return putJson<Types.CustomFieldEntry[]>(customFieldEntityPath(entityType, id), { values });
+}
+
+export function updateEntityCustomField(
+    entityType: Types.CustomFieldEntityType,
+    id: number,
+    definitionId: number,
+    value: unknown,
+) {
+    return putJson<Types.CustomFieldEntry[]>(`${customFieldEntityPath(entityType, id)}/${definitionId}`, { value });
+}
+
+export function getEntityCustomFieldValues(
+    entityType: Types.CustomFieldEntityType,
+    ids: number[],
+    init: RequestInit = {},
+) {
+    if (ids.length === 0) {
+        return Promise.resolve({} as Types.EntityCustomFieldValues);
+    }
+    return getJson<Types.EntityCustomFieldValues>(
+        `/api/${customFieldEntitySegment(entityType)}/custom-field-values?ids=${ids.join(",")}`,
+        { cache: "no-store", ...init },
+    );
+}
+
+export async function getEntityCustomFieldValuesFromCookie(
+    entityType: Types.CustomFieldEntityType,
+    ids: number[],
+    cookie: string | null,
+): Promise<Types.EntityCustomFieldValues> {
+    if (!cookie || ids.length === 0) {
+        return {};
+    }
+    try {
+        return await getEntityCustomFieldValues(entityType, ids, { headers: { cookie }, cache: "no-store" });
+    } catch {
+        return {};
+    }
 }
 
 export function getShares(type: string, id: number, init: RequestInit = {}) {

@@ -499,8 +499,12 @@ export type CustomFieldEntry = {
     fieldType: CustomFieldType;
     options: CustomFieldOption[] | null;
     required: boolean;
-    value: string | number | boolean | null;
+    value: CustomFieldCellValue;
 };
+
+export type CustomFieldCellValue = string | number | boolean | null;
+
+export type EntityCustomFieldValues = Record<string, Record<string, CustomFieldCellValue>>;
 
 export type UpdateContactPayload = {
     name?: string;
