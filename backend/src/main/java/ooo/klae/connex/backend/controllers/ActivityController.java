@@ -54,7 +54,7 @@ public class ActivityController {
         if (itemsPerPage == null) return dtos;
         int size = Math.min(Math.max(itemsPerPage, 1), 200);
         int page = paginationRange == null ? 1 : Math.max(paginationRange, 1);
-        int from = (page - 1) * size;
+        int from = (int) Math.min(Integer.MAX_VALUE, (long) (page - 1) * size);
         if (from >= dtos.size()) return List.of();
         return dtos.subList(from, Math.min(dtos.size(), from + size));
     }
