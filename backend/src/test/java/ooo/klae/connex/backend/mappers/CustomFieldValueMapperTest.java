@@ -75,6 +75,21 @@ class CustomFieldValueMapperTest extends AbstractMapperTest {
     }
 
     @Test
+    void getForEntities_isIsolatedByWorkspace() {
+        CustomFieldDefinition defA = companyField(workspace.getId());
+        valueMapper.upsert(textValue(workspace.getId(), defA.getId(), ENTITY, "Gold"));
+
+        Workspace other = newWorkspace();
+        CustomFieldDefinition defB = companyField(other.getId());
+        valueMapper.upsert(textValue(other.getId(), defB.getId(), ENTITY, "Blue"));
+
+        List<CustomFieldValue> rows = valueMapper.getForEntities(workspace.getId(), "company", List.of(ENTITY));
+
+        assertTrue(rows.stream().anyMatch(r -> r.getDefinitionId() == defA.getId() && "Gold".equals(r.getValueText())));
+        assertTrue(rows.stream().noneMatch(r -> "Blue".equals(r.getValueText())));
+    }
+
+    @Test
     void values_areIsolatedByWorkspace() {
         CustomFieldDefinition defA = companyField(workspace.getId());
         valueMapper.upsert(textValue(workspace.getId(), defA.getId(), ENTITY, "Gold"));

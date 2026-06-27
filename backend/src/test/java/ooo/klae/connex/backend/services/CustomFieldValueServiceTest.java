@@ -163,6 +163,16 @@ class CustomFieldValueServiceTest extends AbstractServiceTest {
     }
 
     @Test
+    void applyValue_rejectsPathologicalNumberExponentsCheaply() {
+        Company company = newCompany();
+        CustomFieldDefinition number = companyField("n", "number", null);
+        assertThrows(BadRequestException.class,
+            () -> valueService.applyValue("company", company.getId(), number.getId(), "1E2000000000"));
+        assertThrows(BadRequestException.class,
+            () -> valueService.applyValue("company", company.getId(), number.getId(), "1E-2000000000"));
+    }
+
+    @Test
     void applyValue_urlValidation() {
         Company company = newCompany();
         CustomFieldDefinition url = companyField("site", "url", null);

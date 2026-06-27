@@ -187,14 +187,15 @@ public class CustomFieldValueService {
     private BigDecimal parseNumber(CustomFieldDefinition def, String text) {
         BigDecimal number;
         try {
-            number = new BigDecimal(text).setScale(NUMERIC_SCALE, RoundingMode.HALF_UP);
+            number = new BigDecimal(text);
         } catch (NumberFormatException e) {
             throw new BadRequestException("'" + def.getLabel() + "' must be a number");
         }
-        if (number.precision() > MAX_NUMERIC_DIGITS) {
-            throw new BadRequestException("'" + def.getLabel() + "' is too large");
+        if (number.scale() > MAX_NUMERIC_DIGITS
+            || number.precision() - number.scale() > MAX_NUMERIC_DIGITS - NUMERIC_SCALE) {
+            throw new BadRequestException("'" + def.getLabel() + "' is out of range");
         }
-        return number;
+        return number.setScale(NUMERIC_SCALE, RoundingMode.HALF_UP);
     }
 
     private String parseDate(CustomFieldDefinition def, String text) {
