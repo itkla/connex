@@ -47,6 +47,7 @@ public class TenantScopeInterceptor implements Interceptor {
         MAPPERS + "TagMapper",
         MAPPERS + "CustomFieldDefinitionMapper",
         MAPPERS + "CustomFieldValueMapper",
+        MAPPERS + "SavedViewMapper",
         MAPPERS + "ActivityMapper",
         MAPPERS + "NoteMapper",
         MAPPERS + "AttachmentMapper",

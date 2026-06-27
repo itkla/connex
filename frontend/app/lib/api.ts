@@ -1123,6 +1123,30 @@ export async function getEntityCustomFieldValuesFromCookie(
     }
 }
 
+/*
+* == Saved views
+*/
+
+export function getSavedViews(recordType: Types.SavedViewRecordType, init: RequestInit = {}) {
+    return getJson<Types.SavedView[]>(`/api/saved-views?recordType=${recordType}`, { cache: "no-store", ...init });
+}
+
+export function getSavedViewsFromCookie(recordType: Types.SavedViewRecordType, cookie: string | null) {
+    return safeWithCookie<Types.SavedView>((init) => getSavedViews(recordType, init), cookie);
+}
+
+export function createSavedView(payload: Types.SavedViewInput) {
+    return postJson<Types.SavedView>(`/api/saved-views`, payload);
+}
+
+export function updateSavedView(id: number, payload: Types.SavedViewInput) {
+    return putJson<Types.SavedView>(`/api/saved-views/${id}`, payload);
+}
+
+export function deleteSavedView(id: number, init: RequestInit = {}) {
+    return deleteJson<void>(`/api/saved-views/${id}`, init);
+}
+
 export function getShares(type: string, id: number, init: RequestInit = {}) {
     return getJson<Types.Share[]>(`/api/shares/${type}/${id}`, { cache: "no-store", ...init });
 }

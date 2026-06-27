@@ -17,6 +17,8 @@ import {
 import { useReducedMotion } from 'motion/react';
 
 import RecordsRenderView from '@/app/components/records/RecordsRenderView';
+import SavedViewsBar from '@/app/components/records/SavedViewsBar';
+import type { SavedView, SavedViewConfig } from '@/app/lib/types';
 import { useCustomFieldColumns } from '@/app/components/records/CustomFieldColumns';
 import RecordsFilterPills from '@/app/components/records/RecordsFilterPills';
 import { SearchField, FilterBar, type FilterChipData } from '@/app/components/filters';
@@ -87,7 +89,7 @@ function diffDraft(original: DealDraft, draft: DealDraft): boolean {
     );
 }
 
-export default function DealsBrowser({ deals }: { deals: Deal[] }) {
+export default function DealsBrowser({ deals, savedViews }: { deals: Deal[]; savedViews: SavedView[] }) {
     const router = useRouter();
     const t = useTranslations('DealsBrowser');
     const tf = useTranslations('Filters');
@@ -511,6 +513,18 @@ export default function DealsBrowser({ deals }: { deals: Deal[] }) {
         </ButtonGroup>
     );
 
+    const currentConfig: SavedViewConfig = useMemo(
+        () => ({ filters: filterState, query }),
+        [filterState, query],
+    );
+    const applyView = useCallback(
+        (config: SavedViewConfig) => {
+            setFilterState(config.filters ?? {});
+            setQuery(config.query ?? '');
+        },
+        [setFilterState, setQuery],
+    );
+
     return (
         <div className="page-grid gap-y-6">
             <div className="flex items-center justify-between">
@@ -579,6 +593,13 @@ export default function DealsBrowser({ deals }: { deals: Deal[] }) {
                     value={summary.forecastAccuracy != null ? `${Math.round(summary.forecastAccuracy * 100)}%` : '—'}
                 />
             </div>
+
+            <SavedViewsBar
+                recordType="deal"
+                initialViews={savedViews}
+                currentConfig={currentConfig}
+                onApply={applyView}
+            />
 
             <FilterBar
                 reduce={reduce}

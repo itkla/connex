@@ -24,6 +24,8 @@ import { SearchField, FilterBar, SegmentedToggle, type FilterChipData } from '@/
 import DeleteRecordDialog from '@/app/components/records/DeleteRecordDialog';
 import { useRecordsBrowser } from '@/app/hooks/useRecordsBrowser';
 import { useServerRecords } from '@/app/hooks/useServerRecords';
+import SavedViewsBar from '@/app/components/records/SavedViewsBar';
+import type { SavedView, SavedViewConfig } from '@/app/lib/types';
 import { type ColumnDef, type ColumnFilterFacet, FILTER_EMPTY, facetChips, countActiveFilters } from '@/app/components/records/types';
 import ContactCard from '@/app/components/records/contacts/ContactCard';
 import ContactAvatar from '@/app/components/records/contacts/ContactAvatar';
@@ -56,7 +58,7 @@ function diffDraft(original: ContactDraft, draft: ContactDraft): boolean {
     );
 }
 
-export default function ContactsBrowser() {
+export default function ContactsBrowser({ savedViews }: { savedViews: SavedView[] }) {
     const router = useRouter();
     const t = useTranslations('ContactsBrowser');
     const tf = useTranslations('Filters');
@@ -98,9 +100,11 @@ export default function ContactsBrowser() {
         setSize,
         query,
         setQuery,
+        applyQuery,
         sortKey,
         sortDirection,
         onSortChange,
+        applySort,
         reload,
     } = useServerRecords<Contact, ContactsPageParams>(getContactsPage, filterParams);
 
@@ -416,6 +420,19 @@ export default function ContactsBrowser() {
         </ButtonGroup>
     );
 
+    const currentConfig: SavedViewConfig = useMemo(
+        () => ({ filters: filterState, query, sortKey, sortDirection }),
+        [filterState, query, sortKey, sortDirection],
+    );
+    const applyView = useCallback(
+        (config: SavedViewConfig) => {
+            setFilterState(config.filters ?? {});
+            applyQuery(config.query ?? '');
+            applySort(config.sortKey ?? null, config.sortDirection ?? 'asc');
+        },
+        [setFilterState, applyQuery, applySort],
+    );
+
     return (
         <div className="page-grid gap-y-6">
             <div className="flex items-center justify-between">
@@ -425,6 +442,13 @@ export default function ContactsBrowser() {
                     {t('new')}
                 </Button>
             </div>
+
+            <SavedViewsBar
+                recordType="person"
+                initialViews={savedViews}
+                currentConfig={currentConfig}
+                onApply={applyView}
+            />
 
             <FilterBar
                 reduce={reduce}

@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="ooo.klae.connex.backend.mappers.SavedViewMapper">
+
+  <sql id="columns">
+    id, workspace_id, user_id, record_type, name, config_json, position, created_at, updated_at
+  </sql>
+
+  <select id="getByUser" resultType="SavedView">
+    SELECT <include refid="columns"/> FROM saved_view
+    WHERE workspace_id = #{workspaceId} AND user_id = #{userId}
+    ORDER BY record_type, position, id
+  </select>
+
+  <select id="getByRecordType" resultType="SavedView">
+    SELECT <include refid="columns"/> FROM saved_view
+    WHERE workspace_id = #{workspaceId} AND user_id = #{userId} AND record_type = #{recordType}
+    ORDER BY position, id
+  </select>
+
+  <select id="getById" resultType="SavedView">
+    SELECT <include refid="columns"/> FROM saved_view
+    WHERE workspace_id = #{workspaceId} AND user_id = #{userId} AND id = #{id}
+  </select>
+
+  <select id="getByName" resultType="SavedView">
+    SELECT <include refid="columns"/> FROM saved_view
+    WHERE workspace_id = #{workspaceId} AND user_id = #{userId}
+      AND record_type = #{recordType} AND name = #{name}
+  </select>
+
+  <insert id="insert" useGeneratedKeys="true" keyProperty="id">
+    INSERT INTO saved_view
+      (workspace_id, user_id, record_type, name, config_json, position)
+    VALUES
+      (#{workspaceId}, #{userId}, #{recordType}, #{name}, #{configJson}, #{position})
+  </insert>
+
+  <update id="update">
+    UPDATE saved_view
+    SET name = #{name}, config_json = #{configJson}, position = #{position}
+    WHERE workspace_id = #{workspaceId} AND user_id = #{userId} AND id = #{id}
+  </update>
+
+  <delete id="delete">
+    DELETE FROM saved_view
+    WHERE workspace_id = #{workspaceId} AND user_id = #{userId} AND id = #{id}
+  </delete>
+</mapper>

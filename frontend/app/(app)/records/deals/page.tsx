@@ -1,6 +1,6 @@
 import { headers } from "next/headers";
-import { getDealsFromCookie, getCurrentUserFromCookie } from "@/app/lib/api";
-import { type Deal } from "@/app/lib/types";
+import { getDealsFromCookie, getCurrentUserFromCookie, getSavedViewsFromCookie } from "@/app/lib/api";
+import { type Deal, type SavedView } from "@/app/lib/types";
 import { redirect } from "next/navigation";
 import DealsBrowser from "@/app/components/records/deals/DealsBrowser";
 
@@ -12,7 +12,10 @@ export default async function DealsPage() {
         redirect('/auth/login');
     }
 
-    const deals: Deal[] = await getDealsFromCookie(cookie);
+    const [deals, savedViews]: [Deal[], SavedView[]] = await Promise.all([
+        getDealsFromCookie(cookie),
+        getSavedViewsFromCookie("deal", cookie),
+    ]);
 
-    return <DealsBrowser deals={deals} />;
+    return <DealsBrowser deals={deals} savedViews={savedViews} />;
 }
