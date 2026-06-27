@@ -17,6 +17,7 @@ import {
 import { useReducedMotion } from 'motion/react';
 
 import RecordsRenderView from '@/app/components/records/RecordsRenderView';
+import { useCustomFieldColumns } from '@/app/components/records/CustomFieldColumns';
 import RecordsFilterPills from '@/app/components/records/RecordsFilterPills';
 import { SearchField, FilterBar, type FilterChipData } from '@/app/components/filters';
 import DeleteRecordDialog from '@/app/components/records/DeleteRecordDialog';
@@ -474,6 +475,8 @@ export default function DealsBrowser({ deals }: { deals: Deal[] }) {
         [filteredDeals, columns, filterState],
     );
 
+    const { columns: customColumns, addColumnSlot } = useCustomFieldColumns('deal', visibleDeals);
+
     const facets = useMemo(() => deriveFilterOptions(columns, filteredDeals), [columns, filteredDeals]);
     const hasActiveFilters = query.trim() !== '' || countActiveFilters(filterState) > 0;
     const clearAll = useCallback(() => { setQuery(''); setFilterState({}); }, [setQuery, setFilterState]);
@@ -620,7 +623,8 @@ export default function DealsBrowser({ deals }: { deals: Deal[] }) {
 
             <RecordsRenderView<Deal>
                 data={visibleDeals}
-                columns={columns}
+                columns={[...columns, ...customColumns]}
+                addColumnSlot={addColumnSlot}
                 renderCard={(item, { onQuickEdit, onDelete }) => (
                     <DealCard
                         deal={item}

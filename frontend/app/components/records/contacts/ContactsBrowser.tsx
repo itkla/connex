@@ -17,6 +17,7 @@ import {
 import { useReducedMotion } from 'motion/react';
 
 import RecordsRenderView from '@/app/components/records/RecordsRenderView';
+import { useCustomFieldColumns } from '@/app/components/records/CustomFieldColumns';
 import RecordsSortMenu from '@/app/components/records/RecordsSortMenu';
 import RecordsFilterPills from '@/app/components/records/RecordsFilterPills';
 import { SearchField, FilterBar, SegmentedToggle, type FilterChipData } from '@/app/components/filters';
@@ -370,6 +371,8 @@ export default function ContactsBrowser() {
         },
     ], [t, tempByContactId]);
 
+    const { columns: customColumns, addColumnSlot } = useCustomFieldColumns('person', contacts);
+
     // const visibleContacts = useMemo(
     //     () => applyRecordFilters(filteredContacts, columns, filterState),
     //     [filteredContacts, columns, filterState],
@@ -470,7 +473,8 @@ export default function ContactsBrowser() {
 
             <RecordsRenderView<Contact>
                 data={contacts}
-                columns={columns}
+                columns={[...columns, ...customColumns]}
+                addColumnSlot={addColumnSlot}
                 renderCard={(item, { onQuickEdit, onDelete }) => (
                     <ContactCard
                         id={item.id}

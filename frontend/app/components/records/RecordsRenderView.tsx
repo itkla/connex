@@ -85,6 +85,7 @@ interface Props<T extends { id: SelectionId; name?: string }> {
     filtersActive?: boolean;
     onClearFilters?: () => void;
     loading?: boolean;
+    addColumnSlot?: ReactNode;
 }
 
 export default function RecordsRenderView<T extends { id: SelectionId; name?: string }>({
@@ -109,6 +110,7 @@ export default function RecordsRenderView<T extends { id: SelectionId; name?: st
     filtersActive = false,
     onClearFilters,
     loading = false,
+    addColumnSlot,
 }: Props<T>) {
     const router = useRouter();
     const t = useTranslations('RecordsRenderView');
@@ -448,7 +450,9 @@ export default function RecordsRenderView<T extends { id: SelectionId; name?: st
                                             )}
                                             style={colIndex === 0 ? { left: frozenOffsets.name } : undefined}
                                         >
-                                            {sortable ? (
+                                            {col.renderHeader ? (
+                                                col.renderHeader()
+                                            ) : sortable ? (
                                                 <button
                                                     type="button"
                                                     onClick={() => onSort(col.key)}
@@ -466,6 +470,7 @@ export default function RecordsRenderView<T extends { id: SelectionId; name?: st
                                         </th>
                                     );
                                 })}
+                                {addColumnSlot && <th className="w-10 px-2 py-2.5">{addColumnSlot}</th>}
                                 {hasRowActions && <th className="w-12 px-4 py-2.5" aria-hidden />}
                             </tr>
                         </thead>
@@ -540,6 +545,7 @@ export default function RecordsRenderView<T extends { id: SelectionId; name?: st
                                                 </td>
                                             );
                                         })}
+                                        {addColumnSlot && <td className="px-2 py-2.5" aria-hidden />}
                                         {hasRowActions && (
                                             <td className="px-2 py-2.5 text-right" onClick={(e) => e.stopPropagation()}>
                                                 <RowActions

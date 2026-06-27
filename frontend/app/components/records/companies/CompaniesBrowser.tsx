@@ -16,6 +16,7 @@ import {
 } from '@heroicons/react/24/outline';
 
 import RecordsRenderView from '@/app/components/records/RecordsRenderView';
+import { useCustomFieldColumns } from '@/app/components/records/CustomFieldColumns';
 import RecordsSortMenu from '@/app/components/records/RecordsSortMenu';
 import RecordsFilterPills from '@/app/components/records/RecordsFilterPills';
 import { SearchField, FilterBar, SegmentedToggle, type FilterChipData } from '@/app/components/filters';
@@ -309,6 +310,8 @@ export default function CompaniesBrowser({ companies }: { companies: Company[] }
         [filteredCompanies, columns, filterState],
     );
 
+    const { columns: customColumns, addColumnSlot } = useCustomFieldColumns('company', visibleCompanies);
+
     const facets = useMemo(() => deriveFilterOptions(columns, filteredCompanies), [columns, filteredCompanies]);
     const hasActiveFilters = query.trim() !== '' || countActiveFilters(filterState) > 0;
     const clearAll = useCallback(() => { setQuery(''); setFilterState({}); }, [setQuery, setFilterState]);
@@ -475,7 +478,8 @@ export default function CompaniesBrowser({ companies }: { companies: Company[] }
 
             <RecordsRenderView<Company>
                 data={visibleCompanies}
-                columns={columns}
+                columns={[...columns, ...customColumns]}
+                addColumnSlot={addColumnSlot}
                 renderCard={(item, { onQuickEdit, onDelete }) => (
                     <CompanyCard
                         company={item}

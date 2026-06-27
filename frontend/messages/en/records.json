@@ -9,7 +9,12 @@
     "no": "No",
     "saved": "Custom fields updated",
     "saveFailed": "Could not save the custom fields.",
-    "doubleClickToEdit": "Double-click to edit"
+    "doubleClickToEdit": "Double-click to edit",
+    "addColumn": "Add field",
+    "configureColumn": "Configure",
+    "deleteColumn": "Delete field",
+    "columnDeleted": "Field deleted",
+    "fieldLabel": "custom field"
   },
   "ShareDialog": {
     "title": "Share {name}",

@@ -9,7 +9,12 @@
     "no": "いいえ",
     "saved": "カスタムフィールドを更新しました",
     "saveFailed": "カスタムフィールドを保存できませんでした。",
-    "doubleClickToEdit": "ダブルクリックで編集"
+    "doubleClickToEdit": "ダブルクリックで編集",
+    "addColumn": "フィールドを追加",
+    "configureColumn": "設定",
+    "deleteColumn": "フィールドを削除",
+    "columnDeleted": "フィールドを削除しました",
+    "fieldLabel": "カスタムフィールド"
   },
   "ShareDialog": {
     "title": "{name} を共有",
