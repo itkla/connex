@@ -27,6 +27,7 @@ public class NoteService {
     private final DealMapper dealMapper;
     private final AuditService auditService;
     private final WorkspaceService workspaceService;
+    private final AuthService authService;
 
     private static final Set<String> AUDIT_FIELDS =
         Set.of("content");
@@ -60,6 +61,7 @@ public class NoteService {
     @RequirePermission(Permission.NOTE_CREATE)
     public Note create(Note note) {
         note.setWorkspaceId(workspaceService.getCurrentWorkspaceId());
+        note.setAuthor(authService.getCurrentUser());
         noteMapper.insert(note);
         auditService.record("note.create", "note", note.getId(), note.getContent(),
             "Created note",
@@ -74,6 +76,7 @@ public class NoteService {
         if (before == null) throw new ResourceNotFoundException("Note not found with id: " + id);
         note.setId(id);
         note.setWorkspaceId(workspaceId);
+        note.setAuthor(before.getAuthor());
         noteMapper.update(note);
         auditService.record("note.update", "note", id, note.getContent(),
             "Updated note",
