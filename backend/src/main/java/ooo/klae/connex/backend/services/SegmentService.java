@@ -49,6 +49,7 @@ public class SegmentService {
     private static final int DEFAULT_DAYS = 30;
     private static final int MAX_DAYS = 3650;
     private static final int STRONG_EDGE = 2;
+    private static final int MAX_CONDITIONS = 16;
     private static final Set<String> PREDICATE_KEYS =
         Set.of("warm_intro_available", "open_deal", "cooling", "no_activity");
 
@@ -59,6 +60,9 @@ public class SegmentService {
         requireCompany(recordType);
         if (definition == null || definition.getConditions() == null || definition.getConditions().isEmpty()) {
             return List.of();
+        }
+        if (definition.getConditions().size() > MAX_CONDITIONS) {
+            throw new BadRequestException("A segment may have at most " + MAX_CONDITIONS + " conditions");
         }
         String match = normalize(definition.getMatch());
         boolean any = "any".equals(match);

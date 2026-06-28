@@ -223,6 +223,57 @@ class SegmentServiceTest extends AbstractServiceTest {
     }
 
     @Test
+    void field_nameContains_escapesLikeWildcards() {
+        Company literal = companyWithIndustry("100% Cotton", "Textile");
+        Company other = companyWithIndustry("Acme Corp", "Textile");
+
+        List<Integer> ids = evaluate(def("all", field("name", "contains", "%")));
+
+        assertTrue(ids.contains(literal.getId()));
+        assertFalse(ids.contains(other.getId()));
+    }
+
+    @Test
+    void negate_combinedWithAny_unionsComplement() {
+        Company fintech = companyWithIndustry("Acme", "Fintech");
+        Company logistics = companyWithIndustry("Beta", "Logistics");
+        SegmentCondition notFintech = field("industry", "equals", "Fintech");
+        notFintech.setNegate(true);
+
+        List<Integer> ids = evaluate(def("any", notFintech, field("industry", "equals", "Logistics")));
+
+        assertFalse(ids.contains(fintech.getId()));
+        assertTrue(ids.contains(logistics.getId()));
+    }
+
+    @Test
+    void negate_excludesOtherWorkspaceFromComplement() {
+        Workspace other = new Workspace();
+        other.setName("WS " + unique());
+        other.setSlug("ws_" + unique());
+        workspaceMapper.insert(other);
+        Company foreign = new Company();
+        foreign.setName("Foreign");
+        foreign.setIndustry("Logistics");
+        foreign.setWorkspaceId(other.getId());
+        companyMapper.insert(foreign);
+        SegmentCondition notFintech = field("industry", "equals", "Fintech");
+        notFintech.setNegate(true);
+
+        assertFalse(evaluate(def("all", notFintech)).contains(foreign.getId()));
+    }
+
+    @Test
+    void field_blankValue_throws() {
+        assertThrows(BadRequestException.class, () -> evaluate(def("all", field("industry", "equals", "  "))));
+    }
+
+    @Test
+    void tag_nonNumericValue_throws() {
+        assertThrows(BadRequestException.class, () -> evaluate(def("all", field("tag", "has", "abc"))));
+    }
+
+    @Test
     void unknownPredicate_throws() {
         assertThrows(BadRequestException.class, () -> evaluate(def("all", predicate("bogus"))));
     }
@@ -240,5 +291,14 @@ class SegmentServiceTest extends AbstractServiceTest {
     @Test
     void unsupportedRecordType_throws() {
         assertThrows(BadRequestException.class, () -> segmentService.evaluate("person", def("all", predicate("open_deal"))));
+    }
+
+    @Test
+    void tooManyConditions_throws() {
+        SegmentCondition[] many = new SegmentCondition[17];
+        for (int i = 0; i < many.length; i++) {
+            many[i] = field("name", "contains", "x" + i);
+        }
+        assertThrows(BadRequestException.class, () -> evaluate(def("all", many)));
     }
 }
