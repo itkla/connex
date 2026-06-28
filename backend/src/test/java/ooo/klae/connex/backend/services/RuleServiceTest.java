@@ -61,7 +61,7 @@ class RuleServiceTest extends AbstractServiceTest {
 
     @Test
     void create_roundTripsTriggerConditionActions() {
-        RuleRequest request = req("company", schedule("daily"), "user", action("create_task"));
+        RuleRequest request = req("company", schedule("daily"), "user", action("add_tag"));
         SegmentDefinition condition = new SegmentDefinition();
         condition.setMatch("all");
         SegmentCondition predicate = new SegmentCondition();
@@ -75,7 +75,7 @@ class RuleServiceTest extends AbstractServiceTest {
 
         assertEquals("schedule", fetched.getTrigger().getType());
         assertEquals("no_activity", fetched.getCondition().getConditions().get(0).getKey());
-        assertEquals("create_task", fetched.getActions().get(0).getType());
+        assertEquals("add_tag", fetched.getActions().get(0).getType());
         assertEquals(currentUser.getId(), fetched.getRunAsUserId());
     }
 
@@ -135,6 +135,24 @@ class RuleServiceTest extends AbstractServiceTest {
         assertEquals("entity_change", updated.getTrigger().getType());
         assertEquals("add_tag", updated.getActions().get(0).getType());
         assertEquals(false, updated.isEnabled());
+    }
+
+    @Test
+    void create_unsupportedEvent_throws() {
+        assertThrows(BadRequestException.class,
+            () -> ruleService.create(req("deal", entityChange("deal.stagechanged"), "user", action("notify"))));
+    }
+
+    @Test
+    void create_linkedActionOnCompanyRule_throws() {
+        assertThrows(BadRequestException.class,
+            () -> ruleService.create(req("company", entityChange("company.updated"), "user", action("create_task"))));
+    }
+
+    @Test
+    void create_entityChangePerson_throws() {
+        assertThrows(BadRequestException.class,
+            () -> ruleService.create(req("person", entityChange("person.updated"), "user", action("notify"))));
     }
 
     @Test

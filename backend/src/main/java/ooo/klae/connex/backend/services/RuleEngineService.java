@@ -3,6 +3,7 @@ package ooo.klae.connex.backend.services;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.time.temporal.IsoFields;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
@@ -49,7 +50,6 @@ public class RuleEngineService {
     private static final Logger log = LoggerFactory.getLogger(RuleEngineService.class);
     private static final DateTimeFormatter DAY = DateTimeFormatter.ofPattern("yyyyMMdd");
     private static final DateTimeFormatter HOUR = DateTimeFormatter.ofPattern("yyyyMMddHH");
-    private static final int MAX_SCHEDULE_MATCHES = 500;
 
     /** Runs every enabled entity-change rule whose trigger matches this committed change. */
     public void onEntityChange(int workspaceId, String recordType, int entityId, String event) {
@@ -114,16 +114,14 @@ public class RuleEngineService {
             return List.of();
         }
         SegmentDefinition definition = read(rule.getConditionJson(), SegmentDefinition.class);
-        List<Integer> ids = segmentService.evaluate(workspaceId, conditionActorId(rule), "company", definition);
-        if (ids.size() > MAX_SCHEDULE_MATCHES) {
-            log.warn("Schedule rule {} matched {} records; capping at {}", rule.getId(), ids.size(), MAX_SCHEDULE_MATCHES);
-            return ids.subList(0, MAX_SCHEDULE_MATCHES);
-        }
-        return ids;
+        return segmentService.evaluate(workspaceId, conditionActorId(rule), "company", definition);
     }
 
     private int conditionActorId(Rule rule) {
-        return rule.getRunAsUserId() != null ? rule.getRunAsUserId() : systemActor.user().getId();
+        if (rule.getRunAsUserId() != null) {
+            return rule.getRunAsUserId();
+        }
+        return rule.getCreatedById() != null ? rule.getCreatedById() : systemActor.user().getId();
     }
 
     private String scheduleBucket(String cadence) {
@@ -158,12 +156,21 @@ public class RuleEngineService {
         }
         List<RuleAction> actions = List.of(read(rule.getActionsJson(), RuleAction[].class));
         RuleFireContext ctx = new RuleFireContext(workspaceId, rule.getId(), recordType, entityId, principal.targetUserId(), dedupeSuffix);
+        List<String> failures = new ArrayList<>();
         try {
             automationExecutor.runAs(workspaceId, principal.user(), principal.role(), () -> {
-                actions.forEach(action -> actionExecutor.execute(action, ctx));
+                for (RuleAction action : actions) {
+                    try {
+                        actionExecutor.execute(action, ctx);
+                    } catch (Exception actionError) {
+                        log.warn("Action {} failed for rule {}: {}", action.getType(), rule.getId(), actionError.getMessage());
+                        failures.add(action.getType() + ": " + actionError.getMessage());
+                    }
+                }
                 return null;
             });
-            finishExecution(execution, "matched", null);
+            finishExecution(execution, failures.isEmpty() ? "matched" : "partial",
+                failures.isEmpty() ? null : String.join("; ", failures));
         } catch (Exception e) {
             log.warn("Rule {} failed for {} {}: {}", rule.getId(), recordType, entityId, e.getMessage());
             finishExecution(execution, "failed", e.getMessage());

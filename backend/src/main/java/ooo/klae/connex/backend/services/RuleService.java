@@ -46,6 +46,10 @@ public class RuleService {
     private static final Set<String> EXECUTION_MODES = Set.of("user", "system");
     private static final Set<String> ACTION_TYPES = Set.of("create_task", "log_activity", "add_tag", "notify");
     private static final Set<String> CADENCES = Set.of("hourly", "daily", "weekly");
+    private static final Set<String> ENTITY_CHANGE_RECORD_TYPES = Set.of("deal", "company");
+    private static final Set<String> DEAL_EVENTS = Set.of("deal.created", "deal.stage_changed", "deal.updated", "deal.won", "deal.lost");
+    private static final Set<String> COMPANY_EVENTS = Set.of("company.created", "company.updated");
+    private static final Set<String> LINKED_ACTIONS = Set.of("create_task", "log_activity");
 
     @RequirePermission(Permission.RULE_MANAGE)
     public List<RuleDto> list() {
@@ -125,38 +129,49 @@ public class RuleService {
         if (request.getCondition() != null && !"company".equals(recordType)) {
             throw new BadRequestException("WHEN conditions are only supported for company rules");
         }
-        validateTrigger(request.getTrigger());
-        if ("schedule".equals(normalize(request.getTrigger().getType()))) {
-            if (!"company".equals(recordType)) {
-                throw new BadRequestException("Schedule rules are only supported for company records");
-            }
-            if (request.getCondition() == null || request.getCondition().getConditions() == null
-                    || request.getCondition().getConditions().isEmpty()) {
-                throw new BadRequestException("A schedule rule requires a WHEN condition");
-            }
-        }
-        validateActions(request.getActions());
+        validateTrigger(request.getTrigger(), recordType, request.getCondition());
+        validateActions(request.getActions(), recordType);
     }
 
-    private void validateTrigger(RuleTrigger trigger) {
+    private void validateTrigger(RuleTrigger trigger, String recordType, SegmentDefinition condition) {
         String type = normalize(trigger.getType());
         if (!TRIGGER_TYPES.contains(type)) {
             throw new BadRequestException("Invalid trigger type: " + trigger.getType());
         }
         if ("entity_change".equals(type)) {
+            if (!ENTITY_CHANGE_RECORD_TYPES.contains(recordType)) {
+                throw new BadRequestException("Entity-change rules are only supported for deal and company records");
+            }
             if (trigger.getEvents() == null || trigger.getEvents().isEmpty()) {
                 throw new BadRequestException("An entity-change trigger requires at least one event");
             }
-        } else if (trigger.getCadence() == null || !CADENCES.contains(normalize(trigger.getCadence()))) {
-            throw new BadRequestException("A schedule trigger requires a valid cadence");
+            Set<String> supported = "deal".equals(recordType) ? DEAL_EVENTS : COMPANY_EVENTS;
+            for (String event : trigger.getEvents()) {
+                if (!supported.contains(event)) {
+                    throw new BadRequestException("Unsupported event for " + recordType + ": " + event);
+                }
+            }
+        } else {
+            if (!"company".equals(recordType)) {
+                throw new BadRequestException("Schedule rules are only supported for company records");
+            }
+            if (trigger.getCadence() == null || !CADENCES.contains(normalize(trigger.getCadence()))) {
+                throw new BadRequestException("A schedule rule requires a valid cadence");
+            }
+            if (condition == null || condition.getConditions() == null || condition.getConditions().isEmpty()) {
+                throw new BadRequestException("A schedule rule requires a WHEN condition");
+            }
         }
     }
 
-    private void validateActions(List<RuleAction> actions) {
+    private void validateActions(List<RuleAction> actions, String recordType) {
         for (RuleAction action : actions) {
             String type = normalize(action.getType());
             if (!ACTION_TYPES.contains(type)) {
                 throw new BadRequestException("Invalid action type: " + action.getType());
+            }
+            if (LINKED_ACTIONS.contains(type) && !"deal".equals(recordType)) {
+                throw new BadRequestException("'" + type + "' actions are only supported for deal rules");
             }
             switch (type) {
                 case "create_task", "notify" -> requireText(action.getTitle(), "title");

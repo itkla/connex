@@ -192,10 +192,7 @@ public class DealService {
         notificationChanges.publish(workspaceId, "deal", id);
         Integer beforeStage = before.getStageId();
         boolean stageChanged = beforeStage == null ? deal.getStageId() != null : !beforeStage.equals(deal.getStageId());
-        if (stageChanged) {
-            ruleTriggers.publish(workspaceId, "deal", id, "deal.stage_changed");
-        }
-        ruleTriggers.publish(workspaceId, "deal", id, "deal.updated");
+        ruleTriggers.publish(workspaceId, "deal", id, stageChanged ? "deal.stage_changed" : "deal.updated");
         return deal;
     }
 
