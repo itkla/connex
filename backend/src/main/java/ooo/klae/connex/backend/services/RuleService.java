@@ -131,6 +131,30 @@ public class RuleService {
         }
         validateTrigger(request.getTrigger(), recordType, request.getCondition());
         validateActions(request.getActions(), recordType);
+        requireActionPermissions(request.getActions(), recordType);
+    }
+
+    private void requireActionPermissions(List<RuleAction> actions, String recordType) {
+        for (RuleAction action : actions) {
+            Permission required = actionPermission(normalize(action.getType()), recordType);
+            if (required != null) {
+                workspaceService.requirePermission(required);
+            }
+        }
+    }
+
+    private Permission actionPermission(String type, String recordType) {
+        return switch (type) {
+            case "create_task" -> Permission.TASK_CREATE;
+            case "log_activity" -> Permission.ACTIVITY_CREATE;
+            case "add_tag" -> switch (recordType) {
+                case "company" -> Permission.COMPANY_UPDATE;
+                case "person" -> Permission.PERSON_UPDATE;
+                case "deal" -> Permission.DEAL_UPDATE;
+                default -> null;
+            };
+            default -> null;
+        };
     }
 
     private void validateTrigger(RuleTrigger trigger, String recordType, SegmentDefinition condition) {
