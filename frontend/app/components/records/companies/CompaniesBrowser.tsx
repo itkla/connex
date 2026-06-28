@@ -107,7 +107,7 @@ export default function CompaniesBrowser({ companies, savedViews }: { companies:
 
     const [tempByCompanyId, setTempByCompanyId] = useState<Map<number, RelationshipTemperature>>(new Map());
     const [segments, setSegments] = useState<SegmentSelection[]>([]);
-    const [segmentResult, setSegmentResult] = useState<{ key: string; ids: Set<number> } | null>(null);
+    const [segmentResult, setSegmentResult] = useState<{ key: string; ids: Set<number> | null } | null>(null);
     const segmentsKey = useMemo(
         () => segments.map((segment) => `${segment.key}:${segment.days ?? ''}`).sort().join('|'),
         [segments],
@@ -117,7 +117,7 @@ export default function CompaniesBrowser({ companies, savedViews }: { companies:
         let active = true;
         evaluateSegments('company', segments)
             .then((result) => { if (active) setSegmentResult({ key: segmentsKey, ids: new Set(result.ids) }); })
-            .catch(() => { if (active) { setSegmentResult({ key: segmentsKey, ids: new Set() }); toastError(tSeg('evaluateFailed')); } });
+            .catch(() => { if (active) { setSegmentResult({ key: segmentsKey, ids: null }); toastError(tSeg('evaluateFailed')); } });
         return () => { active = false; };
     }, [segments, segmentsKey, tSeg]);
     useEffect(() => {
@@ -323,6 +323,7 @@ export default function CompaniesBrowser({ companies, savedViews }: { companies:
     ], [t, tempByCompanyId]);
 
     const activeSegmentIds = segments.length > 0 && segmentResult?.key === segmentsKey ? segmentResult.ids : null;
+    const segmentsLoading = segments.length > 0 && segmentResult?.key !== segmentsKey;
     const visibleCompanies = useMemo(
         () => {
             const filtered = applyRecordFilters(filteredCompanies, columns, filterState);
@@ -526,6 +527,7 @@ export default function CompaniesBrowser({ companies, savedViews }: { companies:
 
             <RecordsRenderView<Company>
                 data={visibleCompanies}
+                loading={segmentsLoading}
                 columns={[...columns, ...customColumns]}
                 addColumnSlot={addColumnSlot}
                 renderCard={(item, { onQuickEdit, onDelete }) => (
