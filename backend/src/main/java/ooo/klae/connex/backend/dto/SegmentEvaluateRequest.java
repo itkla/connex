@@ -1,7 +1,5 @@
 package ooo.klae.connex.backend.dto;
 
-import java.util.List;
-
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
@@ -11,9 +9,8 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 
 /**
- * Request to evaluate a set of smart-segment predicates for a record type. The predicates
- * are combined with AND; the response is the ids of records matching all of them, scoped
- * to the active workspace and the current user.
+ * Request to evaluate a {@link SegmentDefinition} for a record type. The response is the ids of
+ * records matching the definition, scoped to the active workspace and the current user.
  */
 @Data
 @NoArgsConstructor
@@ -25,6 +22,5 @@ public class SegmentEvaluateRequest {
 
     @NotNull
     @Valid
-    @Size(max = 16)
-    private List<SegmentSelection> segments;
+    private SegmentDefinition definition;
 }

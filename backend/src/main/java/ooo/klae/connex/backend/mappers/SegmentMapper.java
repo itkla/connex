@@ -27,4 +27,19 @@ public interface SegmentMapper {
      */
     List<Integer> companyIdsForPersonsWithoutUserActivity(@Param("workspaceId") int workspaceId,
             @Param("userId") int userId, @Param("personIds") List<Integer> personIds);
+
+    /** Ids of companies whose industry exactly equals {@code industry}. */
+    List<Integer> companyIdsByIndustry(@Param("workspaceId") int workspaceId, @Param("industry") String industry);
+
+    /** Ids of companies whose industry matches the (already LIKE-escaped) {@code pattern}. */
+    List<Integer> companyIdsByIndustryContains(@Param("workspaceId") int workspaceId, @Param("pattern") String pattern);
+
+    /** Ids of companies whose name matches the (already LIKE-escaped) {@code pattern}. */
+    List<Integer> companyIdsByNameContains(@Param("workspaceId") int workspaceId, @Param("pattern") String pattern);
+
+    /** Ids of companies tagged with {@code tagId}. */
+    List<Integer> companyIdsByTag(@Param("workspaceId") int workspaceId, @Param("tagId") int tagId);
+
+    /** Distinct non-blank industry values in the workspace, for the builder's value picker. */
+    List<String> distinctIndustries(int workspaceId);
 }

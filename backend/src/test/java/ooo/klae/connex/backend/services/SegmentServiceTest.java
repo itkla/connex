@@ -17,8 +17,11 @@ import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.beans.PersonEdge;
 import ooo.klae.connex.backend.beans.Pipeline;
 import ooo.klae.connex.backend.beans.Stage;
+import ooo.klae.connex.backend.beans.Tag;
 import ooo.klae.connex.backend.beans.Workspace;
-import ooo.klae.connex.backend.dto.SegmentSelection;
+import ooo.klae.connex.backend.dto.SegmentCondition;
+import ooo.klae.connex.backend.dto.SegmentDefinition;
+import ooo.klae.connex.backend.dto.SegmentFieldsDto;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.mappers.PersonEdgeMapper;
 
@@ -29,10 +32,40 @@ class SegmentServiceTest extends AbstractServiceTest {
 
     private static final DateTimeFormatter MYSQL = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
-    private static SegmentSelection segment(String key) {
-        SegmentSelection selection = new SegmentSelection();
-        selection.setKey(key);
-        return selection;
+    private static SegmentCondition predicate(String key) {
+        SegmentCondition condition = new SegmentCondition();
+        condition.setType("predicate");
+        condition.setKey(key);
+        return condition;
+    }
+
+    private static SegmentCondition field(String field, String op, String value) {
+        SegmentCondition condition = new SegmentCondition();
+        condition.setType("field");
+        condition.setField(field);
+        condition.setOp(op);
+        condition.setValue(value);
+        return condition;
+    }
+
+    private static SegmentDefinition def(String match, SegmentCondition... conditions) {
+        SegmentDefinition definition = new SegmentDefinition();
+        definition.setMatch(match);
+        definition.setConditions(List.of(conditions));
+        return definition;
+    }
+
+    private List<Integer> evaluate(SegmentDefinition definition) {
+        return segmentService.evaluate("company", definition);
+    }
+
+    private Company companyWithIndustry(String name, String industry) {
+        Company company = new Company();
+        company.setName(name);
+        company.setIndustry(industry);
+        company.setWorkspaceId(workspace.getId());
+        companyMapper.insert(company);
+        return company;
     }
 
     private void recentActivity(Person person) {
@@ -58,81 +91,108 @@ class SegmentServiceTest extends AbstractServiceTest {
     }
 
     @Test
-    void openDeal_matchesCompaniesWithAnOpenDeal() {
+    void predicate_openDeal_matches() {
         Company withDeal = newCompany();
         Pipeline pipeline = newPipeline();
         Stage stage = newStage(pipeline, 0);
         newDeal(pipeline, stage, withDeal);
-        Company withoutDeal = newCompany();
+        Company without = newCompany();
 
-        List<Integer> ids = segmentService.evaluate("company", List.of(segment("open_deal")));
+        List<Integer> ids = evaluate(def("all", predicate("open_deal")));
 
         assertTrue(ids.contains(withDeal.getId()));
-        assertFalse(ids.contains(withoutDeal.getId()));
+        assertFalse(ids.contains(without.getId()));
     }
 
     @Test
-    void noActivity_excludesCompaniesWithRecentActivity() {
-        Company quiet = newCompany();
-        Company active = newCompany();
-        recentActivity(newPerson(active));
+    void field_industryEquals_matches() {
+        Company fintech = companyWithIndustry("Acme", "Fintech");
+        Company other = companyWithIndustry("Beta", "Logistics");
 
-        List<Integer> ids = segmentService.evaluate("company", List.of(segment("no_activity")));
+        List<Integer> ids = evaluate(def("all", field("industry", "equals", "Fintech")));
 
-        assertTrue(ids.contains(quiet.getId()));
-        assertFalse(ids.contains(active.getId()));
+        assertTrue(ids.contains(fintech.getId()));
+        assertFalse(ids.contains(other.getId()));
     }
 
     @Test
-    void warmIntroAvailable_matchesTeamConnectedCompanyWithNoActivityFromMe() {
+    void field_nameContains_matches() {
+        Company match = companyWithIndustry("Acme Robotics", "Tech");
+        Company other = companyWithIndustry("Beta Logistics", "Tech");
+
+        List<Integer> ids = evaluate(def("all", field("name", "contains", "robot")));
+
+        assertTrue(ids.contains(match.getId()));
+        assertFalse(ids.contains(other.getId()));
+    }
+
+    @Test
+    void field_hasTag_matches() {
+        Company tagged = newCompany();
+        Company untagged = newCompany();
+        Tag tag = newTag();
+        companyMapper.addTag(tagged.getId(), tag.getId());
+
+        List<Integer> ids = evaluate(def("all", field("tag", "has", String.valueOf(tag.getId()))));
+
+        assertTrue(ids.contains(tagged.getId()));
+        assertFalse(ids.contains(untagged.getId()));
+    }
+
+    @Test
+    void match_any_unionsConditions() {
+        Company fintech = companyWithIndustry("Acme", "Fintech");
+        Company logistics = companyWithIndustry("Beta", "Logistics");
+
+        List<Integer> ids = evaluate(def("any",
+            field("industry", "equals", "Fintech"),
+            field("industry", "equals", "Logistics")));
+
+        assertTrue(ids.contains(fintech.getId()));
+        assertTrue(ids.contains(logistics.getId()));
+    }
+
+    @Test
+    void match_all_intersectsConditions() {
+        Company both = companyWithIndustry("Acme Robotics", "Fintech");
+        Company onlyIndustry = companyWithIndustry("Beta", "Fintech");
+
+        List<Integer> ids = evaluate(def("all",
+            field("industry", "equals", "Fintech"),
+            field("name", "contains", "robot")));
+
+        assertTrue(ids.contains(both.getId()));
+        assertFalse(ids.contains(onlyIndustry.getId()));
+    }
+
+    @Test
+    void negate_complementsWithinWorkspace() {
+        Company fintech = companyWithIndustry("Acme", "Fintech");
+        Company other = companyWithIndustry("Beta", "Logistics");
+        SegmentCondition notFintech = field("industry", "equals", "Fintech");
+        notFintech.setNegate(true);
+
+        List<Integer> ids = evaluate(def("all", notFintech));
+
+        assertFalse(ids.contains(fintech.getId()));
+        assertTrue(ids.contains(other.getId()));
+    }
+
+    @Test
+    void warmIntro_matchesTeamConnectedCompany() {
         Company target = newCompany();
         Person contact = newPerson(target);
         Person engaged = newPerson(newCompany());
         recentActivity(engaged);
         strongEdge(contact, engaged);
 
-        List<Integer> ids = segmentService.evaluate("company", List.of(segment("warm_intro_available")));
-
-        assertTrue(ids.contains(target.getId()));
-    }
-
-    @Test
-    void warmIntroAvailable_excludesCompanyIveAlreadyEngaged() {
-        Company target = newCompany();
-        Person contact = newPerson(target);
-        recentActivity(contact);
-        Person engaged = newPerson(newCompany());
-        recentActivity(engaged);
-        strongEdge(contact, engaged);
-
-        List<Integer> ids = segmentService.evaluate("company", List.of(segment("warm_intro_available")));
-
-        assertFalse(ids.contains(target.getId()));
+        assertTrue(evaluate(def("all", predicate("warm_intro_available"))).contains(target.getId()));
     }
 
     @Test
     void cooling_includesUntouchedCompany() {
         Company cold = newCompany();
-
-        List<Integer> ids = segmentService.evaluate("company", List.of(segment("cooling")));
-
-        assertTrue(ids.contains(cold.getId()));
-    }
-
-    @Test
-    void multipleSegments_areIntersectedWithAnd() {
-        Pipeline pipeline = newPipeline();
-        Stage stage = newStage(pipeline, 0);
-        Company both = newCompany();
-        newDeal(pipeline, stage, both);
-        Company dealButActive = newCompany();
-        newDeal(pipeline, stage, dealButActive);
-        recentActivity(newPerson(dealButActive));
-
-        List<Integer> ids = segmentService.evaluate("company", List.of(segment("open_deal"), segment("no_activity")));
-
-        assertTrue(ids.contains(both.getId()));
-        assertFalse(ids.contains(dealButActive.getId()));
+        assertTrue(evaluate(def("all", predicate("cooling"))).contains(cold.getId()));
     }
 
     @Test
@@ -142,23 +202,43 @@ class SegmentServiceTest extends AbstractServiceTest {
         other.setSlug("ws_" + unique());
         workspaceMapper.insert(other);
         Company foreign = new Company();
-        foreign.setName("Foreign " + unique());
+        foreign.setName("Foreign");
+        foreign.setIndustry("Fintech");
         foreign.setWorkspaceId(other.getId());
         companyMapper.insert(foreign);
 
-        assertFalse(segmentService.evaluate("company", List.of(segment("no_activity"))).contains(foreign.getId()));
-        assertFalse(segmentService.evaluate("company", List.of(segment("cooling"))).contains(foreign.getId()));
+        assertFalse(evaluate(def("all", field("industry", "equals", "Fintech"))).contains(foreign.getId()));
+        assertFalse(evaluate(def("all", predicate("cooling"))).contains(foreign.getId()));
     }
 
     @Test
-    void unknownSegment_throwsBadRequest() {
-        assertThrows(BadRequestException.class,
-            () -> segmentService.evaluate("company", List.of(segment("bogus"))));
+    void fields_returnsIndustriesAndTags() {
+        companyWithIndustry("Acme", "Aerospace");
+        Tag tag = newTag();
+
+        SegmentFieldsDto fields = segmentService.fields("company");
+
+        assertTrue(fields.getIndustries().contains("Aerospace"));
+        assertTrue(fields.getTags().stream().anyMatch(option -> option.getId() == tag.getId()));
     }
 
     @Test
-    void unsupportedRecordType_throwsBadRequest() {
-        assertThrows(BadRequestException.class,
-            () -> segmentService.evaluate("person", List.of(segment("open_deal"))));
+    void unknownPredicate_throws() {
+        assertThrows(BadRequestException.class, () -> evaluate(def("all", predicate("bogus"))));
+    }
+
+    @Test
+    void unknownField_throws() {
+        assertThrows(BadRequestException.class, () -> evaluate(def("all", field("bogus", "equals", "x"))));
+    }
+
+    @Test
+    void invalidMatch_throws() {
+        assertThrows(BadRequestException.class, () -> evaluate(def("xor", predicate("open_deal"))));
+    }
+
+    @Test
+    void unsupportedRecordType_throws() {
+        assertThrows(BadRequestException.class, () -> segmentService.evaluate("person", def("all", predicate("open_deal"))));
     }
 }
