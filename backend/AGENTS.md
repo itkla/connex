@@ -53,6 +53,17 @@ This is the most load-bearing property of Connex. A change that leaks data acros
 
 Smart-segment evaluation lives in `SegmentService` as a reusable **condition model**: a `SegmentDefinition` (`match` = `all`/`any` over `SegmentCondition`s), where each condition is a graph-aware **predicate** (`warm_intro_available`, `open_deal`, `cooling`, `no_activity`) or a **field** comparison (`industry`/`name`/`tag`), optionally negated — evaluated to workspace + current-user-scoped record ids via `SegmentMapper`. This model is deliberately feature-agnostic: the planned **rule engine (#54)** should consume it as its `WHEN` rather than inventing a new condition language (segments are state-matching; rules add the transition/trigger + action layer on top). Add new predicates/fields here — extend the catalog allow-list and the `SegmentMapper` queries, keeping every statement `#{}`-bound and workspace-scoped.
 
+## Rule engine
+
+Automation rules (`RuleService` CRUD + `RuleEngineService` execution, issue #54) layer a trigger + actions on top of the segment condition model. Conventions:
+
+- A rule = **trigger** (`entity_change` after-commit events, or a `schedule` cadence) + optional **WHEN** (a `SegmentDefinition`, company-only today) + **THEN** actions. Trigger/condition/actions are JSON columns, validated per type in `RuleService`.
+- **Execution identity.** A rule runs as the run-as member (`user` mode) or the global system actor (`system` mode, gated to admin via `requireRole(ADMIN)` at authoring). `SystemActor` is a seeded non-login user (migration `V20`) whose permissions are a fixed narrow set granted in `WorkspaceService.permissionsFor` — extend that set if you add an action needing a new permission. Off-thread execution installs SecurityContext + TenantContext via `AutomationExecutor`, so the existing tenant- and RBAC-enforcing services apply unchanged; an actor lacking a permission fails the action.
+- **Adding a trigger event.** Emit it after the mutation's write via `ruleTriggers.publish(workspaceId, recordType, entityId, "<entity>.<event>")` (alongside any `notificationChanges.publish`), and add the token to the rule's validated vocabulary. The `@TransactionalEventListener(AFTER_COMMIT)` + `@Async` listener runs the engine off-thread on committed state, mirroring the notification subsystem.
+- **Adding an action.** Add the type to `RuleService` validation and a branch in `RuleActionExecutor` (delegating to the existing service), and grant any new permission to `SystemActor` if `system` mode must perform it.
+- **Idempotency.** Every fire is keyed in `rule_execution` (unique `dedupe_key` per rule); time-based fires bucket by cadence. The engine never throws to its caller.
+- The engine runs **off the request thread** — pass `workspaceId`/`userId` explicitly to mappers and to the session-free `SegmentService.evaluate(workspaceId, userId, …)`; never rely on the request's tenant context there.
+
 ## Definition of Done (backend) — the verify loop is required
 
 1. **Run a test server:** `./gradlew bootRun` (MySQL via `docker-compose up -d db`, see `docker-compose.yml` — db on `:3306`, adminer on `:9001`).
