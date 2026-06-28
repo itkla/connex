@@ -17,6 +17,7 @@ import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.beans.PersonEdge;
 import ooo.klae.connex.backend.beans.Pipeline;
 import ooo.klae.connex.backend.beans.Stage;
+import ooo.klae.connex.backend.beans.Workspace;
 import ooo.klae.connex.backend.dto.SegmentSelection;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.mappers.PersonEdgeMapper;
@@ -132,6 +133,21 @@ class SegmentServiceTest extends AbstractServiceTest {
 
         assertTrue(ids.contains(both.getId()));
         assertFalse(ids.contains(dealButActive.getId()));
+    }
+
+    @Test
+    void evaluate_excludesOtherWorkspaceCompanies() {
+        Workspace other = new Workspace();
+        other.setName("WS " + unique());
+        other.setSlug("ws_" + unique());
+        workspaceMapper.insert(other);
+        Company foreign = new Company();
+        foreign.setName("Foreign " + unique());
+        foreign.setWorkspaceId(other.getId());
+        companyMapper.insert(foreign);
+
+        assertFalse(segmentService.evaluate("company", List.of(segment("no_activity"))).contains(foreign.getId()));
+        assertFalse(segmentService.evaluate("company", List.of(segment("cooling"))).contains(foreign.getId()));
     }
 
     @Test

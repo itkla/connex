@@ -12,6 +12,9 @@ import java.util.List;
  */
 public interface SegmentMapper {
 
+    /** Ids of all companies owned by the workspace, used to scope service-computed predicates to owned records. */
+    List<Integer> companyIdsInWorkspace(int workspaceId);
+
     /** Ids of companies that have at least one open deal ({@code won IS NULL}). */
     List<Integer> companyIdsWithOpenDeal(int workspaceId);
 

@@ -25,5 +25,6 @@ public class SegmentEvaluateRequest {
 
     @NotNull
     @Valid
+    @Size(max = 16)
     private List<SegmentSelection> segments;
 }

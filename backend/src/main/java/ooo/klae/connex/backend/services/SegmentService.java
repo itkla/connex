@@ -57,8 +57,12 @@ public class SegmentService {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         int userId = authService.getCurrentUser().getId();
 
+        Set<String> seen = new HashSet<>();
         Set<Integer> result = null;
         for (SegmentSelection selection : segments) {
+            if (!seen.add(normalize(selection.getKey()) + ":" + selection.getDays())) {
+                continue;
+            }
             Set<Integer> matched = evaluateCompanySegment(selection, workspaceId, userId);
             if (result == null) {
                 result = matched;
@@ -87,11 +91,13 @@ public class SegmentService {
     }
 
     private Set<Integer> coolingCompanyIds(int workspaceId) {
+        Set<Integer> owned = new HashSet<>(segmentMapper.companyIdsInWorkspace(workspaceId));
         Set<Integer> ids = new HashSet<>();
         for (RelationshipTemperatureDto temperature : scoringService.scoreCompanies(workspaceId)) {
-            if ("cool".equals(temperature.getBand())
-                    || "cold".equals(temperature.getBand())
-                    || "cooling".equals(temperature.getTrend())) {
+            if (owned.contains(temperature.getId())
+                    && ("cool".equals(temperature.getBand())
+                        || "cold".equals(temperature.getBand())
+                        || "cooling".equals(temperature.getTrend()))) {
                 ids.add(temperature.getId());
             }
         }
@@ -105,7 +111,7 @@ public class SegmentService {
         }
         Set<Integer> warmlyConnected = new HashSet<>();
         for (PersonEdge edge : edgeMapper.getAllEdges(workspaceId)) {
-            if (edge.getStrength() < STRONG_EDGE) {
+            if (edge.getStrength() < STRONG_EDGE || edge.getSourcePersonId() == edge.getTargetPersonId()) {
                 continue;
             }
             if (engaged.contains(edge.getSourcePersonId())) {

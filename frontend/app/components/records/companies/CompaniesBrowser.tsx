@@ -107,15 +107,19 @@ export default function CompaniesBrowser({ companies, savedViews }: { companies:
 
     const [tempByCompanyId, setTempByCompanyId] = useState<Map<number, RelationshipTemperature>>(new Map());
     const [segments, setSegments] = useState<SegmentSelection[]>([]);
-    const [segmentIds, setSegmentIds] = useState<Set<number> | null>(null);
+    const [segmentResult, setSegmentResult] = useState<{ key: string; ids: Set<number> } | null>(null);
+    const segmentsKey = useMemo(
+        () => segments.map((segment) => `${segment.key}:${segment.days ?? ''}`).sort().join('|'),
+        [segments],
+    );
     useEffect(() => {
         if (segments.length === 0) return;
         let active = true;
         evaluateSegments('company', segments)
-            .then((result) => { if (active) setSegmentIds(new Set(result.ids)); })
-            .catch(() => { if (active) { setSegmentIds(new Set()); toastError(tSeg('evaluateFailed')); } });
+            .then((result) => { if (active) setSegmentResult({ key: segmentsKey, ids: new Set(result.ids) }); })
+            .catch(() => { if (active) { setSegmentResult({ key: segmentsKey, ids: new Set() }); toastError(tSeg('evaluateFailed')); } });
         return () => { active = false; };
-    }, [segments, tSeg]);
+    }, [segments, segmentsKey, tSeg]);
     useEffect(() => {
         getCompanyTemperatures()
             .then((temps) => setTempByCompanyId(new Map(temps.map((temp) => [temp.id, temp]))))
@@ -318,7 +322,7 @@ export default function CompaniesBrowser({ companies, savedViews }: { companies:
         },
     ], [t, tempByCompanyId]);
 
-    const activeSegmentIds = segments.length > 0 ? segmentIds : null;
+    const activeSegmentIds = segments.length > 0 && segmentResult?.key === segmentsKey ? segmentResult.ids : null;
     const visibleCompanies = useMemo(
         () => {
             const filtered = applyRecordFilters(filteredCompanies, columns, filterState);
