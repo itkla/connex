@@ -50,6 +50,7 @@ public class DealService {
     private final AuditService auditService;
     private final WorkspaceService workspaceService;
     private final AuthService authService;
+    private final RuleTriggerPublisher ruleTriggers;
     private final NotificationChangePublisher notificationChanges;
     private final CustomFieldValueService customFieldValueService;
 
@@ -165,6 +166,7 @@ public class DealService {
             "Created deal " + deal.getName(),
             auditService.diff(null, deal, AUDIT_FIELDS));
         notificationChanges.publish(workspaceId, "deal", deal.getId());
+        ruleTriggers.publish(workspaceId, "deal", deal.getId(), "deal.created");
         return deal;
     }
 
@@ -188,6 +190,12 @@ public class DealService {
             "Updated deal " + deal.getName(),
             auditService.diff(before, deal, AUDIT_FIELDS));
         notificationChanges.publish(workspaceId, "deal", id);
+        Integer beforeStage = before.getStageId();
+        boolean stageChanged = beforeStage == null ? deal.getStageId() != null : !beforeStage.equals(deal.getStageId());
+        if (stageChanged) {
+            ruleTriggers.publish(workspaceId, "deal", id, "deal.stage_changed");
+        }
+        ruleTriggers.publish(workspaceId, "deal", id, "deal.updated");
         return deal;
     }
 
@@ -218,6 +226,7 @@ public class DealService {
             (Boolean.TRUE.equals(deal.getWon()) ? "Won deal " : "Lost deal ") + deal.getName(),
             auditService.diff(before, deal, AUDIT_FIELDS));
         notificationChanges.publish(workspaceId, "deal", id);
+        ruleTriggers.publish(workspaceId, "deal", id, Boolean.TRUE.equals(deal.getWon()) ? "deal.won" : "deal.lost");
         return deal;
     }
 

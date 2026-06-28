@@ -11,6 +11,7 @@ import lombok.RequiredArgsConstructor;
 import tools.jackson.databind.ObjectMapper;
 
 import ooo.klae.connex.backend.beans.Rule;
+import ooo.klae.connex.backend.beans.RuleExecution;
 import ooo.klae.connex.backend.dto.RuleAction;
 import ooo.klae.connex.backend.dto.RuleDto;
 import ooo.klae.connex.backend.dto.RuleRequest;
@@ -55,6 +56,12 @@ public class RuleService {
     @RequirePermission(Permission.RULE_MANAGE)
     public RuleDto getById(int id) {
         return toDto(requireRule(id));
+    }
+
+    @RequirePermission(Permission.RULE_MANAGE)
+    public List<RuleExecution> executions(int id) {
+        requireRule(id);
+        return ruleMapper.getExecutionsByRule(workspaceService.getCurrentWorkspaceId(), id, 50);
     }
 
     @Transactional

@@ -1,6 +1,6 @@
 package ooo.klae.connex.backend.services;
 
-import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.Map;
@@ -43,6 +43,8 @@ public class RuleEngineService {
 
     private static final Logger log = LoggerFactory.getLogger(RuleEngineService.class);
     private static final DateTimeFormatter DAY = DateTimeFormatter.ofPattern("yyyyMMdd");
+    private static final DateTimeFormatter HOUR = DateTimeFormatter.ofPattern("yyyyMMddHH");
+    private static final DateTimeFormatter WEEK = DateTimeFormatter.ofPattern("YYYY'W'ww");
     private static final int MAX_SCHEDULE_MATCHES = 500;
 
     /** Runs every enabled entity-change rule whose trigger matches this committed change. */
@@ -68,6 +70,7 @@ public class RuleEngineService {
 
     /** Evaluates every enabled schedule rule of this cadence over the workspace's records. */
     public void runSchedule(int workspaceId, String cadence) {
+        String bucket = scheduleBucket(cadence);
         for (Rule rule : ruleMapper.getEnabledByTrigger(workspaceId, "schedule")) {
             try {
                 RuleTrigger trigger = read(rule.getTriggerConfig(), RuleTrigger.class);
@@ -75,7 +78,7 @@ public class RuleEngineService {
                     continue;
                 }
                 for (int entityId : scheduleMatches(rule, workspaceId)) {
-                    fire(rule, workspaceId, rule.getRecordType(), entityId, "schedule");
+                    fire(rule, workspaceId, rule.getRecordType(), entityId, bucket);
                 }
             } catch (Exception e) {
                 log.warn("Schedule rule {} failed: {}", rule.getId(), e.getMessage());
@@ -108,8 +111,16 @@ public class RuleEngineService {
         return rule.getRunAsUserId() != null ? rule.getRunAsUserId() : systemActor.user().getId();
     }
 
-    private void fire(Rule rule, int workspaceId, String recordType, int entityId, String eventKey) {
-        String dedupeSuffix = "schedule".equals(eventKey) ? LocalDate.now().format(DAY) : eventKey;
+    private String scheduleBucket(String cadence) {
+        LocalDateTime now = LocalDateTime.now();
+        return switch (cadence == null ? "daily" : cadence.trim().toLowerCase()) {
+            case "hourly" -> now.format(HOUR);
+            case "weekly" -> now.format(WEEK);
+            default -> now.format(DAY);
+        };
+    }
+
+    private void fire(Rule rule, int workspaceId, String recordType, int entityId, String dedupeSuffix) {
         String dedupeKey = entityId + ":" + dedupeSuffix;
         if (ruleMapper.executionExists(rule.getId(), dedupeKey)) {
             return;

@@ -14,6 +14,7 @@ import org.springframework.web.bind.annotation.RestController;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 
+import ooo.klae.connex.backend.beans.RuleExecution;
 import ooo.klae.connex.backend.dto.RuleDto;
 import ooo.klae.connex.backend.dto.RuleRequest;
 import ooo.klae.connex.backend.services.RuleService;
@@ -37,6 +38,11 @@ public class RuleController {
     @GetMapping("/{id}")
     public RuleDto get(@PathVariable int id) {
         return ruleService.getById(id);
+    }
+
+    @GetMapping("/{id}/executions")
+    public List<RuleExecution> executions(@PathVariable int id) {
+        return ruleService.executions(id);
     }
 
     @PostMapping

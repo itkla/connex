@@ -48,6 +48,10 @@ connex:
         overdue-backfill-days: ${CONNEX_NOTIFICATIONS_OVERDUE_BACKFILL_DAYS:30}
         retention-days: ${CONNEX_NOTIFICATIONS_RETENTION_DAYS:90}
         max-page-size: ${CONNEX_NOTIFICATIONS_MAX_PAGE_SIZE:100}
+    rules:
+        scheduling-enabled: ${CONNEX_RULES_SCHEDULING_ENABLED:true}
+        evaluation-delay-ms: ${CONNEX_RULES_EVALUATION_DELAY_MS:900000}
+        initial-delay-ms: ${CONNEX_RULES_INITIAL_DELAY_MS:900000}
 
 mybatis:
     mapper-locations: classpath:mappers/*.xml
