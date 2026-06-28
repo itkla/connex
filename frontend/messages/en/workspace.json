@@ -188,6 +188,10 @@
     "nameRequired": "Enter a rule name",
     "eventsRequired": "Pick at least one event",
     "conditionRequired": "A scheduled rule needs at least one condition",
+    "previewAnyChange": "any change",
+    "actionTitleRequired": "Add a title for each action",
+    "actionActivityTypeRequired": "Add an activity type",
+    "actionTagRequired": "Choose a tag for the tag action",
     "record": { "deal": "deal", "company": "company" },
     "cadence": { "hourly": "hour", "daily": "day", "weekly": "week" },
     "event": {

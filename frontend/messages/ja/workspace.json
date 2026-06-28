@@ -188,6 +188,10 @@
     "nameRequired": "ルール名を入力してください",
     "eventsRequired": "イベントを1つ以上選択してください",
     "conditionRequired": "スケジュールルールには条件が1つ以上必要です",
+    "previewAnyChange": "変更時",
+    "actionTitleRequired": "各アクションにタイトルを入力してください",
+    "actionActivityTypeRequired": "活動の種類を入力してください",
+    "actionTagRequired": "タグアクションのタグを選択してください",
     "record": { "deal": "取引", "company": "会社" },
     "cadence": { "hourly": "時間", "daily": "日", "weekly": "週" },
     "event": {

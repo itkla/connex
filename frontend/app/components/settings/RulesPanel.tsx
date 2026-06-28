@@ -75,6 +75,7 @@ export default function RulesPanel() {
         let cancelled = false;
         (async () => {
             setLoading(true);
+            setAccessDenied(false);
             try {
                 const [loadedRules, loadedFields] = await Promise.all([
                     getRules(),

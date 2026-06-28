@@ -2,7 +2,8 @@
 
 import { useState } from "react";
 import { useTranslations } from "next-intl";
-import { PlusIcon, TrashIcon } from "@heroicons/react/24/outline";
+import { AnimatePresence, motion, useReducedMotion } from "motion/react";
+import { BoltIcon, CheckIcon, PlusIcon, TrashIcon, UserIcon } from "@heroicons/react/24/outline";
 
 import {
     Dialog,
@@ -104,6 +105,7 @@ function RuleForm({
     onSubmit: (payload: RuleRequest) => void;
 }) {
     const t = useTranslations("WorkspaceRules");
+    const reduce = useReducedMotion() ?? false;
     const [name, setName] = useState(editing?.name ?? "");
     const [recordType, setRecordType] = useState<string>(editing?.recordType ?? "deal");
     const [triggerType, setTriggerType] = useState<string>(editing?.trigger.type ?? "entity_change");
@@ -135,6 +137,17 @@ function RuleForm({
     const addAction = () => setActions((prev) => [...prev, defaultAction()]);
     const removeAction = (index: number) => setActions((prev) => (prev.length > 1 ? prev.filter((_, i) => i !== index) : prev));
 
+    const previewTrigger = isSchedule
+        ? t("summarySchedule", { cadence: t(`cadence.${cadence}`) })
+        : t("summaryEntity", {
+              record: t(`record.${recordType}`),
+              events: events.length ? events.map((event) => t(`event.${event}`)).join(", ") : t("previewAnyChange"),
+          });
+    const preview = t("summaryFull", {
+        trigger: previewTrigger,
+        actions: actions.map((action) => t(`action.${action.type}`)).join(", "),
+    });
+
     const submit = () => {
         setError(null);
         if (!name.trim()) {
@@ -150,10 +163,40 @@ function RuleForm({
             setError(t("conditionRequired"));
             return;
         }
+        for (const action of actions) {
+            if ((action.type === "create_task" || action.type === "notify") && !action.title?.trim()) {
+                setError(t("actionTitleRequired"));
+                return;
+            }
+            if (action.type === "log_activity" && !action.activityType?.trim()) {
+                setError(t("actionActivityTypeRequired"));
+                return;
+            }
+            if (action.type === "add_tag" && !action.tagId) {
+                setError(t("actionTagRequired"));
+                return;
+            }
+        }
         const trigger: RuleTrigger = isSchedule
             ? { type: "schedule", cadence }
-            : { type: "entity_change", events };
-        onSubmit({ name: name.trim(), recordType, trigger, condition: conditionPayload, actions, executionMode });
+            : {
+                  type: "entity_change",
+                  events,
+                  ...(editing?.trigger.targetStageId ? { targetStageId: editing.trigger.targetStageId } : {}),
+              };
+        const normalizedActions = actions.map((action) =>
+            action.type === "create_task" && action.dueInDays == null ? { ...action, dueInDays: 3 } : action,
+        );
+        onSubmit({
+            name: name.trim(),
+            description: editing?.description,
+            enabled: editing?.enabled ?? true,
+            recordType,
+            trigger,
+            condition: conditionPayload,
+            actions: normalizedActions,
+            executionMode,
+        });
     };
 
     return (
@@ -163,7 +206,7 @@ function RuleForm({
                 <DialogDescription>{t("createDescription")}</DialogDescription>
             </DialogHeader>
 
-            <div className="flex max-h-[60vh] flex-col gap-5 overflow-y-auto px-1">
+            <div className="flex max-h-[62vh] flex-col gap-5 overflow-y-auto px-1">
                 <div className="space-y-1.5">
                     <Label htmlFor="rule-name">{t("ruleName")}</Label>
                     <Input
@@ -175,7 +218,12 @@ function RuleForm({
                     />
                 </div>
 
-                <Section label={t("whenLabel")}>
+                <p className="flex items-start gap-2 rounded-lg bg-muted/50 px-3 py-2.5 text-sm leading-relaxed text-foreground">
+                    <BoltIcon aria-hidden className="mt-0.5 size-4 shrink-0 text-brand" />
+                    <span>{preview}</span>
+                </p>
+
+                <Field label={t("whenLabel")}>
                     <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
                         <Select value={recordType} onValueChange={changeRecordType}>
                             <SelectTrigger size="sm" aria-label={t("recordType")} className="w-32"><SelectValue /></SelectTrigger>
@@ -195,48 +243,62 @@ function RuleForm({
                         )}
                     </div>
 
-                    {triggerType === "entity_change" ? (
-                        <div className="flex flex-wrap gap-1.5">
-                            {eventsFor(recordType).map((event) => (
-                                <button
-                                    key={event}
-                                    type="button"
-                                    aria-pressed={events.includes(event)}
-                                    onClick={() => toggleEvent(event)}
-                                    className={cn(
-                                        "rounded-full px-3 py-1 text-xs font-medium ring-1 transition active:scale-[0.97]",
-                                        events.includes(event)
-                                            ? "bg-brand text-white ring-brand"
-                                            : "bg-muted text-muted-foreground ring-border hover:text-foreground",
-                                    )}
-                                >
-                                    {t(`event.${event}`)}
-                                </button>
-                            ))}
-                        </div>
-                    ) : (
-                        <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                            <span>{t("everyPrefix")}</span>
-                            <Select value={cadence} onValueChange={setCadence}>
-                                <SelectTrigger size="sm" aria-label={t("cadenceLabel")} className="w-32"><SelectValue /></SelectTrigger>
-                                <SelectContent>
-                                    {CADENCES.map((value) => (
-                                        <SelectItem key={value} value={value}>{t(`cadence.${value}`)}</SelectItem>
-                                    ))}
-                                </SelectContent>
-                            </Select>
-                        </div>
-                    )}
-                </Section>
+                    <AnimatePresence mode="wait" initial={false}>
+                        <motion.div
+                            key={triggerType}
+                            initial={reduce ? false : { opacity: 0 }}
+                            animate={{ opacity: 1 }}
+                            exit={reduce ? { opacity: 1 } : { opacity: 0 }}
+                            transition={{ duration: 0.15, ease: [0.23, 1, 0.32, 1] }}
+                        >
+                            {triggerType === "entity_change" ? (
+                                <div className="flex flex-wrap gap-1.5">
+                                    {eventsFor(recordType).map((event) => {
+                                        const on = events.includes(event);
+                                        return (
+                                            <button
+                                                key={event}
+                                                type="button"
+                                                aria-pressed={on}
+                                                onClick={() => toggleEvent(event)}
+                                                className={cn(
+                                                    "inline-flex items-center gap-1 rounded-full px-3 py-1 text-xs font-medium ring-1 transition active:scale-[0.97] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                                                    on
+                                                        ? "bg-brand/15 text-foreground ring-brand"
+                                                        : "bg-muted text-muted-foreground ring-border hover:text-foreground",
+                                                )}
+                                            >
+                                                {on && <CheckIcon aria-hidden className="size-3 text-brand" />}
+                                                {t(`event.${event}`)}
+                                            </button>
+                                        );
+                                    })}
+                                </div>
+                            ) : (
+                                <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                                    <span>{t("everyPrefix")}</span>
+                                    <Select value={cadence} onValueChange={setCadence}>
+                                        <SelectTrigger size="sm" aria-label={t("cadenceLabel")} className="w-32"><SelectValue /></SelectTrigger>
+                                        <SelectContent>
+                                            {CADENCES.map((value) => (
+                                                <SelectItem key={value} value={value}>{t(`cadence.${value}`)}</SelectItem>
+                                            ))}
+                                        </SelectContent>
+                                    </Select>
+                                </div>
+                            )}
+                        </motion.div>
+                    </AnimatePresence>
+                </Field>
 
                 {isCompany && (
-                    <Section label={isSchedule ? t("conditionRequiredLabel") : t("conditionLabel")}>
+                    <Field label={isSchedule ? t("conditionRequiredLabel") : t("conditionLabel")}>
                         <SegmentBuilder definition={condition} fields={fields} onChange={setCondition} />
-                    </Section>
+                    </Field>
                 )}
 
-                <Section label={t("thenLabel")}>
-                    <div className="flex flex-col gap-2">
+                <Field label={t("thenLabel")}>
+                    <div className="divide-y divide-border overflow-hidden rounded-xl ring-1 ring-border">
                         {actions.map((action, index) => (
                             <ActionRow
                                 key={index}
@@ -247,38 +309,46 @@ function RuleForm({
                                 onRemove={actions.length > 1 ? () => removeAction(index) : undefined}
                             />
                         ))}
-                        <Button
-                            type="button"
-                            variant="ghost"
-                            size="sm"
-                            onClick={addAction}
-                            className="self-start gap-1 text-brand hover:text-brand-hover"
-                        >
-                            <PlusIcon className="size-4" />
-                            {t("addAction")}
-                        </Button>
                     </div>
-                </Section>
+                    <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        onClick={addAction}
+                        className="gap-1 text-brand hover:text-brand-hover"
+                    >
+                        <PlusIcon className="size-4" />
+                        {t("addAction")}
+                    </Button>
+                </Field>
 
-                <Section label={t("runAsLabel")}>
-                    <div className="grid grid-cols-2 gap-2">
-                        {EXECUTION_MODES.map((mode) => (
-                            <button
-                                key={mode}
-                                type="button"
-                                aria-pressed={executionMode === mode}
-                                onClick={() => setExecutionMode(mode)}
-                                className={cn(
-                                    "rounded-lg px-3 py-2 text-left ring-1 transition active:scale-[0.99]",
-                                    executionMode === mode ? "bg-brand/10 ring-brand" : "bg-card ring-border hover:bg-muted/50",
-                                )}
-                            >
-                                <span className="block text-sm font-medium text-foreground">{t(`runAs.${mode}.title`)}</span>
-                                <span className="block text-xs text-muted-foreground">{t(`runAs.${mode}.hint`)}</span>
-                            </button>
-                        ))}
+                <Field label={t("runAsLabel")}>
+                    <div role="radiogroup" aria-label={t("runAsLabel")} className="grid grid-cols-2 gap-2">
+                        {EXECUTION_MODES.map((mode) => {
+                            const Icon = mode === "system" ? BoltIcon : UserIcon;
+                            const selected = executionMode === mode;
+                            return (
+                                <button
+                                    key={mode}
+                                    type="button"
+                                    role="radio"
+                                    aria-checked={selected}
+                                    onClick={() => setExecutionMode(mode)}
+                                    className={cn(
+                                        "flex items-start gap-2.5 rounded-xl p-3 text-left ring-1 transition active:scale-[0.99] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                                        selected ? "bg-brand/5 ring-brand" : "bg-card ring-border hover:bg-muted/40",
+                                    )}
+                                >
+                                    <Icon aria-hidden className={cn("mt-0.5 size-4 shrink-0", selected ? "text-brand" : "text-muted-foreground")} />
+                                    <span className="min-w-0">
+                                        <span className="block text-sm font-medium text-foreground">{t(`runAs.${mode}.title`)}</span>
+                                        <span className="block text-xs text-muted-foreground">{t(`runAs.${mode}.hint`)}</span>
+                                    </span>
+                                </button>
+                            );
+                        })}
                     </div>
-                </Section>
+                </Field>
 
                 {error && <p className="text-sm text-destructive">{error}</p>}
             </div>
@@ -295,10 +365,10 @@ function RuleForm({
     );
 }
 
-function Section({ label, children }: { label: string; children: React.ReactNode }) {
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
     return (
         <div className="space-y-2">
-            <h3 className="text-xs font-medium tracking-[0.12em] text-muted-foreground uppercase">{label}</h3>
+            <h3 className="text-[13px] font-medium text-foreground">{label}</h3>
             {children}
         </div>
     );
@@ -319,9 +389,9 @@ function ActionRow({
 }) {
     const t = useTranslations("WorkspaceRules");
     return (
-        <div className="flex items-start gap-2 rounded-lg bg-muted/40 p-2 ring-1 ring-border">
+        <div className="flex items-start gap-2 p-3">
             <Select value={action.type} onValueChange={(type) => onChange({ type })}>
-                <SelectTrigger size="sm" aria-label={t("actionType")} className="w-40 shrink-0 bg-card"><SelectValue /></SelectTrigger>
+                <SelectTrigger size="sm" aria-label={t("actionType")} className="w-40 shrink-0"><SelectValue /></SelectTrigger>
                 <SelectContent>
                     {actionsFor(recordType).map((type) => (
                         <SelectItem key={type} value={type}>{t(`action.${type}`)}</SelectItem>
@@ -336,7 +406,7 @@ function ActionRow({
                         placeholder={t("actionTitlePlaceholder")}
                         aria-label={t("actionTitlePlaceholder")}
                         maxLength={255}
-                        className="h-9 bg-card"
+                        className="h-9"
                     />
                 )}
                 {action.type === "notify" && (
@@ -346,7 +416,7 @@ function ActionRow({
                         placeholder={t("actionBodyPlaceholder")}
                         aria-label={t("actionBodyPlaceholder")}
                         maxLength={2000}
-                        className="h-9 bg-card"
+                        className="h-9"
                     />
                 )}
                 {action.type === "create_task" && (
@@ -358,7 +428,7 @@ function ActionRow({
                             value={action.dueInDays ?? 3}
                             onChange={(event) => onChange({ ...action, dueInDays: Math.max(1, Number(event.target.value) || 3) })}
                             aria-label={t("dueIn")}
-                            className="h-9 w-16 bg-card"
+                            className="h-9 w-16"
                         />
                         <span>{t("days")}</span>
                     </div>
@@ -371,7 +441,7 @@ function ActionRow({
                             placeholder={t("activityTypePlaceholder")}
                             aria-label={t("activityTypePlaceholder")}
                             maxLength={32}
-                            className="h-9 bg-card"
+                            className="h-9"
                         />
                         <Input
                             value={action.title ?? ""}
@@ -379,13 +449,13 @@ function ActionRow({
                             placeholder={t("activitySubjectPlaceholder")}
                             aria-label={t("activitySubjectPlaceholder")}
                             maxLength={255}
-                            className="h-9 bg-card"
+                            className="h-9"
                         />
                     </>
                 )}
                 {action.type === "add_tag" && (
                     <Select value={action.tagId ? String(action.tagId) : undefined} onValueChange={(value) => onChange({ ...action, tagId: Number(value) })}>
-                        <SelectTrigger size="sm" aria-label={t("tag")} className="bg-card"><SelectValue placeholder={t("pickTag")} /></SelectTrigger>
+                        <SelectTrigger size="sm" aria-label={t("tag")}><SelectValue placeholder={t("pickTag")} /></SelectTrigger>
                         <SelectContent>
                             {(fields?.tags ?? []).map((tag) => (
                                 <SelectItem key={tag.id} value={String(tag.id)}>{tag.name}</SelectItem>
