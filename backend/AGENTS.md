@@ -49,6 +49,10 @@ This is the most load-bearing property of Connex. A change that leaks data acros
 - **Error handling:** throw the domain exceptions in `exceptions/` (`BadRequestException`, `ForbiddenException`, `ResourceNotFoundException`, `DuplicateResourceException`); `GlobalExceptionHandler` maps them to HTTP responses. Don't build ad-hoc error bodies or catch-and-swallow.
 - Mirror the existing controller/service/mapper for the entity you're touching before adding new patterns.
 
+## Smart segments & the condition model
+
+Smart-segment evaluation lives in `SegmentService` as a reusable **condition model**: a `SegmentDefinition` (`match` = `all`/`any` over `SegmentCondition`s), where each condition is a graph-aware **predicate** (`warm_intro_available`, `open_deal`, `cooling`, `no_activity`) or a **field** comparison (`industry`/`name`/`tag`), optionally negated — evaluated to workspace + current-user-scoped record ids via `SegmentMapper`. This model is deliberately feature-agnostic: the planned **rule engine (#54)** should consume it as its `WHEN` rather than inventing a new condition language (segments are state-matching; rules add the transition/trigger + action layer on top). Add new predicates/fields here — extend the catalog allow-list and the `SegmentMapper` queries, keeping every statement `#{}`-bound and workspace-scoped.
+
 ## Definition of Done (backend) — the verify loop is required
 
 1. **Run a test server:** `./gradlew bootRun` (MySQL via `docker-compose up -d db`, see `docker-compose.yml` — db on `:3306`, adminer on `:9001`).

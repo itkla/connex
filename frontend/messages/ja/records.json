@@ -2,20 +2,61 @@
   "SmartSegments": {
     "title": "スマートセグメント",
     "evaluateFailed": "セグメントを評価できませんでした。",
+    "fieldsFailed": "セグメントの選択肢を読み込めませんでした。",
+    "builderTitle": "セグメントを作成",
+    "builderDescription": "関係シグナルとフィールド条件を組み合わせて、目的の企業を正確に絞り込みます。",
+    "matchPrefix": "次の条件の",
+    "matchAll": "すべて",
+    "matchAny": "いずれか",
+    "matchSuffix": "に一致",
+    "noConditions": "条件がまだありません。追加して絞り込みを始めましょう。",
+    "addCondition": "条件を追加",
+    "clearConditions": "すべてクリア",
+    "done": "完了",
+    "removeCondition": "条件を削除",
+    "a11yMatch": "すべて／いずれかの条件に一致",
+    "a11ySubject": "条件のフィールドまたはシグナル",
+    "a11yOperator": "演算子",
+    "groupPredicates": "関係シグナル",
+    "groupFields": "フィールド",
+    "field": {
+      "industry": "業界",
+      "name": "会社名",
+      "tag": "タグ"
+    },
+    "op": {
+      "is": "である",
+      "isNot": "ではない",
+      "contains": "を含む",
+      "notContains": "を含まない",
+      "has": "を持つ",
+      "notHas": "を持たない"
+    },
+    "chipField": "{field}が{value}{op}",
+    "chipDays": "{label}（{days}日）",
+    "pickIndustry": "業界を選択",
+    "pickTag": "タグを選択",
+    "nameValue": "テキストを入力",
+    "inLast": "過去",
+    "days": "日間",
     "warm_intro_available": {
       "label": "温かい紹介が可能",
+      "labelNot": "温かい紹介なし",
       "description": "チームの誰かがつながっていますが、あなたはまだ活動がありません。"
     },
     "open_deal": {
       "label": "進行中の取引あり",
+      "labelNot": "進行中の取引なし",
       "description": "少なくとも1件の取引が進行中です。"
     },
     "cooling": {
       "label": "冷めかけ／冷たい",
+      "labelNot": "冷めかけ／冷たくない",
       "description": "関係の温度が低い、または下降傾向です。"
     },
     "no_activity": {
       "label": "最近の活動なし",
+      "labelNot": "最近の活動あり",
       "description": "過去30日間に記録された活動がありません。"
     }
   },

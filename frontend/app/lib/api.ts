@@ -1151,8 +1151,12 @@ export function deleteSavedView(id: number, init: RequestInit = {}) {
 * == Smart segments
 */
 
-export function evaluateSegments(recordType: Types.SavedViewRecordType, segments: Types.SegmentSelection[]) {
-    return postJson<Types.SegmentResult>(`/api/segments/evaluate`, { recordType, segments });
+export function evaluateSegments(recordType: Types.SavedViewRecordType, definition: Types.SegmentDefinition) {
+    return postJson<Types.SegmentResult>(`/api/segments/evaluate`, { recordType, definition });
+}
+
+export function getSegmentFields(recordType: Types.SavedViewRecordType) {
+    return getJson<Types.SegmentFields>(`/api/segments/fields?recordType=${recordType}`, { cache: "no-store" });
 }
 
 export function getShares(type: string, id: number, init: RequestInit = {}) {

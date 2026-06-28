@@ -47,4 +47,29 @@
           )
     </select>
 
+    <select id="companyIdsByIndustry" resultType="int">
+        SELECT id FROM company WHERE workspace_id = #{workspaceId} AND industry = #{industry}
+    </select>
+
+    <select id="companyIdsByIndustryContains" resultType="int">
+        SELECT id FROM company WHERE workspace_id = #{workspaceId} AND industry LIKE #{pattern}
+    </select>
+
+    <select id="companyIdsByNameContains" resultType="int">
+        SELECT id FROM company WHERE workspace_id = #{workspaceId} AND name LIKE #{pattern}
+    </select>
+
+    <select id="companyIdsByTag" resultType="int">
+        SELECT DISTINCT c.id
+        FROM company c
+        JOIN company_tag ct ON ct.company_id = c.id
+        WHERE c.workspace_id = #{workspaceId} AND ct.tag_id = #{tagId}
+    </select>
+
+    <select id="distinctIndustries" resultType="string">
+        SELECT DISTINCT industry FROM company
+        WHERE workspace_id = #{workspaceId} AND industry IS NOT NULL AND industry != ''
+        ORDER BY industry
+    </select>
+
 </mapper>
