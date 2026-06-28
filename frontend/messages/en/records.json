@@ -29,9 +29,10 @@
       "contains": "contains",
       "notContains": "doesn't contain",
       "has": "has",
-      "notHas": "doesn't have",
-      "notPrefix": "Not"
+      "notHas": "doesn't have"
     },
+    "chipField": "{field} {op} {value}",
+    "chipDays": "{label} ({days}d)",
     "pickIndustry": "Choose an industry",
     "pickTag": "Choose a tag",
     "nameValue": "Enter text",
@@ -40,18 +41,22 @@
     "daysShort": "d",
     "warm_intro_available": {
       "label": "Warm intro available",
+      "labelNot": "No warm intro",
       "description": "A teammate is connected to someone here, but you have no activity yet."
     },
     "open_deal": {
       "label": "Has an open deal",
+      "labelNot": "No open deal",
       "description": "At least one deal is still open."
     },
     "cooling": {
       "label": "Cooling or cold",
+      "labelNot": "Not cooling or cold",
       "description": "Relationship temperature is cool, cold, or trending down."
     },
     "no_activity": {
       "label": "No recent activity",
+      "labelNot": "Has recent activity",
       "description": "No logged activity in the last 30 days."
     }
   },

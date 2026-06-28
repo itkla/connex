@@ -24,14 +24,15 @@
       "tag": "タグ"
     },
     "op": {
-      "is": "は",
+      "is": "である",
       "isNot": "ではない",
       "contains": "を含む",
       "notContains": "を含まない",
       "has": "を持つ",
-      "notHas": "を持たない",
-      "notPrefix": "以外"
+      "notHas": "を持たない"
     },
+    "chipField": "{field}が{value}{op}",
+    "chipDays": "{label}（{days}日）",
     "pickIndustry": "業界を選択",
     "pickTag": "タグを選択",
     "nameValue": "テキストを入力",
@@ -40,18 +41,22 @@
     "daysShort": "日",
     "warm_intro_available": {
       "label": "温かい紹介が可能",
+      "labelNot": "温かい紹介なし",
       "description": "チームの誰かがつながっていますが、あなたはまだ活動がありません。"
     },
     "open_deal": {
       "label": "進行中の取引あり",
+      "labelNot": "進行中の取引なし",
       "description": "少なくとも1件の取引が進行中です。"
     },
     "cooling": {
       "label": "冷めかけ／冷たい",
+      "labelNot": "冷めかけ／冷たくない",
       "description": "関係の温度が低い、または下降傾向です。"
     },
     "no_activity": {
       "label": "最近の活動なし",
+      "labelNot": "最近の活動あり",
       "description": "過去30日間に記録された活動がありません。"
     }
   },

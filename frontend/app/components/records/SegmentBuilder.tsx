@@ -93,17 +93,17 @@ export function segmentConditionLabel(
     t: (key: string, values?: Record<string, string | number>) => string,
     resolveTagName: (id: string) => string,
 ): string {
-    const not = condition.negate ? t("op.notPrefix") + " " : "";
     if (condition.type === "predicate") {
-        const label = t(`${condition.key}.label`);
+        const key = condition.key ?? "";
+        const label = condition.negate ? t(`${key}.labelNot`) : t(`${key}.label`);
         if (condition.key === "no_activity") {
-            return `${not}${label} (${condition.days ?? DEFAULT_DAYS}${t("daysShort")})`;
+            return t("chipDays", { label, days: condition.days ?? DEFAULT_DAYS });
         }
-        return `${not}${label}`;
+        return label;
     }
     const field = t(`field.${condition.field}`);
     const value = condition.field === "tag" ? resolveTagName(condition.value ?? "") : (condition.value ?? "");
-    return `${field} ${t(`op.${operatorToken(condition)}`)} ${value}`.trim();
+    return t("chipField", { field, op: t(`op.${operatorToken(condition)}`), value });
 }
 
 /**
@@ -282,7 +282,7 @@ function ConditionRow({
                         type="number"
                         min={1}
                         value={condition.days ?? DEFAULT_DAYS}
-                        onChange={(event) => onChange({ ...condition, days: Number(event.target.value) || DEFAULT_DAYS })}
+                        onChange={(event) => onChange({ ...condition, days: Math.max(1, Number(event.target.value) || DEFAULT_DAYS) })}
                         aria-label={t("days")}
                         className="h-9 w-16"
                     />

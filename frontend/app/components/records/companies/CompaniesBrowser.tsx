@@ -123,10 +123,12 @@ export default function CompaniesBrowser({ companies, savedViews }: { companies:
     useEffect(() => {
         if (evaluable.conditions.length === 0) return;
         let active = true;
-        evaluateSegments('company', evaluable)
-            .then((result) => { if (active) setSegmentResult({ key: segmentsKey, ids: new Set(result.ids) }); })
-            .catch(() => { if (active) { setSegmentResult({ key: segmentsKey, ids: null }); toastError(tSeg('evaluateFailed')); } });
-        return () => { active = false; };
+        const timer = setTimeout(() => {
+            evaluateSegments('company', evaluable)
+                .then((result) => { if (active) setSegmentResult({ key: segmentsKey, ids: new Set(result.ids) }); })
+                .catch(() => { if (active) { setSegmentResult({ key: segmentsKey, ids: null }); toastError(tSeg('evaluateFailed')); } });
+        }, 300);
+        return () => { active = false; clearTimeout(timer); };
     }, [evaluable, segmentsKey, tSeg]);
     useEffect(() => {
         getCompanyTemperatures()
@@ -343,7 +345,7 @@ export default function CompaniesBrowser({ companies, savedViews }: { companies:
     const { columns: customColumns, addColumnSlot } = useCustomFieldColumns('company', visibleCompanies);
 
     const facets = useMemo(() => deriveFilterOptions(columns, filteredCompanies), [columns, filteredCompanies]);
-    const hasActiveFilters = query.trim() !== '' || countActiveFilters(filterState) > 0 || definition.conditions.length > 0;
+    const hasActiveFilters = query.trim() !== '' || countActiveFilters(filterState) > 0 || evaluable.conditions.length > 0;
     const clearAll = useCallback(() => { setQuery(''); setFilterState({}); setDefinition(EMPTY_DEFINITION); }, [setQuery, setFilterState]);
     const resolveTagName = useCallback(
         (id: string) => segmentFields?.tags.find((tag) => String(tag.id) === id)?.name ?? id,
@@ -352,11 +354,14 @@ export default function CompaniesBrowser({ companies, savedViews }: { companies:
     const chips: FilterChipData[] = [
         ...(query.trim() ? [{ id: 'q', label: tf('chipSearch', { query: query.trim() }), onRemove: () => setQuery('') }] : []),
         ...facetChips(facets, filterState, setFilterState),
-        ...definition.conditions.map((condition, index) => ({
-            id: `segment:${index}`,
-            label: segmentConditionLabel(condition, tSeg, resolveTagName),
-            onRemove: () => setDefinition({ ...definition, conditions: definition.conditions.filter((_, i) => i !== index) }),
-        })),
+        ...definition.conditions
+            .map((condition, index) => ({ condition, index }))
+            .filter(({ condition }) => condition.type === 'predicate' || (condition.value ?? '').trim() !== '')
+            .map(({ condition, index }) => ({
+                id: `segment:${index}`,
+                label: segmentConditionLabel(condition, tSeg, resolveTagName),
+                onRemove: () => setDefinition({ ...definition, conditions: definition.conditions.filter((_, i) => i !== index) }),
+            })),
     ];
 
     // TODO: move processing to the backend so the frontend doesn't traverse the full tables to derive per-company metrics
