@@ -5,11 +5,12 @@ import java.util.List;
 import org.apache.ibatis.annotations.Param;
 
 import ooo.klae.connex.backend.beans.Rule;
+import ooo.klae.connex.backend.beans.RuleExecution;
 
 /**
  * Data access for automation rules. CRUD statements are workspace-scoped and called on the request
- * thread (guarded by {@code TenantScopeInterceptor}); engine statements added later run off-thread
- * with an explicit workspace id. SQL is in {@code resources/mappers/RuleMapper.xml}.
+ * thread (guarded by {@code TenantScopeInterceptor}); the engine statements run off-thread with an
+ * explicit workspace id. SQL is in {@code resources/mappers/RuleMapper.xml}.
  */
 public interface RuleMapper {
 
@@ -27,4 +28,19 @@ public interface RuleMapper {
 
     /** Deletes a rule scoped to the workspace; returns rows affected. */
     int delete(@Param("workspaceId") int workspaceId, @Param("id") int id);
+
+    /** Enabled rules of a trigger type in a workspace (engine dispatch; called off-thread). */
+    List<Rule> getEnabledByTrigger(@Param("workspaceId") int workspaceId, @Param("triggerType") String triggerType);
+
+    /** Distinct workspace ids with at least one enabled schedule rule (scheduler fan-out; off-thread, cross-workspace). */
+    List<Integer> workspaceIdsWithEnabledScheduleRules();
+
+    /** Whether a fire with this dedupe key was already recorded for the rule (idempotency guard). */
+    boolean executionExists(@Param("ruleId") int ruleId, @Param("dedupeKey") String dedupeKey);
+
+    /** Records one rule fire. */
+    void insertExecution(RuleExecution execution);
+
+    /** Recent executions for a rule scoped to the workspace, newest first. */
+    List<RuleExecution> getExecutionsByRule(@Param("workspaceId") int workspaceId, @Param("ruleId") int ruleId, @Param("limit") int limit);
 }
