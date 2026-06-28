@@ -190,6 +190,30 @@ class SegmentServiceTest extends AbstractServiceTest {
     }
 
     @Test
+    void predicate_noActivity_excludesRecentlyActiveCompany() {
+        Company quiet = newCompany();
+        Company active = newCompany();
+        recentActivity(newPerson(active));
+
+        List<Integer> ids = evaluate(def("all", predicate("no_activity")));
+
+        assertTrue(ids.contains(quiet.getId()));
+        assertFalse(ids.contains(active.getId()));
+    }
+
+    @Test
+    void warmIntro_excludesCompanyUserAlreadyEngaged() {
+        Company target = newCompany();
+        Person contact = newPerson(target);
+        Person engaged = newPerson(newCompany());
+        recentActivity(engaged);
+        strongEdge(contact, engaged);
+        recentActivity(contact);
+
+        assertFalse(evaluate(def("all", predicate("warm_intro_available"))).contains(target.getId()));
+    }
+
+    @Test
     void cooling_includesUntouchedCompany() {
         Company cold = newCompany();
         assertTrue(evaluate(def("all", predicate("cooling"))).contains(cold.getId()));
