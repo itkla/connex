@@ -77,13 +77,9 @@ export default function RulesPanel() {
             setLoading(true);
             setAccessDenied(false);
             try {
-                const [loadedRules, loadedFields] = await Promise.all([
-                    getRules(),
-                    getSegmentFields("company").catch(() => null),
-                ]);
+                const loadedRules = await getRules();
                 if (cancelled) return;
                 setRules(loadedRules);
-                setFields(loadedFields);
             } catch (err) {
                 if (!cancelled) {
                     if (err instanceof Error && "status" in err && (err as { status?: number }).status === 403) {
@@ -91,9 +87,16 @@ export default function RulesPanel() {
                     } else {
                         toastError(t("loadFailed"));
                     }
+                    setLoading(false);
                 }
-            } finally {
-                if (!cancelled) setLoading(false);
+                return;
+            }
+            if (!cancelled) setLoading(false);
+            try {
+                const loadedFields = await getSegmentFields("company");
+                if (!cancelled) setFields(loadedFields);
+            } catch {
+                if (!cancelled) toastError(t("fieldsLoadFailed"));
             }
         })();
         return () => {

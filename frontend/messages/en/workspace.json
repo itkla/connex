@@ -143,6 +143,7 @@
     "emptyBody": "Create a rule to automate follow-up tasks, tags, and notifications.",
     "noAccess": "Only members with rule access can manage automation.",
     "loadFailed": "Could not load rules.",
+    "fieldsLoadFailed": "Could not load condition options.",
     "saveFailed": "Could not save the rule.",
     "deleteFailed": "Could not delete the rule.",
     "created": "Rule created",

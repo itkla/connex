@@ -787,15 +787,6 @@ export type RuleRequest = {
     executionMode: "user" | "system";
 };
 
-export type RuleExecution = {
-    id: number;
-    triggerEntityType?: string;
-    triggerEntityId?: number;
-    status: string;
-    detail?: string;
-    executedAt: string;
-};
-
 export type Share = {
     workspaceId: number;
     workspaceName: string;
