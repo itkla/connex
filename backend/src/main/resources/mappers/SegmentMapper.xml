@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="ooo.klae.connex.backend.mappers.SegmentMapper">
+
+    <select id="companyIdsWithOpenDeal" resultType="int">
+        SELECT DISTINCT company_id
+        FROM deal
+        WHERE workspace_id = #{workspaceId}
+          AND won IS NULL
+          AND company_id IS NOT NULL
+    </select>
+
+    <select id="companyIdsNoActivitySince" resultType="int">
+        SELECT c.id
+        FROM company c
+        WHERE c.workspace_id = #{workspaceId}
+          AND NOT EXISTS (
+              SELECT 1 FROM activity a
+              WHERE a.workspace_id = #{workspaceId}
+                AND a.timestamp &gt;= DATE_SUB(NOW(), INTERVAL #{days} DAY)
+                AND (
+                    a.person_id IN (SELECT p.id FROM person p WHERE p.workspace_id = #{workspaceId} AND p.company_id = c.id)
+                    OR a.deal_id IN (SELECT d.id FROM deal d WHERE d.workspace_id = #{workspaceId} AND d.company_id = c.id)
+                )
+          )
+    </select>
+
+    <select id="companyIdsForPersonsWithoutUserActivity" resultType="int">
+        SELECT DISTINCT p.company_id
+        FROM person p
+        WHERE p.workspace_id = #{workspaceId}
+          AND p.company_id IS NOT NULL
+          AND p.id IN
+          <foreach item="pid" collection="personIds" open="(" separator="," close=")">#{pid}</foreach>
+          AND NOT EXISTS (
+              SELECT 1 FROM person p2
+              JOIN activity a ON a.person_id = p2.id
+              WHERE p2.workspace_id = #{workspaceId}
+                AND p2.company_id = p.company_id
+                AND a.workspace_id = #{workspaceId}
+                AND a.created_by_id = #{userId}
+          )
+    </select>
+
+</mapper>
