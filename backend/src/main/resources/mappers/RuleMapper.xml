@@ -52,16 +52,16 @@
     SELECT DISTINCT workspace_id FROM rule WHERE trigger_type = 'schedule' AND enabled = TRUE
   </select>
 
-  <select id="executionExists" resultType="boolean">
-    SELECT EXISTS(SELECT 1 FROM rule_execution WHERE rule_id = #{ruleId} AND dedupe_key = #{dedupeKey})
-  </select>
-
   <insert id="insertExecution" useGeneratedKeys="true" keyProperty="id">
     INSERT INTO rule_execution
       (workspace_id, rule_id, trigger_entity_type, trigger_entity_id, status, dedupe_key, detail)
     VALUES
       (#{workspaceId}, #{ruleId}, #{triggerEntityType}, #{triggerEntityId}, #{status}, #{dedupeKey}, #{detail})
   </insert>
+
+  <update id="updateExecution">
+    UPDATE rule_execution SET status = #{status}, detail = #{detail} WHERE id = #{id}
+  </update>
 
   <select id="getExecutionsByRule" resultType="RuleExecution">
     SELECT id, workspace_id, rule_id, trigger_entity_type, trigger_entity_id, status, dedupe_key, detail, executed_at

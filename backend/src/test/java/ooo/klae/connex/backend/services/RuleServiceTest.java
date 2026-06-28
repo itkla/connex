@@ -113,7 +113,7 @@ class RuleServiceTest extends AbstractServiceTest {
         RuleAction tagAction = new RuleAction();
         tagAction.setType("add_tag");
         assertThrows(BadRequestException.class,
-            () -> ruleService.create(req("company", schedule("daily"), "user", tagAction)));
+            () -> ruleService.create(req("company", entityChange("company.updated"), "user", tagAction)));
     }
 
     @Test
@@ -128,18 +128,24 @@ class RuleServiceTest extends AbstractServiceTest {
 
     @Test
     void update_replacesFields() {
-        RuleDto created = ruleService.create(req("company", schedule("daily"), "user", action("notify")));
-        RuleRequest update = req("company", schedule("weekly"), "user", action("add_tag"));
+        RuleDto created = ruleService.create(req("company", entityChange("company.created"), "user", action("notify")));
+        RuleRequest update = req("company", entityChange("company.updated"), "user", action("add_tag"));
         update.setEnabled(false);
         RuleDto updated = ruleService.update(created.getId(), update);
-        assertEquals("weekly", updated.getTrigger().getCadence());
+        assertEquals("entity_change", updated.getTrigger().getType());
         assertEquals("add_tag", updated.getActions().get(0).getType());
         assertEquals(false, updated.isEnabled());
     }
 
     @Test
+    void create_scheduleWithoutCondition_throws() {
+        assertThrows(BadRequestException.class,
+            () -> ruleService.create(req("company", schedule("daily"), "user", action("notify"))));
+    }
+
+    @Test
     void delete_removesRule() {
-        RuleDto created = ruleService.create(req("company", schedule("daily"), "user", action("notify")));
+        RuleDto created = ruleService.create(req("company", entityChange("company.updated"), "user", action("notify")));
         ruleService.delete(created.getId());
         assertThrows(ResourceNotFoundException.class, () -> ruleService.getById(created.getId()));
     }
@@ -147,7 +153,7 @@ class RuleServiceTest extends AbstractServiceTest {
     @Test
     void list_returnsCreatedRules() {
         int before = ruleService.list().size();
-        ruleService.create(req("company", schedule("daily"), "user", action("notify")));
+        ruleService.create(req("company", entityChange("company.updated"), "user", action("notify")));
         assertTrue(ruleService.list().size() >= before + 1);
     }
 }

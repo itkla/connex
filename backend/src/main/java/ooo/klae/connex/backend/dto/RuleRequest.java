@@ -47,6 +47,4 @@ public class RuleRequest {
     @NotBlank
     @Size(max = 8)
     private String executionMode;
-
-    private Integer runAsUserId;
 }

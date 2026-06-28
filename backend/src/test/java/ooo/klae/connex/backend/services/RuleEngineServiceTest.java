@@ -129,6 +129,18 @@ class RuleEngineServiceTest extends AbstractServiceTest {
     }
 
     @Test
+    void entityChange_refiresOnEachOccurrence() {
+        Company company = newCompany();
+        Tag tag = newTag();
+        RuleDto rule = entityChangeTagRule(tag.getId(), "company.updated");
+
+        ruleEngineService.onEntityChange(workspace.getId(), "company", company.getId(), "company.updated");
+        ruleEngineService.onEntityChange(workspace.getId(), "company", company.getId(), "company.updated");
+
+        assertEquals(2, matchedExecutions(rule.getId()));
+    }
+
+    @Test
     void entityChange_unlistedEvent_doesNotFire() {
         Company company = newCompany();
         Tag tag = newTag();

@@ -35,11 +35,11 @@ public interface RuleMapper {
     /** Distinct workspace ids with at least one enabled schedule rule (scheduler fan-out; off-thread, cross-workspace). */
     List<Integer> workspaceIdsWithEnabledScheduleRules();
 
-    /** Whether a fire with this dedupe key was already recorded for the rule (idempotency guard). */
-    boolean executionExists(@Param("ruleId") int ruleId, @Param("dedupeKey") String dedupeKey);
-
-    /** Records one rule fire. */
+    /** Claims a fire by inserting it; the unique {@code (rule_id, dedupe_key)} index enforces idempotency. Populates the id. */
     void insertExecution(RuleExecution execution);
+
+    /** Finalizes a claimed execution's outcome. */
+    void updateExecution(@Param("id") int id, @Param("status") String status, @Param("detail") String detail);
 
     /** Recent executions for a rule scoped to the workspace, newest first. */
     List<RuleExecution> getExecutionsByRule(@Param("workspaceId") int workspaceId, @Param("ruleId") int ruleId, @Param("limit") int limit);

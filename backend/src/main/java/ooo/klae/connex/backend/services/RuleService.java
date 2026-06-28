@@ -86,7 +86,7 @@ public class RuleService {
     public RuleDto update(int id, RuleRequest request) {
         Rule rule = requireRule(id);
         validate(request);
-        applyRequest(rule, request, rule.getCreatedById() != null ? rule.getCreatedById() : authService.getCurrentUser().getId());
+        applyRequest(rule, request, authService.getCurrentUser().getId());
         ruleMapper.update(rule);
         auditService.record("rule.update", "rule", id, rule.getName(),
             "Updated rule " + rule.getName(), null);
@@ -126,6 +126,15 @@ public class RuleService {
             throw new BadRequestException("WHEN conditions are only supported for company rules");
         }
         validateTrigger(request.getTrigger());
+        if ("schedule".equals(normalize(request.getTrigger().getType()))) {
+            if (!"company".equals(recordType)) {
+                throw new BadRequestException("Schedule rules are only supported for company records");
+            }
+            if (request.getCondition() == null || request.getCondition().getConditions() == null
+                    || request.getCondition().getConditions().isEmpty()) {
+                throw new BadRequestException("A schedule rule requires a WHEN condition");
+            }
+        }
         validateActions(request.getActions());
     }
 
