@@ -743,6 +743,50 @@ export type CustomRole = {
     permissions: string[];
 };
 
+export type RuleTrigger = {
+    type: string;
+    events?: string[];
+    targetStageId?: number;
+    cadence?: string;
+};
+
+export type RuleAction = {
+    type: string;
+    title?: string;
+    body?: string;
+    activityType?: string;
+    tagId?: number;
+    dueInDays?: number;
+    severity?: string;
+};
+
+export type Rule = {
+    id: number;
+    name: string;
+    description?: string;
+    enabled: boolean;
+    recordType: string;
+    trigger: RuleTrigger;
+    condition?: SegmentDefinition | null;
+    actions: RuleAction[];
+    executionMode: "user" | "system";
+    runAsUserId?: number | null;
+    createdById?: number | null;
+    createdAt: string;
+    updatedAt: string;
+};
+
+export type RuleRequest = {
+    name: string;
+    description?: string;
+    enabled?: boolean;
+    recordType: string;
+    trigger: RuleTrigger;
+    condition?: SegmentDefinition | null;
+    actions: RuleAction[];
+    executionMode: "user" | "system";
+};
+
 export type Share = {
     workspaceId: number;
     workspaceName: string;
