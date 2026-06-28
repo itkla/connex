@@ -9,7 +9,10 @@ import java.util.List;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.context.SecurityContextHolder;
 
+import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.dto.RuleAction;
 import ooo.klae.connex.backend.dto.RuleDto;
 import ooo.klae.connex.backend.dto.RuleRequest;
@@ -57,6 +60,22 @@ class RuleServiceTest extends AbstractServiceTest {
         request.setActions(List.of(actions));
         request.setExecutionMode(mode);
         return request;
+    }
+
+    @Test
+    void update_byDifferentEditor_preservesCreatorRunAsUser() {
+        int ruleId = ruleService.create(req("deal", entityChange("deal.won"), "user", action("notify"))).getId();
+        assertEquals(currentUser.getId(), ruleService.getById(ruleId).getRunAsUserId());
+
+        User editor = newUser();
+        workspaceMapper.updateMemberRole(workspace.getId(), editor.getId(), "admin");
+        SecurityContextHolder.getContext().setAuthentication(
+            new UsernamePasswordAuthenticationToken(editor, null, editor.getAuthorities()));
+
+        ruleService.update(ruleId, req("deal", entityChange("deal.lost"), "user", action("notify")));
+
+        assertEquals(currentUser.getId(), ruleService.getById(ruleId).getRunAsUserId(),
+            "run-as must stay the original creator, not the editor");
     }
 
     @Test

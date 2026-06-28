@@ -77,8 +77,8 @@ public class RuleService {
 
         Rule rule = new Rule();
         rule.setWorkspaceId(workspaceId);
-        applyRequest(rule, request, userId);
         rule.setCreatedById(userId);
+        applyRequest(rule, request);
         ruleMapper.insert(rule);
         auditService.record("rule.create", "rule", rule.getId(), rule.getName(),
             "Created rule " + rule.getName(), auditService.singleChange("enabled", null, rule.isEnabled()));
@@ -90,7 +90,7 @@ public class RuleService {
     public RuleDto update(int id, RuleRequest request) {
         Rule rule = requireRule(id);
         validate(request);
-        applyRequest(rule, request, authService.getCurrentUser().getId());
+        applyRequest(rule, request);
         ruleMapper.update(rule);
         auditService.record("rule.update", "rule", id, rule.getName(),
             "Updated rule " + rule.getName(), null);
@@ -186,7 +186,7 @@ public class RuleService {
         }
     }
 
-    private void applyRequest(Rule rule, RuleRequest request, int ownerId) {
+    private void applyRequest(Rule rule, RuleRequest request) {
         String mode = normalize(request.getExecutionMode());
         rule.setName(request.getName().trim());
         rule.setDescription(request.getDescription());
@@ -197,7 +197,7 @@ public class RuleService {
         rule.setConditionJson(request.getCondition() == null ? null : serialize(request.getCondition()));
         rule.setActionsJson(serialize(request.getActions()));
         rule.setExecutionMode(mode);
-        rule.setRunAsUserId("system".equals(mode) ? null : ownerId);
+        rule.setRunAsUserId("system".equals(mode) ? null : rule.getCreatedById());
     }
 
     private RuleDto toDto(Rule rule) {
