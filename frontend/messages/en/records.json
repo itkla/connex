@@ -1,4 +1,24 @@
 {
+  "SmartSegments": {
+    "title": "Smart segments",
+    "evaluateFailed": "Could not evaluate segments.",
+    "warm_intro_available": {
+      "label": "Warm intro available",
+      "description": "A teammate is connected to someone here, but you have no activity yet."
+    },
+    "open_deal": {
+      "label": "Has an open deal",
+      "description": "At least one deal is still open."
+    },
+    "cooling": {
+      "label": "Cooling or cold",
+      "description": "Relationship temperature is cool, cold, or trending down."
+    },
+    "no_activity": {
+      "label": "No recent activity",
+      "description": "No logged activity in the last 30 days."
+    }
+  },
   "SavedViews": {
     "all": "All",
     "save": "Save",

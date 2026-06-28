@@ -508,11 +508,21 @@ export type EntityCustomFieldValues = Record<string, Record<string, CustomFieldC
 
 export type SavedViewRecordType = "company" | "person" | "deal";
 
+export type SegmentSelection = {
+    key: string;
+    days?: number;
+};
+
 export type SavedViewConfig = {
     filters?: Record<string, string[]>;
     query?: string;
     sortKey?: string | null;
     sortDirection?: "asc" | "desc";
+    segments?: SegmentSelection[];
+};
+
+export type SegmentResult = {
+    ids: number[];
 };
 
 export type SavedView = {
