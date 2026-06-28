@@ -2,6 +2,7 @@
   "SmartSegments": {
     "title": "スマートセグメント",
     "evaluateFailed": "セグメントを評価できませんでした。",
+    "fieldsFailed": "セグメントの選択肢を読み込めませんでした。",
     "builderTitle": "セグメントを作成",
     "builderDescription": "関係シグナルとフィールド条件を組み合わせて、目的の企業を正確に絞り込みます。",
     "matchPrefix": "次の条件の",
@@ -38,7 +39,6 @@
     "nameValue": "テキストを入力",
     "inLast": "過去",
     "days": "日間",
-    "daysShort": "日",
     "warm_intro_available": {
       "label": "温かい紹介が可能",
       "labelNot": "温かい紹介なし",

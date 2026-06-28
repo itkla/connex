@@ -18,7 +18,7 @@ import {
 import RecordsRenderView from '@/app/components/records/RecordsRenderView';
 import { useCustomFieldColumns } from '@/app/components/records/CustomFieldColumns';
 import SavedViewsBar from '@/app/components/records/SavedViewsBar';
-import SegmentBuilder, { EMPTY_DEFINITION, segmentConditionLabel } from '@/app/components/records/SegmentBuilder';
+import SegmentBuilder, { EMPTY_DEFINITION, isSegmentDefinition, segmentConditionLabel } from '@/app/components/records/SegmentBuilder';
 import RecordsSortMenu from '@/app/components/records/RecordsSortMenu';
 import RecordsFilterPills from '@/app/components/records/RecordsFilterPills';
 import { SearchField, FilterBar, SegmentedToggle, type FilterChipData } from '@/app/components/filters';
@@ -118,10 +118,11 @@ export default function CompaniesBrowser({ companies, savedViews }: { companies:
     );
     const segmentsKey = useMemo(() => JSON.stringify(evaluable), [evaluable]);
     useEffect(() => {
-        getSegmentFields('company').then(setSegmentFields).catch(() => setSegmentFields(null));
+        getSegmentFields('company').then(setSegmentFields).catch(() => { setSegmentFields(null); toastError(tSeg('fieldsFailed')); });
     }, []);
     useEffect(() => {
         if (evaluable.conditions.length === 0) return;
+        if (segmentResult?.key === segmentsKey) return;
         let active = true;
         const timer = setTimeout(() => {
             evaluateSegments('company', evaluable)
@@ -129,7 +130,7 @@ export default function CompaniesBrowser({ companies, savedViews }: { companies:
                 .catch(() => { if (active) { setSegmentResult({ key: segmentsKey, ids: null }); toastError(tSeg('evaluateFailed')); } });
         }, 300);
         return () => { active = false; clearTimeout(timer); };
-    }, [evaluable, segmentsKey, tSeg]);
+    }, [evaluable, segmentsKey, segmentResult, tSeg]);
     useEffect(() => {
         getCompanyTemperatures()
             .then((temps) => setTempByCompanyId(new Map(temps.map((temp) => [temp.id, temp]))))
@@ -474,7 +475,7 @@ export default function CompaniesBrowser({ companies, savedViews }: { companies:
             setFilterState(config.filters ?? {});
             setQuery(config.query ?? '');
             applySort(config.sortKey ?? null, config.sortDirection ?? 'asc');
-            setDefinition(config.segments ?? EMPTY_DEFINITION);
+            setDefinition(isSegmentDefinition(config.segments) ? config.segments : EMPTY_DEFINITION);
         },
         [setFilterState, setQuery, applySort],
     );

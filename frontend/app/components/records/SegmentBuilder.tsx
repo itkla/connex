@@ -32,6 +32,21 @@ const DEFAULT_DAYS = 30;
 
 export const EMPTY_DEFINITION: SegmentDefinition = { match: "all", conditions: [] };
 
+/**
+ * Runtime guard for a {@link SegmentDefinition}: a non-array object with a conditions array and a
+ * valid match. Guards callers that read {@code .conditions} against legacy or malformed saved-view
+ * payloads (e.g. an older array shape) that would otherwise throw.
+ */
+export function isSegmentDefinition(value: unknown): value is SegmentDefinition {
+    return (
+        value != null &&
+        typeof value === "object" &&
+        !Array.isArray(value) &&
+        Array.isArray((value as SegmentDefinition).conditions) &&
+        ((value as SegmentDefinition).match === "all" || (value as SegmentDefinition).match === "any")
+    );
+}
+
 type OperatorOption = { token: string; op?: string; negate: boolean };
 
 function operatorOptions(condition: SegmentCondition): OperatorOption[] {
@@ -262,6 +277,7 @@ function ConditionRow({
                     onChange={(event) => onChange({ ...condition, value: event.target.value })}
                     placeholder={t("nameValue")}
                     aria-label={t("field.name")}
+                    maxLength={255}
                     className="h-9 flex-1 min-w-0"
                 />
             )}

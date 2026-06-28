@@ -2,6 +2,7 @@
   "SmartSegments": {
     "title": "Smart segments",
     "evaluateFailed": "Could not evaluate segments.",
+    "fieldsFailed": "Could not load segment options.",
     "builderTitle": "Build a segment",
     "builderDescription": "Combine relationship signals and field conditions to find exactly the companies you want.",
     "matchPrefix": "Match",
@@ -38,7 +39,6 @@
     "nameValue": "Enter text",
     "inLast": "in last",
     "days": "days",
-    "daysShort": "d",
     "warm_intro_available": {
       "label": "Warm intro available",
       "labelNot": "No warm intro",

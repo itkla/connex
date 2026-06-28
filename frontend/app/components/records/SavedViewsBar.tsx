@@ -25,6 +25,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
 import { ApiError, createSavedView, deleteSavedView, updateSavedView } from "@/app/lib/api";
+import { isSegmentDefinition } from "@/app/components/records/SegmentBuilder";
 import { toastError, toastSuccess } from "@/app/lib/toast";
 import type { SavedView, SavedViewConfig, SavedViewRecordType } from "@/app/lib/types";
 
@@ -36,8 +37,9 @@ function canonical(config: SavedViewConfig | null | undefined): string {
         const values = filters[key];
         if (values && values.length > 0) sorted[key] = [...values].sort();
     }
-    const segments = config?.segments && config.segments.conditions.length > 0
-        ? JSON.stringify(config.segments)
+    const seg = config?.segments;
+    const segments = isSegmentDefinition(seg) && seg.conditions.length > 0
+        ? JSON.stringify(seg)
         : "";
     return JSON.stringify({
         filters: sorted,
