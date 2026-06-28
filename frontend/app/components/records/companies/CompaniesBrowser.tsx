@@ -18,7 +18,7 @@ import {
 import RecordsRenderView from '@/app/components/records/RecordsRenderView';
 import { useCustomFieldColumns } from '@/app/components/records/CustomFieldColumns';
 import SavedViewsBar from '@/app/components/records/SavedViewsBar';
-import SegmentPicker from '@/app/components/records/SegmentPicker';
+import SegmentBuilder, { EMPTY_DEFINITION, segmentConditionLabel } from '@/app/components/records/SegmentBuilder';
 import RecordsSortMenu from '@/app/components/records/RecordsSortMenu';
 import RecordsFilterPills from '@/app/components/records/RecordsFilterPills';
 import { SearchField, FilterBar, SegmentedToggle, type FilterChipData } from '@/app/components/filters';
@@ -30,9 +30,9 @@ import CompanyCard from '@/app/components/records/companies/CompanyCard';
 import CompanyAvatar from '@/app/components/records/companies/CompanyAvatar';
 import NewCompanyDialog from '@/app/components/records/companies/NewCompanyDialog';
 import QuickEditCompanySheet, { type CompanyDraft } from '@/app/components/records/companies/QuickEditCompanySheet';
-import { createCompany, deleteCompany, getUsers, getTasks, getDeals, updateCompany, getActivities, getNotes, getCompanyTemperatures, isFieldError, evaluateSegments } from '@/app/lib/api';
+import { createCompany, deleteCompany, getUsers, getTasks, getDeals, updateCompany, getActivities, getNotes, getCompanyTemperatures, isFieldError, evaluateSegments, getSegmentFields } from '@/app/lib/api';
 import { uploadCompanyLogo, pickDominantCurrency, parseMysqlDateTime } from '@/app/lib/utils';
-import { type Company, type CreateCompanyPayload, type UpdateCompanyPayload, type Contact, type Activity, type Note, type Task, type User, type Deal, type CompanyMetrics, type LoadStatus, type RelationshipTemperature, type SavedView, type SavedViewConfig, type SegmentSelection } from '@/app/lib/types';
+import { type Company, type CreateCompanyPayload, type UpdateCompanyPayload, type Contact, type Activity, type Note, type Task, type User, type Deal, type CompanyMetrics, type LoadStatus, type RelationshipTemperature, type SavedView, type SavedViewConfig, type SegmentDefinition, type SegmentFields } from '@/app/lib/types';
 import { getContacts } from '@/app/lib/api';
 import TemperaturePill from '@/app/components/records/TemperaturePill';
 import { isDealClosed } from '@/app/components/records/deals/dealOutcome';
@@ -106,20 +106,28 @@ export default function CompaniesBrowser({ companies, savedViews }: { companies:
     const [metricsStatus, setMetricsStatus] = useState<LoadStatus>('idle');
 
     const [tempByCompanyId, setTempByCompanyId] = useState<Map<number, RelationshipTemperature>>(new Map());
-    const [segments, setSegments] = useState<SegmentSelection[]>([]);
+    const [definition, setDefinition] = useState<SegmentDefinition>(EMPTY_DEFINITION);
+    const [segmentFields, setSegmentFields] = useState<SegmentFields | null>(null);
     const [segmentResult, setSegmentResult] = useState<{ key: string; ids: Set<number> | null } | null>(null);
-    const segmentsKey = useMemo(
-        () => segments.map((segment) => `${segment.key}:${segment.days ?? ''}`).sort().join('|'),
-        [segments],
+    const evaluable = useMemo<SegmentDefinition>(
+        () => ({
+            match: definition.match,
+            conditions: definition.conditions.filter((condition) => condition.type === 'predicate' || (condition.value ?? '').trim() !== ''),
+        }),
+        [definition],
     );
+    const segmentsKey = useMemo(() => JSON.stringify(evaluable), [evaluable]);
     useEffect(() => {
-        if (segments.length === 0) return;
+        getSegmentFields('company').then(setSegmentFields).catch(() => setSegmentFields(null));
+    }, []);
+    useEffect(() => {
+        if (evaluable.conditions.length === 0) return;
         let active = true;
-        evaluateSegments('company', segments)
+        evaluateSegments('company', evaluable)
             .then((result) => { if (active) setSegmentResult({ key: segmentsKey, ids: new Set(result.ids) }); })
             .catch(() => { if (active) { setSegmentResult({ key: segmentsKey, ids: null }); toastError(tSeg('evaluateFailed')); } });
         return () => { active = false; };
-    }, [segments, segmentsKey, tSeg]);
+    }, [evaluable, segmentsKey, tSeg]);
     useEffect(() => {
         getCompanyTemperatures()
             .then((temps) => setTempByCompanyId(new Map(temps.map((temp) => [temp.id, temp]))))
@@ -322,8 +330,8 @@ export default function CompaniesBrowser({ companies, savedViews }: { companies:
         },
     ], [t, tempByCompanyId]);
 
-    const activeSegmentIds = segments.length > 0 && segmentResult?.key === segmentsKey ? segmentResult.ids : null;
-    const segmentsLoading = segments.length > 0 && segmentResult?.key !== segmentsKey;
+    const activeSegmentIds = evaluable.conditions.length > 0 && segmentResult?.key === segmentsKey ? segmentResult.ids : null;
+    const segmentsLoading = evaluable.conditions.length > 0 && segmentResult?.key !== segmentsKey;
     const visibleCompanies = useMemo(
         () => {
             const filtered = applyRecordFilters(filteredCompanies, columns, filterState);
@@ -335,15 +343,19 @@ export default function CompaniesBrowser({ companies, savedViews }: { companies:
     const { columns: customColumns, addColumnSlot } = useCustomFieldColumns('company', visibleCompanies);
 
     const facets = useMemo(() => deriveFilterOptions(columns, filteredCompanies), [columns, filteredCompanies]);
-    const hasActiveFilters = query.trim() !== '' || countActiveFilters(filterState) > 0 || segments.length > 0;
-    const clearAll = useCallback(() => { setQuery(''); setFilterState({}); setSegments([]); }, [setQuery, setFilterState]);
+    const hasActiveFilters = query.trim() !== '' || countActiveFilters(filterState) > 0 || definition.conditions.length > 0;
+    const clearAll = useCallback(() => { setQuery(''); setFilterState({}); setDefinition(EMPTY_DEFINITION); }, [setQuery, setFilterState]);
+    const resolveTagName = useCallback(
+        (id: string) => segmentFields?.tags.find((tag) => String(tag.id) === id)?.name ?? id,
+        [segmentFields],
+    );
     const chips: FilterChipData[] = [
         ...(query.trim() ? [{ id: 'q', label: tf('chipSearch', { query: query.trim() }), onRemove: () => setQuery('') }] : []),
         ...facetChips(facets, filterState, setFilterState),
-        ...segments.map((segment) => ({
-            id: `segment:${segment.key}`,
-            label: tSeg(`${segment.key}.label`),
-            onRemove: () => setSegments((prev) => prev.filter((item) => item.key !== segment.key)),
+        ...definition.conditions.map((condition, index) => ({
+            id: `segment:${index}`,
+            label: segmentConditionLabel(condition, tSeg, resolveTagName),
+            onRemove: () => setDefinition({ ...definition, conditions: definition.conditions.filter((_, i) => i !== index) }),
         })),
     ];
 
@@ -449,15 +461,15 @@ export default function CompaniesBrowser({ companies, savedViews }: { companies:
     );
 
     const currentConfig: SavedViewConfig = useMemo(
-        () => ({ filters: filterState, query, sortKey, sortDirection, segments }),
-        [filterState, query, sortKey, sortDirection, segments],
+        () => ({ filters: filterState, query, sortKey, sortDirection, segments: definition }),
+        [filterState, query, sortKey, sortDirection, definition],
     );
     const applyView = useCallback(
         (config: SavedViewConfig) => {
             setFilterState(config.filters ?? {});
             setQuery(config.query ?? '');
             applySort(config.sortKey ?? null, config.sortDirection ?? 'asc');
-            setSegments(config.segments ?? []);
+            setDefinition(config.segments ?? EMPTY_DEFINITION);
         },
         [setFilterState, setQuery, applySort],
     );
@@ -497,7 +509,7 @@ export default function CompaniesBrowser({ companies, savedViews }: { companies:
                 }
                 trailing={
                     <div className="flex items-center gap-2">
-                        <SegmentPicker segments={segments} onChange={setSegments} />
+                        <SegmentBuilder definition={definition} fields={segmentFields} onChange={setDefinition} />
                         {displayMode === 'grid' && (
                             <RecordsSortMenu
                                 columns={columns}

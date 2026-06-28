@@ -2,6 +2,39 @@
   "SmartSegments": {
     "title": "Smart segments",
     "evaluateFailed": "Could not evaluate segments.",
+    "builderTitle": "Build a segment",
+    "builderDescription": "Combine relationship signals and field conditions to find exactly the companies you want.",
+    "matchPrefix": "Match",
+    "matchAll": "all",
+    "matchAny": "any",
+    "matchSuffix": "of these conditions",
+    "noConditions": "No conditions yet. Add one to start filtering.",
+    "addCondition": "Add condition",
+    "clearConditions": "Clear all",
+    "done": "Done",
+    "removeCondition": "Remove condition",
+    "groupPredicates": "Relationship signals",
+    "groupFields": "Fields",
+    "field": {
+      "industry": "Industry",
+      "name": "Company name",
+      "tag": "Tag"
+    },
+    "op": {
+      "is": "is",
+      "isNot": "is not",
+      "contains": "contains",
+      "notContains": "doesn't contain",
+      "has": "has",
+      "notHas": "doesn't have",
+      "notPrefix": "Not"
+    },
+    "pickIndustry": "Choose an industry",
+    "pickTag": "Choose a tag",
+    "nameValue": "Enter text",
+    "inLast": "in last",
+    "days": "days",
+    "daysShort": "d",
     "warm_intro_available": {
       "label": "Warm intro available",
       "description": "A teammate is connected to someone here, but you have no activity yet."

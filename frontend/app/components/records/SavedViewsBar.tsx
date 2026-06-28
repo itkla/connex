@@ -36,9 +36,9 @@ function canonical(config: SavedViewConfig | null | undefined): string {
         const values = filters[key];
         if (values && values.length > 0) sorted[key] = [...values].sort();
     }
-    const segments = (config?.segments ?? [])
-        .map((segment) => `${segment.key}:${segment.days ?? ""}`)
-        .sort();
+    const segments = config?.segments && config.segments.conditions.length > 0
+        ? JSON.stringify(config.segments)
+        : "";
     return JSON.stringify({
         filters: sorted,
         query: (config?.query ?? "").trim(),
@@ -52,7 +52,7 @@ function canonical(config: SavedViewConfig | null | undefined): string {
 function isEmpty(config: SavedViewConfig | null | undefined): boolean {
     const filters = config?.filters ?? {};
     const hasFilters = Object.values(filters).some((values) => values && values.length > 0);
-    return !hasFilters && !(config?.query ?? "").trim() && !config?.sortKey && (config?.segments?.length ?? 0) === 0;
+    return !hasFilters && !(config?.query ?? "").trim() && !config?.sortKey && (config?.segments?.conditions?.length ?? 0) === 0;
 }
 
 /**
@@ -87,7 +87,7 @@ export default function SavedViewsBar({
 
     const applyView = (view: SavedView | null) => {
         setActiveId(view?.id ?? null);
-        onApply(view ? view.config : { filters: {}, query: "", sortKey: null, sortDirection: "asc", segments: [] });
+        onApply(view ? view.config : { filters: {}, query: "", sortKey: null, sortDirection: "asc" });
     };
 
     const saveCurrent = async () => {

@@ -2,6 +2,39 @@
   "SmartSegments": {
     "title": "スマートセグメント",
     "evaluateFailed": "セグメントを評価できませんでした。",
+    "builderTitle": "セグメントを作成",
+    "builderDescription": "関係シグナルとフィールド条件を組み合わせて、目的の企業を正確に絞り込みます。",
+    "matchPrefix": "次の条件の",
+    "matchAll": "すべて",
+    "matchAny": "いずれか",
+    "matchSuffix": "に一致",
+    "noConditions": "条件がまだありません。追加して絞り込みを始めましょう。",
+    "addCondition": "条件を追加",
+    "clearConditions": "すべてクリア",
+    "done": "完了",
+    "removeCondition": "条件を削除",
+    "groupPredicates": "関係シグナル",
+    "groupFields": "フィールド",
+    "field": {
+      "industry": "業界",
+      "name": "会社名",
+      "tag": "タグ"
+    },
+    "op": {
+      "is": "は",
+      "isNot": "ではない",
+      "contains": "を含む",
+      "notContains": "を含まない",
+      "has": "を持つ",
+      "notHas": "を持たない",
+      "notPrefix": "以外"
+    },
+    "pickIndustry": "業界を選択",
+    "pickTag": "タグを選択",
+    "nameValue": "テキストを入力",
+    "inLast": "過去",
+    "days": "日間",
+    "daysShort": "日",
     "warm_intro_available": {
       "label": "温かい紹介が可能",
       "description": "チームの誰かがつながっていますが、あなたはまだ活動がありません。"
