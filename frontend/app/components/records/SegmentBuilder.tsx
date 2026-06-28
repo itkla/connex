@@ -149,7 +149,7 @@ export default function SegmentBuilder({
                     <div className="flex items-center gap-2 text-sm text-muted-foreground">
                         <span>{t("matchPrefix")}</span>
                         <Select value={definition.match} onValueChange={(value) => onChange({ ...definition, match: value as SegmentMatch })}>
-                            <SelectTrigger size="sm" className="w-[5.5rem]"><SelectValue /></SelectTrigger>
+                            <SelectTrigger size="sm" aria-label={t("a11yMatch")} className="w-[5.5rem]"><SelectValue /></SelectTrigger>
                             <SelectContent>
                                 <SelectItem value="all">{t("matchAll")}</SelectItem>
                                 <SelectItem value="any">{t("matchAny")}</SelectItem>
@@ -214,7 +214,7 @@ function ConditionRow({
     return (
         <div className="flex items-center gap-2">
             <Select value={subjectValue(condition)} onValueChange={(value) => onChange(newCondition(value))}>
-                <SelectTrigger size="sm" className="w-48 shrink-0"><SelectValue /></SelectTrigger>
+                <SelectTrigger size="sm" aria-label={t("a11ySubject")} className="w-48 shrink-0"><SelectValue /></SelectTrigger>
                 <SelectContent>
                     <SelectGroup>
                         <SelectLabel>{t("groupPredicates")}</SelectLabel>
@@ -238,7 +238,7 @@ function ConditionRow({
                     if (option) onChange({ ...condition, op: option.op, negate: option.negate });
                 }}
             >
-                <SelectTrigger size="sm" className="w-36 shrink-0"><SelectValue /></SelectTrigger>
+                <SelectTrigger size="sm" aria-label={t("a11yOperator")} className="w-36 shrink-0"><SelectValue /></SelectTrigger>
                 <SelectContent>
                     {operators.map((option) => (
                         <SelectItem key={option.token} value={option.token}>{t(`op.${option.token}`)}</SelectItem>
@@ -248,7 +248,7 @@ function ConditionRow({
 
             {isField && condition.field === "industry" && (
                 <Select value={condition.value || undefined} onValueChange={(value) => onChange({ ...condition, value })}>
-                    <SelectTrigger size="sm" className="flex-1 min-w-0"><SelectValue placeholder={t("pickIndustry")} /></SelectTrigger>
+                    <SelectTrigger size="sm" aria-label={t("field.industry")} className="flex-1 min-w-0"><SelectValue placeholder={t("pickIndustry")} /></SelectTrigger>
                     <SelectContent>
                         {(fields?.industries ?? []).map((industry) => (
                             <SelectItem key={industry} value={industry}>{industry}</SelectItem>
@@ -261,12 +261,13 @@ function ConditionRow({
                     value={condition.value ?? ""}
                     onChange={(event) => onChange({ ...condition, value: event.target.value })}
                     placeholder={t("nameValue")}
+                    aria-label={t("field.name")}
                     className="h-9 flex-1 min-w-0"
                 />
             )}
             {isField && condition.field === "tag" && (
                 <Select value={condition.value || undefined} onValueChange={(value) => onChange({ ...condition, value })}>
-                    <SelectTrigger size="sm" className="flex-1 min-w-0"><SelectValue placeholder={t("pickTag")} /></SelectTrigger>
+                    <SelectTrigger size="sm" aria-label={t("field.tag")} className="flex-1 min-w-0"><SelectValue placeholder={t("pickTag")} /></SelectTrigger>
                     <SelectContent>
                         {(fields?.tags ?? []).map((tag) => (
                             <SelectItem key={tag.id} value={String(tag.id)}>{tag.name}</SelectItem>
@@ -282,6 +283,7 @@ function ConditionRow({
                         min={1}
                         value={condition.days ?? DEFAULT_DAYS}
                         onChange={(event) => onChange({ ...condition, days: Number(event.target.value) || DEFAULT_DAYS })}
+                        aria-label={t("days")}
                         className="h-9 w-16"
                     />
                     <span>{t("days")}</span>

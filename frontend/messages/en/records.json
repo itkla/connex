@@ -13,6 +13,9 @@
     "clearConditions": "Clear all",
     "done": "Done",
     "removeCondition": "Remove condition",
+    "a11yMatch": "Match all or any conditions",
+    "a11ySubject": "Condition field or signal",
+    "a11yOperator": "Operator",
     "groupPredicates": "Relationship signals",
     "groupFields": "Fields",
     "field": {

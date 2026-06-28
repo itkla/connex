@@ -13,6 +13,9 @@
     "clearConditions": "すべてクリア",
     "done": "完了",
     "removeCondition": "条件を削除",
+    "a11yMatch": "すべて／いずれかの条件に一致",
+    "a11ySubject": "条件のフィールドまたはシグナル",
+    "a11yOperator": "演算子",
     "groupPredicates": "関係シグナル",
     "groupFields": "フィールド",
     "field": {
