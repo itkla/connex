@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="ooo.klae.connex.backend.mappers.RuleMapper">
+
+  <sql id="columns">
+    id, workspace_id, name, description, enabled, record_type, trigger_type,
+    trigger_config, condition_json, actions_json, execution_mode, run_as_user_id,
+    created_by_id, created_at, updated_at
+  </sql>
+
+  <select id="getByWorkspace" resultType="Rule">
+    SELECT <include refid="columns"/> FROM rule
+    WHERE workspace_id = #{workspaceId}
+    ORDER BY created_at DESC, id DESC
+  </select>
+
+  <select id="getById" resultType="Rule">
+    SELECT <include refid="columns"/> FROM rule
+    WHERE workspace_id = #{workspaceId} AND id = #{id}
+  </select>
+
+  <insert id="insert" useGeneratedKeys="true" keyProperty="id">
+    INSERT INTO rule
+      (workspace_id, name, description, enabled, record_type, trigger_type,
+       trigger_config, condition_json, actions_json, execution_mode, run_as_user_id, created_by_id)
+    VALUES
+      (#{workspaceId}, #{name}, #{description}, #{enabled}, #{recordType}, #{triggerType},
+       #{triggerConfig}, #{conditionJson}, #{actionsJson}, #{executionMode}, #{runAsUserId}, #{createdById})
+  </insert>
+
+  <update id="update">
+    UPDATE rule
+    SET name = #{name}, description = #{description}, enabled = #{enabled},
+        record_type = #{recordType}, trigger_type = #{triggerType},
+        trigger_config = #{triggerConfig}, condition_json = #{conditionJson},
+        actions_json = #{actionsJson}, execution_mode = #{executionMode}, run_as_user_id = #{runAsUserId}
+    WHERE workspace_id = #{workspaceId} AND id = #{id}
+  </update>
+
+  <delete id="delete">
+    DELETE FROM rule WHERE workspace_id = #{workspaceId} AND id = #{id}
+  </delete>
+</mapper>
