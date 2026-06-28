@@ -43,6 +43,7 @@ public class WorkspaceService {
     private final NotificationMapper notificationMapper;
     private final TenantContext tenantContext;
     private final AuditService auditService;
+    private final SystemActor systemActor;
 
     private static final DateTimeFormatter TS = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
@@ -67,7 +68,7 @@ public class WorkspaceService {
         permissions.addAll(EnumSet.of(
             Permission.COMPANY_DELETE, Permission.PIPELINE_MANAGE, Permission.TAG_MANAGE,
             Permission.CUSTOM_FIELD_MANAGE, Permission.SHARE_MANAGE, Permission.MEMBER_MANAGE,
-            Permission.AUDIT_READ, Permission.WORKSPACE_SETTINGS));
+            Permission.AUDIT_READ, Permission.WORKSPACE_SETTINGS, Permission.RULE_MANAGE));
         return permissions;
     }
 
@@ -181,6 +182,9 @@ public class WorkspaceService {
      * permissions when one is assigned, otherwise their built-in role bundle.
      */
     public Set<Permission> permissionsFor(int workspaceId, int userId) {
+        if (systemActor.is(userId)) {
+            return systemActor.permissions();
+        }
         Integer roleId = workspaceMapper.getMemberRoleId(workspaceId, userId);
         if (roleId != null) {
             return parsePermissions(roleMapper.findPermissions(roleId));

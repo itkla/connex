@@ -54,9 +54,18 @@ public class SegmentService {
         Set.of("warm_intro_available", "open_deal", "cooling", "no_activity");
 
     /**
-     * Returns the ids of records matching the definition.
+     * Returns the ids of records matching the definition, scoped to the active session's workspace
+     * and user.
      */
     public List<Integer> evaluate(String recordType, SegmentDefinition definition) {
+        return evaluate(workspaceService.getCurrentWorkspaceId(), authService.getCurrentUser().getId(), recordType, definition);
+    }
+
+    /**
+     * Session-free evaluation for off-request callers (e.g. the rule engine): the workspace and the
+     * user are supplied explicitly rather than resolved from the security/tenant context.
+     */
+    public List<Integer> evaluate(int workspaceId, int userId, String recordType, SegmentDefinition definition) {
         requireCompany(recordType);
         if (definition == null || definition.getConditions() == null || definition.getConditions().isEmpty()) {
             return List.of();
@@ -70,8 +79,6 @@ public class SegmentService {
             throw new BadRequestException("Invalid match (expected 'all' or 'any'): " + definition.getMatch());
         }
 
-        int workspaceId = workspaceService.getCurrentWorkspaceId();
-        int userId = authService.getCurrentUser().getId();
         Set<Integer> universe = null;
 
         Set<Integer> result = null;

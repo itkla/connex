@@ -38,6 +38,7 @@ public class CompanyService {
     private final PersonMapper personMapper;
     private final DealMapper dealMapper;
     private final AuditService auditService;
+    private final RuleTriggerPublisher ruleTriggers;
     private final WorkspaceService workspaceService;
     private final CustomFieldValueService customFieldValueService;
 
@@ -78,6 +79,7 @@ public class CompanyService {
         auditService.record("company.create", "company", company.getId(), company.getName(),
             "Created company " + company.getName(),
             auditService.diff(null, company, AUDIT_FIELDS));
+        ruleTriggers.publish(company.getWorkspaceId(), "company", company.getId(), "company.created");
         return company;
     }
 
@@ -118,10 +120,13 @@ public class CompanyService {
         company.setId(id);
         company.setWorkspaceId(workspaceId);
         assertUniqueWebsite(company);
-        companyMapper.update(company);
+        int updated = companyMapper.update(company);
         auditService.record("company.update", "company", id, company.getName(),
             "Updated company " + company.getName(),
             auditService.diff(before, company, AUDIT_FIELDS));
+        if (updated > 0) {
+            ruleTriggers.publish(workspaceId, "company", id, "company.updated");
+        }
         return company;
     }
 
