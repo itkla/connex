@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.services;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -9,7 +10,11 @@ import java.util.List;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.context.SecurityContextHolder;
 
+import ooo.klae.connex.backend.beans.User;
+import ooo.klae.connex.backend.beans.WorkspaceRole;
 import ooo.klae.connex.backend.dto.RuleAction;
 import ooo.klae.connex.backend.dto.RuleDto;
 import ooo.klae.connex.backend.dto.RuleRequest;
@@ -17,11 +22,14 @@ import ooo.klae.connex.backend.dto.RuleTrigger;
 import ooo.klae.connex.backend.dto.SegmentCondition;
 import ooo.klae.connex.backend.dto.SegmentDefinition;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
+import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 
 class RuleServiceTest extends AbstractServiceTest {
 
     @Autowired RuleService ruleService;
+    @Autowired RoleService roleService;
+    @Autowired WorkspaceService workspaceService;
 
     private static RuleTrigger schedule(String cadence) {
         RuleTrigger trigger = new RuleTrigger();
@@ -57,6 +65,37 @@ class RuleServiceTest extends AbstractServiceTest {
         request.setActions(List.of(actions));
         request.setExecutionMode(mode);
         return request;
+    }
+
+    @Test
+    void update_byDifferentEditor_preservesCreatorRunAsUser() {
+        int ruleId = ruleService.create(req("deal", entityChange("deal.won"), "user", action("notify"))).getId();
+        assertEquals(currentUser.getId(), ruleService.getById(ruleId).getRunAsUserId());
+
+        User editor = newUser();
+        workspaceMapper.updateMemberRole(workspace.getId(), editor.getId(), "admin");
+        SecurityContextHolder.getContext().setAuthentication(
+            new UsernamePasswordAuthenticationToken(editor, null, editor.getAuthorities()));
+
+        ruleService.update(ruleId, req("deal", entityChange("deal.lost"), "user", action("notify")));
+
+        assertEquals(currentUser.getId(), ruleService.getById(ruleId).getRunAsUserId(),
+            "run-as must stay the original creator, not the editor");
+    }
+
+    @Test
+    void create_actionPermissionGate_blocksUnprivilegedManager() {
+        User restricted = newUser();
+        WorkspaceRole ruleOnly = roleService.createRole(workspace.getId(), currentUser.getId(),
+            "RuleOnly " + unique(), List.of("RULE_MANAGE"));
+        workspaceService.assignCustomRole(workspace.getId(), currentUser.getId(), restricted.getId(), ruleOnly.getId());
+        SecurityContextHolder.getContext().setAuthentication(
+            new UsernamePasswordAuthenticationToken(restricted, null, restricted.getAuthorities()));
+
+        assertThrows(ForbiddenException.class,
+            () -> ruleService.create(req("deal", entityChange("deal.won"), "user", action("create_task"))));
+        assertDoesNotThrow(
+            () -> ruleService.create(req("deal", entityChange("deal.won"), "user", action("notify"))));
     }
 
     @Test
