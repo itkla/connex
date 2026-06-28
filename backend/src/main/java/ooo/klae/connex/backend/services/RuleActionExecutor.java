@@ -38,7 +38,8 @@ public class RuleActionExecutor {
     private static final int DEFAULT_DUE_DAYS = 3;
 
     public void execute(RuleAction action, RuleFireContext ctx) {
-        switch (action.getType()) {
+        String type = action.getType() == null ? "" : action.getType().trim().toLowerCase();
+        switch (type) {
             case "create_task" -> createTask(action, ctx);
             case "log_activity" -> logActivity(action, ctx);
             case "add_tag" -> addTag(action, ctx);

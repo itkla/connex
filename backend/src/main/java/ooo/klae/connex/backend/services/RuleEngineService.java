@@ -14,12 +14,14 @@ import org.springframework.stereotype.Service;
 import lombok.RequiredArgsConstructor;
 import tools.jackson.databind.ObjectMapper;
 
+import ooo.klae.connex.backend.beans.Deal;
 import ooo.klae.connex.backend.beans.Rule;
 import ooo.klae.connex.backend.beans.RuleExecution;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.dto.RuleAction;
 import ooo.klae.connex.backend.dto.RuleTrigger;
 import ooo.klae.connex.backend.dto.SegmentDefinition;
+import ooo.klae.connex.backend.mappers.DealMapper;
 import ooo.klae.connex.backend.mappers.RuleMapper;
 import ooo.klae.connex.backend.mappers.UserMapper;
 
@@ -35,6 +37,7 @@ import ooo.klae.connex.backend.mappers.UserMapper;
 public class RuleEngineService {
 
     private final RuleMapper ruleMapper;
+    private final DealMapper dealMapper;
     private final SegmentService segmentService;
     private final RuleActionExecutor actionExecutor;
     private final AutomationExecutor automationExecutor;
@@ -57,6 +60,9 @@ public class RuleEngineService {
                 }
                 RuleTrigger trigger = read(rule.getTriggerConfig(), RuleTrigger.class);
                 if (trigger.getEvents() == null || !trigger.getEvents().contains(event)) {
+                    continue;
+                }
+                if (!stageMatches(trigger, workspaceId, recordType, entityId)) {
                     continue;
                 }
                 if (!conditionMatches(rule, workspaceId, entityId)) {
@@ -85,6 +91,14 @@ public class RuleEngineService {
                 log.warn("Schedule rule {} failed: {}", rule.getId(), e.getMessage());
             }
         }
+    }
+
+    private boolean stageMatches(RuleTrigger trigger, int workspaceId, String recordType, int entityId) {
+        if (trigger.getTargetStageId() == null || !"deal".equals(recordType)) {
+            return true;
+        }
+        Deal deal = dealMapper.getDealById(workspaceId, entityId);
+        return deal != null && trigger.getTargetStageId().equals(deal.getStageId());
     }
 
     private boolean conditionMatches(Rule rule, int workspaceId, int entityId) {

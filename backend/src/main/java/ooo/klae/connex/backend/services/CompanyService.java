@@ -120,11 +120,13 @@ public class CompanyService {
         company.setId(id);
         company.setWorkspaceId(workspaceId);
         assertUniqueWebsite(company);
-        companyMapper.update(company);
+        int updated = companyMapper.update(company);
         auditService.record("company.update", "company", id, company.getName(),
             "Updated company " + company.getName(),
             auditService.diff(before, company, AUDIT_FIELDS));
-        ruleTriggers.publish(workspaceId, "company", id, "company.updated");
+        if (updated > 0) {
+            ruleTriggers.publish(workspaceId, "company", id, "company.updated");
+        }
         return company;
     }
 

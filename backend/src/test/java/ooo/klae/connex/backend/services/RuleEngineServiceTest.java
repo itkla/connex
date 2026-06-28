@@ -10,6 +10,9 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 
 import ooo.klae.connex.backend.beans.Company;
+import ooo.klae.connex.backend.beans.Deal;
+import ooo.klae.connex.backend.beans.Pipeline;
+import ooo.klae.connex.backend.beans.Stage;
 import ooo.klae.connex.backend.beans.Tag;
 import ooo.klae.connex.backend.dto.RuleAction;
 import ooo.klae.connex.backend.dto.RuleDto;
@@ -150,6 +153,59 @@ class RuleEngineServiceTest extends AbstractServiceTest {
 
         assertFalse(tagged(company.getId(), tag.getId()));
         assertEquals(0, matchedExecutions(rule.getId()));
+    }
+
+    @Test
+    void entityChange_normalizesActionType() {
+        Company company = newCompany();
+        Tag tag = newTag();
+        RuleAction upper = new RuleAction();
+        upper.setType("ADD_TAG");
+        upper.setTagId(tag.getId());
+        RuleTrigger trigger = new RuleTrigger();
+        trigger.setType("entity_change");
+        trigger.setEvents(List.of("company.updated"));
+        RuleRequest request = new RuleRequest();
+        request.setName("Upper " + unique());
+        request.setRecordType("company");
+        request.setTrigger(trigger);
+        request.setActions(List.of(upper));
+        request.setExecutionMode("user");
+        ruleService.create(request);
+
+        ruleEngineService.onEntityChange(workspace.getId(), "company", company.getId(), "company.updated");
+
+        assertTrue(tagged(company.getId(), tag.getId()));
+    }
+
+    @Test
+    void entityChange_targetStageId_firesOnlyForMatchingStage() {
+        Pipeline pipeline = newPipeline();
+        Stage stageA = newStage(pipeline, 0);
+        Stage stageB = newStage(pipeline, 1);
+        Company company = newCompany();
+        Deal dealInA = newDeal(pipeline, stageA, company);
+        Deal dealInB = newDeal(pipeline, stageB, company);
+        Tag tag = newTag();
+        RuleTrigger trigger = new RuleTrigger();
+        trigger.setType("entity_change");
+        trigger.setEvents(List.of("deal.stage_changed"));
+        trigger.setTargetStageId(stageA.getId());
+        RuleRequest request = new RuleRequest();
+        request.setName("Stage A " + unique());
+        request.setRecordType("deal");
+        request.setTrigger(trigger);
+        request.setActions(List.of(addTag(tag.getId())));
+        request.setExecutionMode("user");
+        RuleDto rule = ruleService.create(request);
+
+        ruleEngineService.onEntityChange(workspace.getId(), "deal", dealInA.getId(), "deal.stage_changed");
+        ruleEngineService.onEntityChange(workspace.getId(), "deal", dealInB.getId(), "deal.stage_changed");
+
+        assertTrue(ruleMapper.getExecutionsByRule(workspace.getId(), rule.getId(), 50).stream()
+            .anyMatch(e -> e.getTriggerEntityId() == dealInA.getId() && "matched".equals(e.getStatus())));
+        assertFalse(ruleMapper.getExecutionsByRule(workspace.getId(), rule.getId(), 50).stream()
+            .anyMatch(e -> e.getTriggerEntityId() == dealInB.getId()));
     }
 
     @Test

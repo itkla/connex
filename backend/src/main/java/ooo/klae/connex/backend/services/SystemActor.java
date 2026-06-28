@@ -1,6 +1,5 @@
 package ooo.klae.connex.backend.services;
 
-import java.util.EnumSet;
 import java.util.Set;
 
 import org.springframework.stereotype.Component;
@@ -24,7 +23,7 @@ public class SystemActor {
 
     static final String USERNAME = "__connex_system__";
 
-    private static final Set<Permission> PERMISSIONS = EnumSet.of(
+    private static final Set<Permission> PERMISSIONS = Set.of(
         Permission.TASK_CREATE, Permission.ACTIVITY_CREATE,
         Permission.COMPANY_UPDATE, Permission.PERSON_UPDATE, Permission.DEAL_UPDATE);
 

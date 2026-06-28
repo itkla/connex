@@ -29,6 +29,12 @@ public class AutomationExecutor {
      * in the tenant context, restoring both afterward.
      */
     public <T> T runAs(int workspaceId, User principal, String role, Supplier<T> work) {
+        SecurityContext previousSecurity = SecurityContextHolder.getContext();
+        boolean hadTenant = tenantContext.isResolved();
+        Integer previousWorkspace = hadTenant ? tenantContext.getWorkspaceId() : null;
+        Integer previousUser = hadTenant ? tenantContext.getUserId() : null;
+        String previousRole = hadTenant ? tenantContext.getRole() : null;
+
         SecurityContext context = SecurityContextHolder.createEmptyContext();
         context.setAuthentication(new UsernamePasswordAuthenticationToken(principal, null, principal.getAuthorities()));
         SecurityContextHolder.setContext(context);
@@ -36,8 +42,12 @@ public class AutomationExecutor {
         try {
             return work.get();
         } finally {
-            tenantContext.clear();
-            SecurityContextHolder.clearContext();
+            if (hadTenant) {
+                tenantContext.set(previousWorkspace, previousUser, previousRole);
+            } else {
+                tenantContext.clear();
+            }
+            SecurityContextHolder.setContext(previousSecurity);
         }
     }
 }
