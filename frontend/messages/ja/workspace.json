@@ -54,6 +54,7 @@
     "tabRoles": "ロール",
     "tabRules": "ルール",
     "tabCustomFields": "カスタムフィールド",
+    "tabNotifications": "通知",
     "tabMembership": "メンバーシップ"
   },
   "WorkspaceMembers": {
@@ -277,5 +278,18 @@
     "cancel": "キャンセル",
     "left": "ワークスペースを退出しました",
     "leaveFailed": "ワークスペースを退出できませんでした。"
+  },
+  "WorkspaceNotifications": {
+    "title": "通知",
+    "subtitle": "受信トレイに表示するリマインダーを選択します。この設定はワークスペース全体ではなく、あなたにのみ適用されます。",
+    "taskTitle": "タスクのリマインダー",
+    "taskDescription": "担当しているタスクの期限が近づいた、または過ぎたとき。",
+    "dealTitle": "案件のリマインダー",
+    "dealDescription": "所有または共同担当している案件の決着予定日が近づいた、または過ぎたとき。",
+    "relationshipTitle": "関係のナッジ",
+    "relationshipDescription": "進行中の案件の関係者と連絡が途絶えたとき。",
+    "loadFailed": "通知設定を読み込めませんでした。",
+    "saveFailed": "変更を保存できませんでした。もう一度お試しください。",
+    "retry": "再試行"
   }
 }
