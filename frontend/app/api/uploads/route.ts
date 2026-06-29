@@ -1,13 +1,10 @@
-// note to future hunter: serverless platforms like vercel dont support fs, so we either need to build/host ourselves OR use a different storage solution.
-
 import { NextRequest, NextResponse } from "next/server";
 import { headers } from "next/headers";
 import path from "path";
 import fs from "fs/promises";
 import { getCurrentUserFromCookie } from "@/app/lib/api";
+import { MAX_BYTES, resolveContained, safeFileName } from "@/app/lib/uploads";
 
-const DEFAULT_MAX_BYTES = 25 * 1024 * 1024; // 25 MB
-const MAX_BYTES = Number(process.env.CONNEX_MAX_UPLOAD_BYTES) || DEFAULT_MAX_BYTES;
 const PUBLIC_PREFIX = "/attachments";
 
 function uploadsBaseDir() {
@@ -15,16 +12,8 @@ function uploadsBaseDir() {
     return path.join(baseDir, "attachments");
 }
 
-// sanitize the entity type to prevent path traversal and other security issues
 function safeEntityType(value: string): string {
     return value.trim().toLowerCase().replace(/[^a-z0-9_-]/g, "");
-}
-
-// sanitize the file name to prevent path traversal and other security issues
-function safeFileName(value: string): string {
-    const base = value.split(/[\\/]/).pop() ?? "file";
-    const cleaned = base.replace(/[^a-zA-Z0-9._-]/g, "_").replace(/^\.+/, "");
-    return cleaned.slice(0, 200) || "file";
 }
 
 export async function POST(request: NextRequest) {
@@ -60,7 +49,10 @@ export async function POST(request: NextRequest) {
     const entityType = safeEntityType(entityTypeRaw);
     const fileName = `${entityType}-${entityIdRaw}-${Date.now()}-${safeFileName(upload.name)}`;
     const targetDir = path.join(uploadsBaseDir(), entityType);
-    const filePath = path.join(targetDir, fileName);
+    const filePath = resolveContained(targetDir, fileName);
+    if (!filePath) {
+        return NextResponse.json({ error: "Invalid file name" }, { status: 400 });
+    }
     const buffer = Buffer.from(await upload.arrayBuffer());
 
     await fs.mkdir(targetDir, { recursive: true });
@@ -88,16 +80,15 @@ export async function DELETE(request: NextRequest) {
 
     const baseDir = uploadsBaseDir();
     const relative = url.slice(`${PUBLIC_PREFIX}/`.length);
-    const resolved = path.resolve(baseDir, relative);
-
-    if (resolved !== baseDir && !resolved.startsWith(baseDir + path.sep)) {
+    const resolved = resolveContained(baseDir, relative);
+    if (!resolved) {
         return NextResponse.json({ error: "Invalid attachment url" }, { status: 400 });
     }
 
     try {
         await fs.unlink(resolved);
     } catch {
-        // already gone (or never written) - treat as success so callers can proceed
+        return NextResponse.json({ ok: true });
     }
 
     return NextResponse.json({ ok: true });

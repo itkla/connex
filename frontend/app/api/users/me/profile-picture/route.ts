@@ -1,41 +1,45 @@
-// accept a PUT request to update the profile picture of the current user, then move the file to the /public/profile-pictures directory
-
-// THIS API ROUTE DOES NOT MAKE THE PUT REQUEST TO THE BACKEND, IT ONLY UPLOADS THE FILE TO THE /public/profile-pictures DIRECTORY. DO THE API REQUEST AT SOURCE
-
 import { NextRequest, NextResponse } from "next/server";
 import { headers } from "next/headers";
 import { getCurrentUserFromCookie } from "@/app/lib/api";
+import { rejectInvalidImage, resolveContained, safeFileName } from "@/app/lib/uploads";
 import path from "path";
 import fs from "fs/promises";
 
+/**
+ * Stores an uploaded profile picture for the current user under the public
+ * uploads directory and returns its public URL. This route does not call the
+ * backend; the caller is responsible for persisting the returned URL.
+ */
 export async function PUT(request: NextRequest) {
-    const cookie = (await headers()).get('cookie');
+    const cookie = (await headers()).get("cookie");
     const user = await getCurrentUserFromCookie(cookie);
     if (!user) {
         return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
+
     const formData = await request.formData();
     const profilePicture = formData.get("profilePicture");
     if (!profilePicture || typeof profilePicture !== "object" || !("arrayBuffer" in profilePicture)) {
         return NextResponse.json({ error: "Profile picture is required" }, { status: 400 });
     }
-    
-    // Extract filename and buffer
-    const fileName = `user-${user.id}-${Date.now()}-${(profilePicture as File).name}`;
-    const buffer = Buffer.from(await (profilePicture as File).arrayBuffer());
-    // const publicDir = path.join(process.cwd(), "public", "profile-pictures");
+
+    const upload = profilePicture as File;
+    const rejection = rejectInvalidImage(upload);
+    if (rejection) {
+        return NextResponse.json({ error: rejection.error }, { status: rejection.status });
+    }
+
+    const fileName = `user-${user.id}-${Date.now()}-${safeFileName(upload.name)}`;
     const baseDir = process.env.CONNEX_UPLOADS_DIR ?? path.join(process.cwd(), "public");
     const publicDir = path.join(baseDir, "profile-pictures");
-    const filePath = path.join(publicDir, fileName);
+    const filePath = resolveContained(publicDir, fileName);
+    if (!filePath) {
+        return NextResponse.json({ error: "Invalid file name" }, { status: 400 });
+    }
 
-    // Ensure /public/profile-pictures directory exists
+    const buffer = Buffer.from(await upload.arrayBuffer());
     await fs.mkdir(publicDir, { recursive: true });
-
-    // Save the file to /public/profile-pictures
     await fs.writeFile(filePath, buffer);
 
-    // Construct the public URL to the file
-    const profilePictureUrl = `/profile-pictures/${fileName}`;
-
-    return NextResponse.json({ profilePictureUrl: profilePictureUrl });
+    return NextResponse.json({ profilePictureUrl: `/profile-pictures/${fileName}` });
 }
