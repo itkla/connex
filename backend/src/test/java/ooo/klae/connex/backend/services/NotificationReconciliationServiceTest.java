@@ -3,6 +3,7 @@ package ooo.klae.connex.backend.services;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -91,7 +92,7 @@ class NotificationReconciliationServiceTest {
             new ObjectMapper()
         );
 
-        service.reconcileWorkspace(7);
+        service.reconcileWorkspace(7, true);
 
         ArgumentCaptor<Notification> captor = ArgumentCaptor.forClass(Notification.class);
         verify(dispatcher).dispatch(captor.capture());
@@ -140,7 +141,7 @@ class NotificationReconciliationServiceTest {
 
         NotificationReconciliationService service = nudgeService(
             notificationMapper, preferenceMapper, dispatcher, scoringService, clock);
-        service.reconcileWorkspace(7);
+        service.reconcileWorkspace(7, true);
 
         ArgumentCaptor<Notification> captor = ArgumentCaptor.forClass(Notification.class);
         verify(dispatcher).dispatch(captor.capture());
@@ -177,7 +178,7 @@ class NotificationReconciliationServiceTest {
 
         NotificationReconciliationService service = nudgeService(
             notificationMapper, preferenceMapper, dispatcher, scoringService, clock);
-        service.reconcileWorkspace(7);
+        service.reconcileWorkspace(7, true);
 
         verify(dispatcher, never()).dispatch(any());
     }
@@ -205,10 +206,27 @@ class NotificationReconciliationServiceTest {
 
         NotificationReconciliationService service = nudgeService(
             notificationMapper, preferenceMapper, dispatcher, scoringService, clock);
-        service.reconcileWorkspace(7);
+        service.reconcileWorkspace(7, true);
 
         verify(dispatcher, never()).dispatch(any());
         verify(notificationMapper).resolveReminder(7, 42, 101, "2026-06-23 15:30:00");
+    }
+
+    @Test
+    void reconciliationSkipsRelationshipNudgesWhenNotRequested() {
+        NotificationMapper notificationMapper = Mockito.mock(NotificationMapper.class);
+        PreferenceMapper preferenceMapper = Mockito.mock(PreferenceMapper.class);
+        NotificationDispatcher dispatcher = Mockito.mock(NotificationDispatcher.class);
+        ScoringService scoringService = Mockito.mock(ScoringService.class);
+        Clock clock = Clock.fixed(Instant.parse("2026-06-23T15:30:00Z"), ZoneOffset.UTC);
+
+        NotificationReconciliationService service = nudgeService(
+            notificationMapper, preferenceMapper, dispatcher, scoringService, clock);
+        service.reconcileWorkspace(7, false);
+
+        verify(notificationMapper, never()).findRelationshipNudgeCandidates(anyInt());
+        verify(scoringService, never()).scoreContacts(anyInt());
+        verify(dispatcher, never()).dispatch(any());
     }
 
     private static RelationshipNudgeCandidate nudgeCandidate() {

@@ -55,8 +55,14 @@ public class NotificationReconciliationService {
     private final Clock clock;
     private final ObjectMapper objectMapper;
 
+    /**
+     * Reconciles a workspace's reminder notifications. The {@code includeRelationshipNudges} flag
+     * gates the relationship-decay pass, which rescores the whole workspace and is therefore run
+     * only by the scheduled sweep; the per-mutation source-change path skips it, since decay is
+     * time-driven and the next sweep picks it up within the reconciliation interval.
+     */
     @Transactional(propagation = Propagation.REQUIRES_NEW)
-    public void reconcileWorkspace(int workspaceId) {
+    public void reconcileWorkspace(int workspaceId, boolean includeRelationshipNudges) {
         String triggeredAt = utcTimestamp(clock.instant());
         Map<ReminderKey, Notification> existing = loadExisting(workspaceId);
         Map<PreferenceKey, Boolean> preferences = loadPreferences(workspaceId);
@@ -94,29 +100,8 @@ public class NotificationReconciliationService {
             }
         }
 
-        List<RelationshipNudgeCandidate> nudgeCandidates =
-            notificationMapper.findRelationshipNudgeCandidates(workspaceId);
-        if (!nudgeCandidates.isEmpty()) {
-            Map<Integer, RelationshipTemperatureDto> temperatures = scoreByPerson(workspaceId);
-            for (RelationshipNudgeCandidate candidate : nudgeCandidates) {
-                RelationshipTemperatureDto temperature = temperatures.get(candidate.getPersonId());
-                if (temperature == null) {
-                    continue;
-                }
-                String severity = nudgeSeverity(
-                    temperature.getBand(),
-                    temperature.getTrend(),
-                    temperature.getDaysSinceTouch(),
-                    properties.getCoolingMinDaysSinceTouch()
-                );
-                String dedupeKey =
-                    "relationship.cooling:" + candidate.getDealId() + ":" + candidate.getPersonId();
-                ReminderKey key = new ReminderKey(workspaceId, candidate.getRecipientId(), dedupeKey);
-                if (severity != null && enabled(preferences, candidate.getRecipientId(), RELATIONSHIP_TYPE)) {
-                    expected.put(key, relationshipNudgeNotification(
-                        candidate, temperature, severity, dedupeKey, triggeredAt));
-                }
-            }
+        if (includeRelationshipNudges) {
+            addRelationshipNudges(workspaceId, expected, preferences, triggeredAt);
         }
 
         expected.values().forEach(dispatcher::dispatch);
@@ -129,6 +114,39 @@ public class NotificationReconciliationService {
                     notification.getId(),
                     triggeredAt
                 );
+            }
+        }
+    }
+
+    private void addRelationshipNudges(
+        int workspaceId,
+        Map<ReminderKey, Notification> expected,
+        Map<PreferenceKey, Boolean> preferences,
+        String triggeredAt
+    ) {
+        List<RelationshipNudgeCandidate> nudgeCandidates =
+            notificationMapper.findRelationshipNudgeCandidates(workspaceId);
+        if (nudgeCandidates.isEmpty()) {
+            return;
+        }
+        Map<Integer, RelationshipTemperatureDto> temperatures = scoreByPerson(workspaceId);
+        for (RelationshipNudgeCandidate candidate : nudgeCandidates) {
+            RelationshipTemperatureDto temperature = temperatures.get(candidate.getPersonId());
+            if (temperature == null) {
+                continue;
+            }
+            String severity = nudgeSeverity(
+                temperature.getBand(),
+                temperature.getTrend(),
+                temperature.getDaysSinceTouch(),
+                properties.getCoolingMinDaysSinceTouch()
+            );
+            String dedupeKey =
+                "relationship.cooling:" + candidate.getDealId() + ":" + candidate.getPersonId();
+            ReminderKey key = new ReminderKey(workspaceId, candidate.getRecipientId(), dedupeKey);
+            if (severity != null && enabled(preferences, candidate.getRecipientId(), RELATIONSHIP_TYPE)) {
+                expected.put(key, relationshipNudgeNotification(
+                    candidate, temperature, severity, dedupeKey, triggeredAt));
             }
         }
     }
