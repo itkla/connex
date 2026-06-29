@@ -70,8 +70,9 @@ public class DealService {
      * @param deal
      */
     private void reconcileCloseState(Deal deal) {
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
         Integer stageId = deal.getStageId();
-        String stageOutcome = stageId != null ? dealMapper.getStageOutcome(stageId) : "normal";
+        String stageOutcome = stageId != null ? dealMapper.getStageOutcome(workspaceId, stageId) : "normal";
         if ("won".equals(stageOutcome)) {
             deal.setWon(true);
         } else if ("lost".equals(stageOutcome)) {
@@ -241,10 +242,10 @@ public class DealService {
         Deal deal = dealMapper.getDealById(workspaceId, id);
         deal.setWon(null); // reconcile clears closedAt + reason
         Integer stageId = deal.getStageId();
-        boolean terminal = stageId != null && !"normal".equals(dealMapper.getStageOutcome(stageId));
+        boolean terminal = stageId != null && !"normal".equals(dealMapper.getStageOutcome(workspaceId, stageId));
         if (terminal) {
             Integer normalStage = deal.getPipelineId() != null
-                ? dealMapper.getLastNormalStageId(deal.getPipelineId())
+                ? dealMapper.getLastNormalStageId(workspaceId, deal.getPipelineId())
                 : null;
             if (normalStage == null) {
                 throw new IllegalStateException(
@@ -331,7 +332,7 @@ public class DealService {
     public List<Tag> getTagsByDealId(int dealId) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         if (dealMapper.getDealById(workspaceId, dealId) == null) throw new ResourceNotFoundException("Deal not found with id: " + dealId);
-        return tagMapper.getTagsByDealId(dealId);
+        return tagMapper.getTagsByDealId(workspaceId, dealId);
     }
 
     /**
@@ -454,10 +455,10 @@ public class DealService {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         Deal deal = dealMapper.getDealById(workspaceId, dealId);
         if (deal == null) throw new ResourceNotFoundException("Deal not found with id: " + dealId);
-        List<String> before = tagMapper.getTagsByDealId(dealId).stream().map(Tag::getName).toList();
+        List<String> before = tagMapper.getTagsByDealId(workspaceId, dealId).stream().map(Tag::getName).toList();
         dealMapper.clearTags(workspaceId, dealId);
         if (tagIds != null && !tagIds.isEmpty()) dealMapper.insertTags(workspaceId, dealId, tagIds);
-        List<Tag> after = tagMapper.getTagsByDealId(dealId);
+        List<Tag> after = tagMapper.getTagsByDealId(workspaceId, dealId);
         auditService.record("deal.replaceTags", "deal", dealId, deal.getName(),
             "Updated tags on " + deal.getName(),
             auditService.singleChange("tags", before, after.stream().map(Tag::getName).toList()));

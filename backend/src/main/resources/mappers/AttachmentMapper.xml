@@ -22,7 +22,7 @@
   </resultMap>
 
   <resultMap id="AttachmentWithTagsResult" type="Attachment" extends="AttachmentResult">
-    <collection property="tags" ofType="Tag" column="id"
+    <collection property="tags" ofType="Tag" column="{workspaceId=workspace_id,attachmentId=id}"
       select="ooo.klae.connex.backend.mappers.TagMapper.getTagsByAttachmentId"/>
   </resultMap>
 

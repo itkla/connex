@@ -19,7 +19,7 @@
     <result property="createdAt" column="created_at"/>
     <result property="updatedAt" column="updated_at"/>
     <collection property="people" ofType="Person" column="{workspaceId=workspace_id,companyId=id}" select="ooo.klae.connex.backend.mappers.PersonMapper.getPersonsByCompanyId"/>
-    <collection property="tags" ofType="Tag" column="id" select="ooo.klae.connex.backend.mappers.TagMapper.getTagsByCompanyId"/>
+    <collection property="tags" ofType="Tag" column="{workspaceId=workspace_id,companyId=id}" select="ooo.klae.connex.backend.mappers.TagMapper.getTagsByCompanyId"/>
   </resultMap>
 
   <!-- Visibility is owned-or-shared: a company is visible to its owning workspace and to any

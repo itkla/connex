@@ -213,7 +213,7 @@ public class PersonService {
      */
     public List<Tag> getTagsByPersonId(int personId) {
         requirePerson(workspaceService.getCurrentWorkspaceId(), personId);
-        return tagMapper.getTagsByPersonId(personId);
+        return tagMapper.getTagsByPersonId(workspaceService.getCurrentWorkspaceId(), personId);
     }
 
     /**
@@ -253,10 +253,10 @@ public class PersonService {
     @RequirePermission(Permission.PERSON_UPDATE)
     public List<Tag> replaceTags(int personId, List<Integer> tagIds) {
         Person person = requirePerson(workspaceService.getCurrentWorkspaceId(), personId);
-        List<String> before = tagMapper.getTagsByPersonId(personId).stream().map(Tag::getName).toList();
+        List<String> before = tagMapper.getTagsByPersonId(workspaceService.getCurrentWorkspaceId(), personId).stream().map(Tag::getName).toList();
         personMapper.clearTags(personId);
         if (tagIds != null && !tagIds.isEmpty()) personMapper.insertTags(personId, tagIds);
-        List<Tag> after = tagMapper.getTagsByPersonId(personId);
+        List<Tag> after = tagMapper.getTagsByPersonId(workspaceService.getCurrentWorkspaceId(), personId);
         auditService.record("person.replaceTags", "person", personId, person.getName(),
             "Updated tags on " + person.getName(),
             auditService.singleChange("tags", before, after.stream().map(Tag::getName).toList()));

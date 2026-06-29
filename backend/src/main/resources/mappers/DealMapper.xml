@@ -35,7 +35,7 @@
     <collection property="tasks" ofType="Task"
                 column="{workspaceId=workspace_id,dealId=id}"
                 select="ooo.klae.connex.backend.mappers.TaskMapper.getTasksByDealId"/>
-    <collection property="tags" ofType="Tag" column="id"
+    <collection property="tags" ofType="Tag" column="{workspaceId=workspace_id,dealId=id}"
                 select="ooo.klae.connex.backend.mappers.TagMapper.getTagsByDealId"/>
   </resultMap>
 
@@ -185,12 +185,12 @@
 
   <select id="getStageOutcome" resultType="string">
     SELECT CASE WHEN is_success THEN 'won' WHEN is_failure THEN 'lost' ELSE 'normal' END
-    FROM stage WHERE id = #{stageId}
+    FROM stage WHERE workspace_id = #{workspaceId} AND id = #{stageId}
   </select>
 
   <select id="getLastNormalStageId" resultType="java.lang.Integer">
     SELECT id FROM stage
-    WHERE pipeline_id = #{pipelineId} AND is_success = FALSE AND is_failure = FALSE
+    WHERE workspace_id = #{workspaceId} AND pipeline_id = #{pipelineId} AND is_success = FALSE AND is_failure = FALSE
     ORDER BY position DESC
     LIMIT 1
   </select>

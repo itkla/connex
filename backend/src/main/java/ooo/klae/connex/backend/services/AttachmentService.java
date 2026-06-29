@@ -90,7 +90,7 @@ public class AttachmentService {
 
     public List<Tag> getTags(int attachmentId) {
         getById(attachmentId);
-        return tagMapper.getTagsByAttachmentId(attachmentId);
+        return tagMapper.getTagsByAttachmentId(workspaceService.getCurrentWorkspaceId(), attachmentId);
     }
 
     /**
@@ -143,10 +143,10 @@ public class AttachmentService {
     @RequirePermission(Permission.ATTACHMENT_CREATE)
     public List<Tag> replaceTags(int attachmentId, List<Integer> tagIds) {
         Attachment attachment = getById(attachmentId);
-        List<String> before = tagMapper.getTagsByAttachmentId(attachmentId).stream().map(Tag::getName).toList();
+        List<String> before = tagMapper.getTagsByAttachmentId(workspaceService.getCurrentWorkspaceId(), attachmentId).stream().map(Tag::getName).toList();
         attachmentMapper.clearTags(attachmentId);
         if (tagIds != null && !tagIds.isEmpty()) attachmentMapper.insertTags(attachmentId, tagIds);
-        List<Tag> after = tagMapper.getTagsByAttachmentId(attachmentId);
+        List<Tag> after = tagMapper.getTagsByAttachmentId(workspaceService.getCurrentWorkspaceId(), attachmentId);
         auditService.record("attachment.replaceTags", "attachment", attachmentId, attachment.getFileName(),
             "Updated tags on " + attachment.getFileName(),
             auditService.singleChange("tags", before, after.stream().map(Tag::getName).toList()));

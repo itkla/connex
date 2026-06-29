@@ -22,10 +22,10 @@ public interface TagMapper {
     int update(Tag tag);
     int delete(@Param("workspaceId") int workspaceId, @Param("id") int id);
 
-    List<Tag> getTagsByPersonId(int personId);
-    List<Tag> getTagsByCompanyId(int companyId);
-    List<Tag> getTagsByDealId(int dealId);
-    List<Tag> getTagsByAttachmentId(int attachmentId);
+    List<Tag> getTagsByPersonId(@Param("workspaceId") int workspaceId, @Param("personId") int personId);
+    List<Tag> getTagsByCompanyId(@Param("workspaceId") int workspaceId, @Param("companyId") int companyId);
+    List<Tag> getTagsByDealId(@Param("workspaceId") int workspaceId, @Param("dealId") int dealId);
+    List<Tag> getTagsByAttachmentId(@Param("workspaceId") int workspaceId, @Param("attachmentId") int attachmentId);
 
     /** All (entityId, name) tag pairs for contacts in the workspace; for bulk export. */
     List<Map<String, Object>> getPersonTagNames(int workspaceId);

@@ -107,9 +107,12 @@ class TagMapperTest extends AbstractMapperTest {
         Person p = newPerson(company);
         personMapper.addTag(p.getId(), tag.getId());
 
-        List<Tag> tags = tagMapper.getTagsByPersonId(p.getId());
-
+        List<Tag> tags = tagMapper.getTagsByPersonId(workspace.getId(), p.getId());
         assertTrue(tags.stream().anyMatch(x -> x.getId() == tag.getId()));
+
+        Workspace other = newWorkspace();
+        assertTrue(tagMapper.getTagsByPersonId(other.getId(), p.getId()).isEmpty(),
+            "tags linked in another workspace must not hydrate here");
     }
 
     /**
@@ -121,9 +124,12 @@ class TagMapperTest extends AbstractMapperTest {
         Company company = newCompany();
         companyMapper.addTag(company.getId(), tag.getId());
 
-        List<Tag> tags = tagMapper.getTagsByCompanyId(company.getId());
-
+        List<Tag> tags = tagMapper.getTagsByCompanyId(workspace.getId(), company.getId());
         assertTrue(tags.stream().anyMatch(x -> x.getId() == tag.getId()));
+
+        Workspace other = newWorkspace();
+        assertTrue(tagMapper.getTagsByCompanyId(other.getId(), company.getId()).isEmpty(),
+            "tags linked in another workspace must not hydrate here");
     }
 
     /**
@@ -138,9 +144,12 @@ class TagMapperTest extends AbstractMapperTest {
         Deal deal = newDeal(pipeline, stage, company);
         dealMapper.addTag(workspace.getId(), deal.getId(), tag.getId());
 
-        List<Tag> tags = tagMapper.getTagsByDealId(deal.getId());
-
+        List<Tag> tags = tagMapper.getTagsByDealId(workspace.getId(), deal.getId());
         assertTrue(tags.stream().anyMatch(x -> x.getId() == tag.getId()));
+
+        Workspace other = newWorkspace();
+        assertTrue(tagMapper.getTagsByDealId(other.getId(), deal.getId()).isEmpty(),
+            "tags linked in another workspace must not hydrate here");
     }
 
     /**
