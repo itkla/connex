@@ -347,14 +347,16 @@
     JOIN (
       SELECT owned.workspace_id, owned.id AS deal_id, owned.owner_id AS recipient_id
       FROM deal owned
-      WHERE owned.owner_id IS NOT NULL
+      WHERE owned.workspace_id = #{workspaceId}
+        AND owned.owner_id IS NOT NULL
       UNION
       SELECT collaborated.workspace_id, collaborated.id AS deal_id, dc.user_id AS recipient_id
       FROM deal collaborated
       JOIN deal_collaborator dc
         ON dc.workspace_id = collaborated.workspace_id
        AND dc.deal_id = collaborated.id
-      WHERE collaborated.owner_id IS NOT NULL
+      WHERE collaborated.workspace_id = #{workspaceId}
+        AND collaborated.owner_id IS NOT NULL
     ) recipients
       ON recipients.workspace_id = d.workspace_id
      AND recipients.deal_id = d.id
