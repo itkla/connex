@@ -78,4 +78,31 @@
     WHERE at.attachment_id = #{attachmentId}
     ORDER BY t.name
   </select>
+
+  <select id="getPersonTagNames" resultType="map">
+    SELECT pt.person_id AS entityId, t.name AS name
+    FROM person_tag pt
+    JOIN person p ON p.id = pt.person_id
+    JOIN tag t ON t.id = pt.tag_id
+    WHERE p.workspace_id = #{workspaceId}
+    ORDER BY t.name
+  </select>
+
+  <select id="getCompanyTagNames" resultType="map">
+    SELECT ct.company_id AS entityId, t.name AS name
+    FROM company_tag ct
+    JOIN company c ON c.id = ct.company_id
+    JOIN tag t ON t.id = ct.tag_id
+    WHERE c.workspace_id = #{workspaceId}
+    ORDER BY t.name
+  </select>
+
+  <select id="getDealTagNames" resultType="map">
+    SELECT dt.deal_id AS entityId, t.name AS name
+    FROM deal_tag dt
+    JOIN deal d ON d.id = dt.deal_id
+    JOIN tag t ON t.id = dt.tag_id
+    WHERE d.workspace_id = #{workspaceId}
+    ORDER BY t.name
+  </select>
 </mapper>

@@ -4,6 +4,7 @@ import org.apache.ibatis.annotations.Param;
 
 import ooo.klae.connex.backend.beans.Tag;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Mapper interface for {@code Tag} persistence and tag-association reads.
@@ -25,4 +26,11 @@ public interface TagMapper {
     List<Tag> getTagsByCompanyId(int companyId);
     List<Tag> getTagsByDealId(int dealId);
     List<Tag> getTagsByAttachmentId(int attachmentId);
+
+    /** All (entityId, name) tag pairs for contacts in the workspace; for bulk export. */
+    List<Map<String, Object>> getPersonTagNames(int workspaceId);
+    /** All (entityId, name) tag pairs for companies in the workspace; for bulk export. */
+    List<Map<String, Object>> getCompanyTagNames(int workspaceId);
+    /** All (entityId, name) tag pairs for deals in the workspace; for bulk export. */
+    List<Map<String, Object>> getDealTagNames(int workspaceId);
 }
