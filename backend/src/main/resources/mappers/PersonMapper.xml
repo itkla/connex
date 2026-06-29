@@ -195,7 +195,7 @@
     LIMIT 10
   </select>
 
-  <select id="findByEmails" resultMap="PersonResult">
+  <select id="findByEmails" resultType="Person">
     SELECT p.id, p.email, p.name
     FROM person p
     WHERE p.workspace_id = #{workspaceId}

@@ -104,6 +104,8 @@ public class ImportService {
         String companyName;
         String pipelineName;
         String stageName;
+        Integer resolvedPipelineId;
+        Integer resolvedStageId;
         final List<String> peopleEmails = new ArrayList<>();
     }
 
@@ -404,8 +406,6 @@ public class ImportService {
                 updated++;
                 continue;
             }
-            Integer[] resolved = resolveStage(workspaceId, row);
-            if (resolved == null) { fail(row, "Unknown pipeline or stage"); continue; }
             Deal bean = new Deal();
             bean.setWorkspaceId(workspaceId);
             bean.setOwnerId(actorId);
@@ -413,8 +413,8 @@ public class ImportService {
             bean.setValue(parseValue(row.std.get("value")));
             bean.setCurrency(row.std.get("currency"));
             bean.setExpectedCloseDate(row.std.get("expectedCloseDate"));
-            bean.setPipelineId(resolved[0]);
-            bean.setStageId(resolved[1]);
+            bean.setPipelineId(row.resolvedPipelineId);
+            bean.setStageId(row.resolvedStageId);
             bean.setCompanyId(companyByName.get(normName(row.companyName)));
             reconcileClose(bean, stageOutcome);
             beans.add(bean);
@@ -461,6 +461,7 @@ public class ImportService {
             Integer matchId = byNameCompany.get(dealKey(normName(row.std.get("name")), companyId));
             if (matchId != null) markMatch(row, matchId, row.std.get("name"));
         }
+        resolveStages(workspaceId, plan);
         dedupeWithinFile(plan,
             r -> dealKey(normName(r.std.get("name")), companyByName.get(normName(r.companyName))));
         return plan;
@@ -482,12 +483,9 @@ public class ImportService {
         if (companyId != null && (OVERWRITE.equals(action) || existing.getCompanyId() == null)) {
             existing.setCompanyId(companyId);
         }
-        if (OVERWRITE.equals(action) && row.stageName != null) {
-            Integer[] resolved = resolveStage(workspaceId, row);
-            if (resolved != null) {
-                existing.setPipelineId(resolved[0]);
-                existing.setStageId(resolved[1]);
-            }
+        if (OVERWRITE.equals(action) && row.stageName != null && row.resolvedStageId != null) {
+            existing.setPipelineId(row.resolvedPipelineId);
+            existing.setStageId(row.resolvedStageId);
         }
         reconcileClose(existing, stageOutcome);
         dealMapper.update(existing);
@@ -496,30 +494,30 @@ public class ImportService {
         applyCustomValues("deal", existing.getId(), row.custom, columnToDef);
     }
 
-    private Integer[] resolveStage(int workspaceId, PlanRow row) {
-        Integer pipelineId = null;
-        if (row.pipelineName != null) {
-            for (var pipeline : pipelineMapper.getAllPipelines(workspaceId)) {
-                if (row.pipelineName.equalsIgnoreCase(pipeline.getName())) { pipelineId = pipeline.getId(); break; }
-            }
-            if (pipelineId == null) return null;
-        } else {
-            var pipelines = pipelineMapper.getAllPipelines(workspaceId);
-            if (pipelines.isEmpty()) return null;
-            pipelineId = pipelines.get(0).getId();
+    private void resolveStages(int workspaceId, List<PlanRow> plan) {
+        var pipelines = pipelineMapper.getAllPipelines(workspaceId);
+        Map<String, Integer> pipelineByName = new HashMap<>();
+        Map<Integer, Map<String, Integer>> stageByName = new HashMap<>();
+        Map<Integer, Integer> firstStage = new HashMap<>();
+        for (var pipeline : pipelines) {
+            pipelineByName.put(pipeline.getName().toLowerCase(), pipeline.getId());
+            Map<String, Integer> stages = new HashMap<>();
+            List<Stage> list = pipelineMapper.getStagesByPipelineId(workspaceId, pipeline.getId());
+            for (Stage stage : list) stages.put(stage.getName().toLowerCase(), stage.getId());
+            stageByName.put(pipeline.getId(), stages);
+            if (!list.isEmpty()) firstStage.put(pipeline.getId(), list.get(0).getId());
         }
-        List<Stage> stages = pipelineMapper.getStagesByPipelineId(workspaceId, pipelineId);
-        if (stages.isEmpty()) return null;
-        Stage stage = null;
-        if (row.stageName != null) {
-            for (Stage candidate : stages) {
-                if (row.stageName.equalsIgnoreCase(candidate.getName())) { stage = candidate; break; }
-            }
-            if (stage == null) return null;
-        } else {
-            stage = stages.get(0);
+        Integer defaultPipeline = pipelines.isEmpty() ? null : pipelines.get(0).getId();
+        for (PlanRow row : plan) {
+            if (INVALID.equals(row.status) || SKIP.equals(row.status)) continue;
+            Integer pid = row.pipelineName != null ? pipelineByName.get(row.pipelineName.toLowerCase()) : defaultPipeline;
+            if (pid == null) { fail(row, "Unknown pipeline or stage"); continue; }
+            Map<String, Integer> stages = stageByName.getOrDefault(pid, Map.of());
+            Integer sid = row.stageName != null ? stages.get(row.stageName.toLowerCase()) : firstStage.get(pid);
+            if (sid == null) { fail(row, "Unknown pipeline or stage"); continue; }
+            row.resolvedPipelineId = pid;
+            row.resolvedStageId = sid;
         }
-        return new Integer[] { pipelineId, stage.getId() };
     }
 
     private void reconcileClose(Deal deal, Map<Integer, String> stageOutcome) {
@@ -703,7 +701,7 @@ public class ImportService {
             if (field != null && field.startsWith("custom:")) {
                 CustomFieldDefinition def = byId.get(parseCustomId(field));
                 if (def != null) result.put(cm.getColumn(), def);
-            } else if (cm.isCreateCustomField()) {
+            } else if (Boolean.TRUE.equals(cm.getCreateCustomField())) {
                 CustomFieldDefinition placeholder = new CustomFieldDefinition();
                 placeholder.setFieldType(normalizeCustomType(cm.getCustomFieldType()));
                 placeholder.setLabel(customLabel(cm));
@@ -725,7 +723,7 @@ public class ImportService {
             if (field != null && field.startsWith("custom:")) {
                 int id = parseCustomId(field);
                 if (byId.containsKey(id)) columnToDef.put(cm.getColumn(), id);
-            } else if (cm.isCreateCustomField()) {
+            } else if (Boolean.TRUE.equals(cm.getCreateCustomField())) {
                 columnToDef.put(cm.getColumn(), createDefinition(workspaceId, entityType, cm));
             }
         }
@@ -865,7 +863,7 @@ public class ImportService {
         Map<String, ColumnMapping> byColumn = new HashMap<>();
         for (ColumnMapping cm : mapping) {
             String field = cm.getField();
-            boolean usable = cm.isCreateCustomField()
+            boolean usable = Boolean.TRUE.equals(cm.getCreateCustomField())
                 || (field != null && (field.startsWith("custom:") || "tags".equals(field) || allowedFields.contains(field)));
             if (usable) byColumn.put(cm.getColumn(), cm);
         }

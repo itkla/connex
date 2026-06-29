@@ -23,7 +23,7 @@ public class ColumnMapping {
 
     private String field;
 
-    private boolean createCustomField;
+    private Boolean createCustomField;
 
     private String customFieldType;
 
