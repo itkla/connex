@@ -39,9 +39,10 @@ export function notificationContent(notification: Notification, t: Translator, l
         };
     }
     if (notification.type === "relationship.cooling") {
+        const cold = data.band === "cold";
         return {
-            title: t(notification.severity === "critical" ? "relationshipColdTitle" : "relationshipCoolingTitle"),
-            body: t(notification.severity === "critical" ? "relationshipColdBody" : "relationshipCoolingBody", {
+            title: t(cold ? "relationshipColdTitle" : "relationshipCoolingTitle"),
+            body: t(cold ? "relationshipColdBody" : "relationshipCoolingBody", {
                 person: text(data.person, notification.sourceLabel ?? notification.title),
                 deal: text(data.deal, notification.contextLabel ?? ""),
                 days: text(data.daysSinceTouch, ""),
