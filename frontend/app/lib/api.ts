@@ -458,6 +458,59 @@ export function getContactsPage(params: Types.ContactsPageParams = {}, init: Req
     return getJson<Types.Page<Types.Contact>>(`/api/persons/page${buildQuery(params)}`, init);
 }
 
+/*
+* == CSV import / export
+*/
+
+export function previewImport(entity: Types.ImportEntity, body: Types.ImportRequest, init: RequestInit = {}) {
+    return postJson<Types.ImportPreviewResult>(`/api/imports/${entity}/preview`, body, init);
+}
+
+export function commitImport(entity: Types.ImportEntity, body: Types.ImportRequest, init: RequestInit = {}) {
+    return postJson<Types.ImportResult>(`/api/imports/${entity}`, body, init);
+}
+
+/**
+ * Streams a CSV from the backend with the active workspace + locale headers (a plain anchor would
+ * not carry the workspace context) and triggers a browser download.
+ */
+export async function downloadCsv(path: string, filename: string): Promise<void> {
+    const locale = clientLocale();
+    const workspaceId = clientWorkspaceId();
+    const res = await fetch(`${API_BASE}${path}`, {
+        credentials: "include",
+        headers: {
+            ...(locale ? { "Accept-Language": locale } : {}),
+            ...(workspaceId ? { "X-Workspace-Id": workspaceId } : {}),
+        },
+    });
+    if (!res.ok) {
+        throw await getApiError(res);
+    }
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = filename;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    URL.revokeObjectURL(url);
+}
+
+export function exportContactsCsv(params: Types.ContactsPageParams = {}) {
+    const query = buildQuery({ q: params.q, companies: params.companies, titles: params.titles, noCompany: params.noCompany });
+    return downloadCsv(`/api/exports/persons${query}`, "contacts.csv");
+}
+
+export function exportCompaniesCsv(tagId?: number) {
+    return downloadCsv(`/api/exports/companies${tagId ? `?tagId=${tagId}` : ""}`, "companies.csv");
+}
+
+export function exportDealsCsv(params: { pipelineId?: number; stageId?: number; companyId?: number; personId?: number; tagId?: number } = {}) {
+    return downloadCsv(`/api/exports/deals${buildQuery(params)}`, "deals.csv");
+}
+
 export function getPersonFacets(init: RequestInit = {}) {
     return getJson<Types.PersonFacets>(`/api/persons/facets`, init);
 }

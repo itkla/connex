@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { useReducedMotion } from 'motion/react';
 import { Button } from '@/components/ui/button';
+import RecordsImportExport from '@/app/components/import/RecordsImportExport';
 import { ButtonGroup } from '@/components/ui/button-group';
 import { toast } from 'sonner';
 import { toastError, toastSuccess } from '@/app/lib/toast';
@@ -484,10 +485,13 @@ export default function CompaniesBrowser({ companies, savedViews }: { companies:
         <div className="page-grid gap-y-6">
             <div className="flex items-center justify-between">
                 <h1 className="text-4xl font-extrabold">{t('title')}</h1>
-                <Button className="bg-brand text-white" aria-label={t('addCompanyAriaLabel')} onClick={() => setNewDialogOpen(true)}>
-                    <PlusIcon strokeWidth={2.5} />
-                    {t('new')}
-                </Button>
+                <div className="flex items-center gap-2">
+                    <RecordsImportExport entity="companies" onImported={() => router.refresh()} />
+                    <Button className="bg-brand text-white" aria-label={t('addCompanyAriaLabel')} onClick={() => setNewDialogOpen(true)}>
+                        <PlusIcon strokeWidth={2.5} />
+                        {t('new')}
+                    </Button>
+                </div>
             </div>
 
             <SavedViewsBar

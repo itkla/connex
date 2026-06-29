@@ -1,0 +1,83 @@
+{
+  "importExport": {
+    "title": {
+      "persons": "Import contacts",
+      "companies": "Import companies",
+      "deals": "Import deals"
+    },
+    "description": "Upload a CSV, map its columns, review, and import.",
+    "step": {
+      "upload": "Upload",
+      "map": "Map",
+      "review": "Review",
+      "done": "Done"
+    },
+    "parsing": "Reading file…",
+    "dropPrompt": "Drop a CSV here, or click to browse",
+    "uploadHint": "Up to 5,000 rows · 5MB · .csv",
+    "errorTooLarge": "File is too large (max {max}).",
+    "errorNoColumns": "No columns found in this file.",
+    "errorNoRows": "No data rows found in this file.",
+    "errorTooManyRows": "This file has {count} rows; the limit is {max}. Split it into smaller files.",
+    "errorParse": "Couldn't read this file. Make sure it's a valid CSV.",
+    "errorPreview": "Couldn't analyze the import. Please try again.",
+    "errorImport": "The import failed. Please try again.",
+    "errorExport": "The export failed. Please try again.",
+    "back": "Back",
+    "next": "Next",
+    "import": "Import",
+    "done": "Done",
+    "mapHint": "{mapped} of {total} columns mapped. Name is required.",
+    "ignore": "— Ignore —",
+    "createCustomField": "＋ Create custom field",
+    "fields": {
+      "name": "Name",
+      "email": "Email",
+      "phone": "Phone",
+      "title": "Title",
+      "company": "Company",
+      "imageUrl": "Image URL",
+      "website": "Website",
+      "industry": "Industry",
+      "address": "Address",
+      "logoUrl": "Logo URL",
+      "value": "Value",
+      "currency": "Currency",
+      "pipeline": "Pipeline",
+      "stage": "Stage",
+      "expectedCloseDate": "Expected close date",
+      "people": "Contacts",
+      "tags": "Tags"
+    },
+    "type": {
+      "text": "Text",
+      "number": "Number",
+      "date": "Date",
+      "boolean": "Yes/No",
+      "url": "URL"
+    },
+    "onMatch": "When a row matches an existing record",
+    "action": {
+      "fill_empty": "Fill empty",
+      "skip": "Skip",
+      "overwrite": "Overwrite"
+    },
+    "countNew": "new",
+    "countUpdate": "update",
+    "countSkip": "skip",
+    "countInvalid": "invalid",
+    "rowStatus": {
+      "create": "New",
+      "match": "Match",
+      "skip": "Skip",
+      "invalid": "Invalid"
+    },
+    "doneTitle": "Import complete",
+    "doneSummary": "{created} created · {updated} updated · {skipped} skipped",
+    "failedCount": "{count} rows couldn't be imported",
+    "downloadErrors": "Download errors",
+    "toastImported": "Imported {created} created, {updated} updated",
+    "openImport": "Import",
+    "exportCsv": "Export"
+  }
+}
