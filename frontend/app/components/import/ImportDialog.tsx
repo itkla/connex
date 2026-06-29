@@ -121,8 +121,13 @@ export default function ImportDialog({ entity, open, onOpenChange, onImported }:
                 return;
             }
             const initial: Record<string, ColumnTarget> = {};
+            const taken = new Set<string>();
             for (const header of result.headers) {
-                const suggested = suggestField(header, entity);
+                let suggested = suggestField(header, entity);
+                if (suggested && suggested !== 'tags') {
+                    if (taken.has(suggested)) suggested = null;
+                    else taken.add(suggested);
+                }
                 initial[header] = {
                     target: suggested ?? IGNORE,
                     customType: inferColumnType(columnSamples(result.rows, header)),

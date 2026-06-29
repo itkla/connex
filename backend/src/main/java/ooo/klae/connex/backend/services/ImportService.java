@@ -29,6 +29,7 @@ import ooo.klae.connex.backend.dto.ImportRequest;
 import ooo.klae.connex.backend.dto.ImportResult;
 import ooo.klae.connex.backend.dto.RowAnalysis;
 import ooo.klae.connex.backend.dto.RowError;
+import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.mappers.CompanyMapper;
 import ooo.klae.connex.backend.mappers.CustomFieldDefinitionMapper;
 import ooo.klae.connex.backend.mappers.DealMapper;
@@ -138,8 +139,8 @@ public class ImportService {
         requireUpdatePermission(plan, action, Permission.PERSON_UPDATE);
 
         Map<String, Integer> columnToDef = resolveCustomDefinitions("person", request.getMapping());
-        Map<String, Integer> tagByName = resolveTags(plan);
-        Map<String, Integer> companyByName = resolveCompanies(workspaceId, plan);
+        Map<String, Integer> tagByName = resolveTags(plan, action);
+        Map<String, Integer> companyByName = resolveCompanies(workspaceId, plan, action);
 
         List<PlanRow> toCreate = new ArrayList<>();
         List<Person> beans = new ArrayList<>();
@@ -275,7 +276,7 @@ public class ImportService {
         requireUpdatePermission(plan, action, Permission.COMPANY_UPDATE);
 
         Map<String, Integer> columnToDef = resolveCustomDefinitions("company", request.getMapping());
-        Map<String, Integer> tagByName = resolveTags(plan);
+        Map<String, Integer> tagByName = resolveTags(plan, action);
 
         List<PlanRow> toCreate = new ArrayList<>();
         List<Company> beans = new ArrayList<>();
@@ -395,9 +396,9 @@ public class ImportService {
         requireUpdatePermission(plan, action, Permission.DEAL_UPDATE);
 
         Map<String, Integer> columnToDef = resolveCustomDefinitions("deal", request.getMapping());
-        Map<String, Integer> tagByName = resolveTags(plan);
-        Map<String, Integer> companyByName = resolveCompanies(workspaceId, plan);
-        Map<String, Integer> personByEmail = resolveDealPeople(workspaceId, plan);
+        Map<String, Integer> tagByName = resolveTags(plan, action);
+        Map<String, Integer> companyByName = resolveCompanies(workspaceId, plan, action);
+        Map<String, Integer> personByEmail = resolveDealPeople(workspaceId, plan, action);
         Map<Integer, String> stageOutcome = new HashMap<>();
 
         List<PlanRow> toCreate = new ArrayList<>();
@@ -474,7 +475,7 @@ public class ImportService {
         }
         resolveStages(workspaceId, plan);
         dedupeWithinFile(plan,
-            r -> normName(r.std.get("name")) + " " + (normName(r.companyName) == null ? "" : normName(r.companyName)));
+            r -> normName(r.std.get("name")) + " " + (normName(r.companyName) == null ? "" : normName(r.companyName)));
         return plan;
     }
 
@@ -545,10 +546,10 @@ public class ImportService {
         }
     }
 
-    private Map<String, Integer> resolveDealPeople(int workspaceId, List<PlanRow> plan) {
+    private Map<String, Integer> resolveDealPeople(int workspaceId, List<PlanRow> plan, String action) {
         Set<String> emails = new LinkedHashSet<>();
         for (PlanRow row : plan) {
-            if (!INVALID.equals(row.status) && !SKIP.equals(row.status)) emails.addAll(row.peopleEmails);
+            if (willWrite(row, action)) emails.addAll(row.peopleEmails);
         }
         Map<String, Integer> byEmail = new HashMap<>();
         if (!emails.isEmpty()) {
@@ -666,35 +667,21 @@ public class ImportService {
                 fail(row, "Invalid date (expected YYYY-MM-DD): " + date);
             }
         }
+        String value = row.std.get("value");
+        if (value != null) {
+            try {
+                Double.parseDouble(value.replaceAll("[,\\s]", ""));
+            } catch (NumberFormatException e) {
+                fail(row, "Invalid value: " + value);
+            }
+        }
     }
 
     private void validateCustom(PlanRow row, CustomFieldDefinition def, String value) {
-        switch (def.getFieldType()) {
-            case "number" -> {
-                try {
-                    new java.math.BigDecimal(value.trim());
-                } catch (NumberFormatException e) {
-                    fail(row, "Invalid number for " + def.getLabel() + ": " + value);
-                }
-            }
-            case "url" -> {
-                if (!value.trim().matches("^https?://.+")) {
-                    fail(row, "Invalid URL (must start with http:// or https://) for " + def.getLabel() + ": " + value);
-                }
-            }
-            case "date" -> {
-                try {
-                    LocalDate.parse(value.trim());
-                } catch (RuntimeException e) {
-                    fail(row, "Invalid date for " + def.getLabel() + ": " + value);
-                }
-            }
-            case "boolean" -> {
-                if (!value.trim().toLowerCase().matches("true|false|1|0|yes|no")) {
-                    fail(row, "Invalid boolean for " + def.getLabel() + ": " + value);
-                }
-            }
-            default -> { }
+        try {
+            customFieldValueService.validateValue(def, value);
+        } catch (BadRequestException e) {
+            fail(row, e.getMessage());
         }
     }
 
@@ -736,12 +723,18 @@ public class ImportService {
             if (!def.isArchived()) byId.put(def.getId(), def);
         }
         Map<String, Integer> columnToDef = new HashMap<>();
+        Map<String, String> newFieldKeys = new HashMap<>();
         for (ColumnMapping cm : mapping) {
             String field = cm.getField();
             if (field != null && field.startsWith("custom:")) {
                 int id = parseCustomId(field);
                 if (byId.containsKey(id)) columnToDef.put(cm.getColumn(), id);
             } else if (Boolean.TRUE.equals(cm.getCreateCustomField())) {
+                String prior = newFieldKeys.putIfAbsent(slug(customLabel(cm)), cm.getColumn());
+                if (prior != null) {
+                    throw new BadRequestException(
+                        "Columns '" + prior + "' and '" + cm.getColumn() + "' would create the same custom field");
+                }
                 columnToDef.put(cm.getColumn(), createDefinition(workspaceId, entityType, cm));
             }
         }
@@ -762,11 +755,11 @@ public class ImportService {
         return customFieldDefinitionService.create(def, List.of()).getId();
     }
 
-    private Map<String, Integer> resolveTags(List<PlanRow> plan) {
+    private Map<String, Integer> resolveTags(List<PlanRow> plan, String action) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         Set<String> names = new LinkedHashSet<>();
         for (PlanRow row : plan) {
-            if (!INVALID.equals(row.status) && !SKIP.equals(row.status)) names.addAll(row.tagNames);
+            if (willWrite(row, action)) names.addAll(row.tagNames);
         }
         Map<String, Integer> byName = new HashMap<>();
         for (String name : names) {
@@ -784,11 +777,11 @@ public class ImportService {
         return byName;
     }
 
-    private Map<String, Integer> resolveCompanies(int workspaceId, List<PlanRow> plan) {
+    private Map<String, Integer> resolveCompanies(int workspaceId, List<PlanRow> plan, String action) {
         Map<String, Integer> byName = existingCompanyIds(workspaceId);
         Set<String> pending = new LinkedHashSet<>();
         for (PlanRow row : plan) {
-            if (INVALID.equals(row.status) || SKIP.equals(row.status)) continue;
+            if (!willWrite(row, action)) continue;
             String norm = normName(row.companyName);
             if (norm == null || byName.containsKey(norm) || !pending.add(norm)) continue;
             Company company = new Company();
@@ -796,6 +789,11 @@ public class ImportService {
             byName.put(norm, companyService.createCompany(company).getId());
         }
         return byName;
+    }
+
+    private static boolean willWrite(PlanRow row, String action) {
+        if (INVALID.equals(row.status) || SKIP.equals(row.status)) return false;
+        return !(MATCH.equals(row.status) && SKIP.equals(action));
     }
 
     // ===================================================================================
@@ -900,6 +898,14 @@ public class ImportService {
                 || (field != null && (field.startsWith("custom:") || "tags".equals(field) || allowedFields.contains(field)));
             if (usable) byColumn.put(cm.getColumn(), cm);
         }
+        Set<String> seenFields = new HashSet<>();
+        for (ColumnMapping cm : byColumn.values()) {
+            String field = cm.getField();
+            if (field == null || "tags".equals(field) || field.startsWith("custom:")) continue;
+            if (!seenFields.add(field)) {
+                throw new BadRequestException("Multiple columns are mapped to the same field: " + field);
+            }
+        }
         return byColumn;
     }
 
@@ -939,6 +945,9 @@ public class ImportService {
         String value = row.get(column);
         if (value == null) return null;
         String trimmed = value.trim();
+        if (trimmed.length() > 1 && trimmed.charAt(0) == '\'' && "=+-@\t\r".indexOf(trimmed.charAt(1)) >= 0) {
+            trimmed = trimmed.substring(1);
+        }
         return trimmed.isEmpty() ? null : trimmed;
     }
 

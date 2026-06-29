@@ -18,6 +18,7 @@ import ooo.klae.connex.backend.beans.CustomFieldDefinition;
 import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.beans.WorkspaceRole;
+import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.beans.Pipeline;
 import ooo.klae.connex.backend.beans.Stage;
@@ -138,6 +139,13 @@ class ImportServiceTest extends AbstractServiceTest {
         assertEquals(0, result.getCreated());
         assertEquals(1, result.getFailed().size());
         assertTrue(result.getFailed().get(0).getReason().contains("pipeline or stage"));
+    }
+
+    @Test
+    void personImport_rejectsDuplicateFieldMapping() {
+        assertThrows(BadRequestException.class, () -> importService.previewPersons(req(
+            List.of(map("Phone", "phone"), map("Mobile", "phone")),
+            List.of(Map.of("Phone", "111", "Mobile", "222")), "fill_empty")));
     }
 
     @Test

@@ -118,6 +118,9 @@ export function parseCsv(file: File): Promise<ParsedCsv> {
                 const rows = results.data.filter((row) =>
                     Object.values(row).some((value) => value != null && String(value).trim() !== ''),
                 );
+                for (const row of rows) {
+                    delete (row as Record<string, unknown>).__parsed_extra;
+                }
                 resolve({ headers, rows });
             },
             error: (error: unknown) => reject(error instanceof Error ? error : new Error(String(error))),
