@@ -229,6 +229,7 @@ public class ImportService {
             Map<String, Integer> columnToDef, Map<String, Integer> tagByName, Map<String, Integer> companyByName) {
         Person existing = personMapper.getPersonById(workspaceId, row.matchedId);
         if (existing == null) return;
+        Integer beforeCompanyId = existing.getCompany() != null ? existing.getCompany().getId() : null;
         existing.setName(merge(action, existing.getName(), row.std.get("name")));
         existing.setEmail(merge(action, existing.getEmail(), row.std.get("email")));
         existing.setPhone(merge(action, existing.getPhone(), row.std.get("phone")));
@@ -241,6 +242,10 @@ public class ImportService {
             existing.setCompany(stub);
         }
         personMapper.update(existing);
+        Integer afterCompanyId = existing.getCompany() != null ? existing.getCompany().getId() : null;
+        if (afterCompanyId != null && !afterCompanyId.equals(beforeCompanyId)) {
+            employmentService.recordTransition(workspaceId, existing.getId(), afterCompanyId, existing.getTitle());
+        }
         attachTags("person", existing.getId(), row.tagNames, tagByName);
         applyCustomValues("person", existing.getId(), row.custom, columnToDef, action, true);
     }

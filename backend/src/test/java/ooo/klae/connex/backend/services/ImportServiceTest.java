@@ -13,6 +13,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
 
+import ooo.klae.connex.backend.beans.Company;
 import ooo.klae.connex.backend.beans.CustomFieldDefinition;
 import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.beans.User;
@@ -170,6 +171,24 @@ class ImportServiceTest extends AbstractServiceTest {
             .getOrDefault(erin.getId(), Map.of()).get(def.getId());
         assertNotNull(value);
         assertTrue(String.valueOf(value).startsWith("5000"), "fill_empty must preserve 5000, got " + value);
+    }
+
+    @Test
+    void personImport_overwriteChangingCompanyRecordsEmploymentTransition() {
+        Company a = newCompany();
+        Company b = newCompany();
+        List<ColumnMapping> mapping = List.of(map("Name", "name"), map("Email", "email"), map("Company", "company"));
+        importService.commitPersons(req(mapping,
+            List.of(Map.of("Name", "Gwen", "Email", "gwen@x.test", "Company", a.getName())), "fill_empty"));
+
+        ImportResult result = importService.commitPersons(req(mapping,
+            List.of(Map.of("Name", "Gwen", "Email", "gwen@x.test", "Company", b.getName())), "overwrite"));
+        assertEquals(1, result.getUpdated());
+
+        Person gwen = personMapper.getPersonById(workspace.getId(),
+            personMapper.findByEmails(workspace.getId(), List.of("gwen@x.test")).get(0).getId());
+        assertNotNull(gwen.getCompany());
+        assertEquals(b.getId(), gwen.getCompany().getId());
     }
 
     @Test
