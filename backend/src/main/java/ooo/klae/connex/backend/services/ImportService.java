@@ -46,8 +46,8 @@ import ooo.klae.connex.backend.tenant.RequirePermission;
  * into matched ones per the {@code onDuplicate} strategy ("fill_empty", "skip", "overwrite").
  *
  * <p>For throughput and to keep the audit log readable, imports use the batch-insert mappers and
- * write a single {@code import.*} audit summary rather than auditing each row, and they do not fire
- * per-row rule/notification triggers. Tags and auto-created custom-field definitions are resolved up
+ * write a single {@code import.*} audit summary for the imported records rather than auditing each
+ * row, and do not fire per-row rule/notification triggers for them. Tags and auto-created custom-field definitions are resolved up
  * front through their permission-checked services; referenced companies are created through
  * {@code CompanyService} so {@code COMPANY_CREATE} is enforced even during a contact or deal import.
  */
@@ -135,6 +135,7 @@ public class ImportService {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         String action = resolveAction(request.getOnDuplicate());
         List<PlanRow> plan = analyzePersons(request, workspaceId);
+        requireUpdatePermission(plan, action, Permission.PERSON_UPDATE);
 
         Map<String, Integer> columnToDef = resolveCustomDefinitions("person", request.getMapping());
         Map<String, Integer> tagByName = resolveTags(plan);
@@ -181,7 +182,7 @@ public class ImportService {
                     employmentService.recordInitial(workspaceId, bean.getId(), companyId, bean.getTitle());
                 }
                 attachTags("person", bean.getId(), row.tagNames, tagByName);
-                applyCustomValues("person", bean.getId(), row.custom, columnToDef);
+                applyCustomValues("person", bean.getId(), row.custom, columnToDef, action, false);
             }
         }
 
@@ -241,7 +242,7 @@ public class ImportService {
         }
         personMapper.update(existing);
         attachTags("person", existing.getId(), row.tagNames, tagByName);
-        applyCustomValues("person", existing.getId(), row.custom, columnToDef);
+        applyCustomValues("person", existing.getId(), row.custom, columnToDef, action, true);
     }
 
     // ===================================================================================
@@ -266,6 +267,7 @@ public class ImportService {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         String action = resolveAction(request.getOnDuplicate());
         List<PlanRow> plan = analyzeCompanies(request, workspaceId);
+        requireUpdatePermission(plan, action, Permission.COMPANY_UPDATE);
 
         Map<String, Integer> columnToDef = resolveCustomDefinitions("company", request.getMapping());
         Map<String, Integer> tagByName = resolveTags(plan);
@@ -302,7 +304,7 @@ public class ImportService {
                 Company bean = beans.get(i);
                 PlanRow row = toCreate.get(i);
                 attachTags("company", bean.getId(), row.tagNames, tagByName);
-                applyCustomValues("company", bean.getId(), row.custom, columnToDef);
+                applyCustomValues("company", bean.getId(), row.custom, columnToDef, action, false);
             }
         }
 
@@ -358,7 +360,7 @@ public class ImportService {
         existing.setLogoUrl(merge(action, existing.getLogoUrl(), row.std.get("logoUrl")));
         companyMapper.update(existing);
         attachTags("company", existing.getId(), row.tagNames, tagByName);
-        applyCustomValues("company", existing.getId(), row.custom, columnToDef);
+        applyCustomValues("company", existing.getId(), row.custom, columnToDef, action, true);
     }
 
     // ===================================================================================
@@ -385,6 +387,7 @@ public class ImportService {
         int actorId = authService.getCurrentUser().getId();
         String action = resolveAction(request.getOnDuplicate());
         List<PlanRow> plan = analyzeDeals(request, workspaceId);
+        requireUpdatePermission(plan, action, Permission.DEAL_UPDATE);
 
         Map<String, Integer> columnToDef = resolveCustomDefinitions("deal", request.getMapping());
         Map<String, Integer> tagByName = resolveTags(plan);
@@ -430,7 +433,7 @@ public class ImportService {
                 PlanRow row = toCreate.get(i);
                 attachDealTags(workspaceId, bean.getId(), row.tagNames, tagByName);
                 linkDealPeople(workspaceId, bean.getId(), row.peopleEmails, personByEmail);
-                applyCustomValues("deal", bean.getId(), row.custom, columnToDef);
+                applyCustomValues("deal", bean.getId(), row.custom, columnToDef, action, false);
             }
         }
 
@@ -460,12 +463,13 @@ public class ImportService {
                 continue;
             }
             Integer companyId = companyByName.get(normName(row.companyName));
-            Integer matchId = byNameCompany.get(dealKey(normName(row.std.get("name")), companyId));
+            boolean companyKnown = row.companyName == null || companyId != null;
+            Integer matchId = companyKnown ? byNameCompany.get(dealKey(normName(row.std.get("name")), companyId)) : null;
             if (matchId != null) markMatch(row, matchId, row.std.get("name"));
         }
         resolveStages(workspaceId, plan);
         dedupeWithinFile(plan,
-            r -> dealKey(normName(r.std.get("name")), companyByName.get(normName(r.companyName))));
+            r -> normName(r.std.get("name")) + " " + (normName(r.companyName) == null ? "" : normName(r.companyName)));
         return plan;
     }
 
@@ -493,7 +497,7 @@ public class ImportService {
         dealMapper.update(existing);
         attachDealTags(workspaceId, existing.getId(), row.tagNames, tagByName);
         linkDealPeople(workspaceId, existing.getId(), row.peopleEmails, personByEmail);
-        applyCustomValues("deal", existing.getId(), row.custom, columnToDef);
+        applyCustomValues("deal", existing.getId(), row.custom, columnToDef, action, true);
     }
 
     private void resolveStages(int workspaceId, List<PlanRow> plan) {
@@ -661,9 +665,14 @@ public class ImportService {
         switch (def.getFieldType()) {
             case "number" -> {
                 try {
-                    Double.parseDouble(value.replaceAll("[,\\s]", ""));
+                    new java.math.BigDecimal(value.trim());
                 } catch (NumberFormatException e) {
-                    fail(row, "Invalid number for " + def.getLabel() + ": " + value);
+                    fail(row, "Invalid number for " + def.getLabel() + " (no thousands separators): " + value);
+                }
+            }
+            case "url" -> {
+                if (!value.trim().matches("^https?://.+")) {
+                    fail(row, "Invalid URL (must start with http:// or https://) for " + def.getLabel() + ": " + value);
                 }
             }
             case "date" -> {
@@ -803,14 +812,29 @@ public class ImportService {
     }
 
     private void applyCustomValues(String entityType, int entityId, Map<String, String> custom,
-            Map<String, Integer> columnToDef) {
+            Map<String, Integer> columnToDef, String action, boolean isUpdate) {
         if (custom.isEmpty()) return;
+        boolean fillEmpty = isUpdate && FILL_EMPTY.equals(action);
+        Map<Integer, Object> existing = fillEmpty
+            ? customFieldValueService.getForEntities(entityType, List.of(entityId)).getOrDefault(entityId, Map.of())
+            : Map.of();
         Map<Integer, Object> values = new HashMap<>();
         for (Map.Entry<String, String> entry : custom.entrySet()) {
             Integer defId = columnToDef.get(entry.getKey());
-            if (defId != null) values.put(defId, entry.getValue());
+            if (defId == null) continue;
+            if (fillEmpty) {
+                Object current = existing.get(defId);
+                if (current != null && !String.valueOf(current).isBlank()) continue;
+            }
+            values.put(defId, entry.getValue());
         }
         if (!values.isEmpty()) customFieldValueService.applyValues(entityType, entityId, values);
+    }
+
+    private void requireUpdatePermission(List<PlanRow> plan, String action, Permission updatePermission) {
+        if (!SKIP.equals(action) && plan.stream().anyMatch(row -> MATCH.equals(row.status))) {
+            workspaceService.requirePermission(updatePermission);
+        }
     }
 
     // ===================================================================================

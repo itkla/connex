@@ -439,7 +439,7 @@ export default function ContactsBrowser({ savedViews }: { savedViews: SavedView[
             <div className="flex items-center justify-between">
                 <h1 className="text-4xl font-extrabold">{t('heading')}</h1>
                 <div className="flex items-center gap-2">
-                    <RecordsImportExport entity="persons" onImported={refresh} contactsFilter={filterParams} />
+                    <RecordsImportExport entity="persons" onImported={refresh} contactsFilter={{ ...filterParams, q: query || undefined }} />
                     <Button className="bg-brand text-white" aria-label={t('newAria')} onClick={() => setNewContactDialogOpen(true)}>
                         <PlusIcon strokeWidth={2.5} />
                         {t('new')}

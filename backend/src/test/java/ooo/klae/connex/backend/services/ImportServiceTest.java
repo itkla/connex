@@ -5,13 +5,19 @@ import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.context.SecurityContextHolder;
 
 import ooo.klae.connex.backend.beans.CustomFieldDefinition;
 import ooo.klae.connex.backend.beans.Person;
+import ooo.klae.connex.backend.beans.User;
+import ooo.klae.connex.backend.beans.WorkspaceRole;
+import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.beans.Pipeline;
 import ooo.klae.connex.backend.beans.Stage;
 import ooo.klae.connex.backend.dto.ColumnMapping;
@@ -26,6 +32,8 @@ class ImportServiceTest extends AbstractServiceTest {
     @Autowired ExportService exportService;
     @Autowired CustomFieldValueService customFieldValueService;
     @Autowired CustomFieldDefinitionMapper customFieldDefinitionMapper;
+    @Autowired RoleService roleService;
+    @Autowired WorkspaceService workspaceService;
 
     private static ColumnMapping map(String column, String field) {
         return new ColumnMapping(column, field, null, null, null);
@@ -142,5 +150,40 @@ class ImportServiceTest extends AbstractServiceTest {
 
         assertTrue(csv.startsWith("id,name,email"), "header present");
         assertTrue(csv.contains("'=SUM(A1:A2)"), "formula prefixed with apostrophe");
+    }
+
+    @Test
+    void personImport_fillEmptyPreservesExistingCustomFieldValue() {
+        ColumnMapping budget = new ColumnMapping("Budget", null, true, "number", "Budget");
+        List<ColumnMapping> mapping = List.of(map("Name", "name"), map("Email", "email"), budget);
+        importService.commitPersons(req(mapping,
+            List.of(Map.of("Name", "Erin", "Email", "erin@x.test", "Budget", "5000")), "fill_empty"));
+
+        ImportResult second = importService.commitPersons(req(mapping,
+            List.of(Map.of("Name", "Erin", "Email", "erin@x.test", "Budget", "9999")), "fill_empty"));
+        assertEquals(1, second.getUpdated());
+
+        CustomFieldDefinition def = customFieldDefinitionMapper.getByKey(workspace.getId(), "person", "budget");
+        Person erin = personMapper.getPersonById(workspace.getId(),
+            personMapper.findByEmails(workspace.getId(), List.of("erin@x.test")).get(0).getId());
+        Object value = customFieldValueService.getForEntities("person", List.of(erin.getId()))
+            .getOrDefault(erin.getId(), Map.of()).get(def.getId());
+        assertNotNull(value);
+        assertTrue(String.valueOf(value).startsWith("5000"), "fill_empty must preserve 5000, got " + value);
+    }
+
+    @Test
+    void personImport_matchUpdateRequiresUpdatePermission() {
+        List<ColumnMapping> mapping = List.of(map("Name", "name"), map("Email", "email"));
+        importService.commitPersons(req(mapping, List.of(Map.of("Name", "Fred", "Email", "fred@x.test")), "fill_empty"));
+
+        WorkspaceRole role = roleService.createRole(workspace.getId(), currentUser.getId(), "CreatorOnly", List.of("PERSON_CREATE"));
+        User member = newUser();
+        workspaceService.assignCustomRole(workspace.getId(), currentUser.getId(), member.getId(), role.getId());
+        SecurityContextHolder.getContext().setAuthentication(
+            new UsernamePasswordAuthenticationToken(member, null, member.getAuthorities()));
+
+        assertThrows(ForbiddenException.class, () -> importService.commitPersons(
+            req(mapping, List.of(Map.of("Name", "Fred Updated", "Email", "fred@x.test")), "fill_empty")));
     }
 }

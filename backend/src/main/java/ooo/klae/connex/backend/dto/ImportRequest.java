@@ -29,6 +29,7 @@ public class ImportRequest {
 
     @NotEmpty
     @Valid
+    @Size(max = 256)
     private List<ColumnMapping> mapping;
 
     private String onDuplicate;
