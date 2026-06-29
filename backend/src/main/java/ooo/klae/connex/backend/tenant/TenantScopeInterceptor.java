@@ -39,8 +39,13 @@ public class TenantScopeInterceptor implements Interceptor {
 
     private static final String MAPPERS = "ooo.klae.connex.backend.mappers.";
 
-    /** Mapper interfaces whose statements read or write workspace-scoped data. */
-    private static final Set<String> SCOPED_NAMESPACES = Set.of(
+    /**
+     * Mapper interfaces whose statements read or write workspace-scoped data. The
+     * canonical registry of tenant-scoped namespaces — also consumed by the
+     * read-path architecture test that asserts every {@code <select>} here binds
+     * the workspace predicate.
+     */
+    public static final Set<String> SCOPED_NAMESPACES = Set.of(
         MAPPERS + "CompanyMapper",
         MAPPERS + "PersonMapper",
         MAPPERS + "PipelineMapper",
