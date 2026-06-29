@@ -10,7 +10,7 @@ import { EngagementSparkline, RevenueTiles } from '@/app/components/records/comp
 import { Avatar, AvatarFallback, AvatarGroup, AvatarImage } from '@/components/ui/avatar';
 import { buttonVariants } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
-import { warmthDotClass } from '@/app/lib/utils';
+import { ensureUrlScheme, safeHref, warmthDotClass } from '@/app/lib/utils';
 import type { CompanyNode as CompanyNodeType } from './graph/types';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import NodeDot from '@/app/components/map/NodeDot';
@@ -118,7 +118,7 @@ function CompanyNodeImpl({ id, data }: NodeProps<CompanyNodeType>) {
                         <p className="flex items-center gap-2">
                             <GlobeAltIcon className="size-3.5 shrink-0 text-muted-foreground" />
                             <Link
-                                href={company.website}
+                                href={safeHref(ensureUrlScheme(company.website))}
                                 target="_blank"
                                 className="nodrag truncate transition-colors hover:text-brand-dark"
                             >

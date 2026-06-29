@@ -5,6 +5,7 @@ import { ArrowDownTrayIcon } from "@heroicons/react/24/outline";
 import { TrashIcon } from '@heroicons/react/24/outline';
 import { useTranslations } from "next-intl";
 import type { Attachment } from "@/app/lib/types";
+import { safeHref } from "@/app/lib/utils";
 
 type T = ReturnType<typeof useTranslations>;
 
@@ -29,13 +30,13 @@ export default function FileActionsMenu({ attachment, t, onDelete }: { attachmen
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-44">
                 <DropdownMenuItem asChild>
-                    <a href={attachment.url} target="_blank" rel="noopener noreferrer">
+                    <a href={safeHref(attachment.url)} target="_blank" rel="noopener noreferrer">
                         <ArrowTopRightOnSquareIcon className="size-4 text-muted-foreground" />
                         {t('open')}
                     </a>
                 </DropdownMenuItem>
                 <DropdownMenuItem asChild>
-                    <a href={attachment.url} download={attachment.fileName}>
+                    <a href={safeHref(attachment.url)} download={attachment.fileName}>
                         <ArrowDownTrayIcon className="size-4 text-muted-foreground" />
                         {t('download')}
                     </a>

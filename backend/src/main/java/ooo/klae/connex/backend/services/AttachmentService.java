@@ -8,6 +8,7 @@ import org.springframework.transaction.annotation.Transactional;
 import ooo.klae.connex.backend.beans.Attachment;
 import ooo.klae.connex.backend.beans.Tag;
 import ooo.klae.connex.backend.dto.AttachmentFacets;
+import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.AttachmentMapper;
 import ooo.klae.connex.backend.mappers.TagMapper;
@@ -39,6 +40,22 @@ public class AttachmentService {
             throw new ResourceNotFoundException("entityType is required");
         }
         return entityType.trim().toLowerCase();
+    }
+
+    /**
+     * Rejects attachment URLs that are neither an app-relative path nor an http(s)
+     * URL, blocking script-bearing schemes such as {@code javascript:} from being
+     * stored and later rendered into an anchor href.
+     * @param url the candidate attachment url
+     */
+    private void validateUrl(String url) {
+        if (url == null || url.chars().anyMatch(c -> c < 0x20 || c == 0x7F)
+                || url.startsWith("//") || url.startsWith("/\\")
+                || !(url.startsWith("/")
+                    || url.regionMatches(true, 0, "http://", 0, 7)
+                    || url.regionMatches(true, 0, "https://", 0, 8))) {
+            throw new BadRequestException("Attachment url must be an app-relative path or an http(s) URL");
+        }
     }
 
     public List<Attachment> getByEntity(String entityType, int entityId) {
@@ -157,6 +174,7 @@ public class AttachmentService {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         attachment.setWorkspaceId(workspaceId);
         attachment.setEntityType(normalizeType(attachment.getEntityType()));
+        validateUrl(attachment.getUrl());
         attachmentMapper.insert(attachment);
         // Audit from the inserted bean (id populated by the key generator) so a failed
         // re-fetch can never NPE and break the create it is only meant to observe.
