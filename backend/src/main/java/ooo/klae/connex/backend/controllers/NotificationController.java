@@ -16,6 +16,7 @@ import ooo.klae.connex.backend.dto.NotificationCountsDto;
 import ooo.klae.connex.backend.dto.NotificationDto;
 import ooo.klae.connex.backend.dto.NotificationPreferenceDto;
 import ooo.klae.connex.backend.dto.PageResponse;
+import ooo.klae.connex.backend.dto.SnoozeRequest;
 import ooo.klae.connex.backend.services.NotificationPreferenceService;
 import ooo.klae.connex.backend.services.NotificationService;
 
@@ -70,6 +71,11 @@ public class NotificationController {
     @PostMapping("/api/notifications/{id}/restore")
     public NotificationDto restore(@PathVariable int id) {
         return notificationService.restore(id);
+    }
+
+    @PostMapping("/api/notifications/{id}/snooze")
+    public NotificationDto snooze(@PathVariable int id, @Valid @RequestBody SnoozeRequest request) {
+        return notificationService.snooze(id, request.getHours());
     }
 
     @PostMapping("/api/notifications/read-all")

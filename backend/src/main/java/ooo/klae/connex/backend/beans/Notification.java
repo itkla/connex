@@ -36,6 +36,7 @@ public class Notification {
     private String readAt;
     private String dismissedAt;
     private String resolvedAt;
+    private String snoozedUntil;
     private String createdAt;
     private String updatedAt;
 
