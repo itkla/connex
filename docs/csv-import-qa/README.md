@@ -33,7 +33,15 @@ Prereq: the workspace has a pipeline named **Sales** with a stage named **Lead**
 - Open in Excel **and** a plain text editor: a formula-shaped cell stays text, and a phone like `+81-90-1111-2222` is **not** corrupted when the exported file is re-imported (leading apostrophe is stripped on import).
 - Trigger a failed row, then **Download errors** on the done step → the error CSV lists the failed rows + reasons.
 
-## 5. i18n + accessibility
+## 5. Manual search-and-link (dedup override)
+
+In the review step, every non-skipped row shows a **Link…** action.
+
+- On a **new** row that should have matched an existing record, click **Link…**, type ≥2 characters, and pick the record → the preview re-runs and the row flips to **update** (the new/update counts change live).
+- The linked record shows as a chip; click it to unlink and re-preview.
+- Import → confirm the linked rows updated the chosen records instead of creating new ones.
+
+## 6. i18n + accessibility
 
 - Switch language to **日本語** and re-open the wizard → all labels translated.
 - Keyboard only: Tab to **Import**, Enter; in the upload step Tab to the dropzone, Enter opens the file picker.
