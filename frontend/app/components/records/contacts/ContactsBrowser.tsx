@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { Button } from '@/components/ui/button';
+import RecordsImportExport from '@/app/components/import/RecordsImportExport';
 import { ButtonGroup } from '@/components/ui/button-group';
 import { toast } from 'sonner';
 import { toastError, toastSuccess } from '@/app/lib/toast';
@@ -437,10 +438,13 @@ export default function ContactsBrowser({ savedViews }: { savedViews: SavedView[
         <div className="page-grid gap-y-6">
             <div className="flex items-center justify-between">
                 <h1 className="text-4xl font-extrabold">{t('heading')}</h1>
-                <Button className="bg-brand text-white" aria-label={t('newAria')} onClick={() => setNewContactDialogOpen(true)}>
-                    <PlusIcon strokeWidth={2.5} />
-                    {t('new')}
-                </Button>
+                <div className="flex items-center gap-2">
+                    <RecordsImportExport entity="persons" onImported={refresh} contactsFilter={{ ...filterParams, q: query || undefined }} />
+                    <Button className="bg-brand text-white" aria-label={t('newAria')} onClick={() => setNewContactDialogOpen(true)}>
+                        <PlusIcon strokeWidth={2.5} />
+                        {t('new')}
+                    </Button>
+                </div>
             </div>
 
             <SavedViewsBar

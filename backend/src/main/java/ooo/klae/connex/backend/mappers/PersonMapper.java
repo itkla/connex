@@ -19,6 +19,8 @@ public interface PersonMapper {
     Person getPersonById(@Param("workspaceId") int workspaceId, @Param("id") int id);
     boolean exists(@Param("workspaceId") int workspaceId, @Param("id") int id);
     List<Person> search(@Param("workspaceId") int workspaceId, @Param("query") String query);
+    /** Existing contacts in the workspace whose email matches one of the given (normalized) emails; for import dedup. */
+    List<Person> findByEmails(@Param("workspaceId") int workspaceId, @Param("emails") List<String> emails);
     List<Person> getPersonsPage(@Param("workspaceId") int workspaceId, @Param("query") String query,
             @Param("sort") String sort, @Param("dir") String dir,
             @Param("companies") List<String> companies, @Param("titles") List<String> titles,
@@ -36,6 +38,8 @@ public interface PersonMapper {
     /** Ids of contacts the team has engaged (has any activity, note, or task), used as warm-intro entry points. */
     List<Integer> getEngagedPersonIds(int workspaceId);
     int insert(Person person);
+    /** Bulk-insert contacts in one statement (CSV import); generated ids are written back to each bean. */
+    int insertBatch(List<Person> persons);
     int update(Person person);
     int delete(@Param("workspaceId") int workspaceId, @Param("id") int id);
 

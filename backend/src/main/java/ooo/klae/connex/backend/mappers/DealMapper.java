@@ -23,7 +23,13 @@ public interface DealMapper {
     Deal getDealById(@Param("workspaceId") int workspaceId, @Param("id") int id);
     boolean exists(@Param("workspaceId") int workspaceId, @Param("id") int id);
     List<Deal> search(@Param("workspaceId") int workspaceId, @Param("query") String query);
+    /** id + name + company for every deal in the workspace; for import dedup (normalized in the service). */
+    List<Deal> getDealsForDedup(int workspaceId);
+    /** Deals in the workspace with the given ids (workspace-scoped); for export of a selected view. */
+    List<Deal> getByIds(@Param("workspaceId") int workspaceId, @Param("ids") List<Integer> ids);
     int insert(Deal deal);
+    /** Bulk-insert deals in one statement (CSV import); generated ids are written back to each bean. */
+    int insertBatch(List<Deal> deals);
     int update(Deal deal);
     int delete(@Param("workspaceId") int workspaceId, @Param("id") int id);
 

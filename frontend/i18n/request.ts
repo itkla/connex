@@ -29,6 +29,7 @@ const namespaces = [
     "attachments",
     "admin",
     "notifications",
+    "importExport",
 ] as const;
 
 async function loadMessages(locale: Locale) {

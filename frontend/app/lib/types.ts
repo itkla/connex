@@ -19,6 +19,56 @@ export type ContactsPageParams = PageParams & {
     noCompany?: boolean;
 };
 
+export type ImportEntity = 'persons' | 'companies' | 'deals';
+
+export type ImportDuplicateAction = 'fill_empty' | 'skip' | 'overwrite';
+
+export type ImportColumnMapping = {
+    column: string;
+    field?: string | null;
+    createCustomField?: boolean;
+    customFieldType?: string | null;
+    customFieldLabel?: string | null;
+};
+
+export type ImportRequest = {
+    rows: Record<string, string>[];
+    mapping: ImportColumnMapping[];
+    onDuplicate?: ImportDuplicateAction;
+    links?: Record<number, number>;
+};
+
+export type ImportRowStatus = 'create' | 'match' | 'skip' | 'invalid';
+
+export type ImportRowAnalysis = {
+    rowIndex: number;
+    status: ImportRowStatus;
+    matchedId?: number | null;
+    matchedLabel?: string | null;
+    errors?: string[] | null;
+};
+
+export type ImportPreviewResult = {
+    total: number;
+    toCreate: number;
+    toUpdate: number;
+    toSkip: number;
+    invalid: number;
+    rows: ImportRowAnalysis[];
+};
+
+export type ImportRowError = {
+    rowIndex: number;
+    reason: string;
+};
+
+export type ImportResult = {
+    created: number;
+    updated: number;
+    skipped: number;
+    failed: ImportRowError[];
+};
+
 export type PersonFacets = {
     companies: string[];
     titles: string[];

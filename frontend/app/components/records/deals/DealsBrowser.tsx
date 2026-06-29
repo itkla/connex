@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { useLocale, useTranslations } from 'next-intl';
 import { Button } from '@/components/ui/button';
+import RecordsImportExport from '@/app/components/import/RecordsImportExport';
 import { ButtonGroup } from '@/components/ui/button-group';
 import { toast } from 'sonner';
 import { toastError, toastSuccess } from '@/app/lib/toast';
@@ -554,6 +555,7 @@ export default function DealsBrowser({ deals, savedViews }: { deals: Deal[]; sav
                             </DropdownMenuContent>
                         </DropdownMenu>
                     )}
+                    <RecordsImportExport entity="deals" onImported={() => router.refresh()} exportIds={visibleDeals.map((d) => d.id)} />
                     <Button className="bg-brand text-white" aria-label={t('addDeal')} onClick={() => setNewDialogOpen(true)}>
                         <PlusIcon strokeWidth={2.5} />
                         {t('newButton')}

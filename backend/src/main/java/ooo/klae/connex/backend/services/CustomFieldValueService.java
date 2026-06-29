@@ -105,6 +105,15 @@ public class CustomFieldValueService {
         valueMapper.deleteByEntity(workspaceService.getCurrentWorkspaceId(), normalize(entityType), entityId);
     }
 
+    /**
+     * Validates a raw value against a field definition exactly as a write would (running the same
+     * coercion), throwing {@code BadRequestException} on an invalid value without persisting anything.
+     * Used by the CSV-import preview so it matches commit-time validation.
+     */
+    public void validateValue(CustomFieldDefinition def, Object raw) {
+        coerce(workspaceService.getCurrentWorkspaceId(), def.getEntityType(), 0, def, raw);
+    }
+
     private void writeOne(int workspaceId, String entityType, int entityId, CustomFieldDefinition def, Object raw) {
         CustomFieldValue value = coerce(workspaceId, entityType, entityId, def, raw);
         if (value == null) {
