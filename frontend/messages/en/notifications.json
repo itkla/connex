@@ -2,7 +2,7 @@
   "Notifications": {
     "eyebrow": "Your attention",
     "title": "Notifications",
-    "inboxDescription": "Tasks and deals that need your attention, in one place.",
+    "inboxDescription": "Tasks, deals, and cooling relationships that need your attention, in one place.",
     "bellLabel": "Open notifications",
     "unreadCount": "{count, plural, =0 {No unread notifications} one {# unread notification} other {# unread notifications}}",
     "markAllRead": "Mark all read",
@@ -33,6 +33,10 @@
     "dealDueBody": "{deal} is expected to close {date}.",
     "dealOverdueTitle": "Deal close date overdue",
     "dealOverdueBody": "{deal} was expected to close {date}.",
+    "relationshipCoolingTitle": "Relationship cooling",
+    "relationshipCoolingBody": "{person} on {deal} has gone quiet — {days} days since last contact.",
+    "relationshipColdTitle": "Relationship gone cold",
+    "relationshipColdBody": "{person} on {deal} has gone cold — {days} days since last contact.",
     "dealTeamTitle": "Deal team",
     "dealTeamDescription": "The owner and collaborators receive close-date reminders.",
     "owner": "Owner",
@@ -42,7 +46,7 @@
     "saveTeam": "Save team",
     "dealTeamUpdated": "Deal team updated",
     "dealTeamError": "Failed to update deal team",
-    "emptyHint": "New tasks and deal reminders show up here.",
+    "emptyHint": "New tasks, deal reminders, and relationship nudges show up here.",
     "noUsers": "No users found",
     "noCollaborators": "No teammates available",
     "cancel": "Cancel"

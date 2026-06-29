@@ -24,7 +24,7 @@ public class NotificationSourceChangedListener {
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT, fallbackExecution = true)
     public void onSourceChanged(NotificationSourceChangedEvent event) {
         try {
-            reconciliationService.reconcileWorkspace(event.workspaceId());
+            reconciliationService.reconcileWorkspace(event.workspaceId(), false);
         } catch (Exception exception) {
             log.error(
                 "Notification reconciliation failed after source change workspace={} sourceType={} sourceId={}",

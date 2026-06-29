@@ -17,7 +17,9 @@ import ooo.klae.connex.backend.beans.Company;
 import ooo.klae.connex.backend.beans.Deal;
 import ooo.klae.connex.backend.beans.DealReminderCandidate;
 import ooo.klae.connex.backend.beans.Notification;
+import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.beans.Pipeline;
+import ooo.klae.connex.backend.beans.RelationshipNudgeCandidate;
 import ooo.klae.connex.backend.beans.Stage;
 import ooo.klae.connex.backend.beans.Task;
 import ooo.klae.connex.backend.beans.TaskReminderCandidate;
@@ -227,6 +229,44 @@ class NotificationMapperTest extends AbstractMapperTest {
         assertTrue(workspaceIds.contains(workspace.getId()));
         assertTrue(workspaceIds.contains(second.getId()));
         assertTrue(page.stream().allMatch(n -> n.getWorkspaceName() != null));
+    }
+
+    @Test
+    void relationshipNudgeCandidatesProjectDealStakeholdersAndSkipClosedDeals() {
+        User owner = newUser();
+        User collaborator = newUser();
+        Company company = newCompany();
+        Pipeline pipeline = newPipeline();
+        Stage stage = newStage(pipeline, 0);
+        Deal deal = newDeal(pipeline, stage, company);
+        dealMapper.updateOwner(workspace.getId(), deal.getId(), owner.getId());
+        dealMapper.insertCollaborators(
+            workspace.getId(),
+            deal.getId(),
+            List.of(collaborator.getId())
+        );
+
+        Person stakeholder = newPerson(company);
+        dealMapper.addPerson(workspace.getId(), deal.getId(), stakeholder.getId(), "champion");
+
+        Set<Integer> recipients = notificationMapper
+            .findRelationshipNudgeCandidates(workspace.getId())
+            .stream()
+            .filter(candidate -> candidate.getDealId() == deal.getId()
+                && candidate.getPersonId() == stakeholder.getId())
+            .map(RelationshipNudgeCandidate::getRecipientId)
+            .collect(Collectors.toSet());
+        assertEquals(Set.of(owner.getId(), collaborator.getId()), recipients);
+
+        deal.setClosedAt("2026-06-30 00:00:00");
+        deal.setWon(true);
+        dealMapper.update(deal);
+
+        assertFalse(
+            notificationMapper.findRelationshipNudgeCandidates(workspace.getId())
+                .stream()
+                .anyMatch(candidate -> candidate.getDealId() == deal.getId())
+        );
     }
 
     private Notification onlyReminder(User recipient) {

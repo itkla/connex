@@ -34,7 +34,7 @@ public class NotificationScheduler {
     public void reconcileAndPurge() {
         for (Integer workspaceId : notificationMapper.findWorkspaceIds()) {
             try {
-                reconciliationService.reconcileWorkspace(workspaceId);
+                reconciliationService.reconcileWorkspace(workspaceId, true);
                 reconciliationService.purgeWorkspace(workspaceId);
             } catch (Exception exception) {
                 log.error("Scheduled notification reconciliation failed for workspace={}", workspaceId, exception);

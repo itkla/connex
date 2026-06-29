@@ -1,4 +1,10 @@
-import { BellIcon, BriefcaseIcon, CheckCircleIcon, UserGroupIcon } from "@heroicons/react/24/outline";
+import {
+    ArrowTrendingDownIcon,
+    BellIcon,
+    BriefcaseIcon,
+    CheckCircleIcon,
+    UserGroupIcon,
+} from "@heroicons/react/24/outline";
 
 import { type Notification } from "@/app/lib/types";
 import { formatDate } from "@/app/lib/utils";
@@ -32,6 +38,16 @@ export function notificationContent(notification: Notification, t: Translator, l
             }),
         };
     }
+    if (notification.type === "relationship.cooling") {
+        return {
+            title: t(notification.severity === "critical" ? "relationshipColdTitle" : "relationshipCoolingTitle"),
+            body: t(notification.severity === "critical" ? "relationshipColdBody" : "relationshipCoolingBody", {
+                person: text(data.person, notification.sourceLabel ?? notification.title),
+                deal: text(data.deal, notification.contextLabel ?? ""),
+                days: text(data.daysSinceTouch, ""),
+            }),
+        };
+    }
     if (notification.type === "workspace.join") {
         return {
             title: t("workspaceJoinTitle"),
@@ -49,6 +65,7 @@ export function safeNotificationUrl(value?: string | null) {
 export function notificationIcon(notification: Notification) {
     if (notification.type.startsWith("task.")) return CheckCircleIcon;
     if (notification.type.startsWith("deal.")) return BriefcaseIcon;
+    if (notification.type.startsWith("relationship.")) return ArrowTrendingDownIcon;
     if (notification.type.startsWith("workspace.")) return UserGroupIcon;
     return BellIcon;
 }

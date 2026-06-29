@@ -2,7 +2,7 @@
   "Notifications": {
     "eyebrow": "確認が必要",
     "title": "通知",
-    "inboxDescription": "対応が必要なタスクと案件をまとめて確認できます。",
+    "inboxDescription": "対応が必要なタスク・案件・冷めつつある関係をまとめて確認できます。",
     "bellLabel": "通知を開く",
     "unreadCount": "未読 {count} 件",
     "markAllRead": "すべて既読にする",
@@ -33,6 +33,10 @@
     "dealDueBody": "{deal} の決着予定日は {date} です。",
     "dealOverdueTitle": "決着予定日を過ぎた案件",
     "dealOverdueBody": "{deal} の決着予定日は {date} でした。",
+    "relationshipCoolingTitle": "冷めつつある関係",
+    "relationshipCoolingBody": "{deal} の {person} と {days} 日間連絡がありません。",
+    "relationshipColdTitle": "冷え切った関係",
+    "relationshipColdBody": "{deal} の {person} とは {days} 日間連絡がなく、関係が冷え切っています。",
     "dealTeamTitle": "案件チーム",
     "dealTeamDescription": "所有者と共同担当者に決着予定日のリマインダーが届きます。",
     "owner": "所有者",
@@ -42,7 +46,7 @@
     "saveTeam": "チームを保存",
     "dealTeamUpdated": "案件チームを更新しました",
     "dealTeamError": "案件チームを更新できませんでした",
-    "emptyHint": "新しいタスクや案件のリマインダーがここに表示されます。",
+    "emptyHint": "新しいタスクや案件のリマインダー、関係のお知らせがここに表示されます。",
     "noUsers": "ユーザーが見つかりません",
     "noCollaborators": "追加できるメンバーがいません",
     "cancel": "キャンセル"
