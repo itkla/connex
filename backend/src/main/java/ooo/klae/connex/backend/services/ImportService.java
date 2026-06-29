@@ -72,6 +72,7 @@ public class ImportService {
 
     private static final DateTimeFormatter MYSQL_DATETIME = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
     private static final String DEFAULT_TAG_COLOR = "#CCCCCC";
+    private static final String DEFAULT_CURRENCY = "USD";
 
     private static final Set<String> PERSON_FIELDS = Set.of("name", "email", "phone", "title", "company", "imageUrl");
     private static final Set<String> COMPANY_FIELDS = Set.of("name", "website", "industry", "phone", "address", "logoUrl");
@@ -411,7 +412,8 @@ public class ImportService {
             bean.setOwnerId(actorId);
             bean.setName(row.std.get("name"));
             bean.setValue(parseValue(row.std.get("value")));
-            bean.setCurrency(row.std.get("currency"));
+            String currency = row.std.get("currency");
+            bean.setCurrency(currency != null ? currency : DEFAULT_CURRENCY);
             bean.setExpectedCloseDate(row.std.get("expectedCloseDate"));
             bean.setPipelineId(row.resolvedPipelineId);
             bean.setStageId(row.resolvedStageId);
