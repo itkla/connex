@@ -639,6 +639,12 @@ export type NotificationParams = {
     size?: number;
 };
 
+export type NotificationPreference = {
+    type: string;
+    channel: string;
+    enabled: boolean;
+};
+
 export type AttachmentEntityType = 'company' | 'person' | 'deal' | 'user';
 
 export type Attachment = {

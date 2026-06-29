@@ -54,6 +54,7 @@
     "tabRoles": "Roles",
     "tabRules": "Rules",
     "tabCustomFields": "Custom fields",
+    "tabNotifications": "Notifications",
     "tabMembership": "Membership"
   },
   "WorkspaceMembers": {
@@ -277,5 +278,17 @@
     "cancel": "Cancel",
     "left": "You left the workspace",
     "leaveFailed": "Could not leave the workspace."
+  },
+  "WorkspaceNotifications": {
+    "title": "Notifications",
+    "subtitle": "Choose which reminders show up in your inbox. These settings apply to you, not the whole workspace.",
+    "taskTitle": "Task reminders",
+    "taskDescription": "When a task you're assigned is due or overdue.",
+    "dealTitle": "Deal reminders",
+    "dealDescription": "When a deal you own or collaborate on is closing soon or overdue.",
+    "relationshipTitle": "Relationship nudges",
+    "relationshipDescription": "When a contact on one of your open deals goes quiet.",
+    "loadFailed": "Your notification preferences couldn't be loaded.",
+    "saveFailed": "Your change couldn't be saved. Try again."
   }
 }

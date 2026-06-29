@@ -708,6 +708,17 @@ export function getNotificationCounts(init: RequestInit = {}) {
     });
 }
 
+export function getNotificationPreferences(init: RequestInit = {}) {
+    return getJson<Types.NotificationPreference[]>("/api/notification-preferences", {
+        cache: "no-store",
+        ...init,
+    });
+}
+
+export function updateNotificationPreferences(preferences: Types.NotificationPreference[]) {
+    return putJson<Types.NotificationPreference[]>("/api/notification-preferences", preferences);
+}
+
 export function getContextNotifications(
     contextType: string,
     contextId: number,
