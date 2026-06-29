@@ -7,6 +7,7 @@ import { ArrowTrendingDownIcon, BriefcaseIcon, CheckCircleIcon } from "@heroicon
 import type { NotificationPreference } from "@/app/lib/types";
 import { getNotificationPreferences, updateNotificationPreferences } from "@/app/lib/api";
 import { toastError } from "@/app/lib/toast";
+import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
 
@@ -33,12 +34,15 @@ export default function NotificationsPanel() {
     const t = useTranslations("WorkspaceNotifications");
     const [enabled, setEnabled] = useState<Record<string, boolean>>({});
     const [loading, setLoading] = useState(true);
+    const [error, setError] = useState(false);
     const [savingType, setSavingType] = useState<string | null>(null);
+    const [reloadKey, setReloadKey] = useState(0);
 
     useEffect(() => {
         let cancelled = false;
         (async () => {
             setLoading(true);
+            setError(false);
             try {
                 const preferences = await getNotificationPreferences();
                 if (cancelled) return;
@@ -50,7 +54,10 @@ export default function NotificationsPanel() {
                 }
                 setEnabled(next);
             } catch {
-                if (!cancelled) toastError(t("loadFailed"));
+                if (!cancelled) {
+                    setError(true);
+                    toastError(t("loadFailed"));
+                }
             } finally {
                 if (!cancelled) setLoading(false);
             }
@@ -58,7 +65,7 @@ export default function NotificationsPanel() {
         return () => {
             cancelled = true;
         };
-    }, [t]);
+    }, [t, reloadKey]);
 
     const toggle = async (type: string, value: boolean) => {
         const previous = enabled;
@@ -85,27 +92,36 @@ export default function NotificationsPanel() {
             <SectionLabel>{t("title")}</SectionLabel>
             <p className="max-w-prose text-sm text-muted-foreground">{t("subtitle")}</p>
 
-            <ul className="divide-y divide-border overflow-hidden rounded-2xl bg-card ring-1 ring-border">
-                {TYPES.map(({ type, icon: Icon, titleKey, descriptionKey }) => (
-                    <li key={type} className="flex items-center gap-4 px-4 py-3.5">
-                        <Icon aria-hidden className="size-5 shrink-0 text-muted-foreground" />
-                        <div className="min-w-0 flex-1">
-                            <p className="text-sm font-medium text-foreground">{t(titleKey)}</p>
-                            <p className="text-sm text-muted-foreground">{t(descriptionKey)}</p>
-                        </div>
-                        {loading ? (
-                            <Skeleton className="h-[18.4px] w-8 shrink-0 rounded-full" />
-                        ) : (
-                            <Switch
-                                checked={enabled[type] ?? true}
-                                disabled={savingType !== null}
-                                onCheckedChange={(value) => toggle(type, value)}
-                                aria-label={t(titleKey)}
-                            />
-                        )}
-                    </li>
-                ))}
-            </ul>
+            {error ? (
+                <div className="flex flex-col items-center gap-3 rounded-2xl bg-card px-4 py-8 text-center ring-1 ring-border">
+                    <p className="text-sm text-muted-foreground">{t("loadFailed")}</p>
+                    <Button variant="outline" size="sm" onClick={() => setReloadKey((key) => key + 1)}>
+                        {t("retry")}
+                    </Button>
+                </div>
+            ) : (
+                <ul className="divide-y divide-border overflow-hidden rounded-2xl bg-card ring-1 ring-border">
+                    {TYPES.map(({ type, icon: Icon, titleKey, descriptionKey }) => (
+                        <li key={type} className="flex items-center gap-4 px-4 py-3.5">
+                            <Icon aria-hidden className="size-5 shrink-0 text-muted-foreground" />
+                            <div className="min-w-0 flex-1">
+                                <p className="text-sm font-medium text-foreground">{t(titleKey)}</p>
+                                <p className="text-sm text-muted-foreground">{t(descriptionKey)}</p>
+                            </div>
+                            {loading ? (
+                                <Skeleton className="h-[18.4px] w-8 shrink-0 rounded-full" />
+                            ) : (
+                                <Switch
+                                    checked={enabled[type] ?? true}
+                                    disabled={savingType !== null}
+                                    onCheckedChange={(value) => toggle(type, value)}
+                                    aria-label={t(titleKey)}
+                                />
+                            )}
+                        </li>
+                    ))}
+                </ul>
+            )}
         </div>
     );
 }
