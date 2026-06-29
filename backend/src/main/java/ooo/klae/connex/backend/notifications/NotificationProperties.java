@@ -19,4 +19,5 @@ public class NotificationProperties {
     private int retentionDays = 90;
     private int maxPageSize = 100;
     private int coolingMinDaysSinceTouch = 14;
+    private int coolingBackfillDays = 90;
 }

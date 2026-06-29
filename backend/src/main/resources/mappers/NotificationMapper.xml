@@ -63,7 +63,6 @@
     <result property="personId" column="person_id"/>
     <result property="personLabel" column="person_label"/>
     <result property="recipientId" column="recipient_id"/>
-    <result property="recipientTimezone" column="recipient_timezone"/>
   </resultMap>
 
   <sql id="notificationColumns">
@@ -337,8 +336,7 @@
            d.expected_close_date,
            p.id AS person_id,
            p.name AS person_label,
-           recipients.recipient_id,
-           u.timezone AS recipient_timezone
+           recipients.recipient_id
     FROM deal d
     JOIN deal_person dp ON dp.deal_id = d.id
     JOIN person p
@@ -363,7 +361,6 @@
     JOIN workspace_member wm
       ON wm.workspace_id = d.workspace_id
      AND wm.user_id = recipients.recipient_id
-    JOIN app_user u ON u.id = recipients.recipient_id
     WHERE d.workspace_id = #{workspaceId}
       AND d.owner_id IS NOT NULL
       AND d.closed_at IS NULL

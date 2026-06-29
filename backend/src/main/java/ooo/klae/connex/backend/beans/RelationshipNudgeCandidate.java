@@ -21,5 +21,4 @@ public class RelationshipNudgeCandidate {
     private int personId;
     private String personLabel;
     private int recipientId;
-    private String recipientTimezone;
 }

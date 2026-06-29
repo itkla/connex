@@ -12,6 +12,8 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
@@ -46,6 +48,7 @@ public class NotificationReconciliationService {
     private static final String IN_APP = "in_app";
     private static final DateTimeFormatter MYSQL_DATETIME =
         DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
+    private static final Logger log = LoggerFactory.getLogger(NotificationReconciliationService.class);
 
     private final NotificationMapper notificationMapper;
     private final PreferenceMapper preferenceMapper;
@@ -101,7 +104,11 @@ public class NotificationReconciliationService {
         }
 
         if (includeRelationshipNudges) {
-            addRelationshipNudges(workspaceId, expected, preferences, triggeredAt);
+            try {
+                addRelationshipNudges(workspaceId, existing, expected, preferences, triggeredAt);
+            } catch (RuntimeException exception) {
+                log.warn("Relationship-nudge reconciliation failed for workspace={}", workspaceId, exception);
+            }
         }
 
         expected.values().forEach(dispatcher::dispatch);
@@ -120,6 +127,7 @@ public class NotificationReconciliationService {
 
     private void addRelationshipNudges(
         int workspaceId,
+        Map<ReminderKey, Notification> existing,
         Map<ReminderKey, Notification> expected,
         Map<PreferenceKey, Boolean> preferences,
         String triggeredAt
@@ -135,15 +143,17 @@ public class NotificationReconciliationService {
             if (temperature == null) {
                 continue;
             }
+            String dedupeKey =
+                "relationship.cooling:" + candidate.getDealId() + ":" + candidate.getPersonId();
+            ReminderKey key = new ReminderKey(workspaceId, candidate.getRecipientId(), dedupeKey);
             String severity = nudgeSeverity(
                 temperature.getBand(),
                 temperature.getTrend(),
                 temperature.getDaysSinceTouch(),
-                properties.getCoolingMinDaysSinceTouch()
+                properties.getCoolingMinDaysSinceTouch(),
+                properties.getCoolingBackfillDays(),
+                existing.containsKey(key)
             );
-            String dedupeKey =
-                "relationship.cooling:" + candidate.getDealId() + ":" + candidate.getPersonId();
-            ReminderKey key = new ReminderKey(workspaceId, candidate.getRecipientId(), dedupeKey);
             if (severity != null && enabled(preferences, candidate.getRecipientId(), RELATIONSHIP_TYPE)) {
                 expected.put(key, relationshipNudgeNotification(
                     candidate, temperature, severity, dedupeKey, triggeredAt));
@@ -176,11 +186,26 @@ public class NotificationReconciliationService {
      * Severity for a relationship-decay nudge, or {@code null} when the contact does not yet
      * warrant one. A contact that has gone {@code cold} is {@link #CRITICAL}; one that is still
      * warmer but {@code cooling} is {@link #WARNING}. Both require the relationship to have been
-     * quiet for at least {@code minDaysSinceTouch} days so a freshly-followed-up contact is not
-     * nagged, which also excludes never-touched stakeholders (their days-since is {@code null}).
+     * quiet for at least {@code minDaysSinceTouch} days, which keeps a freshly-followed-up contact
+     * from being nagged and excludes never-touched stakeholders (their days-since is {@code null}).
+     *
+     * <p>A <em>new</em> nudge is additionally capped at {@code backfillDaysSinceTouch}: a contact
+     * quiet beyond that window is not flagged for the first time, so a workspace adopting Connex
+     * with long-dormant relationships does not flood inboxes on the first sweep. An existing nudge
+     * ({@code reminderExists}) is kept past the cap and resolves only on warm-up or deal close.
      */
-    static String nudgeSeverity(String band, String trend, Integer daysSinceTouch, int minDaysSinceTouch) {
+    static String nudgeSeverity(
+        String band,
+        String trend,
+        Integer daysSinceTouch,
+        int minDaysSinceTouch,
+        int backfillDaysSinceTouch,
+        boolean reminderExists
+    ) {
         if (daysSinceTouch == null || daysSinceTouch < minDaysSinceTouch) {
+            return null;
+        }
+        if (!reminderExists && daysSinceTouch > backfillDaysSinceTouch) {
             return null;
         }
         if (COLD_BAND.equals(band)) {

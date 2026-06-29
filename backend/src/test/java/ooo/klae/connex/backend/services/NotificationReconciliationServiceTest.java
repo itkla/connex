@@ -102,26 +102,33 @@ class NotificationReconciliationServiceTest {
     }
 
     @Test
-    void nudgeSeverityFlagsColdAsCriticalAndCoolingAsWarningPastThreshold() {
+    void nudgeSeverityFlagsColdAsCriticalAndCoolingAsWarningWithinBackfillWindow() {
         assertEquals(
             NotificationReconciliationService.CRITICAL,
-            NotificationReconciliationService.nudgeSeverity("cold", "steady", 20, 14)
+            NotificationReconciliationService.nudgeSeverity("cold", "steady", 20, 14, 90, false)
         );
         assertEquals(
             NotificationReconciliationService.WARNING,
-            NotificationReconciliationService.nudgeSeverity("cool", "cooling", 20, 14)
+            NotificationReconciliationService.nudgeSeverity("cool", "cooling", 20, 14, 90, false)
         );
         assertNull(
-            NotificationReconciliationService.nudgeSeverity("cool", "cooling", 13, 14)
+            NotificationReconciliationService.nudgeSeverity("cool", "cooling", 13, 14, 90, false)
         );
         assertNull(
-            NotificationReconciliationService.nudgeSeverity("cold", "steady", 5, 14)
+            NotificationReconciliationService.nudgeSeverity("cold", "steady", 5, 14, 90, false)
         );
         assertNull(
-            NotificationReconciliationService.nudgeSeverity("cold", "steady", null, 14)
+            NotificationReconciliationService.nudgeSeverity("cold", "steady", null, 14, 90, false)
         );
         assertNull(
-            NotificationReconciliationService.nudgeSeverity("warm", "rising", 90, 14)
+            NotificationReconciliationService.nudgeSeverity("warm", "rising", 90, 14, 90, false)
+        );
+        assertNull(
+            NotificationReconciliationService.nudgeSeverity("cold", "steady", 200, 14, 90, false)
+        );
+        assertEquals(
+            NotificationReconciliationService.CRITICAL,
+            NotificationReconciliationService.nudgeSeverity("cold", "steady", 200, 14, 90, true)
         );
     }
 
@@ -154,6 +161,26 @@ class NotificationReconciliationServiceTest {
         assertEquals("deal", nudge.getContextType());
         assertEquals(Integer.valueOf(5), nudge.getContextId());
         assertEquals("/records/deals/5", nudge.getActionUrl());
+    }
+
+    @Test
+    void reconciliationSuppressesFirstNudgeForLongDormantContact() {
+        NotificationMapper notificationMapper = Mockito.mock(NotificationMapper.class);
+        PreferenceMapper preferenceMapper = Mockito.mock(PreferenceMapper.class);
+        NotificationDispatcher dispatcher = Mockito.mock(NotificationDispatcher.class);
+        ScoringService scoringService = Mockito.mock(ScoringService.class);
+        Clock clock = Clock.fixed(Instant.parse("2026-06-23T15:30:00Z"), ZoneOffset.UTC);
+
+        when(notificationMapper.findRelationshipNudgeCandidates(7)).thenReturn(List.of(nudgeCandidate()));
+        when(scoringService.scoreContacts(7)).thenReturn(List.of(
+            new RelationshipTemperatureDto(9, 4, "cold", "steady", "2025-06-01 09:00:00", 365, 0, null, null)
+        ));
+
+        NotificationReconciliationService service = nudgeService(
+            notificationMapper, preferenceMapper, dispatcher, scoringService, clock);
+        service.reconcileWorkspace(7, true);
+
+        verify(dispatcher, never()).dispatch(any());
     }
 
     @Test
@@ -238,7 +265,6 @@ class NotificationReconciliationServiceTest {
         candidate.setPersonId(9);
         candidate.setPersonLabel("Jordan Vega");
         candidate.setRecipientId(42);
-        candidate.setRecipientTimezone("Asia/Tokyo");
         return candidate;
     }
 
