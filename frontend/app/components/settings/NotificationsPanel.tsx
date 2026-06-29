@@ -42,10 +42,11 @@ export default function NotificationsPanel() {
             try {
                 const preferences = await getNotificationPreferences();
                 if (cancelled) return;
+                const wildcard = preferences.find((p) => p.type === "*" && p.channel === CHANNEL);
                 const next: Record<string, boolean> = {};
                 for (const { type } of TYPES) {
                     const match = preferences.find((p) => p.type === type && p.channel === CHANNEL);
-                    next[type] = match ? match.enabled : true;
+                    next[type] = match ? match.enabled : wildcard ? wildcard.enabled : true;
                 }
                 setEnabled(next);
             } catch {
