@@ -746,6 +746,10 @@ export function restoreNotification(id: number) {
     return postJson<Types.Notification>(`/api/notifications/${id}/restore`);
 }
 
+export function snoozeNotification(id: number, hours: number) {
+    return postJson<Types.Notification>(`/api/notifications/${id}/snooze`, { hours });
+}
+
 export function markAllNotificationsRead() {
     return postJson<Types.NotificationCounts>("/api/notifications/read-all");
 }

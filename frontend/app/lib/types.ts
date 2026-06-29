@@ -622,6 +622,7 @@ export type Notification = {
     readAt?: string | null;
     dismissedAt?: string | null;
     resolvedAt?: string | null;
+    snoozedUntil?: string | null;
     createdAt: string;
     updatedAt: string;
 };

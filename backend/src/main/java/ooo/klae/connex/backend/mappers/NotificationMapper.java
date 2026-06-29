@@ -59,6 +59,12 @@ public interface NotificationMapper {
         @Param("id") int id
     );
 
+    int snooze(
+        @Param("recipientId") int recipientId,
+        @Param("id") int id,
+        @Param("snoozedUntil") String snoozedUntil
+    );
+
     int markAllRead(@Param("recipientId") int recipientId);
 
     int upsert(Notification notification);

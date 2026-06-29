@@ -283,6 +283,36 @@ class NotificationMapperTest extends AbstractMapperTest {
         );
     }
 
+    @Test
+    void snoozeHidesNotificationUntilWindowPassesAndSurvivesReconcile() {
+        User recipient = newUser();
+        notificationMapper.upsert(reminder(recipient, "warning", "2026-06-23 00:00:00"));
+        Notification stored = onlyReminder(recipient);
+
+        notificationMapper.snooze(recipient.getId(), stored.getId(), "2999-01-01 00:00:00");
+        assertTrue(activeInbox(recipient).isEmpty());
+
+        notificationMapper.snooze(recipient.getId(), stored.getId(), "2000-01-01 00:00:00");
+        assertEquals(1, activeInbox(recipient).size());
+
+        notificationMapper.snooze(recipient.getId(), stored.getId(), "2999-01-01 00:00:00");
+        notificationMapper.upsert(reminder(recipient, "warning", "2026-06-24 00:00:00"));
+        assertTrue(activeInbox(recipient).isEmpty());
+
+        notificationMapper.upsert(reminder(recipient, "critical", "2026-06-25 00:00:00"));
+        assertEquals(1, activeInbox(recipient).size());
+
+        notificationMapper.snooze(recipient.getId(), stored.getId(), "2999-01-01 00:00:00");
+        notificationMapper.resolveReminder(
+            workspace.getId(), recipient.getId(), stored.getId(), "2026-06-28 00:00:00");
+        notificationMapper.upsert(reminder(recipient, "critical", "2026-06-29 00:00:00"));
+        assertEquals(1, activeInbox(recipient).size());
+    }
+
+    private List<Notification> activeInbox(User recipient) {
+        return notificationMapper.findPage(recipient.getId(), "active", null, null, null, 50, 0);
+    }
+
     private Notification onlyReminder(User recipient) {
         List<Notification> notifications = notificationMapper.findReminderNotifications(
             workspace.getId(),

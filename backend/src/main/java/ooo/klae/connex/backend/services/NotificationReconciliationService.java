@@ -47,6 +47,7 @@ public class NotificationReconciliationService {
     static final String WARNING = "warning";
     static final String CRITICAL = "critical";
     private static final String COLD_BAND = "cold";
+    private static final String COOL_BAND = "cool";
     private static final String COOLING_TREND = "cooling";
     private static final double HIGH_VALUE_PERCENTILE = 0.75;
     private static final int MIN_DEALS_FOR_VALUE_RANK = 4;
@@ -274,8 +275,14 @@ public class NotificationReconciliationService {
      *
      * <p>A <em>new</em> nudge is additionally capped at {@code backfillDaysSinceTouch}: a contact
      * quiet beyond that window is not flagged for the first time, so a workspace adopting Connex
-     * with long-dormant relationships does not flood inboxes on the first sweep. An existing nudge
-     * ({@code reminderExists}) is kept past the cap and resolves only on warm-up or deal close.
+     * with long-dormant relationships does not flood inboxes on the first sweep.
+     *
+     * <p>Resolution is monotonic: once a nudge exists ({@code reminderExists}) it is kept at the
+     * current decay severity while the contact stays {@code cool} or {@code cold} — even if the
+     * windowed {@code cooling} trend has fluttered back to steady with no new touch. Only a genuine
+     * warm-up (the band rising to {@code warm}/{@code hot}, which needs fresh activity) or a fresh
+     * touch ({@code daysSinceTouch} dropping below the minimum) resolves it, so a nudge the user
+     * already cleared cannot re-surface as the trend oscillates.
      */
     static String nudgeSeverity(
         String band,
@@ -293,6 +300,9 @@ public class NotificationReconciliationService {
         }
         if (COLD_BAND.equals(band)) {
             return CRITICAL;
+        }
+        if (reminderExists) {
+            return COOL_BAND.equals(band) ? WARNING : null;
         }
         return COOLING_TREND.equals(trend) ? WARNING : null;
     }

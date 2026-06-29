@@ -1,5 +1,10 @@
 package ooo.klae.connex.backend.services;
 
+import java.time.Duration;
+import java.time.Instant;
+import java.time.LocalDateTime;
+import java.time.ZoneOffset;
+import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
@@ -23,6 +28,7 @@ import ooo.klae.connex.backend.notifications.NotificationProperties;
 @RequiredArgsConstructor
 public class NotificationService {
     private static final Set<String> STATES = Set.of("active", "unread", "history", "all");
+    private static final DateTimeFormatter UTC_DATETIME = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
     private final NotificationMapper notificationMapper;
     private final AuthService authService;
@@ -108,6 +114,23 @@ public class NotificationService {
             return NotificationDto.from(current);
         }
         requireMutation(notificationMapper.restore(recipientId, id), id);
+        return NotificationDto.from(requireNotification(recipientId, id));
+    }
+
+    /**
+     * Hides an active notification from the inbox for {@code hours} hours, after which the next
+     * inbox read surfaces it again. A dismissed or resolved notification is left untouched.
+     */
+    public NotificationDto snooze(int id, int hours) {
+        int recipientId = currentRecipientId();
+        Notification current = requireNotification(recipientId, id);
+        if (current.getDismissedAt() != null || current.getResolvedAt() != null) {
+            return NotificationDto.from(current);
+        }
+        String snoozedUntil = LocalDateTime
+            .ofInstant(Instant.now().plus(Duration.ofHours(hours)), ZoneOffset.UTC)
+            .format(UTC_DATETIME);
+        requireMutation(notificationMapper.snooze(recipientId, id, snoozedUntil), id);
         return NotificationDto.from(requireNotification(recipientId, id));
     }
 

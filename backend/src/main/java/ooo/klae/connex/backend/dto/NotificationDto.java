@@ -35,6 +35,7 @@ public class NotificationDto {
     private String readAt;
     private String dismissedAt;
     private String resolvedAt;
+    private String snoozedUntil;
     private String createdAt;
     private String updatedAt;
 
@@ -68,6 +69,7 @@ public class NotificationDto {
         dto.setReadAt(notification.getReadAt());
         dto.setDismissedAt(notification.getDismissedAt());
         dto.setResolvedAt(notification.getResolvedAt());
+        dto.setSnoozedUntil(notification.getSnoozedUntil());
         dto.setCreatedAt(notification.getCreatedAt());
         dto.setUpdatedAt(notification.getUpdatedAt());
         return dto;

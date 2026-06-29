@@ -29,6 +29,7 @@
     <result property="readAt" column="read_at"/>
     <result property="dismissedAt" column="dismissed_at"/>
     <result property="resolvedAt" column="resolved_at"/>
+    <result property="snoozedUntil" column="snoozed_until"/>
     <result property="createdAt" column="created_at"/>
     <result property="updatedAt" column="updated_at"/>
   </resultMap>
@@ -74,7 +75,7 @@
     n.template_version, n.title, n.body, n.actor_id, n.actor_label,
     n.source_type, n.source_id, n.source_label, n.context_type, n.context_id,
     n.context_label, n.action_url, n.data, n.dedupe_key, n.triggered_at,
-    n.read_at, n.dismissed_at, n.resolved_at, n.created_at, n.updated_at
+    n.read_at, n.dismissed_at, n.resolved_at, n.snoozed_until, n.created_at, n.updated_at
   </sql>
 
   <sql id="recipientScope">
@@ -95,13 +96,21 @@
     n.recipient_id = #{recipientId}
   </sql>
 
+  <!-- A snoozed notification is hidden from the active inbox and unread count until its snooze
+       window passes; timestamps are stored in UTC, so compare against UTC_TIMESTAMP(). -->
+  <sql id="notSnoozed">
+    AND (n.snoozed_until IS NULL OR n.snoozed_until &lt;= UTC_TIMESTAMP())
+  </sql>
+
   <sql id="inboxFilters">
     <choose>
       <when test="state == 'active'">
         AND n.dismissed_at IS NULL AND n.resolved_at IS NULL
+        <include refid="notSnoozed"/>
       </when>
       <when test="state == 'unread'">
         AND n.dismissed_at IS NULL AND n.resolved_at IS NULL AND n.read_at IS NULL
+        <include refid="notSnoozed"/>
       </when>
       <when test="state == 'history'">
         AND (n.dismissed_at IS NOT NULL OR n.resolved_at IS NOT NULL)
@@ -140,6 +149,7 @@
       AND n.dismissed_at IS NULL
       AND n.resolved_at IS NULL
       AND n.read_at IS NULL
+      <include refid="notSnoozed"/>
   </select>
 
   <select id="findById" resultMap="NotificationResult">
@@ -177,10 +187,19 @@
 
   <update id="restore">
     UPDATE notification
-    SET dismissed_at = NULL, resolved_at = NULL, read_at = NULL
+    SET dismissed_at = NULL, resolved_at = NULL, read_at = NULL, snoozed_until = NULL
     WHERE recipient_id = #{recipientId}
       AND id = #{id}
       AND (dismissed_at IS NOT NULL OR resolved_at IS NOT NULL)
+  </update>
+
+  <update id="snooze">
+    UPDATE notification
+    SET snoozed_until = #{snoozedUntil}
+    WHERE recipient_id = #{recipientId}
+      AND id = #{id}
+      AND dismissed_at IS NULL
+      AND resolved_at IS NULL
   </update>
 
   <update id="markAllRead">
@@ -190,6 +209,7 @@
       AND dismissed_at IS NULL
       AND resolved_at IS NULL
       AND read_at IS NULL
+      AND (snoozed_until IS NULL OR snoozed_until &lt;= UTC_TIMESTAMP())
   </update>
 
   <insert id="upsert" useGeneratedKeys="true" keyProperty="id">
@@ -223,6 +243,12 @@
           OR notification.resolved_at IS NOT NULL,
         incoming.triggered_at,
         notification.triggered_at
+      ),
+      snoozed_until = IF(
+        notification.severity &lt;&gt; incoming.severity
+          OR notification.resolved_at IS NOT NULL,
+        NULL,
+        notification.snoozed_until
       ),
       resolved_at = IF(
         notification.severity &lt;&gt; incoming.severity
