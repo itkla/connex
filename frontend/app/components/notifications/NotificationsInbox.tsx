@@ -13,12 +13,14 @@ import {
     markNotificationRead,
     markNotificationUnread,
     restoreNotification,
+    snoozeNotification,
 } from "@/app/lib/api";
 import { type Notification, type NotificationState } from "@/app/lib/types";
 import { formatRelativeTime } from "@/app/lib/utils";
 import { toastError } from "@/app/lib/toast";
 import { useNotifications } from "@/app/hooks/useNotifications";
 import { notificationContent, notificationIcon, notificationSeverityStyle, safeNotificationUrl } from "@/app/components/notifications/notificationContent";
+import { SnoozeMenu } from "@/app/components/notifications/SnoozeMenu";
 import { cn } from "@/lib/utils";
 import { SegmentedToggle } from "@/app/components/filters";
 import { Button } from "@/components/ui/button";
@@ -104,6 +106,22 @@ export default function NotificationsInbox() {
         } catch {
             toastError(t("actionError"));
         }
+    }
+
+    async function snooze(item: Notification, hours: number) {
+        try {
+            await snoozeNotification(item.id, hours);
+            setItems((current) => current.filter((entry) => entry.id !== item.id));
+            setTotal((value) => Math.max(0, value - 1));
+            await refreshUnread();
+        } catch {
+            toastError(t("actionError"));
+        }
+    }
+
+    function logTouch(item: Notification) {
+        if (item.sourceId == null) return;
+        router.push(`/records/contacts/${item.sourceId}`);
     }
 
     async function restore(item: Notification) {
@@ -199,6 +217,9 @@ export default function NotificationsInbox() {
                             const content = notificationContent(item, t, locale);
                             const Icon = notificationIcon(item);
                             const style = notificationSeverityStyle(item.severity);
+                            const reasons = item.data?.priorityReasons;
+                            const hasPriority = Array.isArray(reasons) && reasons.length > 0;
+                            const isNudge = item.type === "relationship.cooling";
                             return (
                                 <article
                                     key={item.id}
@@ -233,6 +254,11 @@ export default function NotificationsInbox() {
                                                     {item.workspaceName}
                                                 </span>
                                             ) : null}
+                                            {hasPriority ? (
+                                                <span className="rounded-full bg-brand-light px-1.5 py-0.5 text-[11px] font-medium text-brand-dark">
+                                                    {t("priority")}
+                                                </span>
+                                            ) : null}
                                         </div>
                                         {content.body ? <p className="mt-1 text-sm text-muted-foreground">{content.body}</p> : null}
                                     </button>
@@ -248,6 +274,15 @@ export default function NotificationsInbox() {
                                             </Button>
                                         ) : (
                                             <>
+                                                {isNudge && item.sourceId != null ? (
+                                                    <Button
+                                                        variant="ghost"
+                                                        size="sm"
+                                                        onClick={() => logTouch(item)}
+                                                    >
+                                                        {t("logTouch")}
+                                                    </Button>
+                                                ) : null}
                                                 <Button
                                                     variant="ghost"
                                                     size="sm"
@@ -255,6 +290,7 @@ export default function NotificationsInbox() {
                                                 >
                                                     {item.readAt ? t("markUnread") : t("markRead")}
                                                 </Button>
+                                                <SnoozeMenu onSnooze={(hours) => void snooze(item, hours)} />
                                                 <Button
                                                     variant="ghost"
                                                     size="icon-sm"
