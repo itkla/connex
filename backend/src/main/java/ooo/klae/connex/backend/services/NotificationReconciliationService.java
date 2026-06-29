@@ -7,10 +7,13 @@ import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeParseException;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -44,6 +47,10 @@ public class NotificationReconciliationService {
     static final String CRITICAL = "critical";
     private static final String COLD_BAND = "cold";
     private static final String COOLING_TREND = "cooling";
+    private static final double HIGH_VALUE_PERCENTILE = 0.75;
+    private static final int MIN_DEALS_FOR_VALUE_RANK = 4;
+    private static final double LATE_STAGE_FRACTION = 0.75;
+    private static final Set<String> KEY_ROLE_KEYWORDS = Set.of("champion", "decision", "buyer", "sponsor");
 
     private static final String IN_APP = "in_app";
     private static final DateTimeFormatter MYSQL_DATETIME =
@@ -138,6 +145,8 @@ public class NotificationReconciliationService {
             return;
         }
         Map<Integer, RelationshipTemperatureDto> temperatures = scoreByPerson(workspaceId);
+        double highValueThreshold = highValueThreshold(notificationMapper.findOpenDealValues(workspaceId));
+        LocalDate today = LocalDate.now(clock.withZone(ZoneOffset.UTC));
         for (RelationshipNudgeCandidate candidate : nudgeCandidates) {
             RelationshipTemperatureDto temperature = temperatures.get(candidate.getPersonId());
             if (temperature == null) {
@@ -154,11 +163,89 @@ public class NotificationReconciliationService {
                 properties.getCoolingBackfillDays(),
                 existing.containsKey(key)
             );
-            if (severity != null && enabled(preferences, candidate.getRecipientId(), RELATIONSHIP_TYPE)) {
-                expected.put(key, relationshipNudgeNotification(
-                    candidate, temperature, severity, dedupeKey, triggeredAt));
+            if (severity == null || !enabled(preferences, candidate.getRecipientId(), RELATIONSHIP_TYPE)) {
+                continue;
             }
+            List<String> reasons = priorityReasons(
+                candidate, highValueThreshold, today, properties.getCoolingCloseSoonDays());
+            if (WARNING.equals(severity) && !reasons.isEmpty()) {
+                severity = CRITICAL;
+            }
+            expected.put(key, relationshipNudgeNotification(
+                candidate, temperature, severity, reasons, dedupeKey, triggeredAt));
         }
+    }
+
+    /**
+     * Reasons a decaying relationship's nudge is high-priority: a soon-closing, high-value, or
+     * late-stage deal, or a named key stakeholder. A {@code warning}-level nudge with any reason is
+     * escalated to {@code critical}; the reasons also ride in the notification payload.
+     */
+    static List<String> priorityReasons(
+        RelationshipNudgeCandidate candidate,
+        double highValueThreshold,
+        LocalDate today,
+        int closeSoonDays
+    ) {
+        List<String> reasons = new ArrayList<>();
+        if (closingSoon(candidate.getExpectedCloseDate(), today, closeSoonDays)) {
+            reasons.add("closing_soon");
+        }
+        if (highValueThreshold > 0 && candidate.getDealValue() >= highValueThreshold) {
+            reasons.add("high_value");
+        }
+        if (lateStage(candidate.getStagePosition(), candidate.getPipelineMaxPosition(), candidate.isStageSuccess())) {
+            reasons.add("late_stage");
+        }
+        if (keyRole(candidate.getPersonRole())) {
+            reasons.add("key_role");
+        }
+        return reasons;
+    }
+
+    private static boolean closingSoon(String expectedCloseDate, LocalDate today, int closeSoonDays) {
+        if (expectedCloseDate == null || expectedCloseDate.isBlank()) {
+            return false;
+        }
+        try {
+            return !LocalDate.parse(expectedCloseDate).isAfter(today.plusDays(Math.max(0, closeSoonDays)));
+        } catch (DateTimeParseException exception) {
+            return false;
+        }
+    }
+
+    private static boolean lateStage(Integer position, Integer maxPosition, boolean stageSuccess) {
+        if (stageSuccess) {
+            return true;
+        }
+        if (position == null || maxPosition == null || maxPosition <= 0) {
+            return false;
+        }
+        return position >= maxPosition * LATE_STAGE_FRACTION;
+    }
+
+    private static boolean keyRole(String role) {
+        if (role == null || role.isBlank()) {
+            return false;
+        }
+        String normalized = role.toLowerCase();
+        return KEY_ROLE_KEYWORDS.stream().anyMatch(normalized::contains);
+    }
+
+    /**
+     * The deal value at or above which a deal counts as "high value" for nudge weighting — the
+     * {@link #HIGH_VALUE_PERCENTILE} of the workspace's open-deal values (nearest-rank). Returns
+     * {@link Double#POSITIVE_INFINITY} when there are too few deals to rank meaningfully, which
+     * leaves the value signal off rather than flagging an arbitrary deal as high-value.
+     */
+    static double highValueThreshold(List<Double> openDealValues) {
+        if (openDealValues == null || openDealValues.size() < MIN_DEALS_FOR_VALUE_RANK) {
+            return Double.POSITIVE_INFINITY;
+        }
+        List<Double> sorted = openDealValues.stream().sorted().toList();
+        int rank = (int) Math.ceil(HIGH_VALUE_PERCENTILE * sorted.size());
+        int index = Math.max(1, Math.min(sorted.size(), rank)) - 1;
+        return sorted.get(index);
     }
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
@@ -334,6 +421,7 @@ public class NotificationReconciliationService {
         RelationshipNudgeCandidate candidate,
         RelationshipTemperatureDto temperature,
         String severity,
+        List<String> priorityReasons,
         String dedupeKey,
         String triggeredAt
     ) {
@@ -349,10 +437,11 @@ public class NotificationReconciliationService {
             dedupeKey,
             triggeredAt
         );
+        boolean cold = COLD_BAND.equals(temperature.getBand());
         notification.setContextType("deal");
         notification.setContextId(candidate.getDealId());
         notification.setContextLabel(candidate.getDealLabel());
-        notification.setTitle(CRITICAL.equals(severity) ? "Relationship gone cold" : "Relationship cooling");
+        notification.setTitle(cold ? "Relationship gone cold" : "Relationship cooling");
         notification.setBody(candidate.getPersonLabel() + " on " + candidate.getDealLabel()
             + " — " + temperature.getDaysSinceTouch() + " days since last contact");
         notification.setActionUrl("/records/deals/" + candidate.getDealId());
@@ -364,8 +453,15 @@ public class NotificationReconciliationService {
         data.put("daysSinceTouch", temperature.getDaysSinceTouch());
         data.put("band", temperature.getBand());
         data.put("trend", temperature.getTrend());
+        data.put("dealValue", candidate.getDealValue());
         if (candidate.getExpectedCloseDate() != null) {
             data.put("expectedCloseDate", candidate.getExpectedCloseDate());
+        }
+        if (candidate.getPersonRole() != null && !candidate.getPersonRole().isBlank()) {
+            data.put("role", candidate.getPersonRole());
+        }
+        if (!priorityReasons.isEmpty()) {
+            data.put("priorityReasons", priorityReasons);
         }
         notification.setData(json(data));
         return notification;

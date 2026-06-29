@@ -90,6 +90,12 @@ public interface NotificationMapper {
      */
     List<RelationshipNudgeCandidate> findRelationshipNudgeCandidates(@Param("workspaceId") int workspaceId);
 
+    /**
+     * Values of the workspace's open, owned deals — the same universe the nudge candidates draw
+     * from — used to derive the high-value threshold that weights a nudge's priority.
+     */
+    List<Double> findOpenDealValues(@Param("workspaceId") int workspaceId);
+
     List<Integer> findWorkspaceIds();
 
     List<Integer> findWorkspaceRecipientIds(@Param("workspaceId") int workspaceId);

@@ -20,4 +20,5 @@ public class NotificationProperties {
     private int maxPageSize = 100;
     private int coolingMinDaysSinceTouch = 14;
     private int coolingBackfillDays = 90;
+    private int coolingCloseSoonDays = 14;
 }
