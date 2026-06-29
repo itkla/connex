@@ -97,7 +97,7 @@ export default function NotificationsPanel() {
                         ) : (
                             <Switch
                                 checked={enabled[type] ?? true}
-                                disabled={savingType === type}
+                                disabled={savingType !== null}
                                 onCheckedChange={(value) => toggle(type, value)}
                                 aria-label={t(titleKey)}
                             />
