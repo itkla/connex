@@ -1,0 +1,6 @@
+Deal,Amount,Cur,Account,Pipeline,Stage,Contacts,Tags
+Big Renewal,"500,000",JPY,Acme Inc,Sales,Lead,alice@acme.test,hot
+Small Deal,10000,USD,Globex,Sales,Lead,,
+Bad Stage Deal,5000,USD,Acme Inc,Sales,Nonexistent,,
+No Value Deal,abc,USD,Beta,Sales,Lead,,
+,1000,USD,Acme Inc,Sales,Lead,,

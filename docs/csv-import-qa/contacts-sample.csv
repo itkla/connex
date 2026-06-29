@@ -1,0 +1,7 @@
+Name,Email,Phone,Company,Tags,Budget
+Alice Tanaka,alice@acme.test,+81-90-1111-2222,Acme Inc,"vip, lead","1,000,000"
+Bob Smith,bob@acme.test,555-0100,Acme Inc,lead,50000
+田中 花子,hanako@globex.test,03-1234-5678,Globex,customer,200000
+,noname@x.test,555-0200,Acme Inc,,
+Carol,not-an-email,555-0300,Globex,,
+Alice Tanaka,alice@acme.test,+81-90-9999-0000,Acme Inc,vip,2000000
