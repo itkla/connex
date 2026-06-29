@@ -52,6 +52,10 @@
     SELECT id, website FROM company WHERE workspace_id = #{workspaceId} AND website IS NOT NULL AND website != ''
   </select>
 
+  <select id="getCompaniesForDedup" resultType="Company">
+    SELECT id, name, website FROM company WHERE workspace_id = #{workspaceId}
+  </select>
+
   <select id="exists" resultType="boolean">
     SELECT EXISTS(
       SELECT 1 FROM company WHERE <include refid="visible"/> AND id = #{id}
@@ -69,6 +73,14 @@
   <insert id="insert" useGeneratedKeys="true" keyProperty="id">
     INSERT INTO company (workspace_id, name, website, industry, phone, address, logo_url)
     VALUES (#{workspaceId}, #{name}, #{website}, #{industry}, #{phone}, #{address}, #{logoUrl})
+  </insert>
+
+  <insert id="insertBatch" useGeneratedKeys="true" keyProperty="id">
+    INSERT INTO company (workspace_id, name, website, industry, phone, address, logo_url)
+    VALUES
+    <foreach collection="list" item="c" separator=",">
+      (#{c.workspaceId}, #{c.name}, #{c.website}, #{c.industry}, #{c.phone}, #{c.address}, #{c.logoUrl})
+    </foreach>
   </insert>
 
   <update id="update">

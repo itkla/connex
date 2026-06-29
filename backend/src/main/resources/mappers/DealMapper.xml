@@ -128,6 +128,10 @@
     LIMIT 10
   </select>
 
+  <select id="getDealsForDedup" resultMap="DealResult">
+    SELECT id, name, company_id FROM deal WHERE workspace_id = #{workspaceId}
+  </select>
+
   <insert id="insert" useGeneratedKeys="true" keyProperty="id">
     INSERT INTO deal (
       workspace_id, owner_id, name, value, actual_value, currency, pipeline_id, stage_id, company_id,
@@ -138,6 +142,19 @@
       #{pipelineId}, #{stageId}, #{companyId}, #{expectedCloseDate}, #{closedAt},
       #{closedReason}, #{won}
     )
+  </insert>
+
+  <insert id="insertBatch" useGeneratedKeys="true" keyProperty="id">
+    INSERT INTO deal (
+      workspace_id, owner_id, name, value, actual_value, currency, pipeline_id, stage_id, company_id,
+      expected_close_date, closed_at, closed_reason, won
+    )
+    VALUES
+    <foreach collection="list" item="d" separator=",">
+      (#{d.workspaceId}, #{d.ownerId,jdbcType=INTEGER}, #{d.name}, #{d.value}, #{d.actualValue}, #{d.currency},
+       #{d.pipelineId}, #{d.stageId}, #{d.companyId}, #{d.expectedCloseDate}, #{d.closedAt},
+       #{d.closedReason}, #{d.won})
+    </foreach>
   </insert>
 
   <update id="update">

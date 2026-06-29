@@ -195,6 +195,14 @@
     LIMIT 10
   </select>
 
+  <select id="findByEmails" resultMap="PersonResult">
+    SELECT p.id, p.email, p.name
+    FROM person p
+    WHERE p.workspace_id = #{workspaceId}
+      AND p.email IN
+      <foreach collection="emails" item="e" open="(" separator="," close=")">#{e}</foreach>
+  </select>
+
   <insert id="insert" useGeneratedKeys="true" keyProperty="id">
     INSERT INTO person (workspace_id, name, email, phone, company_id, title, image_url)
     VALUES (
@@ -206,6 +214,16 @@
       #{title},
       #{imageUrl}
     )
+  </insert>
+
+  <insert id="insertBatch" useGeneratedKeys="true" keyProperty="id">
+    INSERT INTO person (workspace_id, name, email, phone, company_id, title, image_url)
+    VALUES
+    <foreach collection="list" item="p" separator=",">
+      (#{p.workspaceId}, #{p.name}, #{p.email}, #{p.phone},
+       <choose><when test="p.company != null">#{p.company.id}</when><otherwise>NULL</otherwise></choose>,
+       #{p.title}, #{p.imageUrl})
+    </foreach>
   </insert>
 
   <update id="update">

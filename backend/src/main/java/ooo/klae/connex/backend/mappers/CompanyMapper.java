@@ -16,9 +16,13 @@ public interface CompanyMapper {
     List<Company> getCompaniesByTagId(@Param("workspaceId") int workspaceId, @Param("tagId") int tagId);
     Company getCompanyById(@Param("workspaceId") int workspaceId, @Param("id") int id);
     List<Company> getCompaniesWithWebsite(int workspaceId);
+    /** id + name + website for every company in the workspace; for import dedup (normalized in the service). */
+    List<Company> getCompaniesForDedup(int workspaceId);
     List<Company> search(@Param("workspaceId") int workspaceId, @Param("query") String query);
     boolean exists(@Param("workspaceId") int workspaceId, @Param("id") int id);
     int insert(Company company);
+    /** Bulk-insert companies in one statement (CSV import); generated ids are written back to each bean. */
+    int insertBatch(List<Company> companies);
     int update(Company company);
     int delete(@Param("workspaceId") int workspaceId, @Param("id") int id);
 
