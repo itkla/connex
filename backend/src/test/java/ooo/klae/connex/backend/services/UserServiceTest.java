@@ -2,16 +2,21 @@ package ooo.klae.connex.backend.services;
 
 import java.util.List;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.context.SecurityContextHolder;
 
 import ooo.klae.connex.backend.beans.Activity;
 import ooo.klae.connex.backend.beans.Note;
 import ooo.klae.connex.backend.beans.Task;
 import ooo.klae.connex.backend.beans.User;
+import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 
 class UserServiceTest extends AbstractServiceTest {
@@ -70,5 +75,68 @@ class UserServiceTest extends AbstractServiceTest {
     @Test
     void getNotesByUserId_throwsWhenUserMissing() {
         assertThrows(ResourceNotFoundException.class, () -> userService.getNotesByUserId(-1));
+    }
+
+    @Test
+    void update_byNonAdminMember_onAnotherUsersAccount_isForbidden() {
+        User attacker = newUser();
+        User victim = newUser();
+        authenticateAs(attacker);
+
+        assertThrows(ForbiddenException.class,
+            () -> userService.update(victim.getId(), profileUpdate(victim, "Hacked Name")));
+        assertEquals(victim.getDisplayName(), userMapper.getUserById(victim.getId()).getDisplayName());
+    }
+
+    @Test
+    void delete_byNonAdminMember_onAnotherUsersAccount_isForbidden() {
+        User attacker = newUser();
+        User victim = newUser();
+        authenticateAs(attacker);
+
+        assertThrows(ForbiddenException.class, () -> userService.delete(victim.getId()));
+        assertTrue(userMapper.getUserById(victim.getId()) != null);
+    }
+
+    @Test
+    void updateProfilePicture_byNonAdminMember_onAnotherUsersAccount_isForbidden() {
+        User attacker = newUser();
+        User victim = newUser();
+        authenticateAs(attacker);
+
+        assertThrows(ForbiddenException.class,
+            () -> userService.updateProfilePictureUrl(victim.getId(), "/profile-pictures/x.png"));
+    }
+
+    @Test
+    void update_onOwnAccount_isAllowed() {
+        User member = newUser();
+        authenticateAs(member);
+
+        assertDoesNotThrow(() -> userService.update(member.getId(), profileUpdate(member, "My New Name")));
+        assertEquals("My New Name", userMapper.getUserById(member.getId()).getDisplayName());
+    }
+
+    @Test
+    void update_byWorkspaceAdmin_onAnotherUsersAccount_isForbidden() {
+        User member = newUser();
+
+        assertThrows(ForbiddenException.class,
+            () -> userService.update(member.getId(), profileUpdate(member, "Renamed By Admin")));
+        assertEquals(member.getDisplayName(), userMapper.getUserById(member.getId()).getDisplayName());
+    }
+
+    private void authenticateAs(User user) {
+        SecurityContextHolder.getContext().setAuthentication(
+            new UsernamePasswordAuthenticationToken(user, null, user.getAuthorities()));
+    }
+
+    private User profileUpdate(User base, String newDisplayName) {
+        User update = new User();
+        update.setUsername(base.getUsername());
+        update.setEmail(base.getEmail());
+        update.setDisplayName(newDisplayName);
+        update.setTimezone(base.getTimezone());
+        return update;
     }
 }

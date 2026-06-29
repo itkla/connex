@@ -18,6 +18,8 @@ import ooo.klae.connex.backend.dto.UpdateTimezoneDto;
 import ooo.klae.connex.backend.dto.UserDto;
 import ooo.klae.connex.backend.services.AuthService;
 import ooo.klae.connex.backend.services.UserService;
+import ooo.klae.connex.backend.services.WorkspaceService;
+import ooo.klae.connex.backend.tenant.Permission;
 
 import java.util.List;
 
@@ -35,6 +37,7 @@ import lombok.RequiredArgsConstructor;
 public class UserController {
     private final UserService userService;
     private final AuthService authService;
+    private final WorkspaceService workspaceService;
 
     /**
      * GET endpoint to retrieve all users. This will return *all* users, not necessarily just the current user
@@ -62,6 +65,7 @@ public class UserController {
      */
     @PostMapping
     public UserDto createUser(@Valid @RequestBody RegisterDto dto) {
+        workspaceService.requirePermission(Permission.MEMBER_MANAGE);
         return UserDto.from(authService.register(dto));
     }
 

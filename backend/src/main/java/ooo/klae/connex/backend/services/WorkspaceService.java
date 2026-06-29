@@ -211,6 +211,19 @@ public class WorkspaceService {
         requirePermission(getCurrentWorkspaceId(), currentUser().getId(), permission);
     }
 
+    /**
+     * Authorizes a mutation of a global user account: permitted only when the
+     * current user is the target. Acting on another member's account is rejected —
+     * workspace-scoped member management (role changes, removal) goes through the
+     * member operations, which carry the owner and last-owner safeguards.
+     * @param targetUserId the user the action operates on
+     */
+    public void requireSelf(int targetUserId) {
+        if (currentUser().getId() != targetUserId) {
+            throw new ForbiddenException("You can only modify your own account");
+        }
+    }
+
     /** The built-in roles and their fixed permission bundles, shown read-only in the role editor. */
     public List<WorkspaceRole> builtInRoles() {
         return List.of(
