@@ -60,8 +60,12 @@
     <result property="dealId" column="deal_id"/>
     <result property="dealLabel" column="deal_label"/>
     <result property="expectedCloseDate" column="expected_close_date"/>
+    <result property="dealValue" column="deal_value"/>
+    <result property="stagePosition" column="stage_position"/>
+    <result property="pipelineMaxPosition" column="pipeline_max_position"/>
     <result property="personId" column="person_id"/>
     <result property="personLabel" column="person_label"/>
+    <result property="personRole" column="person_role"/>
     <result property="recipientId" column="recipient_id"/>
   </resultMap>
 
@@ -334,6 +338,10 @@
            d.id AS deal_id,
            d.name AS deal_label,
            d.expected_close_date,
+           d.value AS deal_value,
+           s.position AS stage_position,
+           pm.max_position AS pipeline_max_position,
+           dp.role AS person_role,
            p.id AS person_id,
            p.name AS person_label,
            recipients.recipient_id
@@ -342,6 +350,17 @@
     JOIN person p
       ON p.id = dp.person_id
      AND p.workspace_id = d.workspace_id
+    LEFT JOIN stage s
+      ON s.id = d.stage_id
+     AND s.workspace_id = d.workspace_id
+    LEFT JOIN (
+      SELECT pipeline_id, MAX(position) AS max_position
+      FROM stage
+      WHERE workspace_id = #{workspaceId}
+        AND is_success = FALSE
+        AND is_failure = FALSE
+      GROUP BY pipeline_id
+    ) pm ON pm.pipeline_id = d.pipeline_id
     JOIN (
       SELECT owned.workspace_id, owned.id AS deal_id, owned.owner_id AS recipient_id
       FROM deal owned
@@ -365,6 +384,14 @@
       AND d.owner_id IS NOT NULL
       AND d.closed_at IS NULL
     ORDER BY d.id, p.id, recipients.recipient_id
+  </select>
+
+  <select id="findOpenDealValues" resultType="double">
+    SELECT value
+    FROM deal
+    WHERE workspace_id = #{workspaceId}
+      AND owner_id IS NOT NULL
+      AND closed_at IS NULL
   </select>
 
   <select id="findWorkspaceIds" resultType="int">

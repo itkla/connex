@@ -239,6 +239,8 @@ class NotificationMapperTest extends AbstractMapperTest {
         Pipeline pipeline = newPipeline();
         Stage stage = newStage(pipeline, 0);
         Deal deal = newDeal(pipeline, stage, company);
+        deal.setValue(50000.0);
+        dealMapper.update(deal);
         dealMapper.updateOwner(workspace.getId(), deal.getId(), owner.getId());
         dealMapper.insertCollaborators(
             workspace.getId(),
@@ -257,6 +259,18 @@ class NotificationMapperTest extends AbstractMapperTest {
             .map(RelationshipNudgeCandidate::getRecipientId)
             .collect(Collectors.toSet());
         assertEquals(Set.of(owner.getId(), collaborator.getId()), recipients);
+
+        RelationshipNudgeCandidate projected = notificationMapper
+            .findRelationshipNudgeCandidates(workspace.getId())
+            .stream()
+            .filter(candidate -> candidate.getDealId() == deal.getId()
+                && candidate.getPersonId() == stakeholder.getId())
+            .findFirst()
+            .orElseThrow();
+        assertEquals(50000.0, projected.getDealValue());
+        assertEquals("champion", projected.getPersonRole());
+        assertEquals(Integer.valueOf(0), projected.getStagePosition());
+        assertEquals(Integer.valueOf(0), projected.getPipelineMaxPosition());
 
         deal.setClosedAt("2026-06-30 00:00:00");
         deal.setWon(true);

@@ -2,6 +2,7 @@ package ooo.klae.connex.backend.services;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.Mockito.never;
@@ -161,6 +162,79 @@ class NotificationReconciliationServiceTest {
         assertEquals("deal", nudge.getContextType());
         assertEquals(Integer.valueOf(5), nudge.getContextId());
         assertEquals("/records/deals/5", nudge.getActionUrl());
+    }
+
+    @Test
+    void highValueThresholdRanksOpenDealValuesAndIgnoresTinyWorkspaces() {
+        assertEquals(
+            Double.POSITIVE_INFINITY,
+            NotificationReconciliationService.highValueThreshold(List.of(10.0, 20.0, 30.0))
+        );
+        assertEquals(
+            6.0,
+            NotificationReconciliationService.highValueThreshold(
+                List.of(1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0))
+        );
+    }
+
+    @Test
+    void priorityReasonsFlagEachImportanceSignal() {
+        LocalDate today = LocalDate.of(2026, 6, 23);
+
+        RelationshipNudgeCandidate none = nudgeCandidate();
+        none.setExpectedCloseDate("2026-08-01");
+        assertTrue(NotificationReconciliationService
+            .priorityReasons(none, Double.POSITIVE_INFINITY, today, 14).isEmpty());
+
+        RelationshipNudgeCandidate soon = nudgeCandidate();
+        soon.setExpectedCloseDate("2026-06-30");
+        assertTrue(NotificationReconciliationService
+            .priorityReasons(soon, Double.POSITIVE_INFINITY, today, 14).contains("closing_soon"));
+
+        RelationshipNudgeCandidate valuable = nudgeCandidate();
+        valuable.setExpectedCloseDate("2026-08-01");
+        valuable.setDealValue(500.0);
+        assertTrue(NotificationReconciliationService
+            .priorityReasons(valuable, 100.0, today, 14).contains("high_value"));
+
+        RelationshipNudgeCandidate late = nudgeCandidate();
+        late.setExpectedCloseDate("2026-08-01");
+        late.setStagePosition(4);
+        late.setPipelineMaxPosition(5);
+        assertTrue(NotificationReconciliationService
+            .priorityReasons(late, Double.POSITIVE_INFINITY, today, 14).contains("late_stage"));
+
+        RelationshipNudgeCandidate keyContact = nudgeCandidate();
+        keyContact.setExpectedCloseDate("2026-08-01");
+        keyContact.setPersonRole("Economic Buyer");
+        assertTrue(NotificationReconciliationService
+            .priorityReasons(keyContact, Double.POSITIVE_INFINITY, today, 14).contains("key_role"));
+    }
+
+    @Test
+    void reconciliationFlagsPriorityInDataWhileSeverityStaysDecayState() {
+        NotificationMapper notificationMapper = Mockito.mock(NotificationMapper.class);
+        PreferenceMapper preferenceMapper = Mockito.mock(PreferenceMapper.class);
+        NotificationDispatcher dispatcher = Mockito.mock(NotificationDispatcher.class);
+        ScoringService scoringService = Mockito.mock(ScoringService.class);
+        Clock clock = Clock.fixed(Instant.parse("2026-06-23T15:30:00Z"), ZoneOffset.UTC);
+
+        RelationshipNudgeCandidate candidate = nudgeCandidate();
+        candidate.setExpectedCloseDate("2026-06-30");
+        when(notificationMapper.findRelationshipNudgeCandidates(7)).thenReturn(List.of(candidate));
+        when(scoringService.scoreContacts(7)).thenReturn(List.of(
+            new RelationshipTemperatureDto(9, 28, "cool", "cooling", "2026-05-10 09:00:00", 44, 1, null, null)
+        ));
+
+        NotificationReconciliationService service = nudgeService(
+            notificationMapper, preferenceMapper, dispatcher, scoringService, clock);
+        service.reconcileWorkspace(7, true);
+
+        ArgumentCaptor<Notification> captor = ArgumentCaptor.forClass(Notification.class);
+        verify(dispatcher).dispatch(captor.capture());
+        Notification nudge = captor.getValue();
+        assertEquals(NotificationReconciliationService.WARNING, nudge.getSeverity());
+        assertTrue(nudge.getData().contains("closing_soon"));
     }
 
     @Test

@@ -11,6 +11,13 @@ import { formatDate } from "@/app/lib/utils";
 
 type Translator = (key: string, values?: Record<string, string | number | Date>) => string;
 
+const RELATIONSHIP_REASON_KEYS: Record<string, string> = {
+    closing_soon: "relationshipReasonClosingSoon",
+    high_value: "relationshipReasonHighValue",
+    late_stage: "relationshipReasonLateStage",
+    key_role: "relationshipReasonKeyContact",
+};
+
 /**
  * Notification content for a given notification.
  * @param notification - The notification to get the content for.
@@ -39,13 +46,18 @@ export function notificationContent(notification: Notification, t: Translator, l
         };
     }
     if (notification.type === "relationship.cooling") {
+        const cold = data.band === "cold";
+        const reasons = Array.isArray(data.priorityReasons) ? data.priorityReasons : [];
+        const primaryReason = typeof reasons[0] === "string" ? reasons[0] : null;
+        const reasonKey = primaryReason ? RELATIONSHIP_REASON_KEYS[primaryReason] : undefined;
+        const body = t(cold ? "relationshipColdBody" : "relationshipCoolingBody", {
+            person: text(data.person, notification.sourceLabel ?? notification.title),
+            deal: text(data.deal, notification.contextLabel ?? ""),
+            days: text(data.daysSinceTouch, ""),
+        });
         return {
-            title: t(notification.severity === "critical" ? "relationshipColdTitle" : "relationshipCoolingTitle"),
-            body: t(notification.severity === "critical" ? "relationshipColdBody" : "relationshipCoolingBody", {
-                person: text(data.person, notification.sourceLabel ?? notification.title),
-                deal: text(data.deal, notification.contextLabel ?? ""),
-                days: text(data.daysSinceTouch, ""),
-            }),
+            title: t(cold ? "relationshipColdTitle" : "relationshipCoolingTitle"),
+            body: reasonKey ? `${body} · ${t(reasonKey)}` : body,
         };
     }
     if (notification.type === "workspace.join") {
