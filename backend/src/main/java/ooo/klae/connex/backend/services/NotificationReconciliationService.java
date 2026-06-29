@@ -7,7 +7,9 @@ import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 import org.springframework.stereotype.Service;
@@ -18,7 +20,9 @@ import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.beans.DealReminderCandidate;
 import ooo.klae.connex.backend.beans.Notification;
 import ooo.klae.connex.backend.beans.NotificationPreference;
+import ooo.klae.connex.backend.beans.RelationshipNudgeCandidate;
 import ooo.klae.connex.backend.beans.TaskReminderCandidate;
+import ooo.klae.connex.backend.dto.RelationshipTemperatureDto;
 import ooo.klae.connex.backend.mappers.NotificationMapper;
 import ooo.klae.connex.backend.mappers.PreferenceMapper;
 import ooo.klae.connex.backend.notifications.NotificationDispatcher;
@@ -33,8 +37,11 @@ import tools.jackson.databind.ObjectMapper;
 public class NotificationReconciliationService {
     static final String TASK_TYPE = "task.due";
     static final String DEAL_TYPE = "deal.close";
+    static final String RELATIONSHIP_TYPE = "relationship.cooling";
     static final String WARNING = "warning";
     static final String CRITICAL = "critical";
+    private static final String COLD_BAND = "cold";
+    private static final String COOLING_TREND = "cooling";
 
     private static final String IN_APP = "in_app";
     private static final DateTimeFormatter MYSQL_DATETIME =
@@ -44,6 +51,7 @@ public class NotificationReconciliationService {
     private final PreferenceMapper preferenceMapper;
     private final NotificationDispatcher dispatcher;
     private final NotificationProperties properties;
+    private final ScoringService scoringService;
     private final Clock clock;
     private final ObjectMapper objectMapper;
 
@@ -86,6 +94,31 @@ public class NotificationReconciliationService {
             }
         }
 
+        List<RelationshipNudgeCandidate> nudgeCandidates =
+            notificationMapper.findRelationshipNudgeCandidates(workspaceId);
+        if (!nudgeCandidates.isEmpty()) {
+            Map<Integer, RelationshipTemperatureDto> temperatures = scoreByPerson(workspaceId);
+            for (RelationshipNudgeCandidate candidate : nudgeCandidates) {
+                RelationshipTemperatureDto temperature = temperatures.get(candidate.getPersonId());
+                if (temperature == null) {
+                    continue;
+                }
+                String severity = nudgeSeverity(
+                    temperature.getBand(),
+                    temperature.getTrend(),
+                    temperature.getDaysSinceTouch(),
+                    properties.getCoolingMinDaysSinceTouch()
+                );
+                String dedupeKey =
+                    "relationship.cooling:" + candidate.getDealId() + ":" + candidate.getPersonId();
+                ReminderKey key = new ReminderKey(workspaceId, candidate.getRecipientId(), dedupeKey);
+                if (severity != null && enabled(preferences, candidate.getRecipientId(), RELATIONSHIP_TYPE)) {
+                    expected.put(key, relationshipNudgeNotification(
+                        candidate, temperature, severity, dedupeKey, triggeredAt));
+                }
+            }
+        }
+
         expected.values().forEach(dispatcher::dispatch);
         for (Map.Entry<ReminderKey, Notification> entry : existing.entrySet()) {
             Notification notification = entry.getValue();
@@ -119,6 +152,31 @@ public class NotificationReconciliationService {
             return reminderExists || !dueDate.isBefore(oldestInitialDate) ? CRITICAL : null;
         }
         return dueDate.isAfter(today.plusDays(warningDays)) ? null : WARNING;
+    }
+
+    /**
+     * Severity for a relationship-decay nudge, or {@code null} when the contact does not yet
+     * warrant one. A contact that has gone {@code cold} is {@link #CRITICAL}; one that is still
+     * warmer but {@code cooling} is {@link #WARNING}. Both require the relationship to have been
+     * quiet for at least {@code minDaysSinceTouch} days so a freshly-followed-up contact is not
+     * nagged, which also excludes never-touched stakeholders (their days-since is {@code null}).
+     */
+    static String nudgeSeverity(String band, String trend, Integer daysSinceTouch, int minDaysSinceTouch) {
+        if (daysSinceTouch == null || daysSinceTouch < minDaysSinceTouch) {
+            return null;
+        }
+        if (COLD_BAND.equals(band)) {
+            return CRITICAL;
+        }
+        return COOLING_TREND.equals(trend) ? WARNING : null;
+    }
+
+    private Map<Integer, RelationshipTemperatureDto> scoreByPerson(int workspaceId) {
+        Map<Integer, RelationshipTemperatureDto> temperatures = new HashMap<>();
+        for (RelationshipTemperatureDto temperature : scoringService.scoreContacts(workspaceId)) {
+            temperatures.put(temperature.getId(), temperature);
+        }
+        return temperatures;
     }
 
     private Map<ReminderKey, Notification> loadExisting(int workspaceId) {
@@ -226,6 +284,47 @@ public class NotificationReconciliationService {
             "deal", candidate.getDealLabel(),
             "expectedCloseDate", candidate.getExpectedCloseDate()
         )));
+        return notification;
+    }
+
+    private Notification relationshipNudgeNotification(
+        RelationshipNudgeCandidate candidate,
+        RelationshipTemperatureDto temperature,
+        String severity,
+        String dedupeKey,
+        String triggeredAt
+    ) {
+        Notification notification = base(
+            candidate.getWorkspaceId(),
+            candidate.getRecipientId(),
+            RELATIONSHIP_TYPE,
+            "relationship",
+            severity,
+            "person",
+            candidate.getPersonId(),
+            candidate.getPersonLabel(),
+            dedupeKey,
+            triggeredAt
+        );
+        notification.setContextType("deal");
+        notification.setContextId(candidate.getDealId());
+        notification.setContextLabel(candidate.getDealLabel());
+        notification.setTitle(CRITICAL.equals(severity) ? "Relationship gone cold" : "Relationship cooling");
+        notification.setBody(candidate.getPersonLabel() + " on " + candidate.getDealLabel()
+            + " — " + temperature.getDaysSinceTouch() + " days since last contact");
+        notification.setActionUrl("/records/deals/" + candidate.getDealId());
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("person", candidate.getPersonLabel());
+        data.put("deal", candidate.getDealLabel());
+        data.put("personId", candidate.getPersonId());
+        data.put("dealId", candidate.getDealId());
+        data.put("daysSinceTouch", temperature.getDaysSinceTouch());
+        data.put("band", temperature.getBand());
+        data.put("trend", temperature.getTrend());
+        if (candidate.getExpectedCloseDate() != null) {
+            data.put("expectedCloseDate", candidate.getExpectedCloseDate());
+        }
+        notification.setData(json(data));
         return notification;
     }
 

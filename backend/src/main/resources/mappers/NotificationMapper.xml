@@ -55,6 +55,17 @@
     <result property="recipientTimezone" column="recipient_timezone"/>
   </resultMap>
 
+  <resultMap id="RelationshipNudgeCandidateResult" type="RelationshipNudgeCandidate">
+    <result property="workspaceId" column="workspace_id"/>
+    <result property="dealId" column="deal_id"/>
+    <result property="dealLabel" column="deal_label"/>
+    <result property="expectedCloseDate" column="expected_close_date"/>
+    <result property="personId" column="person_id"/>
+    <result property="personLabel" column="person_label"/>
+    <result property="recipientId" column="recipient_id"/>
+    <result property="recipientTimezone" column="recipient_timezone"/>
+  </resultMap>
+
   <sql id="notificationColumns">
     n.id, n.workspace_id, n.recipient_id, n.type, n.category, n.severity,
     n.template_version, n.title, n.body, n.actor_id, n.actor_label,
@@ -66,6 +77,12 @@
   <sql id="recipientScope">
     n.workspace_id = #{workspaceId}
     AND n.recipient_id = #{recipientId}
+  </sql>
+
+  <!-- Reconciliation-managed reminder types. Every reconcile/resolve/purge statement scopes to
+       this list so a new reminder producer only has to extend it here, in one place. -->
+  <sql id="reminderTypes">
+    'task.due', 'deal.close', 'relationship.cooling'
   </sql>
 
   <!-- The inbox/bell is recipient-scoped across every workspace the user belongs to (not the active
@@ -232,7 +249,7 @@
     SELECT <include refid="notificationColumns"/>
     FROM notification n
     WHERE <include refid="recipientScope"/>
-      AND n.type IN ('task.due', 'deal.close')
+      AND n.type IN (<include refid="reminderTypes"/>)
     ORDER BY n.id
   </select>
 
@@ -240,7 +257,7 @@
     SELECT <include refid="notificationColumns"/>
     FROM notification n
     WHERE n.workspace_id = #{workspaceId}
-      AND n.type IN ('task.due', 'deal.close')
+      AND n.type IN (<include refid="reminderTypes"/>)
     ORDER BY n.recipient_id, n.id
   </select>
 
@@ -250,7 +267,7 @@
     WHERE workspace_id = #{workspaceId}
       AND recipient_id = #{recipientId}
       AND id = #{id}
-      AND type IN ('task.due', 'deal.close')
+      AND type IN (<include refid="reminderTypes"/>)
       AND resolved_at IS NULL
   </update>
 
@@ -313,6 +330,44 @@
     ORDER BY d.id, recipients.recipient_id
   </select>
 
+  <select id="findRelationshipNudgeCandidates" resultMap="RelationshipNudgeCandidateResult">
+    SELECT DISTINCT d.workspace_id,
+           d.id AS deal_id,
+           d.name AS deal_label,
+           d.expected_close_date,
+           p.id AS person_id,
+           p.name AS person_label,
+           recipients.recipient_id,
+           u.timezone AS recipient_timezone
+    FROM deal d
+    JOIN deal_person dp ON dp.deal_id = d.id
+    JOIN person p
+      ON p.id = dp.person_id
+     AND p.workspace_id = d.workspace_id
+    JOIN (
+      SELECT owned.workspace_id, owned.id AS deal_id, owned.owner_id AS recipient_id
+      FROM deal owned
+      WHERE owned.owner_id IS NOT NULL
+      UNION
+      SELECT collaborated.workspace_id, collaborated.id AS deal_id, dc.user_id AS recipient_id
+      FROM deal collaborated
+      JOIN deal_collaborator dc
+        ON dc.workspace_id = collaborated.workspace_id
+       AND dc.deal_id = collaborated.id
+      WHERE collaborated.owner_id IS NOT NULL
+    ) recipients
+      ON recipients.workspace_id = d.workspace_id
+     AND recipients.deal_id = d.id
+    JOIN workspace_member wm
+      ON wm.workspace_id = d.workspace_id
+     AND wm.user_id = recipients.recipient_id
+    JOIN app_user u ON u.id = recipients.recipient_id
+    WHERE d.workspace_id = #{workspaceId}
+      AND d.owner_id IS NOT NULL
+      AND d.closed_at IS NULL
+    ORDER BY d.id, p.id, recipients.recipient_id
+  </select>
+
   <select id="findWorkspaceIds" resultType="int">
     SELECT id
     FROM workspace
@@ -330,7 +385,7 @@
     DELETE FROM notification
     WHERE workspace_id = #{workspaceId}
       AND recipient_id = #{recipientId}
-      AND type IN ('task.due', 'deal.close')
+      AND type IN (<include refid="reminderTypes"/>)
       AND resolved_at IS NOT NULL
       AND resolved_at &lt; #{cutoff}
   </delete>
@@ -338,7 +393,7 @@
   <delete id="purgeWorkspaceReminderHistory">
     DELETE FROM notification
     WHERE workspace_id = #{workspaceId}
-      AND type IN ('task.due', 'deal.close')
+      AND type IN (<include refid="reminderTypes"/>)
       AND resolved_at IS NOT NULL
       AND resolved_at &lt; #{cutoff}
   </delete>
