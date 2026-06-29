@@ -1,4 +1,5 @@
 import type { IconType } from '@/app/components/library/files/fileMeta';
+import { safeHref } from '@/app/lib/utils';
 
 /**
  * Icon link component for the files browser.
@@ -24,7 +25,7 @@ export default function IconLink({
 }) {
     return (
         <a
-            href={href}
+            href={safeHref(href)}
             title={label}
             aria-label={label}
             {...(openInNewTab ? { target: '_blank', rel: 'noopener noreferrer' } : {})}

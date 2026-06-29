@@ -461,6 +461,32 @@ export function isLikelyUrl(url: string): boolean {
 }
 
 /**
+ * Returns a URL only when it is safe to use as an anchor `href`: an absolute
+ * http(s) URL or an app-relative path (`/...`). URLs containing control
+ * characters, protocol-relative forms (a leading slash followed by another slash
+ * or a backslash, which browsers resolve off-origin), and script-bearing schemes
+ * such as `javascript:` or `data:` all collapse to `'#'`, preventing open
+ * redirects and script execution from an attacker-controlled link target.
+ * @param url - the candidate href, typically an attachment or external URL
+ * @returns the original url when safe, otherwise '#'
+ */
+export function safeHref(url: string | null | undefined): string {
+    if (!url) return '#';
+    if (Array.from(url).some((ch) => ch.charCodeAt(0) <= 0x1f || ch.charCodeAt(0) === 0x7f)) {
+        return '#';
+    }
+    if (url.startsWith('/')) {
+        return url[1] === '/' || url[1] === '\\' ? '#' : url;
+    }
+    try {
+        const protocol = new URL(url).protocol;
+        return protocol === 'http:' || protocol === 'https:' ? url : '#';
+    } catch {
+        return '#';
+    }
+}
+
+/**
  * normalizes a website for comparison. things like http://www.example.com and https://example.com should be considered the same.
  * @param website 
  * @returns 

@@ -23,7 +23,7 @@ import {
 import { Button } from '@/components/ui/button';
 
 import { getAttachments } from '@/app/lib/api';
-import { formatDateTime, formatFileSize } from '@/app/lib/utils';
+import { formatDateTime, formatFileSize, safeHref } from '@/app/lib/utils';
 import type { Attachment, Tag } from '@/app/lib/types';
 import { classifyKind, KIND_ICON, KIND_LABEL_KEY, sourceMetaFor } from '@/app/components/library/files/fileMeta';
 import FileGlyph from '@/app/components/library/files/FileGlyph';
@@ -184,13 +184,13 @@ export default function FileDetailSheet({
 
                         <SheetFooter className="flex-row gap-2 border-t border-border">
                             <Button asChild variant="outline" className="flex-1">
-                                <a href={a.url} target="_blank" rel="noopener noreferrer">
+                                <a href={safeHref(a.url)} target="_blank" rel="noopener noreferrer">
                                     <ArrowTopRightOnSquareIcon className="size-4" />
                                     {t('open')}
                                 </a>
                             </Button>
                             <Button asChild variant="outline" className="flex-1">
-                                <a href={a.url} download={a.fileName}>
+                                <a href={safeHref(a.url)} download={a.fileName}>
                                     <ArrowDownTrayIcon className="size-4" />
                                     {t('download')}
                                 </a>

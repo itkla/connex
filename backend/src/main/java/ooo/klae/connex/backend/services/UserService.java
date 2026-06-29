@@ -77,6 +77,7 @@ public class UserService implements UserDetailsService {
     }
 
     public User update(int id, User user) {
+        workspaceService.requireSelf(id);
         User before = getUserById(id);
         user.setId(id);
         if (user.getTimezone() == null || user.getTimezone().isBlank()) {
@@ -92,6 +93,7 @@ public class UserService implements UserDetailsService {
     }
 
     public void delete(int id) {
+        workspaceService.requireSelf(id);
         User before = getUserById(id);
         userMapper.delete(id);
         auditService.record("user.delete", "user", id, before.getUsername(),
@@ -136,6 +138,7 @@ public class UserService implements UserDetailsService {
      * @return
      */
     public User updateProfilePictureUrl(int userId, String profilePictureUrl) {
+        workspaceService.requireSelf(userId);
         User before = getUserById(userId);
         userMapper.updateProfilePictureUrl(userId, profilePictureUrl);
         auditService.record("user.updateAvatar", "user", userId, before.getUsername(),
@@ -145,6 +148,7 @@ public class UserService implements UserDetailsService {
     }
 
     public User updateTimezone(int userId, String timezone) {
+        workspaceService.requireSelf(userId);
         User before = getUserById(userId);
         String validated = TimezoneSupport.validate(timezone, null);
         userMapper.updateTimezone(userId, validated);

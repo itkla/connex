@@ -14,7 +14,7 @@ import {
 import { cn } from '@/lib/utils';
 import { createAttachment, deleteAttachment, getAttachments } from '@/app/lib/api';
 import { type Attachment } from '@/app/lib/types';
-import { deleteUploadedFile, formatDate, formatFileSize, uploadFile } from '@/app/lib/utils';
+import { deleteUploadedFile, formatDate, formatFileSize, safeHref, uploadFile } from '@/app/lib/utils';
 import { toastError, toastSuccess } from '@/app/lib/toast';
 import { onAttachmentsAdded } from '@/app/components/attachments/attachmentEvents';
 
@@ -180,7 +180,7 @@ export default function Attachments({ entityType, entityId, initialAttachments, 
                                     <Icon className="size-5 shrink-0 text-muted-foreground" />
                                     <div className="min-w-0 flex-1">
                                         <a
-                                            href={attachment.url}
+                                            href={safeHref(attachment.url)}
                                             target="_blank"
                                             rel="noopener noreferrer"
                                             className="block truncate text-sm font-medium text-foreground hover:text-brand"
@@ -197,7 +197,7 @@ export default function Attachments({ entityType, entityId, initialAttachments, 
                                         </p>
                                     </div>
                                     <a
-                                        href={attachment.url}
+                                        href={safeHref(attachment.url)}
                                         download={attachment.fileName}
                                         className="shrink-0 rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
                                         title={t('download')}

@@ -2,6 +2,7 @@ package ooo.klae.connex.backend.dto;
 
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
@@ -42,6 +43,7 @@ public class AttachmentDto {
 
     @NotBlank
     @Size(max = 2048)
+    @Pattern(regexp = "(?i)^(/([^/\\\\].*)?|https?://.*)$", message = "url must be an app-relative path or an http(s) URL")
     private String url;
 
     @Size(max = 255)
