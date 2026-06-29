@@ -169,9 +169,6 @@ public class NotificationReconciliationService {
             }
             List<String> reasons = priorityReasons(
                 candidate, highValueThreshold, today, properties.getCoolingCloseSoonDays());
-            if (WARNING.equals(severity) && !reasons.isEmpty()) {
-                severity = CRITICAL;
-            }
             expected.put(key, relationshipNudgeNotification(
                 candidate, temperature, severity, reasons, dedupeKey, triggeredAt));
         }
@@ -179,8 +176,9 @@ public class NotificationReconciliationService {
 
     /**
      * Reasons a decaying relationship's nudge is high-priority: a soon-closing, high-value, or
-     * late-stage deal, or a named key stakeholder. A {@code warning}-level nudge with any reason is
-     * escalated to {@code critical}; the reasons also ride in the notification payload.
+     * late-stage deal, or a named key stakeholder. Carried in the notification payload so the inbox
+     * can surface priority separately from severity, which stays the (stable) decay state — keeping
+     * a volatile, workspace-relative signal out of the severity that gates read/dismiss resets.
      */
     static List<String> priorityReasons(
         RelationshipNudgeCandidate candidate,

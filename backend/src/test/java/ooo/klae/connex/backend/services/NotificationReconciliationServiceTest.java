@@ -212,7 +212,7 @@ class NotificationReconciliationServiceTest {
     }
 
     @Test
-    void reconciliationEscalatesCoolingNudgeForSoonClosingDeal() {
+    void reconciliationFlagsPriorityInDataWhileSeverityStaysDecayState() {
         NotificationMapper notificationMapper = Mockito.mock(NotificationMapper.class);
         PreferenceMapper preferenceMapper = Mockito.mock(PreferenceMapper.class);
         NotificationDispatcher dispatcher = Mockito.mock(NotificationDispatcher.class);
@@ -232,7 +232,9 @@ class NotificationReconciliationServiceTest {
 
         ArgumentCaptor<Notification> captor = ArgumentCaptor.forClass(Notification.class);
         verify(dispatcher).dispatch(captor.capture());
-        assertEquals(NotificationReconciliationService.CRITICAL, captor.getValue().getSeverity());
+        Notification nudge = captor.getValue();
+        assertEquals(NotificationReconciliationService.WARNING, nudge.getSeverity());
+        assertTrue(nudge.getData().contains("closing_soon"));
     }
 
     @Test
