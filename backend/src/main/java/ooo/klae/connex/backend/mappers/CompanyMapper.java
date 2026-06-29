@@ -18,6 +18,8 @@ public interface CompanyMapper {
     List<Company> getCompaniesWithWebsite(int workspaceId);
     /** id + name + website for every company in the workspace; for import dedup (normalized in the service). */
     List<Company> getCompaniesForDedup(int workspaceId);
+    /** Companies in the workspace with the given ids (workspace-scoped); for export of a selected view. */
+    List<Company> getByIds(@Param("workspaceId") int workspaceId, @Param("ids") List<Integer> ids);
     List<Company> search(@Param("workspaceId") int workspaceId, @Param("query") String query);
     boolean exists(@Param("workspaceId") int workspaceId, @Param("id") int id);
     int insert(Company company);

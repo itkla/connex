@@ -555,7 +555,7 @@ export default function DealsBrowser({ deals, savedViews }: { deals: Deal[]; sav
                             </DropdownMenuContent>
                         </DropdownMenu>
                     )}
-                    <RecordsImportExport entity="deals" onImported={() => router.refresh()} />
+                    <RecordsImportExport entity="deals" onImported={() => router.refresh()} exportIds={visibleDeals.map((d) => d.id)} />
                     <Button className="bg-brand text-white" aria-label={t('addDeal')} onClick={() => setNewDialogOpen(true)}>
                         <PlusIcon strokeWidth={2.5} />
                         {t('newButton')}

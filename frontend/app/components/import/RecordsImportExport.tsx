@@ -18,9 +18,10 @@ export type RecordsImportExportProps = {
     entity: ImportEntity;
     onImported: () => void;
     contactsFilter?: ContactsPageParams;
+    exportIds?: number[];
 };
 
-export default function RecordsImportExport({ entity, onImported, contactsFilter }: RecordsImportExportProps) {
+export default function RecordsImportExport({ entity, onImported, contactsFilter, exportIds }: RecordsImportExportProps) {
     const t = useTranslations('importExport');
     const [importOpen, setImportOpen] = useState(false);
     const [exporting, setExporting] = useState(false);
@@ -29,8 +30,8 @@ export default function RecordsImportExport({ entity, onImported, contactsFilter
         setExporting(true);
         try {
             if (entity === 'persons') await exportContactsCsv(contactsFilter);
-            else if (entity === 'companies') await exportCompaniesCsv();
-            else await exportDealsCsv();
+            else if (entity === 'companies') await exportCompaniesCsv(exportIds);
+            else await exportDealsCsv(exportIds);
         } catch {
             toastError(t('errorExport'));
         } finally {

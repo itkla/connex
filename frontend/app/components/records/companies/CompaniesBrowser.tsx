@@ -486,7 +486,7 @@ export default function CompaniesBrowser({ companies, savedViews }: { companies:
             <div className="flex items-center justify-between">
                 <h1 className="text-4xl font-extrabold">{t('title')}</h1>
                 <div className="flex items-center gap-2">
-                    <RecordsImportExport entity="companies" onImported={() => router.refresh()} />
+                    <RecordsImportExport entity="companies" onImported={() => router.refresh()} exportIds={visibleCompanies.map((c) => c.id)} />
                     <Button className="bg-brand text-white" aria-label={t('addCompanyAriaLabel')} onClick={() => setNewDialogOpen(true)}>
                         <PlusIcon strokeWidth={2.5} />
                         {t('new')}

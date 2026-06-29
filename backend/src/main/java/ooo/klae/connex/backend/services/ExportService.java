@@ -71,11 +71,12 @@ public class ExportService {
     /**
      * CSV of companies (optionally filtered by tag).
      */
-    public String exportCompanies(Integer tagId) {
+    public String exportCompanies(Integer tagId, List<Integer> ids) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        List<Company> companies = tagId != null
-            ? companyMapper.getCompaniesByTagId(workspaceId, tagId)
-            : companyMapper.getAllCompanies(workspaceId);
+        List<Company> companies;
+        if (ids != null && !ids.isEmpty()) companies = companyMapper.getByIds(workspaceId, ids);
+        else if (tagId != null) companies = companyMapper.getCompaniesByTagId(workspaceId, tagId);
+        else companies = companyMapper.getAllCompanies(workspaceId);
         List<CustomFieldDefinition> defs = activeDefinitions(workspaceId, "company");
         Map<Integer, Map<Integer, Object>> custom =
             customFieldValueService.getForEntities("company", companies.stream().map(Company::getId).toList());
@@ -101,9 +102,9 @@ public class ExportService {
     /**
      * CSV of deals matching the given list filter (all deals when no filter is given).
      */
-    public String exportDeals(Integer pipelineId, Integer stageId, Integer companyId, Integer personId, Integer tagId) {
+    public String exportDeals(List<Integer> ids, Integer pipelineId, Integer stageId, Integer companyId, Integer personId, Integer tagId) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        List<Deal> deals = dealsFor(workspaceId, pipelineId, stageId, companyId, personId, tagId);
+        List<Deal> deals = dealsFor(workspaceId, ids, pipelineId, stageId, companyId, personId, tagId);
         List<CustomFieldDefinition> defs = activeDefinitions(workspaceId, "deal");
         Map<Integer, Map<Integer, Object>> custom =
             customFieldValueService.getForEntities("deal", deals.stream().map(Deal::getId).toList());
@@ -142,8 +143,9 @@ public class ExportService {
         return sb.toString();
     }
 
-    private List<Deal> dealsFor(int workspaceId, Integer pipelineId, Integer stageId, Integer companyId,
+    private List<Deal> dealsFor(int workspaceId, List<Integer> ids, Integer pipelineId, Integer stageId, Integer companyId,
             Integer personId, Integer tagId) {
+        if (ids != null && !ids.isEmpty()) return dealMapper.getByIds(workspaceId, ids);
         if (pipelineId != null) return dealMapper.getDealsByPipelineId(workspaceId, pipelineId);
         if (stageId != null) return dealMapper.getDealsByStageId(workspaceId, stageId);
         if (companyId != null) return dealMapper.getDealsByCompanyId(workspaceId, companyId);

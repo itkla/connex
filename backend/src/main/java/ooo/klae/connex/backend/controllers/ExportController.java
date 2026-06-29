@@ -44,8 +44,10 @@ public class ExportController {
      * Export companies as CSV (optionally filtered by tag).
      */
     @GetMapping("/companies")
-    public ResponseEntity<byte[]> exportCompanies(@RequestParam(required = false) Integer tagId) {
-        return csv("companies.csv", exportService.exportCompanies(tagId));
+    public ResponseEntity<byte[]> exportCompanies(
+            @RequestParam(required = false) Integer tagId,
+            @RequestParam(required = false) List<Integer> ids) {
+        return csv("companies.csv", exportService.exportCompanies(tagId, ids));
     }
 
     /**
@@ -53,12 +55,13 @@ public class ExportController {
      */
     @GetMapping("/deals")
     public ResponseEntity<byte[]> exportDeals(
+            @RequestParam(required = false) List<Integer> ids,
             @RequestParam(required = false) Integer pipelineId,
             @RequestParam(required = false) Integer stageId,
             @RequestParam(required = false) Integer companyId,
             @RequestParam(required = false) Integer personId,
             @RequestParam(required = false) Integer tagId) {
-        return csv("deals.csv", exportService.exportDeals(pipelineId, stageId, companyId, personId, tagId));
+        return csv("deals.csv", exportService.exportDeals(ids, pipelineId, stageId, companyId, personId, tagId));
     }
 
     private static ResponseEntity<byte[]> csv(String filename, String body) {

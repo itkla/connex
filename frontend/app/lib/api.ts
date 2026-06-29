@@ -503,12 +503,14 @@ export function exportContactsCsv(params: Types.ContactsPageParams = {}) {
     return downloadCsv(`/api/exports/persons${query}`, "contacts.csv");
 }
 
-export function exportCompaniesCsv(tagId?: number) {
-    return downloadCsv(`/api/exports/companies${tagId ? `?tagId=${tagId}` : ""}`, "companies.csv");
+export function exportCompaniesCsv(ids?: number[]) {
+    const query = buildQuery({ ids: ids && ids.length <= 1000 ? ids : undefined });
+    return downloadCsv(`/api/exports/companies${query}`, "companies.csv");
 }
 
-export function exportDealsCsv(params: { pipelineId?: number; stageId?: number; companyId?: number; personId?: number; tagId?: number } = {}) {
-    return downloadCsv(`/api/exports/deals${buildQuery(params)}`, "deals.csv");
+export function exportDealsCsv(ids?: number[]) {
+    const query = buildQuery({ ids: ids && ids.length <= 1000 ? ids : undefined });
+    return downloadCsv(`/api/exports/deals${query}`, "deals.csv");
 }
 
 export function getPersonFacets(init: RequestInit = {}) {

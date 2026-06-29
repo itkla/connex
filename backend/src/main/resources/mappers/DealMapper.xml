@@ -132,6 +132,12 @@
     SELECT id, name, company_id FROM deal WHERE workspace_id = #{workspaceId}
   </select>
 
+  <select id="getByIds" resultMap="DealResult">
+    SELECT <include refid="dealColumns"/> FROM deal
+    WHERE workspace_id = #{workspaceId} AND id IN
+    <foreach collection="ids" item="id" open="(" separator="," close=")">#{id}</foreach>
+  </select>
+
   <insert id="insert" useGeneratedKeys="true" keyProperty="id">
     INSERT INTO deal (
       workspace_id, owner_id, name, value, actual_value, currency, pipeline_id, stage_id, company_id,

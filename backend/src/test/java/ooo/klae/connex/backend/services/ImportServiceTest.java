@@ -141,6 +141,15 @@ class ImportServiceTest extends AbstractServiceTest {
     }
 
     @Test
+    void exportCompanies_byIdsReturnsOnlySelected() {
+        Company a = newCompany();
+        Company b = newCompany();
+        String csv = exportService.exportCompanies(null, List.of(a.getId()));
+        assertTrue(csv.contains(a.getName()), "selected company present");
+        assertTrue(!csv.contains(b.getName()), "unselected company absent");
+    }
+
+    @Test
     void exportPersons_neutralizesFormulaInjectionAndIncludesHeader() {
         importService.commitPersons(req(
             List.of(map("Name", "name"), map("Email", "email")),
