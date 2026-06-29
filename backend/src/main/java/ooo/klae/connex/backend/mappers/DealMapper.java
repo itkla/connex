@@ -33,9 +33,9 @@ public interface DealMapper {
     int update(Deal deal);
     int delete(@Param("workspaceId") int workspaceId, @Param("id") int id);
 
-    String getStageOutcome(int stageId);
+    String getStageOutcome(@Param("workspaceId") int workspaceId, @Param("stageId") int stageId);
 
-    Integer getLastNormalStageId(int pipelineId);
+    Integer getLastNormalStageId(@Param("workspaceId") int workspaceId, @Param("pipelineId") int pipelineId);
 
     int addTag(@Param("workspaceId") int workspaceId, @Param("dealId") int dealId, @Param("tagId") int tagId);
     int removeTag(@Param("workspaceId") int workspaceId, @Param("dealId") int dealId, @Param("tagId") int tagId);

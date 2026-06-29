@@ -427,7 +427,7 @@ public class ImportService {
             bean.setPipelineId(row.resolvedPipelineId);
             bean.setStageId(row.resolvedStageId);
             bean.setCompanyId(companyByName.get(normName(row.companyName)));
-            reconcileClose(bean, stageOutcome);
+            reconcileClose(workspaceId, bean, stageOutcome);
             beans.add(bean);
             toCreate.add(row);
         }
@@ -499,7 +499,7 @@ public class ImportService {
             existing.setPipelineId(row.resolvedPipelineId);
             existing.setStageId(row.resolvedStageId);
         }
-        reconcileClose(existing, stageOutcome);
+        reconcileClose(workspaceId, existing, stageOutcome);
         dealMapper.update(existing);
         attachDealTags(workspaceId, existing.getId(), row.tagNames, tagByName);
         linkDealPeople(workspaceId, existing.getId(), row.peopleEmails, personByEmail);
@@ -532,10 +532,10 @@ public class ImportService {
         }
     }
 
-    private void reconcileClose(Deal deal, Map<Integer, String> stageOutcome) {
+    private void reconcileClose(int workspaceId, Deal deal, Map<Integer, String> stageOutcome) {
         Integer stageId = deal.getStageId();
         String outcome = stageId == null ? "normal"
-            : stageOutcome.computeIfAbsent(stageId, dealMapper::getStageOutcome);
+            : stageOutcome.computeIfAbsent(stageId, sid -> dealMapper.getStageOutcome(workspaceId, sid));
         if ("won".equals(outcome)) deal.setWon(true);
         else if ("lost".equals(outcome)) deal.setWon(false);
         if (deal.getWon() == null) {

@@ -51,7 +51,7 @@
     SELECT t.id, t.workspace_id, t.name, t.color
     FROM tag t
     JOIN person_tag pt ON pt.tag_id = t.id
-    WHERE pt.person_id = #{personId}
+    WHERE t.workspace_id = #{workspaceId} AND pt.person_id = #{personId}
     ORDER BY t.name
   </select>
 
@@ -59,7 +59,7 @@
     SELECT t.id, t.workspace_id, t.name, t.color
     FROM tag t
     JOIN company_tag ct ON ct.tag_id = t.id
-    WHERE ct.company_id = #{companyId}
+    WHERE t.workspace_id = #{workspaceId} AND ct.company_id = #{companyId}
     ORDER BY t.name
   </select>
 
@@ -67,7 +67,7 @@
     SELECT t.id, t.workspace_id, t.name, t.color
     FROM tag t
     JOIN deal_tag dt ON dt.tag_id = t.id
-    WHERE dt.deal_id = #{dealId}
+    WHERE t.workspace_id = #{workspaceId} AND dt.deal_id = #{dealId}
     ORDER BY t.name
   </select>
 
@@ -75,7 +75,7 @@
     SELECT t.id, t.workspace_id, t.name, t.color
     FROM tag t
     JOIN attachment_tag at ON at.tag_id = t.id
-    WHERE at.attachment_id = #{attachmentId}
+    WHERE t.workspace_id = #{workspaceId} AND at.attachment_id = #{attachmentId}
     ORDER BY t.name
   </select>
 

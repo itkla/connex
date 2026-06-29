@@ -102,14 +102,14 @@ public class TagService {
      * Retrieves the tags associated with a person.
      */
     public List<Tag> getTagsByPersonId(int personId) {
-        return tagMapper.getTagsByPersonId(personId);
+        return tagMapper.getTagsByPersonId(workspaceService.getCurrentWorkspaceId(), personId);
     }
 
     /**
      * Retrieves the tags associated with a company.
      */
     public List<Tag> getTagsByCompanyId(int companyId) {
-        return tagMapper.getTagsByCompanyId(companyId);
+        return tagMapper.getTagsByCompanyId(workspaceService.getCurrentWorkspaceId(), companyId);
     }
 
     /**
@@ -120,7 +120,7 @@ public class TagService {
         if (!dealMapper.exists(workspaceId, dealId)) {
             throw new ResourceNotFoundException("Deal not found with id: " + dealId);
         }
-        return tagMapper.getTagsByDealId(dealId);
+        return tagMapper.getTagsByDealId(workspaceService.getCurrentWorkspaceId(), dealId);
     }
 
     /**
