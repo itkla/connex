@@ -301,6 +301,12 @@ class NotificationMapperTest extends AbstractMapperTest {
 
         notificationMapper.upsert(reminder(recipient, "critical", "2026-06-25 00:00:00"));
         assertEquals(1, activeInbox(recipient).size());
+
+        notificationMapper.snooze(recipient.getId(), stored.getId(), "2999-01-01 00:00:00");
+        notificationMapper.resolveReminder(
+            workspace.getId(), recipient.getId(), stored.getId(), "2026-06-28 00:00:00");
+        notificationMapper.upsert(reminder(recipient, "critical", "2026-06-29 00:00:00"));
+        assertEquals(1, activeInbox(recipient).size());
     }
 
     private List<Notification> activeInbox(User recipient) {

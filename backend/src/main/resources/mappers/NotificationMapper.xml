@@ -209,6 +209,7 @@
       AND dismissed_at IS NULL
       AND resolved_at IS NULL
       AND read_at IS NULL
+      AND (snoozed_until IS NULL OR snoozed_until &lt;= UTC_TIMESTAMP())
   </update>
 
   <insert id="upsert" useGeneratedKeys="true" keyProperty="id">
@@ -243,17 +244,17 @@
         incoming.triggered_at,
         notification.triggered_at
       ),
-      resolved_at = IF(
-        notification.severity &lt;&gt; incoming.severity
-          OR notification.resolved_at IS NOT NULL,
-        NULL,
-        notification.resolved_at
-      ),
       snoozed_until = IF(
         notification.severity &lt;&gt; incoming.severity
           OR notification.resolved_at IS NOT NULL,
         NULL,
         notification.snoozed_until
+      ),
+      resolved_at = IF(
+        notification.severity &lt;&gt; incoming.severity
+          OR notification.resolved_at IS NOT NULL,
+        NULL,
+        notification.resolved_at
       ),
       type = incoming.type,
       category = incoming.category,
