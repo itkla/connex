@@ -134,6 +134,20 @@ class NotificationReconciliationServiceTest {
     }
 
     @Test
+    void nudgeSeverityKeepsExistingNudgeWhileStillCoolButResolvesOnWarmUp() {
+        assertEquals(
+            NotificationReconciliationService.WARNING,
+            NotificationReconciliationService.nudgeSeverity("cool", "steady", 30, 14, 90, true)
+        );
+        assertNull(
+            NotificationReconciliationService.nudgeSeverity("cool", "steady", 30, 14, 90, false)
+        );
+        assertNull(
+            NotificationReconciliationService.nudgeSeverity("warm", "steady", 30, 14, 90, true)
+        );
+    }
+
+    @Test
     void reconciliationEmitsCoolingNudgeForStakeholderOnOpenDeal() {
         NotificationMapper notificationMapper = Mockito.mock(NotificationMapper.class);
         PreferenceMapper preferenceMapper = Mockito.mock(PreferenceMapper.class);
