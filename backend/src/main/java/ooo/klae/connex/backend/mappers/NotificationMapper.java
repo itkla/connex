@@ -81,6 +81,13 @@ public interface NotificationMapper {
 
     List<DealReminderCandidate> findDealReminderCandidates(@Param("workspaceId") int workspaceId);
 
+    /**
+     * Projects deal stakeholders eligible for a relationship-decay nudge: one row per
+     * (open deal, stakeholder contact, recipient), where the recipient is the deal's owner or a
+     * collaborator. Only contacts owned by the deal's own workspace are projected — stakeholders
+     * shared in from another workspace are deliberately excluded so the nudge stays within the
+     * workspace's native contacts; broadening to shared stakeholders is deferred.
+     */
     List<RelationshipNudgeCandidate> findRelationshipNudgeCandidates(@Param("workspaceId") int workspaceId);
 
     List<Integer> findWorkspaceIds();
