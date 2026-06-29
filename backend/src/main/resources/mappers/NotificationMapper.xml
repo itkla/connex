@@ -63,7 +63,6 @@
     <result property="dealValue" column="deal_value"/>
     <result property="stagePosition" column="stage_position"/>
     <result property="pipelineMaxPosition" column="pipeline_max_position"/>
-    <result property="stageSuccess" column="stage_success"/>
     <result property="personId" column="person_id"/>
     <result property="personLabel" column="person_label"/>
     <result property="personRole" column="person_role"/>
@@ -341,7 +340,6 @@
            d.expected_close_date,
            d.value AS deal_value,
            s.position AS stage_position,
-           s.is_success AS stage_success,
            pm.max_position AS pipeline_max_position,
            dp.role AS person_role,
            p.id AS person_id,
@@ -352,10 +350,15 @@
     JOIN person p
       ON p.id = dp.person_id
      AND p.workspace_id = d.workspace_id
-    LEFT JOIN stage s ON s.id = d.stage_id
+    LEFT JOIN stage s
+      ON s.id = d.stage_id
+     AND s.workspace_id = d.workspace_id
     LEFT JOIN (
       SELECT pipeline_id, MAX(position) AS max_position
       FROM stage
+      WHERE workspace_id = #{workspaceId}
+        AND is_success = FALSE
+        AND is_failure = FALSE
       GROUP BY pipeline_id
     ) pm ON pm.pipeline_id = d.pipeline_id
     JOIN (

@@ -12,6 +12,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 
@@ -191,10 +192,10 @@ public class NotificationReconciliationService {
         if (closingSoon(candidate.getExpectedCloseDate(), today, closeSoonDays)) {
             reasons.add("closing_soon");
         }
-        if (highValueThreshold > 0 && candidate.getDealValue() >= highValueThreshold) {
+        if (candidate.getDealValue() > highValueThreshold) {
             reasons.add("high_value");
         }
-        if (lateStage(candidate.getStagePosition(), candidate.getPipelineMaxPosition(), candidate.isStageSuccess())) {
+        if (lateStage(candidate.getStagePosition(), candidate.getPipelineMaxPosition())) {
             reasons.add("late_stage");
         }
         if (keyRole(candidate.getPersonRole())) {
@@ -214,10 +215,7 @@ public class NotificationReconciliationService {
         }
     }
 
-    private static boolean lateStage(Integer position, Integer maxPosition, boolean stageSuccess) {
-        if (stageSuccess) {
-            return true;
-        }
+    private static boolean lateStage(Integer position, Integer maxPosition) {
         if (position == null || maxPosition == null || maxPosition <= 0) {
             return false;
         }
@@ -228,7 +226,7 @@ public class NotificationReconciliationService {
         if (role == null || role.isBlank()) {
             return false;
         }
-        String normalized = role.toLowerCase();
+        String normalized = role.toLowerCase(Locale.ROOT);
         return KEY_ROLE_KEYWORDS.stream().anyMatch(normalized::contains);
     }
 

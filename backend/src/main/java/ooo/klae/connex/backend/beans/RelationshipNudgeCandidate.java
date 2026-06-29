@@ -25,7 +25,6 @@ public class RelationshipNudgeCandidate {
     private double dealValue;
     private Integer stagePosition;
     private Integer pipelineMaxPosition;
-    private boolean stageSuccess;
     private int personId;
     private String personLabel;
     private String personRole;
