@@ -1,7 +1,8 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
+import { motion, useReducedMotion } from 'motion/react';
 import { ArrowUpTrayIcon, CheckCircleIcon, DocumentTextIcon, ExclamationTriangleIcon } from '@heroicons/react/24/outline';
 import { LoaderCircle } from 'lucide-react';
 
@@ -65,6 +66,7 @@ export type ImportDialogProps = {
  */
 export default function ImportDialog({ entity, open, onOpenChange, onImported }: ImportDialogProps) {
     const t = useTranslations('importExport');
+    const reduceMotion = useReducedMotion();
     const [step, setStep] = useState<Step>('upload');
     const [parsed, setParsed] = useState<ParsedCsv | null>(null);
     const [fileName, setFileName] = useState<string>('');
@@ -76,6 +78,7 @@ export default function ImportDialog({ entity, open, onOpenChange, onImported }:
     const [preview, setPreview] = useState<ImportPreviewResult | null>(null);
     const [result, setResult] = useState<ImportResult | null>(null);
     const [busy, setBusy] = useState(false);
+    const [previewing, setPreviewing] = useState(false);
 
     function reset() {
         setStep('upload');
@@ -167,6 +170,20 @@ export default function ImportDialog({ entity, open, onOpenChange, onImported }:
         }
     }
 
+    async function selectAction(action: ImportDuplicateAction) {
+        setOnDuplicate(action);
+        if (!parsed) return;
+        setPreviewing(true);
+        try {
+            const data = await previewImport(entity, { rows: parsed.rows, mapping: buildMapping(), onDuplicate: action });
+            setPreview(data);
+        } catch (error) {
+            toastError(firstFieldError(error, t('errorPreview')));
+        } finally {
+            setPreviewing(false);
+        }
+    }
+
     async function commit() {
         if (!parsed) return;
         setBusy(true);
@@ -193,6 +210,12 @@ export default function ImportDialog({ entity, open, onOpenChange, onImported }:
                 </DialogHeader>
 
                 <div className="max-h-[60vh] overflow-y-auto px-6 py-5">
+                    <motion.div
+                        key={step}
+                        initial={{ opacity: 0, y: reduceMotion ? 0 : 6 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ duration: 0.2, ease: [0.23, 1, 0.32, 1] }}
+                    >
                     {step === 'upload' && (
                         <UploadStep
                             parsing={parsing}
@@ -206,9 +229,10 @@ export default function ImportDialog({ entity, open, onOpenChange, onImported }:
                         <MapStep parsed={parsed} entity={entity} columns={columns} setColumns={setColumns} mappedCount={mappedCount} />
                     )}
                     {step === 'review' && preview && (
-                        <ReviewStep preview={preview} onDuplicate={onDuplicate} setOnDuplicate={setOnDuplicate} />
+                        <ReviewStep preview={preview} onDuplicate={onDuplicate} onSelectAction={selectAction} previewing={previewing} />
                     )}
                     {step === 'done' && result && <DoneStep result={result} entity={entity} parsed={parsed} />}
+                    </motion.div>
                 </div>
 
                 <div className="flex items-center justify-between gap-3 border-t border-border px-6 py-4">
@@ -226,7 +250,7 @@ export default function ImportDialog({ entity, open, onOpenChange, onImported }:
                         {step === 'review' && preview && (
                             <>
                                 <Button variant="ghost" onClick={() => setStep('map')}>{t('back')}</Button>
-                                <Button onClick={commit} disabled={busy || preview.toCreate + preview.toUpdate === 0}>
+                                <Button onClick={commit} disabled={busy || previewing || preview.toCreate + preview.toUpdate === 0}>
                                     {busy && <LoaderCircle className="size-4 animate-spin" />}
                                     {t('import')}
                                 </Button>
@@ -281,30 +305,36 @@ function UploadStep({
     setDragActive: (active: boolean) => void;
 }) {
     const t = useTranslations('importExport');
+    const inputRef = useRef<HTMLInputElement>(null);
     return (
         <div className="space-y-3">
-            <label
+            <button
+                type="button"
+                onClick={() => inputRef.current?.click()}
                 onDragOver={(e) => { e.preventDefault(); setDragActive(true); }}
                 onDragLeave={(e) => { e.preventDefault(); setDragActive(false); }}
                 onDrop={(e) => { e.preventDefault(); setDragActive(false); onPick(e.dataTransfer.files?.[0]); }}
+                disabled={parsing}
                 className={cn(
-                    'flex cursor-pointer flex-col items-center justify-center gap-3 rounded-xl border-2 border-dashed px-4 py-12 text-sm transition-colors',
+                    'flex w-full cursor-pointer flex-col items-center justify-center gap-3 rounded-xl border-2 border-dashed px-4 py-12 text-sm transition-colors',
+                    'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
                     dragActive
                         ? 'border-brand bg-brand/5 text-brand'
                         : 'border-border text-muted-foreground hover:border-muted-foreground/40 hover:bg-muted/60',
-                    parsing && 'pointer-events-none opacity-60',
+                    'disabled:pointer-events-none disabled:opacity-60',
                 )}
             >
                 {parsing ? <LoaderCircle className="size-6 animate-spin" /> : <ArrowUpTrayIcon className="size-6" />}
                 <span className="font-medium text-foreground">{parsing ? t('parsing') : t('dropPrompt')}</span>
                 <span className="text-xs">{t('uploadHint')}</span>
-                <input
-                    type="file"
-                    accept=".csv,text/csv"
-                    className="hidden"
-                    onChange={(e) => { onPick(e.target.files?.[0]); e.target.value = ''; }}
-                />
-            </label>
+            </button>
+            <input
+                ref={inputRef}
+                type="file"
+                accept=".csv,text/csv"
+                className="hidden"
+                onChange={(e) => { onPick(e.target.files?.[0]); e.target.value = ''; }}
+            />
             {error && (
                 <p className="flex items-start gap-2 text-sm text-destructive">
                     <ExclamationTriangleIcon className="mt-0.5 size-4 shrink-0" />
@@ -393,11 +423,13 @@ function MapStep({
 function ReviewStep({
     preview,
     onDuplicate,
-    setOnDuplicate,
+    onSelectAction,
+    previewing,
 }: {
     preview: ImportPreviewResult;
     onDuplicate: ImportDuplicateAction;
-    setOnDuplicate: (action: ImportDuplicateAction) => void;
+    onSelectAction: (action: ImportDuplicateAction) => void;
+    previewing: boolean;
 }) {
     const t = useTranslations('importExport');
     const flagged = preview.rows.filter((r) => r.status === 'invalid' || r.status === 'match').slice(0, 100);
@@ -411,7 +443,8 @@ function ReviewStep({
                             key={action}
                             size="sm"
                             variant={onDuplicate === action ? 'default' : 'outline'}
-                            onClick={() => setOnDuplicate(action)}
+                            disabled={previewing}
+                            onClick={() => onSelectAction(action)}
                         >
                             {t(`action.${action}`)}
                         </Button>
@@ -453,6 +486,7 @@ function ReviewStep({
 
 function DoneStep({ result, entity, parsed }: { result: ImportResult; entity: ImportEntity; parsed: ParsedCsv | null }) {
     const t = useTranslations('importExport');
+    const reduceMotion = useReducedMotion();
     function downloadErrors() {
         if (!parsed) return;
         const lines = [[...parsed.headers, 'error'].map(csvCell).join(',')];
@@ -472,7 +506,13 @@ function DoneStep({ result, entity, parsed }: { result: ImportResult; entity: Im
     return (
         <div className="space-y-4">
             <div className="flex items-center gap-3">
-                <CheckCircleIcon className="size-8 text-brand" />
+                <motion.span
+                    initial={{ scale: reduceMotion ? 1 : 0.8, opacity: 0 }}
+                    animate={{ scale: 1, opacity: 1 }}
+                    transition={{ type: 'spring', duration: 0.4, bounce: 0.25 }}
+                >
+                    <CheckCircleIcon className="size-8 text-brand" />
+                </motion.span>
                 <div>
                     <p className="font-medium">{t('doneTitle')}</p>
                     <p className="text-sm text-muted-foreground">
