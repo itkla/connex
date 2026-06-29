@@ -1,9 +1,9 @@
 'use client';
 
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { motion, useReducedMotion } from 'motion/react';
-import { ArrowUpTrayIcon, CheckCircleIcon, DocumentTextIcon, ExclamationTriangleIcon } from '@heroicons/react/24/outline';
+import { ArrowUpTrayIcon, CheckCircleIcon, DocumentTextIcon, ExclamationTriangleIcon, XMarkIcon } from '@heroicons/react/24/outline';
 import { LoaderCircle } from 'lucide-react';
 
 import { Badge } from '@/components/ui/badge';
@@ -11,7 +11,7 @@ import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { cn } from '@/lib/utils';
-import { commitImport, isFieldError, previewImport } from '@/app/lib/api';
+import { commitImport, isFieldError, previewImport, search } from '@/app/lib/api';
 import { toastError, toastSuccess } from '@/app/lib/toast';
 import {
     columnSamples,
@@ -79,6 +79,8 @@ export default function ImportDialog({ entity, open, onOpenChange, onImported }:
     const [result, setResult] = useState<ImportResult | null>(null);
     const [busy, setBusy] = useState(false);
     const [previewing, setPreviewing] = useState(false);
+    const [links, setLinks] = useState<Record<number, number>>({});
+    const [linkLabels, setLinkLabels] = useState<Record<number, string>>({});
 
     function reset() {
         setStep('upload');
@@ -90,6 +92,8 @@ export default function ImportDialog({ entity, open, onOpenChange, onImported }:
         setPreview(null);
         setResult(null);
         setBusy(false);
+        setLinks({});
+        setLinkLabels({});
     }
 
     function handleOpenChange(next: boolean) {
@@ -160,12 +164,16 @@ export default function ImportDialog({ entity, open, onOpenChange, onImported }:
 
     const mappedCount = useMemo(() => Object.values(columns).filter((c) => c.target !== IGNORE).length, [columns]);
     const hasName = useMemo(() => Object.values(columns).some((c) => c.target === 'name'), [columns]);
+    const nameColumn = useMemo(
+        () => Object.entries(columns).find(([, c]) => c.target === 'name')?.[0] ?? null,
+        [columns],
+    );
 
     async function goToReview() {
         if (!parsed) return;
         setBusy(true);
         try {
-            const data = await previewImport(entity, { rows: parsed.rows, mapping: buildMapping(), onDuplicate });
+            const data = await previewImport(entity, { rows: parsed.rows, mapping: buildMapping(), onDuplicate, links });
             setPreview(data);
             setStep('review');
         } catch (error) {
@@ -175,12 +183,11 @@ export default function ImportDialog({ entity, open, onOpenChange, onImported }:
         }
     }
 
-    async function selectAction(action: ImportDuplicateAction) {
-        setOnDuplicate(action);
+    async function runPreview(action: ImportDuplicateAction, nextLinks: Record<number, number>) {
         if (!parsed) return;
         setPreviewing(true);
         try {
-            const data = await previewImport(entity, { rows: parsed.rows, mapping: buildMapping(), onDuplicate: action });
+            const data = await previewImport(entity, { rows: parsed.rows, mapping: buildMapping(), onDuplicate: action, links: nextLinks });
             setPreview(data);
         } catch (error) {
             toastError(firstFieldError(error, t('errorPreview')));
@@ -189,11 +196,35 @@ export default function ImportDialog({ entity, open, onOpenChange, onImported }:
         }
     }
 
+    function selectAction(action: ImportDuplicateAction) {
+        setOnDuplicate(action);
+        void runPreview(action, links);
+    }
+
+    function linkRow(rowIndex: number, recordId: number, label: string) {
+        const nextLinks = { ...links, [rowIndex]: recordId };
+        setLinks(nextLinks);
+        setLinkLabels((prev) => ({ ...prev, [rowIndex]: label }));
+        void runPreview(onDuplicate, nextLinks);
+    }
+
+    function unlinkRow(rowIndex: number) {
+        const nextLinks = { ...links };
+        delete nextLinks[rowIndex];
+        setLinks(nextLinks);
+        setLinkLabels((prev) => {
+            const next = { ...prev };
+            delete next[rowIndex];
+            return next;
+        });
+        void runPreview(onDuplicate, nextLinks);
+    }
+
     async function commit() {
         if (!parsed) return;
         setBusy(true);
         try {
-            const data = await commitImport(entity, { rows: parsed.rows, mapping: buildMapping(), onDuplicate });
+            const data = await commitImport(entity, { rows: parsed.rows, mapping: buildMapping(), onDuplicate, links });
             setResult(data);
             setStep('done');
             toastSuccess(t('toastImported', { created: data.created, updated: data.updated }));
@@ -234,7 +265,7 @@ export default function ImportDialog({ entity, open, onOpenChange, onImported }:
                         <MapStep parsed={parsed} entity={entity} columns={columns} setColumns={setColumns} mappedCount={mappedCount} />
                     )}
                     {step === 'review' && preview && (
-                        <ReviewStep preview={preview} onDuplicate={onDuplicate} onSelectAction={selectAction} previewing={previewing} />
+                        <ReviewStep preview={preview} onDuplicate={onDuplicate} onSelectAction={selectAction} previewing={previewing} entity={entity} parsed={parsed} nameColumn={nameColumn} links={links} linkLabels={linkLabels} onLink={linkRow} onUnlink={unlinkRow} />
                     )}
                     {step === 'done' && result && <DoneStep result={result} entity={entity} parsed={parsed} />}
                     </motion.div>
@@ -430,14 +461,28 @@ function ReviewStep({
     onDuplicate,
     onSelectAction,
     previewing,
+    entity,
+    parsed,
+    nameColumn,
+    links,
+    linkLabels,
+    onLink,
+    onUnlink,
 }: {
     preview: ImportPreviewResult;
     onDuplicate: ImportDuplicateAction;
     onSelectAction: (action: ImportDuplicateAction) => void;
     previewing: boolean;
+    entity: ImportEntity;
+    parsed: ParsedCsv | null;
+    nameColumn: string | null;
+    links: Record<number, number>;
+    linkLabels: Record<number, string>;
+    onLink: (rowIndex: number, recordId: number, label: string) => void;
+    onUnlink: (rowIndex: number) => void;
 }) {
     const t = useTranslations('importExport');
-    const flagged = preview.rows.filter((r) => r.status === 'invalid' || r.status === 'match').slice(0, 100);
+    const shown = preview.rows.filter((r) => r.status !== 'skip').slice(0, 100);
     return (
         <div className="space-y-5">
             <div className="space-y-2">
@@ -464,34 +509,156 @@ function ReviewStep({
                 <Count label={t('countInvalid')} value={preview.invalid} className="text-destructive" />
             </div>
 
-            {flagged.length > 0 && (
-                <div className="overflow-hidden rounded-lg border border-border">
-                    <table className="w-full text-sm">
-                        <caption className="sr-only">{t('reviewTableCaption')}</caption>
-                        <thead className="sr-only">
-                            <tr>
-                                <th scope="col">{t('rowColRow')}</th>
-                                <th scope="col">{t('rowColStatus')}</th>
-                                <th scope="col">{t('rowColDetail')}</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {flagged.map((row) => (
-                                <tr key={row.rowIndex} className="border-b border-border last:border-0">
-                                    <td className="w-16 px-3 py-2 text-xs text-muted-foreground">#{row.rowIndex + 1}</td>
-                                    <td className="w-24 px-3 py-2">
-                                        <Badge variant={row.status === 'invalid' ? 'destructive' : 'secondary'}>
-                                            {t(`rowStatus.${row.status}`)}
-                                        </Badge>
-                                    </td>
-                                    <td className="px-3 py-2 text-muted-foreground">
-                                        {row.errors?.length ? row.errors.join('; ') : (row.matchedLabel ?? '')}
-                                    </td>
+            {shown.length > 0 && (
+                <div className="space-y-2">
+                    <p className="text-xs text-muted-foreground">{t('reviewLinkHint')}</p>
+                    <div className="overflow-hidden rounded-lg border border-border">
+                        <table className="w-full text-sm">
+                            <caption className="sr-only">{t('reviewTableCaption')}</caption>
+                            <thead className="sr-only">
+                                <tr>
+                                    <th scope="col">{t('rowColRow')}</th>
+                                    <th scope="col">{t('rowColStatus')}</th>
+                                    <th scope="col">{t('rowColDetail')}</th>
+                                    <th scope="col">{t('rowColLink')}</th>
                                 </tr>
-                            ))}
-                        </tbody>
-                    </table>
+                            </thead>
+                            <tbody>
+                                {shown.map((row) => (
+                                    <tr key={row.rowIndex} className="border-b border-border last:border-0">
+                                        <td className="w-12 px-3 py-2 align-middle text-xs text-muted-foreground">#{row.rowIndex + 1}</td>
+                                        <td className="w-20 px-3 py-2 align-middle">
+                                            <Badge variant={row.status === 'invalid' ? 'destructive' : row.status === 'match' ? 'secondary' : 'outline'}>
+                                                {t(`rowStatus.${row.status}`)}
+                                            </Badge>
+                                        </td>
+                                        <td className="max-w-0 truncate px-3 py-2 align-middle text-muted-foreground">
+                                            {row.errors?.length
+                                                ? row.errors.join('; ')
+                                                : row.matchedLabel ?? (nameColumn && parsed ? parsed.rows[row.rowIndex]?.[nameColumn] ?? '' : '')}
+                                        </td>
+                                        <td className="w-56 px-3 py-2 text-right align-middle">
+                                            <RowLinker
+                                                entity={entity}
+                                                linkedLabel={links[row.rowIndex] != null ? linkLabels[row.rowIndex] : undefined}
+                                                onLink={(id, label) => onLink(row.rowIndex, id, label)}
+                                                onClear={() => onUnlink(row.rowIndex)}
+                                            />
+                                        </td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
                 </div>
+            )}
+        </div>
+    );
+}
+
+function RowLinker({
+    entity,
+    linkedLabel,
+    onLink,
+    onClear,
+}: {
+    entity: ImportEntity;
+    linkedLabel?: string;
+    onLink: (recordId: number, label: string) => void;
+    onClear: () => void;
+}) {
+    const t = useTranslations('importExport');
+    const [open, setOpen] = useState(false);
+    const [query, setQuery] = useState('');
+    const [results, setResults] = useState<{ id: number; label: string }[]>([]);
+    const [loading, setLoading] = useState(false);
+
+    useEffect(() => {
+        const q = query.trim();
+        if (!open || q.length < 2) return;
+        let active = true;
+        const handle = setTimeout(() => {
+            search(q)
+                .then((r) => {
+                    if (!active) return;
+                    const items = entity === 'persons' ? r.people : entity === 'companies' ? r.companies : r.deals;
+                    setResults(items.slice(0, 6).map((item) => ({ id: item.id, label: item.name || `#${item.id}` })));
+                })
+                .catch(() => {
+                    if (active) setResults([]);
+                })
+                .finally(() => {
+                    if (active) setLoading(false);
+                });
+        }, 250);
+        return () => {
+            active = false;
+            clearTimeout(handle);
+        };
+    }, [query, open, entity]);
+
+    if (linkedLabel) {
+        return (
+            <button
+                type="button"
+                onClick={onClear}
+                className="inline-flex max-w-full items-center gap-1 rounded-sm bg-accent px-2 py-0.5 text-xs text-accent-foreground transition-colors hover:bg-accent/70"
+            >
+                <span className="truncate">{t('linkedTo', { name: linkedLabel })}</span>
+                <XMarkIcon className="size-3 shrink-0" />
+            </button>
+        );
+    }
+    if (!open) {
+        return (
+            <button
+                type="button"
+                onClick={() => setOpen(true)}
+                className="text-xs text-muted-foreground underline-offset-2 transition-colors hover:text-foreground hover:underline"
+            >
+                {t('linkAction')}
+            </button>
+        );
+    }
+    return (
+        <div className="inline-block w-52 text-left align-top">
+            <input
+                autoFocus
+                value={query}
+                onChange={(event) => {
+                    const value = event.target.value;
+                    setQuery(value);
+                    setResults([]);
+                    setLoading(value.trim().length >= 2);
+                }}
+                onBlur={() => window.setTimeout(() => setOpen(false), 150)}
+                placeholder={t('linkSearchPlaceholder')}
+                className="h-7 w-full rounded-sm border border-input bg-transparent px-2 text-xs outline-none focus:border-ring focus:ring-2 focus:ring-ring/40"
+            />
+            {query.trim().length >= 2 && (
+                <ul className="mt-1 max-h-44 w-full overflow-auto rounded-md border border-border bg-popover p-1 text-left shadow-sm">
+                    {loading && <li className="px-2 py-1 text-xs text-muted-foreground">{t('linkSearching')}</li>}
+                    {!loading && results.length === 0 && (
+                        <li className="px-2 py-1 text-xs text-muted-foreground">{t('linkNoResults')}</li>
+                    )}
+                    {!loading &&
+                        results.map((item) => (
+                            <li key={item.id}>
+                                <button
+                                    type="button"
+                                    onMouseDown={(event) => {
+                                        event.preventDefault();
+                                        onLink(item.id, item.label);
+                                        setOpen(false);
+                                        setQuery('');
+                                    }}
+                                    className="block w-full truncate rounded-sm px-2 py-1 text-left text-xs transition-colors hover:bg-accent hover:text-accent-foreground"
+                                >
+                                    {item.label}
+                                </button>
+                            </li>
+                        ))}
+                </ul>
             )}
         </div>
     );

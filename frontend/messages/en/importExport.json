@@ -79,9 +79,16 @@
     "toastImported": "Imported {created} created, {updated} updated",
     "openImport": "Import",
     "exportCsv": "Export",
-    "reviewTableCaption": "Rows needing attention",
+    "reviewTableCaption": "Rows to import",
     "rowColRow": "Row",
     "rowColStatus": "Status",
-    "rowColDetail": "Detail"
+    "rowColDetail": "Detail",
+    "rowColLink": "Link",
+    "reviewLinkHint": "Showing the first 100 rows. Use Link to match a row to an existing record.",
+    "linkAction": "Link…",
+    "linkSearchPlaceholder": "Search existing…",
+    "linkSearching": "Searching…",
+    "linkNoResults": "No matches",
+    "linkedTo": "Linked: {name}"
   }
 }

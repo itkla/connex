@@ -79,9 +79,16 @@
     "toastImported": "新規{created}件、更新{updated}件をインポートしました",
     "openImport": "インポート",
     "exportCsv": "エクスポート",
-    "reviewTableCaption": "確認が必要な行",
+    "reviewTableCaption": "インポートする行",
     "rowColRow": "行",
     "rowColStatus": "ステータス",
-    "rowColDetail": "詳細"
+    "rowColDetail": "詳細",
+    "rowColLink": "リンク",
+    "reviewLinkHint": "最初の100行を表示しています。「リンク」で行を既存のレコードに紐付けできます。",
+    "linkAction": "リンク…",
+    "linkSearchPlaceholder": "既存を検索…",
+    "linkSearching": "検索中…",
+    "linkNoResults": "一致なし",
+    "linkedTo": "リンク済み: {name}"
   }
 }
