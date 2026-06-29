@@ -462,6 +462,14 @@ function ReviewStep({
             {flagged.length > 0 && (
                 <div className="overflow-hidden rounded-lg border border-border">
                     <table className="w-full text-sm">
+                        <caption className="sr-only">{t('reviewTableCaption')}</caption>
+                        <thead className="sr-only">
+                            <tr>
+                                <th scope="col">{t('rowColRow')}</th>
+                                <th scope="col">{t('rowColStatus')}</th>
+                                <th scope="col">{t('rowColDetail')}</th>
+                            </tr>
+                        </thead>
                         <tbody>
                             {flagged.map((row) => (
                                 <tr key={row.rowIndex} className="border-b border-border last:border-0">

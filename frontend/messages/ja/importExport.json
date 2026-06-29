@@ -78,6 +78,10 @@
     "downloadErrors": "エラーをダウンロード",
     "toastImported": "新規{created}件、更新{updated}件をインポートしました",
     "openImport": "インポート",
-    "exportCsv": "エクスポート"
+    "exportCsv": "エクスポート",
+    "reviewTableCaption": "確認が必要な行",
+    "rowColRow": "行",
+    "rowColStatus": "ステータス",
+    "rowColDetail": "詳細"
   }
 }

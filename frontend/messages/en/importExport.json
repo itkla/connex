@@ -78,6 +78,10 @@
     "downloadErrors": "Download errors",
     "toastImported": "Imported {created} created, {updated} updated",
     "openImport": "Import",
-    "exportCsv": "Export"
+    "exportCsv": "Export",
+    "reviewTableCaption": "Rows needing attention",
+    "rowColRow": "Row",
+    "rowColStatus": "Status",
+    "rowColDetail": "Detail"
   }
 }

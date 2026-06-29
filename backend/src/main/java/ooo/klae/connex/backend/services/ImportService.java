@@ -632,8 +632,10 @@ public class ImportService {
                         if (email != null) row.peopleEmails.add(email);
                     }
                 } else if (defs.containsKey(column)) {
-                    validateCustom(row, defs.get(column), value);
-                    row.custom.put(column, value);
+                    CustomFieldDefinition def = defs.get(column);
+                    String stored = "number".equals(def.getFieldType()) ? value.replaceAll("[,\\s]", "") : value;
+                    validateCustom(row, def, stored);
+                    row.custom.put(column, stored);
                 } else if (field != null) {
                     row.std.put(field, normalizeStandard(field, value));
                 }
@@ -672,7 +674,7 @@ public class ImportService {
                 try {
                     new java.math.BigDecimal(value.trim());
                 } catch (NumberFormatException e) {
-                    fail(row, "Invalid number for " + def.getLabel() + " (no thousands separators): " + value);
+                    fail(row, "Invalid number for " + def.getLabel() + ": " + value);
                 }
             }
             case "url" -> {
