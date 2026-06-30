@@ -86,7 +86,7 @@
   <!-- Reconciliation-managed reminder types. Every reconcile/resolve/purge statement scopes to
        this list so a new reminder producer only has to extend it here, in one place. -->
   <sql id="reminderTypes">
-    'task.due', 'deal.close', 'relationship.cooling'
+    'task.due', 'deal.close', 'relationship.cooling', 'relationship.intro_opportunity'
   </sql>
 
   <!-- The inbox/bell is recipient-scoped across every workspace the user belongs to (not the active
