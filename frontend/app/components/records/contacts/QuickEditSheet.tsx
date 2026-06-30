@@ -39,7 +39,6 @@ type Props = {
 export default function QuickEditSheet({
     editSheetOpen,
     setEditSheetOpen,
-    selectedIds,
     selectedContacts,
     drafts,
     updateDraft,
@@ -57,9 +56,9 @@ export default function QuickEditSheet({
             open={editSheetOpen}
             onOpenChange={setEditSheetOpen}
             icon={<UserIcon />}
-            title={selectedIds.size === 1 ? t('titleSingle') : t('titleMultiple', { count: selectedIds.size })}
+            title={total === 1 ? t('titleSingle') : t('titleMultiple', { count: total })}
             description={t('description')}
-            count={selectedIds.size}
+            count={total}
             isSaving={isSaving}
             onSave={saveEdits}
             saveLabel={t('save')}
@@ -69,13 +68,13 @@ export default function QuickEditSheet({
                 const draft = drafts[c.id];
                 if (!draft) return null;
                 const pendingImage = imageFiles?.[c.id] ?? null;
-                const previewSrc = pendingImage ? URL.createObjectURL(pendingImage) : c.imageUrl || null;
                 const media = updateImageFile ? (
                     <QuickEditMediaUpload
                         id={`pfp-${c.id}`}
                         label={t('changePhoto')}
                         shape="round"
-                        previewSrc={previewSrc}
+                        file={pendingImage}
+                        existingUrl={c.imageUrl ?? null}
                         fallback={
                             <div className="flex h-full w-full items-center justify-center bg-muted-foreground/40">
                                 <UserIcon className="size-8 text-muted-foreground" />

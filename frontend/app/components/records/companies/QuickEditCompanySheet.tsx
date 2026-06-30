@@ -40,7 +40,6 @@ type Props = {
 export default function QuickEditCompanySheet({
     open,
     onOpenChange,
-    selectedIds,
     selectedCompanies,
     drafts,
     updateDraft,
@@ -58,9 +57,9 @@ export default function QuickEditCompanySheet({
             open={open}
             onOpenChange={onOpenChange}
             icon={<BuildingOffice2Icon />}
-            title={selectedIds.size === 1 ? t('titleSingle') : t('titleMultiple', { count: selectedIds.size })}
+            title={total === 1 ? t('titleSingle') : t('titleMultiple', { count: total })}
             description={t('description')}
-            count={selectedIds.size}
+            count={total}
             isSaving={isSaving}
             onSave={saveEdits}
             saveLabel={t('save')}
@@ -70,13 +69,13 @@ export default function QuickEditCompanySheet({
                 const draft = drafts[c.id];
                 if (!draft) return null;
                 const pendingLogo = logoFiles?.[c.id] ?? null;
-                const previewSrc = pendingLogo ? URL.createObjectURL(pendingLogo) : c.logoUrl || null;
                 const media = updateLogoFile ? (
                     <QuickEditMediaUpload
                         id={`logo-${c.id}`}
                         label={t('changeLogo')}
                         shape="squircle"
-                        previewSrc={previewSrc}
+                        file={pendingLogo}
+                        existingUrl={c.logoUrl ?? null}
                         fallback={
                             <div className="flex h-full w-full items-center justify-center bg-muted-foreground/20">
                                 <BuildingOffice2Icon className="size-8 text-muted-foreground" />

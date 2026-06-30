@@ -52,14 +52,13 @@ type OutcomeOption = { key: 'open' | 'won' | 'lost'; won: boolean | null; label:
 
 const OUTCOME_SELECTED: Record<OutcomeOption['key'], string> = {
     open: 'bg-background text-foreground shadow-sm ring-1 ring-border',
-    won: 'bg-brand text-white shadow-sm',
+    won: 'bg-brand text-brand-foreground shadow-sm',
     lost: 'bg-destructive text-white shadow-sm',
 };
 
 export default function QuickEditDealSheet({
     open,
     onOpenChange,
-    selectedIds,
     selectedDeals,
     drafts,
     updateDraft,
@@ -91,9 +90,9 @@ export default function QuickEditDealSheet({
             open={open}
             onOpenChange={onOpenChange}
             icon={<BanknotesIcon />}
-            title={selectedIds.size === 1 ? t('titleSingle') : t('titleMulti', { count: selectedIds.size })}
+            title={total === 1 ? t('titleSingle') : t('titleMulti', { count: total })}
             description={t('subtitle')}
-            count={selectedIds.size}
+            count={total}
             isSaving={isSaving}
             onSave={saveEdits}
             saveLabel={t('save')}
@@ -245,6 +244,7 @@ export default function QuickEditDealSheet({
                                     <button
                                         key={opt.key}
                                         type="button"
+                                        aria-pressed={draft.won === opt.won}
                                         onClick={() =>
                                             updateDraft(
                                                 d.id,

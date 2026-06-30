@@ -10,7 +10,7 @@ import { Select, SelectTrigger, SelectContent, SelectItem, SelectValue } from '@
 import { type Pipeline } from '@/app/lib/types';
 import { type SelectionId } from '@/app/components/records/types';
 import { cn } from '@/lib/utils';
-import { QuickEditRecordCard, QuickEditSheetShell } from '@/app/components/records/quick-edit/QuickEditSheetShell';
+import { QuickEditField, QuickEditRecordCard, QuickEditSheetShell } from '@/app/components/records/quick-edit/QuickEditSheetShell';
 
 export type StageKind = 'normal' | 'won' | 'lost';
 
@@ -56,7 +56,6 @@ type Props = {
 export default function QuickEditPipelineSheet({
     open,
     onOpenChange,
-    selectedIds,
     selectedPipelines,
     drafts,
     updateDraft,
@@ -75,9 +74,9 @@ export default function QuickEditPipelineSheet({
             open={open}
             onOpenChange={onOpenChange}
             icon={<FunnelIcon />}
-            title={selectedIds.size === 1 ? t('titleSingle') : t('titleMultiple', { count: selectedIds.size })}
+            title={total === 1 ? t('titleSingle') : t('titleMultiple', { count: total })}
             description={t('description')}
-            count={selectedIds.size}
+            count={total}
             isSaving={isSaving}
             onSave={saveEdits}
             saveLabel={t('save')}
@@ -88,8 +87,7 @@ export default function QuickEditPipelineSheet({
                 if (!draft) return null;
                 return (
                     <QuickEditRecordCard key={p.id} index={idx} total={total} title={p.name}>
-                        <div className="grid gap-1.5">
-                            <Label htmlFor={`name-${p.id}`}>{t('name')}</Label>
+                        <QuickEditField label={t('name')} htmlFor={`name-${p.id}`} required>
                             <Input
                                 id={`name-${p.id}`}
                                 type="text"
@@ -97,7 +95,7 @@ export default function QuickEditPipelineSheet({
                                 onChange={(e) => updateDraft(p.id, { name: e.target.value })}
                                 required
                             />
-                        </div>
+                        </QuickEditField>
 
                         <div className="grid gap-1.5">
                             <Label>{t('stages')}</Label>

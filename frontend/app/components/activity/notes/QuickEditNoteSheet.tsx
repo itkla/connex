@@ -37,7 +37,6 @@ type Props = {
 export default function QuickEditNoteSheet({
     open,
     onOpenChange,
-    selectedIds,
     selectedNotes,
     drafts,
     updateDraft,
@@ -60,9 +59,9 @@ export default function QuickEditNoteSheet({
             open={open}
             onOpenChange={onOpenChange}
             icon={<DocumentTextIcon />}
-            title={selectedIds.size === 1 ? t('titleSingle') : t('titleMultiple', { count: selectedIds.size })}
+            title={total === 1 ? t('titleSingle') : t('titleMultiple', { count: total })}
             description={t('description')}
-            count={selectedIds.size}
+            count={total}
             isSaving={isSaving}
             onSave={saveEdits}
             saveLabel={t('save')}
@@ -73,8 +72,10 @@ export default function QuickEditNoteSheet({
                 if (!draft) return null;
                 const selectedPerson = draft.person != null ? persons.find((p) => p.id === draft.person) ?? null : null;
                 const selectedDeal = draft.deal != null ? deals.find((d) => d.id === draft.deal) ?? null : null;
-                const preview = draft.content.trim().replace(/\s+/g, ' ').slice(0, 60);
-                const title = total > 1 ? preview || t('noteIndex', { index: idx + 1 }) : undefined;
+                const title =
+                    total > 1
+                        ? draft.content.trim().replace(/\s+/g, ' ').slice(0, 60) || t('noteIndex', { index: idx + 1 })
+                        : undefined;
                 const subtitle = total > 1 ? selectedPerson?.name ?? selectedDeal?.name ?? undefined : undefined;
 
                 return (

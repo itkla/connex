@@ -65,6 +65,7 @@
 
 @theme {
   --color-brand: #73d200;
+  --color-brand-foreground: oklch(0.205 0 0);
   --color-brand-light: #e5f9d8;
   --color-brand-hover: #5cb000;
   --color-brand-dark: #4a9000;

@@ -1,6 +1,6 @@
 'use client';
 
-import { type ReactNode } from 'react';
+import { type ReactNode, useEffect, useMemo } from 'react';
 import { motion, useReducedMotion } from 'motion/react';
 import { Loader2Icon } from 'lucide-react';
 import { CameraIcon } from '@heroicons/react/24/outline';
@@ -82,7 +82,7 @@ export function QuickEditSheetShell({
                     <Button
                         onClick={onSave}
                         disabled={isSaving}
-                        className="min-w-24 bg-brand text-white hover:bg-brand-dark"
+                        className="min-w-24 bg-brand text-brand-foreground hover:bg-brand-hover"
                     >
                         {isSaving ? <Loader2Icon className="size-4 animate-spin" /> : null}
                         {saveLabel}
@@ -163,16 +163,24 @@ type QuickEditMediaUploadProps = {
     id: string;
     label: string;
     shape: 'round' | 'squircle';
-    previewSrc: string | null;
+    file: File | null;
+    existingUrl: string | null;
     fallback: ReactNode;
     onSelect: (file: File | null) => void;
 };
 
 /**
  * Square (logo) or round (avatar) media picker with a camera overlay revealed on hover
- * and keyboard focus. Shows a live preview of the pending file or the existing image.
+ * and keyboard focus. Previews the pending file (managing the object URL's lifecycle so it
+ * is revoked, not leaked) and otherwise falls back to the existing image.
  */
-export function QuickEditMediaUpload({ id, label, shape, previewSrc, fallback, onSelect }: QuickEditMediaUploadProps) {
+export function QuickEditMediaUpload({ id, label, shape, file, existingUrl, fallback, onSelect }: QuickEditMediaUploadProps) {
+    const previewSrc = useMemo(() => (file ? URL.createObjectURL(file) : existingUrl), [file, existingUrl]);
+    useEffect(() => {
+        if (!file || !previewSrc) return;
+        return () => URL.revokeObjectURL(previewSrc);
+    }, [file, previewSrc]);
+
     return (
         <label
             htmlFor={id}
