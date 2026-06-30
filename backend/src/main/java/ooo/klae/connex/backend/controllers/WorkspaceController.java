@@ -13,10 +13,12 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
 import lombok.RequiredArgsConstructor;
+import ooo.klae.connex.backend.dto.AddAllowedDomainRequest;
 import ooo.klae.connex.backend.dto.AddMemberRequest;
 import ooo.klae.connex.backend.dto.CreateInviteLinkRequest;
 import ooo.klae.connex.backend.dto.CreateInviteRequest;
@@ -27,6 +29,7 @@ import ooo.klae.connex.backend.dto.MemberDto;
 import ooo.klae.connex.backend.dto.MyWorkspacesDto;
 import ooo.klae.connex.backend.dto.UpdateMemberRoleRequest;
 import ooo.klae.connex.backend.dto.WorkspaceMembershipDto;
+import ooo.klae.connex.backend.services.AllowedDomainService;
 import ooo.klae.connex.backend.services.AuthService;
 import ooo.klae.connex.backend.services.InviteLinkService;
 import ooo.klae.connex.backend.services.InviteService;
@@ -44,6 +47,7 @@ public class WorkspaceController {
     private final WorkspaceService workspaceService;
     private final InviteService inviteService;
     private final InviteLinkService inviteLinkService;
+    private final AllowedDomainService allowedDomainService;
     private final AuthService authService;
 
     @GetMapping
@@ -130,6 +134,22 @@ public class WorkspaceController {
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void revokeInviteLink(@PathVariable int id, @PathVariable int linkId) {
         inviteLinkService.revokeLink(id, linkId, authService.getCurrentUser().getId());
+    }
+
+    @GetMapping("/{id}/allowed-domains")
+    public List<String> allowedDomains(@PathVariable int id) {
+        return allowedDomainService.listDomains(id, authService.getCurrentUser().getId());
+    }
+
+    @PostMapping("/{id}/allowed-domains")
+    public List<String> addAllowedDomain(@PathVariable int id, @Valid @RequestBody AddAllowedDomainRequest request) {
+        return allowedDomainService.addDomain(id, authService.getCurrentUser().getId(), request.getDomain());
+    }
+
+    @DeleteMapping("/{id}/allowed-domains")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void removeAllowedDomain(@PathVariable int id, @RequestParam String domain) {
+        allowedDomainService.removeDomain(id, authService.getCurrentUser().getId(), domain);
     }
 
     @GetMapping("/{id}/members")

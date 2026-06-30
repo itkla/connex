@@ -125,7 +125,18 @@
     "linkUses": "{count} 回使用",
     "linkUsesOf": "{used} / {max} 回使用",
     "linkRevoked": "招待リンクを取り消しました",
-    "linkRevokeFailed": "招待リンクを取り消せませんでした。"
+    "linkRevokeFailed": "招待リンクを取り消せませんでした。",
+    "domainsTitle": "許可するドメイン",
+    "domainsSubtitle": "招待リンクからの参加を、これらのドメインのメールアドレスを持つ人に制限します。",
+    "domainPlaceholder": "company.com",
+    "domainLabel": "メールドメイン",
+    "addDomain": "ドメインを追加",
+    "removeDomain": "ドメインを削除",
+    "domainAdded": "ドメインを追加しました",
+    "domainAddFailed": "ドメインを追加できませんでした。",
+    "domainRemoved": "ドメインを削除しました",
+    "domainRemoveFailed": "ドメインを削除できませんでした。",
+    "domainsEmpty": "ドメインの制限はありません。招待リンクを知っている人は、メールアドレスに関係なく参加できます。"
   },
   "WorkspaceRoles": {
     "title": "ロール",

@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.services;
 
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.Authentication;
@@ -16,6 +17,7 @@ import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.dto.LoginDto;
 import ooo.klae.connex.backend.dto.RegisterDto;
 import ooo.klae.connex.backend.exceptions.DuplicateResourceException;
+import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.tenant.WorkspaceCookie;
@@ -39,6 +41,23 @@ public class AuthService {
     private final AuditService auditService;
     private final WorkspaceService workspaceService;
     private final SecurityContextRepository securityContextRepository = new HttpSessionSecurityContextRepository();
+
+    @Value("${connex.signup.mode:open}")
+    private String signupMode;
+
+    /**
+     * Public self-service registration entry point: enforces the instance signup mode, then
+     * delegates to {@link #register}. A non-{@code open} mode (reserved for locked-down on-prem)
+     * refuses anonymous self-service signup, while the permission-gated admin create path
+     * ({@code UserController.createUser}) calls {@link #register} directly and is unaffected.
+     */
+    @Transactional
+    public User registerSelfService(RegisterDto request) {
+        if (signupMode == null || !"open".equalsIgnoreCase(signupMode.trim())) {
+            throw new ForbiddenException("Self-service registration is disabled on this instance");
+        }
+        return register(request);
+    }
 
     /**
      * Registers a new user with the provided registration data.

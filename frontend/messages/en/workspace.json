@@ -125,7 +125,18 @@
     "linkUses": "{count} used",
     "linkUsesOf": "{used} / {max} used",
     "linkRevoked": "Invite link revoked",
-    "linkRevokeFailed": "Could not revoke the invite link."
+    "linkRevokeFailed": "Could not revoke the invite link.",
+    "domainsTitle": "Allowed domains",
+    "domainsSubtitle": "Restrict invite links to people whose email matches one of these domains.",
+    "domainPlaceholder": "company.com",
+    "domainLabel": "Email domain",
+    "addDomain": "Add domain",
+    "removeDomain": "Remove domain",
+    "domainAdded": "Domain added",
+    "domainAddFailed": "Could not add the domain.",
+    "domainRemoved": "Domain removed",
+    "domainRemoveFailed": "Could not remove the domain.",
+    "domainsEmpty": "No domain restrictions. Anyone with an invite link can join, regardless of their email."
   },
   "WorkspaceRoles": {
     "title": "Roles",

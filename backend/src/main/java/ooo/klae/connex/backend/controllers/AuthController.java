@@ -38,7 +38,7 @@ public class AuthController {
      */
     @PostMapping("/register")
     public Map<String, String> register(@Valid @RequestBody RegisterDto request, HttpServletRequest httpRequest, HttpServletResponse httpResponse) {
-        authService.register(request);
+        authService.registerSelfService(request);
         authService.login(new LoginDto(request.getUsername(), request.getPassword()), httpRequest, httpResponse);
         return Map.of("message", "You are now registered and logged in");
     }
