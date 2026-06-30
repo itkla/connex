@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ComponentType } from 'react';
 import { useLocale, useTranslations } from 'next-intl';
+import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
 import {
@@ -13,6 +14,7 @@ import {
     ExclamationCircleIcon,
     UserCircleIcon,
     QueueListIcon,
+    ViewColumnsIcon,
     CheckCircleIcon,
     CheckIcon,
 } from '@heroicons/react/24/outline';
@@ -26,6 +28,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 
 import EditTaskSheet from '@/app/components/activity/tasks/EditTaskSheet';
 import TaskDialog from '@/app/components/activity/tasks/TaskDialog';
+import TasksKanban from '@/app/components/activity/tasks/TasksKanban';
 import { updateTask } from '@/app/lib/api';
 import { toastError } from '@/app/lib/toast';
 import { parseMysqlDateTime } from '@/app/lib/utils';
@@ -48,6 +51,7 @@ const ACTIVE_BUCKETS: Bucket[] = ['overdue', 'today', 'upcoming', 'noDate'];
 const ACTIVE_QUEUES: Queue[] = ['myOpen', 'dueToday', 'overdue', 'unassigned', 'allOpen'];
 const ALL_QUEUES: Queue[] = [...ACTIVE_QUEUES, 'completed'];
 const QUEUE_STORAGE_KEY = 'tasks:queue';
+const VIEW_STORAGE_KEY = 'tasks:view';
 const EASE_OUT: [number, number, number, number] = [0.23, 1, 0.32, 1];
 const COMPLETE_LINGER_MS = 230;
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
@@ -161,6 +165,7 @@ export default function TasksBrowser({ tasks: initialTasks, persons, deals, user
     const t = useTranslations('ActivityTasks');
     const tf = useTranslations('Filters');
     const locale = useLocale();
+    const router = useRouter();
     const reduce = useReducedMotion() ?? false;
 
     const [now] = useState(() => Date.now());
@@ -181,6 +186,8 @@ export default function TasksBrowser({ tasks: initialTasks, persons, deals, user
     const [companyFilter, setCompanyFilter] = useState<Set<string>>(new Set());
     const [queue, setQueue] = useState<Queue>('myOpen');
     const [queueInitialized, setQueueInitialized] = useState(false);
+    const [view, setView] = useState<'list' | 'board'>('list');
+    const [viewInitialized, setViewInitialized] = useState(false);
     const [editingTask, setEditingTask] = useState<Task | null>(null);
     const [creating, setCreating] = useState(false);
     const [pendingToggle, setPendingToggle] = useState<Set<number>>(new Set());
@@ -198,6 +205,18 @@ export default function TasksBrowser({ tasks: initialTasks, persons, deals, user
         if (!queueInitialized) return;
         window.localStorage.setItem(QUEUE_STORAGE_KEY, queue);
     }, [queue, queueInitialized]);
+
+    useEffect(() => {
+        const stored = window.localStorage.getItem(VIEW_STORAGE_KEY);
+        // eslint-disable-next-line react-hooks/set-state-in-effect
+        if (stored === 'board' || stored === 'list') setView(stored);
+        setViewInitialized(true);
+    }, []);
+
+    useEffect(() => {
+        if (!viewInitialized) return;
+        window.localStorage.setItem(VIEW_STORAGE_KEY, view);
+    }, [view, viewInitialized]);
 
     useEffect(() => () => timers.current.forEach((id) => window.clearTimeout(id)), []);
 
@@ -298,6 +317,20 @@ export default function TasksBrowser({ tasks: initialTasks, persons, deals, user
             return haystacks.some((s) => s?.toLowerCase().includes(q));
         });
     }, [queueTasks, query, assigneeFilter, personFilter, dealFilter, companyFilter, companyIdForTask, personById, dealById, userById]);
+
+    const boardTasks = useMemo(() => {
+        const q = query.trim().toLowerCase();
+        if (!q) return tasks;
+        return tasks.filter((task) => {
+            const haystacks = [
+                task.description,
+                task.personId ? personById.get(task.personId)?.name : null,
+                task.dealId ? dealById.get(task.dealId)?.name : null,
+                userById.get(task.assignedToId)?.displayName,
+            ];
+            return haystacks.some((s) => s?.toLowerCase().includes(q));
+        });
+    }, [tasks, query, personById, dealById, userById]);
 
     const grouped = useMemo(() => {
         const buckets: Record<Bucket, Task[]> = { overdue: [], today: [], upcoming: [], noDate: [], completed: [] };
@@ -416,14 +449,46 @@ export default function TasksBrowser({ tasks: initialTasks, persons, deals, user
                     <h1 className="text-4xl font-extrabold tracking-tight">{t('title')}</h1>
                     <p className="mt-1 text-sm text-muted-foreground">{t('subtitle')}</p>
                 </div>
-                <Button
-                    className="bg-brand text-white shadow-sm transition-transform hover:bg-brand-dark active:scale-[0.98]"
-                    aria-label={t('newAria')}
-                    onClick={() => setCreating(true)}
-                >
-                    <PlusIcon strokeWidth={2.5} />
-                    {t('new')}
-                </Button>
+                <div className="flex items-center gap-2">
+                    <div
+                        role="group"
+                        aria-label={t('displayMode')}
+                        className="inline-flex rounded-full bg-muted p-0.5 ring-1 ring-border"
+                    >
+                        <button
+                            type="button"
+                            onClick={() => setView('list')}
+                            aria-label={t('viewList')}
+                            aria-pressed={view === 'list'}
+                            className={cn(
+                                'flex h-8 w-8 items-center justify-center rounded-full transition active:scale-[0.97]',
+                                view === 'list' ? 'bg-background text-foreground shadow' : 'text-muted-foreground hover:text-foreground',
+                            )}
+                        >
+                            <QueueListIcon className="size-4" />
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => setView('board')}
+                            aria-label={t('viewBoard')}
+                            aria-pressed={view === 'board'}
+                            className={cn(
+                                'flex h-8 w-8 items-center justify-center rounded-full transition active:scale-[0.97]',
+                                view === 'board' ? 'bg-background text-foreground shadow' : 'text-muted-foreground hover:text-foreground',
+                            )}
+                        >
+                            <ViewColumnsIcon className="size-4" />
+                        </button>
+                    </div>
+                    <Button
+                        className="bg-brand text-white shadow-sm transition-transform hover:bg-brand-dark active:scale-[0.98]"
+                        aria-label={t('newAria')}
+                        onClick={() => setCreating(true)}
+                    >
+                        <PlusIcon strokeWidth={2.5} />
+                        {t('new')}
+                    </Button>
+                </div>
             </header>
 
             {hasAnyTasks && (
@@ -437,6 +502,37 @@ export default function TasksBrowser({ tasks: initialTasks, persons, deals, user
                 />
             )}
 
+            {view === 'board' ? (
+                <div className="min-w-0 space-y-4">
+                    <FilterBar
+                        reduce={reduce}
+                        chips={query.trim() ? [{ id: 'q', label: tf('chipSearch', { query: query.trim() }), onRemove: () => setQuery('') }] : []}
+                        hasActiveFilters={query.trim() !== ''}
+                        onClearAll={() => setQuery('')}
+                        clearAllLabel={tf('clearAll')}
+                        className="py-0"
+                        search={
+                            <SearchField
+                                value={query}
+                                onChange={setQuery}
+                                onClear={() => setQuery('')}
+                                placeholder={t('searchPlaceholder')}
+                                searchAria={tf('searchAria')}
+                                clearAria={tf('clearSearchAria')}
+                            />
+                        }
+                    />
+                    <TasksKanban
+                        tasks={boardTasks}
+                        personById={personById}
+                        dealById={dealById}
+                        userById={userById}
+                        onMoved={() => router.refresh()}
+                        onOpen={setEditingTask}
+                        reduce={reduce}
+                    />
+                </div>
+            ) : (
             <div className="grid grid-cols-1 gap-6 md:grid-cols-[200px_minmax(0,1fr)] md:gap-10">
                 <aside className="md:sticky md:top-6 md:self-start">
                     <h2 className="mb-2 px-3 text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
@@ -577,6 +673,7 @@ export default function TasksBrowser({ tasks: initialTasks, persons, deals, user
                     )}
                 </div>
             </div>
+            )}
 
             {editingTask && (
                 <EditTaskSheet
