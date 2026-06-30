@@ -28,6 +28,10 @@ public interface IntroductionMapper {
 
     long countLineage(@Param("workspaceId") int workspaceId);
 
+    /** A single made introduction for a pair, or {@code null}; used to return a freshly recorded one. */
+    IntroductionDto findByPair(@Param("workspaceId") int workspaceId,
+            @Param("personAId") int personAId, @Param("personBId") int personBId);
+
     /** Workspace-owned contacts the team has engaged, with the attributes ranking/display need. */
     List<IntroCandidatePerson> findCandidatePersons(@Param("workspaceId") int workspaceId);
 

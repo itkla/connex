@@ -21,6 +21,14 @@
     ON DUPLICATE KEY UPDATE type = ne.type, strength = ne.strength, note = ne.note
   </insert>
 
+  <!-- Connect a pair only if no edge exists; the no-op update preserves any existing edge's
+       type/strength (e.g. a stronger 'friend' edge is not downgraded to 'knows'). -->
+  <insert id="insertIfAbsent">
+    INSERT INTO person_edge (workspace_id, source_person_id, target_person_id, type, strength, note)
+    VALUES (#{workspaceId}, #{sourcePersonId}, #{targetPersonId}, #{type}, #{strength}, #{note})
+    ON DUPLICATE KEY UPDATE id = id
+  </insert>
+
   <delete id="delete">
     DELETE FROM person_edge
     WHERE workspace_id = #{workspaceId}

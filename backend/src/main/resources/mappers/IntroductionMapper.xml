@@ -22,7 +22,7 @@
       status = IF(introduction.status = 'made', introduction.status, 'dismissed')
   </insert>
 
-  <select id="findLineage" resultType="ooo.klae.connex.backend.dto.IntroductionDto">
+  <sql id="lineageSelect">
     SELECT i.id              AS id,
            i.person_a_id     AS person_a_id,
            pa.name           AS person_a_name,
@@ -42,10 +42,22 @@
     LEFT JOIN company ca ON ca.id = pa.company_id
     LEFT JOIN company cb ON cb.id = pb.company_id
     LEFT JOIN app_user u ON u.id = i.introducer_user_id
+  </sql>
+
+  <select id="findLineage" resultType="ooo.klae.connex.backend.dto.IntroductionDto">
+    <include refid="lineageSelect"/>
     WHERE i.workspace_id = #{workspaceId}
       AND i.status = 'made'
     ORDER BY i.introduced_at DESC, i.id DESC
     LIMIT #{limit} OFFSET #{offset}
+  </select>
+
+  <select id="findByPair" resultType="ooo.klae.connex.backend.dto.IntroductionDto">
+    <include refid="lineageSelect"/>
+    WHERE i.workspace_id = #{workspaceId}
+      AND i.status = 'made'
+      AND i.person_a_id = #{personAId}
+      AND i.person_b_id = #{personBId}
   </select>
 
   <select id="countLineage" resultType="long">
