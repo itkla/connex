@@ -1,0 +1,92 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="ooo.klae.connex.backend.mappers.IntroductionMapper">
+
+  <!-- Recording a made intro on an existing pair refreshes it (row-alias upsert; VALUES() is
+       removed in MySQL 9). A dismissal of an already-made pair is a no-op, so lineage survives. -->
+  <insert id="recordMade">
+    INSERT INTO introduction (workspace_id, introducer_user_id, person_a_id, person_b_id, status, note, introduced_at)
+    VALUES (#{workspaceId}, #{introducerUserId}, #{personAId}, #{personBId}, 'made', #{note}, #{introducedAt}) AS ni
+    ON DUPLICATE KEY UPDATE
+      status = 'made',
+      introducer_user_id = ni.introducer_user_id,
+      note = ni.note,
+      introduced_at = ni.introduced_at
+  </insert>
+
+  <insert id="recordDismissed">
+    INSERT INTO introduction (workspace_id, introducer_user_id, person_a_id, person_b_id, status, introduced_at)
+    VALUES (#{workspaceId}, #{introducerUserId}, #{personAId}, #{personBId}, 'dismissed', #{introducedAt}) AS ni
+    ON DUPLICATE KEY UPDATE
+      status = IF(introduction.status = 'made', introduction.status, 'dismissed')
+  </insert>
+
+  <select id="findLineage" resultType="ooo.klae.connex.backend.dto.IntroductionDto">
+    SELECT i.id              AS id,
+           i.person_a_id     AS person_a_id,
+           pa.name           AS person_a_name,
+           ca.name           AS person_a_company,
+           pa.image_url      AS person_a_image_url,
+           i.person_b_id     AS person_b_id,
+           pb.name           AS person_b_name,
+           cb.name           AS person_b_company,
+           pb.image_url      AS person_b_image_url,
+           i.introducer_user_id AS introducer_id,
+           u.display_name    AS introducer_name,
+           i.note            AS note,
+           i.introduced_at   AS introduced_at
+    FROM introduction i
+    JOIN person pa ON pa.id = i.person_a_id
+    JOIN person pb ON pb.id = i.person_b_id
+    LEFT JOIN company ca ON ca.id = pa.company_id
+    LEFT JOIN company cb ON cb.id = pb.company_id
+    LEFT JOIN app_user u ON u.id = i.introducer_user_id
+    WHERE i.workspace_id = #{workspaceId}
+      AND i.status = 'made'
+    ORDER BY i.introduced_at DESC, i.id DESC
+    LIMIT #{limit} OFFSET #{offset}
+  </select>
+
+  <select id="countLineage" resultType="long">
+    SELECT COUNT(*)
+    FROM introduction
+    WHERE workspace_id = #{workspaceId}
+      AND status = 'made'
+  </select>
+
+  <!-- Workspace-OWNED contacts only (never shared-in records of another tenant), restricted to
+       those the team has actually engaged, so a suggestion always involves two contacts the user
+       has standing to introduce. -->
+  <select id="findCandidatePersons" resultType="ooo.klae.connex.backend.beans.IntroCandidatePerson">
+    SELECT p.id         AS id,
+           p.name       AS name,
+           p.title      AS title,
+           p.company_id AS company_id,
+           c.name       AS company_name,
+           p.image_url  AS image_url
+    FROM person p
+    LEFT JOIN company c ON c.id = p.company_id
+    WHERE p.workspace_id = #{workspaceId}
+      AND (
+        EXISTS (SELECT 1 FROM activity a WHERE a.workspace_id = #{workspaceId} AND a.person_id = p.id)
+        OR EXISTS (SELECT 1 FROM note n WHERE n.workspace_id = #{workspaceId} AND n.person_id = p.id)
+        OR EXISTS (SELECT 1 FROM task t WHERE t.workspace_id = #{workspaceId} AND t.person_id = p.id)
+      )
+  </select>
+
+  <select id="findWorkspaceEmployment" resultType="ooo.klae.connex.backend.beans.IntroEmploymentRow">
+    SELECT person_id    AS person_id,
+           company_id   AS company_id,
+           company_name AS company_name
+    FROM person_employment
+    WHERE workspace_id = #{workspaceId}
+  </select>
+
+  <select id="findExistingPairs" resultType="ooo.klae.connex.backend.beans.Introduction">
+    SELECT person_a_id AS person_a_id,
+           person_b_id AS person_b_id
+    FROM introduction
+    WHERE workspace_id = #{workspaceId}
+  </select>
+</mapper>
