@@ -228,11 +228,18 @@ export default function MembersPanel({ currentUserId }: { currentUserId: number 
         resetFieldErrors();
         setSending(true);
         try {
-            const invite = await createWorkspaceInvite(workspaceId, inviteEmail.trim(), inviteRole);
-            setInvites((prev) => [invite, ...prev.filter((i) => i.email !== invite.email)]);
+            const result = await createWorkspaceInvite(workspaceId, inviteEmail.trim(), inviteRole);
             setInviteEmail("");
-            await copyInviteLink(invite.token, true);
-            toastSuccess(t("inviteCreated"));
+            if (result.member) {
+                const member = result.member;
+                setMembers((prev) => [...prev.filter((m) => m.id !== member.id), member]);
+                toastSuccess(t("memberInvited"));
+            } else if (result.invite) {
+                const invite = result.invite;
+                setInvites((prev) => [invite, ...prev.filter((i) => i.email !== invite.email)]);
+                await copyInviteLink(invite.token, true);
+                toastSuccess(t("inviteCreated"));
+            }
         } catch (err) {
             if (!captureFieldErrors(err)) {
                 toastError(err instanceof Error ? err.message : t("inviteFailed"));

@@ -99,6 +99,7 @@
     "sendInvite": "Send invite",
     "sending": "Sending",
     "inviteCreated": "Invite link copied to clipboard",
+    "memberInvited": "Invitation sent — they'll see it in their notifications.",
     "inviteFailed": "Could not create the invite.",
     "pendingTitle": "Pending invites",
     "pendingEmpty": "No pending invitations.",

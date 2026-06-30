@@ -11,6 +11,7 @@ import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.beans.WorkspaceInvite;
 import ooo.klae.connex.backend.dto.InviteDto;
 import ooo.klae.connex.backend.dto.InvitePreviewDto;
+import ooo.klae.connex.backend.dto.InviteResultDto;
 import ooo.klae.connex.backend.dto.MemberDto;
 import ooo.klae.connex.backend.dto.WorkspaceMembershipDto;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
@@ -39,15 +40,25 @@ public class InviteService {
     private final WorkspaceService workspaceService;
     private final AuditService auditService;
 
-    /** Creates a pending invite, superseding any earlier pending invite for the same email. */
-    public InviteDto createInvite(int workspaceId, User actor, String emailRaw, String roleRaw) {
+    /**
+     * Invites someone to a workspace by email. An address that already belongs to
+     * a Connex user is added as a pending member and notified in-app (they accept
+     * from Settings); any other address gets an emailed token invite. Either way,
+     * an earlier pending invite for the same email is superseded.
+     */
+    public InviteResultDto createInvite(int workspaceId, User actor, String emailRaw, String roleRaw) {
         workspaceService.requirePermission(workspaceId, actor.getId(), Permission.MEMBER_MANAGE);
         String email = normalizeEmail(emailRaw);
         String role = normalizeRole(roleRaw);
 
         User existing = userMapper.getUserByEmail(email);
-        if (existing != null && workspaceMapper.isMember(workspaceId, existing.getId())) {
-            throw new BadRequestException("That person is already a member of this workspace");
+        if (existing != null) {
+            if (workspaceMapper.getMember(workspaceId, existing.getId()) != null) {
+                throw new BadRequestException("That person is already a member of or invited to this workspace");
+            }
+            inviteMapper.revokePendingForEmail(workspaceId, email);
+            MemberDto member = workspaceService.addPendingMember(workspaceId, actor, existing, role);
+            return new InviteResultDto(null, member);
         }
 
         inviteMapper.revokePendingForEmail(workspaceId, email);
@@ -73,7 +84,7 @@ public class InviteService {
         dto.setExpiresAt(saved.getExpiresAt());
         dto.setCreatedAt(saved.getCreatedAt());
         dto.setInvitedByLabel(actor.getDisplayName());
-        return dto;
+        return new InviteResultDto(dto, null);
     }
 
     /** Lists the workspace's still-pending invites. */

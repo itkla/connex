@@ -99,6 +99,7 @@
     "sendInvite": "招待を送信",
     "sending": "送信中",
     "inviteCreated": "招待リンクをクリップボードにコピーしました",
+    "memberInvited": "招待を送信しました。相手の通知に表示されます。",
     "inviteFailed": "招待を作成できませんでした。",
     "pendingTitle": "保留中の招待",
     "pendingEmpty": "保留中の招待はありません。",
