@@ -885,6 +885,25 @@ export type InvitePreview = {
     valid: boolean;
 };
 
+export type WorkspaceInviteLink = {
+    id: number;
+    token: string;
+    role: WorkspaceRole;
+    expiresAt: string;
+    maxUses: number | null;
+    usedCount: number;
+    revoked: boolean;
+    createdByLabel: string | null;
+    createdAt: string;
+};
+
+export type InviteLinkPreview = {
+    workspaceId: number;
+    workspaceName: string;
+    role: WorkspaceRole;
+    valid: boolean;
+};
+
 export type AuditLogEntry = {
     id: number;
     action: string;

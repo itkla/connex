@@ -47,6 +47,19 @@
     "roleAdmin": "管理者",
     "roleMember": "メンバー"
   },
+  "InviteLinkAccept": {
+    "heading": "{workspace} に参加",
+    "roleLine": "{role} として参加します。",
+    "accept": "ワークスペースに参加",
+    "accepting": "参加中",
+    "acceptFailed": "ワークスペースに参加できませんでした。",
+    "invalidTitle": "リンクは利用できません",
+    "invalidBody": "この招待リンクは期限切れか、取り消されたか、使用回数の上限に達しています。",
+    "backToApp": "ダッシュボードへ",
+    "roleOwner": "オーナー",
+    "roleAdmin": "管理者",
+    "roleMember": "メンバー"
+  },
   "WorkspaceSettings": {
     "title": "設定",
     "subtitle": "このワークスペースにアクセスできる人と、その権限を管理します。",
@@ -96,7 +109,23 @@
     "revokeFailed": "招待を取り消せませんでした。",
     "invitedBy": "{name} が招待",
     "expires": "有効期限 {date}",
-    "customRoles": "カスタムロール"
+    "customRoles": "カスタムロール",
+    "linkTitle": "招待リンク",
+    "linkSubtitle": "リンクを知っている人は、選択したロールで参加できます。メールは不要です。",
+    "linkExpiryLabel": "有効期限（日）",
+    "linkExpiryPlaceholder": "7",
+    "linkMaxUsesLabel": "最大使用回数",
+    "linkMaxUsesPlaceholder": "無制限",
+    "createLink": "リンクを作成",
+    "linkCreated": "招待リンクを作成しました",
+    "linkCreateFailed": "招待リンクを作成できませんでした。",
+    "activeLinksTitle": "有効なリンク",
+    "activeLinksEmpty": "招待リンクはまだありません。",
+    "linkActions": "リンクの操作",
+    "linkUses": "{count} 回使用",
+    "linkUsesOf": "{used} / {max} 回使用",
+    "linkRevoked": "招待リンクを取り消しました",
+    "linkRevokeFailed": "招待リンクを取り消せませんでした。"
   },
   "WorkspaceRoles": {
     "title": "ロール",

@@ -42,7 +42,7 @@ export function proxy(request: NextRequest) {
     }
 
     // Accepting an invite needs a session but no workspace (invite-only users have none yet).
-    if (pathname.startsWith('/invite/')) {
+    if (pathname.startsWith('/invite/') || pathname.startsWith('/invite-link/')) {
         if (!hasSession) {
             const loginUrl = new URL('/auth/login', request.url);
             loginUrl.searchParams.set('redirect', pathname + search);
@@ -77,5 +77,6 @@ export const config = {
         '/notifications/:path*',
         '/onboarding',
         '/invite/:path*',
+        '/invite-link/:path*',
     ],
 };

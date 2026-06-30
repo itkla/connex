@@ -1,0 +1,69 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="ooo.klae.connex.backend.mappers.InviteLinkMapper">
+
+  <insert id="insert">
+    INSERT INTO workspace_invite_link (workspace_id, token, role, expires_at, max_uses, created_by_id)
+    VALUES (#{workspaceId}, #{token}, #{role},
+      <choose>
+        <when test="expiresInDays != null">DATE_ADD(UTC_TIMESTAMP(), INTERVAL #{expiresInDays} DAY)</when>
+        <otherwise>NULL</otherwise>
+      </choose>,
+      #{maxUses}, #{createdById})
+  </insert>
+
+  <select id="findByToken" resultType="WorkspaceInviteLink">
+    SELECT id, workspace_id, token, role, expires_at, max_uses, used_count, revoked,
+           created_by_id, created_at, updated_at
+    FROM workspace_invite_link
+    WHERE token = #{token}
+  </select>
+
+  <select id="findPreviewByToken" resultType="ooo.klae.connex.backend.dto.InviteLinkPreviewDto">
+    SELECT l.workspace_id AS workspaceId, w.name AS workspaceName, l.role,
+           (l.revoked = 0
+            AND (l.expires_at IS NULL OR l.expires_at &gt; UTC_TIMESTAMP())
+            AND (l.max_uses IS NULL OR l.used_count &lt; l.max_uses)) AS valid
+    FROM workspace_invite_link l
+    JOIN workspace w ON w.id = l.workspace_id
+    WHERE l.token = #{token}
+  </select>
+
+  <select id="findActiveByWorkspace" resultType="ooo.klae.connex.backend.dto.InviteLinkDto">
+    SELECT l.id, l.token, l.role, l.expires_at AS expiresAt, l.max_uses AS maxUses,
+           l.used_count AS usedCount, l.revoked,
+           u.display_name AS createdByLabel, l.created_at AS createdAt
+    FROM workspace_invite_link l
+    LEFT JOIN app_user u ON u.id = l.created_by_id
+    WHERE l.workspace_id = #{workspaceId} AND l.revoked = 0
+    ORDER BY l.created_at DESC, l.id DESC
+  </select>
+
+  <update id="markRevoked">
+    UPDATE workspace_invite_link
+    SET revoked = 1
+    WHERE id = #{id} AND workspace_id = #{workspaceId} AND revoked = 0
+  </update>
+
+  <update id="incrementUsedCount">
+    UPDATE workspace_invite_link
+    SET used_count = used_count + 1
+    WHERE id = #{id}
+      AND revoked = 0
+      AND (expires_at IS NULL OR expires_at &gt; UTC_TIMESTAMP())
+      AND (max_uses IS NULL OR used_count &lt; max_uses)
+  </update>
+
+  <insert id="recordRedemption">
+    INSERT INTO workspace_invite_link_redemption (link_id, user_id)
+    VALUES (#{linkId}, #{userId})
+  </insert>
+
+  <select id="hasRedeemed" resultType="boolean">
+    SELECT EXISTS(
+      SELECT 1 FROM workspace_invite_link_redemption
+      WHERE link_id = #{linkId} AND user_id = #{userId}
+    )
+  </select>
+</mapper>
