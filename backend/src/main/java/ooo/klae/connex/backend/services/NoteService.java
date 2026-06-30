@@ -23,6 +23,7 @@ import ooo.klae.connex.backend.mappers.DealMapper;
 import ooo.klae.connex.backend.mappers.NoteMapper;
 import ooo.klae.connex.backend.mappers.NoteReferenceMapper;
 import ooo.klae.connex.backend.mappers.NotificationMapper;
+import ooo.klae.connex.backend.mappers.PersonMapper;
 import ooo.klae.connex.backend.tenant.Permission;
 import ooo.klae.connex.backend.tenant.RequirePermission;
 
@@ -41,6 +42,7 @@ public class NoteService {
     private final NoteMapper noteMapper;
     private final NoteReferenceMapper noteReferenceMapper;
     private final DealMapper dealMapper;
+    private final PersonMapper personMapper;
     private final AuditService auditService;
     private final WorkspaceService workspaceService;
     private final AuthService authService;
@@ -100,7 +102,7 @@ public class NoteService {
             auditService.diff(null, note, AUDIT_FIELDS));
         List<Integer> mentioned =
             referenceService.syncReferences(workspaceId, note.getId(), note.getContent(), actor.getId());
-        notifyMentions(note, mentioned, actor);
+        notifyMentions(workspaceId, note, mentioned, actor);
         return hydrateReferences(workspaceId, note);
     }
 
@@ -120,7 +122,7 @@ public class NoteService {
             auditService.diff(before, note, AUDIT_FIELDS));
         List<Integer> mentioned =
             referenceService.syncReferences(workspaceId, id, note.getContent(), actor.getId());
-        notifyMentions(note, mentioned, actor);
+        notifyMentions(workspaceId, note, mentioned, actor);
         return hydrateReferences(workspaceId, note);
     }
 
@@ -135,7 +137,7 @@ public class NoteService {
             auditService.diff(before, null, AUDIT_FIELDS));
     }
 
-    private void notifyMentions(Note note, List<Integer> recipientIds, User actor) {
+    private void notifyMentions(int workspaceId, Note note, List<Integer> recipientIds, User actor) {
         if (recipientIds.isEmpty()) {
             return;
         }
@@ -147,7 +149,7 @@ public class NoteService {
             }
             try {
                 Notification notification = new Notification();
-                notification.setWorkspaceId(note.getWorkspaceId());
+                notification.setWorkspaceId(workspaceId);
                 notification.setRecipientId(recipientId);
                 notification.setType(MENTION_TYPE);
                 notification.setCategory(MENTION_CATEGORY);
@@ -160,7 +162,7 @@ public class NoteService {
                 notification.setSourceType("note");
                 notification.setSourceId(note.getId());
                 notification.setSourceLabel(snippet);
-                applyContext(notification, note);
+                applyContext(workspaceId, notification, note);
                 notification.setDedupeKey(MENTION_TYPE + ":" + note.getId() + ":" + recipientId);
                 notification.setTriggeredAt(triggeredAt);
                 notification.setData(json(Map.of("noteId", note.getId())));
@@ -170,15 +172,17 @@ public class NoteService {
         }
     }
 
-    private static void applyContext(Notification notification, Note note) {
-        if (note.getDeal() != null && note.getDeal().getId() > 0) {
+    private void applyContext(int workspaceId, Notification notification, Note note) {
+        Integer dealId = note.getDeal() != null && note.getDeal().getId() > 0 ? note.getDeal().getId() : null;
+        Integer personId = note.getPerson() != null && note.getPerson().getId() > 0 ? note.getPerson().getId() : null;
+        if (dealId != null && dealMapper.exists(workspaceId, dealId)) {
             notification.setContextType("deal");
-            notification.setContextId(note.getDeal().getId());
-            notification.setActionUrl("/records/deals/" + note.getDeal().getId());
-        } else if (note.getPerson() != null && note.getPerson().getId() > 0) {
+            notification.setContextId(dealId);
+            notification.setActionUrl("/records/deals/" + dealId);
+        } else if (personId != null && personMapper.exists(workspaceId, personId)) {
             notification.setContextType("person");
-            notification.setContextId(note.getPerson().getId());
-            notification.setActionUrl("/records/contacts/" + note.getPerson().getId());
+            notification.setContextId(personId);
+            notification.setActionUrl("/records/contacts/" + personId);
         } else {
             notification.setActionUrl("/activity/notes");
         }

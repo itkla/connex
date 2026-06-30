@@ -14,6 +14,7 @@ import ooo.klae.connex.backend.beans.Note;
 import ooo.klae.connex.backend.beans.Notification;
 import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.beans.User;
+import ooo.klae.connex.backend.beans.Workspace;
 import ooo.klae.connex.backend.mappers.NotificationMapper;
 
 class NoteMentionTest extends AbstractServiceTest {
@@ -122,5 +123,31 @@ class NoteMentionTest extends AbstractServiceTest {
         assertEquals(person.getId(), notification.getContextId());
         assertEquals("/records/contacts/" + person.getId(), notification.getActionUrl());
         assertNull(notification.getContextLabel());
+    }
+
+    /**
+     * A note linking a record outside the workspace never deep-links the mention notification to it.
+     */
+    @Test
+    void mentionNotification_doesNotDeepLinkToForeignRecord() {
+        User mentioned = newUser();
+        Workspace other = new Workspace();
+        other.setName("Other " + unique());
+        other.setSlug("other_" + unique());
+        workspaceMapper.insert(other);
+        Person foreign = new Person();
+        foreign.setName("Foreign " + unique());
+        foreign.setEmail(unique() + ".foreign@example.com");
+        foreign.setWorkspaceId(other.getId());
+        personMapper.insert(foreign);
+
+        Note note = draft(mention("Mentioned", mentioned));
+        note.setPerson(foreign);
+        noteService.create(note);
+
+        Notification notification = mentions(mentioned.getId()).get(0);
+        assertNull(notification.getContextType());
+        assertNull(notification.getContextId());
+        assertEquals("/activity/notes", notification.getActionUrl());
     }
 }
