@@ -117,14 +117,15 @@ public class NotificationReconciliationService {
         }
 
         if (includeRelationshipNudges) {
+            Map<Integer, RelationshipTemperatureDto> temperatures = scoreByPerson(workspaceId);
             try {
-                addRelationshipNudges(workspaceId, existing, expected, preferences, triggeredAt);
+                addRelationshipNudges(workspaceId, existing, expected, preferences, triggeredAt, temperatures);
             } catch (RuntimeException exception) {
                 log.warn("Relationship-nudge reconciliation failed for workspace={}", workspaceId, exception);
             }
             if (properties.isIntroOpportunitiesEnabled()) {
                 try {
-                    addIntroOpportunities(workspaceId, expected, preferences, triggeredAt);
+                    addIntroOpportunities(workspaceId, expected, preferences, triggeredAt, temperatures);
                 } catch (RuntimeException exception) {
                     log.warn("Intro-opportunity reconciliation failed for workspace={}", workspaceId, exception);
                 }
@@ -132,9 +133,12 @@ public class NotificationReconciliationService {
         }
 
         expected.values().forEach(dispatcher::dispatch);
+        Set<String> managedTypes = managedReminderTypes(includeRelationshipNudges);
         for (Map.Entry<ReminderKey, Notification> entry : existing.entrySet()) {
             Notification notification = entry.getValue();
-            if (notification.getResolvedAt() == null && !expected.containsKey(entry.getKey())) {
+            if (notification.getResolvedAt() == null
+                    && managedTypes.contains(notification.getType())
+                    && !expected.containsKey(entry.getKey())) {
                 notificationMapper.resolveReminder(
                     workspaceId,
                     notification.getRecipientId(),
@@ -145,19 +149,31 @@ public class NotificationReconciliationService {
         }
     }
 
+    /**
+     * Reminder types the current pass recomputes, and may therefore resolve. The per-mutation pass
+     * (no relationship nudges) recomputes only task/deal reminders; it must not resolve the
+     * relationship and intro reminders it never recomputed, or it would clear them on every mutation
+     * and the next scheduled sweep would resurrect them as unread (wiping read/dismiss state).
+     */
+    private static Set<String> managedReminderTypes(boolean includeRelationshipNudges) {
+        return includeRelationshipNudges
+            ? Set.of(TASK_TYPE, DEAL_TYPE, RELATIONSHIP_TYPE, INTRO_OPPORTUNITY_TYPE)
+            : Set.of(TASK_TYPE, DEAL_TYPE);
+    }
+
     private void addRelationshipNudges(
         int workspaceId,
         Map<ReminderKey, Notification> existing,
         Map<ReminderKey, Notification> expected,
         Map<PreferenceKey, Boolean> preferences,
-        String triggeredAt
+        String triggeredAt,
+        Map<Integer, RelationshipTemperatureDto> temperatures
     ) {
         List<RelationshipNudgeCandidate> nudgeCandidates =
             notificationMapper.findRelationshipNudgeCandidates(workspaceId);
         if (nudgeCandidates.isEmpty()) {
             return;
         }
-        Map<Integer, RelationshipTemperatureDto> temperatures = scoreByPerson(workspaceId);
         double highValueThreshold = highValueThreshold(notificationMapper.findOpenDealValues(workspaceId));
         LocalDate today = LocalDate.now(clock.withZone(ZoneOffset.UTC));
         for (RelationshipNudgeCandidate candidate : nudgeCandidates) {
@@ -197,10 +213,11 @@ public class NotificationReconciliationService {
         int workspaceId,
         Map<ReminderKey, Notification> expected,
         Map<PreferenceKey, Boolean> preferences,
-        String triggeredAt
+        String triggeredAt,
+        Map<Integer, RelationshipTemperatureDto> temperatures
     ) {
-        List<IntroSuggestionDto> suggestions =
-            introductionService.computeSuggestions(workspaceId, properties.getIntroOpportunityLimit());
+        List<IntroSuggestionDto> suggestions = introductionService.computeSuggestions(
+            workspaceId, properties.getIntroOpportunityLimit(), temperatures);
         if (suggestions.isEmpty()) {
             return;
         }

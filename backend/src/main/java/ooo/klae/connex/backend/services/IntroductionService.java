@@ -92,6 +92,16 @@ public class IntroductionService {
      * tenant context is resolved.
      */
     public List<IntroSuggestionDto> computeSuggestions(int workspaceId, int limit) {
+        return computeSuggestions(workspaceId, limit, null);
+    }
+
+    /**
+     * As {@link #computeSuggestions(int, int)}, but reuses an already-computed warmth map when the
+     * caller has one (the scheduled sweep scores the workspace once for relationship nudges and
+     * shares it here, avoiding a second full rescore). A {@code null} map is scored on demand.
+     */
+    public List<IntroSuggestionDto> computeSuggestions(
+            int workspaceId, int limit, Map<Integer, RelationshipTemperatureDto> temperatures) {
         if (limit <= 0) {
             return List.of();
         }
@@ -105,11 +115,14 @@ public class IntroductionService {
         for (Introduction pair : introductionMapper.findExistingPairs(workspaceId)) {
             existing.add(pairKey(pair.getPersonAId(), pair.getPersonBId()));
         }
-        Map<Integer, RelationshipTemperatureDto> temperatures = new HashMap<>();
-        for (RelationshipTemperatureDto temperature : scoringService.scoreContacts(workspaceId)) {
-            temperatures.put(temperature.getId(), temperature);
+        Map<Integer, RelationshipTemperatureDto> warmth = temperatures;
+        if (warmth == null) {
+            warmth = new HashMap<>();
+            for (RelationshipTemperatureDto temperature : scoringService.scoreContacts(workspaceId)) {
+                warmth.put(temperature.getId(), temperature);
+            }
         }
-        return rankSuggestions(candidates, edges, employment, existing, temperatures, limit);
+        return rankSuggestions(candidates, edges, employment, existing, warmth, limit);
     }
 
     /**

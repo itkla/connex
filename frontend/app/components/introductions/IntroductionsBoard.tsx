@@ -40,13 +40,28 @@ export default function IntroductionsBoard({
     const [suggestions, setSuggestions] = useState(initialSuggestions);
     const [lineage, setLineage] = useState(initialLineage);
 
+    const indexOfSuggestion = (suggestion: IntroSuggestion) => {
+        const key = pairKey(suggestion.personAId, suggestion.personBId);
+        return suggestions.findIndex((s) => pairKey(s.personAId, s.personBId) === key);
+    };
+
     const removeSuggestion = (personAId: number, personBId: number) => {
         const key = pairKey(personAId, personBId);
         setSuggestions((current) => current.filter((s) => pairKey(s.personAId, s.personBId) !== key));
     };
 
+    const restoreSuggestion = (suggestion: IntroSuggestion, index: number) => {
+        const key = pairKey(suggestion.personAId, suggestion.personBId);
+        setSuggestions((current) => {
+            if (current.some((s) => pairKey(s.personAId, s.personBId) === key)) return current;
+            const next = [...current];
+            next.splice(Math.min(Math.max(index, 0), next.length), 0, suggestion);
+            return next;
+        });
+    };
+
     const record = async (suggestion: IntroSuggestion) => {
-        const previous = suggestions;
+        const index = indexOfSuggestion(suggestion);
         removeSuggestion(suggestion.personAId, suggestion.personBId);
         try {
             const created = await recordIntroduction({
@@ -56,13 +71,13 @@ export default function IntroductionsBoard({
             setLineage((current) => [created, ...current]);
             toastSuccess(t('recordedToast', { a: suggestion.personAName, b: suggestion.personBName }));
         } catch (err) {
-            setSuggestions(previous);
+            restoreSuggestion(suggestion, index);
             toastError(err instanceof Error ? err.message : t('recordFailed'));
         }
     };
 
     const dismiss = async (suggestion: IntroSuggestion) => {
-        const previous = suggestions;
+        const index = indexOfSuggestion(suggestion);
         removeSuggestion(suggestion.personAId, suggestion.personBId);
         try {
             await dismissIntroSuggestion({
@@ -70,7 +85,7 @@ export default function IntroductionsBoard({
                 personBId: suggestion.personBId,
             });
         } catch (err) {
-            setSuggestions(previous);
+            restoreSuggestion(suggestion, index);
             toastError(err instanceof Error ? err.message : t('dismissFailed'));
         }
     };

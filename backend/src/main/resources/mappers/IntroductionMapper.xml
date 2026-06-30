@@ -37,10 +37,10 @@
            i.note            AS note,
            i.introduced_at   AS introduced_at
     FROM introduction i
-    JOIN person pa ON pa.id = i.person_a_id
-    JOIN person pb ON pb.id = i.person_b_id
-    LEFT JOIN company ca ON ca.id = pa.company_id
-    LEFT JOIN company cb ON cb.id = pb.company_id
+    JOIN person pa ON pa.id = i.person_a_id AND pa.workspace_id = i.workspace_id
+    JOIN person pb ON pb.id = i.person_b_id AND pb.workspace_id = i.workspace_id
+    LEFT JOIN company ca ON ca.id = pa.company_id AND ca.workspace_id = i.workspace_id
+    LEFT JOIN company cb ON cb.id = pb.company_id AND cb.workspace_id = i.workspace_id
     LEFT JOIN app_user u ON u.id = i.introducer_user_id
   </sql>
 

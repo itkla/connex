@@ -388,7 +388,7 @@ class NotificationReconciliationServiceTest {
         Clock clock = Clock.fixed(Instant.parse("2026-06-23T15:30:00Z"), ZoneOffset.UTC);
 
         when(notificationMapper.findWorkspaceRecipientIds(7)).thenReturn(List.of(42));
-        when(introductionService.computeSuggestions(eq(7), anyInt())).thenReturn(List.of(introSuggestion()));
+        when(introductionService.computeSuggestions(eq(7), anyInt(), any())).thenReturn(List.of(introSuggestion()));
 
         NotificationReconciliationService service = new NotificationReconciliationService(
             notificationMapper, preferenceMapper, dispatcher, new NotificationProperties(),
@@ -427,7 +427,7 @@ class NotificationReconciliationServiceTest {
             scoringService, introductionService, clock, new ObjectMapper());
         service.reconcileWorkspace(7, true);
 
-        verify(introductionService, never()).computeSuggestions(anyInt(), anyInt());
+        verify(introductionService, never()).computeSuggestions(anyInt(), anyInt(), any());
         verify(dispatcher, never()).dispatch(any());
     }
 
@@ -445,8 +445,34 @@ class NotificationReconciliationServiceTest {
             scoringService, introductionService, clock, new ObjectMapper());
         service.reconcileWorkspace(7, false);
 
-        verify(introductionService, never()).computeSuggestions(anyInt(), anyInt());
+        verify(introductionService, never()).computeSuggestions(anyInt(), anyInt(), any());
         verify(dispatcher, never()).dispatch(any());
+    }
+
+    @Test
+    void reconciliationDoesNotResolveIntroOpportunityOnPerMutationPass() {
+        NotificationMapper notificationMapper = Mockito.mock(NotificationMapper.class);
+        PreferenceMapper preferenceMapper = Mockito.mock(PreferenceMapper.class);
+        NotificationDispatcher dispatcher = Mockito.mock(NotificationDispatcher.class);
+        ScoringService scoringService = Mockito.mock(ScoringService.class);
+        IntroductionService introductionService = Mockito.mock(IntroductionService.class);
+        Clock clock = Clock.fixed(Instant.parse("2026-06-23T15:30:00Z"), ZoneOffset.UTC);
+
+        Notification existing = new Notification();
+        existing.setId(55);
+        existing.setWorkspaceId(7);
+        existing.setRecipientId(42);
+        existing.setType(NotificationReconciliationService.INTRO_OPPORTUNITY_TYPE);
+        existing.setDedupeKey("relationship.intro_opportunity:3:8");
+        when(notificationMapper.findWorkspaceReminderNotifications(7)).thenReturn(List.of(existing));
+
+        NotificationReconciliationService service = new NotificationReconciliationService(
+            notificationMapper, preferenceMapper, dispatcher, new NotificationProperties(),
+            scoringService, introductionService, clock, new ObjectMapper());
+        service.reconcileWorkspace(7, false);
+
+        verify(notificationMapper, never()).resolveReminder(anyInt(), anyInt(), anyInt(), any());
+        verify(introductionService, never()).computeSuggestions(anyInt(), anyInt(), any());
     }
 
     private static ooo.klae.connex.backend.dto.IntroSuggestionDto introSuggestion() {
