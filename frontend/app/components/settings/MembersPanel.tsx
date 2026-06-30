@@ -239,6 +239,8 @@ export default function MembersPanel({ currentUserId }: { currentUserId: number 
                 setInvites((prev) => [invite, ...prev.filter((i) => i.email !== invite.email)]);
                 await copyInviteLink(invite.token, true);
                 toastSuccess(t("inviteCreated"));
+            } else {
+                toastError(t("inviteFailed"));
             }
         } catch (err) {
             if (!captureFieldErrors(err)) {

@@ -5,6 +5,7 @@ import java.util.Base64;
 import java.util.List;
 
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.beans.User;
@@ -46,6 +47,7 @@ public class InviteService {
      * from Settings); any other address gets an emailed token invite. Either way,
      * an earlier pending invite for the same email is superseded.
      */
+    @Transactional
     public InviteResultDto createInvite(int workspaceId, User actor, String emailRaw, String roleRaw) {
         workspaceService.requirePermission(workspaceId, actor.getId(), Permission.MEMBER_MANAGE);
         String email = normalizeEmail(emailRaw);

@@ -7,9 +7,12 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.util.List;
+
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 
+import ooo.klae.connex.backend.beans.Notification;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.dto.InvitePreviewDto;
 import ooo.klae.connex.backend.dto.InviteResultDto;
@@ -57,7 +60,12 @@ class InviteServiceTest extends AbstractServiceTest {
         assertEquals("admin", result.getMember().getRole());
         assertEquals("pending", result.getMember().getStatus());
         assertFalse(workspaceMapper.isMember(ws.getId(), existing.getId()));
+
         assertEquals(1, notificationMapper.getUnreadCounts(existing.getId()).getUnread());
+        List<Notification> inbox = notificationMapper.findPage(existing.getId(), "unread", null, null, null, 10, 0);
+        assertEquals(1, inbox.size());
+        assertEquals("workspace.join", inbox.get(0).getType());
+        assertEquals(ws.getId(), inbox.get(0).getWorkspaceId());
     }
 
     @Test
