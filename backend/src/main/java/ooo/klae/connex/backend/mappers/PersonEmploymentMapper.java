@@ -16,6 +16,7 @@ public interface PersonEmploymentMapper {
     int closeCurrent(@Param("workspaceId") int workspaceId, @Param("personId") int personId,
             @Param("endedAt") String endedAt);
     List<PersonEmployment> getByPersonId(@Param("workspaceId") int workspaceId, @Param("personId") int personId);
+    List<PersonEmployment> getAllEmployment(@Param("workspaceId") int workspaceId);
     List<JobMoveDto> getRecentMoves(@Param("workspaceId") int workspaceId, @Param("since") String since,
             @Param("limit") int limit);
 }

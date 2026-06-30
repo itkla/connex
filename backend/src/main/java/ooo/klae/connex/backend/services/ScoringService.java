@@ -202,6 +202,112 @@ public class ScoringService {
     }
 
     /**
+     * Warmth band for every contact with any touch, at each instant in {@code frameMillis} — decayed
+     * against that instant and counting only touches logged on or before it. Touches load once; the
+     * map for a frame omits contacts with no qualifying touch (the caller defaults them to "cold").
+     * Used by the time-travel replay to avoid re-querying per frame.
+     */
+    public List<Map<Integer, String>> contactBandFrames(int workspaceId, long[] frameMillis) {
+        Map<Integer, List<Touch>> byPerson = collectContactTouches(workspaceId);
+        List<Map<Integer, String>> frames = new ArrayList<>(frameMillis.length);
+        for (long t : frameMillis) {
+            Map<Integer, String> bands = new HashMap<>();
+            for (Map.Entry<Integer, List<Touch>> e : byPerson.entrySet()) {
+                bands.put(e.getKey(), temperature(e.getKey(), e.getValue(), t, t).getBand());
+            }
+            frames.add(bands);
+        }
+        return frames;
+    }
+
+    /**
+     * Warmth band for every company at each instant in {@code frameMillis}. A contact's touch is
+     * attributed to the company that contact worked at <em>when the touch occurred</em> (via
+     * {@code employerAt}), so a contact moving employers cools their old account and heats the new
+     * one rather than retroactively re-crediting their whole history; a deal's touch uses the deal's
+     * present-day company. Attribution is fixed once and touches load once. The map for a frame omits
+     * companies with no qualifying touch (the caller defaults them to "cold").
+     */
+    public List<Map<Integer, String>> companyBandFrames(int workspaceId, long[] frameMillis,
+            EmployerResolver employerAt) {
+        List<AttributedTouch> touches =
+            attributeCompanyTouches(collectCompanyAttributableTouches(workspaceId), employerAt);
+        List<Map<Integer, String>> frames = new ArrayList<>(frameMillis.length);
+        for (long t : frameMillis) {
+            Map<Integer, List<Touch>> byCompany = new HashMap<>();
+            for (AttributedTouch at : touches) {
+                if (at.epochMillis() > t) continue;
+                for (Integer cid : at.companies()) add(byCompany, cid, new Touch(at.epochMillis(), at.weight()));
+            }
+            Map<Integer, String> bands = new HashMap<>();
+            for (Map.Entry<Integer, List<Touch>> e : byCompany.entrySet()) {
+                bands.put(e.getKey(), temperature(e.getKey(), e.getValue(), t, t).getBand());
+            }
+            frames.add(bands);
+        }
+        return frames;
+    }
+
+    /** Resolves which company a contact worked at at a given instant, for touch-time attribution. */
+    @FunctionalInterface
+    public interface EmployerResolver {
+        /** The company the contact worked at at {@code epochMillis}, or {@code null} if none/unknown. */
+        Integer employerAt(int personId, long epochMillis);
+    }
+
+    /** A touch carrying the linkage needed to attribute it to a company as of any instant. */
+    private record CompanyTouch(long epochMillis, double weight, Integer personId, Integer dealCompanyId) {}
+
+    /** A touch with its target companies fixed by the contact's employer at the touch's own time. */
+    private record AttributedTouch(long epochMillis, double weight, Set<Integer> companies) {}
+
+    /** Fixes each touch's target companies once, by the contact's employer at the touch's own time. */
+    private static List<AttributedTouch> attributeCompanyTouches(List<CompanyTouch> touches,
+            EmployerResolver employerAt) {
+        List<AttributedTouch> out = new ArrayList<>(touches.size());
+        for (CompanyTouch ct : touches) {
+            Set<Integer> companies = new HashSet<>();
+            if (ct.personId() != null) {
+                Integer cid = employerAt.employerAt(ct.personId(), ct.epochMillis());
+                if (cid != null) companies.add(cid);
+            }
+            if (ct.dealCompanyId() != null) companies.add(ct.dealCompanyId());
+            if (!companies.isEmpty()) out.add(new AttributedTouch(ct.epochMillis(), ct.weight(), companies));
+        }
+        return out;
+    }
+
+    /** Collects every touch with its contact and present-day deal-company linkage, for as-of attribution. */
+    private List<CompanyTouch> collectCompanyAttributableTouches(int workspaceId) {
+        Map<Integer, Integer> dealCompany = new HashMap<>();
+        for (Deal d : dealMapper.getAllDeals(workspaceId)) {
+            if (d.getCompanyId() != null) dealCompany.put(d.getId(), d.getCompanyId());
+        }
+        List<CompanyTouch> out = new ArrayList<>();
+        for (Activity a : activityMapper.getAllActivities(workspaceId)) {
+            Long ts = epoch(a.getTimestamp());
+            if (ts != null) out.add(new CompanyTouch(ts, activityWeight(a.getType()),
+                personId(a.getPerson()), dealCompanyFor(a.getDeal(), dealCompany)));
+        }
+        for (Note n : noteMapper.getAllNotes(workspaceId)) {
+            Long ts = epoch(n.getCreatedAt());
+            if (ts != null) out.add(new CompanyTouch(ts, NOTE_WEIGHT,
+                personId(n.getPerson()), dealCompanyFor(n.getDeal(), dealCompany)));
+        }
+        for (Task t : taskMapper.getAllTasks(workspaceId)) {
+            Long ts = epoch(t.getCreatedAt());
+            if (ts != null) out.add(new CompanyTouch(ts, TASK_WEIGHT,
+                personId(t.getPerson()), dealCompanyFor(t.getDeal(), dealCompany)));
+        }
+        return out;
+    }
+
+    private static Integer dealCompanyFor(Deal deal, Map<Integer, Integer> dealCompany) {
+        Integer did = dealId(deal);
+        return did == null ? null : dealCompany.get(did);
+    }
+
+    /**
      * Collapses a contact's or company's touches into a single temperature reading, decayed against
      * {@code reference} and counting only touches timestamped at or before {@code cutoff}. Pass
      * {@code Long.MAX_VALUE} as the cutoff for a live reading; the replay passes the frame instant so

@@ -33,6 +33,12 @@
     ORDER BY (ended_at IS NULL) DESC, started_at DESC, id DESC
   </select>
 
+  <select id="getAllEmployment" resultMap="PersonEmploymentResult">
+    SELECT id, workspace_id, person_id, company_id, company_name, title, started_at, ended_at, created_at
+    FROM person_employment
+    WHERE workspace_id = #{workspaceId}
+  </select>
+
   <!-- A "move" is a current employment (ended_at IS NULL) whose start is recent, joined to the
        person's most-recent prior (ended) employment as the company they came from. Contacts that
        only ever had one employer (incl. the migration backfill) have no prior row and are excluded. -->
