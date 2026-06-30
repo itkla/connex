@@ -64,17 +64,39 @@ class IntroductionRankingTest {
     }
 
     @Test
-    void excludesContactsAtTheSameCurrentEmployer() {
+    void doesNotSuggestSameEmployerPairWithoutAnotherSignal() {
         List<IntroCandidatePerson> candidates = List.of(
             person(1, "Aoi", 100, "Acme"),
             person(2, "Ben", 100, "Acme"));
-        List<PersonEdge> edges = List.of(edge(5, 1), edge(5, 2));
 
         List<IntroSuggestionDto> suggestions = IntroductionService.rankSuggestions(
-            candidates, edges, List.of(), Set.of(), warmAll(1, 2), 10);
+            candidates, List.of(), List.of(), Set.of(), warmAll(1, 2), 10);
 
         assertTrue(suggestions.isEmpty(),
-            "contacts at the same current employer should not be suggested even with a mutual connection");
+            "a shared current employer alone is not a reason to introduce two colleagues");
+    }
+
+    @Test
+    void surfacesSameEmployerPairWithMutualConnectionButRanksItBelowCrossCompany() {
+        List<IntroCandidatePerson> candidates = List.of(
+            person(1, "Aoi", 100, "Acme"),
+            person(2, "Ben", 100, "Acme"),
+            person(3, "Cho", 200, "Globex"),
+            person(4, "Dan", 300, "Initrode"));
+        List<PersonEdge> edges = List.of(
+            edge(5, 1), edge(5, 2),
+            edge(6, 3), edge(6, 4));
+
+        List<IntroSuggestionDto> suggestions = IntroductionService.rankSuggestions(
+            candidates, edges, List.of(), Set.of(), warmAll(1, 2, 3, 4), 10);
+
+        IntroSuggestionDto intra = find(suggestions, 1, 2);
+        IntroSuggestionDto cross = find(suggestions, 3, 4);
+        assertEquals(1, intra.getMutualConnections());
+        assertEquals(List.of("mutual_connections"), intra.getReasons());
+        assertNull(intra.getSharedCompany());
+        assertTrue(cross.getScore() > intra.getScore(),
+            "an equivalent cross-company pair must rank above the intra-company one");
     }
 
     @Test

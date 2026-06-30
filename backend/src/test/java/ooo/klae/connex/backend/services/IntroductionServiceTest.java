@@ -59,7 +59,17 @@ class IntroductionServiceTest extends AbstractServiceTest {
     }
 
     @Test
-    void doesNotSuggestContactsAtSameCurrentEmployer() {
+    void doesNotSuggestSameEmployerContactsWithoutAnotherSignal() {
+        Company acme = newCompany();
+        Person p1 = engagedPerson(acme);
+        Person p2 = engagedPerson(acme);
+
+        assertFalse(hasPair(introductionService.getSuggestions(50), p1.getId(), p2.getId()),
+            "a shared current employer alone is not a reason to suggest an intro");
+    }
+
+    @Test
+    void surfacesSameEmployerContactsWhenTheyShareAMutualConnection() {
         Company acme = newCompany();
         Person p1 = engagedPerson(acme);
         Person p2 = engagedPerson(acme);
@@ -67,8 +77,10 @@ class IntroductionServiceTest extends AbstractServiceTest {
         connect(hub.getId(), p1.getId());
         connect(hub.getId(), p2.getId());
 
-        assertFalse(hasPair(introductionService.getSuggestions(50), p1.getId(), p2.getId()),
-            "current colleagues should not be suggested even with a mutual connection");
+        IntroSuggestionDto pair = find(introductionService.getSuggestions(50), p1.getId(), p2.getId());
+        assertEquals(1, pair.getMutualConnections());
+        assertTrue(pair.getReasons().contains("mutual_connections"));
+        assertEquals(null, pair.getSharedCompany());
     }
 
     @Test
