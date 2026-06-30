@@ -52,7 +52,16 @@
     "toastSaveFailed": "Failed to save",
     "toastCompanyDeleted": "Company deleted",
     "toastCompaniesDeleted": "{count} companies deleted",
-    "toastDeleteFailed": "Failed to delete"
+    "toastDeleteFailed": "Failed to delete",
+    "addTag": "Add tag",
+    "removeTag": "Remove tag",
+    "toastCompaniesDeletedPartial": "Deleted {succeeded} of {total} companies",
+    "toastCompaniesDeleteFailed": "Couldn't delete {failed} companies",
+    "toastTagAdded": "Tagged {count} companies",
+    "toastTagRemoved": "Removed tag from {count} companies",
+    "toastTagAddedPartial": "Tagged {succeeded} of {total} companies",
+    "toastTagRemovedPartial": "Removed tag from {succeeded} of {total} companies",
+    "toastTagFailed": "Couldn't update {failed} companies"
   },
   "CompaniesActionsMenu": {
     "edit": "Edit",

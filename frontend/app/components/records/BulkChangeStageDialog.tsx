@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, type WheelEvent } from 'react';
+import { useState, type WheelEvent } from 'react';
 import { useTranslations } from 'next-intl';
 import { Loader2Icon } from 'lucide-react';
 import { Bars3BottomLeftIcon } from '@heroicons/react/24/outline';
@@ -52,12 +52,6 @@ export default function BulkChangeStageDialog({ open, onOpenChange, count, stage
     const [isSaving, setIsSaving] = useState(false);
     const [succeeded, setSucceeded] = useState(false);
 
-    useEffect(() => {
-        if (!open) return;
-        setSelected(null);
-        setSucceeded(false);
-    }, [open]);
-
     const handleListWheel = (e: WheelEvent<HTMLDivElement>) => {
         const lineHeightPx = 16;
         const delta = e.deltaMode === 1 ? e.deltaY * lineHeightPx : e.deltaY;
@@ -73,7 +67,7 @@ export default function BulkChangeStageDialog({ open, onOpenChange, count, stage
             if (anySucceeded) {
                 setSucceeded(true);
                 onSuccess?.();
-                setTimeout(() => onOpenChange(false), 900);
+                setTimeout(() => { setSucceeded(false); setSelected(null); onOpenChange(false); }, 900);
             }
         } catch (err) {
             toastError(err instanceof Error ? err.message : t('toastFailed'));
@@ -86,7 +80,7 @@ export default function BulkChangeStageDialog({ open, onOpenChange, count, stage
 
     const handleOpenChange = (next: boolean) => {
         if (!next && isSaving) return;
-        if (!next) setSucceeded(false);
+        if (!next) { setSucceeded(false); setSelected(null); }
         onOpenChange(next);
     };
 

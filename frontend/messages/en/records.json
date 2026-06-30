@@ -176,5 +176,41 @@
   "RecordsCompaniesLayout": {
     "title": "Records / Companies",
     "description": "Manage companies"
+  },
+  "RecordsBulkTagDialog": {
+    "titleAdd": "Add a tag to {count} records",
+    "titleRemove": "Remove a tag from {count} records",
+    "descriptionAdd": "Choose a tag to add to every selected record.",
+    "descriptionRemove": "Choose a tag to remove from every selected record.",
+    "tagLabel": "Tag",
+    "selectTagPlaceholder": "Select a tag",
+    "noTagsFound": "No tags found",
+    "cancel": "Cancel",
+    "applyAdd": "Add tag",
+    "applyRemove": "Remove tag",
+    "toastFailed": "Couldn't update the records"
+  },
+  "RecordsBulkOwnerDialog": {
+    "title": "Assign owner to {count} deals",
+    "description": "Set the owner for every selected deal.",
+    "ownerLabel": "Owner",
+    "unassignedPlaceholder": "Unassigned",
+    "noMembersFound": "No members found",
+    "unassignHint": "Leave empty to remove the owner.",
+    "cancel": "Cancel",
+    "apply": "Assign",
+    "toastFailed": "Couldn't update the deals"
+  },
+  "RecordsBulkStageDialog": {
+    "title": "Move {count} deals to a stage",
+    "description": "Choose the stage to move every selected deal to.",
+    "mixedPipelines": "The selected deals are in different pipelines. Select deals from a single pipeline to change their stage.",
+    "stageLabel": "Stage",
+    "selectStagePlaceholder": "Select a stage",
+    "noStagesFound": "No stages found",
+    "cancel": "Cancel",
+    "apply": "Move",
+    "close": "Close",
+    "toastFailed": "Couldn't move the deals"
   }
 }

@@ -14,6 +14,7 @@ import { PlusIcon, TrashIcon, PencilIcon, EllipsisVerticalIcon, EyeIcon } from '
 import {
     Squares2X2Icon,
     TableCellsIcon,
+    TagIcon,
 } from '@heroicons/react/24/outline';
 
 import RecordsRenderView from '@/app/components/records/RecordsRenderView';
@@ -31,9 +32,11 @@ import CompanyCard from '@/app/components/records/companies/CompanyCard';
 import CompanyAvatar from '@/app/components/records/companies/CompanyAvatar';
 import NewCompanyDialog from '@/app/components/records/companies/NewCompanyDialog';
 import QuickEditCompanySheet, { type CompanyDraft } from '@/app/components/records/companies/QuickEditCompanySheet';
-import { createCompany, deleteCompany, getUsers, getTasks, getDeals, updateCompany, getActivities, getNotes, getCompanyTemperatures, isFieldError, evaluateSegments, getSegmentFields } from '@/app/lib/api';
+import { createCompany, getUsers, getTasks, getDeals, updateCompany, getActivities, getNotes, getCompanyTemperatures, isFieldError, evaluateSegments, getSegmentFields, getTags, bulkAddTagToCompanies, bulkRemoveTagFromCompanies, bulkDeleteCompanies } from '@/app/lib/api';
+import BulkTagDialog from '@/app/components/records/BulkTagDialog';
+import { notifyBulkResult } from '@/app/lib/bulkToast';
 import { uploadCompanyLogo, pickDominantCurrency, parseMysqlDateTime } from '@/app/lib/utils';
-import { type Company, type CreateCompanyPayload, type UpdateCompanyPayload, type Contact, type Activity, type Note, type Task, type User, type Deal, type CompanyMetrics, type LoadStatus, type RelationshipTemperature, type SavedView, type SavedViewConfig, type SegmentDefinition, type SegmentFields } from '@/app/lib/types';
+import { type Company, type CreateCompanyPayload, type UpdateCompanyPayload, type Contact, type Activity, type Note, type Task, type User, type Deal, type CompanyMetrics, type LoadStatus, type RelationshipTemperature, type SavedView, type SavedViewConfig, type SegmentDefinition, type SegmentFields, type Tag } from '@/app/lib/types';
 import { getContacts } from '@/app/lib/api';
 import TemperaturePill from '@/app/components/records/TemperaturePill';
 import { isDealClosed } from '@/app/components/records/deals/dealOutcome';
@@ -262,23 +265,39 @@ export default function CompaniesBrowser({ companies, savedViews }: { companies:
         setDeleteDialogOpen(true);
     }, [setSelectedIds, setDeleteDialogOpen]);
 
+    const selectedCompanyIds = useMemo(() => selectedCompanies.map((c) => c.id), [selectedCompanies]);
+
     const confirmDelete = async () => {
-        if (selectedIds.size === 0) return;
+        if (selectedCompanyIds.length === 0) return;
         setIsDeleting(true);
         try {
-            await Promise.all(Array.from(selectedIds).map((id) => deleteCompany(Number(id))));
-            toastSuccess(
-                selectedIds.size === 1 ? t('toastCompanyDeleted') : t('toastCompaniesDeleted', { count: selectedIds.size }),
-            );
-            setSelectedIds(new Set());
+            const result = await bulkDeleteCompanies(selectedCompanyIds);
+            const anySucceeded = notifyBulkResult(result, {
+                success: (count) => count === 1 ? t('toastCompanyDeleted') : t('toastCompaniesDeleted', { count }),
+                partial: (succeeded, total) => t('toastCompaniesDeletedPartial', { succeeded, total }),
+                failure: (failed) => t('toastCompaniesDeleteFailed', { failed }),
+            });
             setDeleteDialogOpen(false);
-            router.refresh();
+            if (anySucceeded) {
+                setSelectedIds(new Set());
+                router.refresh();
+            }
         } catch (err) {
             toastError(err instanceof Error ? err.message : t('toastDeleteFailed'));
         } finally {
             setIsDeleting(false);
         }
     };
+
+    const [tags, setTags] = useState<Tag[]>([]);
+    useEffect(() => { getTags().then(setTags).catch(() => setTags([])); }, []);
+    const [bulkTag, setBulkTag] = useState<{ open: boolean; mode: 'add' | 'remove' }>({ open: false, mode: 'add' });
+    const applyBulkTag = useCallback((tagId: number) => {
+        return bulkTag.mode === 'add'
+            ? bulkAddTagToCompanies(selectedCompanyIds, tagId)
+            : bulkRemoveTagFromCompanies(selectedCompanyIds, tagId);
+    }, [bulkTag.mode, selectedCompanyIds]);
+    const onBulkTagSuccess = useCallback(() => { setSelectedIds(new Set()); router.refresh(); }, [setSelectedIds, router]);
 
     const viewSelected = () => {
         if (selectedCompanies.length === 1) {
@@ -458,6 +477,15 @@ export default function CompaniesBrowser({ companies, savedViews }: { companies:
                     </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent>
+                    <DropdownMenuItem onSelect={(e) => { e.preventDefault(); setBulkTag({ open: true, mode: 'add' }); }}>
+                        <TagIcon />
+                        {t('addTag')}
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onSelect={(e) => { e.preventDefault(); setBulkTag({ open: true, mode: 'remove' }); }}>
+                        <TagIcon />
+                        {t('removeTag')}
+                    </DropdownMenuItem>
+                    <DropdownMenuSeparator />
                     <DropdownMenuItem variant="destructive" onSelect={(e) => { e.preventDefault(); setDeleteDialogOpen(true); }}>
                         <TrashIcon />
                         {t('delete')}
@@ -608,6 +636,21 @@ export default function CompaniesBrowser({ companies, savedViews }: { companies:
                 getDisplayName={(c) => c.name}
                 isDeleting={isDeleting}
                 confirmDelete={confirmDelete}
+            />
+
+            <BulkTagDialog
+                open={bulkTag.open}
+                onOpenChange={(open) => setBulkTag((s) => ({ ...s, open }))}
+                mode={bulkTag.mode}
+                count={selectedCompanyIds.length}
+                tags={tags}
+                messages={{
+                    success: (count) => t(bulkTag.mode === 'add' ? 'toastTagAdded' : 'toastTagRemoved', { count }),
+                    partial: (succeeded, total) => t(bulkTag.mode === 'add' ? 'toastTagAddedPartial' : 'toastTagRemovedPartial', { succeeded, total }),
+                    failure: (failed) => t('toastTagFailed', { failed }),
+                }}
+                onApply={applyBulkTag}
+                onSuccess={onBulkTagSuccess}
             />
         </div>
     );
