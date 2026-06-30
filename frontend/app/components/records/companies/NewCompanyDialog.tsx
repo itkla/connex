@@ -264,10 +264,27 @@ export default function NewCompanyDialog({
     };
     const pageTransition = reduce ? { duration: 0 } : { duration: 0.34, ease: PAGE_EASE };
 
+    const stageRef = useRef<HTMLDivElement>(null);
+    const [stageHeight, setStageHeight] = useState<number | 'auto'>('auto');
+    useEffect(() => {
+        const el = stageRef.current;
+        if (!el || reduce) return;
+        const measure = () => setStageHeight(el.offsetHeight);
+        measure();
+        const observer = new ResizeObserver(measure);
+        observer.observe(el);
+        return () => observer.disconnect();
+    }, [reduce, open]);
+
     return (
         <Dialog open={open} onOpenChange={handleOpenChange}>
             <DialogContent className="max-h-[90dvh] gap-0 overflow-hidden p-0 sm:max-w-lg">
-                <motion.div layout={!reduce} transition={pageTransition} className="relative overflow-hidden">
+                <motion.div
+                    animate={reduce ? undefined : { height: stageHeight }}
+                    transition={pageTransition}
+                    className="relative overflow-hidden"
+                >
+                    <div ref={stageRef}>
                     <AnimatePresence mode="popLayout" custom={direction} initial={false}>
                         {view === 'company' ? (
                             <motion.div
@@ -280,7 +297,7 @@ export default function NewCompanyDialog({
                                 transition={pageTransition}
                                 className="flex max-h-[85dvh] flex-col"
                             >
-                                <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
+                                <div className="shrink-0">
                 <div aria-hidden className="relative h-24 overflow-hidden">
                     <PixelCard
                         active={status !== 'idle'}
@@ -293,7 +310,7 @@ export default function NewCompanyDialog({
                     <div className="absolute inset-x-0 bottom-0 h-1/2 bg-gradient-to-t from-popover to-transparent" />
                 </div>
 
-                <div className="px-6 pb-6">
+                <div className="px-6">
                     <div className="ncd-pop relative -mt-12 mb-4 w-fit">
                         <label
                             htmlFor="company-logo"
@@ -351,7 +368,10 @@ export default function NewCompanyDialog({
                         <DialogTitle className="text-xl font-semibold tracking-tight">{t('title')}</DialogTitle>
                         <DialogDescription>{t('description')}</DialogDescription>
                     </DialogHeader>
+                </div>
+                                </div>
 
+                                <div className="min-h-0 flex-1 overflow-y-auto px-6 pb-4">
                     <form id="new-company-form" onSubmit={handleSubmit} className="grid gap-5">
                         <div className="ncd-rise grid gap-1.5" style={{ animationDelay: '90ms' }}>
                             <Label htmlFor="company-name">
@@ -508,7 +528,6 @@ export default function NewCompanyDialog({
                             />
                         </div>
                     </form>
-                </div>
                                 </div>
 
                                 <DialogFooter className="shrink-0 border-t border-border/60 bg-popover px-6 py-4">
@@ -553,6 +572,7 @@ export default function NewCompanyDialog({
                             </motion.div>
                         )}
                     </AnimatePresence>
+                    </div>
                 </motion.div>
                 <p aria-live="polite" className="sr-only">
                     {announcement}
