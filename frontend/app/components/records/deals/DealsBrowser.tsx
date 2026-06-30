@@ -9,11 +9,14 @@ import RecordsImportExport from '@/app/components/import/RecordsImportExport';
 import { ButtonGroup } from '@/components/ui/button-group';
 import { toast } from 'sonner';
 import { toastError, toastSuccess } from '@/app/lib/toast';
-import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from '@/components/ui/dropdown-menu';
+import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
 import { PlusIcon, TrashIcon, PencilIcon, EllipsisVerticalIcon, EyeIcon } from '@heroicons/react/24/solid';
 import {
     TableCellsIcon,
     ChevronDownIcon,
+    TagIcon,
+    UserCircleIcon,
+    Bars3BottomLeftIcon,
 } from '@heroicons/react/24/outline';
 import { useReducedMotion } from 'motion/react';
 
@@ -33,14 +36,24 @@ import {
     createDeal,
     closeDeal,
     reopenDeal,
-    deleteDeal,
     updateDeal,
     getCompanies,
     getPipelines,
     getStagesByPipelineId,
     getDealPeople,
+    getTags,
+    getActiveWorkspaceMembers,
+    bulkAddTagToDeals,
+    bulkRemoveTagFromDeals,
+    bulkDeleteDeals,
+    bulkAssignDealOwner,
+    bulkChangeDealStage,
     isFieldError,
 } from '@/app/lib/api';
+import BulkTagDialog from '@/app/components/records/BulkTagDialog';
+import BulkAssignOwnerDialog from '@/app/components/records/BulkAssignOwnerDialog';
+import BulkChangeStageDialog from '@/app/components/records/BulkChangeStageDialog';
+import { notifyBulkResult } from '@/app/lib/bulkToast';
 import { formatCompactCurrency, formatDate, formatDateTime, parseCalendarDate, pickDominantCurrency } from '@/app/lib/utils';
 import {
     type Company,
@@ -50,6 +63,8 @@ import {
     type Stage,
     type Contact,
     type UpdateDealPayload,
+    type Tag,
+    type WorkspaceMember,
 } from '@/app/lib/types';
 import { isDealClosed } from './dealOutcome';
 import CompanyAvatar from '@/app/components/records/companies/CompanyAvatar';
@@ -323,23 +338,53 @@ export default function DealsBrowser({ deals, savedViews }: { deals: Deal[]; sav
         setDeleteDialogOpen(true);
     }, [setSelectedIds, setDeleteDialogOpen]);
 
+    const selectedDealIds = useMemo(() => selectedDeals.map((d) => d.id), [selectedDeals]);
+
     const confirmDelete = async () => {
-        if (selectedIds.size === 0) return;
+        if (selectedDealIds.length === 0) return;
         setIsDeleting(true);
         try {
-            await Promise.all(Array.from(selectedIds).map((id) => deleteDeal(Number(id))));
-            toastSuccess(
-                selectedIds.size === 1 ? t('dealDeleted') : t('dealsDeleted', { count: selectedIds.size }),
-            );
-            setSelectedIds(new Set());
+            const result = await bulkDeleteDeals(selectedDealIds);
+            const anySucceeded = notifyBulkResult(result, {
+                success: (count) => count === 1 ? t('dealDeleted') : t('dealsDeleted', { count }),
+                partial: (succeeded, total) => t('dealsDeletedPartial', { succeeded, total }),
+                failure: (failed) => t('dealsDeleteFailed', { failed }),
+            });
             setDeleteDialogOpen(false);
-            router.refresh();
+            if (anySucceeded) {
+                setSelectedIds(new Set());
+                router.refresh();
+            }
         } catch (err) {
             toastError(err instanceof Error ? err.message : t('failedToDelete'));
         } finally {
             setIsDeleting(false);
         }
     };
+
+    const [tags, setTags] = useState<Tag[]>([]);
+    useEffect(() => { getTags().then(setTags).catch(() => setTags([])); }, []);
+    const [members, setMembers] = useState<WorkspaceMember[]>([]);
+    useEffect(() => { getActiveWorkspaceMembers().then(setMembers).catch(() => setMembers([])); }, []);
+
+    const [bulkTag, setBulkTag] = useState<{ open: boolean; mode: 'add' | 'remove' }>({ open: false, mode: 'add' });
+    const [bulkOwnerOpen, setBulkOwnerOpen] = useState(false);
+    const [bulkStageOpen, setBulkStageOpen] = useState(false);
+
+    const { stageOptions, mixedPipelines } = useMemo(() => {
+        const distinctPipelines = new Set(selectedDeals.map((d) => d.pipeline ?? null));
+        if (distinctPipelines.size > 1) return { stageOptions: [] as Stage[], mixedPipelines: true };
+        const commonPipelineId = [...distinctPipelines][0];
+        const options = commonPipelineId != null ? (stagesByPipeline[commonPipelineId] ?? []) : [];
+        return { stageOptions: options, mixedPipelines: false };
+    }, [selectedDeals, stagesByPipeline]);
+
+    const applyBulkTag = useCallback((tagId: number) => {
+        return bulkTag.mode === 'add'
+            ? bulkAddTagToDeals(selectedDealIds, tagId)
+            : bulkRemoveTagFromDeals(selectedDealIds, tagId);
+    }, [bulkTag.mode, selectedDealIds]);
+    const onBulkSuccess = useCallback(() => { setSelectedIds(new Set()); router.refresh(); }, [setSelectedIds, router]);
 
     const viewSelected = () => {
         if (selectedDeals.length === 1) {
@@ -505,6 +550,23 @@ export default function DealsBrowser({ deals, savedViews }: { deals: Deal[]; sav
                     </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent>
+                    <DropdownMenuItem onSelect={(e) => { e.preventDefault(); setBulkStageOpen(true); }}>
+                        <Bars3BottomLeftIcon />
+                        {t('changeStage')}
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onSelect={(e) => { e.preventDefault(); setBulkOwnerOpen(true); }}>
+                        <UserCircleIcon />
+                        {t('assignOwner')}
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onSelect={(e) => { e.preventDefault(); setBulkTag({ open: true, mode: 'add' }); }}>
+                        <TagIcon />
+                        {t('addTag')}
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onSelect={(e) => { e.preventDefault(); setBulkTag({ open: true, mode: 'remove' }); }}>
+                        <TagIcon />
+                        {t('removeTag')}
+                    </DropdownMenuItem>
+                    <DropdownMenuSeparator />
                     <DropdownMenuItem variant="destructive" onSelect={(e) => { e.preventDefault(); setDeleteDialogOpen(true); }}>
                         <TrashIcon />
                         {t('delete')}
@@ -716,6 +778,50 @@ export default function DealsBrowser({ deals, savedViews }: { deals: Deal[]; sav
                 getDisplayName={(d) => d.name}
                 isDeleting={isDeleting}
                 confirmDelete={confirmDelete}
+            />
+
+            <BulkTagDialog
+                open={bulkTag.open}
+                onOpenChange={(open) => setBulkTag((s) => ({ ...s, open }))}
+                mode={bulkTag.mode}
+                count={selectedDealIds.length}
+                tags={tags}
+                messages={{
+                    success: (count) => t(bulkTag.mode === 'add' ? 'toastTagAdded' : 'toastTagRemoved', { count }),
+                    partial: (succeeded, total) => t(bulkTag.mode === 'add' ? 'toastTagAddedPartial' : 'toastTagRemovedPartial', { succeeded, total }),
+                    failure: (failed) => t('toastTagFailed', { failed }),
+                }}
+                onApply={applyBulkTag}
+                onSuccess={onBulkSuccess}
+            />
+
+            <BulkAssignOwnerDialog
+                open={bulkOwnerOpen}
+                onOpenChange={setBulkOwnerOpen}
+                count={selectedDealIds.length}
+                members={members}
+                messages={{
+                    success: (count) => t('toastOwnerAssigned', { count }),
+                    partial: (succeeded, total) => t('toastOwnerAssignedPartial', { succeeded, total }),
+                    failure: (failed) => t('toastOwnerFailed', { failed }),
+                }}
+                onApply={(ownerId) => bulkAssignDealOwner(selectedDealIds, ownerId)}
+                onSuccess={onBulkSuccess}
+            />
+
+            <BulkChangeStageDialog
+                open={bulkStageOpen}
+                onOpenChange={setBulkStageOpen}
+                count={selectedDealIds.length}
+                stages={stageOptions}
+                mixedPipelines={mixedPipelines}
+                messages={{
+                    success: (count) => t('toastStageChanged', { count }),
+                    partial: (succeeded, total) => t('toastStageChangedPartial', { succeeded, total }),
+                    failure: (failed) => t('toastStageFailed', { failed }),
+                }}
+                onApply={(stageId) => bulkChangeDealStage(selectedDealIds, stageId)}
+                onSuccess={onBulkSuccess}
             />
         </div>
     );

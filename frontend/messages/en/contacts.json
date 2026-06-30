@@ -83,7 +83,22 @@
     "toastFailedRemoveFromCompany": "Failed to remove from company",
     "toastContactDeleted": "Contact deleted",
     "toastContactsDeleted": "{count} contacts deleted",
-    "toastFailedDelete": "Failed to delete"
+    "toastFailedDelete": "Failed to delete",
+    "addTag": "Add tag",
+    "removeTag": "Remove tag",
+    "toastContactsDeletedPartial": "Deleted {succeeded} of {total} contacts",
+    "toastContactsDeleteFailed": "Couldn't delete {failed} contacts",
+    "toastTagAdded": "Tagged {count} contacts",
+    "toastTagRemoved": "Removed tag from {count} contacts",
+    "toastTagAddedPartial": "Tagged {succeeded} of {total} contacts",
+    "toastTagRemovedPartial": "Removed tag from {succeeded} of {total} contacts",
+    "toastTagFailed": "Couldn't update {failed} contacts",
+    "toastSelectAllFailed": "Couldn't select all matching contacts",
+    "allMatchingSelected": "All {total} contacts selected.",
+    "clearSelection": "Clear selection",
+    "pageSelected": "All {count} on this page selected.",
+    "selecting": "Selecting…",
+    "selectAllMatching": "Select all {total}"
   },
   "ContactsCard": {
     "actionsAria": "Contact actions",

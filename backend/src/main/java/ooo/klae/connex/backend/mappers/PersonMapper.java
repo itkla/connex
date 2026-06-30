@@ -18,6 +18,8 @@ public interface PersonMapper {
     List<Person> getPersonsByDealId(@Param("workspaceId") int workspaceId, @Param("dealId") int dealId);
     Person getPersonById(@Param("workspaceId") int workspaceId, @Param("id") int id);
     boolean exists(@Param("workspaceId") int workspaceId, @Param("id") int id);
+    /** True only when the workspace OWNS the contact (excludes records merely shared in); for write scoping. */
+    boolean existsOwned(@Param("workspaceId") int workspaceId, @Param("id") int id);
     List<Person> search(@Param("workspaceId") int workspaceId, @Param("query") String query);
     /** Existing contacts in the workspace whose email matches one of the given (normalized) emails; for import dedup. */
     List<Person> findByEmails(@Param("workspaceId") int workspaceId, @Param("emails") List<String> emails);
@@ -30,6 +32,10 @@ public interface PersonMapper {
             @Param("titles") List<String> titles, @Param("noCompany") boolean noCompany);
     /** Same filter predicates as {@code getPersonsPage} but unpaginated, for sorts computed in Java (warmth). */
     List<Person> getPersonsFiltered(@Param("workspaceId") int workspaceId, @Param("query") String query,
+            @Param("companies") List<String> companies, @Param("titles") List<String> titles,
+            @Param("noCompany") boolean noCompany);
+    /** Ids only for the same filter predicates as {@code getPersonsFiltered}; backs "select all matching". */
+    List<Integer> getPersonIdsFiltered(@Param("workspaceId") int workspaceId, @Param("query") String query,
             @Param("companies") List<String> companies, @Param("titles") List<String> titles,
             @Param("noCompany") boolean noCompany);
     List<String> distinctCompanies(int workspaceId);

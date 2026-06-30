@@ -22,6 +22,8 @@ public interface CompanyMapper {
     List<Company> getByIds(@Param("workspaceId") int workspaceId, @Param("ids") List<Integer> ids);
     List<Company> search(@Param("workspaceId") int workspaceId, @Param("query") String query);
     boolean exists(@Param("workspaceId") int workspaceId, @Param("id") int id);
+    /** True only when the workspace OWNS the company (excludes records merely shared in); for write scoping. */
+    boolean existsOwned(@Param("workspaceId") int workspaceId, @Param("id") int id);
     int insert(Company company);
     /** Bulk-insert companies in one statement (CSV import); generated ids are written back to each bean. */
     int insertBatch(List<Company> companies);

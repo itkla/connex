@@ -13,6 +13,9 @@ import org.springframework.web.bind.annotation.RestController;
 import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.util.LikePattern;
 import ooo.klae.connex.backend.dto.ActivityDto;
+import ooo.klae.connex.backend.dto.BulkDeleteRequest;
+import ooo.klae.connex.backend.dto.BulkOperationResult;
+import ooo.klae.connex.backend.dto.BulkTagRequest;
 import ooo.klae.connex.backend.dto.ConnectionRequestDto;
 import ooo.klae.connex.backend.dto.CustomFieldEntryDto;
 import ooo.klae.connex.backend.dto.CustomFieldValueRequest;
@@ -29,6 +32,7 @@ import ooo.klae.connex.backend.dto.PersonDetailDto;
 import ooo.klae.connex.backend.dto.PersonDto;
 import ooo.klae.connex.backend.dto.TagDto;
 import ooo.klae.connex.backend.dto.TaskDto;
+import ooo.klae.connex.backend.services.BulkOperationService;
 import ooo.klae.connex.backend.services.ConnectionService;
 import ooo.klae.connex.backend.services.EmploymentService;
 import ooo.klae.connex.backend.services.PersonService;
@@ -51,6 +55,7 @@ public class PersonController {
     private final PersonService personService;
     private final EmploymentService employmentService;
     private final ConnectionService connectionService;
+    private final BulkOperationService bulkOperationService;
 
     /**
      * GET endpoint for the "recently moved" feed: contacts who recently changed companies.
@@ -114,6 +119,27 @@ public class PersonController {
         List<PersonDto> items = personService.getPersonsPage(query, sort, dir, companies, titles, noCompany, size, offset)
             .stream().map(PersonDto::from).toList();
         return new PageResponse<>(items, personService.countPersons(query, companies, titles, noCompany));
+    }
+
+    /**
+     * GET endpoint returning the ids of every contact matching the given filter — the same filter
+     * predicates as {@code /page} but unpaginated. Backs "select all matching filter" so a bulk
+     * action can target the whole filtered set rather than just the loaded page.
+     * @param q
+     * @param companies
+     * @param titles
+     * @param noCompany
+     * @return
+     */
+    @GetMapping("/ids")
+    public List<Integer> getPersonIds(
+        @RequestParam(required = false) String q,
+        @RequestParam(required = false) List<String> companies,
+        @RequestParam(required = false) List<String> titles,
+        @RequestParam(defaultValue = "false") boolean noCompany
+    ) {
+        String query = (q == null || q.isBlank()) ? null : LikePattern.containing(q);
+        return personService.getMatchingPersonIds(query, companies, titles, noCompany);
     }
 
     /**
@@ -211,6 +237,36 @@ public class PersonController {
     @PutMapping("/{id}/tags")
     public List<TagDto> replaceTagsForPerson(@PathVariable int id, @RequestBody List<Integer> tagIds) {
         return personService.replaceTags(id, tagIds).stream().map(TagDto::from).toList();
+    }
+
+    /**
+     * POST endpoint to add one tag to many contacts in a single request.
+     * @param request the target contact ids and the tag to add
+     * @return per-record success/failure counts
+     */
+    @PostMapping("/bulk/tags/add")
+    public BulkOperationResult bulkAddTag(@Valid @RequestBody BulkTagRequest request) {
+        return bulkOperationService.addTagToPersons(request.getIds(), request.getTagId());
+    }
+
+    /**
+     * POST endpoint to remove one tag from many contacts in a single request.
+     * @param request the target contact ids and the tag to remove
+     * @return per-record success/failure counts
+     */
+    @PostMapping("/bulk/tags/remove")
+    public BulkOperationResult bulkRemoveTag(@Valid @RequestBody BulkTagRequest request) {
+        return bulkOperationService.removeTagFromPersons(request.getIds(), request.getTagId());
+    }
+
+    /**
+     * POST endpoint to delete many contacts in a single request.
+     * @param request the target contact ids
+     * @return per-record success/failure counts
+     */
+    @PostMapping("/bulk/delete")
+    public BulkOperationResult bulkDelete(@Valid @RequestBody BulkDeleteRequest request) {
+        return bulkOperationService.deletePersons(request.getIds());
     }
 
     /**

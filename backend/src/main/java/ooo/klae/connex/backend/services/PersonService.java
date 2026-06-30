@@ -117,6 +117,16 @@ public class PersonService {
         return personMapper.countPersons(workspaceService.getCurrentWorkspaceId(), query, companies, titles, noCompany);
     }
 
+    /**
+     * Ids of every contact in the active workspace matching the given filter predicates — the same
+     * predicates as {@code getPersonsPage}, but unpaginated. Backs "select all matching filter" so a
+     * bulk action can target the whole filtered set, not just the loaded page.
+     */
+    public List<Integer> getMatchingPersonIds(String query, List<String> companies, List<String> titles,
+            boolean noCompany) {
+        return personMapper.getPersonIdsFiltered(workspaceService.getCurrentWorkspaceId(), query, companies, titles, noCompany);
+    }
+
     public List<String> distinctCompanies() {
         return personMapper.distinctCompanies(workspaceService.getCurrentWorkspaceId());
     }

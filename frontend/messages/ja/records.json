@@ -176,5 +176,41 @@
   "RecordsCompaniesLayout": {
     "title": "レコード / 企業",
     "description": "企業を管理"
+  },
+  "RecordsBulkTagDialog": {
+    "titleAdd": "{count}件のレコードにタグを追加",
+    "titleRemove": "{count}件のレコードからタグを削除",
+    "descriptionAdd": "選択したすべてのレコードに追加するタグを選択してください。",
+    "descriptionRemove": "選択したすべてのレコードから削除するタグを選択してください。",
+    "tagLabel": "タグ",
+    "selectTagPlaceholder": "タグを選択",
+    "noTagsFound": "タグが見つかりません",
+    "cancel": "キャンセル",
+    "applyAdd": "タグを追加",
+    "applyRemove": "タグを削除",
+    "toastFailed": "レコードを更新できませんでした"
+  },
+  "RecordsBulkOwnerDialog": {
+    "title": "{count}件の取引に担当者を割り当て",
+    "description": "選択したすべての取引の担当者を設定します。",
+    "ownerLabel": "担当者",
+    "unassignedPlaceholder": "未割り当て",
+    "noMembersFound": "メンバーが見つかりません",
+    "unassignHint": "担当者を解除するには空欄のままにします。",
+    "cancel": "キャンセル",
+    "apply": "割り当て",
+    "toastFailed": "取引を更新できませんでした"
+  },
+  "RecordsBulkStageDialog": {
+    "title": "{count}件の取引をステージへ移動",
+    "description": "選択したすべての取引を移動するステージを選択してください。",
+    "mixedPipelines": "選択した取引は異なるパイプラインにあります。ステージを変更するには、単一のパイプラインの取引を選択してください。",
+    "stageLabel": "ステージ",
+    "selectStagePlaceholder": "ステージを選択",
+    "noStagesFound": "ステージが見つかりません",
+    "cancel": "キャンセル",
+    "apply": "移動",
+    "close": "閉じる",
+    "toastFailed": "取引を移動できませんでした"
   }
 }
