@@ -123,7 +123,7 @@ export default function CompaniesBrowser({ companies, savedViews }: { companies:
     const segmentsKey = useMemo(() => JSON.stringify(evaluable), [evaluable]);
     useEffect(() => {
         getSegmentFields('company').then(setSegmentFields).catch(() => { setSegmentFields(null); toastError(tSeg('fieldsFailed')); });
-    }, []);
+    }, [tSeg]);
     useEffect(() => {
         if (evaluable.conditions.length === 0) return;
         if (segmentResult?.key === segmentsKey) return;
@@ -387,6 +387,7 @@ export default function CompaniesBrowser({ companies, savedViews }: { companies:
 
     // TODO: move processing to the backend so the frontend doesn't traverse the full tables to derive per-company metrics
 
+    const [now] = useState(() => Date.now());
     const metricsByCompanyId = useMemo(() => {
         const map = new Map<number, CompanyMetrics>();
         for (const company of companies) {
@@ -412,7 +413,6 @@ export default function CompaniesBrowser({ companies, savedViews }: { companies:
             for (const n of notes) userIds.add(n.author);
 
             const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
-            const now = Date.now();
             const firstWeekStart = now - 11 * WEEK_MS;
             const weeklyEngagement = Array.from({ length: 12 }, (_, i) => ({
                 weekStart: firstWeekStart + i * WEEK_MS,
@@ -458,7 +458,7 @@ export default function CompaniesBrowser({ companies, savedViews }: { companies:
             });
         }
         return map;
-    }, [companies, allContacts, allDeals, allTasks, allActivities, allNotes, allUsers]);
+    }, [now, companies, allContacts, allDeals, allTasks, allActivities, allNotes, allUsers]);
 
     const selectionActions = (
         <ButtonGroup className="rounded-full bg-muted">
