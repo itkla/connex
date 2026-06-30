@@ -13,6 +13,7 @@ import java.util.List;
 
 public interface NoteReferenceMapper {
     List<NoteReference> findByNote(@Param("workspaceId") int workspaceId, @Param("noteId") int noteId);
+    List<NoteReference> findByNotes(@Param("workspaceId") int workspaceId, @Param("noteIds") List<Integer> noteIds);
     int insert(NoteReference reference);
     int deleteByNote(@Param("workspaceId") int workspaceId, @Param("noteId") int noteId);
 }

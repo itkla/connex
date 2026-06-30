@@ -114,4 +114,18 @@ public class ReferenceService {
         }
         return ids;
     }
+
+    /**
+     * Renders note content for plain-text contexts (e.g. notification snippets)
+     * by replacing each {@code [Label](type:id)} token with {@code @Label}.
+     *
+     * @param content the raw note content
+     * @return the content with reference tokens flattened to their labels
+     */
+    public static String toPlainText(String content) {
+        if (content == null) {
+            return "";
+        }
+        return TOKEN.matcher(content).replaceAll(match -> "@" + Matcher.quoteReplacement(match.group(1)));
+    }
 }

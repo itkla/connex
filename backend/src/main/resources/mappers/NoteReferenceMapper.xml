@@ -19,6 +19,14 @@
     ORDER BY ref_type, ref_id
   </select>
 
+  <select id="findByNotes" resultMap="NoteReferenceResult">
+    SELECT workspace_id, note_id, ref_type, ref_id, label, created_at
+    FROM note_reference
+    WHERE workspace_id = #{workspaceId} AND note_id IN
+    <foreach item="noteId" collection="noteIds" open="(" separator="," close=")">#{noteId}</foreach>
+    ORDER BY note_id, ref_type, ref_id
+  </select>
+
   <insert id="insert">
     INSERT INTO note_reference (workspace_id, note_id, ref_type, ref_id, label)
     VALUES (#{workspaceId}, #{noteId}, #{refType}, #{refId}, #{label})
