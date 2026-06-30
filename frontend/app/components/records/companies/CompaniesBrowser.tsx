@@ -64,6 +64,16 @@ function diffDraft(original: CompanyDraft, draft: CompanyDraft): boolean {
 
 const searchFields = (c: Company) => [c.name, c.website, c.industry, c.phone, c.address];
 
+function cleanCompanyPayload(payload: CreateCompanyPayload): CreateCompanyPayload {
+    return {
+        name: payload.name.trim(),
+        website: payload.website?.trim() || undefined,
+        industry: payload.industry?.trim() || undefined,
+        phone: payload.phone?.trim() || undefined,
+        address: payload.address?.trim() || undefined,
+    };
+}
+
 export default function CompaniesBrowser({ companies, savedViews }: { companies: Company[]; savedViews: SavedView[] }) {
     const router = useRouter();
     const t = useTranslations('CompaniesBrowser');
@@ -183,10 +193,11 @@ export default function CompaniesBrowser({ companies, savedViews }: { companies:
         setCreationSucceeded(false);
         setIsCreating(true);
         try {
-            const created = await createCompany(newPayload);
+            const companyPayload = cleanCompanyPayload(newPayload);
+            const created = await createCompany(companyPayload);
             if (logoFile) {
                 const logoUrl = await uploadCompanyLogo(created.id, logoFile);
-                await updateCompany(created.id, { ...newPayload, logoUrl });
+                await updateCompany(created.id, { ...companyPayload, logoUrl });
             }
             const flushed = contactsFieldRef.current?.flush() ?? null;
             const contactDrafts = flushed ? [...pendingContacts, flushed] : pendingContacts;
