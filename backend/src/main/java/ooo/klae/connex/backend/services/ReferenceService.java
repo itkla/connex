@@ -1,0 +1,117 @@
+package ooo.klae.connex.backend.services;
+
+import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import ooo.klae.connex.backend.beans.NoteReference;
+import ooo.klae.connex.backend.mappers.NoteReferenceMapper;
+
+import lombok.RequiredArgsConstructor;
+
+/**
+ * Derives the structured @-references for a note from its content tokens
+ * ({@code [Label](type:id)}) and persists them, replacing the previous set.
+ * Tokens are validated against the workspace, so a client can never inject a
+ * reference to an entity outside the current tenant. Phase A resolves only
+ * member ({@code user}) references; contact/deal/company references are handled
+ * separately (issue #190).
+ */
+@Service
+@RequiredArgsConstructor
+public class ReferenceService {
+
+    private final NoteReferenceMapper noteReferenceMapper;
+    private final WorkspaceService workspaceService;
+
+    static final String TYPE_USER = "user";
+    private static final int MAX_REFERENCES = 100;
+    private static final int MAX_LABEL_LENGTH = 255;
+    private static final Pattern TOKEN =
+        Pattern.compile("\\[([^\\]]+)\\]\\((user|person|deal|company):(\\d+)\\)");
+
+    /**
+     * Re-derives and persists a note's @-references from its content, replacing
+     * any previous set. Returns the IDs of members mentioned for the first time
+     * (present now but not before this call), so the caller can notify only
+     * newly-added mentions. The {@code authorId} is never returned or stored
+     * (no self-notifications). Scoped to {@code workspaceId}.
+     *
+     * @param workspaceId the owning workspace
+     * @param noteId      the note whose references are being synced
+     * @param content     the note's current content
+     * @param authorId    the note's author, excluded from mentions
+     * @return the user IDs newly mentioned by this sync
+     */
+    @Transactional
+    public List<Integer> syncReferences(int workspaceId, int noteId, String content, int authorId) {
+        Set<Integer> before = mentionedMemberIds(noteReferenceMapper.findByNote(workspaceId, noteId));
+        List<NoteReference> resolved = resolve(workspaceId, noteId, content, authorId);
+
+        noteReferenceMapper.deleteByNote(workspaceId, noteId);
+        for (NoteReference reference : resolved) {
+            noteReferenceMapper.insert(reference);
+        }
+
+        Set<Integer> added = mentionedMemberIds(resolved);
+        added.removeAll(before);
+        return new ArrayList<>(added);
+    }
+
+    private List<NoteReference> resolve(int workspaceId, int noteId, String content, int authorId) {
+        if (content == null || content.isBlank()) {
+            return List.of();
+        }
+        Map<String, NoteReference> unique = new LinkedHashMap<>();
+        Matcher matcher = TOKEN.matcher(content);
+        while (matcher.find() && unique.size() < MAX_REFERENCES) {
+            String type = matcher.group(2);
+            if (!TYPE_USER.equals(type)) {
+                continue;
+            }
+            int refId;
+            try {
+                refId = Integer.parseInt(matcher.group(3));
+            } catch (NumberFormatException ignored) {
+                continue;
+            }
+            if (refId == authorId || !workspaceService.isMember(workspaceId, refId)) {
+                continue;
+            }
+            String key = type + ":" + refId;
+            if (unique.containsKey(key)) {
+                continue;
+            }
+            unique.put(key, build(workspaceId, noteId, type, refId, matcher.group(1)));
+        }
+        return new ArrayList<>(unique.values());
+    }
+
+    private NoteReference build(int workspaceId, int noteId, String type, int refId, String label) {
+        NoteReference reference = new NoteReference();
+        reference.setWorkspaceId(workspaceId);
+        reference.setNoteId(noteId);
+        reference.setRefType(type);
+        reference.setRefId(refId);
+        reference.setLabel(label.length() > MAX_LABEL_LENGTH ? label.substring(0, MAX_LABEL_LENGTH) : label);
+        return reference;
+    }
+
+    private Set<Integer> mentionedMemberIds(List<NoteReference> references) {
+        Set<Integer> ids = new HashSet<>();
+        for (NoteReference reference : references) {
+            if (TYPE_USER.equals(reference.getRefType())) {
+                ids.add(reference.getRefId());
+            }
+        }
+        return ids;
+    }
+}

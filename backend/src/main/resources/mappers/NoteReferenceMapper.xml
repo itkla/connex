@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="ooo.klae.connex.backend.mappers.NoteReferenceMapper">
+
+  <resultMap id="NoteReferenceResult" type="NoteReference">
+    <result property="workspaceId" column="workspace_id"/>
+    <result property="noteId"      column="note_id"/>
+    <result property="refType"     column="ref_type"/>
+    <result property="refId"       column="ref_id"/>
+    <result property="label"       column="label"/>
+    <result property="createdAt"   column="created_at"/>
+  </resultMap>
+
+  <select id="findByNote" resultMap="NoteReferenceResult">
+    SELECT workspace_id, note_id, ref_type, ref_id, label, created_at
+    FROM note_reference
+    WHERE workspace_id = #{workspaceId} AND note_id = #{noteId}
+    ORDER BY ref_type, ref_id
+  </select>
+
+  <insert id="insert">
+    INSERT INTO note_reference (workspace_id, note_id, ref_type, ref_id, label)
+    VALUES (#{workspaceId}, #{noteId}, #{refType}, #{refId}, #{label})
+  </insert>
+
+  <delete id="deleteByNote">
+    DELETE FROM note_reference WHERE workspace_id = #{workspaceId} AND note_id = #{noteId}
+  </delete>
+</mapper>
