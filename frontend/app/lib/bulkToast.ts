@@ -19,6 +19,7 @@ export type BulkToastMessages = {
  */
 export function notifyBulkResult(result: BulkOperationResult, messages: BulkToastMessages): boolean {
     const total = result.succeeded + result.failed;
+    if (total === 0) return false;
     if (result.failed === 0) {
         toastSuccess(messages.success(result.succeeded));
     } else if (result.succeeded === 0) {

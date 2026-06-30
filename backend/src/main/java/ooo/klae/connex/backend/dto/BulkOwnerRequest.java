@@ -20,5 +20,6 @@ public class BulkOwnerRequest {
     @Size(max = 1000)
     private List<@Positive Integer> ids = new ArrayList<>();
 
+    @Positive
     private Integer ownerId;
 }

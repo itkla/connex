@@ -29,7 +29,7 @@ import { useRecordsBrowser } from '@/app/hooks/useRecordsBrowser';
 import { useServerRecords } from '@/app/hooks/useServerRecords';
 import SavedViewsBar from '@/app/components/records/SavedViewsBar';
 import type { SavedView, SavedViewConfig } from '@/app/lib/types';
-import { type ColumnDef, type ColumnFilterFacet, FILTER_EMPTY, facetChips, countActiveFilters } from '@/app/components/records/types';
+import { type ColumnDef, type ColumnFilterFacet, type SelectionId, FILTER_EMPTY, facetChips, countActiveFilters } from '@/app/components/records/types';
 import ContactCard from '@/app/components/records/contacts/ContactCard';
 import ContactAvatar from '@/app/components/records/contacts/ContactAvatar';
 import NewContactDialog from '@/app/components/records/contacts/NewContactDialog';
@@ -113,7 +113,14 @@ export default function ContactsBrowser({ savedViews }: { savedViews: SavedView[
 
     const selectedContacts = useMemo(() => contacts.filter((c) => selectedIds.has(c.id)), [contacts, selectedIds]);
 
-    useEffect(() => { setSelectedIds(new Set()); }, [contacts, setSelectedIds]);
+    const filterSignature = useMemo(() => JSON.stringify([filterParams, query]), [filterParams, query]);
+    const [matchedSignature, setMatchedSignature] = useState<string | null>(null);
+    const allMatchingActive = matchedSignature === filterSignature;
+    const handleSelectedIdsChange = useCallback((ids: Set<SelectionId>) => {
+        if (ids.size === 0) setMatchedSignature(null);
+        setSelectedIds(ids);
+    }, [setSelectedIds]);
+    useEffect(() => { if (!allMatchingActive) setSelectedIds(new Set()); }, [contacts, allMatchingActive, setSelectedIds]);
 
     const [personFacets, setPersonFacets] = useState<PersonFacets | null>(null);
     const loadFacets = useCallback(() => {
@@ -165,12 +172,13 @@ export default function ContactsBrowser({ savedViews }: { savedViews: SavedView[
         try {
             const ids = await getContactIds({ ...filterParams, q: query || undefined });
             setSelectedIds(new Set(ids));
+            setMatchedSignature(filterSignature);
         } catch (err) {
             toastError(err instanceof Error ? err.message : t('toastSelectAllFailed'));
         } finally {
             setSelectingAll(false);
         }
-    }, [filterParams, query, setSelectedIds, t]);
+    }, [filterParams, query, filterSignature, setSelectedIds, t]);
 
     const [tempByContactId, setTempByContactId] = useState<Map<number, RelationshipTemperature>>(new Map());
     useEffect(() => {
@@ -551,7 +559,7 @@ export default function ContactsBrowser({ savedViews }: { savedViews: SavedView[
                         {allMatchingSelected ? (
                             <>
                                 <span>{t('allMatchingSelected', { total })}</span>
-                                <button type="button" onClick={() => setSelectedIds(new Set())} className="font-medium text-brand transition hover:underline">
+                                <button type="button" onClick={() => { setSelectedIds(new Set()); setMatchedSignature(null); }} className="font-medium text-brand transition hover:underline">
                                     {t('clearSelection')}
                                 </button>
                             </>
@@ -561,7 +569,7 @@ export default function ContactsBrowser({ savedViews }: { savedViews: SavedView[
                                 <button
                                     type="button"
                                     onClick={selectAllMatching}
-                                    disabled={selectingAll}
+                                    disabled={selectingAll || loading}
                                     className="font-medium text-brand transition hover:underline disabled:opacity-50"
                                 >
                                     {selectingAll ? t('selecting') : t('selectAllMatching', { total })}
@@ -593,7 +601,7 @@ export default function ContactsBrowser({ savedViews }: { savedViews: SavedView[
                 detailPath={(item) => `/records/contacts/${item.id}`}
                 displayMode={displayMode}
                 selectedIds={selectedIds}
-                onSelectedIdsChange={setSelectedIds}
+                onSelectedIdsChange={handleSelectedIdsChange}
                 onQuickEdit={quickEditOne}
                 onDelete={deleteOne}
                 entityLabel="contact"

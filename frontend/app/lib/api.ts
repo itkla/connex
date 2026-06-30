@@ -532,6 +532,7 @@ async function runBulk(
     ids: number[],
     call: (chunk: number[]) => Promise<Types.BulkOperationResult>,
 ): Promise<Types.BulkOperationResult> {
+    if (ids.length === 0) return { succeeded: 0, failed: 0, errors: [] };
     if (ids.length <= BULK_CHUNK_SIZE) return call(ids);
     const merged: Types.BulkOperationResult = { succeeded: 0, failed: 0, errors: [] };
     for (let offset = 0; offset < ids.length; offset += BULK_CHUNK_SIZE) {
