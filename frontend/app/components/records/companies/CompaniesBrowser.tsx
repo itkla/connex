@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { useReducedMotion } from 'motion/react';
@@ -31,8 +31,9 @@ import { type ColumnDef, applyRecordFilters, deriveFilterOptions, facetChips, co
 import CompanyCard from '@/app/components/records/companies/CompanyCard';
 import CompanyAvatar from '@/app/components/records/companies/CompanyAvatar';
 import NewCompanyDialog from '@/app/components/records/companies/NewCompanyDialog';
+import { type CompanyContactsFieldHandle, type PendingContact, type PendingContactDraft } from '@/app/components/records/companies/CompanyContactsField';
 import QuickEditCompanySheet, { type CompanyDraft } from '@/app/components/records/companies/QuickEditCompanySheet';
-import { createCompany, getUsers, getTasks, getDeals, updateCompany, getActivities, getNotes, getCompanyTemperatures, isFieldError, evaluateSegments, getSegmentFields, getTags, bulkAddTagToCompanies, bulkRemoveTagFromCompanies, bulkDeleteCompanies } from '@/app/lib/api';
+import { createCompany, createContact, getUsers, getTasks, getDeals, updateCompany, getActivities, getNotes, getCompanyTemperatures, isFieldError, evaluateSegments, getSegmentFields, getTags, bulkAddTagToCompanies, bulkRemoveTagFromCompanies, bulkDeleteCompanies } from '@/app/lib/api';
 import BulkTagDialog from '@/app/components/records/BulkTagDialog';
 import { notifyBulkResult } from '@/app/lib/bulkToast';
 import { uploadCompanyLogo, pickDominantCurrency, parseMysqlDateTime } from '@/app/lib/utils';
@@ -100,6 +101,13 @@ export default function CompaniesBrowser({ companies, savedViews }: { companies:
     const [creationSucceeded, setCreationSucceeded] = useState(false);
     const [newPayload, setNewPayload] = useState<CreateCompanyPayload>(emptyDraft);
     const [logoFile, setLogoFile] = useState<File | null>(null);
+    const [pendingContacts, setPendingContacts] = useState<PendingContact[]>([]);
+    const contactsFieldRef = useRef<CompanyContactsFieldHandle>(null);
+
+    const addPendingContact = (draft: PendingContactDraft) =>
+        setPendingContacts((prev) => [...prev, { tempId: crypto.randomUUID(), ...draft }]);
+    const removePendingContact = (tempId: string) =>
+        setPendingContacts((prev) => prev.filter((c) => c.tempId !== tempId));
 
     const [allContacts, setAllContacts] = useState<Contact[]>([]);
     const [allDeals, setAllDeals] = useState<Deal[]>([]);
@@ -166,6 +174,7 @@ export default function CompaniesBrowser({ companies, savedViews }: { companies:
         if (!open) {
             setNewPayload(emptyDraft);
             setLogoFile(null);
+            setPendingContacts([]);
             setCreationSucceeded(false);
         }
     };
@@ -178,6 +187,27 @@ export default function CompaniesBrowser({ companies, savedViews }: { companies:
             if (logoFile) {
                 const logoUrl = await uploadCompanyLogo(created.id, logoFile);
                 await updateCompany(created.id, { ...newPayload, logoUrl });
+            }
+            const flushed = contactsFieldRef.current?.flush() ?? null;
+            const contactDrafts = flushed ? [...pendingContacts, flushed] : pendingContacts;
+            if (contactDrafts.length > 0) {
+                const results = await Promise.allSettled(
+                    contactDrafts.map((c) =>
+                        createContact({
+                            name: c.name.trim(),
+                            email: c.email.trim(),
+                            phone: c.phone.trim(),
+                            title: c.title.trim(),
+                            companyId: created.id,
+                        }),
+                    ),
+                );
+                const failed = results.filter((r) => r.status === 'rejected').length;
+                if (failed === contactDrafts.length) {
+                    toastError(t('toastContactsAllFailed', { count: failed }));
+                } else if (failed > 0) {
+                    toastError(t('toastContactsPartial', { succeeded: contactDrafts.length - failed, total: contactDrafts.length }));
+                }
             }
             toastSuccess(t('toastCompanyCreated'));
             setIsCreating(false);
@@ -625,6 +655,10 @@ export default function CompaniesBrowser({ companies, savedViews }: { companies:
                 isSuccess={creationSucceeded}
                 existingCompanies={companies}
                 createNewCompany={createNewCompany}
+                pendingContacts={pendingContacts}
+                addPendingContact={addPendingContact}
+                removePendingContact={removePendingContact}
+                contactsFieldRef={contactsFieldRef}
             />
 
             <DeleteRecordDialog

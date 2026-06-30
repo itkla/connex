@@ -61,7 +61,9 @@
     "toastTagRemoved": "{count}件の会社からタグを削除しました",
     "toastTagAddedPartial": "{total}件中{succeeded}件の会社にタグを付けました",
     "toastTagRemovedPartial": "{total}件中{succeeded}件の会社からタグを削除しました",
-    "toastTagFailed": "{failed}件の会社を更新できませんでした"
+    "toastTagFailed": "{failed}件の会社を更新できませんでした",
+    "toastContactsPartial": "{total}人中{succeeded}人を追加しました",
+    "toastContactsAllFailed": "企業は作成しましたが、{count}人を追加できませんでした"
   },
   "CompaniesActionsMenu": {
     "edit": "編集",
@@ -125,6 +127,19 @@
     "placeholderPhone": "+1 555 123 4567",
     "labelAddress": "住所",
     "placeholderAddress": "123 Main St",
+    "labelContacts": "担当者",
+    "contactsCount": "{count} 件追加済み",
+    "addContact": "担当者を追加",
+    "addAnotherContact": "さらに追加",
+    "contactNamePlaceholder": "氏名",
+    "contactEmailPlaceholder": "メール",
+    "contactTitlePlaceholder": "役職",
+    "contactPhonePlaceholder": "電話",
+    "contactAdd": "追加",
+    "contactCancel": "キャンセル",
+    "contactNameRequired": "名前は必須です",
+    "contactEmailInvalid": "有効なメールアドレスを入力してください",
+    "removeContactAria": "{name} を削除",
     "cancel": "キャンセル",
     "create": "作成"
   },

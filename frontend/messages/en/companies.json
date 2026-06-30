@@ -61,7 +61,9 @@
     "toastTagRemoved": "Removed tag from {count} companies",
     "toastTagAddedPartial": "Tagged {succeeded} of {total} companies",
     "toastTagRemovedPartial": "Removed tag from {succeeded} of {total} companies",
-    "toastTagFailed": "Couldn't update {failed} companies"
+    "toastTagFailed": "Couldn't update {failed} companies",
+    "toastContactsPartial": "Added {succeeded} of {total} people",
+    "toastContactsAllFailed": "Company created, but couldn't add {count} people"
   },
   "CompaniesActionsMenu": {
     "edit": "Edit",
@@ -125,6 +127,19 @@
     "placeholderPhone": "+1 555 123 4567",
     "labelAddress": "Address",
     "placeholderAddress": "123 Main St",
+    "labelContacts": "People",
+    "contactsCount": "{count} added",
+    "addContact": "Add a person",
+    "addAnotherContact": "Add another",
+    "contactNamePlaceholder": "Full name",
+    "contactEmailPlaceholder": "Email",
+    "contactTitlePlaceholder": "Title",
+    "contactPhonePlaceholder": "Phone",
+    "contactAdd": "Add",
+    "contactCancel": "Cancel",
+    "contactNameRequired": "Name is required",
+    "contactEmailInvalid": "Enter a valid email",
+    "removeContactAria": "Remove {name}",
     "cancel": "Cancel",
     "create": "Create"
   },
