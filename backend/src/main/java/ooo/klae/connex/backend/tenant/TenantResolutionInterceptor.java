@@ -50,7 +50,8 @@ public class TenantResolutionInterceptor implements HandlerInterceptor {
         if (role == null) {
             throw new ForbiddenException("Not a member of workspace " + candidate);
         }
-        tenantContext.set(candidate, user.getId(), role);
+        int orgId = workspaceService.getOrgId(candidate);
+        tenantContext.set(candidate, orgId, user.getId(), role);
         return true;
     }
 

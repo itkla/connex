@@ -108,9 +108,13 @@
   </update>
 
   <insert id="insert" useGeneratedKeys="true" keyProperty="id">
-    INSERT INTO workspace (name, slug)
-    VALUES (#{name}, #{slug})
+    INSERT INTO workspace (name, slug<if test="orgId != 0">, org_id</if>)
+    VALUES (#{name}, #{slug}<if test="orgId != 0">, #{orgId}</if>)
   </insert>
+
+  <select id="getOrgId" resultType="int">
+    SELECT org_id FROM workspace WHERE id = #{workspaceId}
+  </select>
 
   <insert id="addMember">
     INSERT INTO workspace_member (workspace_id, user_id, role)

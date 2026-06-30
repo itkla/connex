@@ -23,6 +23,7 @@ import ooo.klae.connex.backend.tenant.TenantContext;
 public class AutomationExecutor {
 
     private final TenantContext tenantContext;
+    private final WorkspaceService workspaceService;
 
     /**
      * Runs {@code work} with {@code principal} installed in the security context and {@code workspaceId}
@@ -34,16 +35,17 @@ public class AutomationExecutor {
         Integer previousWorkspace = hadTenant ? tenantContext.getWorkspaceId() : null;
         Integer previousUser = hadTenant ? tenantContext.getUserId() : null;
         String previousRole = hadTenant ? tenantContext.getRole() : null;
+        Integer previousOrg = hadTenant ? tenantContext.getOrgId() : null;
 
         SecurityContext context = SecurityContextHolder.createEmptyContext();
         context.setAuthentication(new UsernamePasswordAuthenticationToken(principal, null, principal.getAuthorities()));
         SecurityContextHolder.setContext(context);
-        tenantContext.set(workspaceId, principal.getId(), role);
+        tenantContext.set(workspaceId, workspaceService.getOrgId(workspaceId), principal.getId(), role);
         try {
             return work.get();
         } finally {
             if (hadTenant) {
-                tenantContext.set(previousWorkspace, previousUser, previousRole);
+                tenantContext.set(previousWorkspace, previousOrg, previousUser, previousRole);
             } else {
                 tenantContext.clear();
             }

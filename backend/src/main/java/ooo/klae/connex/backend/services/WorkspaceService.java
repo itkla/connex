@@ -15,6 +15,7 @@ import org.springframework.stereotype.Service;
 
 import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.beans.Notification;
+import ooo.klae.connex.backend.beans.Organization;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.beans.Workspace;
 import ooo.klae.connex.backend.beans.WorkspaceRole;
@@ -24,6 +25,7 @@ import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.NotificationMapper;
+import ooo.klae.connex.backend.mappers.OrganizationMapper;
 import ooo.klae.connex.backend.mappers.RoleMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
 import ooo.klae.connex.backend.tenant.Permission;
@@ -39,6 +41,7 @@ import ooo.klae.connex.backend.tenant.TenantContext;
 @RequiredArgsConstructor
 public class WorkspaceService {
     private final WorkspaceMapper workspaceMapper;
+    private final OrganizationMapper organizationMapper;
     private final RoleMapper roleMapper;
     private final NotificationMapper notificationMapper;
     private final TenantContext tenantContext;
@@ -89,6 +92,23 @@ public class WorkspaceService {
             return tenantContext.getWorkspaceId();
         }
         return fallbackWorkspaceId(currentUser().getId());
+    }
+
+    /** The organization owning the active workspace. */
+    public int getCurrentOrgId() {
+        if (tenantContext.isResolved()) {
+            return tenantContext.getOrgId();
+        }
+        return getOrgId(fallbackWorkspaceId(currentUser().getId()));
+    }
+
+    /** The organization that owns the given workspace. */
+    public int getOrgId(int workspaceId) {
+        Integer orgId = workspaceMapper.getOrgId(workspaceId);
+        if (orgId == null) {
+            throw new ResourceNotFoundException("Workspace not found: " + workspaceId);
+        }
+        return orgId;
     }
 
     public Workspace getCurrentWorkspace() {
@@ -142,11 +162,29 @@ public class WorkspaceService {
             throw new ForbiddenException("Workspace creation is disabled on this instance");
         }
         Workspace workspace = new Workspace();
+        workspace.setOrgId(orgIdForOwner(ownerUserId, name));
         workspace.setName(name.trim());
         workspace.setSlug(generateSlug(name));
         workspaceMapper.insert(workspace);
         workspaceMapper.addMember(workspace.getId(), ownerUserId, "owner");
         return new WorkspaceMembershipDto(workspace.getId(), workspace.getName(), workspace.getSlug(), "owner");
+    }
+
+    /**
+     * The organization a new workspace for {@code ownerUserId} joins: the org of a
+     * workspace they already belong to (so a user's own workspaces stay in one org),
+     * or a freshly created organization for a first-time owner.
+     */
+    private int orgIdForOwner(int ownerUserId, String name) {
+        List<Workspace> existing = workspaceMapper.getWorkspacesForUser(ownerUserId);
+        if (!existing.isEmpty()) {
+            return getOrgId(existing.getFirst().getId());
+        }
+        Organization organization = new Organization();
+        organization.setName(name.trim());
+        organization.setSlug(generateSlug(name));
+        organizationMapper.insert(organization);
+        return organization.getId();
     }
 
     private String generateSlug(String name) {

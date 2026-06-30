@@ -52,7 +52,7 @@ class TenantScopeInterceptorTest {
     @Test
     void allowsScopedStatementWhenResolved() {
         bindRequest();
-        tenantContext.set(1, 1, "owner");
+        tenantContext.set(1, 1, 1, "owner");
         assertDoesNotThrow(() -> interceptor.enforce(NS + "CompanyMapper.getAllCompanies"));
     }
 

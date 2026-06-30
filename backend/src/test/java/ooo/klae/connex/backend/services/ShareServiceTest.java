@@ -12,10 +12,12 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 
 import ooo.klae.connex.backend.beans.Company;
+import ooo.klae.connex.backend.beans.Organization;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.beans.Workspace;
 import ooo.klae.connex.backend.dto.WorkspaceMembershipDto;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
+import ooo.klae.connex.backend.mappers.OrganizationMapper;
 import ooo.klae.connex.backend.tenant.TenantContext;
 
 class ShareServiceTest extends AbstractServiceTest {
@@ -23,6 +25,7 @@ class ShareServiceTest extends AbstractServiceTest {
     @Autowired ShareService shareService;
     @Autowired WorkspaceService workspaceService;
     @Autowired TenantContext tenantContext;
+    @Autowired OrganizationMapper organizationMapper;
 
     @AfterEach
     void clearContext() {
@@ -46,7 +49,7 @@ class ShareServiceTest extends AbstractServiceTest {
         assertNull(companyMapper.getCompanyById(b.getId(), company.getId()));
         assertFalse(companyMapper.exists(b.getId(), company.getId()));
 
-        tenantContext.set(a.getId(), currentUser.getId(), "owner");
+        tenantContext.set(a.getId(), workspaceService.getOrgId(a.getId()), currentUser.getId(), "owner");
         shareService.share("company", company.getId(), b.getId(), false);
         tenantContext.clear();
 
@@ -62,7 +65,7 @@ class ShareServiceTest extends AbstractServiceTest {
         WorkspaceMembershipDto b = workspaceService.createWorkspace("Grantee2 WS", currentUser.getId());
         Company company = companyIn(a.getId());
 
-        tenantContext.set(a.getId(), currentUser.getId(), "owner");
+        tenantContext.set(a.getId(), workspaceService.getOrgId(a.getId()), currentUser.getId(), "owner");
         shareService.share("company", company.getId(), b.getId(), false);
         assertNotNull(companyMapper.getCompanyById(b.getId(), company.getId()));
 
@@ -84,8 +87,29 @@ class ShareServiceTest extends AbstractServiceTest {
         User outsider = newUser();
         workspaceMapper.addMember(foreign.getId(), outsider.getId(), "owner");
 
-        tenantContext.set(a.getId(), currentUser.getId(), "owner");
+        tenantContext.set(a.getId(), workspaceService.getOrgId(a.getId()), currentUser.getId(), "owner");
         assertThrows(ForbiddenException.class,
             () -> shareService.share("company", company.getId(), foreign.getId(), false));
+    }
+
+    @Test
+    void cannotShareAcrossOrganizations() {
+        WorkspaceMembershipDto a = workspaceService.createWorkspace("Org1 WS", currentUser.getId());
+        Company company = companyIn(a.getId());
+
+        Organization otherOrg = new Organization();
+        otherOrg.setName("Other Org");
+        otherOrg.setSlug("other-org-" + unique());
+        organizationMapper.insert(otherOrg);
+        Workspace otherOrgWs = new Workspace();
+        otherOrgWs.setOrgId(otherOrg.getId());
+        otherOrgWs.setName("Other Org WS");
+        otherOrgWs.setSlug("other-org-ws-" + unique());
+        workspaceMapper.insert(otherOrgWs);
+        workspaceMapper.addMember(otherOrgWs.getId(), currentUser.getId(), "owner");
+
+        tenantContext.set(a.getId(), workspaceService.getOrgId(a.getId()), currentUser.getId(), "owner");
+        assertThrows(ForbiddenException.class,
+            () -> shareService.share("company", company.getId(), otherOrgWs.getId(), false));
     }
 }

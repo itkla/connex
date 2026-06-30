@@ -30,6 +30,7 @@ public interface WorkspaceMapper {
     Integer getLastActiveWorkspaceId(int userId);
     int setLastActiveWorkspaceId(@Param("userId") int userId, @Param("workspaceId") int workspaceId);
     int insert(Workspace workspace);
+    Integer getOrgId(int workspaceId);
     int addMember(
         @Param("workspaceId") int workspaceId,
         @Param("userId") int userId,

@@ -7,6 +7,7 @@ import org.springframework.stereotype.Service;
 import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.dto.ShareDto;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
+import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.ShareMapper;
 import ooo.klae.connex.backend.tenant.Permission;
@@ -51,6 +52,9 @@ public class ShareService {
             throw new BadRequestException("A record cannot be shared with its own workspace");
         }
         workspaceService.requireMember(targetWorkspaceId, actorId);
+        if (workspaceService.getOrgId(targetWorkspaceId) != workspaceService.getOrgId(workspaceId)) {
+            throw new ForbiddenException("A record cannot be shared across organizations");
+        }
         switch (type) {
             case COMPANY -> shareMapper.shareCompany(entityId, targetWorkspaceId, actorId, canEdit);
             case PERSON -> shareMapper.sharePerson(entityId, targetWorkspaceId, actorId, canEdit);
