@@ -81,6 +81,7 @@ When in doubt, open a reference page and mirror it.
 
 1. `pnpm lint` and `pnpm exec tsc --noEmit` clean.
 2. **Verify in a real browser — this is the frontend test gate.** Run `pnpm dev`, then use the **Playwright MCP** to open the implemented page and confirm it renders and the flow completes with no console errors. There is no unit-test runner, so exercising the real UI is mandatory, not optional. (Requires the Playwright MCP server connected — if absent, say so, don't skip.)
+   - **Run the Playwright MCP in `--isolated` mode.** Several agents share this one clone, and Chrome lets only one process hold a profile at a time — the default shared profile serializes browsing to a single agent and fails the rest with `Browser is already in use for …/mcp-chrome-… use --isolated`. With `--isolated`, each agent gets its own fresh browser profile/context, so concurrent verification doesn't collide. Configure it where the server is registered, e.g. `npx @playwright/mcp@latest --isolated` (add `--headless` for CI/headless runs). Trade-off: an isolated profile starts logged-out, so make session login part of the verification flow (hit `/auth/login`, authenticate, then drive the page) rather than relying on a persisted session.
 3. `/code-review` **and** adversarial multi-agent review; address findings. Auth, invite, sharing, or permissions UI changes also get `/security-review`.
 
 ## Commands

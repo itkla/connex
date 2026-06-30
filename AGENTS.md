@@ -123,7 +123,7 @@ A change is done only when **all** of these pass:
 2. Use the **Playwright MCP** to open the implemented page and view it as it actually renders.
 3. Confirm the operation/flow completes successfully — no console errors, correct rendered result.
 
-> Note: the Playwright MCP server must be connected for this. If it isn't available, say so rather than skipping verification.
+> Note: the Playwright MCP server must be connected for this. If it isn't available, say so rather than skipping verification. Run it in **`--isolated`** mode — several agents share this clone, and Chrome locks its profile to one process, so the default shared profile errors with `Browser is already in use … use --isolated`; isolated mode gives each agent its own browser profile (see `frontend/AGENTS.md` for the detail and the logged-out-session caveat).
 
 ## Review
 
@@ -142,6 +142,15 @@ Treat GitHub as the system of record. For any tracked piece of work:
 2. **Advance the project board.** If the repo has a GitHub Project board configured, move the related issue down its pipeline as work progresses (e.g. Todo → In Progress → In Review → Done) using `gh project` / `gh issue edit`. If `gh project` reports none, skip this step rather than erroring.
 3. **Commit convention.** Follow Conventional Commits (`feat:`, `fix:`, `chore:`, `refactor:`, …). Keep messages **short and brief** — a single clear subject line, no body unless essential. **Do not self-sign** — no `Co-Authored-By`, no "Generated with" trailers, no sign-off lines.
 4. **Branch → push → merge → close.** Never commit straight to `main`. Work on a branch named `type/short-description` (e.g. `feat/employment-history`, `fix/tenant-leak` — matching the existing branch style), push it, open/merge the PR, and close the related issues on merge (link them with `Closes #N` so they auto-close).
+5. **Work in a dedicated git worktree — several agents share this clone.** Multiple agents run concurrently against the same checkout (`/home/dev/Projects/connex`), so they share one HEAD and one index: another agent's `git checkout`/`git switch` can move HEAD out from under you mid-task (your commits then land on *its* branch), and a broad `git add -A` can sweep its uncommitted files into your commit. Before starting a unit of work, branch into your own worktree off the latest `main` and do all edits/commits/builds/pushes there:
+
+   ```bash
+   git fetch origin
+   git worktree add /tmp/connex-<short-desc> -b type/short-description origin/main
+   cd /tmp/connex-<short-desc>   # work here; git worktree remove --force <path> when merged
+   ```
+
+   The shared MySQL is fine across worktrees (Flyway just migrates it). Always prefer explicit `git add <paths>` over `git add -A`, and never assume the shared clone's current branch is yours — run `git branch --show-current` in your worktree. If you spawn agents that mutate files in parallel, give them `isolation: "worktree"`. **Recovery if commits tangled anyway:** create a fresh worktree at your branch's last good commit and `git cherry-pick` your stranded commits onto it (verify each with `git show --stat`); don't rewrite a sibling's branch to fix it.
 
 **Plans live in issues, not the repo.** Prefer capturing implementation plans, design notes, and task breakdowns as a GitHub issue (`gh issue create`) over committing `*_PLAN.md` or scratch markdown to the tree. Put the plan in the issue body, refine it with `gh issue comment` / `gh issue edit` as it evolves, and close it on completion — this keeps plans linked to the work, reviewable/commentable, and out of the code diff. Transient working notes can stay in your scratchpad, but never commit them. (Long-lived architecture/reference docs that genuinely belong in the repo — like `MULTITENANCY_PLAN.md` — are the exception.)
 
