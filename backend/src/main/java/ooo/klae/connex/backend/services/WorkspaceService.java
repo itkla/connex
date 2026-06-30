@@ -161,6 +161,19 @@ public class WorkspaceService {
         if (!selfServiceCreationAllowed) {
             throw new ForbiddenException("Workspace creation is disabled on this instance");
         }
+        return provisionWorkspace(name, ownerUserId);
+    }
+
+    /**
+     * Creates the first owner's workspace during instance bootstrap, bypassing the
+     * self-service-creation flag (the bootstrap actor is the trusted operator, not a
+     * self-service user). Only {@code BootstrapRunner} should call this.
+     */
+    WorkspaceMembershipDto createWorkspaceForBootstrap(String name, int ownerUserId) {
+        return provisionWorkspace(name, ownerUserId);
+    }
+
+    private WorkspaceMembershipDto provisionWorkspace(String name, int ownerUserId) {
         Workspace workspace = new Workspace();
         workspace.setOrgId(orgIdForOwner(ownerUserId, name));
         workspace.setName(name.trim());

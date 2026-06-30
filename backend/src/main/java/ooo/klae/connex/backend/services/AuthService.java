@@ -75,6 +75,26 @@ public class AuthService {
     }
 
     /**
+     * Provisions the initial owner account and its workspace during instance bootstrap
+     * (see {@code BootstrapRunner}), bypassing the self-service-creation flag because the
+     * bootstrap actor is the trusted operator rather than a self-service user. Not exposed over HTTP.
+     */
+    @Transactional
+    public User provisionBootstrapOwner(RegisterDto request) {
+        User user = new User();
+        user.setUsername(request.getUsername());
+        user.setDisplayName(request.getDisplayName());
+        user.setEmail(request.getEmail());
+        user.setTimezone(TimezoneSupport.validate(request.getTimezone(), "UTC"));
+        user.setPasswordHash(passwordEncoder.encode(request.getPassword()));
+        userMapper.insert(user);
+        workspaceService.createWorkspaceForBootstrap(user.getDisplayName() + "'s Workspace", user.getId());
+        auditService.record("auth.bootstrap", "user", user.getId(), user.getDisplayName(),
+                "Bootstrap owner provisioned", null);
+        return user;
+    }
+
+    /**
      * Logs in a user with the provided login data.
      * @param request
      * @param httpRequest
