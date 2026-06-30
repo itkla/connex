@@ -46,15 +46,26 @@ public class AuthService {
     private String signupMode;
 
     /**
+     * Public self-service registration entry point: enforces the instance signup mode, then
+     * delegates to {@link #register}. A non-{@code open} mode (reserved for locked-down on-prem)
+     * refuses anonymous self-service signup, while the permission-gated admin create path
+     * ({@code UserController.createUser}) calls {@link #register} directly and is unaffected.
+     */
+    @Transactional
+    public User registerSelfService(RegisterDto request) {
+        if (signupMode == null || !"open".equalsIgnoreCase(signupMode.trim())) {
+            throw new ForbiddenException("Self-service registration is disabled on this instance");
+        }
+        return register(request);
+    }
+
+    /**
      * Registers a new user with the provided registration data.
      * @param request
      * @return
      */
     @Transactional
     public User register(RegisterDto request) {
-        if (!"open".equalsIgnoreCase(signupMode)) {
-            throw new ForbiddenException("Self-service registration is disabled on this instance");
-        }
         try {
             if (userMapper.getUserByUsername(request.getUsername()) != null
                     || userMapper.getUserByEmail(request.getEmail()) != null) {
