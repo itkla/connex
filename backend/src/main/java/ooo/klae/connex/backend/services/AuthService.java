@@ -48,12 +48,9 @@ public class AuthService {
     @Transactional
     public User register(RegisterDto request) {
         try {
-            if (userMapper.getUserByUsername(request.getUsername()) != null) {
-                throw new DuplicateResourceException("username", "Username is already taken");
-            }
-
-            if (userMapper.getUserByEmail(request.getEmail()) != null) {
-                throw new DuplicateResourceException("email", "Email is already registered");
+            if (userMapper.getUserByUsername(request.getUsername()) != null
+                    || userMapper.getUserByEmail(request.getEmail()) != null) {
+                throw new DuplicateResourceException("Registration could not be completed");
             }
 
             User user = new User();

@@ -102,6 +102,10 @@ export function AuthForm({ mode, redirectUrl }: { mode: AuthMode; redirectUrl: s
             return tForm("formHasErrors");
         }
 
+        if (mode === "register" && err.status === 409) {
+            return tMode("registerFailed");
+        }
+
         return err.message;
     }
 

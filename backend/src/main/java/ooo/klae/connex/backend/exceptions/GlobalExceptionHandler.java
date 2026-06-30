@@ -59,16 +59,6 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(DataIntegrityViolationException.class)
     public ResponseEntity<Map<String, String>> dataIntegrity(DataIntegrityViolationException ex) {
-        String message = ex.getMostSpecificCause().getMessage();
-
-        if (message != null && message.contains("app_user.email")) {
-            return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of("email", "Email is already registered"));
-        }
-
-        if (message != null && message.contains("app_user.username")) {
-            return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of("username", "Username is already taken"));
-        }
-
         return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of("message", "This record conflicts with existing data"));
     }
 
