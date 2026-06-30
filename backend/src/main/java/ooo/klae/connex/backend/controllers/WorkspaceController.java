@@ -18,14 +18,17 @@ import org.springframework.web.bind.annotation.RestController;
 
 import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.dto.AddMemberRequest;
+import ooo.klae.connex.backend.dto.CreateInviteLinkRequest;
 import ooo.klae.connex.backend.dto.CreateInviteRequest;
 import ooo.klae.connex.backend.dto.CreateWorkspaceRequest;
 import ooo.klae.connex.backend.dto.InviteDto;
+import ooo.klae.connex.backend.dto.InviteLinkDto;
 import ooo.klae.connex.backend.dto.MemberDto;
 import ooo.klae.connex.backend.dto.MyWorkspacesDto;
 import ooo.klae.connex.backend.dto.UpdateMemberRoleRequest;
 import ooo.klae.connex.backend.dto.WorkspaceMembershipDto;
 import ooo.klae.connex.backend.services.AuthService;
+import ooo.klae.connex.backend.services.InviteLinkService;
 import ooo.klae.connex.backend.services.InviteService;
 import ooo.klae.connex.backend.services.WorkspaceService;
 import ooo.klae.connex.backend.tenant.WorkspaceCookie;
@@ -40,6 +43,7 @@ import ooo.klae.connex.backend.tenant.WorkspaceCookie;
 public class WorkspaceController {
     private final WorkspaceService workspaceService;
     private final InviteService inviteService;
+    private final InviteLinkService inviteLinkService;
     private final AuthService authService;
 
     @GetMapping
@@ -109,6 +113,23 @@ public class WorkspaceController {
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void revokeInvite(@PathVariable int id, @PathVariable int inviteId) {
         inviteService.revokeInvite(id, inviteId, authService.getCurrentUser().getId());
+    }
+
+    @PostMapping("/{id}/invite-links")
+    public InviteLinkDto createInviteLink(@PathVariable int id, @Valid @RequestBody CreateInviteLinkRequest request) {
+        return inviteLinkService.createLink(id, authService.getCurrentUser(),
+                request.getRole(), request.getExpiresInDays(), request.getMaxUses());
+    }
+
+    @GetMapping("/{id}/invite-links")
+    public List<InviteLinkDto> inviteLinks(@PathVariable int id) {
+        return inviteLinkService.listLinks(id, authService.getCurrentUser().getId());
+    }
+
+    @DeleteMapping("/{id}/invite-links/{linkId}")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void revokeInviteLink(@PathVariable int id, @PathVariable int linkId) {
+        inviteLinkService.revokeLink(id, linkId, authService.getCurrentUser().getId());
     }
 
     @GetMapping("/{id}/members")
