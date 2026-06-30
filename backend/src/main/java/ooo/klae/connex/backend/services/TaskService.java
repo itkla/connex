@@ -71,7 +71,7 @@ public class TaskService {
         task.setWorkspaceId(workspaceId);
         validateReferences(task, workspaceId);
         task.setStatus(task.isCompleted() ? STATUS_DONE : STATUS_TODO);
-        task.setPosition(taskMapper.countTasksInStatus(workspaceId, task.getStatus()));
+        task.setPosition(taskMapper.nextTaskPosition(workspaceId, task.getStatus()));
         taskMapper.insert(task);
         auditService.record("task.create", "task", task.getId(), task.getDescription(),
             "Created task " + task.getDescription(),
@@ -95,7 +95,7 @@ public class TaskService {
         task.setStatus(resolved);
         task.setPosition(resolved.equals(beforeStatus)
             ? before.getPosition()
-            : taskMapper.countTasksInStatus(workspaceId, resolved));
+            : taskMapper.nextTaskPosition(workspaceId, resolved));
         taskMapper.update(task);
         auditService.record("task.update", "task", id, task.getDescription(),
             "Updated task " + task.getDescription(),
@@ -129,7 +129,7 @@ public class TaskService {
         if (task.isCompleted()) {
             return task;
         }
-        int donePosition = taskMapper.countTasksInStatus(workspaceId, STATUS_DONE);
+        int donePosition = taskMapper.nextTaskPosition(workspaceId, STATUS_DONE);
         if (taskMapper.complete(workspaceId, id, currentUser.getId(), donePosition) == 0) {
             throw new ForbiddenException("Only the task assignee may complete this task");
         }

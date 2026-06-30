@@ -83,7 +83,7 @@ export default function KanbanBoard<T>(props: KanbanBoardProps<T>) {
     const [activeId, setActiveId] = useState<number | null>(null);
 
     const [syncedKey, setSyncedKey] = useState(incomingKey);
-    if (syncedKey !== incomingKey) {
+    if (syncedKey !== incomingKey && activeId == null) {
         setSyncedKey(incomingKey);
         setColumnItems(incoming);
     }

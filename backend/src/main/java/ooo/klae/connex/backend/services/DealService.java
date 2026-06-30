@@ -166,7 +166,7 @@ public class DealService {
         deal.setOwnerId(authService.getCurrentUser().getId());
         reconcileCloseState(deal);
         if (deal.getStageId() != null) {
-            deal.setPosition(dealMapper.countDealsInStage(workspaceId, deal.getStageId()));
+            deal.setPosition(dealMapper.nextDealPosition(workspaceId, deal.getStageId()));
         }
         dealMapper.insert(deal);
         auditService.record("deal.create", "deal", deal.getId(), deal.getName(),
@@ -259,7 +259,7 @@ public class DealService {
                     "Cannot reopen deal \"" + deal.getName() + "\": its pipeline has no open stage to return to.");
             }
             deal.setStageId(normalStage);
-            deal.setPosition(dealMapper.countDealsInStage(workspaceId, normalStage));
+            deal.setPosition(dealMapper.nextDealPosition(workspaceId, normalStage));
         }
         reconcileCloseState(deal);
         dealMapper.update(deal);
@@ -570,7 +570,7 @@ public class DealService {
     @Transactional
     @RequirePermission(Permission.DEAL_UPDATE)
     public Deal changeStage(int dealId, int stageId) {
-        return move(dealId, stageId, Integer.MAX_VALUE);
+        return moveInternal(dealId, stageId, Integer.MAX_VALUE, true);
     }
 
     /**
@@ -588,6 +588,17 @@ public class DealService {
     @Transactional
     @RequirePermission(Permission.DEAL_UPDATE)
     public Deal move(int dealId, int stageId, int position) {
+        return moveInternal(dealId, stageId, position, false);
+    }
+
+    /**
+     * Shared implementation for {@link #move} and {@link #changeStage}. {@code forceStageChanged}
+     * makes the {@code deal.stage_changed} trigger fire even when the stage value is unchanged,
+     * preserving {@code changeStage}'s historical contract for the bulk stage-change and rule-engine
+     * callers; the board {@code move} endpoint passes {@code false} so a pure reorder publishes
+     * {@code deal.updated} instead.
+     */
+    private Deal moveInternal(int dealId, int stageId, int position, boolean forceStageChanged) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         Deal before = dealMapper.getDealById(workspaceId, dealId);
         if (before == null) throw new ResourceNotFoundException("Deal not found with id: " + dealId);
@@ -601,6 +612,7 @@ public class DealService {
         }
         Integer oldStageId = before.getStageId();
         boolean stageChanged = oldStageId == null || oldStageId != stageId;
+        boolean publishStageChanged = forceStageChanged || stageChanged;
 
         List<Integer> target = dealMapper.getDealIdsInStageOrdered(workspaceId, stageId);
         target.removeIf(existing -> existing == dealId);
@@ -626,11 +638,11 @@ public class DealService {
         }
 
         auditService.record("deal.update", "deal", dealId, deal.getName(),
-            stageChanged ? "Moved deal " + deal.getName() + " to " + stage.getName()
-                         : "Reordered deal " + deal.getName(),
+            publishStageChanged ? "Moved deal " + deal.getName() + " to " + stage.getName()
+                                : "Reordered deal " + deal.getName(),
             auditService.diff(before, deal, AUDIT_FIELDS));
         notificationChanges.publish(workspaceId, "deal", dealId);
-        ruleTriggers.publish(workspaceId, "deal", dealId, stageChanged ? "deal.stage_changed" : "deal.updated");
+        ruleTriggers.publish(workspaceId, "deal", dealId, publishStageChanged ? "deal.stage_changed" : "deal.updated");
         return dealMapper.getDealById(workspaceId, dealId);
     }
 
