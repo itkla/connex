@@ -1,0 +1,14 @@
+title = "Connex gitleaks configuration"
+
+[extend]
+useDefault = true
+
+# Scope the exception to the file that holds the documented throwaway docker-compose
+# credentials (AGENTS.md permits them; rotation is tracked in #88). Using a path
+# allowlist rather than repo-wide value regexes keeps the scanner able to flag the
+# same strings — or any genuine secret — anywhere else in the tree.
+[allowlist]
+description = "Documented dev-only credential file"
+paths = [
+  '''backend/docker-compose\.yml''',
+]
