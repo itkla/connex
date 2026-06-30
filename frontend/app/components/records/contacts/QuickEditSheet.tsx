@@ -1,17 +1,19 @@
+'use client';
+
 import { type ReactNode } from 'react';
-import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription, SheetFooter, SheetClose } from '@/components/ui/sheet';
-import { Button } from '@/components/ui/button';
-import { Loader2Icon, UserIcon } from 'lucide-react';
-import { CameraIcon } from '@heroicons/react/24/outline';
 import { useTranslations } from 'next-intl';
-import { Label } from '@/components/ui/label';
+import { UserIcon } from '@heroicons/react/24/outline';
+
+import { Input } from '@/components/ui/input';
 import { type Contact } from '@/app/lib/types';
 import type { SelectionId } from '@/app/components/records/types';
 import ContactAvatar from '@/app/components/records/contacts/ContactAvatar';
-
-// the styling from login
-// TODO: move this to a shared location
-const inputClass = 'w-full rounded-lg bg-muted px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground outline-none ring-1 ring-border transition focus:ring-2 focus:ring-brand';
+import {
+    QuickEditField,
+    QuickEditMediaUpload,
+    QuickEditRecordCard,
+    QuickEditSheetShell,
+} from '@/app/components/records/quick-edit/QuickEditSheetShell';
 
 export type ContactDraft = {
     name: string;
@@ -37,7 +39,6 @@ type Props = {
 export default function QuickEditSheet({
     editSheetOpen,
     setEditSheetOpen,
-    selectedIds,
     selectedContacts,
     drafts,
     updateDraft,
@@ -48,118 +49,89 @@ export default function QuickEditSheet({
     customFieldsSlot,
 }: Props) {
     const t = useTranslations('ContactsQuickEditSheet');
+    const total = selectedContacts.length;
+
     return (
-        <Sheet open={editSheetOpen} onOpenChange={setEditSheetOpen}>
-            <SheetContent side="right" className="flex w-full flex-col sm:max-w-lg">
-                <SheetHeader className="border-b">
-                    <SheetTitle>
-                        {selectedIds.size === 1 ? t('titleSingle') : t('titleMultiple', { count: selectedIds.size })}
-                    </SheetTitle>
-                    <SheetDescription>
-                        {t('description')}
-                    </SheetDescription>
-                </SheetHeader>
+        <QuickEditSheetShell
+            open={editSheetOpen}
+            onOpenChange={setEditSheetOpen}
+            icon={<UserIcon />}
+            title={total === 1 ? t('titleSingle') : t('titleMultiple', { count: total })}
+            description={t('description')}
+            count={total}
+            isSaving={isSaving}
+            onSave={saveEdits}
+            saveLabel={t('save')}
+            cancelLabel={t('cancel')}
+        >
+            {selectedContacts.map((c, idx) => {
+                const draft = drafts[c.id];
+                if (!draft) return null;
+                const pendingImage = imageFiles?.[c.id] ?? null;
+                const media = updateImageFile ? (
+                    <QuickEditMediaUpload
+                        id={`pfp-${c.id}`}
+                        label={t('changePhoto')}
+                        shape="round"
+                        file={pendingImage}
+                        existingUrl={c.imageUrl ?? null}
+                        fallback={
+                            <div className="flex h-full w-full items-center justify-center bg-muted-foreground/40">
+                                <UserIcon className="size-8 text-muted-foreground" />
+                            </div>
+                        }
+                        onSelect={(file) => updateImageFile(c.id, file)}
+                    />
+                ) : (
+                    <ContactAvatar contact={c} type="large" />
+                );
 
-                <div className="flex-1 overflow-y-auto px-4 py-2">
-                    <div className="flex flex-col gap-6">
-                        {selectedContacts.map((c, idx) => {
-                            const draft = drafts[c.id];
-                            if (!draft) return null;
-                            const pendingImage = imageFiles?.[c.id] ?? null;
-                            const previewSrc = pendingImage
-                                ? URL.createObjectURL(pendingImage)
-                                : c.imageUrl || null;
-                            return (
-                                <div key={c.id} className={idx > 0 ? 'border-t pt-6' : ''}>
-                                    <div className="mb-3 flex items-center gap-3">
-                                        {updateImageFile ? (
-                                            <label
-                                                htmlFor={`pfp-${c.id}`}
-                                                className="group relative flex h-16 w-16 cursor-pointer items-center justify-center overflow-hidden rounded-full bg-muted ring-1 ring-border transition hover:ring-2 hover:ring-brand"
-                                            >
-                                                {previewSrc ? (
-                                                    <img src={previewSrc} alt="" className="h-full w-full object-cover" />
-                                                ) : (
-                                                    <div className="flex h-full w-full items-center justify-center bg-muted-foreground/40">
-                                                        <UserIcon className="size-10 text-muted-foreground" />
-                                                    </div>
-                                                )}
-                                                <div className="absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 transition group-hover:opacity-100">
-                                                    <CameraIcon className="size-5 text-white" />
-                                                </div>
-                                                <input
-                                                    id={`pfp-${c.id}`}
-                                                    type="file"
-                                                    accept="image/*"
-                                                    onChange={(e) => updateImageFile(c.id, e.target.files?.[0] ?? null)}
-                                                    className="sr-only"
-                                                />
-                                            </label>
-                                        ) : (
-                                            <ContactAvatar contact={c} type="large" />
-                                        )}
-                                        <div className="text-lg font-medium text-foreground">{c.name}</div>
-                                    </div>
-
-                                    <div className="grid gap-3">
-                                        <div className="grid gap-1.5">
-                                            <Label htmlFor={`name-${c.id}`}>{t('name')}</Label>
-                                            <input
-                                                id={`name-${c.id}`}
-                                                type="text"
-                                                value={draft.name}
-                                                onChange={(e) => updateDraft(c.id, { name: e.target.value })}
-                                                className={inputClass}
-                                                required
-                                            />
-                                        </div>
-                                        <div className="grid gap-1.5">
-                                            <Label htmlFor={`email-${c.id}`}>{t('email')}</Label>
-                                            <input
-                                                id={`email-${c.id}`}
-                                                type="email"
-                                                value={draft.email}
-                                                onChange={(e) => updateDraft(c.id, { email: e.target.value })}
-                                                className={inputClass}
-                                            />
-                                        </div>
-                                        <div className="grid gap-1.5">
-                                            <Label htmlFor={`phone-${c.id}`}>{t('phone')}</Label>
-                                            <input
-                                                id={`phone-${c.id}`}
-                                                type="tel"
-                                                value={draft.phone}
-                                                onChange={(e) => updateDraft(c.id, { phone: e.target.value })}
-                                                className={inputClass}
-                                            />
-                                        </div>
-                                        <div className="grid gap-1.5">
-                                            <Label htmlFor={`title-${c.id}`}>{t('title')}</Label>
-                                            <input
-                                                id={`title-${c.id}`}
-                                                type="text"
-                                                value={draft.title}
-                                                onChange={(e) => updateDraft(c.id, { title: e.target.value })}
-                                                className={inputClass}
-                                            />
-                                        </div>
-                                    </div>
-                                </div>
-                            );
-                        })}
-                    </div>
-                    {customFieldsSlot}
-                </div>
-
-                <SheetFooter className="border-t">
-                    <SheetClose asChild>
-                        <Button variant="outline" disabled={isSaving}>{t('cancel')}</Button>
-                    </SheetClose>
-                    <Button onClick={saveEdits} disabled={isSaving} className="bg-brand text-white hover:bg-brand-dark">
-                        {isSaving ? <Loader2Icon className="size-4 animate-spin" /> : t('save')}
-                    </Button>
-                </SheetFooter>
-            </SheetContent>
-        </Sheet>
+                return (
+                    <QuickEditRecordCard
+                        key={c.id}
+                        index={idx}
+                        total={total}
+                        media={media}
+                        title={c.name}
+                        subtitle={draft.title || draft.email || undefined}
+                    >
+                        <QuickEditField label={t('name')} htmlFor={`name-${c.id}`} required>
+                            <Input
+                                id={`name-${c.id}`}
+                                type="text"
+                                value={draft.name}
+                                onChange={(e) => updateDraft(c.id, { name: e.target.value })}
+                                required
+                            />
+                        </QuickEditField>
+                        <QuickEditField label={t('email')} htmlFor={`email-${c.id}`}>
+                            <Input
+                                id={`email-${c.id}`}
+                                type="email"
+                                value={draft.email}
+                                onChange={(e) => updateDraft(c.id, { email: e.target.value })}
+                            />
+                        </QuickEditField>
+                        <QuickEditField label={t('phone')} htmlFor={`phone-${c.id}`}>
+                            <Input
+                                id={`phone-${c.id}`}
+                                type="tel"
+                                value={draft.phone}
+                                onChange={(e) => updateDraft(c.id, { phone: e.target.value })}
+                            />
+                        </QuickEditField>
+                        <QuickEditField label={t('title')} htmlFor={`title-${c.id}`}>
+                            <Input
+                                id={`title-${c.id}`}
+                                type="text"
+                                value={draft.title}
+                                onChange={(e) => updateDraft(c.id, { title: e.target.value })}
+                            />
+                        </QuickEditField>
+                    </QuickEditRecordCard>
+                );
+            })}
+            {customFieldsSlot}
+        </QuickEditSheetShell>
     );
 }
