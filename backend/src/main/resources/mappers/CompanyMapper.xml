@@ -68,6 +68,9 @@
       SELECT 1 FROM company WHERE <include refid="visible"/> AND id = #{id}
     )
   </select>
+  <select id="existsOwned" resultType="boolean">
+    SELECT EXISTS(SELECT 1 FROM company WHERE workspace_id = #{workspaceId} AND id = #{id})
+  </select>
 
   <select id="search" resultType="Company">
     SELECT <include refid="companyColumns"/> FROM company

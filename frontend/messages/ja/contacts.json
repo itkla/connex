@@ -83,7 +83,22 @@
     "toastFailedRemoveFromCompany": "会社から削除できませんでした",
     "toastContactDeleted": "コンタクトを削除しました",
     "toastContactsDeleted": "{count} 件のコンタクトを削除しました",
-    "toastFailedDelete": "削除できませんでした"
+    "toastFailedDelete": "削除できませんでした",
+    "addTag": "タグを追加",
+    "removeTag": "タグを削除",
+    "toastContactsDeletedPartial": "{total}件中{succeeded}件の連絡先を削除しました",
+    "toastContactsDeleteFailed": "{failed}件の連絡先を削除できませんでした",
+    "toastTagAdded": "{count}件の連絡先にタグを付けました",
+    "toastTagRemoved": "{count}件の連絡先からタグを削除しました",
+    "toastTagAddedPartial": "{total}件中{succeeded}件の連絡先にタグを付けました",
+    "toastTagRemovedPartial": "{total}件中{succeeded}件の連絡先からタグを削除しました",
+    "toastTagFailed": "{failed}件の連絡先を更新できませんでした",
+    "toastSelectAllFailed": "一致するすべての連絡先を選択できませんでした",
+    "allMatchingSelected": "{total}件すべての連絡先を選択しました。",
+    "clearSelection": "選択を解除",
+    "pageSelected": "このページの{count}件をすべて選択しました。",
+    "selecting": "選択中…",
+    "selectAllMatching": "{total}件すべてを選択"
   },
   "ContactsCard": {
     "actionsAria": "コンタクトの操作",

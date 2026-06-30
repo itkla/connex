@@ -68,6 +68,6 @@ jobs:
         with:
           distribution: temurin
           java-version: '26'
-      - uses: gradle/actions/dependency-submission@v4
+      - uses: gradle/actions/dependency-submission@v6
         with:
           build-root-directory: backend

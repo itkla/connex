@@ -517,6 +517,86 @@ export function getPersonFacets(init: RequestInit = {}) {
     return getJson<Types.PersonFacets>(`/api/persons/facets`, init);
 }
 
+/*
+* == Bulk operations
+*/
+
+/**
+ * The backend bounds a single bulk request to 1000 ids. Larger selections are split into
+ * sequential chunks and their results merged, so the caller always gets one combined outcome with
+ * {@link Types.BulkOperationError.rowIndex} offset to the position in the full id list.
+ */
+const BULK_CHUNK_SIZE = 1000;
+
+async function runBulk(
+    ids: number[],
+    call: (chunk: number[]) => Promise<Types.BulkOperationResult>,
+): Promise<Types.BulkOperationResult> {
+    if (ids.length === 0) return { succeeded: 0, failed: 0, errors: [] };
+    if (ids.length <= BULK_CHUNK_SIZE) return call(ids);
+    const merged: Types.BulkOperationResult = { succeeded: 0, failed: 0, errors: [] };
+    for (let offset = 0; offset < ids.length; offset += BULK_CHUNK_SIZE) {
+        const chunk = ids.slice(offset, offset + BULK_CHUNK_SIZE);
+        const result = await call(chunk);
+        merged.succeeded += result.succeeded;
+        merged.failed += result.failed;
+        for (const error of result.errors) {
+            merged.errors.push({ rowIndex: error.rowIndex + offset, reason: error.reason });
+        }
+    }
+    return merged;
+}
+
+export function bulkAddTagToContacts(ids: number[], tagId: number) {
+    return runBulk(ids, (chunk) => postJson<Types.BulkOperationResult>(`/api/persons/bulk/tags/add`, { ids: chunk, tagId }));
+}
+
+export function bulkRemoveTagFromContacts(ids: number[], tagId: number) {
+    return runBulk(ids, (chunk) => postJson<Types.BulkOperationResult>(`/api/persons/bulk/tags/remove`, { ids: chunk, tagId }));
+}
+
+export function bulkDeleteContacts(ids: number[]) {
+    return runBulk(ids, (chunk) => postJson<Types.BulkOperationResult>(`/api/persons/bulk/delete`, { ids: chunk }));
+}
+
+export function bulkAddTagToCompanies(ids: number[], tagId: number) {
+    return runBulk(ids, (chunk) => postJson<Types.BulkOperationResult>(`/api/companies/bulk/tags/add`, { ids: chunk, tagId }));
+}
+
+export function bulkRemoveTagFromCompanies(ids: number[], tagId: number) {
+    return runBulk(ids, (chunk) => postJson<Types.BulkOperationResult>(`/api/companies/bulk/tags/remove`, { ids: chunk, tagId }));
+}
+
+export function bulkDeleteCompanies(ids: number[]) {
+    return runBulk(ids, (chunk) => postJson<Types.BulkOperationResult>(`/api/companies/bulk/delete`, { ids: chunk }));
+}
+
+export function bulkAddTagToDeals(ids: number[], tagId: number) {
+    return runBulk(ids, (chunk) => postJson<Types.BulkOperationResult>(`/api/deals/bulk/tags/add`, { ids: chunk, tagId }));
+}
+
+export function bulkRemoveTagFromDeals(ids: number[], tagId: number) {
+    return runBulk(ids, (chunk) => postJson<Types.BulkOperationResult>(`/api/deals/bulk/tags/remove`, { ids: chunk, tagId }));
+}
+
+export function bulkDeleteDeals(ids: number[]) {
+    return runBulk(ids, (chunk) => postJson<Types.BulkOperationResult>(`/api/deals/bulk/delete`, { ids: chunk }));
+}
+
+export function bulkAssignDealOwner(ids: number[], ownerId: number | null) {
+    return runBulk(ids, (chunk) => postJson<Types.BulkOperationResult>(`/api/deals/bulk/owner`, { ids: chunk, ownerId }));
+}
+
+export function bulkChangeDealStage(ids: number[], stageId: number) {
+    return runBulk(ids, (chunk) => postJson<Types.BulkOperationResult>(`/api/deals/bulk/stage`, { ids: chunk, stageId }));
+}
+
+/** Ids of every contact matching the active filter (for "select all matching", beyond the loaded page). */
+export function getContactIds(params: Types.ContactsPageParams = {}, init: RequestInit = {}) {
+    const query = buildQuery({ q: params.q, companies: params.companies, titles: params.titles, noCompany: params.noCompany });
+    return getJson<number[]>(`/api/persons/ids${query}`, init);
+}
+
 export function getContactById(id: number, init: RequestInit = {}) {
     return getJson<Types.Contact>(`/api/persons/${id}`, init);
 }
@@ -1049,6 +1129,13 @@ export function leaveWorkspace(id: number) {
 
 export function getWorkspaceMembers(workspaceId: number, init: RequestInit = {}) {
     return getJson<Types.WorkspaceMember[]>(`/api/workspaces/${workspaceId}/members`, { cache: "no-store", ...init });
+}
+
+/** Members of the active workspace (read from the connex_workspace cookie); empty when none is set. */
+export function getActiveWorkspaceMembers(init: RequestInit = {}): Promise<Types.WorkspaceMember[]> {
+    const workspaceId = clientWorkspaceId();
+    if (!workspaceId) return Promise.resolve([]);
+    return getWorkspaceMembers(Number(workspaceId), init);
 }
 
 export function addWorkspaceMember(workspaceId: number, email: string, role: Types.WorkspaceRole) {

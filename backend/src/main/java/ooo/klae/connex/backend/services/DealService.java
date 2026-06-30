@@ -16,6 +16,7 @@ import ooo.klae.connex.backend.beans.Deal;
 import ooo.klae.connex.backend.beans.DealPerson;
 import ooo.klae.connex.backend.beans.Note;
 import ooo.klae.connex.backend.beans.Person;
+import ooo.klae.connex.backend.beans.Stage;
 import ooo.klae.connex.backend.beans.Tag;
 import ooo.klae.connex.backend.beans.Task;
 import ooo.klae.connex.backend.beans.User;
@@ -28,6 +29,7 @@ import ooo.klae.connex.backend.mappers.ActivityMapper;
 import ooo.klae.connex.backend.mappers.DealMapper;
 import ooo.klae.connex.backend.mappers.NoteMapper;
 import ooo.klae.connex.backend.mappers.PersonMapper;
+import ooo.klae.connex.backend.mappers.PipelineMapper;
 import ooo.klae.connex.backend.mappers.TagMapper;
 import ooo.klae.connex.backend.mappers.TaskMapper;
 import ooo.klae.connex.backend.notifications.NotificationChangePublisher;
@@ -43,6 +45,7 @@ import ooo.klae.connex.backend.notifications.NotificationChangePublisher;
 public class DealService {
     private final DealMapper dealMapper;
     private final PersonMapper personMapper;
+    private final PipelineMapper pipelineMapper;
     private final TagMapper tagMapper;
     private final ActivityMapper activityMapper;
     private final NoteMapper noteMapper;
@@ -549,6 +552,41 @@ public class DealService {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         if (dealMapper.getDealById(workspaceId, dealId) == null) throw new ResourceNotFoundException("Deal not found with id: " + dealId);
         return taskMapper.getTasksByDealId(workspaceId, dealId);
+    }
+
+    /**
+     * Moves a deal to a different stage within its own pipeline, reconciling the close state and
+     * publishing the {@code deal.stage_changed} trigger exactly as a full update would. The target
+     * stage must belong to the active workspace and to the deal's pipeline; a cross-pipeline target
+     * is rejected so the deal never ends up at a stage outside its pipeline.
+     * @param dealId the deal to move
+     * @param stageId the target stage
+     * @return the moved deal
+     */
+    @Transactional
+    @RequirePermission(Permission.DEAL_UPDATE)
+    public Deal changeStage(int dealId, int stageId) {
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        Deal before = dealMapper.getDealById(workspaceId, dealId);
+        if (before == null) throw new ResourceNotFoundException("Deal not found with id: " + dealId);
+        Stage stage = pipelineMapper.getStageById(workspaceId, stageId);
+        if (stage == null) throw new ResourceNotFoundException("Stage not found with id: " + stageId);
+        Integer stagePipelineId = stage.getPipeline() != null ? stage.getPipeline().getId() : null;
+        if (before.getPipelineId() != null && stagePipelineId != null
+                && !before.getPipelineId().equals(stagePipelineId)) {
+            throw new BadRequestException(
+                "Stage " + stageId + " is not in deal " + dealId + "'s pipeline");
+        }
+        Deal deal = dealMapper.getDealById(workspaceId, dealId);
+        deal.setStageId(stageId);
+        reconcileCloseState(deal);
+        dealMapper.update(deal);
+        auditService.record("deal.update", "deal", dealId, deal.getName(),
+            "Moved deal " + deal.getName() + " to " + stage.getName(),
+            auditService.diff(before, deal, AUDIT_FIELDS));
+        notificationChanges.publish(workspaceId, "deal", dealId);
+        ruleTriggers.publish(workspaceId, "deal", dealId, "deal.stage_changed");
+        return dealMapper.getDealById(workspaceId, dealId);
     }
 
     @Transactional

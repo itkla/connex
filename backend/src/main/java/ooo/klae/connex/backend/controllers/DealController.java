@@ -13,6 +13,11 @@ import org.springframework.web.bind.annotation.RestController;
 import ooo.klae.connex.backend.beans.Deal;
 import ooo.klae.connex.backend.beans.DealPerson;
 import ooo.klae.connex.backend.dto.ActivityDto;
+import ooo.klae.connex.backend.dto.BulkDeleteRequest;
+import ooo.klae.connex.backend.dto.BulkOperationResult;
+import ooo.klae.connex.backend.dto.BulkOwnerRequest;
+import ooo.klae.connex.backend.dto.BulkStageRequest;
+import ooo.klae.connex.backend.dto.BulkTagRequest;
 import ooo.klae.connex.backend.dto.CloseDealRequest;
 import ooo.klae.connex.backend.dto.CustomFieldEntryDto;
 import ooo.klae.connex.backend.dto.CustomFieldValueRequest;
@@ -24,6 +29,7 @@ import ooo.klae.connex.backend.dto.NoteDto;
 import ooo.klae.connex.backend.dto.TagDto;
 import ooo.klae.connex.backend.dto.TaskDto;
 import ooo.klae.connex.backend.dto.UserDto;
+import ooo.klae.connex.backend.services.BulkOperationService;
 import ooo.klae.connex.backend.services.DealService;
 
 import java.util.List;
@@ -42,6 +48,7 @@ import lombok.RequiredArgsConstructor;
 @RequiredArgsConstructor
 public class DealController {
     private final DealService dealService;
+    private final BulkOperationService bulkOperationService;
 
     /**
      * GET endpoint to retrieve deals, with filtering by pipelineId, stageId, companyId, personId, or tagId.
@@ -274,6 +281,58 @@ public class DealController {
         @Valid @RequestBody DealCollaboratorsDto dto
     ) {
         return dealService.replaceCollaborators(id, dto.getUserIds()).stream().map(UserDto::from).toList();
+    }
+
+    /**
+     * POST endpoint to add one tag to many deals in a single request.
+     * @param request the target deal ids and the tag to add
+     * @return per-record success/failure counts
+     */
+    @PostMapping("/bulk/tags/add")
+    public BulkOperationResult bulkAddTag(@Valid @RequestBody BulkTagRequest request) {
+        return bulkOperationService.addTagToDeals(request.getIds(), request.getTagId());
+    }
+
+    /**
+     * POST endpoint to remove one tag from many deals in a single request.
+     * @param request the target deal ids and the tag to remove
+     * @return per-record success/failure counts
+     */
+    @PostMapping("/bulk/tags/remove")
+    public BulkOperationResult bulkRemoveTag(@Valid @RequestBody BulkTagRequest request) {
+        return bulkOperationService.removeTagFromDeals(request.getIds(), request.getTagId());
+    }
+
+    /**
+     * POST endpoint to delete many deals in a single request.
+     * @param request the target deal ids
+     * @return per-record success/failure counts
+     */
+    @PostMapping("/bulk/delete")
+    public BulkOperationResult bulkDelete(@Valid @RequestBody BulkDeleteRequest request) {
+        return bulkOperationService.deleteDeals(request.getIds());
+    }
+
+    /**
+     * POST endpoint to assign an owner across many deals in a single request. A null ownerId
+     * unassigns the owner.
+     * @param request the target deal ids and the owner to assign
+     * @return per-record success/failure counts
+     */
+    @PostMapping("/bulk/owner")
+    public BulkOperationResult bulkAssignOwner(@Valid @RequestBody BulkOwnerRequest request) {
+        return bulkOperationService.assignOwnerToDeals(request.getIds(), request.getOwnerId());
+    }
+
+    /**
+     * POST endpoint to move many deals to a single stage in one request. Deals outside the target
+     * stage's pipeline are reported as failures rather than moved across pipelines.
+     * @param request the target deal ids and the stage to move them to
+     * @return per-record success/failure counts
+     */
+    @PostMapping("/bulk/stage")
+    public BulkOperationResult bulkChangeStage(@Valid @RequestBody BulkStageRequest request) {
+        return bulkOperationService.changeStageForDeals(request.getIds(), request.getStageId());
     }
 
     /**
