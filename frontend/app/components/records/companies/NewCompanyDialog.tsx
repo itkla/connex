@@ -266,7 +266,7 @@ export default function NewCompanyDialog({
 
     return (
         <Dialog open={open} onOpenChange={handleOpenChange}>
-            <DialogContent className="gap-0 overflow-hidden p-0 sm:max-w-lg">
+            <DialogContent className="max-h-[90dvh] gap-0 overflow-hidden p-0 sm:max-w-lg">
                 <motion.div layout={!reduce} transition={pageTransition} className="relative overflow-hidden">
                     <AnimatePresence mode="popLayout" custom={direction} initial={false}>
                         {view === 'company' ? (
@@ -278,7 +278,9 @@ export default function NewCompanyDialog({
                                 animate="center"
                                 exit="exit"
                                 transition={pageTransition}
+                                className="flex max-h-[85dvh] flex-col"
                             >
+                                <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
                 <div aria-hidden className="relative h-24 overflow-hidden">
                     <PixelCard
                         active={status !== 'idle'}
@@ -350,7 +352,7 @@ export default function NewCompanyDialog({
                         <DialogDescription>{t('description')}</DialogDescription>
                     </DialogHeader>
 
-                    <form onSubmit={handleSubmit} className="grid gap-5">
+                    <form id="new-company-form" onSubmit={handleSubmit} className="grid gap-5">
                         <div className="ncd-rise grid gap-1.5" style={{ animationDelay: '90ms' }}>
                             <Label htmlFor="company-name">
                                 {t('labelName')} <span className="text-muted-foreground">*</span>
@@ -505,30 +507,32 @@ export default function NewCompanyDialog({
                                 disabled={isCreating || isSuccess}
                             />
                         </div>
-
-                        <DialogFooter className="ncd-rise mt-1" style={{ animationDelay: '290ms' }}>
-                            <DialogClose asChild>
-                                <Button type="button" variant="outline" disabled={isCreating}>
-                                    {t('cancel')}
-                                </Button>
-                            </DialogClose>
-                            <Button
-                                type="submit"
-                                disabled={isCreating || hasErrors || isSuccess || websiteBlocked}
-                                className="min-w-24 bg-brand text-white shadow-sm transition hover:bg-brand-hover hover:shadow-md"
-                            >
-                                {isCreating ? (
-                                    <>
-                                        <Loader2Icon className="size-4 animate-spin" />
-                                        {t('create')}
-                                    </>
-                                ) : (
-                                    t('create')
-                                )}
-                            </Button>
-                        </DialogFooter>
                     </form>
                 </div>
+                                </div>
+
+                                <DialogFooter className="shrink-0 border-t border-border/60 bg-popover px-6 py-4">
+                                    <DialogClose asChild>
+                                        <Button type="button" variant="outline" disabled={isCreating}>
+                                            {t('cancel')}
+                                        </Button>
+                                    </DialogClose>
+                                    <Button
+                                        type="submit"
+                                        form="new-company-form"
+                                        disabled={isCreating || hasErrors || isSuccess || websiteBlocked}
+                                        className="min-w-24 bg-brand text-white shadow-sm transition hover:bg-brand-hover hover:shadow-md"
+                                    >
+                                        {isCreating ? (
+                                            <>
+                                                <Loader2Icon className="size-4 animate-spin" />
+                                                {t('create')}
+                                            </>
+                                        ) : (
+                                            t('create')
+                                        )}
+                                    </Button>
+                                </DialogFooter>
                             </motion.div>
                         ) : (
                             <motion.div

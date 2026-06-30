@@ -67,8 +67,8 @@ export default function ContactSubView({ mode, initial, onDone, onBack, disabled
     const fallbackInitials = initials(name || '');
 
     return (
-        <div className="grid gap-5 px-6 pb-6 pt-5">
-            <div className="flex items-center gap-2">
+        <div className="flex max-h-[85dvh] flex-col">
+            <div className="flex items-center gap-2 px-6 pb-2 pt-5">
                 <button
                     type="button"
                     onClick={onBack}
@@ -83,6 +83,7 @@ export default function ContactSubView({ mode, initial, onDone, onBack, disabled
                 </h2>
             </div>
 
+            <div className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto px-6 py-4">
             <div className="flex items-center gap-4">
                 <QuickEditMediaUpload
                     id="pending-contact-photo"
@@ -192,8 +193,9 @@ export default function ContactSubView({ mode, initial, onDone, onBack, disabled
                     </div>
                 </div>
             </div>
+            </div>
 
-            <div className="flex items-center justify-end">
+            <div className="flex shrink-0 items-center justify-end border-t border-border/60 bg-popover px-6 py-4">
                 <Button
                     type="button"
                     onClick={submit}
