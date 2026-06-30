@@ -12,8 +12,8 @@ import {
     SelectTrigger,
     SelectValue,
 } from "@/components/ui/select";
-import { fieldInputClass } from "@/components/ui/dialog-status-cover";
-import { cn } from "@/lib/utils";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { ApiError, getEntityCustomFields, updateEntityCustomFields } from "@/app/lib/api";
 import { toastError } from "@/app/lib/toast";
 import type { CustomFieldCellValue, CustomFieldEntityType, CustomFieldEntry } from "@/app/lib/types";
@@ -129,11 +129,11 @@ function FieldInput({
             return <Switch id={id} checked={value === true} onCheckedChange={onChange} aria-label={entry.label} />;
         case "textarea":
             return (
-                <textarea
+                <Textarea
                     id={id}
                     value={str}
                     onChange={(e) => onChange(e.target.value)}
-                    className={cn(fieldInputClass, "min-h-20 px-3")}
+                    className="min-h-20"
                     maxLength={2000}
                 />
             );
@@ -156,13 +156,12 @@ function FieldInput({
             const inputType =
                 entry.fieldType === "number" ? "number" : entry.fieldType === "date" ? "date" : entry.fieldType === "url" ? "url" : "text";
             return (
-                <input
+                <Input
                     id={id}
                     type={inputType}
                     value={str}
                     onChange={(e) => onChange(e.target.value)}
                     placeholder={entry.fieldType === "url" ? "https://" : undefined}
-                    className={cn(fieldInputClass, "px-3")}
                     maxLength={entry.fieldType === "url" ? 2048 : 1000}
                 />
             );

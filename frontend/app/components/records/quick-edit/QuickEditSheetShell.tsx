@@ -19,7 +19,7 @@ import { Badge } from '@/components/ui/badge';
 import { Label } from '@/components/ui/label';
 import { cn } from '@/lib/utils';
 
-const EASE_OUT: [number, number, number, number] = [0.23, 1, 0.32, 1];
+export const EASE_OUT: [number, number, number, number] = [0.23, 1, 0.32, 1];
 
 type QuickEditSheetShellProps = {
     open: boolean;

@@ -1,20 +1,9 @@
 'use client';
 
-import { useTranslations } from 'next-intl';
-import { Loader2Icon } from 'lucide-react';
 import { type WheelEvent } from 'react';
+import { useTranslations } from 'next-intl';
+import { DocumentTextIcon } from '@heroicons/react/24/outline';
 
-import {
-    Sheet,
-    SheetContent,
-    SheetDescription,
-    SheetHeader,
-    SheetTitle,
-    SheetFooter,
-    SheetClose,
-} from '@/components/ui/sheet';
-import { Button } from '@/components/ui/button';
-import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import {
     Combobox,
@@ -24,9 +13,13 @@ import {
     ComboboxItem,
     ComboboxList,
 } from '@/components/ui/combobox';
-
 import type { Contact, Deal, Note, NoteDraft } from '@/app/lib/types';
 import type { SelectionId } from '@/app/components/records/types';
+import {
+    QuickEditField,
+    QuickEditRecordCard,
+    QuickEditSheetShell,
+} from '@/app/components/records/quick-edit/QuickEditSheetShell';
 
 type Props = {
     open: boolean;
@@ -54,6 +47,7 @@ export default function QuickEditNoteSheet({
     saveEdits,
 }: Props) {
     const t = useTranslations('NotesQuickEditSheet');
+    const total = selectedNotes.length;
 
     const handleListWheel = (e: WheelEvent<HTMLDivElement>) => {
         const lineHeightPx = 16;
@@ -62,128 +56,83 @@ export default function QuickEditNoteSheet({
     };
 
     return (
-        <Sheet open={open} onOpenChange={onOpenChange}>
-            <SheetContent side="right" className="flex w-full flex-col sm:max-w-lg">
-                <SheetHeader className="border-b">
-                    <SheetTitle>
-                        {selectedIds.size === 1
-                            ? t('titleSingle')
-                            : t('titleMultiple', { count: selectedIds.size })}
-                    </SheetTitle>
-                    <SheetDescription>{t('description')}</SheetDescription>
-                </SheetHeader>
+        <QuickEditSheetShell
+            open={open}
+            onOpenChange={onOpenChange}
+            icon={<DocumentTextIcon />}
+            title={selectedIds.size === 1 ? t('titleSingle') : t('titleMultiple', { count: selectedIds.size })}
+            description={t('description')}
+            count={selectedIds.size}
+            isSaving={isSaving}
+            onSave={saveEdits}
+            saveLabel={t('save')}
+            cancelLabel={t('cancel')}
+        >
+            {selectedNotes.map((note, idx) => {
+                const draft = drafts[note.id];
+                if (!draft) return null;
+                const selectedPerson = draft.person != null ? persons.find((p) => p.id === draft.person) ?? null : null;
+                const selectedDeal = draft.deal != null ? deals.find((d) => d.id === draft.deal) ?? null : null;
+                const preview = draft.content.trim().replace(/\s+/g, ' ').slice(0, 60);
+                const title = total > 1 ? preview || t('noteIndex', { index: idx + 1 }) : undefined;
+                const subtitle = total > 1 ? selectedPerson?.name ?? selectedDeal?.name ?? undefined : undefined;
 
-                <div className="flex-1 overflow-y-auto px-4 py-2">
-                    <div className="flex flex-col gap-6">
-                        {selectedNotes.map((note, idx) => {
-                            const draft = drafts[note.id];
-                            if (!draft) return null;
-                            const selectedPerson =
-                                draft.person != null
-                                    ? persons.find((p) => p.id === draft.person) ?? null
-                                    : null;
-                            const selectedDeal =
-                                draft.deal != null
-                                    ? deals.find((d) => d.id === draft.deal) ?? null
-                                    : null;
-                            return (
-                                <div key={note.id} className={idx > 0 ? 'border-t pt-6' : ''}>
-                                    <div className="mb-3 text-xs font-medium tracking-[0.12em] text-muted-foreground uppercase">
-                                        {t('noteIndex', { index: idx + 1 })}
-                                    </div>
-                                    <div className="grid gap-3">
-                                        <div className="grid gap-1.5">
-                                            <Label htmlFor={`content-${note.id}`}>{t('contentLabel')}</Label>
-                                            <Textarea
-                                                id={`content-${note.id}`}
-                                                value={draft.content}
-                                                onChange={(e) => updateDraft(note.id, { content: e.target.value })}
-                                                rows={4}
-                                                required
-                                            />
-                                        </div>
-                                        <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-                                            <div className="grid gap-1.5">
-                                                <Label htmlFor={`person-${note.id}`}>{t('personLabel')}</Label>
-                                                <Combobox
-                                                    items={persons}
-                                                    itemToStringLabel={(p: Contact) => p.name}
-                                                    value={selectedPerson}
-                                                    onValueChange={(p) =>
-                                                        updateDraft(note.id, {
-                                                            person: (p as Contact | null)?.id ?? null,
-                                                        })
-                                                    }
-                                                >
-                                                    <ComboboxInput
-                                                        id={`person-${note.id}`}
-                                                        placeholder={t('personPlaceholder')}
-                                                        className="ring-1 ring-border"
-                                                    />
-                                                    <ComboboxContent className="pointer-events-auto">
-                                                        <ComboboxList onWheel={handleListWheel}>
-                                                            <ComboboxEmpty>{t('noPersonFound')}</ComboboxEmpty>
-                                                            {persons.map((p) => (
-                                                                <ComboboxItem key={p.id} value={p}>
-                                                                    {p.name}
-                                                                </ComboboxItem>
-                                                            ))}
-                                                        </ComboboxList>
-                                                    </ComboboxContent>
-                                                </Combobox>
-                                            </div>
-                                            <div className="grid gap-1.5">
-                                                <Label htmlFor={`deal-${note.id}`}>{t('dealLabel')}</Label>
-                                                <Combobox
-                                                    items={deals}
-                                                    itemToStringLabel={(d: Deal) => d.name}
-                                                    value={selectedDeal}
-                                                    onValueChange={(d) =>
-                                                        updateDraft(note.id, {
-                                                            deal: (d as Deal | null)?.id ?? null,
-                                                        })
-                                                    }
-                                                >
-                                                    <ComboboxInput
-                                                        id={`deal-${note.id}`}
-                                                        placeholder={t('dealPlaceholder')}
-                                                        className="ring-1 ring-border"
-                                                    />
-                                                    <ComboboxContent className="pointer-events-auto">
-                                                        <ComboboxList onWheel={handleListWheel}>
-                                                            <ComboboxEmpty>{t('noDealFound')}</ComboboxEmpty>
-                                                            {deals.map((d) => (
-                                                                <ComboboxItem key={d.id} value={d}>
-                                                                    {d.name}
-                                                                </ComboboxItem>
-                                                            ))}
-                                                        </ComboboxList>
-                                                    </ComboboxContent>
-                                                </Combobox>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-                            );
-                        })}
-                    </div>
-                </div>
-
-                <SheetFooter className="border-t">
-                    <SheetClose asChild>
-                        <Button variant="outline" disabled={isSaving}>
-                            {t('cancel')}
-                        </Button>
-                    </SheetClose>
-                    <Button
-                        onClick={saveEdits}
-                        disabled={isSaving}
-                        className="bg-brand text-white hover:bg-brand-dark"
-                    >
-                        {isSaving ? <Loader2Icon className="size-4 animate-spin" /> : t('save')}
-                    </Button>
-                </SheetFooter>
-            </SheetContent>
-        </Sheet>
+                return (
+                    <QuickEditRecordCard key={note.id} index={idx} total={total} title={title} subtitle={subtitle}>
+                        <QuickEditField label={t('contentLabel')} htmlFor={`content-${note.id}`} required>
+                            <Textarea
+                                id={`content-${note.id}`}
+                                value={draft.content}
+                                onChange={(e) => updateDraft(note.id, { content: e.target.value })}
+                                rows={4}
+                                required
+                            />
+                        </QuickEditField>
+                        <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                            <QuickEditField label={t('personLabel')} htmlFor={`person-${note.id}`}>
+                                <Combobox
+                                    items={persons}
+                                    itemToStringLabel={(p: Contact) => p.name}
+                                    value={selectedPerson}
+                                    onValueChange={(p) => updateDraft(note.id, { person: (p as Contact | null)?.id ?? null })}
+                                >
+                                    <ComboboxInput id={`person-${note.id}`} placeholder={t('personPlaceholder')} showClear />
+                                    <ComboboxContent className="pointer-events-auto">
+                                        <ComboboxList onWheel={handleListWheel}>
+                                            <ComboboxEmpty>{t('noPersonFound')}</ComboboxEmpty>
+                                            {persons.map((p) => (
+                                                <ComboboxItem key={p.id} value={p}>
+                                                    {p.name}
+                                                </ComboboxItem>
+                                            ))}
+                                        </ComboboxList>
+                                    </ComboboxContent>
+                                </Combobox>
+                            </QuickEditField>
+                            <QuickEditField label={t('dealLabel')} htmlFor={`deal-${note.id}`}>
+                                <Combobox
+                                    items={deals}
+                                    itemToStringLabel={(d: Deal) => d.name}
+                                    value={selectedDeal}
+                                    onValueChange={(d) => updateDraft(note.id, { deal: (d as Deal | null)?.id ?? null })}
+                                >
+                                    <ComboboxInput id={`deal-${note.id}`} placeholder={t('dealPlaceholder')} showClear />
+                                    <ComboboxContent className="pointer-events-auto">
+                                        <ComboboxList onWheel={handleListWheel}>
+                                            <ComboboxEmpty>{t('noDealFound')}</ComboboxEmpty>
+                                            {deals.map((d) => (
+                                                <ComboboxItem key={d.id} value={d}>
+                                                    {d.name}
+                                                </ComboboxItem>
+                                            ))}
+                                        </ComboboxList>
+                                    </ComboboxContent>
+                                </Combobox>
+                            </QuickEditField>
+                        </div>
+                    </QuickEditRecordCard>
+                );
+            })}
+        </QuickEditSheetShell>
     );
 }
