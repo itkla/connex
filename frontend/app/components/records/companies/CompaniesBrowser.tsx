@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { useReducedMotion } from 'motion/react';
@@ -31,12 +31,12 @@ import { type ColumnDef, applyRecordFilters, deriveFilterOptions, facetChips, co
 import CompanyCard from '@/app/components/records/companies/CompanyCard';
 import CompanyAvatar from '@/app/components/records/companies/CompanyAvatar';
 import NewCompanyDialog from '@/app/components/records/companies/NewCompanyDialog';
-import { type CompanyContactsFieldHandle, type PendingContact, type PendingContactDraft } from '@/app/components/records/companies/CompanyContactsField';
+import { type PendingContact, type PendingContactDraft } from '@/app/components/records/companies/CompanyContactsField';
 import QuickEditCompanySheet, { type CompanyDraft } from '@/app/components/records/companies/QuickEditCompanySheet';
-import { createCompany, createContact, getUsers, getTasks, getDeals, updateCompany, getActivities, getNotes, getCompanyTemperatures, isFieldError, evaluateSegments, getSegmentFields, getTags, bulkAddTagToCompanies, bulkRemoveTagFromCompanies, bulkDeleteCompanies } from '@/app/lib/api';
+import { createCompany, createContact, updateContact, getUsers, getTasks, getDeals, updateCompany, getActivities, getNotes, getCompanyTemperatures, isFieldError, evaluateSegments, getSegmentFields, getTags, bulkAddTagToCompanies, bulkRemoveTagFromCompanies, bulkDeleteCompanies } from '@/app/lib/api';
 import BulkTagDialog from '@/app/components/records/BulkTagDialog';
 import { notifyBulkResult } from '@/app/lib/bulkToast';
-import { uploadCompanyLogo, pickDominantCurrency, parseMysqlDateTime } from '@/app/lib/utils';
+import { uploadCompanyLogo, uploadContactPicture, pickDominantCurrency, parseMysqlDateTime } from '@/app/lib/utils';
 import { type Company, type CreateCompanyPayload, type UpdateCompanyPayload, type Contact, type Activity, type Note, type Task, type User, type Deal, type CompanyMetrics, type LoadStatus, type RelationshipTemperature, type SavedView, type SavedViewConfig, type SegmentDefinition, type SegmentFields, type Tag } from '@/app/lib/types';
 import { getContacts } from '@/app/lib/api';
 import TemperaturePill from '@/app/components/records/TemperaturePill';
@@ -112,12 +112,28 @@ export default function CompaniesBrowser({ companies, savedViews }: { companies:
     const [newPayload, setNewPayload] = useState<CreateCompanyPayload>(emptyDraft);
     const [logoFile, setLogoFile] = useState<File | null>(null);
     const [pendingContacts, setPendingContacts] = useState<PendingContact[]>([]);
-    const contactsFieldRef = useRef<CompanyContactsFieldHandle>(null);
 
     const addPendingContact = (draft: PendingContactDraft) =>
         setPendingContacts((prev) => [...prev, { tempId: crypto.randomUUID(), ...draft }]);
+    const updatePendingContact = (tempId: string, draft: PendingContactDraft) =>
+        setPendingContacts((prev) => prev.map((c) => (c.tempId === tempId ? { tempId, ...draft } : c)));
     const removePendingContact = (tempId: string) =>
         setPendingContacts((prev) => prev.filter((c) => c.tempId !== tempId));
+    const createPendingContact = async (c: PendingContact, companyId: number) => {
+        const payload = {
+            name: c.name.trim(),
+            email: c.email.trim(),
+            phone: c.phone.trim(),
+            title: c.title.trim(),
+            companyId,
+        };
+        const newContact = await createContact(payload);
+        if (c.imageFile) {
+            const imageUrl = await uploadContactPicture(newContact.id, c.imageFile).catch(() => null);
+            if (imageUrl) await updateContact(newContact.id, { ...payload, imageUrl }).catch(() => undefined);
+        }
+        return newContact;
+    };
 
     const [allContacts, setAllContacts] = useState<Contact[]>([]);
     const [allDeals, setAllDeals] = useState<Deal[]>([]);
@@ -199,25 +215,13 @@ export default function CompaniesBrowser({ companies, savedViews }: { companies:
                 const logoUrl = await uploadCompanyLogo(created.id, logoFile);
                 await updateCompany(created.id, { ...companyPayload, logoUrl });
             }
-            const flushed = contactsFieldRef.current?.flush() ?? null;
-            const contactDrafts = flushed ? [...pendingContacts, flushed] : pendingContacts;
-            if (contactDrafts.length > 0) {
-                const results = await Promise.allSettled(
-                    contactDrafts.map((c) =>
-                        createContact({
-                            name: c.name.trim(),
-                            email: c.email.trim(),
-                            phone: c.phone.trim(),
-                            title: c.title.trim(),
-                            companyId: created.id,
-                        }),
-                    ),
-                );
+            if (pendingContacts.length > 0) {
+                const results = await Promise.allSettled(pendingContacts.map((c) => createPendingContact(c, created.id)));
                 const failed = results.filter((r) => r.status === 'rejected').length;
-                if (failed === contactDrafts.length) {
+                if (failed === pendingContacts.length) {
                     toastError(t('toastContactsAllFailed', { count: failed }));
                 } else if (failed > 0) {
-                    toastError(t('toastContactsPartial', { succeeded: contactDrafts.length - failed, total: contactDrafts.length }));
+                    toastError(t('toastContactsPartial', { succeeded: pendingContacts.length - failed, total: pendingContacts.length }));
                 }
             }
             toastSuccess(t('toastCompanyCreated'));
@@ -668,8 +672,8 @@ export default function CompaniesBrowser({ companies, savedViews }: { companies:
                 createNewCompany={createNewCompany}
                 pendingContacts={pendingContacts}
                 addPendingContact={addPendingContact}
+                updatePendingContact={updatePendingContact}
                 removePendingContact={removePendingContact}
-                contactsFieldRef={contactsFieldRef}
             />
 
             <DeleteRecordDialog
