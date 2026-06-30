@@ -142,11 +142,12 @@ public class AttachmentService {
     @Transactional
     @RequirePermission(Permission.ATTACHMENT_CREATE)
     public List<Tag> replaceTags(int attachmentId, List<Integer> tagIds) {
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
         Attachment attachment = getById(attachmentId);
-        List<String> before = tagMapper.getTagsByAttachmentId(workspaceService.getCurrentWorkspaceId(), attachmentId).stream().map(Tag::getName).toList();
-        attachmentMapper.clearTags(workspaceService.getCurrentWorkspaceId(), attachmentId);
-        if (tagIds != null && !tagIds.isEmpty()) attachmentMapper.insertTags(workspaceService.getCurrentWorkspaceId(), attachmentId, tagIds);
-        List<Tag> after = tagMapper.getTagsByAttachmentId(workspaceService.getCurrentWorkspaceId(), attachmentId);
+        List<String> before = tagMapper.getTagsByAttachmentId(workspaceId, attachmentId).stream().map(Tag::getName).toList();
+        attachmentMapper.clearTags(workspaceId, attachmentId);
+        if (tagIds != null && !tagIds.isEmpty()) attachmentMapper.insertTags(workspaceId, attachmentId, tagIds);
+        List<Tag> after = tagMapper.getTagsByAttachmentId(workspaceId, attachmentId);
         auditService.record("attachment.replaceTags", "attachment", attachmentId, attachment.getFileName(),
             "Updated tags on " + attachment.getFileName(),
             auditService.singleChange("tags", before, after.stream().map(Tag::getName).toList()));

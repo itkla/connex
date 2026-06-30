@@ -162,6 +162,22 @@ class PersonMapperTest extends AbstractMapperTest {
     }
 
     /**
+     * A tag write issued with another workspace's id must not associate the tag.
+     */
+    @Test
+    void addTag_fromAnotherWorkspace_doesNotAssociate() {
+        Person person = newPerson(newCompany());
+        Tag tag = newTag();
+        Workspace other = newWorkspace();
+
+        int affected = personMapper.addTag(other.getId(), person.getId(), tag.getId());
+
+        assertEquals(0, affected, "cross-workspace addTag must affect no rows");
+        assertTrue(personMapper.getPersonsByTagId(workspace.getId(), tag.getId()).stream()
+                .noneMatch(x -> x.getId() == person.getId()));
+    }
+
+    /**
      * Gets persons by deal ID and checks if the returned list includes the inserted person.
      */
     @Test

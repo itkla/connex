@@ -227,7 +227,7 @@
     <foreach collection="tagIds" item="tagId" open="(" separator="," close=")">
       #{tagId}
     </foreach>
-    WHERE d.workspace_id = #{workspaceId} AND d.id = #{dealId}
+    WHERE d.workspace_id = #{workspaceId} AND d.id = #{dealId} AND t.workspace_id = #{workspaceId}
   </insert>
 
   <insert id="addPerson">

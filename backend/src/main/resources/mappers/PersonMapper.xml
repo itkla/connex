@@ -280,6 +280,6 @@
     <foreach collection="tagIds" item="tagId" open="(" separator="," close=")">
       #{tagId}
     </foreach>
-    WHERE p.workspace_id = #{workspaceId} AND p.id = #{personId}
+    WHERE p.workspace_id = #{workspaceId} AND p.id = #{personId} AND t.workspace_id = #{workspaceId}
   </insert>
 </mapper>
