@@ -45,7 +45,7 @@ class TagServiceTest extends AbstractServiceTest {
         Person linked = newPerson(newCompany());
         Person unlinked = newPerson(newCompany());
         Tag tag = newTag();
-        personMapper.addTag(linked.getId(), tag.getId());
+        personMapper.addTag(workspace.getId(), linked.getId(), tag.getId());
 
         List<Person> people = tagService.getPersonsByTagId(tag.getId());
 
@@ -63,7 +63,7 @@ class TagServiceTest extends AbstractServiceTest {
         Company linked = newCompany();
         Company unlinked = newCompany();
         Tag tag = newTag();
-        companyMapper.addTag(linked.getId(), tag.getId());
+        companyMapper.addTag(workspace.getId(), linked.getId(), tag.getId());
 
         List<Company> companies = tagService.getCompaniesByTagId(tag.getId());
 

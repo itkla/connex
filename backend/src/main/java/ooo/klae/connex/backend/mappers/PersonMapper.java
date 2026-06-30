@@ -49,8 +49,8 @@ public interface PersonMapper {
     int update(Person person);
     int delete(@Param("workspaceId") int workspaceId, @Param("id") int id);
 
-    int addTag(@Param("personId") int personId, @Param("tagId") int tagId);
-    int removeTag(@Param("personId") int personId, @Param("tagId") int tagId);
-    int clearTags(int personId);
-    int insertTags(@Param("personId") int personId, @Param("tagIds") List<Integer> tagIds);
+    int addTag(@Param("workspaceId") int workspaceId, @Param("personId") int personId, @Param("tagId") int tagId);
+    int removeTag(@Param("workspaceId") int workspaceId, @Param("personId") int personId, @Param("tagId") int tagId);
+    int clearTags(@Param("workspaceId") int workspaceId, @Param("personId") int personId);
+    int insertTags(@Param("workspaceId") int workspaceId, @Param("personId") int personId, @Param("tagIds") List<Integer> tagIds);
 }

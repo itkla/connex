@@ -103,7 +103,7 @@ class CompanyMapperTest extends AbstractMapperTest {
         Company company = newCompany();
         Tag tag = newTag();
 
-        companyMapper.addTag(company.getId(), tag.getId());
+        companyMapper.addTag(workspace.getId(), company.getId(), tag.getId());
 
         List<Company> companies = companyMapper.getCompaniesByTagId(workspace.getId(), tag.getId());
         assertTrue(companies.stream().anyMatch(x -> x.getId() == company.getId()));
@@ -117,8 +117,8 @@ class CompanyMapperTest extends AbstractMapperTest {
         Company company = newCompany();
         Tag tag = newTag();
 
-        companyMapper.addTag(company.getId(), tag.getId());
-        companyMapper.addTag(company.getId(), tag.getId());
+        companyMapper.addTag(workspace.getId(), company.getId(), tag.getId());
+        companyMapper.addTag(workspace.getId(), company.getId(), tag.getId());
 
         List<Company> companies = companyMapper.getCompaniesByTagId(workspace.getId(), tag.getId());
         long matching = companies.stream().filter(x -> x.getId() == company.getId()).count();
@@ -132,10 +132,29 @@ class CompanyMapperTest extends AbstractMapperTest {
     void removeTag_dropsAssociation() {
         Company company = newCompany();
         Tag tag = newTag();
-        companyMapper.addTag(company.getId(), tag.getId());
+        companyMapper.addTag(workspace.getId(), company.getId(), tag.getId());
 
-        companyMapper.removeTag(company.getId(), tag.getId());
+        companyMapper.removeTag(workspace.getId(), company.getId(), tag.getId());
 
+        List<Company> companies = companyMapper.getCompaniesByTagId(workspace.getId(), tag.getId());
+        assertTrue(companies.stream().noneMatch(x -> x.getId() == company.getId()));
+    }
+
+    /**
+     * A tag write issued with another workspace's id must not associate the tag: the
+     * scoped statement only matches a company owned by the given workspace, so the
+     * insert affects no rows (write-path tenant isolation — pairs with the static
+     * {@code TenantScopeArchTest}).
+     */
+    @Test
+    void addTag_fromAnotherWorkspace_doesNotAssociate() {
+        Company company = newCompany();
+        Tag tag = newTag();
+        Workspace other = newWorkspace();
+
+        int affected = companyMapper.addTag(other.getId(), company.getId(), tag.getId());
+
+        assertEquals(0, affected, "cross-workspace addTag must affect no rows");
         List<Company> companies = companyMapper.getCompaniesByTagId(workspace.getId(), tag.getId());
         assertTrue(companies.stream().noneMatch(x -> x.getId() == company.getId()));
     }

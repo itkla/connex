@@ -30,8 +30,8 @@ public interface CompanyMapper {
     int update(Company company);
     int delete(@Param("workspaceId") int workspaceId, @Param("id") int id);
 
-    int addTag(@Param("companyId") int companyId, @Param("tagId") int tagId);
-    int removeTag(@Param("companyId") int companyId, @Param("tagId") int tagId);
-    int clearTags(int companyId);
-    int insertTags(@Param("companyId") int companyId, @Param("tagIds") List<Integer> tagIds);
+    int addTag(@Param("workspaceId") int workspaceId, @Param("companyId") int companyId, @Param("tagId") int tagId);
+    int removeTag(@Param("workspaceId") int workspaceId, @Param("companyId") int companyId, @Param("tagId") int tagId);
+    int clearTags(@Param("workspaceId") int workspaceId, @Param("companyId") int companyId);
+    int insertTags(@Param("workspaceId") int workspaceId, @Param("companyId") int companyId, @Param("tagIds") List<Integer> tagIds);
 }

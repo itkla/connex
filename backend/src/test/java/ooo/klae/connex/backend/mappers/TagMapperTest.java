@@ -105,7 +105,7 @@ class TagMapperTest extends AbstractMapperTest {
         Tag tag = newTag();
         Company company = newCompany();
         Person p = newPerson(company);
-        personMapper.addTag(p.getId(), tag.getId());
+        personMapper.addTag(workspace.getId(), p.getId(), tag.getId());
 
         List<Tag> tags = tagMapper.getTagsByPersonId(workspace.getId(), p.getId());
         assertTrue(tags.stream().anyMatch(x -> x.getId() == tag.getId()));
@@ -122,7 +122,7 @@ class TagMapperTest extends AbstractMapperTest {
     void getTagsByCompanyId_returnsTagsLinkedToCompany() {
         Tag tag = newTag();
         Company company = newCompany();
-        companyMapper.addTag(company.getId(), tag.getId());
+        companyMapper.addTag(workspace.getId(), company.getId(), tag.getId());
 
         List<Tag> tags = tagMapper.getTagsByCompanyId(workspace.getId(), company.getId());
         assertTrue(tags.stream().anyMatch(x -> x.getId() == tag.getId()));

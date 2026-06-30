@@ -108,22 +108,33 @@
 
   <insert id="addTag">
     INSERT IGNORE INTO company_tag (company_id, tag_id)
-    VALUES (#{companyId}, #{tagId})
+    SELECT c.id, #{tagId}
+    FROM company c
+    WHERE c.workspace_id = #{workspaceId} AND c.id = #{companyId}
   </insert>
 
   <delete id="removeTag">
-    DELETE FROM company_tag
-    WHERE company_id = #{companyId} AND tag_id = #{tagId}
+    DELETE ct
+    FROM company_tag ct
+    JOIN company c ON c.id = ct.company_id
+    WHERE c.workspace_id = #{workspaceId} AND ct.company_id = #{companyId} AND ct.tag_id = #{tagId}
   </delete>
 
   <delete id="clearTags">
-    DELETE FROM company_tag WHERE company_id = #{companyId}
+    DELETE ct
+    FROM company_tag ct
+    JOIN company c ON c.id = ct.company_id
+    WHERE c.workspace_id = #{workspaceId} AND ct.company_id = #{companyId}
   </delete>
 
   <insert id="insertTags">
-    INSERT IGNORE INTO company_tag (company_id, tag_id) VALUES
-    <foreach collection="tagIds" item="tagId" separator=",">
-      (#{companyId}, #{tagId})
+    INSERT IGNORE INTO company_tag (company_id, tag_id)
+    SELECT c.id, t.id
+    FROM company c
+    JOIN tag t ON t.id IN
+    <foreach collection="tagIds" item="tagId" open="(" separator="," close=")">
+      #{tagId}
     </foreach>
+    WHERE c.workspace_id = #{workspaceId} AND c.id = #{companyId}
   </insert>
 </mapper>

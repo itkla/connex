@@ -131,7 +131,7 @@ class SegmentServiceTest extends AbstractServiceTest {
         Company tagged = newCompany();
         Company untagged = newCompany();
         Tag tag = newTag();
-        companyMapper.addTag(tagged.getId(), tag.getId());
+        companyMapper.addTag(workspace.getId(), tagged.getId(), tag.getId());
 
         List<Integer> ids = evaluate(def("all", field("tag", "has", String.valueOf(tag.getId()))));
 

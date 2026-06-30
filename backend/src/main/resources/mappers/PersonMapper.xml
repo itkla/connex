@@ -253,22 +253,33 @@
 
   <insert id="addTag">
     INSERT IGNORE INTO person_tag (person_id, tag_id)
-    VALUES (#{personId}, #{tagId})
+    SELECT p.id, #{tagId}
+    FROM person p
+    WHERE p.workspace_id = #{workspaceId} AND p.id = #{personId}
   </insert>
 
   <delete id="removeTag">
-    DELETE FROM person_tag
-    WHERE person_id = #{personId} AND tag_id = #{tagId}
+    DELETE pt
+    FROM person_tag pt
+    JOIN person p ON p.id = pt.person_id
+    WHERE p.workspace_id = #{workspaceId} AND pt.person_id = #{personId} AND pt.tag_id = #{tagId}
   </delete>
 
   <delete id="clearTags">
-    DELETE FROM person_tag WHERE person_id = #{personId}
+    DELETE pt
+    FROM person_tag pt
+    JOIN person p ON p.id = pt.person_id
+    WHERE p.workspace_id = #{workspaceId} AND pt.person_id = #{personId}
   </delete>
 
   <insert id="insertTags">
-    INSERT IGNORE INTO person_tag (person_id, tag_id) VALUES
-    <foreach collection="tagIds" item="tagId" separator=",">
-      (#{personId}, #{tagId})
+    INSERT IGNORE INTO person_tag (person_id, tag_id)
+    SELECT p.id, t.id
+    FROM person p
+    JOIN tag t ON t.id IN
+    <foreach collection="tagIds" item="tagId" open="(" separator="," close=")">
+      #{tagId}
     </foreach>
+    WHERE p.workspace_id = #{workspaceId} AND p.id = #{personId}
   </insert>
 </mapper>

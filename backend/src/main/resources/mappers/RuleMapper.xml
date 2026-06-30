@@ -60,7 +60,7 @@
   </insert>
 
   <update id="updateExecution">
-    UPDATE rule_execution SET status = #{status}, detail = #{detail} WHERE id = #{id}
+    UPDATE rule_execution SET status = #{status}, detail = #{detail} WHERE workspace_id = #{workspaceId} AND id = #{id}
   </update>
 
   <select id="getExecutionsByRule" resultType="RuleExecution">

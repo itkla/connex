@@ -163,7 +163,7 @@ public class CompanyService {
         Company company = requireCompany(workspaceId, companyId);
         Tag tag = tagMapper.getTagById(workspaceId, tagId);
         if (tag == null) throw new ResourceNotFoundException("Tag not found with id: " + tagId);
-        companyMapper.addTag(companyId, tagId);
+        companyMapper.addTag(workspaceId, companyId, tagId);
         auditService.record("company.addTag", "company", companyId, company.getName(),
             "Tagged " + company.getName() + " with " + tag.getName(),
             auditService.singleChange("tag", null, tag.getName()));
@@ -177,7 +177,7 @@ public class CompanyService {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         Company company = requireCompany(workspaceId, companyId);
         Tag tag = tagMapper.getTagById(workspaceId, tagId);
-        companyMapper.removeTag(companyId, tagId);
+        companyMapper.removeTag(workspaceId, companyId, tagId);
         String tagName = tag != null ? tag.getName() : "#" + tagId;
         auditService.record("company.removeTag", "company", companyId, company.getName(),
             "Removed tag " + tagName + " from " + company.getName(),
@@ -192,8 +192,8 @@ public class CompanyService {
     public List<Tag> replaceTags(int companyId, List<Integer> tagIds) {
         Company company = requireCompany(companyId);
         List<String> before = tagMapper.getTagsByCompanyId(workspaceService.getCurrentWorkspaceId(), companyId).stream().map(Tag::getName).toList();
-        companyMapper.clearTags(companyId);
-        if (tagIds != null && !tagIds.isEmpty()) companyMapper.insertTags(companyId, tagIds);
+        companyMapper.clearTags(workspaceService.getCurrentWorkspaceId(), companyId);
+        if (tagIds != null && !tagIds.isEmpty()) companyMapper.insertTags(workspaceService.getCurrentWorkspaceId(), companyId, tagIds);
         List<Tag> after = tagMapper.getTagsByCompanyId(workspaceService.getCurrentWorkspaceId(), companyId);
         auditService.record("company.replaceTags", "company", companyId, company.getName(),
             "Updated tags on " + company.getName(),
