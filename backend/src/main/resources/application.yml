@@ -40,6 +40,13 @@ connex:
         password: ${CONNEX_BOOTSTRAP_PASSWORD:}
         display-name: ${CONNEX_BOOTSTRAP_DISPLAY_NAME:}
         timezone: ${CONNEX_BOOTSTRAP_TIMEZONE:UTC}
+    signup:
+        # Self-service registration mode. 'open' (default) lets anyone register and create their own
+        # workspace. 'invite' / 'domain' (reserved for locked-down on-prem) disable open self-service
+        # signup so users onboard via invites instead. Read in AuthService.register.
+        mode: ${CONNEX_SIGNUP_MODE:open}
+        # Instance-wide allowed email domains (CSV), reserved for the future 'domain' signup mode.
+        allowed-domains: ${CONNEX_SIGNUP_ALLOWED_DOMAINS:}
     tenancy:
         # Fail-closed MyBatis backstop: rejects workspace-scoped queries that run
         # without a resolved tenant context. Disable only to debug isolation issues.

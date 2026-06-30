@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="ooo.klae.connex.backend.mappers.AllowedDomainMapper">
+
+  <select id="findByWorkspace" resultType="string">
+    SELECT domain FROM workspace_allowed_domain
+    WHERE workspace_id = #{workspaceId}
+    ORDER BY domain
+  </select>
+
+  <insert id="add">
+    INSERT IGNORE INTO workspace_allowed_domain (workspace_id, domain)
+    VALUES (#{workspaceId}, #{domain})
+  </insert>
+
+  <delete id="remove">
+    DELETE FROM workspace_allowed_domain
+    WHERE workspace_id = #{workspaceId} AND domain = #{domain}
+  </delete>
+
+  <select id="isAllowed" resultType="boolean">
+    SELECT EXISTS(
+      SELECT 1 FROM workspace_allowed_domain
+      WHERE workspace_id = #{workspaceId} AND domain = #{domain}
+    )
+  </select>
+
+  <select id="countByWorkspace" resultType="int">
+    SELECT COUNT(*) FROM workspace_allowed_domain WHERE workspace_id = #{workspaceId}
+  </select>
+</mapper>

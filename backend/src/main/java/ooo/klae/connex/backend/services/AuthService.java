@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.services;
 
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.Authentication;
@@ -16,6 +17,7 @@ import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.dto.LoginDto;
 import ooo.klae.connex.backend.dto.RegisterDto;
 import ooo.klae.connex.backend.exceptions.DuplicateResourceException;
+import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.tenant.WorkspaceCookie;
@@ -40,6 +42,9 @@ public class AuthService {
     private final WorkspaceService workspaceService;
     private final SecurityContextRepository securityContextRepository = new HttpSessionSecurityContextRepository();
 
+    @Value("${connex.signup.mode:open}")
+    private String signupMode;
+
     /**
      * Registers a new user with the provided registration data.
      * @param request
@@ -47,6 +52,9 @@ public class AuthService {
      */
     @Transactional
     public User register(RegisterDto request) {
+        if (!"open".equalsIgnoreCase(signupMode)) {
+            throw new ForbiddenException("Self-service registration is disabled on this instance");
+        }
         try {
             if (userMapper.getUserByUsername(request.getUsername()) != null
                     || userMapper.getUserByEmail(request.getEmail()) != null) {

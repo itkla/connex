@@ -14,6 +14,7 @@ import ooo.klae.connex.backend.dto.InviteLinkDto;
 import ooo.klae.connex.backend.dto.InviteLinkPreviewDto;
 import ooo.klae.connex.backend.dto.WorkspaceMembershipDto;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
+import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.InviteLinkMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
@@ -37,6 +38,7 @@ public class InviteLinkService {
     private final WorkspaceMapper workspaceMapper;
     private final AuditService auditService;
     private final WorkspaceService workspaceService;
+    private final AllowedDomainService allowedDomainService;
 
     /** Creates a shareable link. Defaults: member role, 14-day expiry, unlimited uses. */
     public InviteLinkDto createLink(int workspaceId, User actor, String roleRaw,
@@ -89,6 +91,10 @@ public class InviteLinkService {
         if (inviteLinkMapper.hasRedeemed(link.getId(), user.getId())) {
             ensureMember(workspaceId, user, link.getRole());
             return membership(user.getId(), workspaceId);
+        }
+
+        if (!allowedDomainService.isJoinAllowed(workspaceId, user.getEmail())) {
+            throw new ForbiddenException("Your email domain isn't permitted to join this workspace");
         }
 
         // First redemption: atomically claim a use, rejecting revoked / expired / exhausted links.
