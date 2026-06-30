@@ -45,7 +45,7 @@ export function WorkspaceProvider({
                 await switchWorkspace(id);
                 writeWorkspaceCookie(id);
                 setActiveWorkspaceId(id);
-                // Re-run all server components (SSR lists) under the new workspace.
+                router.replace("/dashboard");
                 router.refresh();
             } finally {
                 setSwitching(false);
@@ -60,6 +60,7 @@ export function WorkspaceProvider({
             writeWorkspaceCookie(workspace.id);
             setWorkspaces((prev) => [...prev, workspace]);
             setActiveWorkspaceId(workspace.id);
+            router.replace("/dashboard");
             router.refresh();
             return workspace;
         },
