@@ -1367,3 +1367,26 @@ export function getInvitePreview(token: string, init: RequestInit = {}) {
 export function acceptInvite(token: string) {
     return postJson<Types.Workspace>(`/api/invites/${token}/accept`, {});
 }
+
+export function getWorkspaceInviteLinks(workspaceId: number, init: RequestInit = {}) {
+    return getJson<Types.WorkspaceInviteLink[]>(`/api/workspaces/${workspaceId}/invite-links`, { cache: "no-store", ...init });
+}
+
+export function createWorkspaceInviteLink(
+    workspaceId: number,
+    payload: { role?: Types.WorkspaceRole; expiresInDays?: number; maxUses?: number },
+) {
+    return postJson<Types.WorkspaceInviteLink>(`/api/workspaces/${workspaceId}/invite-links`, payload);
+}
+
+export function revokeWorkspaceInviteLink(workspaceId: number, linkId: number) {
+    return deleteJson<void>(`/api/workspaces/${workspaceId}/invite-links/${linkId}`);
+}
+
+export function getInviteLinkPreview(token: string, init: RequestInit = {}) {
+    return getJson<Types.InviteLinkPreview>(`/api/invite-links/${token}`, { cache: "no-store", ...init });
+}
+
+export function acceptInviteLink(token: string) {
+    return postJson<Types.Workspace>(`/api/invite-links/${token}/accept`, {});
+}

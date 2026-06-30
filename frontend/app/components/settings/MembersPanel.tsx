@@ -3,17 +3,26 @@
 import { useCallback, useEffect, useState } from "react";
 import { useTranslations } from "next-intl";
 import { Loader2Icon } from "lucide-react";
-import { EllipsisHorizontalIcon, EnvelopeIcon, LinkIcon, TrashIcon } from "@heroicons/react/24/outline";
+import { CheckIcon, EllipsisHorizontalIcon, EnvelopeIcon, LinkIcon, TrashIcon } from "@heroicons/react/24/outline";
 
-import type { CustomRole, WorkspaceInvite, WorkspaceMember, WorkspaceRole } from "@/app/lib/types";
+import type {
+    CustomRole,
+    WorkspaceInvite,
+    WorkspaceInviteLink,
+    WorkspaceMember,
+    WorkspaceRole,
+} from "@/app/lib/types";
 import {
     assignMemberCustomRole,
     createWorkspaceInvite,
+    createWorkspaceInviteLink,
+    getWorkspaceInviteLinks,
     getWorkspaceInvites,
     getWorkspaceMembers,
     getWorkspaceRoles,
     removeWorkspaceMember,
     revokeWorkspaceInvite,
+    revokeWorkspaceInviteLink,
     updateMemberRole,
 } from "@/app/lib/api";
 import { useWorkspace } from "@/app/hooks/useWorkspace";
@@ -28,6 +37,7 @@ import {
     DropdownMenuItem,
     DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { Input } from "@/components/ui/input";
 import { InputGroup, InputGroupAddon, InputGroupInput } from "@/components/ui/input-group";
 import {
     Select,
@@ -103,6 +113,14 @@ export default function MembersPanel({ currentUserId }: { currentUserId: number 
     const [isRemoving, setIsRemoving] = useState(false);
     const [busyInviteId, setBusyInviteId] = useState<number | null>(null);
 
+    const [inviteLinks, setInviteLinks] = useState<WorkspaceInviteLink[]>([]);
+    const [linkRole, setLinkRole] = useState<WorkspaceRole>("member");
+    const [linkExpiry, setLinkExpiry] = useState("");
+    const [linkMaxUses, setLinkMaxUses] = useState("");
+    const [creatingLink, setCreatingLink] = useState(false);
+    const [busyLinkId, setBusyLinkId] = useState<number | null>(null);
+    const [copiedLinkId, setCopiedLinkId] = useState<number | null>(null);
+
     const roleLabel = useCallback(
         (r: string) =>
             r === "owner" ? t("roleOwner") : r === "admin" ? t("roleAdmin") : r === "member" ? t("roleMember") : r,
@@ -121,6 +139,8 @@ export default function MembersPanel({ currentUserId }: { currentUserId: number 
                 if (isAdmin) {
                     const loadedInvites = await getWorkspaceInvites(workspaceId);
                     if (!cancelled) setInvites(loadedInvites);
+                    const loadedLinks = await getWorkspaceInviteLinks(workspaceId);
+                    if (!cancelled) setInviteLinks(loadedLinks);
                 }
                 if (isOwner) {
                     const loadedRoles = await getWorkspaceRoles(workspaceId);
@@ -223,6 +243,59 @@ export default function MembersPanel({ currentUserId }: { currentUserId: number 
             toastError(err instanceof Error ? err.message : t("revokeFailed"));
         } finally {
             setBusyInviteId(null);
+        }
+    };
+
+    const copyShareLink = useCallback(
+        async (link: WorkspaceInviteLink) => {
+            const url = `${window.location.origin}/invite-link/${link.token}`;
+            try {
+                await navigator.clipboard.writeText(url);
+                setCopiedLinkId(link.id);
+                window.setTimeout(() => {
+                    setCopiedLinkId((current) => (current === link.id ? null : current));
+                }, 1500);
+            } catch {
+                toastError(url);
+            }
+        },
+        [],
+    );
+
+    const createLink = async () => {
+        if (!workspaceId || creatingLink) return;
+        setCreatingLink(true);
+        try {
+            const expiresInDays = Number.parseInt(linkExpiry, 10);
+            const maxUses = Number.parseInt(linkMaxUses, 10);
+            const link = await createWorkspaceInviteLink(workspaceId, {
+                role: linkRole,
+                expiresInDays: Number.isFinite(expiresInDays) && expiresInDays > 0 ? expiresInDays : undefined,
+                maxUses: Number.isFinite(maxUses) && maxUses > 0 ? maxUses : undefined,
+            });
+            setInviteLinks((prev) => [link, ...prev]);
+            setLinkExpiry("");
+            setLinkMaxUses("");
+            await copyShareLink(link);
+            toastSuccess(t("linkCreated"));
+        } catch (err) {
+            toastError(err instanceof Error ? err.message : t("linkCreateFailed"));
+        } finally {
+            setCreatingLink(false);
+        }
+    };
+
+    const revokeLink = async (linkId: number) => {
+        if (!workspaceId) return;
+        setBusyLinkId(linkId);
+        try {
+            await revokeWorkspaceInviteLink(workspaceId, linkId);
+            setInviteLinks((prev) => prev.filter((l) => l.id !== linkId));
+            toastSuccess(t("linkRevoked"));
+        } catch (err) {
+            toastError(err instanceof Error ? err.message : t("linkRevokeFailed"));
+        } finally {
+            setBusyLinkId(null);
         }
     };
 
@@ -452,6 +525,136 @@ export default function MembersPanel({ currentUserId }: { currentUserId: number 
                                 })}
                             </ListCard>
                         )}
+                    </div>
+
+                    <div className="space-y-4 pt-2">
+                        <div className="space-y-1">
+                            <SectionLabel>{t("linkTitle")}</SectionLabel>
+                            <p className="text-sm text-muted-foreground">{t("linkSubtitle")}</p>
+                        </div>
+
+                        <form
+                            onSubmit={(e) => {
+                                e.preventDefault();
+                                createLink();
+                            }}
+                            className="flex flex-col gap-3 sm:flex-row sm:items-start"
+                        >
+                            <Select value={linkRole} onValueChange={(v) => setLinkRole(v as WorkspaceRole)}>
+                                <SelectTrigger className="w-full sm:w-36" aria-label={t("roleLabel")}>
+                                    <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent align="start">
+                                    {selectableRoles.map((r) => (
+                                        <SelectItem key={r} value={r}>
+                                            {roleLabel(r)}
+                                        </SelectItem>
+                                    ))}
+                                </SelectContent>
+                            </Select>
+                            <Input
+                                type="number"
+                                min={1}
+                                inputMode="numeric"
+                                value={linkExpiry}
+                                onChange={(e) => setLinkExpiry(e.target.value)}
+                                placeholder={t("linkExpiryPlaceholder")}
+                                aria-label={t("linkExpiryLabel")}
+                                className="w-full sm:flex-1"
+                            />
+                            <Input
+                                type="number"
+                                min={1}
+                                inputMode="numeric"
+                                value={linkMaxUses}
+                                onChange={(e) => setLinkMaxUses(e.target.value)}
+                                placeholder={t("linkMaxUsesPlaceholder")}
+                                aria-label={t("linkMaxUsesLabel")}
+                                className="w-full sm:flex-1"
+                            />
+                            <Button
+                                type="submit"
+                                disabled={creatingLink}
+                                className="min-w-28 bg-brand text-white hover:bg-brand-hover"
+                            >
+                                {creatingLink ? <Loader2Icon className="size-4 animate-spin" /> : t("createLink")}
+                            </Button>
+                        </form>
+
+                        <div className="space-y-2 pt-2">
+                            <SectionLabel>{t("activeLinksTitle")}</SectionLabel>
+                            {inviteLinks.length === 0 ? (
+                                <EmptyRow>{t("activeLinksEmpty")}</EmptyRow>
+                            ) : (
+                                <ListCard>
+                                    {inviteLinks.map((link) => {
+                                        const busy = busyLinkId === link.id;
+                                        const copied = copiedLinkId === link.id;
+                                        return (
+                                            <li key={link.id} className="group flex items-center gap-3 px-4 py-3">
+                                                <span
+                                                    aria-hidden
+                                                    className="grid size-8 shrink-0 place-items-center rounded-full bg-muted text-muted-foreground"
+                                                >
+                                                    <LinkIcon className="size-4" />
+                                                </span>
+                                                <div className="min-w-0 flex-1">
+                                                    <div className="flex items-center gap-2">
+                                                        <RoleBadge role={link.role} label={roleLabel(link.role)} />
+                                                        <span className="text-xs text-muted-foreground tabular-nums">
+                                                            {link.maxUses != null
+                                                                ? t("linkUsesOf", { used: link.usedCount, max: link.maxUses })
+                                                                : t("linkUses", { count: link.usedCount })}
+                                                        </span>
+                                                    </div>
+                                                    <p className="text-xs text-muted-foreground">
+                                                        {t("expires", { date: link.expiresAt.slice(0, 10) })}
+                                                    </p>
+                                                </div>
+                                                <Button
+                                                    type="button"
+                                                    variant="outline"
+                                                    size="sm"
+                                                    onClick={() => copyShareLink(link)}
+                                                    aria-label={t("copyLink")}
+                                                >
+                                                    {copied ? (
+                                                        <CheckIcon className="size-4" />
+                                                    ) : (
+                                                        <LinkIcon className="size-4" />
+                                                    )}
+                                                    {copied ? t("linkCopied") : t("copyLink")}
+                                                </Button>
+                                                {busy ? (
+                                                    <Loader2Icon className="size-4 animate-spin text-muted-foreground" />
+                                                ) : (
+                                                    <DropdownMenu>
+                                                        <DropdownMenuTrigger asChild>
+                                                            <button
+                                                                type="button"
+                                                                aria-label={t("linkActions")}
+                                                                className={rowActionTrigger}
+                                                            >
+                                                                <EllipsisHorizontalIcon className="size-5" />
+                                                            </button>
+                                                        </DropdownMenuTrigger>
+                                                        <DropdownMenuContent align="end" className="w-44">
+                                                            <DropdownMenuItem
+                                                                variant="destructive"
+                                                                onSelect={() => revokeLink(link.id)}
+                                                            >
+                                                                <TrashIcon className="size-4" />
+                                                                {t("revoke")}
+                                                            </DropdownMenuItem>
+                                                        </DropdownMenuContent>
+                                                    </DropdownMenu>
+                                                )}
+                                            </li>
+                                        );
+                                    })}
+                                </ListCard>
+                            )}
+                        </div>
                     </div>
                 </section>
             )}

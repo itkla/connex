@@ -47,6 +47,19 @@
     "roleAdmin": "an admin",
     "roleMember": "a member"
   },
+  "InviteLinkAccept": {
+    "heading": "Join {workspace}",
+    "roleLine": "You'll join as {role}.",
+    "accept": "Join workspace",
+    "accepting": "Joining",
+    "acceptFailed": "Could not join the workspace.",
+    "invalidTitle": "Link unavailable",
+    "invalidBody": "This invite link has expired, been revoked, or reached its usage limit.",
+    "backToApp": "Go to dashboard",
+    "roleOwner": "an owner",
+    "roleAdmin": "an admin",
+    "roleMember": "a member"
+  },
   "WorkspaceSettings": {
     "title": "Settings",
     "subtitle": "Manage who can access this workspace and what they can do.",
@@ -96,7 +109,23 @@
     "revokeFailed": "Could not revoke the invite.",
     "invitedBy": "Invited by {name}",
     "expires": "Expires {date}",
-    "customRoles": "Custom roles"
+    "customRoles": "Custom roles",
+    "linkTitle": "Invite link",
+    "linkSubtitle": "Anyone with the link can join with the role you choose. No email required.",
+    "linkExpiryLabel": "Expiry (days)",
+    "linkExpiryPlaceholder": "7",
+    "linkMaxUsesLabel": "Max uses",
+    "linkMaxUsesPlaceholder": "Unlimited",
+    "createLink": "Create link",
+    "linkCreated": "Invite link created",
+    "linkCreateFailed": "Could not create the invite link.",
+    "activeLinksTitle": "Active links",
+    "activeLinksEmpty": "No invite links yet.",
+    "linkActions": "Link actions",
+    "linkUses": "{count} used",
+    "linkUsesOf": "{used} / {max} used",
+    "linkRevoked": "Invite link revoked",
+    "linkRevokeFailed": "Could not revoke the invite link."
   },
   "WorkspaceRoles": {
     "title": "Roles",
