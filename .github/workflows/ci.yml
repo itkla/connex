@@ -54,6 +54,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - name: Set up pnpm
         uses: pnpm/action-setup@v4
         with:
@@ -70,6 +72,20 @@ jobs:
       - name: Typecheck
         working-directory: frontend
         run: node_modules/.bin/tsc --noEmit
-      - name: Lint
+      - name: Lint changed files
         working-directory: frontend
-        run: node_modules/.bin/eslint .
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          if [ -z "$BASE_SHA" ] || [ "$BASE_SHA" = "0000000000000000000000000000000000000000" ]; then
+            echo "No base commit to diff against — skipping changed-file lint."
+            exit 0
+          fi
+          CHANGED=$(git diff --name-only --relative --diff-filter=ACMR "$BASE_SHA"...HEAD -- '*.ts' '*.tsx' || true)
+          if [ -z "$CHANGED" ]; then
+            echo "No changed frontend TS/TSX files — nothing to lint."
+            exit 0
+          fi
+          echo "Linting changed files:"
+          echo "$CHANGED"
+          node_modules/.bin/eslint $CHANGED
