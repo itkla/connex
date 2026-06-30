@@ -35,6 +35,13 @@ public interface DealMapper {
     int update(Deal deal);
     int delete(@Param("workspaceId") int workspaceId, @Param("id") int id);
 
+    /** Deal ids in a stage, in board order (position, then id), for renumbering a column on a move. */
+    List<Integer> getDealIdsInStageOrdered(@Param("workspaceId") int workspaceId, @Param("stageId") int stageId);
+    /** Number of deals currently in a stage; used to seed a new deal's tail position. */
+    int countDealsInStage(@Param("workspaceId") int workspaceId, @Param("stageId") int stageId);
+    /** Sets a single deal's manual sort position within its stage column. */
+    int setPosition(@Param("workspaceId") int workspaceId, @Param("id") int id, @Param("position") int position);
+
     String getStageOutcome(@Param("workspaceId") int workspaceId, @Param("stageId") int stageId);
 
     Integer getLastNormalStageId(@Param("workspaceId") int workspaceId, @Param("pipelineId") int pipelineId);
