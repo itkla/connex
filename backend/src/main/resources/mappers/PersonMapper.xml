@@ -93,6 +93,9 @@
         AND id = #{id}
     )
   </select>
+  <select id="existsOwned" resultType="boolean">
+    SELECT EXISTS(SELECT 1 FROM person WHERE workspace_id = #{workspaceId} AND id = #{id})
+  </select>
 
   <sql id="pageWhere">
     <where>
@@ -138,6 +141,13 @@
     <include refid="pageWhere"/>
     <include refid="pageOrderBy"/>
     LIMIT #{limit} OFFSET #{offset}
+  </select>
+
+  <select id="getPersonIdsFiltered" resultType="int">
+    SELECT p.id
+    FROM person p
+    <include refid="companyJoin"/>
+    <include refid="pageWhere"/>
   </select>
 
   <select id="countPersons" resultType="long">

@@ -22,6 +22,8 @@ public interface DealMapper {
     List<Deal> getDealsByTagId(@Param("workspaceId") int workspaceId, @Param("tagId") int tagId);
     Deal getDealById(@Param("workspaceId") int workspaceId, @Param("id") int id);
     boolean exists(@Param("workspaceId") int workspaceId, @Param("id") int id);
+    /** Deals are owned-only already; mirrors the person/company method so bulk write-scoping is uniform. */
+    boolean existsOwned(@Param("workspaceId") int workspaceId, @Param("id") int id);
     List<Deal> search(@Param("workspaceId") int workspaceId, @Param("query") String query);
     /** id + name + company for every deal in the workspace; for import dedup (normalized in the service). */
     List<Deal> getDealsForDedup(int workspaceId);

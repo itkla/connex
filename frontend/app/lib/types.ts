@@ -19,6 +19,19 @@ export type ContactsPageParams = PageParams & {
     noCompany?: boolean;
 };
 
+/** One record that a bulk operation could not apply, with its index in the request and the reason. */
+export type BulkOperationError = {
+    rowIndex: number;
+    reason: string;
+};
+
+/** Outcome of a bulk record mutation: per-record success/failure counts plus per-failure reasons. */
+export type BulkOperationResult = {
+    succeeded: number;
+    failed: number;
+    errors: BulkOperationError[];
+};
+
 export type ImportEntity = 'persons' | 'companies' | 'deals';
 
 export type ImportDuplicateAction = 'fill_empty' | 'skip' | 'overwrite';

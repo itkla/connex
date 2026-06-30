@@ -124,8 +124,7 @@ public class PersonService {
      */
     public List<Integer> getMatchingPersonIds(String query, List<String> companies, List<String> titles,
             boolean noCompany) {
-        return personMapper.getPersonsFiltered(workspaceService.getCurrentWorkspaceId(), query, companies, titles, noCompany)
-            .stream().map(Person::getId).toList();
+        return personMapper.getPersonIdsFiltered(workspaceService.getCurrentWorkspaceId(), query, companies, titles, noCompany);
     }
 
     public List<String> distinctCompanies() {

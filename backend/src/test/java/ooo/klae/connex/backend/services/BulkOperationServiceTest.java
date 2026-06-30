@@ -22,10 +22,12 @@ import ooo.klae.connex.backend.beans.Workspace;
 import ooo.klae.connex.backend.dto.BulkOperationResult;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
+import ooo.klae.connex.backend.mappers.ShareMapper;
 
 class BulkOperationServiceTest extends AbstractServiceTest {
 
     @Autowired BulkOperationService bulkOperationService;
+    @Autowired ShareMapper shareMapper;
 
     @Test
     void addTagToPersons_tagsEveryRecordAndReportsSuccess() {
@@ -77,6 +79,25 @@ class BulkOperationServiceTest extends AbstractServiceTest {
         assertFalse(personMapper.exists(workspace.getId(), local.getId()));
         assertNotNull(personMapper.getPersonById(other.getId(), foreign.getId()),
             "a record in another workspace must never be touched by a bulk operation");
+    }
+
+    @Test
+    void deletePersons_skipsRecordsMerelySharedIntoTheWorkspace() {
+        Workspace other = newOtherWorkspace();
+        Person foreign = personInWorkspace(other);
+        shareMapper.sharePerson(foreign.getId(), workspace.getId(), currentUser.getId(), true);
+
+        assertTrue(personMapper.exists(workspace.getId(), foreign.getId()),
+            "a shared-in record is read-visible");
+        assertFalse(personMapper.existsOwned(workspace.getId(), foreign.getId()),
+            "but it is not owned by the workspace");
+
+        BulkOperationResult result = bulkOperationService.deletePersons(List.of(foreign.getId()));
+
+        assertEquals(0, result.getSucceeded());
+        assertEquals(1, result.getFailed());
+        assertNotNull(personMapper.getPersonById(other.getId(), foreign.getId()),
+            "a record only shared into the workspace must never be mutated by a bulk operation");
     }
 
     @Test
