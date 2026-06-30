@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="ooo.klae.connex.backend.mappers.OrganizationMapper">
+
+  <insert id="insert" useGeneratedKeys="true" keyProperty="id">
+    INSERT INTO organization (name, slug) VALUES (#{name}, #{slug})
+  </insert>
+
+  <select id="getById" resultType="Organization">
+    SELECT id, name, slug, created_at, updated_at FROM organization WHERE id = #{id}
+  </select>
+</mapper>

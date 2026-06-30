@@ -11,12 +11,12 @@ import org.springframework.stereotype.Component;
 @Component
 public class TenantContext {
 
-    private record Scope(int workspaceId, int userId, String role) {}
+    private record Scope(int workspaceId, int orgId, int userId, String role) {}
 
     private static final ThreadLocal<Scope> CURRENT = new ThreadLocal<>();
 
-    public void set(int workspaceId, int userId, String role) {
-        CURRENT.set(new Scope(workspaceId, userId, role));
+    public void set(int workspaceId, int orgId, int userId, String role) {
+        CURRENT.set(new Scope(workspaceId, orgId, userId, role));
     }
 
     public boolean isResolved() {
@@ -26,6 +26,11 @@ public class TenantContext {
     public Integer getWorkspaceId() {
         Scope s = CURRENT.get();
         return s == null ? null : s.workspaceId();
+    }
+
+    public Integer getOrgId() {
+        Scope s = CURRENT.get();
+        return s == null ? null : s.orgId();
     }
 
     public Integer getUserId() {

@@ -34,7 +34,7 @@ class WorkspaceServiceTest extends AbstractServiceTest {
         WorkspaceMembershipDto second = workspaceService.createWorkspace("Second", currentUser.getId());
 
         // Simulate the interceptor pinning the second workspace for this request.
-        tenantContext.set(second.getId(), currentUser.getId(), "owner");
+        tenantContext.set(second.getId(), workspaceService.getOrgId(second.getId()), currentUser.getId(), "owner");
         try {
             assertEquals(second.getId(), workspaceService.getCurrentWorkspaceId());
         } finally {
@@ -42,6 +42,25 @@ class WorkspaceServiceTest extends AbstractServiceTest {
         }
         // Off the request thread it falls back to the first/default membership.
         assertEquals(workspace.getId(), workspaceService.getCurrentWorkspaceId());
+    }
+
+    @Test
+    void createWorkspace_reusesTheOwnersOrganization() {
+        WorkspaceMembershipDto first = workspaceService.createWorkspace("Org A", currentUser.getId());
+        WorkspaceMembershipDto second = workspaceService.createWorkspace("Org B", currentUser.getId());
+        assertEquals(workspaceService.getOrgId(first.getId()), workspaceService.getOrgId(second.getId()));
+    }
+
+    @Test
+    void getCurrentOrgId_readsResolvedContext() {
+        WorkspaceMembershipDto ws = workspaceService.createWorkspace("Ctx WS", currentUser.getId());
+        int orgId = workspaceService.getOrgId(ws.getId());
+        tenantContext.set(ws.getId(), orgId, currentUser.getId(), "owner");
+        try {
+            assertEquals(orgId, workspaceService.getCurrentOrgId());
+        } finally {
+            tenantContext.clear();
+        }
     }
 
     @Test

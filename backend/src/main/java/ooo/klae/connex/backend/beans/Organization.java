@@ -4,13 +4,13 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 
 /**
- * Represents an isolated CRM workspace.
+ * A top-level organization — the tenant, billing, and breach boundary above
+ * workspaces. A workspace belongs to exactly one organization.
  */
 @Data
 @NoArgsConstructor
-public class Workspace {
+public class Organization {
     private int id;
-    private int orgId;
     private String name;
     private String slug;
     private String createdAt;
