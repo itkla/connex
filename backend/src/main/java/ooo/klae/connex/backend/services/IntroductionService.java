@@ -130,6 +130,11 @@ public class IntroductionService {
      * Generates only pairs that share a structural signal (a mutual connection or an employer),
      * drops pairs that are already connected or already recorded, scores each, and returns the top
      * {@code limit} by descending score.
+     *
+     * <p>Contacts who currently work at the same company are excluded: same-employer colleagues are
+     * very likely to already know each other, so introducing them adds little. The shared-employer
+     * signal therefore only rewards a <em>former</em> or cross-time overlap (a past employer, or one
+     * contact at a company the other has since left) — the reconnection that actually has value.
      */
     static List<IntroSuggestionDto> rankSuggestions(
             List<IntroCandidatePerson> candidates,
@@ -173,6 +178,9 @@ public class IntroductionService {
             IntroCandidatePerson partyA = byId.get(personA);
             IntroCandidatePerson partyB = byId.get(personB);
             if (partyA == null || partyB == null) {
+                continue;
+            }
+            if (sameCurrentEmployer(partyA, partyB)) {
                 continue;
             }
             int mutualCount = mutual.getOrDefault(key, 0);
@@ -401,6 +409,11 @@ public class IntroductionService {
 
     private static boolean notBlank(String value) {
         return value != null && !value.isBlank();
+    }
+
+    /** True when both contacts list the same non-null current employer (likely already colleagues). */
+    private static boolean sameCurrentEmployer(IntroCandidatePerson a, IntroCandidatePerson b) {
+        return a.getCompanyId() != null && a.getCompanyId().equals(b.getCompanyId());
     }
 
     private static String trimToNull(String value) {
