@@ -27,16 +27,19 @@ class IntroductionRankingTest {
     void ranksAndExplainsSuggestionsExcludingDirectlyConnectedPairs() {
         List<IntroCandidatePerson> candidates = List.of(
             person(1, "Aoi", 100, "Acme"),
-            person(2, "Ben", 100, "Acme"),
-            person(3, "Cho", 200, "Globex"),
-            person(4, "Dan", 200, "Globex"));
+            person(2, "Ben", 200, "Globex"),
+            person(3, "Cho", 300, "Initrode"),
+            person(4, "Dan", 400, "Umbrella"));
         List<PersonEdge> edges = List.of(
             edge(5, 1), edge(5, 2), edge(5, 3),
             edge(1, 3));
+        List<IntroEmploymentRow> employment = List.of(
+            employment(1, 900, "Initech"), employment(2, 900, "Initech"),
+            employment(3, 901, "Hooli"), employment(4, 901, "Hooli"));
         Map<Integer, RelationshipTemperatureDto> temps = warmAll(1, 2, 3, 4);
 
         List<IntroSuggestionDto> suggestions = IntroductionService.rankSuggestions(
-            candidates, edges, List.of(), Set.of(), temps, 10);
+            candidates, edges, employment, Set.of(), temps, 10);
 
         assertEquals(3, suggestions.size());
         assertNoPair(suggestions, 1, 3);
@@ -46,12 +49,12 @@ class IntroductionRankingTest {
         assertEquals(1, top.getPersonAId());
         assertEquals(2, top.getPersonBId());
         assertEquals(1, top.getMutualConnections());
-        assertEquals("Acme", top.getSharedCompany());
+        assertEquals("Initech", top.getSharedCompany());
         assertEquals(List.of("mutual_connections", "shared_company"), top.getReasons());
 
         IntroSuggestionDto sharedOnly = find(suggestions, 3, 4);
         assertEquals(0, sharedOnly.getMutualConnections());
-        assertEquals("Globex", sharedOnly.getSharedCompany());
+        assertEquals("Hooli", sharedOnly.getSharedCompany());
         assertEquals(List.of("shared_company"), sharedOnly.getReasons());
 
         IntroSuggestionDto mutualOnly = find(suggestions, 2, 3);
@@ -61,14 +64,66 @@ class IntroductionRankingTest {
     }
 
     @Test
-    void excludesPairsAlreadyRecordedOrDismissed() {
+    void doesNotSuggestSameEmployerPairWithoutAnotherSignal() {
         List<IntroCandidatePerson> candidates = List.of(
             person(1, "Aoi", 100, "Acme"),
             person(2, "Ben", 100, "Acme"));
+
+        List<IntroSuggestionDto> suggestions = IntroductionService.rankSuggestions(
+            candidates, List.of(), List.of(), Set.of(), warmAll(1, 2), 10);
+
+        assertTrue(suggestions.isEmpty(),
+            "a shared current employer alone is not a reason to introduce two colleagues");
+    }
+
+    @Test
+    void surfacesSameEmployerPairWithMutualConnectionButRanksItBelowCrossCompany() {
+        List<IntroCandidatePerson> candidates = List.of(
+            person(1, "Aoi", 100, "Acme"),
+            person(2, "Ben", 100, "Acme"),
+            person(3, "Cho", 200, "Globex"),
+            person(4, "Dan", 300, "Initrode"));
+        List<PersonEdge> edges = List.of(
+            edge(5, 1), edge(5, 2),
+            edge(6, 3), edge(6, 4));
+
+        List<IntroSuggestionDto> suggestions = IntroductionService.rankSuggestions(
+            candidates, edges, List.of(), Set.of(), warmAll(1, 2, 3, 4), 10);
+
+        IntroSuggestionDto intra = find(suggestions, 1, 2);
+        IntroSuggestionDto cross = find(suggestions, 3, 4);
+        assertEquals(1, intra.getMutualConnections());
+        assertEquals(List.of("mutual_connections"), intra.getReasons());
+        assertNull(intra.getSharedCompany());
+        assertTrue(cross.getScore() > intra.getScore(),
+            "an equivalent cross-company pair must rank above the intra-company one");
+    }
+
+    @Test
+    void suggestsWhenOneContactHasLeftTheSharedEmployer() {
+        List<IntroCandidatePerson> candidates = List.of(
+            person(1, "Aoi", 900, "Initech"),
+            person(2, "Ben", 200, "Globex"));
+        List<IntroEmploymentRow> employment = List.of(employment(2, 900, "Initech"));
+
+        List<IntroSuggestionDto> suggestions = IntroductionService.rankSuggestions(
+            candidates, List.of(), employment, Set.of(), warmAll(1, 2), 10);
+
+        assertEquals(1, suggestions.size());
+        assertEquals("Initech", suggestions.get(0).getSharedCompany());
+        assertEquals(List.of("shared_company"), suggestions.get(0).getReasons());
+    }
+
+    @Test
+    void excludesPairsAlreadyRecordedOrDismissed() {
+        List<IntroCandidatePerson> candidates = List.of(
+            person(1, "Aoi", 100, "Acme"),
+            person(2, "Ben", 200, "Globex"));
+        List<PersonEdge> edges = List.of(edge(5, 1), edge(5, 2));
         Set<Long> existing = Set.of(pairKey(1, 2));
 
         List<IntroSuggestionDto> suggestions = IntroductionService.rankSuggestions(
-            candidates, List.of(), List.of(), existing, warmAll(1, 2), 10);
+            candidates, edges, List.of(), existing, warmAll(1, 2), 10);
 
         assertTrue(suggestions.isEmpty());
     }
@@ -106,13 +161,14 @@ class IntroductionRankingTest {
     void limitTrimsToTopByScore() {
         List<IntroCandidatePerson> candidates = List.of(
             person(1, "Aoi", 100, "Acme"),
-            person(2, "Ben", 100, "Acme"),
-            person(3, "Cho", 200, "Globex"),
-            person(4, "Dan", 200, "Globex"));
+            person(2, "Ben", 200, "Globex"),
+            person(3, "Cho", 300, "Initrode"));
         List<PersonEdge> edges = List.of(edge(5, 1), edge(5, 2), edge(5, 3));
+        List<IntroEmploymentRow> employment = List.of(
+            employment(1, 900, "Initech"), employment(2, 900, "Initech"));
 
         List<IntroSuggestionDto> suggestions = IntroductionService.rankSuggestions(
-            candidates, edges, List.of(), Set.of(), warmAll(1, 2, 3, 4), 1);
+            candidates, edges, employment, Set.of(), warmAll(1, 2, 3), 1);
 
         assertEquals(1, suggestions.size());
         assertEquals(1, suggestions.get(0).getPersonAId());
@@ -123,13 +179,14 @@ class IntroductionRankingTest {
     void carriesWarmthBandsForBothParties() {
         List<IntroCandidatePerson> candidates = List.of(
             person(1, "Aoi", 100, "Acme"),
-            person(2, "Ben", 100, "Acme"));
+            person(2, "Ben", 200, "Globex"));
+        List<PersonEdge> edges = List.of(edge(5, 1), edge(5, 2));
         Map<Integer, RelationshipTemperatureDto> temps = Map.of(
             1, temperature(1, 80, "hot"),
             2, temperature(2, 40, "warm"));
 
         List<IntroSuggestionDto> suggestions = IntroductionService.rankSuggestions(
-            candidates, List.of(), List.of(), Set.of(), temps, 10);
+            candidates, edges, List.of(), Set.of(), temps, 10);
 
         assertEquals(1, suggestions.size());
         assertEquals("hot", suggestions.get(0).getPersonAWarmth());

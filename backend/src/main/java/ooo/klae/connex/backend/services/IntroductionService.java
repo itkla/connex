@@ -66,6 +66,10 @@ public class IntroductionService {
     private static final double WEIGHT_MUTUAL = 0.45;
     private static final double WEIGHT_SHARED = 0.30;
     private static final double WEIGHT_WARMTH = 0.25;
+    /** Score multiplier applied to a pair already at the same current employer: they are presumed
+     *  to know each other, so such intros are down-ranked far below cross-company ones — but kept,
+     *  not dropped, so the user can still act on them and the lineage signal keeps accruing. */
+    private static final double SAME_EMPLOYER_PENALTY = 0.5;
 
     private static final int DEFAULT_SUGGESTION_LIMIT = 20;
     private static final int MAX_SUGGESTION_LIMIT = 50;
@@ -130,6 +134,15 @@ public class IntroductionService {
      * Generates only pairs that share a structural signal (a mutual connection or an employer),
      * drops pairs that are already connected or already recorded, scores each, and returns the top
      * {@code limit} by descending score.
+     *
+     * <p>Contacts who currently work at the same company are heavily de-prioritized rather than
+     * dropped: same-employer colleagues are likely to already know each other, so simply sharing a
+     * current employer is not a reason to introduce them, and such a pair only surfaces when a
+     * mutual connection makes the intro non-obvious — then ranked well below cross-company pairs via
+     * {@link #SAME_EMPLOYER_PENALTY}. Keeping them surfaceable means the user can still make the
+     * intro and the made/dismissed signal keeps building. The shared-employer reason itself only
+     * rewards a <em>former</em> or cross-time overlap (a past employer, or one contact at a company
+     * the other has since left) — the reconnection that actually has value.
      */
     static List<IntroSuggestionDto> rankSuggestions(
             List<IntroCandidatePerson> candidates,
@@ -176,12 +189,14 @@ public class IntroductionService {
                 continue;
             }
             int mutualCount = mutual.getOrDefault(key, 0);
-            String shared = sharedCompany.get(key);
+            boolean sameCurrent = sameCurrentEmployer(partyA, partyB);
+            String shared = sameCurrent ? null : sharedCompany.get(key);
             boolean hasShared = shared != null;
-            if (mutualCount <= 0 && !hasShared) {
+            boolean surfaced = sameCurrent ? mutualCount > 0 : (mutualCount > 0 || hasShared);
+            if (!surfaced) {
                 continue;
             }
-            suggestions.add(suggestion(partyA, partyB, mutualCount, shared, hasShared, temperatures));
+            suggestions.add(suggestion(partyA, partyB, mutualCount, shared, hasShared, sameCurrent, temperatures));
         }
 
         suggestions.sort(Comparator
@@ -280,6 +295,7 @@ public class IntroductionService {
             int mutualCount,
             String shared,
             boolean hasShared,
+            boolean sameCurrentEmployer,
             Map<Integer, RelationshipTemperatureDto> temperatures) {
         int scoreA = score(temperatures, partyA.getId());
         int scoreB = score(temperatures, partyB.getId());
@@ -288,6 +304,9 @@ public class IntroductionService {
         double warmthComponent = (scoreA + scoreB) / 200.0;
         double raw = WEIGHT_MUTUAL * mutualComponent + WEIGHT_SHARED * sharedComponent
             + WEIGHT_WARMTH * warmthComponent;
+        if (sameCurrentEmployer) {
+            raw *= SAME_EMPLOYER_PENALTY;
+        }
 
         List<String> reasons = new ArrayList<>();
         if (mutualCount > 0) {
@@ -401,6 +420,11 @@ public class IntroductionService {
 
     private static boolean notBlank(String value) {
         return value != null && !value.isBlank();
+    }
+
+    /** True when both contacts list the same non-null current employer (likely already colleagues). */
+    private static boolean sameCurrentEmployer(IntroCandidatePerson a, IntroCandidatePerson b) {
+        return a.getCompanyId() != null && a.getCompanyId().equals(b.getCompanyId());
     }
 
     private static String trimToNull(String value) {

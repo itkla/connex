@@ -16,6 +16,7 @@ import ooo.klae.connex.backend.beans.Company;
 import ooo.klae.connex.backend.beans.Introduction;
 import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.beans.PersonEdge;
+import ooo.klae.connex.backend.beans.PersonEmployment;
 import ooo.klae.connex.backend.beans.Workspace;
 import ooo.klae.connex.backend.dto.IntroSuggestionDto;
 import ooo.klae.connex.backend.dto.IntroductionDto;
@@ -24,6 +25,7 @@ import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.IntroductionMapper;
 import ooo.klae.connex.backend.mappers.PersonEdgeMapper;
+import ooo.klae.connex.backend.mappers.PersonEmploymentMapper;
 
 /**
  * Database-backed tests for {@link IntroductionService}: suggestion lifecycle, lineage, and the
@@ -34,12 +36,15 @@ class IntroductionServiceTest extends AbstractServiceTest {
     @Autowired private IntroductionService introductionService;
     @Autowired private PersonEdgeMapper personEdgeMapper;
     @Autowired private IntroductionMapper introductionMapper;
+    @Autowired private PersonEmploymentMapper personEmploymentMapper;
 
     @Test
-    void suggestsSharedCompanyPairThenExcludesAfterRecording() {
-        Company acme = newCompany();
-        Person p1 = engagedPerson(acme);
-        Person p2 = engagedPerson(acme);
+    void suggestsPairThenExcludesAfterRecording() {
+        Person p1 = engagedPerson(newCompany());
+        Person p2 = engagedPerson(newCompany());
+        Person hub = newPerson(newCompany());
+        connect(hub.getId(), p1.getId());
+        connect(hub.getId(), p2.getId());
 
         assertTrue(hasPair(introductionService.getSuggestions(50), p1.getId(), p2.getId()));
 
@@ -51,6 +56,44 @@ class IntroductionServiceTest extends AbstractServiceTest {
         assertTrue(lineageHasPair(p1.getId(), p2.getId()));
         assertTrue(edgeExists(p1.getId(), p2.getId()));
         assertFalse(hasPair(introductionService.getSuggestions(50), p1.getId(), p2.getId()));
+    }
+
+    @Test
+    void doesNotSuggestSameEmployerContactsWithoutAnotherSignal() {
+        Company acme = newCompany();
+        Person p1 = engagedPerson(acme);
+        Person p2 = engagedPerson(acme);
+
+        assertFalse(hasPair(introductionService.getSuggestions(50), p1.getId(), p2.getId()),
+            "a shared current employer alone is not a reason to suggest an intro");
+    }
+
+    @Test
+    void surfacesSameEmployerContactsWhenTheyShareAMutualConnection() {
+        Company acme = newCompany();
+        Person p1 = engagedPerson(acme);
+        Person p2 = engagedPerson(acme);
+        Person hub = newPerson(newCompany());
+        connect(hub.getId(), p1.getId());
+        connect(hub.getId(), p2.getId());
+
+        IntroSuggestionDto pair = find(introductionService.getSuggestions(50), p1.getId(), p2.getId());
+        assertEquals(1, pair.getMutualConnections());
+        assertTrue(pair.getReasons().contains("mutual_connections"));
+        assertEquals(null, pair.getSharedCompany());
+    }
+
+    @Test
+    void suggestsFormerColleaguesViaEmploymentHistory() {
+        Person p1 = engagedPerson(newCompany());
+        Person p2 = engagedPerson(newCompany());
+        Company past = newCompany();
+        addEmployment(p1, past);
+        addEmployment(p2, past);
+
+        IntroSuggestionDto pair = find(introductionService.getSuggestions(50), p1.getId(), p2.getId());
+        assertTrue(pair.getReasons().contains("shared_company"));
+        assertEquals(past.getName(), pair.getSharedCompany());
     }
 
     @Test
@@ -69,9 +112,11 @@ class IntroductionServiceTest extends AbstractServiceTest {
 
     @Test
     void dismissExcludesFromSuggestionsWithoutAddingLineage() {
-        Company acme = newCompany();
-        Person p1 = engagedPerson(acme);
-        Person p2 = engagedPerson(acme);
+        Person p1 = engagedPerson(newCompany());
+        Person p2 = engagedPerson(newCompany());
+        Person hub = newPerson(newCompany());
+        connect(hub.getId(), p1.getId());
+        connect(hub.getId(), p2.getId());
         assertTrue(hasPair(introductionService.getSuggestions(50), p1.getId(), p2.getId()));
 
         introductionService.dismissSuggestion(p1.getId(), p2.getId());
@@ -170,6 +215,18 @@ class IntroductionServiceTest extends AbstractServiceTest {
         edge.setType("knows");
         edge.setStrength(2);
         personEdgeMapper.upsert(edge);
+    }
+
+    private void addEmployment(Person person, Company company) {
+        PersonEmployment employment = new PersonEmployment();
+        employment.setWorkspaceId(workspace.getId());
+        employment.setPersonId(person.getId());
+        employment.setCompanyId(company.getId());
+        employment.setCompanyName(company.getName());
+        employment.setTitle("Engineer");
+        employment.setStartedAt("2018-01-01");
+        employment.setEndedAt("2021-01-01");
+        personEmploymentMapper.insert(employment);
     }
 
     private Workspace newWorkspace() {
