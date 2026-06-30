@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -82,6 +83,7 @@ class NotificationReconciliationServiceTest {
         when(notificationMapper.findTaskReminderCandidates(7)).thenReturn(List.of(candidate));
         when(notificationMapper.findDealReminderCandidates(7)).thenReturn(List.of());
         ScoringService scoringService = Mockito.mock(ScoringService.class);
+        IntroductionService introductionService = Mockito.mock(IntroductionService.class);
 
         NotificationReconciliationService service = new NotificationReconciliationService(
             notificationMapper,
@@ -89,6 +91,7 @@ class NotificationReconciliationServiceTest {
             dispatcher,
             properties,
             scoringService,
+            introductionService,
             clock,
             new ObjectMapper()
         );
@@ -369,8 +372,120 @@ class NotificationReconciliationServiceTest {
             dispatcher,
             new NotificationProperties(),
             scoringService,
+            Mockito.mock(IntroductionService.class),
             clock,
             new ObjectMapper()
         );
+    }
+
+    @Test
+    void reconciliationEmitsIntroOpportunityForTopSuggestionToEachMember() {
+        NotificationMapper notificationMapper = Mockito.mock(NotificationMapper.class);
+        PreferenceMapper preferenceMapper = Mockito.mock(PreferenceMapper.class);
+        NotificationDispatcher dispatcher = Mockito.mock(NotificationDispatcher.class);
+        ScoringService scoringService = Mockito.mock(ScoringService.class);
+        IntroductionService introductionService = Mockito.mock(IntroductionService.class);
+        Clock clock = Clock.fixed(Instant.parse("2026-06-23T15:30:00Z"), ZoneOffset.UTC);
+
+        when(notificationMapper.findWorkspaceRecipientIds(7)).thenReturn(List.of(42));
+        when(introductionService.computeSuggestions(eq(7), anyInt(), any())).thenReturn(List.of(introSuggestion()));
+
+        NotificationReconciliationService service = new NotificationReconciliationService(
+            notificationMapper, preferenceMapper, dispatcher, new NotificationProperties(),
+            scoringService, introductionService, clock, new ObjectMapper());
+        service.reconcileWorkspace(7, true);
+
+        ArgumentCaptor<Notification> captor = ArgumentCaptor.forClass(Notification.class);
+        verify(dispatcher).dispatch(captor.capture());
+        Notification opportunity = captor.getValue();
+        assertEquals(NotificationReconciliationService.INTRO_OPPORTUNITY_TYPE, opportunity.getType());
+        assertEquals("relationship", opportunity.getCategory());
+        assertEquals("info", opportunity.getSeverity());
+        assertEquals("person", opportunity.getSourceType());
+        assertEquals(Integer.valueOf(3), opportunity.getSourceId());
+        assertEquals("person", opportunity.getContextType());
+        assertEquals(Integer.valueOf(8), opportunity.getContextId());
+        assertEquals("/overview/introductions", opportunity.getActionUrl());
+        assertEquals(42, opportunity.getRecipientId());
+        assertEquals("relationship.intro_opportunity:3:8", opportunity.getDedupeKey());
+    }
+
+    @Test
+    void reconciliationSkipsIntroOpportunitiesWhenDisabled() {
+        NotificationMapper notificationMapper = Mockito.mock(NotificationMapper.class);
+        PreferenceMapper preferenceMapper = Mockito.mock(PreferenceMapper.class);
+        NotificationDispatcher dispatcher = Mockito.mock(NotificationDispatcher.class);
+        ScoringService scoringService = Mockito.mock(ScoringService.class);
+        IntroductionService introductionService = Mockito.mock(IntroductionService.class);
+        Clock clock = Clock.fixed(Instant.parse("2026-06-23T15:30:00Z"), ZoneOffset.UTC);
+
+        NotificationProperties properties = new NotificationProperties();
+        properties.setIntroOpportunitiesEnabled(false);
+
+        NotificationReconciliationService service = new NotificationReconciliationService(
+            notificationMapper, preferenceMapper, dispatcher, properties,
+            scoringService, introductionService, clock, new ObjectMapper());
+        service.reconcileWorkspace(7, true);
+
+        verify(introductionService, never()).computeSuggestions(anyInt(), anyInt(), any());
+        verify(dispatcher, never()).dispatch(any());
+    }
+
+    @Test
+    void reconciliationSkipsIntroOpportunitiesWhenNotRequested() {
+        NotificationMapper notificationMapper = Mockito.mock(NotificationMapper.class);
+        PreferenceMapper preferenceMapper = Mockito.mock(PreferenceMapper.class);
+        NotificationDispatcher dispatcher = Mockito.mock(NotificationDispatcher.class);
+        ScoringService scoringService = Mockito.mock(ScoringService.class);
+        IntroductionService introductionService = Mockito.mock(IntroductionService.class);
+        Clock clock = Clock.fixed(Instant.parse("2026-06-23T15:30:00Z"), ZoneOffset.UTC);
+
+        NotificationReconciliationService service = new NotificationReconciliationService(
+            notificationMapper, preferenceMapper, dispatcher, new NotificationProperties(),
+            scoringService, introductionService, clock, new ObjectMapper());
+        service.reconcileWorkspace(7, false);
+
+        verify(introductionService, never()).computeSuggestions(anyInt(), anyInt(), any());
+        verify(dispatcher, never()).dispatch(any());
+    }
+
+    @Test
+    void reconciliationDoesNotResolveIntroOpportunityOnPerMutationPass() {
+        NotificationMapper notificationMapper = Mockito.mock(NotificationMapper.class);
+        PreferenceMapper preferenceMapper = Mockito.mock(PreferenceMapper.class);
+        NotificationDispatcher dispatcher = Mockito.mock(NotificationDispatcher.class);
+        ScoringService scoringService = Mockito.mock(ScoringService.class);
+        IntroductionService introductionService = Mockito.mock(IntroductionService.class);
+        Clock clock = Clock.fixed(Instant.parse("2026-06-23T15:30:00Z"), ZoneOffset.UTC);
+
+        Notification existing = new Notification();
+        existing.setId(55);
+        existing.setWorkspaceId(7);
+        existing.setRecipientId(42);
+        existing.setType(NotificationReconciliationService.INTRO_OPPORTUNITY_TYPE);
+        existing.setDedupeKey("relationship.intro_opportunity:3:8");
+        when(notificationMapper.findWorkspaceReminderNotifications(7)).thenReturn(List.of(existing));
+
+        NotificationReconciliationService service = new NotificationReconciliationService(
+            notificationMapper, preferenceMapper, dispatcher, new NotificationProperties(),
+            scoringService, introductionService, clock, new ObjectMapper());
+        service.reconcileWorkspace(7, false);
+
+        verify(notificationMapper, never()).resolveReminder(anyInt(), anyInt(), anyInt(), any());
+        verify(introductionService, never()).computeSuggestions(anyInt(), anyInt(), any());
+    }
+
+    private static ooo.klae.connex.backend.dto.IntroSuggestionDto introSuggestion() {
+        ooo.klae.connex.backend.dto.IntroSuggestionDto suggestion =
+            new ooo.klae.connex.backend.dto.IntroSuggestionDto();
+        suggestion.setPersonAId(3);
+        suggestion.setPersonAName("Ada Lovelace");
+        suggestion.setPersonBId(8);
+        suggestion.setPersonBName("Alan Turing");
+        suggestion.setScore(72);
+        suggestion.setMutualConnections(2);
+        suggestion.setSharedCompany("Bletchley");
+        suggestion.setReasons(List.of("mutual_connections", "shared_company"));
+        return suggestion;
     }
 }

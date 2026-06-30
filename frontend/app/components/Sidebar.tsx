@@ -18,6 +18,7 @@ import {
     EllipsisVerticalIcon,
     CalendarIcon,
     MapIcon,
+    ArrowsRightLeftIcon,
     ChartBarIcon,
     PresentationChartLineIcon,
     GlobeAltIcon,
@@ -63,6 +64,7 @@ function useSections(): NavSection[] {
                 { label: t("navDashboard"), href: "/dashboard", icon: HomeIcon },
                 { label: t("navCalendar"), href: "/overview/calendar", icon: CalendarIcon, disabled: false },
                 { label: t("navMap"), href: "/overview/map", icon: MapIcon, disabled: false },
+                { label: t("navIntroductions"), href: "/overview/introductions", icon: ArrowsRightLeftIcon, disabled: false },
                 { label: t("navAnalytics"), href: "/overview/analytics", icon: ChartBarIcon, disabled: false },
                 // { label: t("navInsights"), href: "/overview/insights", icon: ChartPieIcon, disabled: true },
                 { label: t("navReports"), href: "/overview/reports", icon: PresentationChartLineIcon, disabled: true }

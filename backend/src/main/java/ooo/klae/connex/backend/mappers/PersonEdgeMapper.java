@@ -13,6 +13,8 @@ import java.util.List;
  */
 public interface PersonEdgeMapper {
     int upsert(PersonEdge edge);
+    /** Inserts a connection only when the pair has no edge yet; never overwrites an existing one. */
+    int insertIfAbsent(PersonEdge edge);
     int delete(@Param("workspaceId") int workspaceId, @Param("sourcePersonId") int sourcePersonId,
             @Param("targetPersonId") int targetPersonId);
     List<PersonConnectionDto> getConnections(@Param("workspaceId") int workspaceId,

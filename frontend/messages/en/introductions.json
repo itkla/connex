@@ -1,0 +1,33 @@
+{
+  "Introductions": {
+    "pageTitle": "Introductions",
+    "pageSubtitle": "Be the connector. People in your network you're positioned to introduce to each other, plus the intros you've already made.",
+    "toMake": "Intros to make",
+    "logIntro": "Log an intro",
+    "record": "Record intro",
+    "dismiss": "Dismiss",
+    "reasonMutual": "{count, plural, =1 {# mutual connection} other {# mutual connections}}",
+    "reasonSharedCompany": "Shared employer",
+    "reasonSharedCompanyNamed": "Shared employer: {company}",
+    "toMakeEmptyTitle": "No introductions to suggest yet",
+    "toMakeEmptyHint": "As you log activities and map how your contacts know each other, pairs worth connecting will show up here.",
+    "lineageTitle": "Intros you've made",
+    "lineageEmpty": "No introductions recorded yet. When you connect two contacts, they'll appear here.",
+    "byIntroducer": "by {name}",
+    "logTitle": "Log an introduction",
+    "logDescription": "Record an introduction you made between two contacts. This connects them and adds to your lineage.",
+    "personA": "First contact",
+    "personB": "Second contact",
+    "pickContact": "Search contacts",
+    "noContacts": "No contacts found",
+    "noteLabel": "Note (optional)",
+    "notePlaceholder": "How you introduced them, or why",
+    "cancel": "Cancel",
+    "logSubmit": "Record intro",
+    "recordedToast": "Introduced {a} to {b}",
+    "recordedManualToast": "Introduction recorded",
+    "recordFailed": "Could not record the introduction",
+    "dismissFailed": "Could not dismiss the suggestion",
+    "dashboardEmpty": "No introduction opportunities right now."
+  }
+}

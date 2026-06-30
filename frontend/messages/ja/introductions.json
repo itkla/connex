@@ -1,0 +1,33 @@
+{
+  "Introductions": {
+    "pageTitle": "紹介",
+    "pageSubtitle": "つなぎ役になりましょう。お互いを紹介できそうな人脈と、これまでに行った紹介の履歴です。",
+    "toMake": "これからの紹介",
+    "logIntro": "紹介を記録",
+    "record": "紹介を記録",
+    "dismiss": "非表示",
+    "reasonMutual": "共通のつながり {count} 件",
+    "reasonSharedCompany": "共通の勤務先",
+    "reasonSharedCompanyNamed": "共通の勤務先: {company}",
+    "toMakeEmptyTitle": "まだ紹介の候補はありません",
+    "toMakeEmptyHint": "活動を記録し、連絡先同士のつながりを整理していくと、紹介する価値のある組み合わせがここに表示されます。",
+    "lineageTitle": "行った紹介",
+    "lineageEmpty": "まだ紹介の記録はありません。2人の連絡先をつなぐと、ここに表示されます。",
+    "byIntroducer": "{name} による",
+    "logTitle": "紹介を記録",
+    "logDescription": "2人の連絡先を紹介したことを記録します。両者がつながり、履歴に追加されます。",
+    "personA": "1人目の連絡先",
+    "personB": "2人目の連絡先",
+    "pickContact": "連絡先を検索",
+    "noContacts": "連絡先が見つかりません",
+    "noteLabel": "メモ (任意)",
+    "notePlaceholder": "どのように、またはなぜ紹介したか",
+    "cancel": "キャンセル",
+    "logSubmit": "紹介を記録",
+    "recordedToast": "{a} さんを {b} さんに紹介しました",
+    "recordedManualToast": "紹介を記録しました",
+    "recordFailed": "紹介を記録できませんでした",
+    "dismissFailed": "候補を非表示にできませんでした",
+    "dashboardEmpty": "現在、紹介のチャンスはありません。"
+  }
+}

@@ -28,6 +28,7 @@ import ooo.klae.connex.backend.beans.Notification;
 import ooo.klae.connex.backend.beans.NotificationPreference;
 import ooo.klae.connex.backend.beans.RelationshipNudgeCandidate;
 import ooo.klae.connex.backend.beans.TaskReminderCandidate;
+import ooo.klae.connex.backend.dto.IntroSuggestionDto;
 import ooo.klae.connex.backend.dto.RelationshipTemperatureDto;
 import ooo.klae.connex.backend.mappers.NotificationMapper;
 import ooo.klae.connex.backend.mappers.PreferenceMapper;
@@ -44,6 +45,8 @@ public class NotificationReconciliationService {
     static final String TASK_TYPE = "task.due";
     static final String DEAL_TYPE = "deal.close";
     static final String RELATIONSHIP_TYPE = "relationship.cooling";
+    static final String INTRO_OPPORTUNITY_TYPE = "relationship.intro_opportunity";
+    private static final String INFO = "info";
     static final String WARNING = "warning";
     static final String CRITICAL = "critical";
     private static final String COLD_BAND = "cold";
@@ -64,6 +67,7 @@ public class NotificationReconciliationService {
     private final NotificationDispatcher dispatcher;
     private final NotificationProperties properties;
     private final ScoringService scoringService;
+    private final IntroductionService introductionService;
     private final Clock clock;
     private final ObjectMapper objectMapper;
 
@@ -113,17 +117,28 @@ public class NotificationReconciliationService {
         }
 
         if (includeRelationshipNudges) {
+            Map<Integer, RelationshipTemperatureDto> temperatures = scoreByPerson(workspaceId);
             try {
-                addRelationshipNudges(workspaceId, existing, expected, preferences, triggeredAt);
+                addRelationshipNudges(workspaceId, existing, expected, preferences, triggeredAt, temperatures);
             } catch (RuntimeException exception) {
                 log.warn("Relationship-nudge reconciliation failed for workspace={}", workspaceId, exception);
+            }
+            if (properties.isIntroOpportunitiesEnabled()) {
+                try {
+                    addIntroOpportunities(workspaceId, expected, preferences, triggeredAt, temperatures);
+                } catch (RuntimeException exception) {
+                    log.warn("Intro-opportunity reconciliation failed for workspace={}", workspaceId, exception);
+                }
             }
         }
 
         expected.values().forEach(dispatcher::dispatch);
+        Set<String> managedTypes = managedReminderTypes(includeRelationshipNudges);
         for (Map.Entry<ReminderKey, Notification> entry : existing.entrySet()) {
             Notification notification = entry.getValue();
-            if (notification.getResolvedAt() == null && !expected.containsKey(entry.getKey())) {
+            if (notification.getResolvedAt() == null
+                    && managedTypes.contains(notification.getType())
+                    && !expected.containsKey(entry.getKey())) {
                 notificationMapper.resolveReminder(
                     workspaceId,
                     notification.getRecipientId(),
@@ -134,19 +149,31 @@ public class NotificationReconciliationService {
         }
     }
 
+    /**
+     * Reminder types the current pass recomputes, and may therefore resolve. The per-mutation pass
+     * (no relationship nudges) recomputes only task/deal reminders; it must not resolve the
+     * relationship and intro reminders it never recomputed, or it would clear them on every mutation
+     * and the next scheduled sweep would resurrect them as unread (wiping read/dismiss state).
+     */
+    private static Set<String> managedReminderTypes(boolean includeRelationshipNudges) {
+        return includeRelationshipNudges
+            ? Set.of(TASK_TYPE, DEAL_TYPE, RELATIONSHIP_TYPE, INTRO_OPPORTUNITY_TYPE)
+            : Set.of(TASK_TYPE, DEAL_TYPE);
+    }
+
     private void addRelationshipNudges(
         int workspaceId,
         Map<ReminderKey, Notification> existing,
         Map<ReminderKey, Notification> expected,
         Map<PreferenceKey, Boolean> preferences,
-        String triggeredAt
+        String triggeredAt,
+        Map<Integer, RelationshipTemperatureDto> temperatures
     ) {
         List<RelationshipNudgeCandidate> nudgeCandidates =
             notificationMapper.findRelationshipNudgeCandidates(workspaceId);
         if (nudgeCandidates.isEmpty()) {
             return;
         }
-        Map<Integer, RelationshipTemperatureDto> temperatures = scoreByPerson(workspaceId);
         double highValueThreshold = highValueThreshold(notificationMapper.findOpenDealValues(workspaceId));
         LocalDate today = LocalDate.now(clock.withZone(ZoneOffset.UTC));
         for (RelationshipNudgeCandidate candidate : nudgeCandidates) {
@@ -173,6 +200,83 @@ public class NotificationReconciliationService {
             expected.put(key, relationshipNudgeNotification(
                 candidate, temperature, severity, reasons, dedupeKey, triggeredAt));
         }
+    }
+
+    /**
+     * Surfaces the workspace's top reverse-introduction opportunities (issue #43) as info-level
+     * nudges to every member — anyone can make the intro. Each opportunity is deduped per recipient
+     * by pair; when a pair is introduced, dismissed, or otherwise drops out of the top suggestions,
+     * the resolve pass clears its notifications. Like the relationship-nudge pass, this rescores the
+     * whole workspace, so it runs only on the scheduled sweep.
+     */
+    private void addIntroOpportunities(
+        int workspaceId,
+        Map<ReminderKey, Notification> expected,
+        Map<PreferenceKey, Boolean> preferences,
+        String triggeredAt,
+        Map<Integer, RelationshipTemperatureDto> temperatures
+    ) {
+        List<IntroSuggestionDto> suggestions = introductionService.computeSuggestions(
+            workspaceId, properties.getIntroOpportunityLimit(), temperatures);
+        if (suggestions.isEmpty()) {
+            return;
+        }
+        List<Integer> recipients = notificationMapper.findWorkspaceRecipientIds(workspaceId);
+        for (IntroSuggestionDto suggestion : suggestions) {
+            String dedupeKey = INTRO_OPPORTUNITY_TYPE + ":"
+                + suggestion.getPersonAId() + ":" + suggestion.getPersonBId();
+            for (Integer recipientId : recipients) {
+                if (!enabled(preferences, recipientId, INTRO_OPPORTUNITY_TYPE)) {
+                    continue;
+                }
+                ReminderKey key = new ReminderKey(workspaceId, recipientId, dedupeKey);
+                expected.put(key, introOpportunityNotification(
+                    workspaceId, recipientId, suggestion, dedupeKey, triggeredAt));
+            }
+        }
+    }
+
+    private Notification introOpportunityNotification(
+        int workspaceId,
+        int recipientId,
+        IntroSuggestionDto suggestion,
+        String dedupeKey,
+        String triggeredAt
+    ) {
+        Notification notification = base(
+            workspaceId,
+            recipientId,
+            INTRO_OPPORTUNITY_TYPE,
+            "relationship",
+            INFO,
+            "person",
+            suggestion.getPersonAId(),
+            suggestion.getPersonAName(),
+            dedupeKey,
+            triggeredAt
+        );
+        notification.setContextType("person");
+        notification.setContextId(suggestion.getPersonBId());
+        notification.setContextLabel(suggestion.getPersonBName());
+        notification.setTitle("Introduction opportunity");
+        notification.setBody("You could introduce " + suggestion.getPersonAName()
+            + " to " + suggestion.getPersonBName());
+        notification.setActionUrl("/overview/introductions");
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("personAId", suggestion.getPersonAId());
+        data.put("personAName", suggestion.getPersonAName());
+        data.put("personBId", suggestion.getPersonBId());
+        data.put("personBName", suggestion.getPersonBName());
+        data.put("score", suggestion.getScore());
+        data.put("mutualConnections", suggestion.getMutualConnections());
+        if (suggestion.getSharedCompany() != null) {
+            data.put("sharedCompany", suggestion.getSharedCompany());
+        }
+        if (suggestion.getReasons() != null && !suggestion.getReasons().isEmpty()) {
+            data.put("reasons", suggestion.getReasons());
+        }
+        notification.setData(json(data));
+        return notification;
     }
 
     /**

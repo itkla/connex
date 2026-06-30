@@ -21,4 +21,6 @@ public class NotificationProperties {
     private int coolingMinDaysSinceTouch = 14;
     private int coolingBackfillDays = 90;
     private int coolingCloseSoonDays = 14;
+    private boolean introOpportunitiesEnabled = true;
+    private int introOpportunityLimit = 3;
 }

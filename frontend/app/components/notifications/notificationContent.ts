@@ -1,4 +1,5 @@
 import {
+    ArrowsRightLeftIcon,
     ArrowTrendingDownIcon,
     BellIcon,
     BriefcaseIcon,
@@ -45,6 +46,15 @@ export function notificationContent(notification: Notification, t: Translator, l
             }),
         };
     }
+    if (notification.type === "relationship.intro_opportunity") {
+        return {
+            title: t("introOpportunityTitle"),
+            body: t("introOpportunityBody", {
+                personA: text(data.personAName, notification.sourceLabel ?? ""),
+                personB: text(data.personBName, notification.contextLabel ?? ""),
+            }),
+        };
+    }
     if (notification.type === "relationship.cooling") {
         const cold = data.band === "cold";
         const reasons = Array.isArray(data.priorityReasons) ? data.priorityReasons : [];
@@ -77,6 +87,7 @@ export function safeNotificationUrl(value?: string | null) {
 export function notificationIcon(notification: Notification) {
     if (notification.type.startsWith("task.")) return CheckCircleIcon;
     if (notification.type.startsWith("deal.")) return BriefcaseIcon;
+    if (notification.type === "relationship.intro_opportunity") return ArrowsRightLeftIcon;
     if (notification.type.startsWith("relationship.")) return ArrowTrendingDownIcon;
     if (notification.type.startsWith("workspace.")) return UserGroupIcon;
     return BellIcon;
