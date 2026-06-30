@@ -25,6 +25,7 @@ import ooo.klae.connex.backend.dto.CreateInviteRequest;
 import ooo.klae.connex.backend.dto.CreateWorkspaceRequest;
 import ooo.klae.connex.backend.dto.InviteDto;
 import ooo.klae.connex.backend.dto.InviteLinkDto;
+import ooo.klae.connex.backend.dto.InviteResultDto;
 import ooo.klae.connex.backend.dto.MemberDto;
 import ooo.klae.connex.backend.dto.MyWorkspacesDto;
 import ooo.klae.connex.backend.dto.UpdateMemberRoleRequest;
@@ -104,7 +105,7 @@ public class WorkspaceController {
     }
 
     @PostMapping("/{id}/invites")
-    public InviteDto invite(@PathVariable int id, @Valid @RequestBody CreateInviteRequest request) {
+    public InviteResultDto invite(@PathVariable int id, @Valid @RequestBody CreateInviteRequest request) {
         return inviteService.createInvite(id, authService.getCurrentUser(), request.getEmail(), request.getRole());
     }
 

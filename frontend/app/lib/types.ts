@@ -925,6 +925,17 @@ export type WorkspaceInvite = {
     createdAt: string;
 };
 
+/**
+ * The outcome of inviting someone by email. Exactly one field is set: `invite`
+ * for an emailed token invite (a new address), or `member` when the address
+ * belongs to an existing Connex user, who is added as a pending member and
+ * notified in-app instead.
+ */
+export type InviteResult = {
+    invite: WorkspaceInvite | null;
+    member: WorkspaceMember | null;
+};
+
 export type InvitePreview = {
     workspaceId: number;
     workspaceName: string;

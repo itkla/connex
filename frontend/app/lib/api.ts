@@ -1377,7 +1377,7 @@ export function getWorkspaceInvites(workspaceId: number, init: RequestInit = {})
 }
 
 export function createWorkspaceInvite(workspaceId: number, email: string, role: Types.WorkspaceRole) {
-    return postJson<Types.WorkspaceInvite>(`/api/workspaces/${workspaceId}/invites`, { email, role });
+    return postJson<Types.InviteResult>(`/api/workspaces/${workspaceId}/invites`, { email, role });
 }
 
 export function revokeWorkspaceInvite(workspaceId: number, inviteId: number) {
