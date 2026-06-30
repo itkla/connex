@@ -32,8 +32,8 @@ public interface AttachmentMapper {
     long totalCount(int workspaceId);
     long totalSize(int workspaceId);
 
-    int addTag(@Param("attachmentId") int attachmentId, @Param("tagId") int tagId);
-    int removeTag(@Param("attachmentId") int attachmentId, @Param("tagId") int tagId);
-    int clearTags(@Param("attachmentId") int attachmentId);
-    int insertTags(@Param("attachmentId") int attachmentId, @Param("tagIds") List<Integer> tagIds);
+    int addTag(@Param("workspaceId") int workspaceId, @Param("attachmentId") int attachmentId, @Param("tagId") int tagId);
+    int removeTag(@Param("workspaceId") int workspaceId, @Param("attachmentId") int attachmentId, @Param("tagId") int tagId);
+    int clearTags(@Param("workspaceId") int workspaceId, @Param("attachmentId") int attachmentId);
+    int insertTags(@Param("workspaceId") int workspaceId, @Param("attachmentId") int attachmentId, @Param("tagIds") List<Integer> tagIds);
 }

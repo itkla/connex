@@ -179,7 +179,7 @@ public class RuleEngineService {
 
     private void finishExecution(RuleExecution execution, String status, String detail) {
         try {
-            ruleMapper.updateExecution(execution.getId(), status, writeDetail(detail));
+            ruleMapper.updateExecution(execution.getWorkspaceId(), execution.getId(), status, writeDetail(detail));
         } catch (Exception e) {
             log.warn("Failed to finalize execution {}: {}", execution.getId(), e.getMessage());
         }

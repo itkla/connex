@@ -43,7 +43,7 @@ import ooo.klae.connex.backend.tenant.TenantScopeInterceptor;
  */
 class TenantScopeArchTest {
 
-    private static final Pattern WORKSPACE_PARAM = Pattern.compile("#\\{\\s*workspaceId\\s*\\}");
+    private static final Pattern WORKSPACE_PARAM = Pattern.compile("#\\{\\s*(?:\\w+\\.)?workspaceId\\b");
 
     /**
      * Scoped-mapper selects that legitimately do not bind {@code #{workspaceId}}.
@@ -60,6 +60,60 @@ class TenantScopeArchTest {
         "ooo.klae.connex.backend.mappers.NotificationMapper.findWorkspaceIds",
         "ooo.klae.connex.backend.mappers.RuleMapper.workspaceIdsWithEnabledScheduleRules"
     );
+
+    /**
+     * Scoped-mapper writes that legitimately do not bind {@code #{workspaceId}}.
+     * The audit-log insert runs during auth flows before a workspace is pinned and
+     * carries a nullable {@code workspace_id} for system events (mirrors the matching
+     * exemption in {@link TenantScopeInterceptor}). The notification mutations are
+     * recipient-scoped across every membership by design (MULTITENANCY_PLAN §0.3 — they
+     * bind {@code #{recipientId}}), exactly like the exempt notification selects above.
+     */
+    private static final Set<String> EXEMPT_WRITES = Set.of(
+        "ooo.klae.connex.backend.mappers.AuditLogMapper.insert",
+        "ooo.klae.connex.backend.mappers.NotificationMapper.markRead",
+        "ooo.klae.connex.backend.mappers.NotificationMapper.markUnread",
+        "ooo.klae.connex.backend.mappers.NotificationMapper.dismiss",
+        "ooo.klae.connex.backend.mappers.NotificationMapper.restore",
+        "ooo.klae.connex.backend.mappers.NotificationMapper.snooze",
+        "ooo.klae.connex.backend.mappers.NotificationMapper.markAllRead"
+    );
+
+    @Test
+    void every_write_in_scoped_mappers_binds_workspaceId() throws Exception {
+        List<String> violations = new ArrayList<>();
+        int scanned = 0;
+
+        for (String namespace : TenantScopeInterceptor.SCOPED_NAMESPACES) {
+            String simpleName = namespace.substring(namespace.lastIndexOf('.') + 1);
+            String resource = "mappers/" + simpleName + ".xml";
+            Document doc = loadMapper(resource);
+            assertNotNull(doc, "Scoped mapper XML not found on the classpath: " + resource);
+
+            Map<String, Element> fragments = sqlFragments(doc);
+            for (String tag : List.of("insert", "update", "delete")) {
+                for (Element statement : elementsByTag(doc, tag)) {
+                    scanned++;
+                    String statementId = namespace + "." + statement.getAttribute("id");
+                    if (EXEMPT_WRITES.contains(statementId)) {
+                        continue;
+                    }
+                    String sql = resolvedSql(statement, fragments);
+                    if (!WORKSPACE_PARAM.matcher(sql).find()) {
+                        violations.add(statementId);
+                    }
+                }
+            }
+        }
+
+        assertTrue(scanned >= TenantScopeInterceptor.SCOPED_NAMESPACES.size(),
+            "Only scanned " + scanned + " writes across scoped mappers — the scan looks misconfigured "
+                + "and this guard would pass vacuously.");
+        assertTrue(violations.isEmpty(),
+            "These <insert>/<update>/<delete> statements in workspace-scoped mappers do not bind "
+                + "#{workspaceId} (add the tenant predicate/value, or exempt explicitly with rationale): "
+                + violations);
+    }
 
     @Test
     void every_select_in_scoped_mappers_binds_workspaceId() throws Exception {

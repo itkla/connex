@@ -225,7 +225,7 @@ public class PersonService {
         Person person = requirePerson(workspaceId, personId);
         Tag tag = tagMapper.getTagById(workspaceId, tagId);
         if (tag == null) throw new ResourceNotFoundException("Tag not found with id: " + tagId);
-        personMapper.addTag(personId, tagId);
+        personMapper.addTag(workspaceId, personId, tagId);
         auditService.record("person.addTag", "person", personId, person.getName(),
             "Tagged " + person.getName() + " with " + tag.getName(),
             auditService.singleChange("tag", null, tag.getName()));
@@ -239,7 +239,7 @@ public class PersonService {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         Person person = requirePerson(workspaceId, personId);
         Tag tag = tagMapper.getTagById(workspaceId, tagId);
-        personMapper.removeTag(personId, tagId);
+        personMapper.removeTag(workspaceId, personId, tagId);
         String tagName = tag != null ? tag.getName() : "#" + tagId;
         auditService.record("person.removeTag", "person", personId, person.getName(),
             "Removed tag " + tagName + " from " + person.getName(),
@@ -254,8 +254,8 @@ public class PersonService {
     public List<Tag> replaceTags(int personId, List<Integer> tagIds) {
         Person person = requirePerson(workspaceService.getCurrentWorkspaceId(), personId);
         List<String> before = tagMapper.getTagsByPersonId(workspaceService.getCurrentWorkspaceId(), personId).stream().map(Tag::getName).toList();
-        personMapper.clearTags(personId);
-        if (tagIds != null && !tagIds.isEmpty()) personMapper.insertTags(personId, tagIds);
+        personMapper.clearTags(workspaceService.getCurrentWorkspaceId(), personId);
+        if (tagIds != null && !tagIds.isEmpty()) personMapper.insertTags(workspaceService.getCurrentWorkspaceId(), personId, tagIds);
         List<Tag> after = tagMapper.getTagsByPersonId(workspaceService.getCurrentWorkspaceId(), personId);
         auditService.record("person.replaceTags", "person", personId, person.getName(),
             "Updated tags on " + person.getName(),

@@ -107,7 +107,7 @@ public class AttachmentService {
                     "Tag not found", "Tag not found with id: " + tagId);
             throw new ResourceNotFoundException("Tag not found with id: " + tagId);
         }
-        attachmentMapper.addTag(attachmentId, tagId);
+        attachmentMapper.addTag(workspaceService.getCurrentWorkspaceId(), attachmentId, tagId);
         auditService.record("attachment.addTag", "attachment", attachmentId, attachment.getFileName(),
             "Tagged " + attachment.getFileName() + " with " + tag.getName(),
             auditService.singleChange("tag", null, tag.getName()));
@@ -127,7 +127,7 @@ public class AttachmentService {
                     "Tag not found", "Tag not found with id: " + tagId);
             throw new ResourceNotFoundException("Tag not found with id: " + tagId);
         }
-        attachmentMapper.removeTag(attachmentId, tagId);
+        attachmentMapper.removeTag(workspaceService.getCurrentWorkspaceId(), attachmentId, tagId);
         auditService.record("attachment.removeTag", "attachment", attachmentId, attachment.getFileName(),
             "Removed tag " + tag.getName() + " from " + attachment.getFileName(),
             auditService.singleChange("tag", tag.getName(), null));
@@ -144,8 +144,8 @@ public class AttachmentService {
     public List<Tag> replaceTags(int attachmentId, List<Integer> tagIds) {
         Attachment attachment = getById(attachmentId);
         List<String> before = tagMapper.getTagsByAttachmentId(workspaceService.getCurrentWorkspaceId(), attachmentId).stream().map(Tag::getName).toList();
-        attachmentMapper.clearTags(attachmentId);
-        if (tagIds != null && !tagIds.isEmpty()) attachmentMapper.insertTags(attachmentId, tagIds);
+        attachmentMapper.clearTags(workspaceService.getCurrentWorkspaceId(), attachmentId);
+        if (tagIds != null && !tagIds.isEmpty()) attachmentMapper.insertTags(workspaceService.getCurrentWorkspaceId(), attachmentId, tagIds);
         List<Tag> after = tagMapper.getTagsByAttachmentId(workspaceService.getCurrentWorkspaceId(), attachmentId);
         auditService.record("attachment.replaceTags", "attachment", attachmentId, attachment.getFileName(),
             "Updated tags on " + attachment.getFileName(),

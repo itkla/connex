@@ -124,7 +124,7 @@ class PersonMapperTest extends AbstractMapperTest {
         Person person = newPerson(newCompany());
         Tag tag = newTag();
 
-        personMapper.addTag(person.getId(), tag.getId());
+        personMapper.addTag(workspace.getId(), person.getId(), tag.getId());
 
         List<Person> matched = personMapper.getPersonsByTagId(workspace.getId(), tag.getId());
         assertTrue(matched.stream().anyMatch(x -> x.getId() == person.getId()));
@@ -138,8 +138,8 @@ class PersonMapperTest extends AbstractMapperTest {
         Person person = newPerson(newCompany());
         Tag tag = newTag();
 
-        personMapper.addTag(person.getId(), tag.getId());
-        personMapper.addTag(person.getId(), tag.getId());
+        personMapper.addTag(workspace.getId(), person.getId(), tag.getId());
+        personMapper.addTag(workspace.getId(), person.getId(), tag.getId());
 
         long matching = personMapper.getPersonsByTagId(workspace.getId(), tag.getId()).stream()
                 .filter(x -> x.getId() == person.getId()).count();
@@ -153,9 +153,9 @@ class PersonMapperTest extends AbstractMapperTest {
     void removeTag_dropsAssociation() {
         Person person = newPerson(newCompany());
         Tag tag = newTag();
-        personMapper.addTag(person.getId(), tag.getId());
+        personMapper.addTag(workspace.getId(), person.getId(), tag.getId());
 
-        personMapper.removeTag(person.getId(), tag.getId());
+        personMapper.removeTag(workspace.getId(), person.getId(), tag.getId());
 
         assertTrue(personMapper.getPersonsByTagId(workspace.getId(), tag.getId()).stream()
                 .noneMatch(x -> x.getId() == person.getId()));

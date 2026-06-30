@@ -39,7 +39,7 @@ public interface RuleMapper {
     void insertExecution(RuleExecution execution);
 
     /** Finalizes a claimed execution's outcome. */
-    void updateExecution(@Param("id") int id, @Param("status") String status, @Param("detail") String detail);
+    void updateExecution(@Param("workspaceId") int workspaceId, @Param("id") int id, @Param("status") String status, @Param("detail") String detail);
 
     /** Recent executions for a rule scoped to the workspace, newest first. */
     List<RuleExecution> getExecutionsByRule(@Param("workspaceId") int workspaceId, @Param("ruleId") int ruleId, @Param("limit") int limit);

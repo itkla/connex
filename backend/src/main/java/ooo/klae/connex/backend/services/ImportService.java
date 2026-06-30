@@ -182,7 +182,7 @@ public class ImportService {
                 if (companyId != null) {
                     employmentService.recordInitial(workspaceId, bean.getId(), companyId, bean.getTitle());
                 }
-                attachTags("person", bean.getId(), row.tagNames, tagByName);
+                attachTags(workspaceId, "person", bean.getId(), row.tagNames, tagByName);
                 applyCustomValues("person", bean.getId(), row.custom, columnToDef, action, false);
             }
         }
@@ -247,7 +247,7 @@ public class ImportService {
         if (afterCompanyId != null && !afterCompanyId.equals(beforeCompanyId)) {
             employmentService.recordTransition(workspaceId, existing.getId(), afterCompanyId, existing.getTitle());
         }
-        attachTags("person", existing.getId(), row.tagNames, tagByName);
+        attachTags(workspaceId, "person", existing.getId(), row.tagNames, tagByName);
         applyCustomValues("person", existing.getId(), row.custom, columnToDef, action, true);
     }
 
@@ -309,7 +309,7 @@ public class ImportService {
             for (int i = 0; i < beans.size(); i++) {
                 Company bean = beans.get(i);
                 PlanRow row = toCreate.get(i);
-                attachTags("company", bean.getId(), row.tagNames, tagByName);
+                attachTags(workspaceId, "company", bean.getId(), row.tagNames, tagByName);
                 applyCustomValues("company", bean.getId(), row.custom, columnToDef, action, false);
             }
         }
@@ -365,7 +365,7 @@ public class ImportService {
         existing.setAddress(merge(action, existing.getAddress(), row.std.get("address")));
         existing.setLogoUrl(merge(action, existing.getLogoUrl(), row.std.get("logoUrl")));
         companyMapper.update(existing);
-        attachTags("company", existing.getId(), row.tagNames, tagByName);
+        attachTags(workspaceId, "company", existing.getId(), row.tagNames, tagByName);
         applyCustomValues("company", existing.getId(), row.custom, columnToDef, action, true);
     }
 
@@ -800,11 +800,11 @@ public class ImportService {
     // Apply helpers
     // ===================================================================================
 
-    private void attachTags(String entityType, int entityId, List<String> tagNames, Map<String, Integer> tagByName) {
+    private void attachTags(int workspaceId, String entityType, int entityId, List<String> tagNames, Map<String, Integer> tagByName) {
         List<Integer> ids = tagIds(tagNames, tagByName);
         if (ids.isEmpty()) return;
-        if ("person".equals(entityType)) personMapper.insertTags(entityId, ids);
-        else if ("company".equals(entityType)) companyMapper.insertTags(entityId, ids);
+        if ("person".equals(entityType)) personMapper.insertTags(workspaceId, entityId, ids);
+        else if ("company".equals(entityType)) companyMapper.insertTags(workspaceId, entityId, ids);
     }
 
     private static List<Integer> tagIds(List<String> tagNames, Map<String, Integer> tagByName) {
