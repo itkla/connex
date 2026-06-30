@@ -138,4 +138,22 @@ class UserMapperTest extends AbstractMapperTest {
         assertTrue(userMapper.search(workspace.getId(), "%" + mine.getUsername() + "%")
                 .stream().anyMatch(u -> u.getId() == mine.getId()));
     }
+
+    /**
+     * countUsers excludes the reserved {@code __connex_system__} actor, so a fresh instance (only the
+     * seeded system actor) reads zero real users and the bootstrap runner can fire (#81 Phase 2).
+     */
+    @Test
+    void countUsers_excludesSystemActor() {
+        newUser();
+
+        long nonSystem = userMapper.getAllUsers().stream()
+            .filter(u -> !"__connex_system__".equals(u.getUsername())).count();
+        assertEquals(nonSystem, userMapper.countUsers(),
+            "countUsers must equal the number of non-system accounts");
+
+        assertNotNull(userMapper.getUserByUsername("__connex_system__"));
+        assertTrue(userMapper.getAllUsers().size() > userMapper.countUsers(),
+            "the seeded system actor is present but excluded from the count");
+    }
 }

@@ -17,6 +17,8 @@ public interface UserMapper {
     User getUserById(int id);
     User getUserByUsername(String username);
     User getUserByEmail(String email);
+    /** Count of real accounts, excluding the reserved {@code __connex_system__} actor; gates bootstrap provisioning. */
+    int countUsers();
     List<User> search(@Param("workspaceId") int workspaceId, @Param("query") String query);
     int insert(User user);
     int update(User user);

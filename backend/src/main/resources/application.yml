@@ -29,6 +29,17 @@ connex:
         # When false, new registrations and the create endpoint cannot make workspaces
         # (invite-only mode); users onboard by accepting an invite instead.
         allow-self-service-creation: ${CONNEX_WORKSPACES_ALLOW_CREATION:true}
+    bootstrap:
+        # Provisions the first owner account + workspace on startup when the instance has zero
+        # login-capable users (fresh self-host/on-prem deploy). Set enabled=true with username,
+        # email, and password on first boot; ignored once any real user exists. The password is
+        # read from the environment and is never logged.
+        enabled: ${CONNEX_BOOTSTRAP_ENABLED:false}
+        username: ${CONNEX_BOOTSTRAP_USERNAME:}
+        email: ${CONNEX_BOOTSTRAP_EMAIL:}
+        password: ${CONNEX_BOOTSTRAP_PASSWORD:}
+        display-name: ${CONNEX_BOOTSTRAP_DISPLAY_NAME:}
+        timezone: ${CONNEX_BOOTSTRAP_TIMEZONE:UTC}
     tenancy:
         # Fail-closed MyBatis backstop: rejects workspace-scoped queries that run
         # without a resolved tenant context. Disable only to debug isolation issues.

@@ -27,6 +27,10 @@
     FROM app_user WHERE email = #{email}
   </select>
 
+  <select id="countUsers" resultType="int">
+    SELECT COUNT(*) FROM app_user WHERE username != '__connex_system__'
+  </select>
+
   <select id="search" resultType="User">
     SELECT u.id, u.username, u.display_name, u.email, u.password_hash, u.timezone,
            u.last_login_at, u.profile_picture_url, u.created_at, u.updated_at
