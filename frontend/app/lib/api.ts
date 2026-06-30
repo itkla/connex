@@ -1414,3 +1414,15 @@ export function getInviteLinkPreview(token: string, init: RequestInit = {}) {
 export function acceptInviteLink(token: string) {
     return postJson<Types.Workspace>(`/api/invite-links/${token}/accept`, {});
 }
+
+export function getWorkspaceAllowedDomains(workspaceId: number, init: RequestInit = {}) {
+    return getJson<string[]>(`/api/workspaces/${workspaceId}/allowed-domains`, { cache: "no-store", ...init });
+}
+
+export function addWorkspaceAllowedDomain(workspaceId: number, domain: string) {
+    return postJson<string[]>(`/api/workspaces/${workspaceId}/allowed-domains`, { domain });
+}
+
+export function removeWorkspaceAllowedDomain(workspaceId: number, domain: string) {
+    return deleteJson<void>(`/api/workspaces/${workspaceId}/allowed-domains?domain=${encodeURIComponent(domain)}`);
+}
