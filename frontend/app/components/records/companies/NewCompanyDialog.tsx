@@ -9,8 +9,10 @@ import { cn } from '@/lib/utils';
 import { ensureUrlScheme, isLikelyUrl, normalizeWebsiteForCompare } from '@/app/lib/utils';
 import { type CreateCompanyPayload, type Company } from '@/app/lib/types';
 import { isFieldError } from '@/app/lib/api';
-import CompanyContactsField, { type CompanyContactsFieldHandle, type PendingContact, type PendingContactDraft } from '@/app/components/records/companies/CompanyContactsField';
-import { ChangeEvent, DragEvent, Dispatch, FormEvent, RefObject, SetStateAction, useEffect, useMemo, useRef, useState } from 'react';
+import CompanyContactsField, { type PendingContact, type PendingContactDraft } from '@/app/components/records/companies/CompanyContactsField';
+import ContactSubView from '@/app/components/records/companies/ContactSubView';
+import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
+import { ChangeEvent, DragEvent, Dispatch, FormEvent, SetStateAction, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import PixelCard from '@/components/PixelCard';
 import {
@@ -35,6 +37,7 @@ const PIXEL_GREEN = '#bbf7d0,#86efac,#73d200';
 const PIXEL_RED = '#fecaca,#f87171,#ef4444';
 const inputWarn = 'ring-2 ring-amber-500 focus:ring-amber-500';
 const leadIcon = 'pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground transition-colors group-focus-within:text-brand';
+const PAGE_EASE: [number, number, number, number] = [0.77, 0, 0.175, 1];
 
 type Props = {
     open: boolean;
@@ -49,8 +52,8 @@ type Props = {
     createNewCompany: () => void | Promise<void>;
     pendingContacts: PendingContact[];
     addPendingContact: (draft: PendingContactDraft) => void;
+    updatePendingContact: (tempId: string, draft: PendingContactDraft) => void;
     removePendingContact: (tempId: string) => void;
-    contactsFieldRef: RefObject<CompanyContactsFieldHandle | null>;
 };
 
 export default function NewCompanyDialog({
@@ -66,10 +69,15 @@ export default function NewCompanyDialog({
     createNewCompany,
     pendingContacts,
     addPendingContact,
+    updatePendingContact,
     removePendingContact,
-    contactsFieldRef,
 }: Props) {
     const t = useTranslations('CompaniesNewDialog');
+    const reduce = useReducedMotion() ?? false;
+    const [view, setView] = useState<'company' | 'contact'>('company');
+    const [direction, setDirection] = useState(1);
+    const [editing, setEditing] = useState<{ mode: 'new' } | { mode: 'edit'; contact: PendingContact }>({ mode: 'new' });
+    const [announcement, setAnnouncement] = useState('');
     const [logoPreview, setLogoPreview] = useState<string | null>(null);
     const [isDragging, setIsDragging] = useState(false);
     const [websiteFormatError, setWebsiteFormatError] = useState<string | null>(null);
@@ -126,6 +134,8 @@ export default function NewCompanyDialog({
             resetFieldErrors();
             setIsDragging(false);
             setWebsiteFormatError(null);
+            setView('company');
+            setEditing({ mode: 'new' });
         }
     }, [open, logoPreview, resetFieldErrors]);
 
@@ -189,9 +199,86 @@ export default function NewCompanyDialog({
         }
     };
 
+    const announce = (message: string) => {
+        setAnnouncement('');
+        queueMicrotask(() => setAnnouncement(message));
+    };
+
+    const openAddContact = () => {
+        setEditing({ mode: 'new' });
+        setDirection(1);
+        setView('contact');
+    };
+
+    const openEditContact = (contact: PendingContact) => {
+        setEditing({ mode: 'edit', contact });
+        setDirection(1);
+        setView('contact');
+    };
+
+    const returnFocus = useRef(false);
+    useEffect(() => {
+        if (view === 'company' && returnFocus.current) {
+            returnFocus.current = false;
+            requestAnimationFrame(() => document.getElementById('company-add-contact-trigger')?.focus());
+        }
+    }, [view]);
+
+    const backToCompany = () => {
+        returnFocus.current = true;
+        setDirection(-1);
+        setView('company');
+    };
+
+    const handleContactDone = (draft: PendingContactDraft) => {
+        if (editing.mode === 'edit') {
+            updatePendingContact(editing.contact.tempId, draft);
+            announce(t('contactUpdatedAnnounce', { name: draft.name }));
+        } else {
+            addPendingContact(draft);
+            announce(t('contactAddedAnnounce', { name: draft.name }));
+        }
+        backToCompany();
+    };
+
+    const removeContact = (contact: PendingContact) => {
+        removePendingContact(contact.tempId);
+        announce(t('contactRemovedAnnounce', { name: contact.name }));
+    };
+
+    const editingInitial: PendingContactDraft =
+        editing.mode === 'edit'
+            ? {
+                  name: editing.contact.name,
+                  email: editing.contact.email,
+                  title: editing.contact.title,
+                  phone: editing.contact.phone,
+                  imageFile: editing.contact.imageFile,
+              }
+            : { name: '', email: '', title: '', phone: '', imageFile: null };
+
+    const pageVariants = {
+        enter: (dir: number) => (reduce ? { opacity: 0 } : { opacity: 0, x: dir > 0 ? '100%' : '-100%' }),
+        center: { opacity: 1, x: 0 },
+        exit: (dir: number) => (reduce ? { opacity: 0 } : { opacity: 0, x: dir > 0 ? '-100%' : '100%' }),
+    };
+    const pageTransition = reduce ? { duration: 0 } : { duration: 0.34, ease: PAGE_EASE };
+
     return (
         <Dialog open={open} onOpenChange={handleOpenChange}>
             <DialogContent className="gap-0 overflow-hidden p-0 sm:max-w-lg">
+                <motion.div layout={!reduce} transition={pageTransition} className="relative overflow-hidden">
+                    <AnimatePresence mode="popLayout" custom={direction} initial={false}>
+                        {view === 'company' ? (
+                            <motion.div
+                                key="company"
+                                custom={direction}
+                                variants={pageVariants}
+                                initial="enter"
+                                animate="center"
+                                exit="exit"
+                                transition={pageTransition}
+                            >
                 <div aria-hidden className="relative h-24 overflow-hidden">
                     <PixelCard
                         active={status !== 'idle'}
@@ -411,10 +498,10 @@ export default function NewCompanyDialog({
 
                         <div className="ncd-rise" style={{ animationDelay: '265ms' }}>
                             <CompanyContactsField
-                                ref={contactsFieldRef}
                                 contacts={pendingContacts}
-                                onAdd={addPendingContact}
-                                onRemove={removePendingContact}
+                                onAdd={openAddContact}
+                                onEdit={openEditContact}
+                                onRemove={removeContact}
                                 disabled={isCreating || isSuccess}
                             />
                         </div>
@@ -442,6 +529,30 @@ export default function NewCompanyDialog({
                         </DialogFooter>
                     </form>
                 </div>
+                            </motion.div>
+                        ) : (
+                            <motion.div
+                                key="contact"
+                                custom={direction}
+                                variants={pageVariants}
+                                initial="enter"
+                                animate="center"
+                                exit="exit"
+                                transition={pageTransition}
+                            >
+                                <ContactSubView
+                                    mode={editing.mode}
+                                    initial={editingInitial}
+                                    onDone={handleContactDone}
+                                    onBack={backToCompany}
+                                />
+                            </motion.div>
+                        )}
+                    </AnimatePresence>
+                </motion.div>
+                <p aria-live="polite" className="sr-only">
+                    {announcement}
+                </p>
             </DialogContent>
         </Dialog>
     );
