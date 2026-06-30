@@ -14,9 +14,8 @@ import ContactSubView from '@/app/components/records/companies/ContactSubView';
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
 import { ChangeEvent, DragEvent, Dispatch, FormEvent, SetStateAction, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
-import PixelCard from '@/components/PixelCard';
+import { DialogStatusCover } from '@/components/ui/dialog-status-cover';
 import {
-    ArrowPathIcon,
     CameraIcon,
     XMarkIcon,
     BuildingOffice2Icon,
@@ -32,9 +31,6 @@ import { useFieldErrors } from '@/app/hooks/useFieldErrors';
 
 const inputBase = 'w-full rounded-lg bg-muted py-2 text-sm text-foreground placeholder:text-muted-foreground outline-none ring-1 ring-border transition focus:ring-2 focus:ring-brand';
 const inputError = 'ring-2 ring-destructive focus:ring-destructive';
-const PIXEL_GRAY = '#e5e7eb,#cbd5e1,#94a3b8';
-const PIXEL_GREEN = '#bbf7d0,#86efac,#73d200';
-const PIXEL_RED = '#fecaca,#f87171,#ef4444';
 const inputWarn = 'ring-2 ring-amber-500 focus:ring-amber-500';
 const leadIcon = 'pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground transition-colors group-focus-within:text-brand';
 const PAGE_EASE: [number, number, number, number] = [0.77, 0, 0.175, 1];
@@ -118,26 +114,18 @@ export default function NewCompanyDialog({
                 ? 'success'
                 : 'idle';
 
-    const lastPixelColorsRef = useRef(PIXEL_GRAY);
-    let pixelColors = lastPixelColorsRef.current;
-    if (status === 'loading') pixelColors = PIXEL_GRAY;
-    else if (status === 'success') pixelColors = PIXEL_GREEN;
-    else if (status === 'error') pixelColors = PIXEL_RED;
-    lastPixelColorsRef.current = pixelColors;
-
-    useEffect(() => {
-        if (!open && logoPreview) {
-            URL.revokeObjectURL(logoPreview);
-            setLogoPreview(null);
-        }
+    const [wasOpen, setWasOpen] = useState(open);
+    if (open !== wasOpen) {
+        setWasOpen(open);
         if (!open) {
             resetFieldErrors();
             setIsDragging(false);
             setWebsiteFormatError(null);
             setView('company');
             setEditing({ mode: 'new' });
+            setLogoPreview(null);
         }
-    }, [open, logoPreview, resetFieldErrors]);
+    }
 
     useEffect(() => {
         return () => {
@@ -298,17 +286,7 @@ export default function NewCompanyDialog({
                                 className="flex max-h-[85dvh] flex-col"
                             >
                                 <div className="shrink-0">
-                <div aria-hidden className="relative h-24 overflow-hidden">
-                    <PixelCard
-                        active={status !== 'idle'}
-                        colors={pixelColors}
-                        gap={5}
-                        speed={40}
-                        noFocus
-                        className="pointer-events-none absolute inset-0 aspect-auto! h-full! w-full! rounded-none! border-0!"
-                    />
-                    <div className="absolute inset-x-0 bottom-0 h-1/2 bg-gradient-to-t from-popover to-transparent" />
-                </div>
+                <DialogStatusCover status={status} />
 
                 <div className="px-6">
                     <div className="ncd-pop relative -mt-12 mb-4 w-fit">
