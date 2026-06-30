@@ -1,0 +1,17 @@
+title = "Connex gitleaks configuration"
+
+[extend]
+useDefault = true
+
+# Documented dev-only credentials. AGENTS.md permits the throwaway docker-compose
+# values, and their rotation/externalization is tracked in #88. Allowlisted so the
+# secret-scan gate flags only genuine, unexpected secrets rather than these.
+[allowlist]
+description = "Known dev-only credentials"
+paths = [
+  '''backend/docker-compose\.yml''',
+]
+regexes = [
+  '''connexpassword''',
+  '''rootpassword''',
+]
