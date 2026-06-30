@@ -217,7 +217,7 @@
     <foreach collection="tagIds" item="tagId" open="(" separator="," close=")">
       #{tagId}
     </foreach>
-    WHERE a.workspace_id = #{workspaceId} AND a.id = #{attachmentId}
+    WHERE a.workspace_id = #{workspaceId} AND a.id = #{attachmentId} AND t.workspace_id = #{workspaceId}
   </insert>
 
   <insert id="insert" useGeneratedKeys="true" keyProperty="id">

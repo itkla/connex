@@ -79,10 +79,17 @@ class TenantScopeArchTest {
         "ooo.klae.connex.backend.mappers.NotificationMapper.markAllRead"
     );
 
+    /**
+     * Write-path counterpart to {@link #every_select_in_scoped_mappers_binds_workspaceId()}:
+     * asserts every {@code <insert>/<update>/<delete>} in a scoped mapper binds {@code #{workspaceId}}.
+     * Same presence-not-placement heuristic as the class doc (a binding in an unrelated subquery would
+     * still pass), so it is layered with the runtime cross-workspace write tests (e.g.
+     * {@code CompanyMapperTest.addTag_fromAnotherWorkspace_doesNotAssociate}) and the fail-closed interceptor.
+     */
     @Test
     void every_write_in_scoped_mappers_binds_workspaceId() throws Exception {
         List<String> violations = new ArrayList<>();
-        int scanned = 0;
+        int mappersWithWrites = 0;
 
         for (String namespace : TenantScopeInterceptor.SCOPED_NAMESPACES) {
             String simpleName = namespace.substring(namespace.lastIndexOf('.') + 1);
@@ -91,9 +98,10 @@ class TenantScopeArchTest {
             assertNotNull(doc, "Scoped mapper XML not found on the classpath: " + resource);
 
             Map<String, Element> fragments = sqlFragments(doc);
+            int writesInMapper = 0;
             for (String tag : List.of("insert", "update", "delete")) {
                 for (Element statement : elementsByTag(doc, tag)) {
-                    scanned++;
+                    writesInMapper++;
                     String statementId = namespace + "." + statement.getAttribute("id");
                     if (EXEMPT_WRITES.contains(statementId)) {
                         continue;
@@ -104,11 +112,15 @@ class TenantScopeArchTest {
                     }
                 }
             }
+            if (writesInMapper > 0) {
+                mappersWithWrites++;
+            }
         }
 
-        assertTrue(scanned >= TenantScopeInterceptor.SCOPED_NAMESPACES.size(),
-            "Only scanned " + scanned + " writes across scoped mappers — the scan looks misconfigured "
-                + "and this guard would pass vacuously.");
+        assertTrue(mappersWithWrites >= 12,
+            "Only " + mappersWithWrites + " of " + TenantScopeInterceptor.SCOPED_NAMESPACES.size()
+                + " scoped mappers contributed any write statements — most have writes, so a near-zero "
+                + "count means the per-mapper XML scan is misconfigured and this guard would pass vacuously.");
         assertTrue(violations.isEmpty(),
             "These <insert>/<update>/<delete> statements in workspace-scoped mappers do not bind "
                 + "#{workspaceId} (add the tenant predicate/value, or exempt explicitly with rationale): "

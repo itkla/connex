@@ -190,11 +190,12 @@ public class CompanyService {
     @Transactional
     @RequirePermission(Permission.COMPANY_UPDATE)
     public List<Tag> replaceTags(int companyId, List<Integer> tagIds) {
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
         Company company = requireCompany(companyId);
-        List<String> before = tagMapper.getTagsByCompanyId(workspaceService.getCurrentWorkspaceId(), companyId).stream().map(Tag::getName).toList();
-        companyMapper.clearTags(workspaceService.getCurrentWorkspaceId(), companyId);
-        if (tagIds != null && !tagIds.isEmpty()) companyMapper.insertTags(workspaceService.getCurrentWorkspaceId(), companyId, tagIds);
-        List<Tag> after = tagMapper.getTagsByCompanyId(workspaceService.getCurrentWorkspaceId(), companyId);
+        List<String> before = tagMapper.getTagsByCompanyId(workspaceId, companyId).stream().map(Tag::getName).toList();
+        companyMapper.clearTags(workspaceId, companyId);
+        if (tagIds != null && !tagIds.isEmpty()) companyMapper.insertTags(workspaceId, companyId, tagIds);
+        List<Tag> after = tagMapper.getTagsByCompanyId(workspaceId, companyId);
         auditService.record("company.replaceTags", "company", companyId, company.getName(),
             "Updated tags on " + company.getName(),
             auditService.singleChange("tags", before, after.stream().map(Tag::getName).toList()));

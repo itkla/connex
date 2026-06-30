@@ -252,11 +252,12 @@ public class PersonService {
     @Transactional
     @RequirePermission(Permission.PERSON_UPDATE)
     public List<Tag> replaceTags(int personId, List<Integer> tagIds) {
-        Person person = requirePerson(workspaceService.getCurrentWorkspaceId(), personId);
-        List<String> before = tagMapper.getTagsByPersonId(workspaceService.getCurrentWorkspaceId(), personId).stream().map(Tag::getName).toList();
-        personMapper.clearTags(workspaceService.getCurrentWorkspaceId(), personId);
-        if (tagIds != null && !tagIds.isEmpty()) personMapper.insertTags(workspaceService.getCurrentWorkspaceId(), personId, tagIds);
-        List<Tag> after = tagMapper.getTagsByPersonId(workspaceService.getCurrentWorkspaceId(), personId);
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        Person person = requirePerson(workspaceId, personId);
+        List<String> before = tagMapper.getTagsByPersonId(workspaceId, personId).stream().map(Tag::getName).toList();
+        personMapper.clearTags(workspaceId, personId);
+        if (tagIds != null && !tagIds.isEmpty()) personMapper.insertTags(workspaceId, personId, tagIds);
+        List<Tag> after = tagMapper.getTagsByPersonId(workspaceId, personId);
         auditService.record("person.replaceTags", "person", personId, person.getName(),
             "Updated tags on " + person.getName(),
             auditService.singleChange("tags", before, after.stream().map(Tag::getName).toList()));

@@ -160,6 +160,31 @@ class CompanyMapperTest extends AbstractMapperTest {
     }
 
     /**
+     * insertTags links only tags owned by the active workspace: a foreign-workspace tag id is
+     * filtered out by the {@code t.workspace_id} join predicate, while a same-workspace tag in the
+     * same call still links — so exactly one of the two ids is written.
+     */
+    @Test
+    void insertTags_linksOnlySameWorkspaceTags() {
+        Company company = newCompany();
+        Tag ownTag = newTag();
+        Workspace other = newWorkspace();
+        Tag foreignTag = new Tag();
+        foreignTag.setName("tag_" + unique());
+        foreignTag.setColor("#abcdef");
+        foreignTag.setWorkspaceId(other.getId());
+        tagMapper.insert(foreignTag);
+
+        int affected = companyMapper.insertTags(workspace.getId(), company.getId(),
+            List.of(ownTag.getId(), foreignTag.getId()));
+
+        assertEquals(1, affected, "only the same-workspace tag links; the foreign tag is filtered out");
+        List<Tag> tags = tagMapper.getTagsByCompanyId(workspace.getId(), company.getId());
+        assertTrue(tags.stream().anyMatch(t -> t.getId() == ownTag.getId()));
+        assertTrue(tags.stream().noneMatch(t -> t.getId() == foreignTag.getId()));
+    }
+
+    /**
      * A company in another workspace is invisible and immutable from this workspace.
      */
     @Test

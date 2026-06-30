@@ -11,6 +11,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 
 import ooo.klae.connex.backend.beans.Attachment;
+import ooo.klae.connex.backend.beans.Tag;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.beans.Workspace;
 
@@ -125,6 +126,22 @@ class AttachmentMapperTest extends AbstractMapperTest {
         // facet counts are per-workspace
         long otherTotal = attachmentMapper.totalCount(other.getId());
         assertEquals(1, otherTotal);
+    }
+
+    /**
+     * A tag write issued with another workspace's id must not associate the tag.
+     */
+    @Test
+    void addTag_fromAnotherWorkspace_doesNotAssociate() {
+        Attachment a = build(workspace.getId(), "tagged.pdf", "deal", 1, newUser());
+        attachmentMapper.insert(a);
+        Tag tag = newTag();
+        Workspace other = newWorkspace();
+
+        int affected = attachmentMapper.addTag(other.getId(), a.getId(), tag.getId());
+
+        assertEquals(0, affected, "cross-workspace addTag must affect no rows");
+        assertTrue(tagMapper.getTagsByAttachmentId(workspace.getId(), a.getId()).isEmpty());
     }
 
     private Workspace newWorkspace() {
