@@ -43,6 +43,8 @@ jobs:
           distribution: temurin
           java-version: '26'
           cache: gradle
+      - name: Allow non-SUPER routine creation under binary logging
+        run: mysql -h 127.0.0.1 -P 3306 -uroot -prootpassword -e "SET GLOBAL log_bin_trust_function_creators = 1;"
       - name: Test (runs Flyway migrations, arch tests, tenant-isolation tests)
         working-directory: backend
         run: bash gradlew test --no-daemon --stacktrace
@@ -64,7 +66,7 @@ jobs:
           cache-dependency-path: frontend/pnpm-lock.yaml
       - name: Install
         working-directory: frontend
-        run: pnpm install --frozen-lockfile
+        run: pnpm install --frozen-lockfile --ignore-scripts
       - name: Typecheck
         working-directory: frontend
         run: node_modules/.bin/tsc --noEmit

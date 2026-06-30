@@ -36,7 +36,7 @@ jobs:
           cache-dependency-path: frontend/pnpm-lock.yaml
       - name: Install
         working-directory: frontend
-        run: pnpm install --frozen-lockfile
+        run: pnpm install --frozen-lockfile --ignore-scripts
       - name: Audit (fail on high+)
         working-directory: frontend
         run: pnpm audit --audit-level=high
