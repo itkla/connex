@@ -11,6 +11,9 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import ooo.klae.connex.backend.beans.Company;
+import ooo.klae.connex.backend.dto.BulkDeleteRequest;
+import ooo.klae.connex.backend.dto.BulkOperationResult;
+import ooo.klae.connex.backend.dto.BulkTagRequest;
 import ooo.klae.connex.backend.dto.CompanyDto;
 import ooo.klae.connex.backend.dto.CustomFieldEntryDto;
 import ooo.klae.connex.backend.dto.CustomFieldValueRequest;
@@ -18,6 +21,7 @@ import ooo.klae.connex.backend.dto.CustomFieldValuesRequest;
 import ooo.klae.connex.backend.dto.DealDto;
 import ooo.klae.connex.backend.dto.PersonDto;
 import ooo.klae.connex.backend.dto.TagDto;
+import ooo.klae.connex.backend.services.BulkOperationService;
 import ooo.klae.connex.backend.services.CompanyService;
 
 import java.util.List;
@@ -36,6 +40,7 @@ import lombok.RequiredArgsConstructor;
 @RequiredArgsConstructor
 public class CompanyController {
     private final CompanyService companyService;
+    private final BulkOperationService bulkOperationService;
 
     /**
      * Retrieves all companies, optionally filtered by tag.
@@ -126,6 +131,36 @@ public class CompanyController {
     @PutMapping("/{id}/tags")
     public List<TagDto> replaceTagsForCompany(@PathVariable int id, @RequestBody List<Integer> tagIds) {
         return companyService.replaceTags(id, tagIds).stream().map(TagDto::from).toList();
+    }
+
+    /**
+     * POST endpoint to add one tag to many companies in a single request.
+     * @param request the target company ids and the tag to add
+     * @return per-record success/failure counts
+     */
+    @PostMapping("/bulk/tags/add")
+    public BulkOperationResult bulkAddTag(@Valid @RequestBody BulkTagRequest request) {
+        return bulkOperationService.addTagToCompanies(request.getIds(), request.getTagId());
+    }
+
+    /**
+     * POST endpoint to remove one tag from many companies in a single request.
+     * @param request the target company ids and the tag to remove
+     * @return per-record success/failure counts
+     */
+    @PostMapping("/bulk/tags/remove")
+    public BulkOperationResult bulkRemoveTag(@Valid @RequestBody BulkTagRequest request) {
+        return bulkOperationService.removeTagFromCompanies(request.getIds(), request.getTagId());
+    }
+
+    /**
+     * POST endpoint to delete many companies in a single request.
+     * @param request the target company ids
+     * @return per-record success/failure counts
+     */
+    @PostMapping("/bulk/delete")
+    public BulkOperationResult bulkDelete(@Valid @RequestBody BulkDeleteRequest request) {
+        return bulkOperationService.deleteCompanies(request.getIds());
     }
 
     /**
