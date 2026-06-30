@@ -82,12 +82,36 @@ public class ScoringService {
     private record Touch(long epochMillis, double weight) {}
 
     /**
-     * Scores every contact in the workspace, including those with no activity (band "cold").
+     * Scores every contact in the workspace as of now, including those with no activity (band "cold").
      */
     public List<RelationshipTemperatureDto> scoreContacts(int workspaceId) {
-        long now = Instant.now(clock).toEpochMilli();
-        Map<Integer, List<Touch>> byPerson = new HashMap<>();
+        return computeContactScores(workspaceId, Instant.now(clock).toEpochMilli(), Long.MAX_VALUE);
+    }
 
+    /**
+     * Scores every contact in the workspace as of {@code asOf}: warmth is decayed against that
+     * instant and only interactions logged on or before it are counted. Used by the time-travel
+     * replay to reconstruct historical warmth — touches dated after {@code asOf} are excluded so a
+     * future-dated interaction can never leak into a past frame.
+     */
+    public List<RelationshipTemperatureDto> scoreContacts(int workspaceId, Instant asOf) {
+        long t = asOf.toEpochMilli();
+        return computeContactScores(workspaceId, t, t);
+    }
+
+    private List<RelationshipTemperatureDto> computeContactScores(int workspaceId, long reference, long cutoff) {
+        Map<Integer, List<Touch>> byPerson = collectContactTouches(workspaceId);
+        List<Person> persons = personMapper.getAllPersons(workspaceId);
+        List<RelationshipTemperatureDto> out = new ArrayList<>(persons.size());
+        for (Person p : persons) {
+            out.add(temperature(p.getId(), byPerson.getOrDefault(p.getId(), List.of()), reference, cutoff));
+        }
+        return out;
+    }
+
+    /** Buckets every contact-linked touch (activities, notes, tasks) by contact id. */
+    private Map<Integer, List<Touch>> collectContactTouches(int workspaceId) {
+        Map<Integer, List<Touch>> byPerson = new HashMap<>();
         for (Activity a : activityMapper.getAllActivities(workspaceId)) {
             Integer pid = personId(a.getPerson());
             Long ts = epoch(a.getTimestamp());
@@ -103,23 +127,41 @@ public class ScoringService {
             Long ts = epoch(t.getCreatedAt());
             if (pid != null && ts != null) add(byPerson, pid, new Touch(ts, TASK_WEIGHT));
         }
+        return byPerson;
+    }
 
-        List<Person> persons = personMapper.getAllPersons(workspaceId);
-        List<RelationshipTemperatureDto> out = new ArrayList<>(persons.size());
-        for (Person p : persons) {
-            out.add(temperature(p.getId(), byPerson.getOrDefault(p.getId(), List.of()), now));
+    /**
+     * Scores every company in the workspace as of now. A touch counts toward a company when it is
+     * linked to one of the company's contacts or one of its deals (mirroring how engagement metrics
+     * are scoped elsewhere).
+     */
+    public List<RelationshipTemperatureDto> scoreCompanies(int workspaceId) {
+        return computeCompanyScores(workspaceId, Instant.now(clock).toEpochMilli(), Long.MAX_VALUE);
+    }
+
+    /**
+     * Scores every company in the workspace as of {@code asOf}: warmth is decayed against that
+     * instant and only interactions logged on or before it are counted. Company attribution uses
+     * present-day contact/deal parentage; the time-travel replay refines attribution to the
+     * as-of-{@code asOf} employment when it assembles frames.
+     */
+    public List<RelationshipTemperatureDto> scoreCompanies(int workspaceId, Instant asOf) {
+        long t = asOf.toEpochMilli();
+        return computeCompanyScores(workspaceId, t, t);
+    }
+
+    private List<RelationshipTemperatureDto> computeCompanyScores(int workspaceId, long reference, long cutoff) {
+        Map<Integer, List<Touch>> byCompany = collectCompanyTouches(workspaceId);
+        List<Company> companies = companyMapper.getAllCompanies(workspaceId);
+        List<RelationshipTemperatureDto> out = new ArrayList<>(companies.size());
+        for (Company c : companies) {
+            out.add(temperature(c.getId(), byCompany.getOrDefault(c.getId(), List.of()), reference, cutoff));
         }
         return out;
     }
 
-    /**
-     * Scores every company in the workspace. A touch counts toward a company when it is linked
-     * to one of the company's contacts or one of its deals (mirroring how engagement metrics
-     * are scoped elsewhere).
-     */
-    public List<RelationshipTemperatureDto> scoreCompanies(int workspaceId) {
-        long now = Instant.now(clock).toEpochMilli();
-
+    /** Buckets every touch by the company of its linked contact and/or deal (present-day parentage). */
+    private Map<Integer, List<Touch>> collectCompanyTouches(int workspaceId) {
         Map<Integer, Integer> personCompany = new HashMap<>();
         for (Person p : personMapper.getAllPersons(workspaceId)) {
             Integer cid = p.getCompany() == null ? null : p.getCompany().getId();
@@ -146,13 +188,7 @@ public class ScoringService {
             if (ts != null) attribute(t.getPerson(), t.getDeal(), new Touch(ts, TASK_WEIGHT),
                 personCompany, dealCompany, byCompany);
         }
-
-        List<Company> companies = companyMapper.getAllCompanies(workspaceId);
-        List<RelationshipTemperatureDto> out = new ArrayList<>(companies.size());
-        for (Company c : companies) {
-            out.add(temperature(c.getId(), byCompany.getOrDefault(c.getId(), List.of()), now));
-        }
-        return out;
+        return byCompany;
     }
 
     /**
@@ -165,16 +201,21 @@ public class ScoringService {
         return map;
     }
 
-    /** Collapses a contact's or company's touches into a single temperature reading. */
-    private RelationshipTemperatureDto temperature(int id, List<Touch> touches, long now) {
-        if (touches.isEmpty()) {
-            return new RelationshipTemperatureDto(id, 0, "cold", "steady", null, null, 0, null, null);
-        }
+    /**
+     * Collapses a contact's or company's touches into a single temperature reading, decayed against
+     * {@code reference} and counting only touches timestamped at or before {@code cutoff}. Pass
+     * {@code Long.MAX_VALUE} as the cutoff for a live reading; the replay passes the frame instant so
+     * a future-dated touch is skipped before the age clamp and never leaks into a past frame.
+     */
+    private RelationshipTemperatureDto temperature(int id, List<Touch> touches, long reference, long cutoff) {
         double raw = 0, recent = 0, prior = 0;
         long lastTs = Long.MIN_VALUE;
         int recentCount = 0;
+        boolean any = false;
         for (Touch t : touches) {
-            double ageDays = Math.max(0.0, (now - t.epochMillis()) / (double) DAY_MS);
+            if (t.epochMillis() > cutoff) continue;
+            any = true;
+            double ageDays = Math.max(0.0, (reference - t.epochMillis()) / (double) DAY_MS);
             raw += t.weight() * Math.pow(2.0, -ageDays / HALF_LIFE_DAYS);
             if (ageDays <= RECENT_WINDOW_DAYS) {
                 recent += t.weight();
@@ -184,12 +225,15 @@ public class ScoringService {
             }
             if (t.epochMillis() > lastTs) lastTs = t.epochMillis();
         }
+        if (!any) {
+            return new RelationshipTemperatureDto(id, 0, "cold", "steady", null, null, 0, null, null);
+        }
 
         int score = (int) Math.round(100.0 * (1.0 - Math.pow(2.0, -raw / SATURATION)));
         score = Math.max(0, Math.min(100, score));
         String band = score >= 60 ? "hot" : score >= 35 ? "warm" : score >= 15 ? "cool" : "cold";
 
-        long daysSince = (now - lastTs) / DAY_MS;
+        long daysSince = (reference - lastTs) / DAY_MS;
         String trend;
         if (prior >= COOLING_PRIOR_MIN && recent < prior * 0.5 && daysSince >= RECENT_WINDOW_DAYS) {
             trend = "cooling";
@@ -208,7 +252,7 @@ public class ScoringService {
             double daysToCold = HALF_LIFE_DAYS * log2(raw / RAW_COLD);
             daysUntilCold = (int) Math.round(daysToCold);
             goesColdAt = LocalDateTime.ofInstant(
-                Instant.ofEpochMilli(now + Math.round(daysToCold * DAY_MS)), ZoneOffset.UTC).format(MYSQL_DATETIME);
+                Instant.ofEpochMilli(reference + Math.round(daysToCold * DAY_MS)), ZoneOffset.UTC).format(MYSQL_DATETIME);
         }
 
         return new RelationshipTemperatureDto(id, score, band, trend, lastTouchAt, (int) daysSince, recentCount,
