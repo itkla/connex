@@ -9,7 +9,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
+  group: ci-${{ github.workflow }}-${{ github.head_ref || github.sha }}
   cancel-in-progress: true
 
 jobs:
@@ -81,7 +81,10 @@ jobs:
             echo "No base commit to diff against — skipping changed-file lint."
             exit 0
           fi
-          CHANGED=$(git diff --name-only --relative --diff-filter=ACMR "$BASE_SHA"...HEAD -- '*.ts' '*.tsx' || true)
+          if ! CHANGED=$(git diff --name-only --relative --diff-filter=ACMR "$BASE_SHA"...HEAD -- '*.ts' '*.tsx'); then
+            echo "git diff against base $BASE_SHA failed — failing rather than silently skipping the lint gate."
+            exit 1
+          fi
           if [ -z "$CHANGED" ]; then
             echo "No changed frontend TS/TSX files — nothing to lint."
             exit 0

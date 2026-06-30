@@ -18,7 +18,12 @@ jobs:
           fetch-depth: 0
       - name: gitleaks
         run: |
-          docker run --rm -v "$GITHUB_WORKSPACE:/repo" zricethezav/gitleaks:latest \
+          docker run --rm \
+            -v "$GITHUB_WORKSPACE:/repo" \
+            -e GIT_CONFIG_COUNT=1 \
+            -e GIT_CONFIG_KEY_0=safe.directory \
+            -e GIT_CONFIG_VALUE_0=/repo \
+            zricethezav/gitleaks:latest \
             detect --source /repo --config /repo/.gitleaks.toml --redact --no-banner --exit-code 1
 
   frontend-audit:

@@ -3,15 +3,12 @@ title = "Connex gitleaks configuration"
 [extend]
 useDefault = true
 
-# Documented dev-only credentials. AGENTS.md permits the throwaway docker-compose
-# values, and their rotation/externalization is tracked in #88. Allowlisted so the
-# secret-scan gate flags only genuine, unexpected secrets rather than these.
+# Scope the exception to the file that holds the documented throwaway docker-compose
+# credentials (AGENTS.md permits them; rotation is tracked in #88). Using a path
+# allowlist rather than repo-wide value regexes keeps the scanner able to flag the
+# same strings — or any genuine secret — anywhere else in the tree.
 [allowlist]
-description = "Known dev-only credentials"
+description = "Documented dev-only credential file"
 paths = [
   '''backend/docker-compose\.yml''',
-]
-regexes = [
-  '''connexpassword''',
-  '''rootpassword''',
 ]
