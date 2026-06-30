@@ -43,6 +43,8 @@
     "relationshipCoolingBody": "{person} on {deal} has gone quiet — {days} days since last contact.",
     "relationshipColdTitle": "Relationship gone cold",
     "relationshipColdBody": "{person} on {deal} has gone cold — {days} days since last contact.",
+    "introOpportunityTitle": "Introduction opportunity",
+    "introOpportunityBody": "You could introduce {personA} to {personB}.",
     "relationshipReasonClosingSoon": "Closing soon",
     "relationshipReasonHighValue": "High-value deal",
     "relationshipReasonLateStage": "Late-stage deal",

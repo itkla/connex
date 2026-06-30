@@ -13,6 +13,7 @@
     "viewAll": "View all",
     "viewMap": "View map",
     "coolingRelationships": "Cooling relationships",
+    "introductions": "Introductions",
     "recentlyMoved": "Recently moved",
     "files": "Files",
     "storageUsed": "{count, plural, =1 {# file} other {# files}} · {size}",

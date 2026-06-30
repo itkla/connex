@@ -18,6 +18,7 @@ import {
     getContactTemperaturesFromCookie,
     getCurrentUserFromCookie,
     getDealsFromCookie,
+    getIntroSuggestionsFromCookie,
     getNotesFromCookie,
     getPipelinesFromCookie,
     getRecentMovesFromCookie,
@@ -29,6 +30,7 @@ import { startOfLocalDay, timeOf } from '@/app/lib/utils';
 
 import CoolingRelationships, { type CoolingItem } from '@/app/components/dashboard/CoolingRelationships';
 import Greeting from '@/app/components/dashboard/Greeting';
+import IntroOpportunities from '@/app/components/dashboard/IntroOpportunities';
 import OverviewCard from '@/app/components/dashboard/OverviewCard';
 import PipelineChart from '@/app/components/dashboard/PipelineChart';
 import RecentFiles from '@/app/components/dashboard/RecentFiles';
@@ -53,7 +55,7 @@ export default async function Dashboard() {
 
     const init = { headers: { cookie: cookie ?? '' } } as const;
     const emptyFacets: AttachmentFacets = { sources: [], kinds: [], tags: [], orphaned: 0, total: 0, totalSize: 0 };
-    const [companies, contacts, deals, pipelines, tasks, activities, notes, users, recentFiles, fileFacets, contactTemps, recentMoves] =
+    const [companies, contacts, deals, pipelines, tasks, activities, notes, users, recentFiles, fileFacets, contactTemps, recentMoves, introSuggestions] =
         await Promise.all([
             getCompaniesFromCookie(cookie),
             getContactsFromCookie(cookie),
@@ -69,6 +71,7 @@ export default async function Dashboard() {
             getAttachmentFacets(init).catch(() => emptyFacets),
             getContactTemperaturesFromCookie(cookie),
             getRecentMovesFromCookie(cookie),
+            getIntroSuggestionsFromCookie(cookie, 4),
         ]);
 
     const tempByContactId = new Map(contactTemps.map((temp) => [temp.id, temp]));
@@ -192,6 +195,23 @@ export default async function Dashboard() {
                         <RecentMoves moves={recentMoves} />
                     </Rise>
                 </div>
+
+                <Rise delay={0.38}>
+                    <section>
+                        <SectionHeader
+                            title={t('introductions')}
+                            action={
+                                <Link
+                                    href="/overview/introductions"
+                                    className="text-xs text-brand hover:text-brand-hover"
+                                >
+                                    {t('viewAll')}
+                                </Link>
+                            }
+                        />
+                        <IntroOpportunities items={introSuggestions} />
+                    </section>
+                </Rise>
 
                 <Rise delay={0.39}>
                     <section>

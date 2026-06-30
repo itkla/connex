@@ -25,6 +25,7 @@ const namespaces = [
     "pipelines",
     "users",
     "map",
+    "introductions",
     "calendar",
     "attachments",
     "admin",

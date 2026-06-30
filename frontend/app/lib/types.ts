@@ -170,6 +170,56 @@ export type IntroPath = {
     steps: IntroPathStep[];
 };
 
+/** Why a reverse-introduction is suggested. */
+export type IntroReason = 'mutual_connections' | 'shared_company';
+
+/**
+ * A suggested reverse introduction: a pair of contacts the team is positioned to introduce because
+ * it knows both but they are not connected to each other. The "give side" of the graph (issue #43).
+ */
+export type IntroSuggestion = {
+    personAId: number;
+    personAName: string;
+    personATitle?: string | null;
+    personACompany?: string | null;
+    personAImageUrl?: string | null;
+    personAWarmth?: TemperatureBand | null;
+    personBId: number;
+    personBName: string;
+    personBTitle?: string | null;
+    personBCompany?: string | null;
+    personBImageUrl?: string | null;
+    personBWarmth?: TemperatureBand | null;
+    score: number;
+    reasons: string[];
+    mutualConnections: number;
+    sharedCompany?: string | null;
+};
+
+/** A recorded introduction in the lineage feed ("intros you've made"). */
+export type IntroductionRecord = {
+    id: number;
+    personAId: number;
+    personAName: string;
+    personACompany?: string | null;
+    personAImageUrl?: string | null;
+    personBId: number;
+    personBName: string;
+    personBCompany?: string | null;
+    personBImageUrl?: string | null;
+    introducerId?: number | null;
+    introducerName?: string | null;
+    note?: string | null;
+    introducedAt: string;
+};
+
+/** Request body to record an introduction, or dismiss a suggested pair. */
+export type IntroductionPayload = {
+    personAId: number;
+    personBId: number;
+    note?: string;
+};
+
 export type User = {
     id: number;
     username: string;

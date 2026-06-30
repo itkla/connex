@@ -649,6 +649,30 @@ export function getCompanyTemperaturesFromCookie(cookie: string | null) {
     return safeWithCookie<Types.RelationshipTemperature>((init) => getCompanyTemperatures(init), cookie);
 }
 
+/*
+* == Reverse introductions (the "give side" of the graph)
+*/
+
+export function getIntroSuggestions(init: RequestInit = {}, limit?: number) {
+    return getJson<Types.IntroSuggestion[]>(`/api/introductions/suggestions${buildQuery({ limit })}`, init);
+}
+
+export function getIntroSuggestionsFromCookie(cookie: string | null, limit?: number) {
+    return safeWithCookie<Types.IntroSuggestion>((init) => getIntroSuggestions(init, limit), cookie);
+}
+
+export function getIntroductions(params: { page?: number; size?: number } = {}, init: RequestInit = {}) {
+    return getJson<Types.Page<Types.IntroductionRecord>>(`/api/introductions${buildQuery(params)}`, init);
+}
+
+export function recordIntroduction(payload: Types.IntroductionPayload, init: RequestInit = {}) {
+    return postJson<Types.IntroductionRecord>(`/api/introductions`, payload, init);
+}
+
+export function dismissIntroSuggestion(payload: Types.IntroductionPayload, init: RequestInit = {}) {
+    return postJson<void>(`/api/introductions/dismiss`, payload, init);
+}
+
 export function createContact(payload: Types.CreateContactPayload) {
     return postJson<Types.Contact>(`/api/persons`, payload);
 }
