@@ -9,7 +9,8 @@ import { cn } from '@/lib/utils';
 import { ensureUrlScheme, isLikelyUrl, normalizeWebsiteForCompare } from '@/app/lib/utils';
 import { type CreateCompanyPayload, type Company } from '@/app/lib/types';
 import { isFieldError } from '@/app/lib/api';
-import { ChangeEvent, DragEvent, Dispatch, FormEvent, SetStateAction, useEffect, useMemo, useRef, useState } from 'react';
+import CompanyContactsField, { type CompanyContactsFieldHandle, type PendingContact, type PendingContactDraft } from '@/app/components/records/companies/CompanyContactsField';
+import { ChangeEvent, DragEvent, Dispatch, FormEvent, RefObject, SetStateAction, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import PixelCard from '@/components/PixelCard';
 import {
@@ -46,6 +47,10 @@ type Props = {
     isSuccess?: boolean;
     existingCompanies?: Company[];
     createNewCompany: () => void | Promise<void>;
+    pendingContacts: PendingContact[];
+    addPendingContact: (draft: PendingContactDraft) => void;
+    removePendingContact: (tempId: string) => void;
+    contactsFieldRef: RefObject<CompanyContactsFieldHandle | null>;
 };
 
 export default function NewCompanyDialog({
@@ -59,6 +64,10 @@ export default function NewCompanyDialog({
     isSuccess = false,
     existingCompanies = [],
     createNewCompany,
+    pendingContacts,
+    addPendingContact,
+    removePendingContact,
+    contactsFieldRef,
 }: Props) {
     const t = useTranslations('CompaniesNewDialog');
     const [logoPreview, setLogoPreview] = useState<string | null>(null);
@@ -398,6 +407,16 @@ export default function NewCompanyDialog({
                                     autoComplete="street-address"
                                 />
                             </div>
+                        </div>
+
+                        <div className="ncd-rise" style={{ animationDelay: '265ms' }}>
+                            <CompanyContactsField
+                                ref={contactsFieldRef}
+                                contacts={pendingContacts}
+                                onAdd={addPendingContact}
+                                onRemove={removePendingContact}
+                                disabled={isCreating || isSuccess}
+                            />
                         </div>
 
                         <DialogFooter className="ncd-rise mt-1" style={{ animationDelay: '290ms' }}>
