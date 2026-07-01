@@ -2,18 +2,21 @@
 
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
-import { UserIcon } from '@heroicons/react/24/outline';
+import { BriefcaseIcon, BuildingOffice2Icon, UserIcon } from '@heroicons/react/24/outline';
 
-import { getActiveWorkspaceMembers } from '@/app/lib/api';
-import { type WorkspaceMember } from '@/app/lib/types';
+import { getActiveWorkspaceMembers, search } from '@/app/lib/api';
+import { type NoteReferenceType, type SearchResults, type WorkspaceMember } from '@/app/lib/types';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { cn } from '@/lib/utils';
 
-const TOKEN = /\[([^\]]+)\]\((user):(\d+)\)/g;
+const TOKEN = /\[([^\]]+)\]\((user|person|deal|company):(\d+)\)/g;
 const HANDLE = /[A-Za-z0-9_.\-]/;
-const MAX_SUGGESTIONS = 6;
-const MENU_WIDTH = 256;
-const MENU_MAX_HEIGHT = 280;
+const MAX_SUGGESTIONS = 8;
+const MENU_WIDTH = 288;
+const MENU_MAX_HEIGHT = 320;
+const SEARCH_DEBOUNCE_MS = 220;
+
+const RECORD_ICON = { person: UserIcon, deal: BriefcaseIcon, company: BuildingOffice2Icon };
 
 function currentWorkspaceKey(): string {
     if (typeof document === 'undefined') return '';
@@ -40,7 +43,61 @@ function sanitizeLabel(label: string): string {
     return label.replace(/[[\]\r\n]/g, '').trim();
 }
 
-type EditorSegment = { kind: 'text'; value: string } | { kind: 'mention'; id: number; label: string };
+type Suggestion = {
+    type: NoteReferenceType;
+    id: number;
+    label: string;
+    sublabel: string;
+    avatarUrl?: string | null;
+};
+
+function memberSuggestions(members: WorkspaceMember[], excludeUserId?: number): Suggestion[] {
+    return members
+        .filter((member) => member.id !== excludeUserId)
+        .map((member): Suggestion => ({
+            type: 'user',
+            id: member.id,
+            label: member.displayName,
+            sublabel: `@${member.username}`,
+            avatarUrl: member.profilePictureUrl,
+        }));
+}
+
+function searchSuggestions(results: SearchResults, excludeUserId?: number): Suggestion[] {
+    const users = (results.users ?? [])
+        .filter((user) => user.id !== excludeUserId)
+        .map((user): Suggestion => ({
+            type: 'user',
+            id: user.id,
+            label: user.displayName,
+            sublabel: `@${user.username}`,
+            avatarUrl: user.profilePictureUrl,
+        }));
+    const people = (results.people ?? []).map((person): Suggestion => ({
+        type: 'person',
+        id: person.id,
+        label: person.name,
+        sublabel: person.title || person.company?.name || 'Contact',
+        avatarUrl: person.imageUrl,
+    }));
+    const deals = (results.deals ?? []).map((deal): Suggestion => ({
+        type: 'deal',
+        id: deal.id,
+        label: deal.name,
+        sublabel: 'Deal',
+    }));
+    const companies = (results.companies ?? []).map((company): Suggestion => ({
+        type: 'company',
+        id: company.id,
+        label: company.name,
+        sublabel: company.industry || 'Company',
+    }));
+    return [...users, ...people, ...deals, ...companies];
+}
+
+type EditorSegment =
+    | { kind: 'text'; value: string }
+    | { kind: 'reference'; type: NoteReferenceType; id: number; label: string };
 
 function splitTokens(value: string): EditorSegment[] {
     const segments: EditorSegment[] = [];
@@ -48,27 +105,33 @@ function splitTokens(value: string): EditorSegment[] {
     for (const match of value.matchAll(TOKEN)) {
         const start = match.index ?? 0;
         if (start > lastIndex) segments.push({ kind: 'text', value: value.slice(lastIndex, start) });
-        segments.push({ kind: 'mention', id: Number(match[3]), label: match[1] });
+        segments.push({ kind: 'reference', type: match[2] as NoteReferenceType, id: Number(match[3]), label: match[1] });
         lastIndex = start + match[0].length;
     }
     if (lastIndex < value.length) segments.push({ kind: 'text', value: value.slice(lastIndex) });
     return segments;
 }
 
-function makeChip(id: number, label: string): HTMLSpanElement {
+function makeChip(type: NoteReferenceType, id: number, label: string): HTMLSpanElement {
     const chip = document.createElement('span');
-    chip.dataset.userId = String(id);
+    chip.dataset.refType = type;
+    chip.dataset.refId = String(id);
     chip.dataset.label = label;
     chip.contentEditable = 'false';
-    chip.className = 'rounded-sm bg-brand-light/50 px-0.5 font-medium text-brand-dark';
-    chip.textContent = `@${label}`;
+    if (type === 'user') {
+        chip.className = 'rounded-sm bg-brand-light/50 px-0.5 font-medium text-brand-dark';
+        chip.textContent = `@${label}`;
+    } else {
+        chip.className = 'rounded-sm bg-muted px-1 font-medium text-foreground';
+        chip.textContent = label;
+    }
     return chip;
 }
 
 function renderInto(root: HTMLElement, value: string) {
     root.replaceChildren();
     for (const segment of splitTokens(value)) {
-        if (segment.kind === 'mention') root.appendChild(makeChip(segment.id, segment.label));
+        if (segment.kind === 'reference') root.appendChild(makeChip(segment.type, segment.id, segment.label));
         else root.appendChild(document.createTextNode(segment.value));
     }
 }
@@ -76,7 +139,9 @@ function renderInto(root: HTMLElement, value: string) {
 function serializeNode(node: Node): string {
     if (node.nodeType === Node.TEXT_NODE) return node.textContent ?? '';
     if (!(node instanceof HTMLElement)) return '';
-    if (node.dataset.userId) return `[${node.dataset.label ?? ''}](user:${node.dataset.userId})`;
+    if (node.dataset.refType && node.dataset.refId) {
+        return `[${node.dataset.label ?? ''}](${node.dataset.refType}:${node.dataset.refId})`;
+    }
     if (node.tagName === 'BR') return '\n';
     let inner = '';
     node.childNodes.forEach((child) => {
@@ -108,12 +173,13 @@ type Props = {
 };
 
 /**
- * A contentEditable note composer with inline @-mention chips. The editable DOM
+ * A contentEditable note composer with inline reference chips. The editable DOM
  * is driven imperatively (never re-rendered by React while focused) to keep the
- * caret stable; {@link serialize} converts it back to the `[Label](user:id)`
- * token string exposed via {@code onChange}. Typing `@` opens a member picker —
- * an ARIA combobox popup, positioned from the caret and flipping above when
- * there isn't room below — whose selection inserts a non-editable chip.
+ * caret stable; {@link serialize} converts it back to the `[Label](type:id)`
+ * token string exposed via {@code onChange}. Typing `@` opens a picker — an ARIA
+ * combobox popup, positioned from the caret and flipping above when there isn't
+ * room below — that searches workspace members, contacts, deals, and companies;
+ * a selection inserts a non-editable chip.
  */
 export default function MentionEditor({
     id,
@@ -131,6 +197,7 @@ export default function MentionEditor({
     const listboxId = useId();
     const reduceMotion = useReducedMotion();
     const [members, setMembers] = useState<WorkspaceMember[]>([]);
+    const [results, setResults] = useState<SearchResults | null>(null);
     const [query, setQuery] = useState<ActiveQuery | null>(null);
     const [activeIndex, setActiveIndex] = useState(0);
 
@@ -157,18 +224,39 @@ export default function MentionEditor({
         if (autoFocus) editorRef.current?.focus();
     }, [autoFocus]);
 
+    const queryText = query?.text ?? '';
+    useEffect(() => {
+        if (queryText.length < 1) return;
+        let cancelled = false;
+        const handle = window.setTimeout(() => {
+            search(queryText)
+                .then((res) => {
+                    if (!cancelled) setResults(res);
+                })
+                .catch(() => {});
+        }, SEARCH_DEBOUNCE_MS);
+        return () => {
+            cancelled = true;
+            window.clearTimeout(handle);
+        };
+    }, [queryText]);
+
     const suggestions = useMemo(() => {
         if (!query) return [];
         const needle = query.text.toLowerCase();
-        return members
-            .filter((member) => member.id !== excludeUserId)
+        if (needle.length === 0) {
+            return memberSuggestions(members, excludeUserId).slice(0, MAX_SUGGESTIONS);
+        }
+        if (results) {
+            return searchSuggestions(results, excludeUserId).slice(0, MAX_SUGGESTIONS);
+        }
+        return memberSuggestions(members, excludeUserId)
             .filter(
-                (member) =>
-                    member.displayName.toLowerCase().includes(needle) ||
-                    member.username.toLowerCase().includes(needle),
+                (suggestion) =>
+                    suggestion.label.toLowerCase().includes(needle) || suggestion.sublabel.toLowerCase().includes(needle),
             )
             .slice(0, MAX_SUGGESTIONS);
-    }, [query, members, excludeUserId]);
+    }, [query, members, results, excludeUserId]);
 
     const menuOpen = query !== null && suggestions.length > 0;
     const activeOptionId = menuOpen ? `${listboxId}-opt-${activeIndex}` : undefined;
@@ -236,8 +324,8 @@ export default function MentionEditor({
         detectQuery();
     }, [emit, detectQuery]);
 
-    const insertMention = useCallback(
-        (member: WorkspaceMember) => {
+    const insertReference = useCallback(
+        (suggestion: Suggestion) => {
             const el = editorRef.current;
             const selection = window.getSelection();
             if (!el || !selection || selection.rangeCount === 0) {
@@ -263,7 +351,9 @@ export default function MentionEditor({
             const before = text.slice(0, at);
             const after = text.slice(caret);
 
-            const chip = makeChip(member.id, sanitizeLabel(member.displayName) || member.username);
+            const fallback = suggestion.type === 'user' ? suggestion.sublabel.replace(/^@/, '') : suggestion.type;
+            const label = sanitizeLabel(suggestion.label) || fallback;
+            const chip = makeChip(suggestion.type, suggestion.id, label);
             const spacer = document.createTextNode(' ');
             const afterNode = document.createTextNode(after);
             const beforeNode = document.createTextNode(before);
@@ -300,7 +390,7 @@ export default function MentionEditor({
                 }
                 if (event.key === 'Enter' || event.key === 'Tab') {
                     event.preventDefault();
-                    insertMention(suggestions[activeIndex]);
+                    insertReference(suggestions[activeIndex]);
                     return;
                 }
                 if (event.key === 'Escape') {
@@ -315,7 +405,7 @@ export default function MentionEditor({
                 emit();
             }
         },
-        [menuOpen, suggestions, activeIndex, insertMention, closeMenu, emit],
+        [menuOpen, suggestions, activeIndex, insertReference, closeMenu, emit],
     );
 
     return (
@@ -359,18 +449,24 @@ export default function MentionEditor({
                             bottom: query.bottom,
                             transformOrigin: query.above ? 'bottom left' : 'top left',
                         }}
-                        className="fixed z-50 max-h-64 w-64 overflow-y-auto rounded-md bg-popover p-1 text-popover-foreground shadow-md ring-1 ring-foreground/10"
+                        className="fixed z-50 max-h-80 w-72 overflow-y-auto rounded-md bg-popover p-1 text-popover-foreground shadow-md ring-1 ring-foreground/10"
                     >
-                        {suggestions.map((member, index) => {
+                        {suggestions.map((suggestion, index) => {
                             const optionId = `${listboxId}-opt-${index}`;
+                            const RecordIcon = suggestion.type === 'user' ? null : RECORD_ICON[suggestion.type];
                             return (
-                                <li key={member.id} id={optionId} role="option" aria-selected={index === activeIndex}>
+                                <li
+                                    key={`${suggestion.type}-${suggestion.id}`}
+                                    id={optionId}
+                                    role="option"
+                                    aria-selected={index === activeIndex}
+                                >
                                     <button
                                         type="button"
                                         tabIndex={-1}
                                         onMouseDown={(event) => {
                                             event.preventDefault();
-                                            insertMention(member);
+                                            insertReference(suggestion);
                                         }}
                                         onMouseEnter={() => setActiveIndex(index)}
                                         className={cn(
@@ -378,17 +474,23 @@ export default function MentionEditor({
                                             index === activeIndex ? 'bg-brand-light/50 text-brand-dark' : 'text-foreground',
                                         )}
                                     >
-                                        <Avatar size="sm" className="ring-1 ring-border">
-                                            {member.profilePictureUrl ? (
-                                                <AvatarImage src={member.profilePictureUrl} alt={member.displayName} />
-                                            ) : (
-                                                <AvatarFallback>
-                                                    <UserIcon className="size-3 text-muted-foreground" />
-                                                </AvatarFallback>
-                                            )}
-                                        </Avatar>
-                                        <span className="min-w-0 flex-1 truncate font-medium">{member.displayName}</span>
-                                        <span className="shrink-0 truncate text-xs text-muted-foreground">@{member.username}</span>
+                                        {RecordIcon ? (
+                                            <span className="flex size-6 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground">
+                                                <RecordIcon className="size-3" />
+                                            </span>
+                                        ) : (
+                                            <Avatar size="sm" className="ring-1 ring-border">
+                                                {suggestion.avatarUrl ? (
+                                                    <AvatarImage src={suggestion.avatarUrl} alt={suggestion.label} />
+                                                ) : (
+                                                    <AvatarFallback>
+                                                        <UserIcon className="size-3 text-muted-foreground" />
+                                                    </AvatarFallback>
+                                                )}
+                                            </Avatar>
+                                        )}
+                                        <span className="min-w-0 flex-1 truncate font-medium">{suggestion.label}</span>
+                                        <span className="shrink-0 truncate text-xs text-muted-foreground">{suggestion.sublabel}</span>
                                     </button>
                                 </li>
                             );
