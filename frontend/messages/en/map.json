@@ -27,6 +27,35 @@
             "activeOpen": "Active / Open",
             "closedWon": "Closed Won",
             "closedLost": "Closed Lost"
+        },
+        "warmth": {
+            "title": "Warmth",
+            "hot": "Hot",
+            "warm": "Warm",
+            "cool": "Cool",
+            "cold": "Cold"
         }
+    },
+    "Replay": {
+        "enter": "Time travel",
+        "building": "Building…",
+        "exit": "Exit time travel",
+        "title": "Time travel",
+        "play": "Play",
+        "pause": "Pause",
+        "restart": "Restart",
+        "speed": "Speed",
+        "asOf": "As of {date}",
+        "range": "Range",
+        "interval": "Interval",
+        "granularityWeekly": "Weekly",
+        "granularityMonthly": "Monthly",
+        "range13w": "13 weeks",
+        "range26w": "26 weeks",
+        "range52w": "52 weeks",
+        "loading": "Loading timeline…",
+        "empty": "Not enough history to replay yet. As your network grows, you'll be able to watch it evolve here.",
+        "singleFrame": "This range has only one point in time. Widen it to replay.",
+        "error": "Couldn't load the replay timeline."
     }
 }

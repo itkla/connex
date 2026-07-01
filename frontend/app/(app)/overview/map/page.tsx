@@ -16,7 +16,7 @@ import {
     getUsers,
 } from "@/app/lib/api";
 import type { Activity, Company, Contact, Deal, Note, Pipeline, RelationshipTemperature, Stage, Task, TemperatureBand, User } from "@/app/lib/types";
-import RelationMap from "@/app/components/map/RelationMap";
+import MapView from "@/app/components/map/MapView";
 import { buildGraph, companyNodeId, contactNodeId } from "@/app/components/map/graph/buildGraph";
 
 type MapSearchParams = { companyId?: string; contactId?: string };
@@ -85,7 +85,7 @@ export default async function MapPage({ searchParams }: { searchParams: Promise<
         <div className="flex min-h-0 flex-1 flex-col w-full h-full">
             {/* <h1 className="px-1 py-3 text-4xl font-extrabold tracking-tight">{t("title")}</h1> */}
             <div className="min-h-0 flex-1 rounded-lg w-full h-full">
-                <RelationMap graph={graph} focusId={focusId} />
+                <MapView graph={graph} focusId={focusId} />
             </div>
         </div>
     );

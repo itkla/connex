@@ -9,9 +9,9 @@ const userNodeId = (id: number) => `user-${id}`;
 export const companyNodeId = (id: number) => `company-${id}`;
 export const contactNodeId = (id: number) => `contact-${id}`;
 
-const COLOR_UC = '#3b82f6'; // green, like default branding
-const COLOR_WON = '#22c55e'; // greenish
-const COLOR_LOST = '#ef4444'; // redish
+export const COLOR_UC = '#3b82f6'; // green, like default branding
+export const COLOR_WON = '#22c55e'; // greenish
+export const COLOR_LOST = '#ef4444'; // redish
 
 export function collectActiveContactIds(
     activities: Activity[],

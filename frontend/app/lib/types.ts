@@ -109,6 +109,55 @@ export type RelationshipTemperature = {
     daysUntilCold?: number | null;
 };
 
+export type ReplayGranularity = 'weekly' | 'monthly';
+
+/** A contact's state within a single time-travel replay (#48) frame. */
+export type ReplayContactState = {
+    id: number;
+    band: TemperatureBand;
+    /** Company the contact worked at as of this frame, or null/undefined if none. */
+    employerId?: number | null;
+};
+
+/** A company's state within a single replay frame. */
+export type ReplayCompanyState = {
+    id: number;
+    band: TemperatureBand;
+};
+
+export type ReplayDealResolution = 'open' | 'won' | 'lost';
+
+/** A deal's state within a single replay frame. */
+export type ReplayDealState = {
+    id: number;
+    resolution: ReplayDealResolution;
+};
+
+/**
+ * One frame of the time-travel replay: the contacts, companies, and deals that existed as of
+ * {@link asOf}, each with its as-of warmth band, employer, or outcome. Entities absent from these
+ * lists did not exist yet (or no longer exist) at this instant.
+ */
+export type ReplayFrame = {
+    /** The frame's calendar date as a UTC {@code yyyy-MM-dd} string. */
+    asOf: string;
+    contacts: ReplayContactState[];
+    companies: ReplayCompanyState[];
+    deals: ReplayDealState[];
+};
+
+/** The full time-travel replay payload: an ordered series of frames. */
+export type MapReplay = {
+    frames: ReplayFrame[];
+};
+
+/** Query parameters for the replay endpoint. Dates are ISO {@code yyyy-MM-dd}. */
+export type ReplayParams = {
+    from: string;
+    to: string;
+    granularity?: ReplayGranularity;
+};
+
 /** One stint in a contact's employment history. The row with {@code current} is the present company. */
 export type PersonEmployment = {
     id: number;

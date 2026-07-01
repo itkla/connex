@@ -1,10 +1,15 @@
 package ooo.klae.connex.backend.integration;
 
+import static org.hamcrest.Matchers.hasItem;
+import static org.hamcrest.Matchers.not;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import java.time.LocalDate;
+import java.time.ZoneOffset;
 import java.util.UUID;
 
 import jakarta.servlet.Filter;
@@ -111,6 +116,47 @@ class TenantReadIsolationIntegrationTest {
                 .header("X-Workspace-Id", wsB.getId())
                 .session(bobSession))
             .andExpect(status().isOk());
+    }
+
+    @Test
+    void mapReplayIsScopedToTheActiveWorkspace() throws Exception {
+        RequestContextHolder.resetRequestAttributes();
+        Workspace wsA = newWorkspace();
+        Workspace wsB = newWorkspace();
+        User alice = newMember(wsA);
+        Company companyA = newCompany(wsA);
+        Company companyB = newCompany(wsB);
+
+        LocalDate to = LocalDate.now(ZoneOffset.UTC);
+        LocalDate from = to.minusWeeks(8);
+        String range = "?from=" + from + "&to=" + to + "&granularity=weekly";
+
+        MockHttpSession aliceSession = login(alice.getUsername());
+
+        mockMvc.perform(get("/api/map/replay" + range)
+                .header("X-Workspace-Id", wsA.getId())
+                .session(aliceSession))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.frames[*].companies[*].id", hasItem(companyA.getId())))
+            .andExpect(jsonPath("$.frames[*].companies[*].id", not(hasItem(companyB.getId()))));
+
+        mockMvc.perform(get("/api/map/replay" + range)
+                .header("X-Workspace-Id", wsB.getId())
+                .session(aliceSession))
+            .andExpect(status().isForbidden());
+
+        mockMvc.perform(get("/api/map/replay" + range))
+            .andExpect(status().is4xxClientError());
+
+        mockMvc.perform(get("/api/map/replay?from=" + to + "&to=" + from + "&granularity=weekly")
+                .header("X-Workspace-Id", wsA.getId())
+                .session(aliceSession))
+            .andExpect(status().isBadRequest());
+
+        mockMvc.perform(get("/api/map/replay?from=" + from + "&to=" + to + "&granularity=daily")
+                .header("X-Workspace-Id", wsA.getId())
+                .session(aliceSession))
+            .andExpect(status().isBadRequest());
     }
 
     private MockHttpSession login(String username) throws Exception {
