@@ -4,12 +4,12 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { Button } from '@/components/ui/button';
-import RecordsImportExport from '@/app/components/import/RecordsImportExport';
+import RecordsActions from '@/app/components/import/RecordsActions';
 import { ButtonGroup } from '@/components/ui/button-group';
 import { toast } from 'sonner';
 import { toastError, toastSuccess } from '@/app/lib/toast';
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
-import { PlusIcon, TrashIcon, PencilIcon, EllipsisVerticalIcon, EyeIcon } from '@heroicons/react/24/solid';
+import { TrashIcon, PencilIcon, EllipsisVerticalIcon, EyeIcon } from '@heroicons/react/24/solid';
 import { BuildingOffice2Icon, NoSymbolIcon, TagIcon } from '@heroicons/react/24/outline';
 import {
     Squares2X2Icon,
@@ -480,11 +480,14 @@ export default function ContactsBrowser({ savedViews }: { savedViews: SavedView[
                     <div className="flex items-center justify-between">
                         <h1 className="text-4xl font-extrabold">{t('heading')}</h1>
                         <div className="flex items-center gap-2">
-                            <RecordsImportExport entity="persons" onImported={refresh} contactsFilter={{ ...filterParams, q: query || undefined }} />
-                            <Button className="bg-brand text-white" aria-label={t('newAria')} onClick={() => setNewContactDialogOpen(true)}>
-                                <PlusIcon strokeWidth={2.5} />
-                                {t('new')}
-                            </Button>
+                            <RecordsActions
+                                entity="persons"
+                                onNew={() => setNewContactDialogOpen(true)}
+                                newLabel={t('new')}
+                                newAriaLabel={t('newAria')}
+                                onImported={refresh}
+                                contactsFilter={{ ...filterParams, q: query || undefined }}
+                            />
                         </div>
                     </div>
                 </Rise>

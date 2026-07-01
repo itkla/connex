@@ -28,6 +28,17 @@
     "recordedManualToast": "紹介を記録しました",
     "recordFailed": "紹介を記録できませんでした",
     "dismissFailed": "候補を非表示にできませんでした",
-    "dashboardEmpty": "現在、紹介のチャンスはありません。"
+    "dashboardEmpty": "現在、紹介のチャンスはありません。",
+    "topOpportunity": "注目の候補",
+    "statOpportunities": "紹介の候補",
+    "statOpportunitiesHint": "紹介できる組み合わせ",
+    "statStrong": "有力な候補",
+    "statStrongHint": "優先度の高い紹介",
+    "statMade": "行った紹介",
+    "statMadeHint": "累計",
+    "strengthStrong": "有力",
+    "strengthGood": "良好",
+    "strengthFair": "要検討",
+    "strengthAria": "マッチ度: {level}"
   }
 }

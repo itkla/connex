@@ -28,6 +28,17 @@
     "recordedManualToast": "Introduction recorded",
     "recordFailed": "Could not record the introduction",
     "dismissFailed": "Could not dismiss the suggestion",
-    "dashboardEmpty": "No introduction opportunities right now."
+    "dashboardEmpty": "No introduction opportunities right now.",
+    "topOpportunity": "Top opportunity",
+    "statOpportunities": "Opportunities",
+    "statOpportunitiesHint": "ready to make",
+    "statStrong": "Strong matches",
+    "statStrongHint": "worth prioritizing",
+    "statMade": "Intros made",
+    "statMadeHint": "all time",
+    "strengthStrong": "Strong",
+    "strengthGood": "Good",
+    "strengthFair": "Fair",
+    "strengthAria": "Match strength: {level}"
   }
 }

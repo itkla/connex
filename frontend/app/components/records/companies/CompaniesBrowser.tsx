@@ -5,12 +5,12 @@ import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { useReducedMotion } from 'motion/react';
 import { Button } from '@/components/ui/button';
-import RecordsImportExport from '@/app/components/import/RecordsImportExport';
+import RecordsActions from '@/app/components/import/RecordsActions';
 import { ButtonGroup } from '@/components/ui/button-group';
 import { toast } from 'sonner';
 import { toastError, toastSuccess } from '@/app/lib/toast';
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
-import { PlusIcon, TrashIcon, PencilIcon, EllipsisVerticalIcon, EyeIcon } from '@heroicons/react/24/solid';
+import { TrashIcon, PencilIcon, EllipsisVerticalIcon, EyeIcon } from '@heroicons/react/24/solid';
 import {
     Squares2X2Icon,
     TableCellsIcon,
@@ -558,11 +558,14 @@ export default function CompaniesBrowser({ companies, savedViews }: { companies:
                     <div className="flex items-center justify-between">
                         <h1 className="text-4xl font-extrabold">{t('title')}</h1>
                         <div className="flex items-center gap-2">
-                            <RecordsImportExport entity="companies" onImported={() => router.refresh()} exportIds={visibleCompanies.map((c) => c.id)} />
-                            <Button className="bg-brand text-white" aria-label={t('addCompanyAriaLabel')} onClick={() => setNewDialogOpen(true)}>
-                                <PlusIcon strokeWidth={2.5} />
-                                {t('new')}
-                            </Button>
+                            <RecordsActions
+                                entity="companies"
+                                onNew={() => setNewDialogOpen(true)}
+                                newLabel={t('new')}
+                                newAriaLabel={t('addCompanyAriaLabel')}
+                                onImported={() => router.refresh()}
+                                exportIds={visibleCompanies.map((c) => c.id)}
+                            />
                         </div>
                     </div>
                 </Rise>

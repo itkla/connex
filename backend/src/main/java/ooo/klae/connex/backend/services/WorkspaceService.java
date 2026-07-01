@@ -322,6 +322,21 @@ public class WorkspaceService {
         return workspaceMapper.isMember(workspaceId, userId);
     }
 
+    /**
+     * Whether the user holds any membership row in the workspace — {@code active}
+     * or {@code pending}. Unlike {@link #isMember}, this does not gate on
+     * acceptance, so it must never be used for auth/RBAC; it exists for surfaces
+     * that address invited-but-not-yet-joined members, such as @-mention
+     * references and their notifications.
+     *
+     * @param workspaceId the workspace to check within
+     * @param userId the user to check
+     * @return true if the user has an active or pending membership row
+     */
+    public boolean isMemberIncludingPending(int workspaceId, int userId) {
+        return workspaceMapper.isMemberIncludingPending(workspaceId, userId);
+    }
+
     public List<User> getMembers(int workspaceId) {
         return workspaceMapper.getMembers(workspaceId);
     }

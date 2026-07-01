@@ -60,6 +60,26 @@ class NoteMentionTest extends AbstractServiceTest {
     }
 
     /**
+     * Mentioning a pending (invited-but-not-yet-joined) member queues the mention:
+     * the notification is created but withheld from their cross-workspace inbox
+     * while pending, so the note's content is not disclosed before they accept.
+     * Once their membership activates, the queued mention surfaces.
+     */
+    @Test
+    void create_withMention_toPendingMember_isWithheldUntilAccepted() {
+        User pending = newPendingMember();
+        Note created = noteService.create(draft("Welcome aboard " + mention("Invitee", pending)));
+
+        assertTrue(mentions(pending.getId()).isEmpty());
+
+        workspaceMapper.activateMember(workspace.getId(), pending.getId());
+
+        List<Notification> delivered = mentions(pending.getId());
+        assertEquals(1, delivered.size());
+        assertEquals("note.mention:" + created.getId() + ":" + pending.getId(), delivered.get(0).getDedupeKey());
+    }
+
+    /**
      * The created note is returned with its resolved references hydrated.
      */
     @Test
