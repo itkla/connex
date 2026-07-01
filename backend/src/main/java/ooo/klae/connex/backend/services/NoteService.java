@@ -93,12 +93,12 @@ public class NoteService {
         User actor = authService.getCurrentUser();
         note.setWorkspaceId(workspaceId);
         note.setAuthor(actor);
+        requireLinkedRecordsVisible(workspaceId, note);
         noteMapper.insert(note);
         auditService.record("note.create", "note", note.getId(), note.getContent(),
             "Created note",
             auditService.diff(null, note, AUDIT_FIELDS));
-        List<Integer> mentioned =
-            referenceService.syncReferences(workspaceId, note.getId(), note.getContent(), actor.getId());
+        List<Integer> mentioned = referenceService.syncReferences(workspaceId, note.getId(), note.getContent());
         notifyMentions(workspaceId, note, mentioned, actor);
         return hydrateReferences(workspaceId, note);
     }
@@ -113,12 +113,12 @@ public class NoteService {
         note.setId(id);
         note.setWorkspaceId(workspaceId);
         note.setAuthor(before.getAuthor());
+        requireLinkedRecordsVisible(workspaceId, note);
         noteMapper.update(note);
         auditService.record("note.update", "note", id, note.getContent(),
             "Updated note",
             auditService.diff(before, note, AUDIT_FIELDS));
-        List<Integer> mentioned =
-            referenceService.syncReferences(workspaceId, id, note.getContent(), actor.getId());
+        List<Integer> mentioned = referenceService.syncReferences(workspaceId, id, note.getContent());
         notifyMentions(workspaceId, note, mentioned, actor);
         return hydrateReferences(workspaceId, note);
     }
@@ -140,7 +140,22 @@ public class NoteService {
         }
         String snippet = snippet(note.getContent());
         String triggeredAt = LocalDateTime.now(ZoneOffset.UTC).format(TS);
+        String contextType = null;
+        Integer contextId = null;
+        String actionUrl = "/activity/notes";
+        if (note.getDeal() != null && note.getDeal().getId() > 0) {
+            contextType = "deal";
+            contextId = note.getDeal().getId();
+            actionUrl = "/records/deals/" + contextId;
+        } else if (note.getPerson() != null && note.getPerson().getId() > 0) {
+            contextType = "person";
+            contextId = note.getPerson().getId();
+            actionUrl = "/records/contacts/" + contextId;
+        }
         for (int recipientId : recipientIds) {
+            if (recipientId == actor.getId()) {
+                continue;
+            }
             if (!notificationPreferenceService.isEnabled(recipientId, MENTION_TYPE, IN_APP)) {
                 continue;
             }
@@ -159,7 +174,9 @@ public class NoteService {
                 notification.setSourceType("note");
                 notification.setSourceId(note.getId());
                 notification.setSourceLabel(snippet);
-                applyContext(workspaceId, notification, note);
+                notification.setContextType(contextType);
+                notification.setContextId(contextId);
+                notification.setActionUrl(actionUrl);
                 notification.setDedupeKey(MENTION_TYPE + ":" + note.getId() + ":" + recipientId);
                 notification.setTriggeredAt(triggeredAt);
                 notification.setData(json(Map.of("noteId", note.getId())));
@@ -169,19 +186,14 @@ public class NoteService {
         }
     }
 
-    private void applyContext(int workspaceId, Notification notification, Note note) {
-        Integer dealId = note.getDeal() != null && note.getDeal().getId() > 0 ? note.getDeal().getId() : null;
-        Integer personId = note.getPerson() != null && note.getPerson().getId() > 0 ? note.getPerson().getId() : null;
-        if (dealId != null && dealMapper.exists(workspaceId, dealId)) {
-            notification.setContextType("deal");
-            notification.setContextId(dealId);
-            notification.setActionUrl("/records/deals/" + dealId);
-        } else if (personId != null && personMapper.exists(workspaceId, personId)) {
-            notification.setContextType("person");
-            notification.setContextId(personId);
-            notification.setActionUrl("/records/contacts/" + personId);
-        } else {
-            notification.setActionUrl("/activity/notes");
+    private void requireLinkedRecordsVisible(int workspaceId, Note note) {
+        if (note.getPerson() != null && note.getPerson().getId() > 0
+                && !personMapper.exists(workspaceId, note.getPerson().getId())) {
+            throw new ResourceNotFoundException("Person not found with id: " + note.getPerson().getId());
+        }
+        if (note.getDeal() != null && note.getDeal().getId() > 0
+                && !dealMapper.exists(workspaceId, note.getDeal().getId())) {
+            throw new ResourceNotFoundException("Deal not found with id: " + note.getDeal().getId());
         }
     }
 

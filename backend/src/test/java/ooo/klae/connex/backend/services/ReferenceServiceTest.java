@@ -47,7 +47,7 @@ class ReferenceServiceTest extends AbstractServiceTest {
         Note note = newNote(currentUser, null, null);
 
         List<Integer> added = referenceService.syncReferences(workspace.getId(), note.getId(),
-            "Hey " + mention("Mentioned", mentioned) + " take a look", currentUser.getId());
+            "Hey " + mention("Mentioned", mentioned) + " take a look");
 
         assertEquals(List.of(mentioned.getId()), added);
         assertEquals(1, stored(note).size());
@@ -56,17 +56,20 @@ class ReferenceServiceTest extends AbstractServiceTest {
     }
 
     /**
-     * The author is never mentioned by their own note.
+     * A member who appears in the content is stored (so the chip renders) even
+     * when they are the editor; excluding the author from notification is the
+     * caller's job, not this method's.
      */
     @Test
-    void syncReferences_excludesSelfMention() {
+    void syncReferences_storesSelfReference() {
         Note note = newNote(currentUser, null, null);
 
         List<Integer> added = referenceService.syncReferences(workspace.getId(), note.getId(),
-            "Note to self " + mention("Me", currentUser), currentUser.getId());
+            "Note to self " + mention("Me", currentUser));
 
-        assertTrue(added.isEmpty());
-        assertTrue(stored(note).isEmpty());
+        assertEquals(List.of(currentUser.getId()), added);
+        assertEquals(1, stored(note).size());
+        assertEquals(currentUser.getId(), stored(note).get(0).getRefId());
     }
 
     /**
@@ -78,7 +81,7 @@ class ReferenceServiceTest extends AbstractServiceTest {
         Note note = newNote(currentUser, null, null);
 
         List<Integer> added = referenceService.syncReferences(workspace.getId(), note.getId(),
-            "Hi " + mention("Outsider", outsider), currentUser.getId());
+            "Hi " + mention("Outsider", outsider));
 
         assertTrue(added.isEmpty());
         assertTrue(stored(note).isEmpty());
@@ -93,7 +96,7 @@ class ReferenceServiceTest extends AbstractServiceTest {
         Note note = newNote(currentUser, null, null);
 
         List<Integer> added = referenceService.syncReferences(workspace.getId(), note.getId(),
-            mention("First", mentioned) + " and again " + mention("Second", mentioned), currentUser.getId());
+            mention("First", mentioned) + " and again " + mention("Second", mentioned));
 
         assertEquals(List.of(mentioned.getId()), added);
         assertEquals(1, stored(note).size());
@@ -109,10 +112,10 @@ class ReferenceServiceTest extends AbstractServiceTest {
         Note note = newNote(currentUser, null, null);
 
         referenceService.syncReferences(workspace.getId(), note.getId(),
-            mention("Alice", alice), currentUser.getId());
+            mention("Alice", alice));
 
         List<Integer> addedOnEdit = referenceService.syncReferences(workspace.getId(), note.getId(),
-            mention("Alice", alice) + " " + mention("Bob", bob), currentUser.getId());
+            mention("Alice", alice) + " " + mention("Bob", bob));
 
         assertEquals(List.of(bob.getId()), addedOnEdit);
         assertEquals(2, stored(note).size());
@@ -126,10 +129,10 @@ class ReferenceServiceTest extends AbstractServiceTest {
         User alice = newUser();
         Note note = newNote(currentUser, null, null);
         referenceService.syncReferences(workspace.getId(), note.getId(),
-            mention("Alice", alice), currentUser.getId());
+            mention("Alice", alice));
 
         List<Integer> added = referenceService.syncReferences(workspace.getId(), note.getId(),
-            "no mentions now", currentUser.getId());
+            "no mentions now");
 
         assertTrue(added.isEmpty());
         assertTrue(stored(note).isEmpty());
@@ -143,7 +146,7 @@ class ReferenceServiceTest extends AbstractServiceTest {
         Note note = newNote(currentUser, null, null);
 
         List<Integer> added = referenceService.syncReferences(workspace.getId(), note.getId(),
-            "See [Acme](deal:1) and [Jane](person:2) and [Globex](company:3)", currentUser.getId());
+            "See [Acme](deal:1) and [Jane](person:2) and [Globex](company:3)");
 
         assertTrue(added.isEmpty());
         assertTrue(stored(note).isEmpty());

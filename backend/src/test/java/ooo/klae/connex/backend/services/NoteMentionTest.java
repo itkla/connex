@@ -5,11 +5,13 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 
+import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.beans.Note;
 import ooo.klae.connex.backend.beans.Notification;
 import ooo.klae.connex.backend.beans.Person;
@@ -127,11 +129,11 @@ class NoteMentionTest extends AbstractServiceTest {
     }
 
     /**
-     * A note linking a record outside the workspace never deep-links the mention notification to it.
+     * A note may not link a record outside the workspace — create is rejected,
+     * closing the search side-channel on foreign record names.
      */
     @Test
-    void mentionNotification_doesNotDeepLinkToForeignRecord() {
-        User mentioned = newUser();
+    void noteCreate_rejectsForeignLinkedRecord() {
         Workspace other = new Workspace();
         other.setName("Other " + unique());
         other.setSlug("other_" + unique());
@@ -142,14 +144,10 @@ class NoteMentionTest extends AbstractServiceTest {
         foreign.setWorkspaceId(other.getId());
         personMapper.insert(foreign);
 
-        Note note = draft(mention("Mentioned", mentioned));
+        Note note = draft("a linked note");
         note.setPerson(foreign);
-        noteService.create(note);
 
-        Notification notification = mentions(mentioned.getId()).get(0);
-        assertNull(notification.getContextType());
-        assertNull(notification.getContextId());
-        assertEquals("/activity/notes", notification.getActionUrl());
+        assertThrows(ResourceNotFoundException.class, () -> noteService.create(note));
     }
 
     /**

@@ -148,9 +148,8 @@ public class PersonService {
         Person person = personMapper.getPersonById(workspaceId, id);
         if (person == null) throw new ResourceNotFoundException("Person not found with id: " + id);
         Person hydrated = hydrateScopedRelationships(person, workspaceId);
-        if (hydrated.getNotes() != null) {
-            referenceService.hydrate(workspaceId, java.util.Arrays.asList(hydrated.getNotes()));
-        }
+        hydrated.setNotes(
+            referenceService.hydrate(workspaceId, noteMapper.getNotesByPersonId(workspaceId, id)).toArray(new Note[0]));
         return hydrated;
     }
 

@@ -41,21 +41,22 @@ public class ReferenceService {
 
     /**
      * Re-derives and persists a note's @-references from its content, replacing
-     * any previous set. Returns the IDs of members mentioned for the first time
-     * (present now but not before this call), so the caller can notify only
-     * newly-added mentions. The {@code authorId} is never returned or stored
-     * (no self-notifications). Scoped to {@code workspaceId}.
+     * any previous set. Every valid member reference is stored (so the mention
+     * chip renders regardless of who edits the note); returns the IDs of members
+     * referenced for the first time (present now but not before this call), so
+     * the caller can notify only newly-added mentions. Excluding the acting
+     * author from notification is the caller's responsibility. Scoped to
+     * {@code workspaceId}.
      *
      * @param workspaceId the owning workspace
      * @param noteId      the note whose references are being synced
      * @param content     the note's current content
-     * @param authorId    the note's author, excluded from mentions
-     * @return the user IDs newly mentioned by this sync
+     * @return the user IDs newly referenced by this sync
      */
     @Transactional
-    public List<Integer> syncReferences(int workspaceId, int noteId, String content, int authorId) {
+    public List<Integer> syncReferences(int workspaceId, int noteId, String content) {
         Set<Integer> before = mentionedMemberIds(noteReferenceMapper.findByNote(workspaceId, noteId));
-        List<NoteReference> resolved = resolve(workspaceId, noteId, content, authorId);
+        List<NoteReference> resolved = resolve(workspaceId, noteId, content);
 
         noteReferenceMapper.deleteByNote(workspaceId, noteId);
         for (NoteReference reference : resolved) {
@@ -92,7 +93,7 @@ public class ReferenceService {
         return notes;
     }
 
-    private List<NoteReference> resolve(int workspaceId, int noteId, String content, int authorId) {
+    private List<NoteReference> resolve(int workspaceId, int noteId, String content) {
         if (content == null || content.isBlank()) {
             return List.of();
         }
@@ -109,7 +110,7 @@ public class ReferenceService {
             } catch (NumberFormatException ignored) {
                 continue;
             }
-            if (refId == authorId || !workspaceService.isMember(workspaceId, refId)) {
+            if (!workspaceService.isMember(workspaceId, refId)) {
                 continue;
             }
             String key = type + ":" + refId;
