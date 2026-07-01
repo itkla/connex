@@ -4,7 +4,7 @@ import { type WheelEvent } from 'react';
 import { useTranslations } from 'next-intl';
 import { DocumentTextIcon } from '@heroicons/react/24/outline';
 
-import { Textarea } from '@/components/ui/textarea';
+import MentionEditor from './MentionEditor';
 import {
     Combobox,
     ComboboxContent,
@@ -81,12 +81,11 @@ export default function QuickEditNoteSheet({
                 return (
                     <QuickEditRecordCard key={note.id} index={idx} total={total} title={title} subtitle={subtitle}>
                         <QuickEditField label={t('contentLabel')} htmlFor={`content-${note.id}`} required>
-                            <Textarea
+                            <MentionEditor
                                 id={`content-${note.id}`}
                                 value={draft.content}
-                                onChange={(e) => updateDraft(note.id, { content: e.target.value })}
-                                rows={4}
-                                required
+                                onChange={(next) => updateDraft(note.id, { content: next })}
+                                className="min-h-[6rem] rounded-lg bg-muted px-3 py-2 text-sm ring-1 ring-border focus:ring-2 focus:ring-brand"
                             />
                         </QuickEditField>
                         <div className="grid grid-cols-1 gap-3 md:grid-cols-2">

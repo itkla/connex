@@ -49,3 +49,14 @@ export function parseNoteContent(content: string, references: NoteReference[] = 
     }
     return segments;
 }
+
+/**
+ * Flattens note content to plain text for previews and labels, replacing each
+ * `[Label](type:id)` reference token with `@Label`.
+ *
+ * @param content the raw note content
+ * @returns the content with tokens reduced to their labels
+ */
+export function noteContentToPlainText(content: string): string {
+    return content.replace(/\[([^\]]+)\]\((?:user|person|deal|company):\d+\)/g, (_full, label: string) => `@${label}`);
+}

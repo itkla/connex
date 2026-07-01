@@ -26,7 +26,7 @@ import {
 } from '@/components/ui/combobox';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
-import { Textarea } from '@/components/ui/textarea';
+import MentionEditor from './MentionEditor';
 import { InputGroupAddon } from '@/components/ui/input-group';
 import { DialogStatusCover, resolveDialogStatus, fieldInputClass } from '@/components/ui/dialog-status-cover';
 import { cn } from '@/lib/utils';
@@ -158,20 +158,19 @@ export default function NoteDialog({
                             <Label htmlFor="note-content">{t('contentLabel')}</Label>
                             <div className="group relative">
                                 <Bars3BottomLeftIcon className="pointer-events-none absolute left-3 top-3 size-4 text-muted-foreground transition-colors group-focus-within:text-brand" />
-                                <Textarea
+                                <MentionEditor
                                     id="note-content"
                                     value={content}
-                                    onChange={(e) => {
-                                        setContent(e.target.value);
+                                    onChange={(next) => {
+                                        setContent(next);
                                         clearError('content');
                                     }}
                                     placeholder={t('contentPlaceholder')}
-                                    rows={6}
-                                    aria-invalid={Boolean(fieldErrors.content)}
-                                    aria-describedby={fieldErrors.content ? 'note-content-error' : undefined}
-                                    className={cn(fieldInputClass, 'pl-9 pr-3')}
+                                    excludeUserId={currentUserId}
+                                    ariaInvalid={Boolean(fieldErrors.content)}
+                                    ariaDescribedby={fieldErrors.content ? 'note-content-error' : undefined}
                                     autoFocus
-                                    required
+                                    className={cn(fieldInputClass, 'pl-9 pr-3 py-2')}
                                 />
                             </div>
                             {fieldErrors.content && <p id="note-content-error" className="text-sm text-destructive">{fieldErrors.content}</p>}
@@ -247,7 +246,7 @@ export default function NoteDialog({
                             </DialogClose>
                             <Button
                                 type="submit"
-                                disabled={submitting || succeeded}
+                                disabled={submitting || succeeded || !content.trim()}
                                 className="min-w-24 bg-brand text-white shadow-sm transition hover:bg-brand-hover hover:shadow-md"
                             >
                                 {submitting ? (

@@ -28,6 +28,8 @@ import { SearchField, FilterBar, RadioFilter, SegmentedToggle, type FilterChipDa
 import { useRecordsBrowser } from '@/app/hooks/useRecordsBrowser';
 import RecordsRenderView from '@/app/components/records/RecordsRenderView';
 import DeleteRecordDialog from '@/app/components/records/DeleteRecordDialog';
+import NoteContent from './NoteContent';
+import { noteContentToPlainText } from '@/app/lib/references';
 import { type ColumnDef } from '@/app/components/records/types';
 import NoteCard from '@/app/components/activity/notes/NoteCard';
 import NoteDialog from '@/app/components/activity/notes/NoteDialog';
@@ -279,7 +281,7 @@ export default function NotesBrowser({ notes, persons, deals, users, currentUser
                 getSortValue: (n) => n.content ?? null,
                 render: (n) => (
                     <span className="block max-w-[28rem] truncate text-sm text-foreground">
-                        {n.content}
+                        <NoteContent content={n.content} references={n.references} />
                     </span>
                 ),
             },
@@ -518,7 +520,7 @@ export default function NotesBrowser({ notes, persons, deals, users, currentUser
                 selectedItems={selectedNotes}
                 entityLabel={t('entityLabel')}
                 getDisplayName={(n) => {
-                    const snippet = n.content?.trim().slice(0, 40) ?? '';
+                    const snippet = noteContentToPlainText(n.content ?? '').trim().slice(0, 40);
                     return snippet.length === 40 ? `${snippet}…` : snippet;
                 }}
                 isDeleting={isDeleting}
