@@ -1,5 +1,7 @@
 package ooo.klae.connex.backend.beans;
 
+import java.util.List;
+
 import com.fasterxml.jackson.annotation.JsonIdentityInfo;
 import com.fasterxml.jackson.annotation.JsonIdentityReference;
 import com.fasterxml.jackson.annotation.ObjectIdGenerators;
@@ -28,6 +30,7 @@ public class Note {
     private Deal deal;
     private String createdAt;
     private String updatedAt;
+    private List<NoteReference> references;
 
     public int getId() {
         return id;

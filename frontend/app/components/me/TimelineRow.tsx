@@ -1,7 +1,8 @@
 'use client';
 
-import { useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useEffect, useRef, useState } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
+import { useReducedMotion } from 'motion/react';
 import { useLocale, useTranslations } from 'next-intl';
 import { toastError, toastSuccess } from '@/app/lib/toast';
 import { CheckIcon, EllipsisVerticalIcon, PencilIcon, TrashIcon, UserIcon } from '@heroicons/react/24/outline';
@@ -16,6 +17,7 @@ import { deleteActivity, deleteNote, deleteTask } from '@/app/lib/api';
 import EditTaskSheet from '@/app/components/activity/tasks/EditTaskSheet';
 import EditActivitySheet from '@/app/components/activity/activities/EditActivitySheet';
 import NoteDialog from '@/app/components/activity/notes/NoteDialog';
+import NoteContent from '@/app/components/activity/notes/NoteContent';
 
 export type TimelineEntry =
     | { kind: 'task'; sortAt: number; task: Task }
@@ -59,6 +61,16 @@ export default function TimelineRow({
     const locale = useLocale();
     const router = useRouter();
     const [editOpen, setEditOpen] = useState(false);
+    const rowRef = useRef<HTMLLIElement>(null);
+    const searchParams = useSearchParams();
+    const reduceMotion = useReducedMotion();
+    const isHighlighted = entry.kind === 'note' && searchParams.get('note') === String(entry.note.id);
+
+    useEffect(() => {
+        if (isHighlighted) {
+            rowRef.current?.scrollIntoView({ behavior: reduceMotion ? 'auto' : 'smooth', block: 'center' });
+        }
+    }, [isHighlighted, reduceMotion]);
 
     const handleDelete = async () => {
         try {
@@ -123,13 +135,16 @@ export default function TimelineRow({
     } else {
         title = (
             <p className="line-clamp-2 text-sm text-foreground">
-                {entry.note.content}
+                <NoteContent content={entry.note.content} references={entry.note.references} />
             </p>
         );
     }
 
     return (
-        <li className="flex items-center gap-4 px-6 py-4">
+        <li
+            ref={rowRef}
+            className={`flex scroll-mt-24 items-center gap-4 rounded-lg px-6 py-4 transition-colors duration-700 ${isHighlighted ? 'bg-brand-light/40' : ''}`}
+        >
             <Tooltip>
                 <TooltipTrigger asChild>
                     <Avatar size="default">

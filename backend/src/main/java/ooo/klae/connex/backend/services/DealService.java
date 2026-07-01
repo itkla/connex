@@ -56,6 +56,7 @@ public class DealService {
     private final RuleTriggerPublisher ruleTriggers;
     private final NotificationChangePublisher notificationChanges;
     private final CustomFieldValueService customFieldValueService;
+    private final ReferenceService referenceService;
 
     private static final DateTimeFormatter MYSQL_DATETIME = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
@@ -548,7 +549,7 @@ public class DealService {
     public List<Note> getNotesByDealId(int dealId) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         if (dealMapper.getDealById(workspaceId, dealId) == null) throw new ResourceNotFoundException("Deal not found with id: " + dealId);
-        return noteMapper.getNotesByDealId(workspaceId, dealId);
+        return referenceService.hydrate(workspaceId, noteMapper.getNotesByDealId(workspaceId, dealId));
     }
 
     /**

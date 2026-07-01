@@ -7,6 +7,7 @@ import { ChevronLeftIcon, ChevronRightIcon } from '@heroicons/react/24/outline';
 
 import type { Task, Activity, Deal, Contact, Note } from '@/app/lib/types';
 import { parseMysqlDateTime } from '@/app/lib/utils';
+import { noteContentToPlainText } from '@/app/lib/references';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 
 type Props = {
@@ -126,7 +127,8 @@ export default function Calendar({ activities, tasks, persons, deals, notes }: P
             const when = parseMysqlDateTime(note.createdAt);
             if (Number.isNaN(when)) continue;
             const author = personById.get(note.person ?? -1);
-            const preview = note.content.length > 60 ? note.content.slice(0, 60) + '…' : note.content;
+            const plain = noteContentToPlainText(note.content);
+            const preview = plain.length > 60 ? plain.slice(0, 60) + '…' : plain;
             push(
                 {
                     id: `note-${note.id}`,
@@ -134,7 +136,7 @@ export default function Calendar({ activities, tasks, persons, deals, notes }: P
                     sortAt: when,
                     label: author ? `${author.name}: ${preview}` : preview,
                     // TODO: add param to /notes so that if specified, the note is highlighted on page visit
-                    content: note.content,
+                    content: plain,
                     href: `/activity/notes?id=${note.id}`,
                 },
                 when,

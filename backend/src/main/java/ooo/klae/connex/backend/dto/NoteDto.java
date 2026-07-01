@@ -1,5 +1,7 @@
 package ooo.klae.connex.backend.dto;
 
+import java.util.List;
+
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
 
@@ -41,6 +43,9 @@ public class NoteDto {
     private String createdAt;
     private String updatedAt;
 
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
+    private List<NoteReferenceDto> references;
+
     public static NoteDto from(Note n) {
         if (n == null) return null;
         NoteDto dto = new NoteDto();
@@ -51,6 +56,9 @@ public class NoteDto {
         dto.deal = n.getDeal() != null ? n.getDeal().getId() : null;
         dto.createdAt = n.getCreatedAt();
         dto.updatedAt = n.getUpdatedAt();
+        dto.references = n.getReferences() == null
+            ? List.of()
+            : n.getReferences().stream().map(NoteReferenceDto::from).toList();
         return dto;
     }
 

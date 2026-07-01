@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useTranslations } from "next-intl";
-import { ArrowTrendingDownIcon, BriefcaseIcon, CheckCircleIcon } from "@heroicons/react/24/outline";
+import { ArrowTrendingDownIcon, AtSymbolIcon, BriefcaseIcon, CheckCircleIcon } from "@heroicons/react/24/outline";
 
 import type { NotificationPreference } from "@/app/lib/types";
 import { getNotificationPreferences, updateNotificationPreferences } from "@/app/lib/api";
@@ -22,6 +22,7 @@ const TYPES = [
         titleKey: "relationshipTitle",
         descriptionKey: "relationshipDescription",
     },
+    { type: "note.mention", icon: AtSymbolIcon, titleKey: "mentionTitle", descriptionKey: "mentionDescription" },
 ] as const;
 
 function SectionLabel({ children }: { children: React.ReactNode }) {

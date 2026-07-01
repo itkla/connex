@@ -329,6 +329,8 @@
     "dealDescription": "所有または共同担当している案件の決着予定日が近づいた、または過ぎたとき。",
     "relationshipTitle": "関係のナッジ",
     "relationshipDescription": "進行中の案件の関係者と連絡が途絶えたとき。",
+    "mentionTitle": "メンション",
+    "mentionDescription": "メンバーがノートであなたをメンションしたとき。",
     "loadFailed": "通知設定を読み込めませんでした。",
     "saveFailed": "変更を保存できませんでした。もう一度お試しください。",
     "retry": "再試行"

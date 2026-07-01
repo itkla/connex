@@ -1,6 +1,7 @@
 import {
     ArrowsRightLeftIcon,
     ArrowTrendingDownIcon,
+    AtSymbolIcon,
     BellIcon,
     BriefcaseIcon,
     CheckCircleIcon,
@@ -76,6 +77,12 @@ export function notificationContent(notification: Notification, t: Translator, l
             body: t("workspaceJoinBody", { workspace: notification.workspaceName ?? "" }),
         };
     }
+    if (notification.type === "note.mention") {
+        return {
+            title: t("noteMentionTitle"),
+            body: t("noteMentionBody", { actor: notification.actorLabel ?? "" }),
+        };
+    }
     return { title: notification.title, body: notification.body ?? "" };
 }
 
@@ -90,6 +97,7 @@ export function notificationIcon(notification: Notification) {
     if (notification.type === "relationship.intro_opportunity") return ArrowsRightLeftIcon;
     if (notification.type.startsWith("relationship.")) return ArrowTrendingDownIcon;
     if (notification.type.startsWith("workspace.")) return UserGroupIcon;
+    if (notification.type.startsWith("note.")) return AtSymbolIcon;
     return BellIcon;
 }
 

@@ -49,6 +49,7 @@ public class PersonService {
     private final ScoringService scoringService;
     private final EmploymentService employmentService;
     private final CustomFieldValueService customFieldValueService;
+    private final ReferenceService referenceService;
 
     private static final Set<String> AUDIT_FIELDS =
         Set.of("name", "email", "phone", "title", "imageUrl");
@@ -146,7 +147,10 @@ public class PersonService {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         Person person = personMapper.getPersonById(workspaceId, id);
         if (person == null) throw new ResourceNotFoundException("Person not found with id: " + id);
-        return hydrateScopedRelationships(person, workspaceId);
+        Person hydrated = hydrateScopedRelationships(person, workspaceId);
+        hydrated.setNotes(
+            referenceService.hydrate(workspaceId, noteMapper.getNotesByPersonId(workspaceId, id)).toArray(new Note[0]));
+        return hydrated;
     }
 
     /**
@@ -298,7 +302,7 @@ public class PersonService {
     public List<Note> getNotesByPersonId(int personId) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         requirePerson(workspaceId, personId);
-        return noteMapper.getNotesByPersonId(workspaceId, personId);
+        return referenceService.hydrate(workspaceId, noteMapper.getNotesByPersonId(workspaceId, personId));
     }
 
     /**

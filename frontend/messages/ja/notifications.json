@@ -31,6 +31,8 @@
     "completeTask": "タスクを完了",
     "workspaceJoinTitle": "ワークスペースへの招待",
     "workspaceJoinBody": "{workspace} に招待されました。設定で承認すると参加できます。",
+    "noteMentionTitle": "新しいメンション",
+    "noteMentionBody": "{actor} さんがノートであなたにメンションしました。",
     "taskDueTitle": "期限が近いタスク",
     "taskDueBody": "{task} の期限は {date} です。",
     "taskOverdueTitle": "期限切れのタスク",
