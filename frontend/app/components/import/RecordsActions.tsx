@@ -61,15 +61,15 @@ export default function RecordsActions({
     return (
         <>
             <ButtonGroup>
-                <Button className="bg-brand text-white" aria-label={newAriaLabel} onClick={onNew}>
+                <Button className="bg-brand text-white hover:bg-brand-hover" aria-label={newAriaLabel} onClick={onNew}>
                     <PlusIcon strokeWidth={2.5} />
                     {newLabel}
                 </Button>
                 <ButtonGroupSeparator className="bg-white/20" />
                 <DropdownMenu>
                     <DropdownMenuTrigger asChild>
-                        <Button size="icon" className="bg-brand text-white" aria-label={t('moreActions')}>
-                            <ChevronDownIcon className="size-4" />
+                        <Button size="icon" className="bg-brand text-white hover:bg-brand-hover" aria-label={t('moreActions')}>
+                            <ChevronDownIcon className="size-3.5 transition-transform duration-200 ease-out group-data-[state=open]/button:rotate-180 motion-reduce:transition-none" />
                         </Button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end" className="w-44">
