@@ -31,6 +31,8 @@
     "completeTask": "Complete task",
     "workspaceJoinTitle": "Workspace invitation",
     "workspaceJoinBody": "You've been invited to join {workspace}. Accept in Settings to join.",
+    "noteMentionTitle": "New mention",
+    "noteMentionBody": "{actor} mentioned you in a note.",
     "taskDueTitle": "Task due soon",
     "taskDueBody": "{task} is due {date}.",
     "taskOverdueTitle": "Task overdue",
