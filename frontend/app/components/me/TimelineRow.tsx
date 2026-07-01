@@ -16,6 +16,7 @@ import { deleteActivity, deleteNote, deleteTask } from '@/app/lib/api';
 import EditTaskSheet from '@/app/components/activity/tasks/EditTaskSheet';
 import EditActivitySheet from '@/app/components/activity/activities/EditActivitySheet';
 import NoteDialog from '@/app/components/activity/notes/NoteDialog';
+import NoteContent from '@/app/components/activity/notes/NoteContent';
 
 export type TimelineEntry =
     | { kind: 'task'; sortAt: number; task: Task }
@@ -123,7 +124,7 @@ export default function TimelineRow({
     } else {
         title = (
             <p className="line-clamp-2 text-sm text-foreground">
-                {entry.note.content}
+                <NoteContent content={entry.note.content} references={entry.note.references} />
             </p>
         );
     }

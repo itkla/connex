@@ -320,6 +320,14 @@ export type Activity = {
     timestamp?: string;
 };
 
+export type NoteReferenceType = "user" | "person" | "deal" | "company";
+
+export type NoteReference = {
+    type: NoteReferenceType;
+    id: number;
+    label: string;
+};
+
 export type Note = {
     id: number;
     content: string;
@@ -328,6 +336,7 @@ export type Note = {
     deal?: number | null;
     createdAt: string;
     updatedAt: string;
+    references?: NoteReference[];
 };
 
 export type NoteDraft = {

@@ -24,6 +24,7 @@ import {
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { copyToClipboard, formatShortDate, formatDateTime } from '@/app/lib/utils';
 import type { Contact, Deal, Note, User } from '@/app/lib/types';
+import NoteContent from './NoteContent';
 
 interface NoteCardProps {
     note: Note;
@@ -127,15 +128,15 @@ export default function NoteCard({ note, person, deal, author, onEdit, onDelete 
                     {body ? (
                         <>
                             <p className="text-[15px] font-semibold leading-snug break-words text-foreground">
-                                {heading}
+                                <NoteContent content={heading} references={note.references} />
                             </p>
                             <p className="mt-1.5 text-sm leading-relaxed break-words whitespace-pre-wrap text-muted-foreground">
-                                {body}
+                                <NoteContent content={body} references={note.references} />
                             </p>
                         </>
                     ) : (
                         <p className="text-sm leading-relaxed break-words whitespace-pre-wrap text-foreground">
-                            {heading}
+                            <NoteContent content={heading} references={note.references} />
                         </p>
                     )}
                 </div>
