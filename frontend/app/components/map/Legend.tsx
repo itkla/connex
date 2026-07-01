@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { ChevronDownIcon, ListBulletIcon } from '@heroicons/react/24/outline';
 import { Button } from '@/components/ui/button';
 import { useTranslations } from 'next-intl';
+import { warmthDotClass } from '@/app/lib/utils';
 
 function Row({ swatch, label }: { swatch: React.ReactNode; label: string }) {
     return (
@@ -81,6 +82,14 @@ export default function Legend() {
                 <Row swatch={<span className="size-2.5 rounded-full bg-blue-500" />} label={t('dealStatus.activeOpen')} />
                 <Row swatch={<span className="size-2.5 rounded-full bg-emerald-500" />} label={t('dealStatus.closedWon')} />
                 <Row swatch={<span className="size-2.5 rounded-full bg-red-500" />} label={t('dealStatus.closedLost')} />
+            </ul>
+
+            <Section title={t('warmth.title')} />
+            <ul className="space-y-1.5">
+                <Row swatch={<span className={`size-2.5 rounded-full ${warmthDotClass('hot')}`} />} label={t('warmth.hot')} />
+                <Row swatch={<span className={`size-2.5 rounded-full ${warmthDotClass('warm')}`} />} label={t('warmth.warm')} />
+                <Row swatch={<span className={`size-2.5 rounded-full ${warmthDotClass('cool')}`} />} label={t('warmth.cool')} />
+                <Row swatch={<span className={`size-2.5 rounded-full ${warmthDotClass('cold')}`} />} label={t('warmth.cold')} />
             </ul>
         </div>
     );

@@ -1,7 +1,7 @@
 import type { ReplayDealResolution, ReplayFrame, TemperatureBand } from '@/app/lib/types';
 import { parseMysqlDateTime } from '@/app/lib/utils';
-import { COLOR_LOST, COLOR_UC, COLOR_WON, UC_ID, buildGraph, companyNodeId, contactNodeId } from './buildGraph';
-import type { DealSummary, Graph, GraphInput, RelationEdge } from './types';
+import { COLOR_LOST, COLOR_UC, COLOR_WON, UC_ID, companyNodeId, contactNodeId } from './buildGraph';
+import type { DealSummary, Graph, RelationEdge } from './types';
 
 /**
  * A single replay frame resolved against the master graph: which node/edge ids are present, each
@@ -20,13 +20,13 @@ export type ComputedFrame = {
 };
 
 /**
- * Builds the master graph for replay: the live graph (every still-existing node is the union of nodes
- * that can appear in any frame) augmented with a company→contact edge for every employer a contact
- * held across the window, plus an org-node fallback edge for any frame in which they were unaffiliated,
- * so employment moves render by toggling which edge is present rather than by relaying out.
+ * Augments the live graph into the master graph for replay. The live graph's nodes are already the
+ * union of every node that can appear in any frame (a node present in a past frame still exists now,
+ * hard-deletes aside); this adds a company→contact edge for every employer a contact held across the
+ * window, plus an org-node fallback edge for any frame in which they were unaffiliated, so employment
+ * moves render by toggling which edge is present rather than by relaying out.
  */
-export function buildMasterGraph(input: GraphInput, frames: ReplayFrame[]): Graph {
-    const base = buildGraph(input);
+export function augmentMasterGraph(base: Graph, frames: ReplayFrame[]): Graph {
     const edges = base.edges.slice();
     const edgeIds = new Set(edges.map((e) => e.id));
     const companyNodeIds = new Set(base.nodes.filter((n) => n.data.kind === 'company').map((n) => n.id));

@@ -29,6 +29,9 @@ import { LodContext, lodConfigForCompanyCount } from '@/app/hooks/useNodeTier';
 import { UC_ID } from '@/app/components/map/graph/buildGraph';
 import { cn } from '@/lib/utils';
 import type { AppNode, Graph, RelationEdge as RelationEdgeType } from './graph/types';
+import type { ComputedFrame } from './graph/replay';
+
+type ReplayState = { frames: ComputedFrame[]; frameIndex: number };
 
 const nodeTypes = { uc: UCNode, user: UserNode, company: CompanyNode, contact: ContactNode };
 const edgeTypes = { relation: RelationEdge };
@@ -96,7 +99,7 @@ function LabelFade() {
     return null;
 }
 
-function Flow({ graph, focusId }: { graph: Graph; focusId?: string }) {
+function Flow({ graph, focusId, replay }: { graph: Graph; focusId?: string; replay?: ReplayState }) {
     const [nodes, setNodes] = useState<AppNode[]>(() => {
         const seeded = radialLayout(graph);
         if (!focusId) return seeded;
@@ -205,6 +208,55 @@ function Flow({ graph, focusId }: { graph: Graph; focusId?: string }) {
         [],
     );
 
+    const applyFrame = useCallback((frame: ComputedFrame) => {
+        setNodes((snapshot) => {
+            let changed = false;
+            const next = snapshot.map((n): AppNode => {
+                const present = frame.presentNodeIds.has(n.id);
+                const opacity = present ? 1 : 0;
+                const pointerEvents: 'none' | undefined = present ? undefined : 'none';
+                const style = { ...n.style, opacity, pointerEvents };
+                const styleChanged = ((n.style?.opacity as number | undefined) ?? 1) !== opacity;
+                const band = frame.nodeWarmth.get(n.id);
+                if (n.type === 'company') {
+                    const warmthChanged = band !== undefined && n.data.warmth !== band;
+                    if (!styleChanged && !warmthChanged) return n;
+                    changed = true;
+                    return { ...n, style, data: band !== undefined ? { ...n.data, warmth: band } : n.data };
+                }
+                if (n.type === 'contact') {
+                    const warmthChanged = band !== undefined && n.data.warmth !== band;
+                    if (!styleChanged && !warmthChanged) return n;
+                    changed = true;
+                    return { ...n, style, data: band !== undefined ? { ...n.data, warmth: band } : n.data };
+                }
+                if (!styleChanged) return n;
+                changed = true;
+                return { ...n, style };
+            });
+            return changed ? next : snapshot;
+        });
+        setEdges((snapshot) => {
+            let changed = false;
+            const next = snapshot.map((e) => {
+                const hidden = !frame.presentEdgeIds.has(e.id);
+                const cc = frame.edgeCcColor.get(e.id);
+                const ccChanged = cc !== undefined && e.data?.ccColor !== cc;
+                if ((e.hidden ?? false) === hidden && !ccChanged) return e;
+                changed = true;
+                return { ...e, hidden, data: cc !== undefined && e.data ? { ...e.data, ccColor: cc } : e.data };
+            });
+            return changed ? next : snapshot;
+        });
+    }, []);
+
+    const frame = replay ? replay.frames[replay.frameIndex] : undefined;
+    useEffect(() => {
+        if (!frame) return;
+        const raf = requestAnimationFrame(() => applyFrame(frame));
+        return () => cancelAnimationFrame(raf);
+    }, [frame, applyFrame]);
+
     return (
         <LodContext.Provider value={lod}>
             <ReactFlow
@@ -216,10 +268,10 @@ function Flow({ graph, focusId }: { graph: Graph; focusId?: string }) {
                 onEdgesChange={onEdgesChange}
                 onNodeDragStart={onNodeDragStart}
                 onNodeDragStop={onNodeDragStop}
-                onNodeMouseEnter={onNodeMouseEnter}
-                onNodeMouseLeave={onNodeMouseLeave}
+                onNodeMouseEnter={replay ? undefined : onNodeMouseEnter}
+                onNodeMouseLeave={replay ? undefined : onNodeMouseLeave}
                 colorMode={resolvedTheme === 'dark' ? 'dark' : 'light'}
-                className={cn(settling && 'settle-animate', hovering && 'map-dim')}
+                className={cn(settling && 'settle-animate', !replay && hovering && 'map-dim')}
                 nodeOrigin={NODE_ORIGIN}
                 onlyRenderVisibleElements
                 minZoom={0.1}
@@ -236,11 +288,19 @@ function Flow({ graph, focusId }: { graph: Graph; focusId?: string }) {
     );
 }
 
-export default function RelationMap({ graph, focusId }: { graph: Graph; focusId?: string }) {
+export default function RelationMap({
+    graph,
+    focusId,
+    replay,
+}: {
+    graph: Graph;
+    focusId?: string;
+    replay?: ReplayState;
+}) {
     return (
         <div className="w-full h-full">
             <ReactFlowProvider>
-                <Flow graph={graph} focusId={focusId} />
+                <Flow graph={graph} focusId={focusId} replay={replay} />
             </ReactFlowProvider>
         </div>
     );
