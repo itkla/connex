@@ -48,6 +48,11 @@ import ooo.klae.connex.backend.mappers.TaskMapper;
  * A deal's "last touch" is the most recent of its activities, notes, tasks, or — as a floor so a
  * brand-new deal is not flagged as stalled — its creation time.
  *
+ * <p>The two silence signals are layered rather than additive: an imminent-but-quiet close
+ * ({@code closing_soon_quiet}) subsumes plain staleness, so {@code stalled} is suppressed when it
+ * fires. Plain close-date proximity that is <em>not</em> quiet is intentionally left to the existing
+ * {@code deal.close} reminder rather than duplicated here.
+ *
  * <p>Every read is workspace-scoped; the caller resolves the active workspace and passes it in.
  */
 @Service
@@ -64,6 +69,12 @@ public class DealRiskService {
     private static final String MEDIUM = "medium";
     private static final String LOW = "low";
     private static final String NONE = "none";
+
+    private static final String CODE_CLOSE_OVERDUE = "close_overdue";
+    private static final String CODE_CLOSING_SOON_QUIET = "closing_soon_quiet";
+    private static final String CODE_STALLED = "stalled";
+    private static final String CODE_STAKEHOLDER_COLD = "stakeholder_cold";
+    private static final String CODE_NO_STAKEHOLDERS = "no_stakeholders";
 
     /** Days out to the expected close date within which a close counts as imminent. */
     private static final int CLOSING_SOON_DAYS = 14;
@@ -82,7 +93,6 @@ public class DealRiskService {
     private static final int SCORE_MEDIUM = 25;
     private static final int SCORE_LOW = 10;
 
-    private static final long DAY_MS = 24L * 60 * 60 * 1000;
     private static final DateTimeFormatter MYSQL_DATETIME =
         DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
@@ -94,7 +104,7 @@ public class DealRiskService {
         Instant now = Instant.now(clock);
         String assessedAt = utc(now);
         List<Deal> open = dealMapper.getAllDeals(workspaceId).stream().filter(DealRiskService::isOpen).toList();
-        Map<Integer, Long> lastTouch = dealLastTouch(workspaceId, open);
+        Map<Integer, Long> lastTouch = dealLastTouch(workspaceId, open, now.toEpochMilli());
         Map<Integer, List<DealStakeholder>> stakeholders = stakeholdersByDeal(workspaceId);
         Map<Integer, RelationshipTemperatureDto> warmth = warmthByPerson(workspaceId);
 
@@ -120,7 +130,7 @@ public class DealRiskService {
         if (deal == null || !isOpen(deal)) {
             return new DealRiskDto(dealId, NONE, 0, List.of(), assessedAt);
         }
-        Map<Integer, Long> lastTouch = dealLastTouch(workspaceId, List.of(deal));
+        Map<Integer, Long> lastTouch = dealLastTouch(workspaceId, List.of(deal), now.toEpochMilli());
         Map<Integer, List<DealStakeholder>> stakeholders = stakeholdersByDeal(workspaceId);
         Map<Integer, RelationshipTemperatureDto> warmth = warmthByPerson(workspaceId);
         return assess(deal, now, lastTouch, stakeholders, warmth, assessedAt);
@@ -138,11 +148,13 @@ public class DealRiskService {
         LocalDate today = LocalDate.ofInstant(now, ZoneOffset.UTC);
 
         Long touchMs = lastTouch.get(deal.getId());
-        Integer daysSinceTouch = touchMs == null ? null : (int) ((now.toEpochMilli() - touchMs) / DAY_MS);
+        Integer daysSinceTouch = touchMs == null ? null
+            : (int) ChronoUnit.DAYS.between(LocalDate.ofInstant(Instant.ofEpochMilli(touchMs), ZoneOffset.UTC), today);
 
+        boolean closingSoonQuiet = false;
         LocalDate close = parseDate(deal.getExpectedCloseDate());
         if (close != null && close.isBefore(today)) {
-            factors.add(factor("close_overdue", HIGH,
+            factors.add(factor(CODE_CLOSE_OVERDUE, HIGH,
                 Map.of("daysOverdue", ChronoUnit.DAYS.between(close, today))));
         } else if (close != null && !close.isAfter(today.plusDays(CLOSING_SOON_DAYS))
                 && (daysSinceTouch == null || daysSinceTouch >= CLOSING_SOON_QUIET_DAYS)) {
@@ -151,16 +163,17 @@ public class DealRiskService {
             if (daysSinceTouch != null) {
                 params.put("daysSinceTouch", daysSinceTouch);
             }
-            factors.add(factor("closing_soon_quiet", HIGH, params));
+            factors.add(factor(CODE_CLOSING_SOON_QUIET, HIGH, params));
+            closingSoonQuiet = true;
         }
 
-        if (daysSinceTouch != null && daysSinceTouch >= STALLED_DAYS) {
-            factors.add(factor("stalled", MEDIUM, Map.of("daysSinceTouch", daysSinceTouch)));
+        if (!closingSoonQuiet && daysSinceTouch != null && daysSinceTouch >= STALLED_DAYS) {
+            factors.add(factor(CODE_STALLED, MEDIUM, Map.of("daysSinceTouch", daysSinceTouch)));
         }
 
         List<DealStakeholder> people = stakeholders.getOrDefault(deal.getId(), List.of());
         if (people.isEmpty()) {
-            factors.add(factor("no_stakeholders", LOW, Map.of()));
+            factors.add(factor(CODE_NO_STAKEHOLDERS, LOW, Map.of()));
         } else {
             for (DealStakeholder person : people) {
                 DealRiskFactor coldFactor = stakeholderColdFactor(person, warmth.get(person.getPersonId()));
@@ -200,7 +213,7 @@ public class DealRiskService {
         if (warmth.getDaysSinceTouch() != null) {
             params.put("daysSinceTouch", warmth.getDaysSinceTouch());
         }
-        return factor("stakeholder_cold", severity, params);
+        return factor(CODE_STAKEHOLDER_COLD, severity, params);
     }
 
     private static String overallLevel(List<DealRiskFactor> factors) {
@@ -213,16 +226,31 @@ public class DealRiskService {
         return factors.isEmpty() ? NONE : LOW;
     }
 
+    /**
+     * Bounded composite score. Cold stakeholders contribute only their single highest weight rather
+     * than one per stakeholder, so a deal's rank reflects the severity of its distinct problems
+     * rather than how many contacts it happens to carry.
+     */
     private static int score(List<DealRiskFactor> factors) {
         int score = 0;
+        int stakeholderColdWeight = 0;
         for (DealRiskFactor factor : factors) {
-            score += switch (factor.getSeverity()) {
-                case HIGH -> SCORE_HIGH;
-                case MEDIUM -> SCORE_MEDIUM;
-                default -> SCORE_LOW;
-            };
+            int weight = weight(factor.getSeverity());
+            if (CODE_STAKEHOLDER_COLD.equals(factor.getCode())) {
+                stakeholderColdWeight = Math.max(stakeholderColdWeight, weight);
+            } else {
+                score += weight;
+            }
         }
-        return Math.min(100, score);
+        return Math.min(100, score + stakeholderColdWeight);
+    }
+
+    private static int weight(String severity) {
+        return switch (severity) {
+            case HIGH -> SCORE_HIGH;
+            case MEDIUM -> SCORE_MEDIUM;
+            default -> SCORE_LOW;
+        };
     }
 
     private static int severityRank(String severity) {
@@ -240,26 +268,28 @@ public class DealRiskService {
     /**
      * Most recent touch per deal, in epoch millis, seeded with each deal's creation time so a fresh
      * deal with no logged interactions is measured from when it was created rather than treated as
-     * infinitely quiet.
+     * infinitely quiet. Future-dated timestamps are ignored so a stray forward-dated interaction
+     * cannot make a genuinely quiet deal read as freshly touched.
      */
-    private Map<Integer, Long> dealLastTouch(int workspaceId, List<Deal> deals) {
+    private Map<Integer, Long> dealLastTouch(int workspaceId, List<Deal> deals, long nowMs) {
         Map<Integer, Long> last = new HashMap<>();
         for (Deal deal : deals) {
-            Long created = epoch(deal.getCreatedAt());
-            if (created != null) {
-                last.put(deal.getId(), created);
-            }
+            merge(last, deal.getId(), notFuture(epoch(deal.getCreatedAt()), nowMs));
         }
         for (Activity activity : activityMapper.getAllActivities(workspaceId)) {
-            merge(last, dealId(activity.getDeal()), epoch(activity.getTimestamp()));
+            merge(last, dealId(activity.getDeal()), notFuture(epoch(activity.getTimestamp()), nowMs));
         }
         for (Note note : noteMapper.getAllNotes(workspaceId)) {
-            merge(last, dealId(note.getDeal()), epoch(note.getCreatedAt()));
+            merge(last, dealId(note.getDeal()), notFuture(epoch(note.getCreatedAt()), nowMs));
         }
         for (Task task : taskMapper.getAllTasks(workspaceId)) {
-            merge(last, dealId(task.getDeal()), epoch(task.getCreatedAt()));
+            merge(last, dealId(task.getDeal()), notFuture(epoch(task.getCreatedAt()), nowMs));
         }
         return last;
+    }
+
+    private static Long notFuture(Long epochMillis, long nowMs) {
+        return (epochMillis == null || epochMillis > nowMs) ? null : epochMillis;
     }
 
     private Map<Integer, List<DealStakeholder>> stakeholdersByDeal(int workspaceId) {
@@ -337,6 +367,8 @@ public class DealRiskService {
         }
         if (normalized.length() == 10) {
             normalized = normalized + " 00:00:00";
+        } else if (normalized.length() == 16) {
+            normalized = normalized + ":00";
         }
         try {
             return LocalDateTime.parse(normalized, MYSQL_DATETIME).toInstant(ZoneOffset.UTC).toEpochMilli();

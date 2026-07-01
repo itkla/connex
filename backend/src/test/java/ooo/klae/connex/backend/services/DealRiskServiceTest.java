@@ -15,6 +15,7 @@ import ooo.klae.connex.backend.beans.Deal;
 import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.beans.Pipeline;
 import ooo.klae.connex.backend.beans.Stage;
+import ooo.klae.connex.backend.beans.Workspace;
 import ooo.klae.connex.backend.dto.DealRiskDto;
 import ooo.klae.connex.backend.dto.DealRiskFactor;
 import ooo.klae.connex.backend.dto.RelationshipTemperatureDto;
@@ -70,9 +71,52 @@ class DealRiskServiceTest extends AbstractServiceTest {
     }
 
     private void warmth(int personId, int score, String band, String trend, int daysSinceTouch) {
-        when(scoring.scoreContacts(workspace.getId())).thenReturn(List.of(
-            new RelationshipTemperatureDto(personId, score, band, trend, "2126-05-01 10:00:00",
-                daysSinceTouch, 0, null, null)));
+        warmthList(new RelationshipTemperatureDto(personId, score, band, trend, "2126-05-01 10:00:00",
+            daysSinceTouch, 0, null, null));
+    }
+
+    private RelationshipTemperatureDto temp(int personId, String band, String trend) {
+        return new RelationshipTemperatureDto(personId, 0, band, trend, "2126-05-01 10:00:00", 40, 0, null, null);
+    }
+
+    private void warmthList(RelationshipTemperatureDto... temps) {
+        when(scoring.scoreContacts(workspace.getId())).thenReturn(List.of(temps));
+    }
+
+    private Workspace newWorkspace() {
+        Workspace other = new Workspace();
+        other.setName("Other " + unique());
+        other.setSlug("other-" + unique());
+        workspaceMapper.insert(other);
+        return other;
+    }
+
+    private Deal overdueDealInWorkspace(int workspaceId) {
+        Pipeline p = new Pipeline();
+        p.setName("Pipeline " + unique());
+        p.setWorkspaceId(workspaceId);
+        pipelineMapper.insertPipeline(p);
+        Stage s = new Stage();
+        s.setName("Stage " + unique());
+        s.setPipeline(p);
+        s.setPosition(0);
+        s.setWorkspaceId(workspaceId);
+        pipelineMapper.insertStage(s);
+        Company c = new Company();
+        c.setName("Company " + unique());
+        c.setWorkspaceId(workspaceId);
+        companyMapper.insert(c);
+        Deal deal = new Deal();
+        deal.setName("Deal " + unique());
+        deal.setWorkspaceId(workspaceId);
+        deal.setValue(1000.0);
+        deal.setCurrency("JPY");
+        deal.setPipelineId(p.getId());
+        deal.setStageId(s.getId());
+        deal.setCompanyId(c.getId());
+        deal.setExpectedCloseDate("2126-06-01");
+        dealMapper.insert(deal);
+        return deal;
     }
 
     private DealRiskFactor factor(DealRiskDto dto, String code) {
@@ -195,5 +239,124 @@ class DealRiskServiceTest extends AbstractServiceTest {
             .isGreaterThanOrEqualTo(risks.get(risks.size() - 1).getScore());
         assertThat(risks).anyMatch(risk -> risk.getDealId() == overdue.getId());
         assertThat(risks).noneMatch(risk -> risk.getDealId() == healthy.getId());
+    }
+
+    @Test
+    void nonKeyRoleColdStakeholderFlagsMedium() {
+        Deal deal = openDeal();
+        closeDateOf(deal, "2126-12-31");
+        touch(deal, "2126-06-20 10:00:00");
+        Person contact = newPerson(company);
+        dealMapper.addPerson(workspace.getId(), deal.getId(), contact.getId(), "Influencer");
+        warmthList(temp(contact.getId(), "cold", "cooling"));
+
+        DealRiskDto risk = service.assessDeal(workspace.getId(), deal.getId());
+
+        assertThat(factor(risk, "stakeholder_cold").getSeverity()).isEqualTo("medium");
+        assertThat(risk.getLevel()).isEqualTo("medium");
+    }
+
+    @Test
+    void coolingKeyRoleFlagsMediumAndNonKeyFlagsLow() {
+        Deal keyDeal = openDeal();
+        closeDateOf(keyDeal, "2126-12-31");
+        touch(keyDeal, "2126-06-20 10:00:00");
+        Person champion = newPerson(company);
+        dealMapper.addPerson(workspace.getId(), keyDeal.getId(), champion.getId(), "Champion");
+        warmthList(temp(champion.getId(), "cool", "cooling"));
+        assertThat(service.assessDeal(workspace.getId(), keyDeal.getId()).getLevel()).isEqualTo("medium");
+
+        Deal plainDeal = openDeal();
+        closeDateOf(plainDeal, "2126-12-31");
+        touch(plainDeal, "2126-06-20 10:00:00");
+        Person contact = newPerson(company);
+        dealMapper.addPerson(workspace.getId(), plainDeal.getId(), contact.getId(), "Influencer");
+        warmthList(temp(contact.getId(), "cool", "cooling"));
+        assertThat(service.assessDeal(workspace.getId(), plainDeal.getId()).getLevel()).isEqualTo("low");
+    }
+
+    @Test
+    void stakeholderWithoutWarmthDoesNotFlag() {
+        Deal deal = openDeal();
+        closeDateOf(deal, "2126-12-31");
+        touch(deal, "2126-06-20 10:00:00");
+        Person contact = newPerson(company);
+        dealMapper.addPerson(workspace.getId(), deal.getId(), contact.getId(), "Champion");
+        warmthList();
+
+        DealRiskDto risk = service.assessDeal(workspace.getId(), deal.getId());
+
+        assertThat(factor(risk, "stakeholder_cold")).isNull();
+        assertThat(risk.getLevel()).isEqualTo("none");
+    }
+
+    @Test
+    void multipleColdStakeholdersScoreCappedToHighest() {
+        Deal deal = openDeal();
+        closeDateOf(deal, "2126-12-31");
+        touch(deal, "2126-06-20 10:00:00");
+        Person champion = newPerson(company);
+        Person contact = newPerson(company);
+        dealMapper.addPerson(workspace.getId(), deal.getId(), champion.getId(), "Champion");
+        dealMapper.addPerson(workspace.getId(), deal.getId(), contact.getId(), "Influencer");
+        warmthList(temp(champion.getId(), "cold", "cooling"), temp(contact.getId(), "cold", "cooling"));
+
+        DealRiskDto risk = service.assessDeal(workspace.getId(), deal.getId());
+
+        assertThat(risk.getFactors()).filteredOn(f -> "stakeholder_cold".equals(f.getCode())).hasSize(2);
+        assertThat(risk.getScore()).isEqualTo(50);
+        assertThat(risk.getLevel()).isEqualTo("high");
+    }
+
+    @Test
+    void futureDatedTouchDoesNotMaskStaleness() {
+        Deal deal = openDeal();
+        touch(deal, "2126-05-01 10:00:00");
+        touch(deal, "2130-01-01 10:00:00");
+
+        DealRiskDto risk = service.assessDeal(workspace.getId(), deal.getId());
+
+        assertThat(factor(risk, "stalled")).isNotNull();
+    }
+
+    @Test
+    void assessWorkspaceIncludesLowOnlyDealBelowHigh() {
+        Deal overdue = openDeal();
+        closeDateOf(overdue, "2126-06-01");
+        touch(overdue, "2126-06-20 10:00:00");
+        Person warm = newPerson(company);
+        dealMapper.addPerson(workspace.getId(), overdue.getId(), warm.getId(), "Champion");
+
+        Deal lowOnly = openDeal();
+        closeDateOf(lowOnly, "2126-12-31");
+        touch(lowOnly, "2126-06-20 10:00:00");
+        warmthList(temp(warm.getId(), "hot", "rising"));
+
+        List<DealRiskDto> risks = service.assessWorkspace(workspace.getId());
+
+        DealRiskDto lowRisk = risks.stream().filter(r -> r.getDealId() == lowOnly.getId()).findFirst().orElseThrow();
+        assertThat(lowRisk.getLevel()).isEqualTo("low");
+        int highIndex = indexOfDeal(risks, overdue.getId());
+        int lowIndex = indexOfDeal(risks, lowOnly.getId());
+        assertThat(highIndex).isLessThan(lowIndex);
+    }
+
+    @Test
+    void doesNotLeakAcrossWorkspaces() {
+        Workspace other = newWorkspace();
+        Deal foreign = overdueDealInWorkspace(other.getId());
+
+        assertThat(service.assessWorkspace(workspace.getId()))
+            .noneMatch(risk -> risk.getDealId() == foreign.getId());
+        assertThat(service.assessDeal(workspace.getId(), foreign.getId()).getLevel()).isEqualTo("none");
+    }
+
+    private static int indexOfDeal(List<DealRiskDto> risks, int dealId) {
+        for (int i = 0; i < risks.size(); i++) {
+            if (risks.get(i).getDealId() == dealId) {
+                return i;
+            }
+        }
+        return -1;
     }
 }
