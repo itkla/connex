@@ -743,6 +743,7 @@ export default function DealsBrowser({ deals, savedViews }: { deals: Deal[]; sav
                     companyById={companyById}
                     pipelineById={pipelineById}
                     stageById={stageById}
+                    riskByDealId={riskByDealId}
                     onQuickEdit={quickEditOne}
                     onDelete={deleteOne}
                     onMoved={() => router.refresh()}
