@@ -1,6 +1,6 @@
 'use client';
 
-import type { ComponentType, SVGProps } from 'react';
+import { useCallback, type ComponentType, type SVGProps } from 'react';
 import {
     CalendarDaysIcon,
     ClockIcon,
@@ -48,11 +48,12 @@ function stringParam(value: unknown): string | null {
 export function useRiskText() {
     const t = useTranslations('DealRisk');
 
-    function levelLabel(severity: DealRiskSeverity): string {
-        return t(LEVEL_LABEL_KEYS[severity]);
-    }
+    const levelLabel = useCallback(
+        (severity: DealRiskSeverity): string => t(LEVEL_LABEL_KEYS[severity]),
+        [t],
+    );
 
-    function factorText(factor: DealRiskFactor): string {
+    const factorText = useCallback((factor: DealRiskFactor): string => {
         const params = factor.params;
         switch (factor.code) {
             case 'close_overdue':
@@ -77,7 +78,7 @@ export function useRiskText() {
             default:
                 return '';
         }
-    }
+    }, [t]);
 
     return { levelLabel, factorText };
 }
