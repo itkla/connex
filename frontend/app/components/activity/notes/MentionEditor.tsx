@@ -364,6 +364,13 @@ export default function MentionEditor({
             parent.insertBefore(chip, spacer);
             if (before.length > 0) parent.insertBefore(beforeNode, chip);
 
+            if (!reduceMotion) {
+                chip.animate([{ opacity: 0 }, { opacity: 1 }], {
+                    duration: 120,
+                    easing: 'cubic-bezier(0.23, 1, 0.32, 1)',
+                });
+            }
+
             const next = document.createRange();
             next.setStart(afterNode, 0);
             next.collapse(true);
@@ -373,7 +380,7 @@ export default function MentionEditor({
             closeMenu();
             emit();
         },
-        [closeMenu, emit],
+        [closeMenu, emit, reduceMotion],
     );
 
     const handleKeyDown = useCallback(
@@ -394,6 +401,11 @@ export default function MentionEditor({
                     insertReference(suggestions[activeIndex]);
                     return;
                 }
+                if (event.key === ' ' && query !== null && query.text.length >= 1) {
+                    event.preventDefault();
+                    insertReference(suggestions[activeIndex]);
+                    return;
+                }
                 if (event.key === 'Escape') {
                     event.preventDefault();
                     closeMenu();
@@ -406,7 +418,7 @@ export default function MentionEditor({
                 emit();
             }
         },
-        [menuOpen, suggestions, activeIndex, insertReference, closeMenu, emit],
+        [menuOpen, suggestions, activeIndex, insertReference, closeMenu, emit, query],
     );
 
     return (
