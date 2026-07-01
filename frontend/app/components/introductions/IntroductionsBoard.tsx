@@ -6,6 +6,7 @@ import { useTranslations } from 'next-intl';
 import { ArrowsRightLeftIcon, PlusIcon } from '@heroicons/react/24/outline';
 
 import SectionHeader from '@/app/components/dashboard/SectionHeader';
+import Rise from '@/app/components/motion/Rise';
 import { Button } from '@/components/ui/button';
 import { dismissIntroSuggestion, recordIntroduction } from '@/app/lib/api';
 import { toastError, toastSuccess } from '@/app/lib/toast';
@@ -104,60 +105,64 @@ export default function IntroductionsBoard({
 
     return (
         <div className="flex flex-col gap-10">
-            <section>
-                <SectionHeader
-                    title={t('toMake')}
-                    action={
-                        <LogIntroDialog
-                            contacts={contacts}
-                            onRecord={logManual}
-                            trigger={
-                                <Button variant="outline" size="sm">
-                                    <PlusIcon className="size-4" />
-                                    {t('logIntro')}
-                                </Button>
-                            }
-                        />
-                    }
-                />
-                {suggestions.length === 0 ? (
-                    <div className="flex flex-col items-center justify-center gap-2 rounded-2xl border border-dashed border-border bg-card px-6 py-16 text-center">
-                        <ArrowsRightLeftIcon className="size-6 text-muted-foreground" aria-hidden />
-                        <p className="text-sm font-medium text-foreground">{t('toMakeEmptyTitle')}</p>
-                        <p className="max-w-md text-sm text-muted-foreground">{t('toMakeEmptyHint')}</p>
-                    </div>
-                ) : (
-                    <motion.div layout className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-                        <AnimatePresence mode="popLayout" initial={false}>
-                            {suggestions.map((suggestion, index) => (
-                                <motion.div
-                                    key={pairKey(suggestion.personAId, suggestion.personBId)}
-                                    layout
-                                    initial={reduce ? false : { opacity: 0, y: 12 }}
-                                    animate={{ opacity: 1, y: 0 }}
-                                    exit={reduce ? { opacity: 0 } : { opacity: 0, scale: 0.97 }}
-                                    transition={{
-                                        duration: reduce ? 0 : 0.22,
-                                        ease: EASE_OUT,
-                                        delay: reduce ? 0 : Math.min(index, 6) * 0.04,
-                                    }}
-                                >
-                                    <IntroSuggestionCard
-                                        suggestion={suggestion}
-                                        onRecord={() => void record(suggestion)}
-                                        onDismiss={() => void dismiss(suggestion)}
-                                    />
-                                </motion.div>
-                            ))}
-                        </AnimatePresence>
-                    </motion.div>
-                )}
-            </section>
+            <Rise delay={0.06}>
+                <section>
+                    <SectionHeader
+                        title={t('toMake')}
+                        action={
+                            <LogIntroDialog
+                                contacts={contacts}
+                                onRecord={logManual}
+                                trigger={
+                                    <Button variant="outline" size="sm">
+                                        <PlusIcon className="size-4" />
+                                        {t('logIntro')}
+                                    </Button>
+                                }
+                            />
+                        }
+                    />
+                    {suggestions.length === 0 ? (
+                        <div className="flex flex-col items-center justify-center gap-2 rounded-2xl border border-dashed border-border bg-card px-6 py-16 text-center">
+                            <ArrowsRightLeftIcon className="size-6 text-muted-foreground" aria-hidden />
+                            <p className="text-sm font-medium text-foreground">{t('toMakeEmptyTitle')}</p>
+                            <p className="max-w-md text-sm text-muted-foreground">{t('toMakeEmptyHint')}</p>
+                        </div>
+                    ) : (
+                        <motion.div layout className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+                            <AnimatePresence mode="popLayout" initial={false}>
+                                {suggestions.map((suggestion, index) => (
+                                    <motion.div
+                                        key={pairKey(suggestion.personAId, suggestion.personBId)}
+                                        layout
+                                        initial={reduce ? false : { opacity: 0, y: 12 }}
+                                        animate={{ opacity: 1, y: 0 }}
+                                        exit={reduce ? { opacity: 0 } : { opacity: 0, scale: 0.97 }}
+                                        transition={{
+                                            duration: reduce ? 0 : 0.22,
+                                            ease: EASE_OUT,
+                                            delay: reduce ? 0 : Math.min(index, 6) * 0.04,
+                                        }}
+                                    >
+                                        <IntroSuggestionCard
+                                            suggestion={suggestion}
+                                            onRecord={() => void record(suggestion)}
+                                            onDismiss={() => void dismiss(suggestion)}
+                                        />
+                                    </motion.div>
+                                ))}
+                            </AnimatePresence>
+                        </motion.div>
+                    )}
+                </section>
+            </Rise>
 
-            <section>
-                <SectionHeader title={t('lineageTitle')} />
-                <IntroLineageList items={lineage} />
-            </section>
+            <Rise delay={0.12}>
+                <section>
+                    <SectionHeader title={t('lineageTitle')} />
+                    <IntroLineageList items={lineage} />
+                </section>
+            </Rise>
         </div>
     );
 }

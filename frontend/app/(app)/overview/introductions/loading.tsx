@@ -60,7 +60,7 @@ export default function IntroductionsLoading() {
     return (
         <div className="min-h-screen bg-background px-2 pt-8 pb-12">
             <div className="mx-auto flex w-full max-w-7xl flex-col gap-10">
-                <header className="px-4 sm:px-6">
+                <header className="px-6">
                     <Skeleton className="h-8 w-56" />
                     <Skeleton className="mt-2 h-4 w-80" />
                 </header>

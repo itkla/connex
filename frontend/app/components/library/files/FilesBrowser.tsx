@@ -63,6 +63,7 @@ import {
 } from '@/app/components/library/files/fileMeta';
 
 import { useUrlSync } from '@/app/hooks/useUrlSync';
+import Rise from '@/app/components/motion/Rise';
 import RecordsRenderView from '@/app/components/records/RecordsRenderView';
 import { type ColumnDef } from '@/app/components/records/types';
 import {
@@ -438,26 +439,32 @@ export default function FilesBrowser() {
     );
 
     return (
-        <div className="page-grid gap-y-8">
-            <header className="flex flex-wrap items-end justify-between gap-4">
-                <div>
-                    <h1 className="text-4xl font-extrabold tracking-tight">{t('title')}</h1>
-                    <p className="mt-1 max-w-prose text-sm text-muted-foreground">{t('subtitle')}</p>
-                </div>
-                {facets && facets.total > 0 && (
-                    <div className="text-right tabular-nums">
-                        <div className="text-sm font-medium text-foreground">{t('count', { count: facets.total })}</div>
-                        <div className="text-xs text-muted-foreground">
-                            {t('totalSize', { size: formatFileSize(facets.totalSize) })}
-                        </div>
+        <div className="min-h-screen bg-background px-2 pt-8 pb-12">
+            <div className="mx-auto flex w-full max-w-7xl flex-col gap-10">
+            <Rise>
+                <header className="flex flex-wrap items-end justify-between gap-4">
+                    <div>
+                        <h1 className="text-4xl font-extrabold tracking-tight">{t('title')}</h1>
+                        <p className="mt-1 max-w-prose text-sm text-muted-foreground">{t('subtitle')}</p>
                     </div>
-                )}
-            </header>
+                    {facets && facets.total > 0 && (
+                        <div className="text-right tabular-nums">
+                            <div className="text-sm font-medium text-foreground">{t('count', { count: facets.total })}</div>
+                            <div className="text-xs text-muted-foreground">
+                                {t('totalSize', { size: formatFileSize(facets.totalSize) })}
+                            </div>
+                        </div>
+                    )}
+                </header>
+            </Rise>
 
             {isEmptyLibrary ? (
-                <EmptyState t={t} />
+                <Rise delay={0.06}>
+                    <EmptyState t={t} />
+                </Rise>
             ) : (
                 <>
+                    <Rise delay={0.06}>
                     <FilterBar
                         reduce={reduce}
                         chips={chips}
@@ -545,7 +552,9 @@ export default function FilesBrowser() {
                             </button>
                         )}
                     </FilterBar>
+                    </Rise>
 
+                    <Rise delay={0.12}>
                     <RecordsRenderView<Attachment>
                         data={items}
                         columns={columns}
@@ -583,6 +592,7 @@ export default function FilesBrowser() {
                             onPageSizeChange: setSize,
                         }}
                     />
+                    </Rise>
                 </>
             )}
 
@@ -656,12 +666,16 @@ export default function FilesBrowser() {
                     loadFacets();
                 }}
             />
+            </div>
         </div>
     );
 }
 
-// rendered inside RecordsRenderView's grid wrapper (which supplies the key, exit
-// animation, and selection outline), so this returns the card body — not a list item.
+/**
+ * Renders a single file card inside RecordsRenderView's grid wrapper, which supplies
+ * the key, exit animation, and selection outline, so this returns the card body rather
+ * than a list item.
+ */
 function FileCard({
     attachment,
     kind,
@@ -692,7 +706,7 @@ function FileCard({
         <motion.div
             whileHover={reduce ? undefined : { y: -3 }}
             transition={{ duration: 0.2, ease: EASE_OUT }}
-            className="group flex h-full flex-col overflow-hidden rounded-2xl bg-card ring-1 ring-border transition-shadow duration-200 hover:shadow-lg"
+            className="group flex h-full flex-col overflow-hidden rounded-2xl border border-border bg-card transition-shadow duration-200 hover:shadow-lg"
         >
             <div className="flex items-center gap-2 px-3 py-2.5">
                 <span className="relative inline-flex size-4 shrink-0 items-center justify-center">

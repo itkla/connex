@@ -1,6 +1,11 @@
 {
     "MapPage": {
-        "title": "関係地図"
+        "title": "関係地図",
+        "subtitle": "チーム・企業・コンタクトのつながりを一目で把握できます。",
+        "yourCompany": "自社",
+        "emptyTitle": "関係地図はまだ空です",
+        "emptyBody": "企業やコンタクトを追加すると、ネットワークのつながりと成長を可視化できます。",
+        "emptyCta": "企業を追加"
     },
     "CompanyNode": {
         "title": "企業ノード"

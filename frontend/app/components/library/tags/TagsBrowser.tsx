@@ -38,6 +38,7 @@ import { deleteTag } from '@/app/lib/api';
 import { toastError, toastSuccess } from '@/app/lib/toast';
 import { compareByColor, copyToClipboard, readableTextColor } from '@/app/lib/utils';
 import type { Tag } from '@/app/lib/types';
+import Rise from '@/app/components/motion/Rise';
 import TagDialog from '@/app/components/library/tags/TagDialog';
 
 type Props = { tags: Tag[] };
@@ -132,25 +133,29 @@ export default function TagsBrowser({ tags: initialTags }: Props) {
     const noResults = hasTags && visible.length === 0;
 
     return (
-        <div className="mx-auto w-full max-w-7xl space-y-8">
-            <div className="flex flex-wrap items-start justify-between gap-4">
-                <div>
-                    <h1 className="text-4xl font-extrabold">{t('title')}</h1>
-                    <p className="mt-1 max-w-prose text-sm text-muted-foreground">{t('subtitle')}</p>
+        <div className="min-h-screen bg-background px-2 pt-8 pb-12">
+            <div className="mx-auto flex w-full max-w-7xl flex-col gap-10">
+            <Rise>
+                <div className="flex flex-wrap items-start justify-between gap-4">
+                    <div>
+                        <h1 className="text-4xl font-extrabold">{t('title')}</h1>
+                        <p className="mt-1 max-w-prose text-sm text-muted-foreground">{t('subtitle')}</p>
+                    </div>
+                    {hasTags && (
+                        <Button
+                            className="bg-brand text-white hover:bg-brand-dark"
+                            aria-label={t('newAria')}
+                            onClick={openCreate}
+                        >
+                            <PlusIcon strokeWidth={2.5} />
+                            {t('newTag')}
+                        </Button>
+                    )}
                 </div>
-                {hasTags && (
-                    <Button
-                        className="bg-brand text-white hover:bg-brand-dark"
-                        aria-label={t('newAria')}
-                        onClick={openCreate}
-                    >
-                        <PlusIcon strokeWidth={2.5} />
-                        {t('newTag')}
-                    </Button>
-                )}
-            </div>
+            </Rise>
 
             {hasTags && (
+                <Rise delay={0.06}>
                 <FilterBar
                     reduce={reduce}
                     chips={query.trim() ? [{ id: 'q', label: tf('chipSearch', { query: query.trim() }), onRemove: () => setQuery('') }] as FilterChipData[] : []}
@@ -183,8 +188,10 @@ export default function TagsBrowser({ tags: initialTags }: Props) {
                         </div>
                     }
                 />
+                </Rise>
             )}
 
+            <Rise delay={0.12}>
             {!hasTags ? (
                 <EmptyState
                     title={t('emptyTitle')}
@@ -193,7 +200,7 @@ export default function TagsBrowser({ tags: initialTags }: Props) {
                     onCreate={openCreate}
                 />
             ) : noResults ? (
-                <div className="rounded-2xl bg-card px-6 py-20 text-center ring-1 ring-border">
+                <div className="rounded-2xl border border-border bg-card px-6 py-20 text-center">
                     <p className="text-sm text-muted-foreground">{t('noResults', { query: query.trim() })}</p>
                 </div>
             ) : (
@@ -216,6 +223,7 @@ export default function TagsBrowser({ tags: initialTags }: Props) {
                     </AnimatePresence>
                 </ul>
             )}
+            </Rise>
 
             <TagDialog
                 open={dialogOpen}
@@ -258,6 +266,7 @@ export default function TagsBrowser({ tags: initialTags }: Props) {
                     </DialogFooter>
                 </DialogContent>
             </Dialog>
+            </div>
         </div>
     );
 }
@@ -279,7 +288,7 @@ function TagTile({ tag, reduce, onEdit, onCopy, onDelete, t }: TileProps) {
             <motion.div
                 whileHover={reduce ? undefined : { y: -2 }}
                 transition={{ duration: 0.2, ease: EASE_OUT }}
-                className="group relative overflow-hidden rounded-2xl bg-card ring-1 ring-border transition-shadow duration-200 hover:shadow-lg"
+                className="group relative overflow-hidden rounded-2xl border border-border bg-card transition-shadow duration-200 hover:shadow-lg"
             >
                 <motion.button
                     type="button"
@@ -382,7 +391,7 @@ function EmptyState({
     onCreate: () => void;
 }) {
     return (
-        <div className="rounded-2xl bg-card px-6 py-20 text-center ring-1 ring-border">
+        <div className="rounded-2xl border border-border bg-card px-6 py-20 text-center">
             <div className="mx-auto flex size-14 items-center justify-center rounded-2xl bg-brand-light text-brand-dark">
                 <TagIcon className="size-7" />
             </div>

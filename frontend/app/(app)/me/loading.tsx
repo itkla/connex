@@ -2,8 +2,8 @@ import { Skeleton } from '@/components/ui/skeleton';
 
 export default function MeLoading() {
     return (
-        <div className="min-h-screen bg-background px-6 pt-12 pb-12 md:flex md:h-screen md:flex-col md:overflow-hidden">
-            <div className="mx-auto w-full max-w-7xl md:flex md:min-h-0 md:flex-1 md:flex-col">
+        <div className="min-h-screen bg-background px-2 pt-8 pb-12">
+            <div className="mx-auto flex w-full max-w-5xl flex-col gap-10">
                 <header className="flex items-center gap-6">
                     <Skeleton className="h-24 w-24 shrink-0 rounded-full" />
                     <div className="flex flex-col gap-2">
@@ -12,7 +12,7 @@ export default function MeLoading() {
                     </div>
                 </header>
 
-                <div className="mt-12 grid grid-cols-1 gap-8 md:grid-cols-[minmax(0,1fr)_minmax(0,2fr)] md:min-h-0 md:flex-1">
+                <div className="grid grid-cols-1 gap-8 md:grid-cols-[minmax(0,1fr)_minmax(0,2fr)]">
                     <aside>
                         <div className="mb-3 flex h-8 items-center justify-between px-6">
                             <Skeleton className="h-3 w-20" />
@@ -49,7 +49,7 @@ export default function MeLoading() {
                         </div>
                     </aside>
 
-                    <section className="md:flex md:min-h-0 md:flex-col">
+                    <section>
                         <div className="mb-3 flex h-8 items-center px-6">
                             <Skeleton className="h-3 w-24" />
                         </div>
@@ -67,7 +67,7 @@ export default function MeLoading() {
                             ))}
                         </div>
 
-                        <div className="mt-6 overflow-hidden rounded-2xl border border-border bg-card md:flex md:min-h-0 md:flex-1 md:flex-col">
+                        <div className="mt-6 overflow-hidden rounded-2xl border border-border bg-card">
                             <div className="divide-y divide-border">
                                 {Array.from({ length: 6 }).map((_, i) => (
                                     <div key={i} className="flex items-start gap-4 px-6 py-5">

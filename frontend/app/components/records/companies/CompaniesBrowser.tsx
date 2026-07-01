@@ -18,6 +18,7 @@ import {
 } from '@heroicons/react/24/outline';
 
 import RecordsRenderView from '@/app/components/records/RecordsRenderView';
+import Rise from '@/app/components/motion/Rise';
 import { useCustomFieldColumns } from '@/app/components/records/CustomFieldColumns';
 import SavedViewsBar from '@/app/components/records/SavedViewsBar';
 import SegmentBuilder, { EMPTY_DEFINITION, isSegmentDefinition, segmentConditionLabel } from '@/app/components/records/SegmentBuilder';
@@ -188,8 +189,7 @@ export default function CompaniesBrowser({ companies, savedViews }: { companies:
                 setAllUsers(users);
                 setMetricsStatus('ready');
             })
-            .catch((err) => {
-                console.error(err);
+            .catch(() => {
                 setMetricsStatus('error');
                 toastError(t('toastMetricsLoadFailed'));
             });
@@ -235,7 +235,6 @@ export default function CompaniesBrowser({ companies, savedViews }: { companies:
             if (isFieldError(err)) {
                 throw err;
             }
-            console.error(err);
             toastError(t('toastCreateFailed'));
         } finally {
             setIsCreating(false);
@@ -430,8 +429,6 @@ export default function CompaniesBrowser({ companies, savedViews }: { companies:
             })),
     ];
 
-    // TODO: move processing to the backend so the frontend doesn't traverse the full tables to derive per-company metrics
-
     const [now] = useState(() => Date.now());
     const metricsByCompanyId = useMemo(() => {
         const map = new Map<number, CompanyMetrics>();
@@ -555,152 +552,162 @@ export default function CompaniesBrowser({ companies, savedViews }: { companies:
     );
 
     return (
-        <div className="page-grid gap-y-6">
-            <div className="flex items-center justify-between">
-                <h1 className="text-4xl font-extrabold">{t('title')}</h1>
-                <div className="flex items-center gap-2">
-                    <RecordsImportExport entity="companies" onImported={() => router.refresh()} exportIds={visibleCompanies.map((c) => c.id)} />
-                    <Button className="bg-brand text-white" aria-label={t('addCompanyAriaLabel')} onClick={() => setNewDialogOpen(true)}>
-                        <PlusIcon strokeWidth={2.5} />
-                        {t('new')}
-                    </Button>
-                </div>
-            </div>
+        <div className="min-h-screen bg-background px-2 pt-8 pb-12">
+            <div className="mx-auto flex w-full max-w-7xl flex-col gap-10">
+                <Rise>
+                    <div className="flex items-center justify-between">
+                        <h1 className="text-4xl font-extrabold">{t('title')}</h1>
+                        <div className="flex items-center gap-2">
+                            <RecordsImportExport entity="companies" onImported={() => router.refresh()} exportIds={visibleCompanies.map((c) => c.id)} />
+                            <Button className="bg-brand text-white" aria-label={t('addCompanyAriaLabel')} onClick={() => setNewDialogOpen(true)}>
+                                <PlusIcon strokeWidth={2.5} />
+                                {t('new')}
+                            </Button>
+                        </div>
+                    </div>
+                </Rise>
 
-            <SavedViewsBar
-                recordType="company"
-                initialViews={savedViews}
-                currentConfig={currentConfig}
-                onApply={applyView}
-            />
-
-            <FilterBar
-                reduce={reduce}
-                chips={chips}
-                hasActiveFilters={hasActiveFilters}
-                onClearAll={clearAll}
-                clearAllLabel={tf('clearAll')}
-                search={
-                    <SearchField
-                        value={query}
-                        onChange={setQuery}
-                        onClear={() => setQuery('')}
-                        placeholder={t('searchPlaceholder')}
-                        searchAria={tf('searchAria')}
-                        clearAria={tf('clearSearchAria')}
+                <Rise delay={0.06}>
+                    <SavedViewsBar
+                        recordType="company"
+                        initialViews={savedViews}
+                        currentConfig={currentConfig}
+                        onApply={applyView}
                     />
-                }
-                trailing={
-                    <div className="flex items-center gap-2">
-                        <SegmentBuilder definition={definition} fields={segmentFields} onChange={setDefinition} />
-                        {displayMode === 'grid' && (
-                            <RecordsSortMenu
-                                columns={columns}
-                                sortKey={sortKey}
-                                sortDirection={sortDirection}
-                                onSortChange={onSortChange}
+                </Rise>
+
+                <Rise delay={0.12}>
+                    <FilterBar
+                        reduce={reduce}
+                        chips={chips}
+                        hasActiveFilters={hasActiveFilters}
+                        onClearAll={clearAll}
+                        clearAllLabel={tf('clearAll')}
+                        search={
+                            <SearchField
+                                value={query}
+                                onChange={setQuery}
+                                onClear={() => setQuery('')}
+                                placeholder={t('searchPlaceholder')}
+                                searchAria={tf('searchAria')}
+                                clearAria={tf('clearSearchAria')}
+                            />
+                        }
+                        trailing={
+                            <div className="flex items-center gap-2">
+                                <SegmentBuilder definition={definition} fields={segmentFields} onChange={setDefinition} />
+                                {displayMode === 'grid' && (
+                                    <RecordsSortMenu
+                                        columns={columns}
+                                        sortKey={sortKey}
+                                        sortDirection={sortDirection}
+                                        onSortChange={onSortChange}
+                                    />
+                                )}
+                                <SegmentedToggle
+                                    ariaLabel={t('displayModeAriaLabel')}
+                                    value={displayMode}
+                                    onChange={setDisplayMode}
+                                    options={[
+                                        { value: 'grid', icon: <Squares2X2Icon className="size-4" />, ariaLabel: t('gridViewAriaLabel') },
+                                        { value: 'table', icon: <TableCellsIcon className="size-4" />, ariaLabel: t('tableViewAriaLabel') },
+                                    ]}
+                                />
+                            </div>
+                        }
+                    >
+                        <RecordsFilterPills<Company>
+                            facets={facets}
+                            filterState={filterState}
+                            onChange={setFilterState}
+                        />
+                    </FilterBar>
+                </Rise>
+
+                <Rise delay={0.18}>
+                    <RecordsRenderView<Company>
+                        data={visibleCompanies}
+                        loading={segmentsLoading}
+                        columns={[...columns, ...customColumns]}
+                        addColumnSlot={addColumnSlot}
+                        renderCard={(item, { onQuickEdit, onDelete }) => (
+                            <CompanyCard
+                                company={item}
+                                metrics={metricsByCompanyId.get(item.id)}
+                                metricsStatus={metricsStatus}
+                                onFirstExpand={ensureMetricsLoaded}
+                                onQuickEdit={onQuickEdit ? () => onQuickEdit(item) : undefined}
+                                onDelete={onDelete ? () => onDelete(item) : undefined}
                             />
                         )}
-                        <SegmentedToggle
-                            ariaLabel={t('displayModeAriaLabel')}
-                            value={displayMode}
-                            onChange={setDisplayMode}
-                            options={[
-                                { value: 'grid', icon: <Squares2X2Icon className="size-4" />, ariaLabel: t('gridViewAriaLabel') },
-                                { value: 'table', icon: <TableCellsIcon className="size-4" />, ariaLabel: t('tableViewAriaLabel') },
-                            ]}
-                        />
-                    </div>
-                }
-            >
-                <RecordsFilterPills<Company>
-                    facets={facets}
-                    filterState={filterState}
-                    onChange={setFilterState}
-                />
-            </FilterBar>
-
-            <RecordsRenderView<Company>
-                data={visibleCompanies}
-                loading={segmentsLoading}
-                columns={[...columns, ...customColumns]}
-                addColumnSlot={addColumnSlot}
-                renderCard={(item, { onQuickEdit, onDelete }) => (
-                    <CompanyCard
-                        company={item}
-                        metrics={metricsByCompanyId.get(item.id)}
-                        metricsStatus={metricsStatus}
-                        onFirstExpand={ensureMetricsLoaded}
-                        onQuickEdit={onQuickEdit ? () => onQuickEdit(item) : undefined}
-                        onDelete={onDelete ? () => onDelete(item) : undefined}
+                        renderAvatar={(item) => <CompanyAvatar company={item} />}
+                        detailPath={(item) => `/records/companies/${item.id}`}
+                        displayMode={displayMode}
+                        selectedIds={selectedIds}
+                        onSelectedIdsChange={setSelectedIds}
+                        onQuickEdit={quickEditOne}
+                        onDelete={deleteOne}
+                        gridClassName="grid grid-cols-1 gap-3"
+                        entityLabel={t('entityLabel')}
+                        selectionActions={selectionActions}
+                        sortState={sortState}
                     />
-                )}
-                renderAvatar={(item) => <CompanyAvatar company={item} />}
-                detailPath={(item) => `/records/companies/${item.id}`}
-                displayMode={displayMode}
-                selectedIds={selectedIds}
-                onSelectedIdsChange={setSelectedIds}
-                onQuickEdit={quickEditOne}
-                onDelete={deleteOne}
-                gridClassName="grid grid-cols-1 gap-3"
-                entityLabel={t('entityLabel')}
-                selectionActions={selectionActions}
-                sortState={sortState}
-            />
+                </Rise>
 
-            <QuickEditCompanySheet
-                open={editSheetOpen}
-                onOpenChange={setEditSheetOpen}
-                selectedIds={selectedIds}
-                selectedCompanies={selectedCompanies}
-                drafts={drafts}
-                updateDraft={updateDraft}
-                isSaving={isSaving}
-                saveEdits={saveEdits}
-            />
+                <QuickEditCompanySheet
+                    open={editSheetOpen}
+                    onOpenChange={setEditSheetOpen}
+                    selectedIds={selectedIds}
+                    selectedCompanies={selectedCompanies}
+                    drafts={drafts}
+                    updateDraft={updateDraft}
+                    isSaving={isSaving}
+                    saveEdits={saveEdits}
+                />
 
-            <NewCompanyDialog
-                open={newDialogOpen}
-                onOpenChange={closeNewDialog}
-                payload={newPayload}
-                setPayload={setNewPayload}
-                logoFile={logoFile}
-                setLogoFile={setLogoFile}
-                isCreating={isCreating}
-                isSuccess={creationSucceeded}
-                existingCompanies={companies}
-                createNewCompany={createNewCompany}
-                pendingContacts={pendingContacts}
-                addPendingContact={addPendingContact}
-                updatePendingContact={updatePendingContact}
-                removePendingContact={removePendingContact}
-            />
+                <NewCompanyDialog
+                    open={newDialogOpen}
+                    onOpenChange={closeNewDialog}
+                    payload={newPayload}
+                    setPayload={setNewPayload}
+                    logoFile={logoFile}
+                    setLogoFile={setLogoFile}
+                    isCreating={isCreating}
+                    isSuccess={creationSucceeded}
+                    existingCompanies={companies}
+                    createNewCompany={createNewCompany}
+                    pendingContacts={pendingContacts}
+                    addPendingContact={addPendingContact}
+                    updatePendingContact={updatePendingContact}
+                    removePendingContact={removePendingContact}
+                />
 
-            <DeleteRecordDialog
-                open={deleteDialogOpen}
-                onOpenChange={setDeleteDialogOpen}
-                selectedIds={selectedIds}
-                selectedItems={selectedCompanies}
-                entityLabel={t('entityLabel')}
-                getDisplayName={(c) => c.name}
-                isDeleting={isDeleting}
-                confirmDelete={confirmDelete}
-            />
+                <DeleteRecordDialog
+                    open={deleteDialogOpen}
+                    onOpenChange={setDeleteDialogOpen}
+                    selectedIds={selectedIds}
+                    selectedItems={selectedCompanies}
+                    entityLabel={t('entityLabel')}
+                    getDisplayName={(c) => c.name}
+                    isDeleting={isDeleting}
+                    confirmDelete={confirmDelete}
+                />
 
-            <BulkTagDialog
-                open={bulkTag.open}
-                onOpenChange={(open) => setBulkTag((s) => ({ ...s, open }))}
-                mode={bulkTag.mode}
-                count={selectedCompanyIds.length}
-                tags={tags}
-                messages={{
-                    success: (count) => t(bulkTag.mode === 'add' ? 'toastTagAdded' : 'toastTagRemoved', { count }),
-                    partial: (succeeded, total) => t(bulkTag.mode === 'add' ? 'toastTagAddedPartial' : 'toastTagRemovedPartial', { succeeded, total }),
-                    failure: (failed) => t('toastTagFailed', { failed }),
-                }}
-                onApply={applyBulkTag}
-                onSuccess={onBulkTagSuccess}
-            />
+                <BulkTagDialog
+                    open={bulkTag.open}
+                    onOpenChange={(open) => setBulkTag((s) => ({ ...s, open }))}
+                    mode={bulkTag.mode}
+                    count={selectedCompanyIds.length}
+                    tags={tags}
+                    messages={{
+                        success: (count) => t(bulkTag.mode === 'add' ? 'toastTagAdded' : 'toastTagRemoved', { count }),
+                        partial: (succeeded, total) => t(bulkTag.mode === 'add' ? 'toastTagAddedPartial' : 'toastTagRemovedPartial', { succeeded, total }),
+                        failure: (failed) => t('toastTagFailed', { failed }),
+                    }}
+                    onApply={applyBulkTag}
+                    onSuccess={onBulkTagSuccess}
+                />
+            </div>
         </div>
     );
 }

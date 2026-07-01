@@ -30,7 +30,8 @@
     "notes": "メモ",
     "openCount": "未完了{count}件",
     "notesCount": "メモ{count}件",
-    "timeline": "タイムライン"
+    "timeline": "タイムライン",
+    "emptyActivity": "まだアクティビティはありません"
   },
   "UsersNewUserDialog": {
     "new": "新規",

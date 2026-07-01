@@ -11,10 +11,13 @@ import {
     DocumentTextIcon,
     CheckCircleIcon,
     PaperClipIcon,
+    MagnifyingGlassIcon,
 } from "@heroicons/react/24/outline";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import CompanyAvatar from "@/app/components/records/companies/CompanyAvatar";
 import UserAvatar from "@/app/components/records/users/UserAvatar";
+import Rise from "@/app/components/motion/Rise";
+import SectionHeader from "@/app/components/dashboard/SectionHeader";
 import type { SearchResults } from "@/app/lib/types";
 import { formatFileSize } from "@/app/lib/utils";
 
@@ -57,7 +60,6 @@ export default function SearchResultsView({
         if (items?.length) groups.push({ key, heading, rows: items.map(toRow) });
     };
 
-    // TODO: reorder the groups based on relevancy, rather than hardcoded order
     add("users", t("groupUsers"), results.users, (u) => ({
         key: `user-${u.id}`,
         href: `/users/${u.id}`,
@@ -139,76 +141,93 @@ export default function SearchResultsView({
     const hasResults = groups.length > 0;
 
     return (
-        <div className="mx-auto w-full max-w-7xl">
-            <h1 className="mb-6 text-xl font-semibold text-foreground">
-                {t("resultsHeading", { query })}
-            </h1>
+        <div className="min-h-screen bg-background px-2 pt-8 pb-12">
+            <div className="mx-auto flex w-full max-w-7xl flex-col gap-10">
+                <Rise delay={0}>
+                    <header className="px-4 sm:px-6">
+                        <h1 className="text-2xl font-semibold tracking-tight text-foreground">
+                            {t("resultsHeading", { query })}
+                        </h1>
+                    </header>
+                </Rise>
 
-            {!hasResults ? (
-                <p className="text-sm text-muted-foreground">{t("noResults", { query })}</p>
-            ) : (
-                <div className="space-y-8">
-                    {groups.map((group) => (
-                        <section key={group.key}>
-                            <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                                {group.heading}{" "}
-                                <span className="text-muted-foreground">({group.rows.length})</span>
-                            </h2>
-                            <ul className="overflow-hidden rounded-2xl ring-1 ring-border">
-                                {group.rows.map((row) => {
-                                    const Icon = row.icon;
-                                    const rowClassName =
-                                        "flex items-center gap-3 bg-card px-4 py-3 transition hover:bg-muted";
-                                    const content = (
-                                        <>
-                                            <span className="flex size-8 shrink-0 items-center justify-center">
-                                                {row.leading ? (
-                                                    row.leading
-                                                ) : row.accent ? (
-                                                    <span
-                                                        className="size-4 rounded-full ring-1 ring-border"
-                                                        style={{ backgroundColor: row.accent }}
-                                                    />
-                                                ) : Icon ? (
-                                                    <Icon className="size-5 text-muted-foreground" />
-                                                ) : null}
-                                            </span>
-                                            <span className="min-w-0 flex-1">
-                                                <span className="block truncate text-sm text-foreground">
-                                                    {row.label}
+                {!hasResults ? (
+                    <Rise delay={0.06}>
+                        <div className="flex flex-col items-center justify-center gap-2 rounded-2xl border border-dashed border-border bg-card px-6 py-16 text-center">
+                            <MagnifyingGlassIcon className="size-6 text-muted-foreground" aria-hidden />
+                            <p className="text-sm text-muted-foreground">
+                                {t("noResults", { query })}
+                            </p>
+                        </div>
+                    </Rise>
+                ) : (
+                    groups.map((group, groupIndex) => (
+                        <Rise key={group.key} delay={0.06 + groupIndex * 0.06}>
+                            <section>
+                                <SectionHeader
+                                    title={group.heading}
+                                    action={
+                                        <span className="px-3 text-xs text-muted-foreground">
+                                            {group.rows.length}
+                                        </span>
+                                    }
+                                />
+                                <ul className="overflow-hidden rounded-2xl border border-border">
+                                    {group.rows.map((row) => {
+                                        const Icon = row.icon;
+                                        const rowClassName =
+                                            "flex items-center gap-3 bg-card px-4 py-3 transition hover:bg-muted";
+                                        const content = (
+                                            <>
+                                                <span className="flex size-8 shrink-0 items-center justify-center">
+                                                    {row.leading ? (
+                                                        row.leading
+                                                    ) : row.accent ? (
+                                                        <span
+                                                            className="size-4 rounded-full ring-1 ring-border"
+                                                            style={{ backgroundColor: row.accent }}
+                                                        />
+                                                    ) : Icon ? (
+                                                        <Icon className="size-5 text-muted-foreground" />
+                                                    ) : null}
                                                 </span>
-                                                {row.subtitle && (
-                                                    <span className="block truncate text-xs text-muted-foreground">
-                                                        {row.subtitle}
+                                                <span className="min-w-0 flex-1">
+                                                    <span className="block truncate text-sm text-foreground">
+                                                        {row.label}
                                                     </span>
+                                                    {row.subtitle && (
+                                                        <span className="block truncate text-xs text-muted-foreground">
+                                                            {row.subtitle}
+                                                        </span>
+                                                    )}
+                                                </span>
+                                            </>
+                                        );
+                                        return (
+                                            <li key={row.key} className="border-b border-border last:border-0">
+                                                {row.external ? (
+                                                    <a
+                                                        href={row.href}
+                                                        target="_blank"
+                                                        rel="noopener noreferrer"
+                                                        className={rowClassName}
+                                                    >
+                                                        {content}
+                                                    </a>
+                                                ) : (
+                                                    <Link href={row.href} className={rowClassName}>
+                                                        {content}
+                                                    </Link>
                                                 )}
-                                            </span>
-                                        </>
-                                    );
-                                    return (
-                                        <li key={row.key} className="border-b border-border last:border-0">
-                                            {row.external ? (
-                                                <a
-                                                    href={row.href}
-                                                    target="_blank"
-                                                    rel="noopener noreferrer"
-                                                    className={rowClassName}
-                                                >
-                                                    {content}
-                                                </a>
-                                            ) : (
-                                                <Link href={row.href} className={rowClassName}>
-                                                    {content}
-                                                </Link>
-                                            )}
-                                        </li>
-                                    );
-                                })}
-                            </ul>
-                        </section>
-                    ))}
-                </div>
-            )}
+                                            </li>
+                                        );
+                                    })}
+                                </ul>
+                            </section>
+                        </Rise>
+                    ))
+                )}
+            </div>
         </div>
     );
 }

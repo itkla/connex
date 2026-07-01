@@ -9,11 +9,6 @@ import {
     MagnifyingGlassIcon,
     UserIcon,
     BriefcaseIcon,
-    PhoneIcon,
-    EnvelopeIcon,
-    UserGroupIcon,
-    PencilSquareIcon,
-    SparklesIcon,
     Squares2X2Icon,
     PencilIcon,
     TrashIcon,
@@ -37,6 +32,7 @@ import {
 import EditActivitySheet from '@/app/components/activity/activities/EditActivitySheet';
 import ActivityDialog from '@/app/components/activity/activities/ActivityDialog';
 import DeleteRecordDialog from '@/app/components/records/DeleteRecordDialog';
+import Rise from '@/app/components/motion/Rise';
 import { ACTIVITY_TYPES, TYPE_META, normalizeType, type ActivityType } from '@/app/components/activity/activities/activityTypes';
 import { deleteActivity } from '@/app/lib/api';
 import { toastError, toastSuccess } from '@/app/lib/toast';
@@ -77,12 +73,6 @@ function activityTime(a: Activity): number {
 
 function startOfDayKey(ts: number): number {
     const d = new Date(ts);
-    d.setHours(0, 0, 0, 0);
-    return d.getTime();
-}
-
-function todayKey(): number {
-    const d = new Date();
     d.setHours(0, 0, 0, 0);
     return d.getTime();
 }
@@ -317,159 +307,169 @@ export default function ActivitiesBrowser({ activities, persons, deals, users, c
     };
 
     return (
-        <div className="mx-auto w-full max-w-7xl space-y-6">
-            <header className="flex flex-wrap items-start justify-between gap-4">
-                <div>
-                    <h1 className="text-4xl font-extrabold tracking-tight">{t('title')}</h1>
-                    <p className="mt-1 text-sm text-muted-foreground">{t('subtitle')}</p>
-                </div>
-                <Button
-                    className="bg-brand text-white shadow-sm transition-transform hover:bg-brand-dark active:scale-[0.98]"
-                    aria-label={t('newAria')}
-                    onClick={() => setCreating(true)}
-                >
-                    <PlusIcon strokeWidth={2.5} />
-                    {t('new')}
-                </Button>
-            </header>
+        <div className="min-h-screen bg-background px-2 pt-8 pb-12">
+            <div className="mx-auto flex w-full max-w-7xl flex-col gap-10">
+                <Rise>
+                    <header className="flex flex-wrap items-start justify-between gap-4">
+                        <div>
+                            <h1 className="text-4xl font-extrabold tracking-tight">{t('title')}</h1>
+                            <p className="mt-1 text-sm text-muted-foreground">{t('subtitle')}</p>
+                        </div>
+                        <Button
+                            className="bg-brand text-white shadow-sm transition-transform hover:bg-brand-dark active:scale-[0.98]"
+                            aria-label={t('newAria')}
+                            onClick={() => setCreating(true)}
+                        >
+                            <PlusIcon strokeWidth={2.5} />
+                            {t('new')}
+                        </Button>
+                    </header>
+                </Rise>
 
-            {hasAny && <WeekPulse pulse={weekPulse} reduce={reduce} t={t} />}
+                {hasAny && (
+                    <Rise delay={0.06}>
+                        <WeekPulse pulse={weekPulse} reduce={reduce} t={t} />
+                    </Rise>
+                )}
 
-            <div className="grid grid-cols-1 gap-6 md:grid-cols-[200px_minmax(0,1fr)] md:gap-10">
-                <aside className="md:sticky md:top-6 md:self-start">
-                    <h2 className="mb-2 px-3 text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
-                        {t('filtersHeader')}
-                    </h2>
-                    <nav className="space-y-0.5">
-                        {FILTERS.map((f) => (
-                            <FilterButton
-                                key={f}
-                                Icon={f === 'all' ? Squares2X2Icon : TYPE_META[f].Icon}
-                                tint={f === 'all' ? undefined : TYPE_META[f].chip}
-                                label={f === 'all' ? t('filterAll') : t(`type${f}` as 'typeCall')}
-                                count={typeCounts[f]}
-                                active={filter === f}
+                <Rise delay={0.12}>
+                    <div className="grid grid-cols-1 gap-6 md:grid-cols-[200px_minmax(0,1fr)] md:gap-10">
+                        <aside className="md:sticky md:top-6 md:self-start">
+                            <h2 className="mb-2 px-3 text-xs font-medium uppercase tracking-[0.12em] text-muted-foreground">
+                                {t('filtersHeader')}
+                            </h2>
+                            <nav className="space-y-0.5">
+                                {FILTERS.map((f) => (
+                                    <FilterButton
+                                        key={f}
+                                        Icon={f === 'all' ? Squares2X2Icon : TYPE_META[f].Icon}
+                                        tint={f === 'all' ? undefined : TYPE_META[f].chip}
+                                        label={f === 'all' ? t('filterAll') : t(`type${f}` as 'typeCall')}
+                                        count={typeCounts[f]}
+                                        active={filter === f}
+                                        reduce={reduce}
+                                        onClick={() => setFilter(f)}
+                                    />
+                                ))}
+                            </nav>
+                        </aside>
+
+                        <div className="min-w-0 space-y-5">
+                            <FilterBar
                                 reduce={reduce}
-                                onClick={() => setFilter(f)}
-                            />
-                        ))}
-                    </nav>
-                </aside>
-
-                <div className="min-w-0 space-y-5">
-                    <FilterBar
-                        reduce={reduce}
-                        chips={chips}
-                        hasActiveFilters={query.trim() !== '' || dimensionsActive}
-                        onClearAll={clearAllFilters}
-                        clearAllLabel={tf('clearAll')}
-                        className="py-0"
-                        search={
-                            <SearchField
-                                value={query}
-                                onChange={setQuery}
-                                onClear={() => setQuery('')}
-                                placeholder={t('searchPlaceholder')}
-                                searchAria={tf('searchAria')}
-                                clearAria={tf('clearSearchAria')}
-                            />
-                        }
-                    >
-                        {dimensionOptions.creators.length > 0 && (
-                            <MultiSelectFilter
-                                label={tf('creator')}
-                                ariaLabel={tf('creator')}
-                                options={dimensionOptions.creators}
-                                selected={creatorFilter}
-                                onToggle={(v) => toggleInSet(setCreatorFilter, v)}
-                                onClear={() => setCreatorFilter(new Set())}
-                                clearLabel={tf('clear')}
-                                scroll
-                            />
-                        )}
-                        {dimensionOptions.persons.length > 0 && (
-                            <MultiSelectFilter
-                                label={tf('contact')}
-                                ariaLabel={tf('contact')}
-                                options={dimensionOptions.persons}
-                                selected={personFilter}
-                                onToggle={(v) => toggleInSet(setPersonFilter, v)}
-                                onClear={() => setPersonFilter(new Set())}
-                                clearLabel={tf('clear')}
-                                scroll
-                            />
-                        )}
-                        {dimensionOptions.deals.length > 0 && (
-                            <MultiSelectFilter
-                                label={tf('deal')}
-                                ariaLabel={tf('deal')}
-                                options={dimensionOptions.deals}
-                                selected={dealFilter}
-                                onToggle={(v) => toggleInSet(setDealFilter, v)}
-                                onClear={() => setDealFilter(new Set())}
-                                clearLabel={tf('clear')}
-                                scroll
-                            />
-                        )}
-                        {dimensionOptions.companies.length > 0 && (
-                            <MultiSelectFilter
-                                label={tf('company')}
-                                ariaLabel={tf('company')}
-                                options={dimensionOptions.companies}
-                                selected={companyFilter}
-                                onToggle={(v) => toggleInSet(setCompanyFilter, v)}
-                                onClear={() => setCompanyFilter(new Set())}
-                                clearLabel={tf('clear')}
-                                scroll
-                            />
-                        )}
-                    </FilterBar>
-                    {isEmpty ? (
-                        <ActivityEmptyState filtered={!!query.trim() || filter !== 'all'} message={emptyMessage} />
-                    ) : (
-                        <ul className="relative">
-                            <AnimatePresence initial={false} mode="popLayout">
-                                {entries.map((entry, i) => {
-                                    const connectUp = i > 0;
-                                    const connectDown = i < entries.length - 1;
-                                    if (entry.kind === 'date') {
-                                        return (
-                                            <DateMarker
-                                                key={entry.id}
-                                                reduce={reduce}
-                                                label={entry.label}
-                                                count={entry.count}
-                                                connectUp={connectUp}
-                                                connectDown={connectDown}
-                                            />
-                                        );
-                                    }
-                                    const activity = entry.activity;
-                                    return (
-                                        <TimelineRow
-                                            key={entry.id}
-                                            activity={activity}
-                                            reduce={reduce}
-                                            connectUp={connectUp}
-                                            connectDown={connectDown}
-                                            person={activity.personId ? personById.get(activity.personId) : undefined}
-                                            deal={activity.dealId ? dealById.get(activity.dealId) : undefined}
-                                            creator={userById.get(activity.createdById)}
-                                            time={formatTime(activity)}
-                                            typeLabel={t(`type${normalizeType(activity.type)}` as 'typeCall')}
-                                            onOpen={() => setEditing(activity)}
-                                            onEdit={() => setEditing(activity)}
-                                            onDelete={() => setDeleting(activity)}
-                                            editLabel={t('edit')}
-                                            deleteLabel={t('delete')}
-                                            actionsAria={t('actionsAria')}
-                                        />
-                                    );
-                                })}
-                            </AnimatePresence>
-                        </ul>
-                    )}
-                </div>
+                                chips={chips}
+                                hasActiveFilters={query.trim() !== '' || dimensionsActive}
+                                onClearAll={clearAllFilters}
+                                clearAllLabel={tf('clearAll')}
+                                className="py-0"
+                                search={
+                                    <SearchField
+                                        value={query}
+                                        onChange={setQuery}
+                                        onClear={() => setQuery('')}
+                                        placeholder={t('searchPlaceholder')}
+                                        searchAria={tf('searchAria')}
+                                        clearAria={tf('clearSearchAria')}
+                                    />
+                                }
+                            >
+                                {dimensionOptions.creators.length > 0 && (
+                                    <MultiSelectFilter
+                                        label={tf('creator')}
+                                        ariaLabel={tf('creator')}
+                                        options={dimensionOptions.creators}
+                                        selected={creatorFilter}
+                                        onToggle={(v) => toggleInSet(setCreatorFilter, v)}
+                                        onClear={() => setCreatorFilter(new Set())}
+                                        clearLabel={tf('clear')}
+                                        scroll
+                                    />
+                                )}
+                                {dimensionOptions.persons.length > 0 && (
+                                    <MultiSelectFilter
+                                        label={tf('contact')}
+                                        ariaLabel={tf('contact')}
+                                        options={dimensionOptions.persons}
+                                        selected={personFilter}
+                                        onToggle={(v) => toggleInSet(setPersonFilter, v)}
+                                        onClear={() => setPersonFilter(new Set())}
+                                        clearLabel={tf('clear')}
+                                        scroll
+                                    />
+                                )}
+                                {dimensionOptions.deals.length > 0 && (
+                                    <MultiSelectFilter
+                                        label={tf('deal')}
+                                        ariaLabel={tf('deal')}
+                                        options={dimensionOptions.deals}
+                                        selected={dealFilter}
+                                        onToggle={(v) => toggleInSet(setDealFilter, v)}
+                                        onClear={() => setDealFilter(new Set())}
+                                        clearLabel={tf('clear')}
+                                        scroll
+                                    />
+                                )}
+                                {dimensionOptions.companies.length > 0 && (
+                                    <MultiSelectFilter
+                                        label={tf('company')}
+                                        ariaLabel={tf('company')}
+                                        options={dimensionOptions.companies}
+                                        selected={companyFilter}
+                                        onToggle={(v) => toggleInSet(setCompanyFilter, v)}
+                                        onClear={() => setCompanyFilter(new Set())}
+                                        clearLabel={tf('clear')}
+                                        scroll
+                                    />
+                                )}
+                            </FilterBar>
+                            {isEmpty ? (
+                                <ActivityEmptyState filtered={!!query.trim() || filter !== 'all'} message={emptyMessage} />
+                            ) : (
+                                <ul className="relative">
+                                    <AnimatePresence initial={false} mode="popLayout">
+                                        {entries.map((entry, i) => {
+                                            const connectUp = i > 0;
+                                            const connectDown = i < entries.length - 1;
+                                            if (entry.kind === 'date') {
+                                                return (
+                                                    <DateMarker
+                                                        key={entry.id}
+                                                        reduce={reduce}
+                                                        label={entry.label}
+                                                        count={entry.count}
+                                                        connectUp={connectUp}
+                                                        connectDown={connectDown}
+                                                    />
+                                                );
+                                            }
+                                            const activity = entry.activity;
+                                            return (
+                                                <TimelineRow
+                                                    key={entry.id}
+                                                    activity={activity}
+                                                    reduce={reduce}
+                                                    connectUp={connectUp}
+                                                    connectDown={connectDown}
+                                                    person={activity.personId ? personById.get(activity.personId) : undefined}
+                                                    deal={activity.dealId ? dealById.get(activity.dealId) : undefined}
+                                                    creator={userById.get(activity.createdById)}
+                                                    time={formatTime(activity)}
+                                                    typeLabel={t(`type${normalizeType(activity.type)}` as 'typeCall')}
+                                                    onOpen={() => setEditing(activity)}
+                                                    onEdit={() => setEditing(activity)}
+                                                    onDelete={() => setDeleting(activity)}
+                                                    editLabel={t('edit')}
+                                                    deleteLabel={t('delete')}
+                                                    actionsAria={t('actionsAria')}
+                                                />
+                                            );
+                                        })}
+                                    </AnimatePresence>
+                                </ul>
+                            )}
+                        </div>
+                    </div>
+                </Rise>
             </div>
 
             {editing && (
@@ -518,7 +518,7 @@ function WeekPulse({
     t: ReturnType<typeof useTranslations>;
 }) {
     return (
-        <div className="flex items-center gap-5 rounded-2xl bg-card p-4 ring-1 ring-border">
+        <div className="flex items-center gap-5 rounded-2xl border border-border bg-card p-4">
             <div className="shrink-0">
                 <div className="text-2xl font-semibold tabular-nums text-foreground">{pulse.total}</div>
                 <div className="mt-0.5 text-xs font-medium text-muted-foreground">{t('weekTotalLabel')}</div>
@@ -804,7 +804,7 @@ function DateMarker({
 function ActivityEmptyState({ filtered, message }: { filtered: boolean; message: string }) {
     const Icon = filtered ? MagnifyingGlassIcon : InboxStackIcon;
     return (
-        <div className="rounded-2xl bg-card px-6 py-20 text-center ring-1 ring-border">
+        <div className="rounded-2xl border border-border bg-card px-6 py-20 text-center">
             <div className="mx-auto flex size-14 items-center justify-center rounded-2xl bg-brand-light text-brand-dark">
                 <Icon className="size-7" strokeWidth={1.75} />
             </div>

@@ -53,6 +53,8 @@ import {
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import DeleteRecordDialog from "@/app/components/records/DeleteRecordDialog";
+import Rise from "@/app/components/motion/Rise";
+import SectionHeader from "@/app/components/dashboard/SectionHeader";
 
 const ASSIGNABLE: WorkspaceRole[] = ["member", "admin"];
 
@@ -61,12 +63,6 @@ const rowActionTrigger =
 
 function initial(name: string) {
     return name.trim().charAt(0).toUpperCase() || "?";
-}
-
-function SectionLabel({ children }: { children: React.ReactNode }) {
-    return (
-        <h2 className="text-xs font-medium tracking-[0.12em] text-muted-foreground uppercase">{children}</h2>
-    );
 }
 
 function RoleBadge({ role, label }: { role: string; label: string }) {
@@ -79,7 +75,7 @@ function RoleBadge({ role, label }: { role: string; label: string }) {
 
 function ListCard({ children }: { children: React.ReactNode }) {
     return (
-        <ul className="divide-y divide-border overflow-hidden rounded-2xl bg-card ring-1 ring-border">
+        <ul className="divide-y divide-border overflow-hidden rounded-2xl border border-border bg-card">
             {children}
         </ul>
     );
@@ -87,7 +83,7 @@ function ListCard({ children }: { children: React.ReactNode }) {
 
 function EmptyRow({ children }: { children: React.ReactNode }) {
     return (
-        <p className="rounded-2xl bg-card px-4 py-6 text-center text-sm text-muted-foreground ring-1 ring-border">
+        <p className="rounded-2xl border border-border bg-card px-4 py-6 text-center text-sm text-muted-foreground">
             {children}
         </p>
     );
@@ -354,13 +350,15 @@ export default function MembersPanel({ currentUserId }: { currentUserId: number 
 
     return (
         <div className="space-y-10">
-            <section className="space-y-3">
-                <div className="flex items-baseline justify-between">
-                    <SectionLabel>{t("title")}</SectionLabel>
-                    <span className="text-xs text-muted-foreground tabular-nums">
-                        {t("count", { count: members.length })}
-                    </span>
-                </div>
+            <Rise className="space-y-3">
+                <SectionHeader
+                    title={t("title")}
+                    action={
+                        <span className="text-xs text-muted-foreground tabular-nums">
+                            {t("count", { count: members.length })}
+                        </span>
+                    }
+                />
 
                 {loading ? (
                     <MemberSkeleton />
@@ -395,7 +393,7 @@ export default function MembersPanel({ currentUserId }: { currentUserId: number 
                                                 </Badge>
                                             )}
                                             {pending && (
-                                                <Badge className="border-transparent bg-amber-500/10 text-amber-600 dark:text-amber-400">
+                                                <Badge className="border-transparent bg-warmth-cool/10 text-warmth-cool">
                                                     {t("pending")}
                                                 </Badge>
                                             )}
@@ -464,13 +462,13 @@ export default function MembersPanel({ currentUserId }: { currentUserId: number 
                         })}
                     </ListCard>
                 )}
-            </section>
+            </Rise>
 
             {isAdmin && (
-                <section className="space-y-4">
-                    <div className="space-y-1">
-                        <SectionLabel>{t("inviteTitle")}</SectionLabel>
-                        <p className="text-sm text-muted-foreground">{t("inviteSubtitle")}</p>
+                <Rise className="space-y-4">
+                    <div>
+                        <SectionHeader title={t("inviteTitle")} />
+                        <p className="px-6 text-sm text-muted-foreground">{t("inviteSubtitle")}</p>
                     </div>
 
                     <form
@@ -523,7 +521,7 @@ export default function MembersPanel({ currentUserId }: { currentUserId: number 
                     </form>
 
                     <div className="space-y-2 pt-2">
-                        <SectionLabel>{t("pendingTitle")}</SectionLabel>
+                        <SectionHeader title={t("pendingTitle")} />
                         {invites.length === 0 ? (
                             <EmptyRow>{t("pendingEmpty")}</EmptyRow>
                         ) : (
@@ -579,9 +577,9 @@ export default function MembersPanel({ currentUserId }: { currentUserId: number 
                     </div>
 
                     <div className="space-y-4 pt-2">
-                        <div className="space-y-1">
-                            <SectionLabel>{t("linkTitle")}</SectionLabel>
-                            <p className="text-sm text-muted-foreground">{t("linkSubtitle")}</p>
+                        <div>
+                            <SectionHeader title={t("linkTitle")} />
+                            <p className="px-6 text-sm text-muted-foreground">{t("linkSubtitle")}</p>
                         </div>
 
                         <form
@@ -633,7 +631,7 @@ export default function MembersPanel({ currentUserId }: { currentUserId: number 
                         </form>
 
                         <div className="space-y-2 pt-2">
-                            <SectionLabel>{t("activeLinksTitle")}</SectionLabel>
+                            <SectionHeader title={t("activeLinksTitle")} />
                             {inviteLinks.length === 0 ? (
                                 <EmptyRow>{t("activeLinksEmpty")}</EmptyRow>
                             ) : (
@@ -709,9 +707,9 @@ export default function MembersPanel({ currentUserId }: { currentUserId: number 
                     </div>
 
                     <div className="space-y-4 pt-2">
-                        <div className="space-y-1">
-                            <SectionLabel>{t("domainsTitle")}</SectionLabel>
-                            <p className="text-sm text-muted-foreground">{t("domainsSubtitle")}</p>
+                        <div>
+                            <SectionHeader title={t("domainsTitle")} />
+                            <p className="px-6 text-sm text-muted-foreground">{t("domainsSubtitle")}</p>
                         </div>
 
                         <form
@@ -797,7 +795,7 @@ export default function MembersPanel({ currentUserId }: { currentUserId: number 
                             </ListCard>
                         )}
                     </div>
-                </section>
+                </Rise>
             )}
 
             <DeleteRecordDialog
@@ -818,7 +816,7 @@ export default function MembersPanel({ currentUserId }: { currentUserId: number 
 
 function MemberSkeleton() {
     return (
-        <ul className="divide-y divide-border overflow-hidden rounded-2xl bg-card ring-1 ring-border">
+        <ul className="divide-y divide-border overflow-hidden rounded-2xl border border-border bg-card">
             {[0, 1, 2].map((i) => (
                 <li key={i} className="flex items-center gap-3 px-4 py-3">
                     <Skeleton className="size-8 shrink-0 rounded-full" />

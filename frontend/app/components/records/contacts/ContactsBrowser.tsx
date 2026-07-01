@@ -18,6 +18,7 @@ import {
 import { useReducedMotion } from 'motion/react';
 
 import RecordsRenderView from '@/app/components/records/RecordsRenderView';
+import Rise from '@/app/components/motion/Rise';
 import { useCustomFieldColumns } from '@/app/components/records/CustomFieldColumns';
 import RecordsSortMenu from '@/app/components/records/RecordsSortMenu';
 import RecordsFilterPills from '@/app/components/records/RecordsFilterPills';
@@ -70,14 +71,10 @@ export default function ContactsBrowser({ savedViews }: { savedViews: SavedView[
     const {
         displayMode,
         setDisplayMode,
-        // query,
-        // setQuery,
         filterState,
         setFilterState,
         selectedIds,
         setSelectedIds,
-        // filteredItems: filteredContacts,
-        // selectedItems: selectedContacts,
         deleteDialogOpen,
         setDeleteDialogOpen,
     } = useRecordsBrowser<Contact>({ items: NO_ITEMS, storageKey: 'contacts:view', searchFields });
@@ -227,7 +224,6 @@ export default function ContactsBrowser({ savedViews }: { savedViews: SavedView[
             if (isFieldError(err)) {
                 throw err;
             }
-            console.error(err);
             toastError(t('toastFailedCreate'));
         } finally {
             setIsCreating(false);
@@ -395,13 +391,11 @@ export default function ContactsBrowser({ savedViews }: { savedViews: SavedView[
             getSortValue: (c) => c.company?.name ?? null,
             render: (c) => c.company?.name,
             copyable: { label: t('copyableCompany'), getValue: (c) => c.company?.name ?? '' },
-            // filter: { getValue: (c) => c.company?.name ?? null, emptyLabel: t('filterNoCompany') },
         },
         {
             key: 'title',
             label: t('columnTitle'),
             getSortValue: (c) => c.title ?? null,
-            // filter: { getValue: (c) => c.title ?? null },
         },
         {
             key: 'createdAt',
@@ -418,11 +412,6 @@ export default function ContactsBrowser({ savedViews }: { savedViews: SavedView[
     ], [t, tempByContactId]);
 
     const { columns: customColumns, addColumnSlot } = useCustomFieldColumns('person', contacts);
-
-    // const visibleContacts = useMemo(
-    //     () => applyRecordFilters(filteredContacts, columns, filterState),
-    //     [filteredContacts, columns, filterState],
-    // );
 
     const selectionActions = (
         <ButtonGroup className="rounded-full bg-muted">
@@ -485,189 +474,199 @@ export default function ContactsBrowser({ savedViews }: { savedViews: SavedView[
     );
 
     return (
-        <div className="page-grid gap-y-6">
-            <div className="flex items-center justify-between">
-                <h1 className="text-4xl font-extrabold">{t('heading')}</h1>
-                <div className="flex items-center gap-2">
-                    <RecordsImportExport entity="persons" onImported={refresh} contactsFilter={{ ...filterParams, q: query || undefined }} />
-                    <Button className="bg-brand text-white" aria-label={t('newAria')} onClick={() => setNewContactDialogOpen(true)}>
-                        <PlusIcon strokeWidth={2.5} />
-                        {t('new')}
-                    </Button>
-                </div>
-            </div>
+        <div className="min-h-screen bg-background px-2 pt-8 pb-12">
+            <div className="mx-auto flex w-full max-w-7xl flex-col gap-10">
+                <Rise>
+                    <div className="flex items-center justify-between">
+                        <h1 className="text-4xl font-extrabold">{t('heading')}</h1>
+                        <div className="flex items-center gap-2">
+                            <RecordsImportExport entity="persons" onImported={refresh} contactsFilter={{ ...filterParams, q: query || undefined }} />
+                            <Button className="bg-brand text-white" aria-label={t('newAria')} onClick={() => setNewContactDialogOpen(true)}>
+                                <PlusIcon strokeWidth={2.5} />
+                                {t('new')}
+                            </Button>
+                        </div>
+                    </div>
+                </Rise>
 
-            <SavedViewsBar
-                recordType="person"
-                initialViews={savedViews}
-                currentConfig={currentConfig}
-                onApply={applyView}
-            />
-
-            <FilterBar
-                reduce={reduce}
-                chips={chips}
-                hasActiveFilters={hasActiveFilters}
-                onClearAll={clearAll}
-                clearAllLabel={tf('clearAll')}
-                search={
-                    <SearchField
-                        value={query}
-                        onChange={setQuery}
-                        onClear={() => setQuery('')}
-                        placeholder={t('searchPlaceholder')}
-                        searchAria={tf('searchAria')}
-                        clearAria={tf('clearSearchAria')}
+                <Rise delay={0.06}>
+                    <SavedViewsBar
+                        recordType="person"
+                        initialViews={savedViews}
+                        currentConfig={currentConfig}
+                        onApply={applyView}
                     />
-                }
-                trailing={
-                    <div className="flex items-center gap-2">
-                        {displayMode === 'grid' && (
-                            <RecordsSortMenu
-                                columns={columns}
-                                sortKey={sortKey}
-                                sortDirection={sortDirection}
-                                onSortChange={onSortChange}
+                </Rise>
+
+                <Rise delay={0.12}>
+                    <FilterBar
+                        reduce={reduce}
+                        chips={chips}
+                        hasActiveFilters={hasActiveFilters}
+                        onClearAll={clearAll}
+                        clearAllLabel={tf('clearAll')}
+                        search={
+                            <SearchField
+                                value={query}
+                                onChange={setQuery}
+                                onClear={() => setQuery('')}
+                                placeholder={t('searchPlaceholder')}
+                                searchAria={tf('searchAria')}
+                                clearAria={tf('clearSearchAria')}
+                            />
+                        }
+                        trailing={
+                            <div className="flex items-center gap-2">
+                                {displayMode === 'grid' && (
+                                    <RecordsSortMenu
+                                        columns={columns}
+                                        sortKey={sortKey}
+                                        sortDirection={sortDirection}
+                                        onSortChange={onSortChange}
+                                    />
+                                )}
+                                <SegmentedToggle
+                                    ariaLabel={t('displayModeAria')}
+                                    value={displayMode}
+                                    onChange={setDisplayMode}
+                                    options={[
+                                        { value: 'grid', icon: <Squares2X2Icon className="size-4" />, ariaLabel: t('gridViewAria') },
+                                        { value: 'table', icon: <TableCellsIcon className="size-4" />, ariaLabel: t('tableViewAria') },
+                                    ]}
+                                />
+                            </div>
+                        }
+                    >
+                        <RecordsFilterPills<Contact>
+                            facets={facets}
+                            filterState={filterState}
+                            onChange={setFilterState}
+                        />
+                    </FilterBar>
+                </Rise>
+
+                {(() => {
+                    const pageFullySelected = contacts.length > 0 && selectedContactIds.length >= contacts.length;
+                    const allMatchingSelected = total > contacts.length && selectedContactIds.length >= total;
+                    const canSelectAllMatching = pageFullySelected && total > contacts.length && selectedContactIds.length < total;
+                    if (!canSelectAllMatching && !allMatchingSelected) return null;
+                    return (
+                        <div className="flex flex-wrap items-center justify-center gap-x-2 gap-y-1 rounded-lg bg-muted px-4 py-2 text-sm text-muted-foreground ring-1 ring-border">
+                            {allMatchingSelected ? (
+                                <>
+                                    <span>{t('allMatchingSelected', { total })}</span>
+                                    <button type="button" onClick={() => { setSelectedIds(new Set()); setMatchedSignature(null); }} className="font-medium text-brand transition hover:underline">
+                                        {t('clearSelection')}
+                                    </button>
+                                </>
+                            ) : (
+                                <>
+                                    <span>{t('pageSelected', { count: selectedContactIds.length })}</span>
+                                    <button
+                                        type="button"
+                                        onClick={selectAllMatching}
+                                        disabled={selectingAll || loading}
+                                        className="font-medium text-brand transition hover:underline disabled:opacity-50"
+                                    >
+                                        {selectingAll ? t('selecting') : t('selectAllMatching', { total })}
+                                    </button>
+                                </>
+                            )}
+                        </div>
+                    );
+                })()}
+
+                <Rise delay={0.18}>
+                    <RecordsRenderView<Contact>
+                        data={contacts}
+                        columns={[...columns, ...customColumns]}
+                        addColumnSlot={addColumnSlot}
+                        renderCard={(item, { onQuickEdit, onDelete }) => (
+                            <ContactCard
+                                id={item.id}
+                                name={item.name}
+                                title={item.title}
+                                company={item.company?.name}
+                                email={item.email}
+                                phone={item.phone}
+                                imageUrl={item.imageUrl}
+                                onQuickEdit={onQuickEdit ? () => onQuickEdit(item) : undefined}
+                                onDelete={onDelete ? () => onDelete(item) : undefined}
                             />
                         )}
-                        <SegmentedToggle
-                            ariaLabel={t('displayModeAria')}
-                            value={displayMode}
-                            onChange={setDisplayMode}
-                            options={[
-                                { value: 'grid', icon: <Squares2X2Icon className="size-4" />, ariaLabel: t('gridViewAria') },
-                                { value: 'table', icon: <TableCellsIcon className="size-4" />, ariaLabel: t('tableViewAria') },
-                            ]}
-                        />
-                    </div>
-                }
-            >
-                <RecordsFilterPills<Contact>
-                    facets={facets}
-                    filterState={filterState}
-                    onChange={setFilterState}
-                />
-            </FilterBar>
-
-            {(() => {
-                const pageFullySelected = contacts.length > 0 && selectedContactIds.length >= contacts.length;
-                const allMatchingSelected = total > contacts.length && selectedContactIds.length >= total;
-                const canSelectAllMatching = pageFullySelected && total > contacts.length && selectedContactIds.length < total;
-                if (!canSelectAllMatching && !allMatchingSelected) return null;
-                return (
-                    <div className="flex flex-wrap items-center justify-center gap-x-2 gap-y-1 rounded-lg bg-muted px-4 py-2 text-sm text-muted-foreground ring-1 ring-border">
-                        {allMatchingSelected ? (
-                            <>
-                                <span>{t('allMatchingSelected', { total })}</span>
-                                <button type="button" onClick={() => { setSelectedIds(new Set()); setMatchedSignature(null); }} className="font-medium text-brand transition hover:underline">
-                                    {t('clearSelection')}
-                                </button>
-                            </>
-                        ) : (
-                            <>
-                                <span>{t('pageSelected', { count: selectedContactIds.length })}</span>
-                                <button
-                                    type="button"
-                                    onClick={selectAllMatching}
-                                    disabled={selectingAll || loading}
-                                    className="font-medium text-brand transition hover:underline disabled:opacity-50"
-                                >
-                                    {selectingAll ? t('selecting') : t('selectAllMatching', { total })}
-                                </button>
-                            </>
-                        )}
-                    </div>
-                );
-            })()}
-
-            <RecordsRenderView<Contact>
-                data={contacts}
-                columns={[...columns, ...customColumns]}
-                addColumnSlot={addColumnSlot}
-                renderCard={(item, { onQuickEdit, onDelete }) => (
-                    <ContactCard
-                        id={item.id}
-                        name={item.name}
-                        title={item.title}
-                        company={item.company?.name}
-                        email={item.email}
-                        phone={item.phone}
-                        imageUrl={item.imageUrl}
-                        onQuickEdit={onQuickEdit ? () => onQuickEdit(item) : undefined}
-                        onDelete={onDelete ? () => onDelete(item) : undefined}
+                        renderAvatar={(item) => <ContactAvatar contact={item} />}
+                        detailPath={(item) => `/records/contacts/${item.id}`}
+                        displayMode={displayMode}
+                        selectedIds={selectedIds}
+                        onSelectedIdsChange={handleSelectedIdsChange}
+                        onQuickEdit={quickEditOne}
+                        onDelete={deleteOne}
+                        entityLabel="contact"
+                        selectionActions={selectionActions}
+                        loading={loading}
+                        pagination={{ page, pageSize: size, total, onPageChange: setPage, onPageSizeChange: setSize }}
+                        sortState={{ key: sortKey, direction: sortDirection, onSortChange }}
                     />
-                )}
-                renderAvatar={(item) => <ContactAvatar contact={item} />}
-                detailPath={(item) => `/records/contacts/${item.id}`}
-                displayMode={displayMode}
-                selectedIds={selectedIds}
-                onSelectedIdsChange={handleSelectedIdsChange}
-                onQuickEdit={quickEditOne}
-                onDelete={deleteOne}
-                entityLabel="contact"
-                selectionActions={selectionActions}
-                loading={loading}
-                pagination={{ page, pageSize: size, total, onPageChange: setPage, onPageSizeChange: setSize }}
-                sortState={{ key: sortKey, direction: sortDirection, onSortChange }}
-            />
+                </Rise>
 
-            <QuickEditSheet
-                editSheetOpen={editSheetOpen}
-                setEditSheetOpen={setEditSheetOpen}
-                selectedIds={selectedIds}
-                selectedContacts={selectedContacts}
-                drafts={drafts}
-                updateDraft={updateDraft}
-                isSaving={isSaving}
-                saveEdits={saveEdits}
-            />
+                <QuickEditSheet
+                    editSheetOpen={editSheetOpen}
+                    setEditSheetOpen={setEditSheetOpen}
+                    selectedIds={selectedIds}
+                    selectedContacts={selectedContacts}
+                    drafts={drafts}
+                    updateDraft={updateDraft}
+                    isSaving={isSaving}
+                    saveEdits={saveEdits}
+                />
 
-            <NewContactDialog
-                newContactDialogOpen={newContactDialogOpen}
-                setNewContactDialogOpen={closeNewContactDialog}
-                newContactPayload={newContactPayload}
-                setNewContactPayload={setNewContactPayload}
-                imageFile={imageFile}
-                setImageFile={setImageFile}
-                companies={companies}
-                selectedCompany={selectedCompany}
-                isCreating={isCreating}
-                isSuccess={creationSucceeded}
-                createNewContact={createNewContact}
-            />
+                <NewContactDialog
+                    newContactDialogOpen={newContactDialogOpen}
+                    setNewContactDialogOpen={closeNewContactDialog}
+                    newContactPayload={newContactPayload}
+                    setNewContactPayload={setNewContactPayload}
+                    imageFile={imageFile}
+                    setImageFile={setImageFile}
+                    companies={companies}
+                    selectedCompany={selectedCompany}
+                    isCreating={isCreating}
+                    isSuccess={creationSucceeded}
+                    createNewContact={createNewContact}
+                />
 
-            <DeleteRecordDialog
-                open={deleteDialogOpen}
-                onOpenChange={setDeleteDialogOpen}
-                selectedIds={selectedIds}
-                selectedItems={selectedContacts}
-                entityLabel="contact"
-                getDisplayName={(c) => c.name}
-                isDeleting={isDeleting}
-                confirmDelete={confirmDelete}
-            />
+                <DeleteRecordDialog
+                    open={deleteDialogOpen}
+                    onOpenChange={setDeleteDialogOpen}
+                    selectedIds={selectedIds}
+                    selectedItems={selectedContacts}
+                    entityLabel="contact"
+                    getDisplayName={(c) => c.name}
+                    isDeleting={isDeleting}
+                    confirmDelete={confirmDelete}
+                />
 
-            <ChangeCompanyDialog
-                open={changeCompanyOpen}
-                onOpenChange={setChangeCompanyOpen}
-                contacts={selectedContacts}
-                companies={companies}
-            />
+                <ChangeCompanyDialog
+                    open={changeCompanyOpen}
+                    onOpenChange={setChangeCompanyOpen}
+                    contacts={selectedContacts}
+                    companies={companies}
+                />
 
-            <BulkTagDialog
-                open={bulkTag.open}
-                onOpenChange={(open) => setBulkTag((s) => ({ ...s, open }))}
-                mode={bulkTag.mode}
-                count={selectedContactIds.length}
-                tags={tags}
-                messages={{
-                    success: (count) => t(bulkTag.mode === 'add' ? 'toastTagAdded' : 'toastTagRemoved', { count }),
-                    partial: (succeeded, total) => t(bulkTag.mode === 'add' ? 'toastTagAddedPartial' : 'toastTagRemovedPartial', { succeeded, total }),
-                    failure: (failed) => t('toastTagFailed', { failed }),
-                }}
-                onApply={applyBulkTag}
-                onSuccess={onBulkTagSuccess}
-            />
+                <BulkTagDialog
+                    open={bulkTag.open}
+                    onOpenChange={(open) => setBulkTag((s) => ({ ...s, open }))}
+                    mode={bulkTag.mode}
+                    count={selectedContactIds.length}
+                    tags={tags}
+                    messages={{
+                        success: (count) => t(bulkTag.mode === 'add' ? 'toastTagAdded' : 'toastTagRemoved', { count }),
+                        partial: (succeeded, total) => t(bulkTag.mode === 'add' ? 'toastTagAddedPartial' : 'toastTagRemovedPartial', { succeeded, total }),
+                        failure: (failed) => t('toastTagFailed', { failed }),
+                    }}
+                    onApply={applyBulkTag}
+                    onSuccess={onBulkTagSuccess}
+                />
+            </div>
         </div>
     );
 }

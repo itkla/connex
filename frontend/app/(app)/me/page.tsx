@@ -1,10 +1,8 @@
 import { headers } from 'next/headers';
 import { redirect } from 'next/navigation';
-import Image from 'next/image';
 import Link from 'next/link';
 import { ArrowLeftIcon } from '@heroicons/react/24/outline';
 import { getLocale, getTranslations } from 'next-intl/server';
-import { Skeleton } from '@/components/ui/skeleton'; // TODO: add skeleton loaders to render before the PRomises resolve
 
 import {
     getAttachmentsFromCookie,
@@ -25,11 +23,12 @@ import Timeline from '@/app/components/me/Timeline';
 import EditSelfModal from '@/app/components/me/EditSelfModal';
 import UserAvatar from '@/app/components/records/users/UserAvatar';
 import Attachments from '@/app/components/attachments/Attachments';
+import Rise from '@/app/components/motion/Rise';
+import SectionHeader from '@/app/components/dashboard/SectionHeader';
 
 export default async function MePage() {
     const t = await getTranslations('MePage');
     const locale = await getLocale();
-    // TODO: move this block to a separate component OR put it into a lib/hook
     const cookie = (await headers()).get('cookie');
     const user = await getCurrentUserFromCookie(cookie);
 
@@ -62,109 +61,98 @@ export default async function MePage() {
         t('greetingHowdy'),
         t('greetingWhatsUp'),
     ];
-    const randomGreeting = greetings[Math.floor(Math.random() * greetings.length)];
+    const greeting = greetings[user.id % greetings.length];
 
     return (
-        <div className="min-h-screen bg-background px-6 pt-12 pb-12 md:flex md:h-screen md:flex-col md:overflow-hidden">
-            <div className="mx-auto w-full max-w-7xl md:flex md:min-h-0 md:flex-1 md:flex-col">
-                <header className="flex items-center gap-6">
-                    {user.profilePictureUrl ? (
-                        // <Image
-                        //     src={user.profilePictureUrl}
-                        //     alt={t('profilePictureAlt', { name: user.displayName })}
-                        //     width={96}
-                        //     height={96}
-                        //     className="h-24 w-24 shrink-0 rounded-full object-cover shadow-[0_20px_50px_-15px_rgba(0,0,0,0.15)] ring-1 ring-black/5"
-                        // />
-                        <UserAvatar user={user} type="2xlarge" />
-                    ) : (
-                        <div
-                            aria-label={t('profilePicturePlaceholderAriaLabel')}
-                            className="flex h-24 w-24 shrink-0 items-center justify-center rounded-full bg-brand-light text-4xl text-brand-dark ring-1 ring-border"
-                        >
-                            {initials}
-                        </div>
-                    )}
-                    <h1 className="leading-tight tracking-tight">
-                        <span className="block text-2xl font-medium text-muted-foreground">
-                            {randomGreeting}
-                        </span>
-                        <span className="mt-1 block text-4xl font-extrabold tracking-tight text-foreground">
-                            {user.displayName}
-                        </span>
-                    </h1>
-                </header>
-
-                <div className="mt-12 grid grid-cols-1 gap-8 md:grid-cols-[minmax(0,1fr)_minmax(0,2fr)] md:min-h-0 md:flex-1">
-                    <aside>
-                        <div className="mb-3 flex h-8 items-center justify-between">
-                            <h2 className="px-6 text-xs font-medium tracking-[0.12em] text-muted-foreground uppercase">
-                                {t('profile')}
-                            </h2>
-                            <EditSelfModal user={user} />
-                        </div>
-                        <dl className="divide-y divide-border overflow-hidden rounded-2xl bg-muted ring-1 ring-border">
-                            <InfoRow
-                                label={t('username')}
-                                value={`@${user.username}`}
-                            />
-                            <InfoRow
-                                label={t('email')}
-                                value={user.email ?? ''}
-                            />
-                            <InfoRow
-                                label={t('lastLogin')}
-                                value={formatDateTime(user.lastLoginAt, locale)}
-                            />
-                            <InfoRow
-                                label={t('memberSince')}
-                                value={formatDate(user.createdAt, locale)}
-                            />
-                        </dl>
-
-                        <Attachments
-                            entityType="user"
-                            entityId={user.id}
-                            initialAttachments={attachments}
-                            className="mt-6"
-                        />
-                        {/* TODO: find a better place to put this */}
-                        <div className="mt-6 px-6">
-                            {/* TODO: fix Link attaching to parent div, causing the whole section to be clickable and not just the text + arrow */}
-                            <Link
-                                href="/dashboard"
-                                className="text-base text-brand hover:text-brand-hover"
+        <div className="min-h-screen bg-background px-2 pt-8 pb-12">
+            <div className="mx-auto flex w-full max-w-5xl flex-col gap-10">
+                <Rise>
+                    <header className="flex items-center gap-6">
+                        {user.profilePictureUrl ? (
+                            <UserAvatar user={user} type="2xlarge" />
+                        ) : (
+                            <div
+                                aria-label={t('profilePicturePlaceholderAriaLabel')}
+                                className="flex h-24 w-24 shrink-0 items-center justify-center rounded-full bg-brand-light text-4xl text-brand-dark ring-1 ring-border"
                             >
-                                <span className="flex items-center gap-2">
-                                    <ArrowLeftIcon className="h-4 w-4" />
-                                    {t('backToDashboard')}
-                                </span>
-                            </Link>
-                        </div>
-                    </aside>
+                                {initials}
+                            </div>
+                        )}
+                        <h1 className="leading-tight tracking-tight">
+                            <span className="block text-2xl font-medium text-muted-foreground">
+                                {greeting}
+                            </span>
+                            <span className="mt-1 block text-4xl font-extrabold tracking-tight text-foreground">
+                                {user.displayName}
+                            </span>
+                        </h1>
+                    </header>
+                </Rise>
 
-                    <section className="md:flex md:min-h-0 md:flex-col">
-                        <div className="mb-3 flex h-8 items-center">
-                            <h2 className="px-6 text-xs font-medium tracking-[0.12em] text-muted-foreground uppercase">
-                                {t('myActivity')}
-                            </h2>
-                        </div>
-
-                        <div className="grid grid-cols-3 gap-3">
-                            <StatCard
-                                label={t('tasks')}
-                                value={tasks.length}
-                                subtitle={t('openCount', { count: openTasks })}
+                <div className="grid grid-cols-1 gap-8 md:grid-cols-[minmax(0,1fr)_minmax(0,2fr)]">
+                    <Rise delay={0.06}>
+                        <aside>
+                            <SectionHeader
+                                title={t('profile')}
+                                action={<EditSelfModal user={user} />}
                             />
-                            <StatCard
-                                label={t('activities')}
-                                value={activities.length}
-                            />
-                            <StatCard label={t('notes')} value={notes.length} />
-                        </div>
+                            <dl className="divide-y divide-border overflow-hidden rounded-2xl border border-border bg-card">
+                                <InfoRow
+                                    label={t('username')}
+                                    value={`@${user.username}`}
+                                />
+                                <InfoRow
+                                    label={t('email')}
+                                    value={user.email ?? ''}
+                                />
+                                <InfoRow
+                                    label={t('lastLogin')}
+                                    value={formatDateTime(user.lastLoginAt, locale)}
+                                />
+                                <InfoRow
+                                    label={t('memberSince')}
+                                    value={formatDate(user.createdAt, locale)}
+                                />
+                            </dl>
 
-                        <div className="mt-6 overflow-hidden rounded-2xl bg-card ring-1 ring-border md:flex md:min-h-0 md:flex-1 md:flex-col">
-                            <div className="md:min-h-0 md:flex-1 md:overflow-y-auto md:[-webkit-mask-image:linear-gradient(to_bottom,transparent_0,black_24px)] md:[mask-image:linear-gradient(to_bottom,transparent_0,black_24px)]">
+                            <Attachments
+                                entityType="user"
+                                entityId={user.id}
+                                initialAttachments={attachments}
+                                className="mt-6"
+                            />
+                            <div className="mt-6 px-6">
+                                <Link
+                                    href="/dashboard"
+                                    className="text-base text-brand hover:text-brand-hover"
+                                >
+                                    <span className="flex items-center gap-2">
+                                        <ArrowLeftIcon className="h-4 w-4" />
+                                        {t('backToDashboard')}
+                                    </span>
+                                </Link>
+                            </div>
+                        </aside>
+                    </Rise>
+
+                    <Rise delay={0.12}>
+                        <section>
+                            <SectionHeader title={t('myActivity')} />
+
+                            <div className="grid grid-cols-3 gap-3">
+                                <StatCard
+                                    label={t('tasks')}
+                                    value={tasks.length}
+                                    subtitle={t('openCount', { count: openTasks })}
+                                />
+                                <StatCard
+                                    label={t('activities')}
+                                    value={activities.length}
+                                />
+                                <StatCard label={t('notes')} value={notes.length} />
+                            </div>
+
+                            <div className="mt-6 overflow-hidden rounded-2xl border border-border bg-card">
                                 <Timeline
                                     tasks={tasks}
                                     activities={activities}
@@ -175,8 +163,8 @@ export default async function MePage() {
                                     currentUserId={user.id}
                                 />
                             </div>
-                        </div>
-                    </section>
+                        </section>
+                    </Rise>
                 </div>
             </div>
         </div>

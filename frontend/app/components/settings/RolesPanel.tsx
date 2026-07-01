@@ -32,17 +32,13 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Skeleton } from "@/components/ui/skeleton";
 import DeleteRecordDialog from "@/app/components/records/DeleteRecordDialog";
+import Rise from "@/app/components/motion/Rise";
+import SectionHeader from "@/app/components/dashboard/SectionHeader";
 import RoleDialog from "./RoleDialog";
 import { groupPermissions, type PermissionGroup } from "./permissions";
 
 const rowActionTrigger =
     "flex size-7 items-center justify-center rounded-full text-muted-foreground opacity-0 transition hover:bg-muted/70 hover:text-foreground group-hover:opacity-100 focus:opacity-100 focus-visible:opacity-100 data-[state=open]:opacity-100";
-
-function SectionLabel({ children }: { children: React.ReactNode }) {
-    return (
-        <h2 className="text-xs font-medium tracking-[0.12em] text-muted-foreground uppercase">{children}</h2>
-    );
-}
 
 function RoleIcon({ locked }: { locked?: boolean }) {
     return (
@@ -186,7 +182,7 @@ export default function RolesPanel() {
 
     if (accessDenied) {
         return (
-            <p className="rounded-2xl bg-card px-4 py-6 text-center text-sm text-muted-foreground ring-1 ring-border">
+            <p className="rounded-2xl border border-border bg-card px-4 py-6 text-center text-sm text-muted-foreground">
                 {t("noAccess")}
             </p>
         );
@@ -196,24 +192,26 @@ export default function RolesPanel() {
 
     return (
         <div className="space-y-10">
-            <section className="space-y-3">
-                <div className="flex items-start justify-between gap-4">
-                    <div className="space-y-1">
-                        <SectionLabel>{t("defaultRolesLabel")}</SectionLabel>
-                        <p className="text-sm text-muted-foreground">{t("builtInSubtitle")}</p>
-                    </div>
-                    {!loading && (
-                        <Button onClick={openCreate} className="shrink-0 bg-brand text-white hover:bg-brand-hover">
-                            <PlusIcon className="size-4" />
-                            {t("newRole")}
-                        </Button>
-                    )}
+            <Rise className="space-y-3">
+                <div>
+                    <SectionHeader
+                        title={t("defaultRolesLabel")}
+                        action={
+                            !loading && (
+                                <Button onClick={openCreate} className="bg-brand text-white hover:bg-brand-hover">
+                                    <PlusIcon className="size-4" />
+                                    {t("newRole")}
+                                </Button>
+                            )
+                        }
+                    />
+                    <p className="px-6 text-sm text-muted-foreground">{t("builtInSubtitle")}</p>
                 </div>
 
                 {loading ? (
                     <RoleSkeleton rows={3} />
                 ) : (
-                    <ul className="divide-y divide-border overflow-hidden rounded-2xl bg-card ring-1 ring-border">
+                    <ul className="divide-y divide-border overflow-hidden rounded-2xl border border-border bg-card">
                         {builtIn.map((role) => (
                             <li key={role.name} className="flex items-start gap-3 px-4 py-3.5">
                                 <RoleIcon locked />
@@ -237,26 +235,28 @@ export default function RolesPanel() {
                         ))}
                     </ul>
                 )}
-            </section>
+            </Rise>
 
-            <section className="space-y-3">
-                <div className="flex items-baseline justify-between">
-                    <SectionLabel>{t("customRolesLabel")}</SectionLabel>
-                    {!loading && roles.length > 0 && (
-                        <span className="text-xs text-muted-foreground">
-                            {t("permissionCount", { count: roles.length })}
-                        </span>
-                    )}
-                </div>
+            <Rise className="space-y-3">
+                <SectionHeader
+                    title={t("customRolesLabel")}
+                    action={
+                        !loading && roles.length > 0 ? (
+                            <span className="text-xs text-muted-foreground">
+                                {t("permissionCount", { count: roles.length })}
+                            </span>
+                        ) : undefined
+                    }
+                />
 
                 {loading ? (
                     <RoleSkeleton rows={2} />
                 ) : roles.length === 0 ? (
-                    <p className="rounded-2xl bg-card px-4 py-6 text-center text-sm text-muted-foreground ring-1 ring-border">
+                    <p className="rounded-2xl border border-border bg-card px-4 py-6 text-center text-sm text-muted-foreground">
                         {t("empty")}
                     </p>
                 ) : (
-                    <ul className="divide-y divide-border overflow-hidden rounded-2xl bg-card ring-1 ring-border">
+                    <ul className="divide-y divide-border overflow-hidden rounded-2xl border border-border bg-card">
                         {roles.map((role) => (
                             <li key={role.id} className="group flex items-start gap-3 px-4 py-3.5">
                                 <RoleIcon />
@@ -298,7 +298,7 @@ export default function RolesPanel() {
                         ))}
                     </ul>
                 )}
-            </section>
+            </Rise>
 
             <RoleDialog
                 open={dialogOpen}
@@ -326,7 +326,7 @@ export default function RolesPanel() {
 
 function RoleSkeleton({ rows }: { rows: number }) {
     return (
-        <ul className="divide-y divide-border overflow-hidden rounded-2xl bg-card ring-1 ring-border">
+        <ul className="divide-y divide-border overflow-hidden rounded-2xl border border-border bg-card">
             {Array.from({ length: rows }, (_, i) => (
                 <li key={i} className="flex items-center gap-3 px-4 py-3.5">
                     <Skeleton className="size-9 shrink-0 rounded-lg" />

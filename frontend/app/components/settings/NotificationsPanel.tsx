@@ -10,6 +10,8 @@ import { toastError } from "@/app/lib/toast";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
+import Rise from "@/app/components/motion/Rise";
+import SectionHeader from "@/app/components/dashboard/SectionHeader";
 
 const CHANNEL = "in_app";
 
@@ -24,12 +26,6 @@ const TYPES = [
     },
     { type: "note.mention", icon: AtSymbolIcon, titleKey: "mentionTitle", descriptionKey: "mentionDescription" },
 ] as const;
-
-function SectionLabel({ children }: { children: React.ReactNode }) {
-    return (
-        <h2 className="text-xs font-medium tracking-[0.12em] text-muted-foreground uppercase">{children}</h2>
-    );
-}
 
 export default function NotificationsPanel() {
     const t = useTranslations("WorkspaceNotifications");
@@ -89,19 +85,21 @@ export default function NotificationsPanel() {
     };
 
     return (
-        <div className="space-y-3">
-            <SectionLabel>{t("title")}</SectionLabel>
-            <p className="max-w-prose text-sm text-muted-foreground">{t("subtitle")}</p>
+        <Rise className="space-y-3">
+            <div>
+                <SectionHeader title={t("title")} />
+                <p className="max-w-prose px-6 text-sm text-muted-foreground">{t("subtitle")}</p>
+            </div>
 
             {error ? (
-                <div className="flex flex-col items-center gap-3 rounded-2xl bg-card px-4 py-8 text-center ring-1 ring-border">
+                <div className="flex flex-col items-center gap-3 rounded-2xl border border-border bg-card px-4 py-8 text-center">
                     <p className="text-sm text-muted-foreground">{t("loadFailed")}</p>
                     <Button variant="outline" size="sm" onClick={() => setReloadKey((key) => key + 1)}>
                         {t("retry")}
                     </Button>
                 </div>
             ) : (
-                <ul className="divide-y divide-border overflow-hidden rounded-2xl bg-card ring-1 ring-border">
+                <ul className="divide-y divide-border overflow-hidden rounded-2xl border border-border bg-card">
                     {TYPES.map(({ type, icon: Icon, titleKey, descriptionKey }) => (
                         <li key={type} className="flex items-center gap-4 px-4 py-3.5">
                             <Icon aria-hidden className="size-5 shrink-0 text-muted-foreground" />
@@ -123,6 +121,6 @@ export default function NotificationsPanel() {
                     ))}
                 </ul>
             )}
-        </div>
+        </Rise>
     );
 }

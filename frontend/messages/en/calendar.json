@@ -8,6 +8,7 @@
     "itemActivity": "Activity",
     "itemDeal": "Deal",
     "itemNote": "Note",
-    "emptyDay": "No items"
+    "emptyDay": "No items",
+    "emptyMonth": "Nothing scheduled this month"
   }
 }

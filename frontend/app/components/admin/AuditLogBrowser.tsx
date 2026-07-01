@@ -24,6 +24,7 @@ import {
     TagIcon,
 } from "@heroicons/react/20/solid";
 import { Badge } from "@/components/ui/badge";
+import Rise from "@/app/components/motion/Rise";
 import {
     SearchField,
     FilterBar,
@@ -69,12 +70,12 @@ const VERB_META: Record<string, VerbMeta> = {
 const PLAIN_VERBS = new Set<string>(["login", "logout", "updateAvatar"]);
 
 const TONE_DOT: Record<Tone, string> = {
-    create: "bg-emerald-500/12 text-emerald-600 dark:text-emerald-400",
-    update: "bg-sky-500/12 text-sky-600 dark:text-sky-400",
-    delete: "bg-rose-500/12 text-rose-600 dark:text-rose-400",
-    auth: "bg-violet-500/12 text-violet-600 dark:text-violet-400",
-    view: "bg-zinc-500/12 text-zinc-500 dark:text-zinc-400",
-    default: "bg-amber-500/12 text-amber-600 dark:text-amber-400",
+    create: "bg-chart-won/12 text-chart-won",
+    update: "bg-chart-2/12 text-chart-2",
+    delete: "bg-destructive/12 text-destructive",
+    auth: "bg-chart-4/12 text-chart-4",
+    view: "bg-muted-foreground/12 text-muted-foreground",
+    default: "bg-muted-foreground/12 text-muted-foreground",
 };
 
 const EASE_OUT: [number, number, number, number] = [0.23, 1, 0.32, 1];
@@ -429,31 +430,36 @@ export default function AuditLogBrowser({ entries }: { entries: AuditLogEntry[] 
     })();
 
     return (
-        <div className="mx-auto w-full max-w-7xl space-y-6 pb-16">
-            <header className="flex flex-wrap items-end justify-between gap-4">
-                <div>
-                    <h1 className="text-3xl font-bold tracking-tight text-balance text-foreground sm:text-4xl">{t("heading")}</h1>
-                    <p className="mt-1.5 text-sm text-muted-foreground">{t("subtitle")}</p>
-                </div>
+        <div className="min-h-screen bg-background px-2 pt-8 pb-12">
+            <div className="mx-auto flex w-full max-w-7xl flex-col gap-10">
+                <Rise delay={0}>
+                    <header className="flex flex-wrap items-end justify-between gap-4">
+                        <div>
+                            <h1 className="text-3xl font-bold tracking-tight text-balance text-foreground sm:text-4xl">{t("heading")}</h1>
+                            <p className="mt-1.5 text-sm text-muted-foreground">{t("subtitle")}</p>
+                        </div>
+                        {entries.length > 0 && (
+                            <StatCluster
+                                stats={stats}
+                                lastMs={stats.lastMs === -Infinity ? null : stats.lastMs}
+                                now={now}
+                                locale={locale}
+                                t={t}
+                            />
+                        )}
+                    </header>
+                </Rise>
+
                 {entries.length > 0 && (
-                    <StatCluster
-                        stats={stats}
-                        lastMs={stats.lastMs === -Infinity ? null : stats.lastMs}
-                        now={now}
-                        locale={locale}
-                        t={t}
-                    />
+                    <Rise delay={0.06}>
+                        <PulseStrip pulse={pulse} reduce={reduce} t={t} locale={locale} />
+                    </Rise>
                 )}
-            </header>
 
-            {entries.length > 0 && (
-                <PulseStrip pulse={pulse} reduce={reduce} t={t} locale={locale} />
-            )}
-
-            {entries.length === 0 ? (
-                <EmptyState title={t("emptyAllTitle")} body={t("emptyAllBody")} />
-            ) : (
-                <>
+                {entries.length === 0 ? (
+                    <EmptyState title={t("emptyAllTitle")} body={t("emptyAllBody")} />
+                ) : (
+                    <Rise delay={0.12} className="flex flex-col gap-6">
                     <FilterBar
                         reduce={reduce}
                         chips={activeChips}
@@ -582,8 +588,9 @@ export default function AuditLogBrowser({ entries }: { entries: AuditLogEntry[] 
                             </AnimatePresence>
                         </ul>
                     )}
-                </>
-            )}
+                    </Rise>
+                )}
+            </div>
         </div>
     );
 }
@@ -654,7 +661,7 @@ function StatCluster({
             <Divider className="hidden sm:block" />
             <div className="hidden sm:block">
                 <div className="text-sm font-semibold tabular-nums text-foreground">{last}</div>
-                <div className="text-[11px] font-medium uppercase tracking-[0.12em] text-muted-foreground">{t("statLastEvent")}</div>
+                <div className="text-xs font-medium uppercase tracking-[0.12em] text-muted-foreground">{t("statLastEvent")}</div>
             </div>
         </div>
     );
@@ -667,10 +674,10 @@ function Divider({ className }: { className?: string }) {
 function Stat({ value, label, danger }: { value: number; label: string; danger?: boolean }) {
     return (
         <div>
-            <div className={cn("text-sm font-semibold tabular-nums", danger ? "text-rose-600 dark:text-rose-400" : "text-foreground")}>
+            <div className={cn("text-sm font-semibold tabular-nums", danger ? "text-destructive" : "text-foreground")}>
                 {value}
             </div>
-            <div className="text-[11px] font-medium uppercase tracking-[0.12em] text-muted-foreground">{label}</div>
+            <div className="text-xs font-medium uppercase tracking-[0.12em] text-muted-foreground">{label}</div>
         </div>
     );
 }
@@ -691,9 +698,9 @@ function PulseStrip({
         [locale],
     );
     return (
-        <div className="flex items-center gap-5 rounded-2xl bg-card p-4 ring-1 ring-border">
+        <div className="flex items-center gap-5 rounded-2xl border border-border bg-card p-4">
             <div className="shrink-0">
-                <div className="text-[11px] font-medium uppercase tracking-[0.12em] text-muted-foreground">{t("pulseLabel")}</div>
+                <div className="text-xs font-medium uppercase tracking-[0.12em] text-muted-foreground">{t("pulseLabel")}</div>
                 <div className="mt-0.5 text-2xl font-semibold tabular-nums text-foreground">
                     {pulse.days.reduce((n, d) => n + d.count, 0)}
                 </div>
@@ -897,7 +904,7 @@ function AuditRow({
                     <div className="overflow-hidden">
                         <div className="my-1.5 rounded-xl border border-border/60 bg-muted/30 p-3.5">
                             {errorText && (
-                                <div className="mb-3 flex items-start gap-2 rounded-lg bg-rose-500/10 px-3 py-2 text-xs text-rose-600 dark:text-rose-400">
+                                <div className="mb-3 flex items-start gap-2 rounded-lg bg-destructive/10 px-3 py-2 text-xs text-destructive">
                                     <span className="font-medium uppercase tracking-wide">{t("metaError")}</span>
                                     <span className="min-w-0 break-words font-mono">{errorText}</span>
                                 </div>
@@ -963,8 +970,8 @@ function ValueChip({ value, tone, empty }: { value: unknown; tone: "old" | "new"
             className={cn(
                 "max-w-[16rem] truncate rounded-md px-1.5 py-0.5 font-mono text-[11px]",
                 isEmpty && "bg-muted italic text-muted-foreground/70",
-                !isEmpty && tone === "old" && "bg-rose-500/10 text-rose-600 dark:text-rose-400",
-                !isEmpty && tone === "new" && "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400",
+                !isEmpty && tone === "old" && "bg-muted text-muted-foreground",
+                !isEmpty && tone === "new" && "bg-chart-2/10 text-chart-2",
             )}
             title={text}
         >

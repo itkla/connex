@@ -23,6 +23,8 @@ import { notificationContent, notificationIcon, notificationSeverityStyle, safeN
 import { SnoozeMenu } from "@/app/components/notifications/SnoozeMenu";
 import { cn } from "@/lib/utils";
 import { SegmentedToggle } from "@/app/components/filters";
+import Rise from "@/app/components/motion/Rise";
+import SectionHeader from "@/app/components/dashboard/SectionHeader";
 import { Button } from "@/components/ui/button";
 import {
     Pagination,
@@ -158,37 +160,43 @@ export default function NotificationsInbox() {
     const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
     return (
-        <div className="mx-auto w-full max-w-5xl px-2 py-8 sm:px-6">
-            <div className="flex flex-wrap items-end justify-between gap-4">
-                <div>
-                    <h1 className="text-4xl font-bold tracking-tight">{t("title")}</h1>
-                    <p className="mt-2 text-muted-foreground">{t("inboxDescription")}</p>
-                </div>
-                <Button variant="outline" disabled={unread === 0} onClick={() => void readAll()}>
-                    <CheckCheck />
-                    {t("markAllRead")}
-                </Button>
-            </div>
+        <div className="min-h-screen bg-background px-2 pt-8 pb-12">
+            <div className="mx-auto flex w-full max-w-7xl flex-col gap-10">
+                <Rise>
+                    <header className="flex flex-wrap items-end justify-between gap-4 px-4 sm:px-6">
+                        <div>
+                            <h1 className="text-2xl font-semibold tracking-tight text-foreground">{t("title")}</h1>
+                            <p className="mt-1 max-w-2xl text-sm text-muted-foreground">{t("inboxDescription")}</p>
+                        </div>
+                        <Button variant="outline" disabled={unread === 0} onClick={() => void readAll()}>
+                            <CheckCheck />
+                            {t("markAllRead")}
+                        </Button>
+                    </header>
+                </Rise>
 
-            <div className="mt-8">
-                <SegmentedToggle<NotificationState>
-                    ariaLabel={t("filterAria")}
-                    value={state}
-                    onChange={(value) => {
-                        setLoading(true);
-                        setState(value);
-                        setPage(1);
-                    }}
-                    options={[
-                        { value: "active", label: t("filter_active") },
-                        { value: "unread", label: t("filter_unread") },
-                        { value: "history", label: t("filter_history") },
-                        { value: "all", label: t("filter_all") },
-                    ]}
-                />
-            </div>
+                <Rise delay={0.06} className="px-4 sm:px-6">
+                    <SegmentedToggle<NotificationState>
+                        ariaLabel={t("filterAria")}
+                        value={state}
+                        onChange={(value) => {
+                            setLoading(true);
+                            setState(value);
+                            setPage(1);
+                        }}
+                        options={[
+                            { value: "active", label: t("filter_active") },
+                            { value: "unread", label: t("filter_unread") },
+                            { value: "history", label: t("filter_history") },
+                            { value: "all", label: t("filter_all") },
+                        ]}
+                    />
+                </Rise>
 
-            <div className="mt-6 overflow-hidden rounded-xl border border-border bg-card">
+                <Rise delay={0.12}>
+                    <section>
+                        <SectionHeader title={t("inbox")} />
+                        <div className="overflow-hidden rounded-2xl border border-border bg-card">
                 {loading ? (
                     <div className="divide-y divide-border">
                         {Array.from({ length: 6 }).map((_, i) => (
@@ -307,35 +315,40 @@ export default function NotificationsInbox() {
                         })}
                     </div>
                 )}
-            </div>
+                        </div>
+                    </section>
+                </Rise>
 
-            {pageCount > 1 ? (
-                <Pagination className="mt-6">
-                    <PaginationContent>
-                        <PaginationItem>
-                            <PaginationPrevious
-                                disabled={page <= 1}
-                                onClick={() => {
-                                    setLoading(true);
-                                    setPage((value) => Math.max(1, value - 1));
-                                }}
-                            />
-                        </PaginationItem>
-                        <PaginationItem>
-                            <span className="px-3 text-sm text-muted-foreground">{t("page", { page, pageCount })}</span>
-                        </PaginationItem>
-                        <PaginationItem>
-                            <PaginationNext
-                                disabled={page >= pageCount}
-                                onClick={() => {
-                                    setLoading(true);
-                                    setPage((value) => Math.min(pageCount, value + 1));
-                                }}
-                            />
-                        </PaginationItem>
-                    </PaginationContent>
-                </Pagination>
-            ) : null}
+                {pageCount > 1 ? (
+                    <Rise delay={0.18}>
+                        <Pagination>
+                            <PaginationContent>
+                                <PaginationItem>
+                                    <PaginationPrevious
+                                        disabled={page <= 1}
+                                        onClick={() => {
+                                            setLoading(true);
+                                            setPage((value) => Math.max(1, value - 1));
+                                        }}
+                                    />
+                                </PaginationItem>
+                                <PaginationItem>
+                                    <span className="px-3 text-sm text-muted-foreground">{t("page", { page, pageCount })}</span>
+                                </PaginationItem>
+                                <PaginationItem>
+                                    <PaginationNext
+                                        disabled={page >= pageCount}
+                                        onClick={() => {
+                                            setLoading(true);
+                                            setPage((value) => Math.min(pageCount, value + 1));
+                                        }}
+                                    />
+                                </PaginationItem>
+                            </PaginationContent>
+                        </Pagination>
+                    </Rise>
+                ) : null}
+            </div>
         </div>
     );
 }

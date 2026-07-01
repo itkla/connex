@@ -30,7 +30,8 @@
     "notes": "Notes",
     "openCount": "{count} open",
     "notesCount": "{count} notes",
-    "timeline": "Timeline"
+    "timeline": "Timeline",
+    "emptyActivity": "No activity yet"
   },
   "UsersNewUserDialog": {
     "new": "New",

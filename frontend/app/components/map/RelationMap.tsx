@@ -13,6 +13,7 @@ import {
     type EdgeChange,
 } from '@xyflow/react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useReducedMotion } from 'motion/react';
 import { useTheme } from 'next-themes';
 
 import '@xyflow/react/dist/style.css';
@@ -82,8 +83,8 @@ function activeTreeFor(
     return ids;
 }
 
-const LABEL_FADE_MIN = 0.1; // at/below this zoom: labels fully faded
-const LABEL_FADE_MAX = 0.22; // at/above this zoom: labels fully visible
+const LABEL_FADE_MIN = 0.1;
+const LABEL_FADE_MAX = 0.22;
 
 function LabelFade() {
     const store = useStoreApi();
@@ -116,6 +117,7 @@ function Flow({ graph, focusId, replay, extraEdges }: FlowProps) {
     const [hovering, setHovering] = useState(false);
 
     const { resolvedTheme } = useTheme();
+    const reduceMotion = useReducedMotion() ?? false;
 
     const companyCount = useMemo(
         () => graph.nodes.reduce((n, x) => (x.type === 'company' ? n + 1 : n), 0),
@@ -190,7 +192,7 @@ function Flow({ graph, focusId, replay, extraEdges }: FlowProps) {
                 }
                 return;
             }
-            if (activeRef.current?.has(node.id)) return; // already inside this branch
+            if (activeRef.current?.has(node.id)) return;
             const ids = activeTreeFor(node.id, adjacency.children, adjacency.parents);
             activeRef.current = ids;
             applyHover(ids);
@@ -333,11 +335,11 @@ function Flow({ graph, focusId, replay, extraEdges }: FlowProps) {
                 onNodeMouseEnter={replay ? undefined : onNodeMouseEnter}
                 onNodeMouseLeave={replay ? undefined : onNodeMouseLeave}
                 colorMode={resolvedTheme === 'dark' ? 'dark' : 'light'}
-                className={cn(settling && 'settle-animate', !replay && hovering && 'map-dim')}
+                className={cn(settling && !reduceMotion && 'settle-animate', !replay && hovering && 'map-dim')}
                 nodeOrigin={NODE_ORIGIN}
                 onlyRenderVisibleElements
                 minZoom={0.1}
-                fitView
+                fitView={!reduceMotion}
             >
                 <LabelFade />
                 <Background />

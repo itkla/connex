@@ -23,6 +23,8 @@ import {
 import { useReducedMotion } from 'motion/react';
 
 import RecordsRenderView from '@/app/components/records/RecordsRenderView';
+import Rise from '@/app/components/motion/Rise';
+import SectionHeader from '@/app/components/dashboard/SectionHeader';
 import SavedViewsBar from '@/app/components/records/SavedViewsBar';
 import type { SavedView, SavedViewConfig } from '@/app/lib/types';
 import { useCustomFieldColumns } from '@/app/components/records/CustomFieldColumns';
@@ -264,7 +266,6 @@ export default function DealsBrowser({ deals, savedViews }: { deals: Deal[]; sav
             if (isFieldError(err)) {
                 throw err;
             }
-            console.error(err);
             toastError(err instanceof Error ? err.message : t('failedToCreateDeal'));
         } finally {
             setIsCreating(false);
@@ -510,7 +511,7 @@ export default function DealsBrowser({ deals, savedViews }: { deals: Deal[]; sav
                                 onClick={(e) => e.stopPropagation()}
                                 className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-xs ring-1 ring-border transition hover:bg-muted/80"
                             >
-                                <span className={closed ? 'text-gray-500' : 'text-emerald-300'}>●</span>
+                                <span className={closed ? 'text-muted-foreground' : 'text-chart-won'}>●</span>
                                 {closed ? t('statusClosed') : t('statusOpen')}
                                 <ChevronDownIcon className="size-3 text-muted-foreground" />
                             </button>
@@ -518,17 +519,17 @@ export default function DealsBrowser({ deals, savedViews }: { deals: Deal[]; sav
                         <DropdownMenuContent align="start" onClick={(e) => e.stopPropagation()}>
                             {closed ? (
                                 <DropdownMenuItem onSelect={() => toggleDealStatus(d, null)}>
-                                    <span className="text-emerald-300">●</span>
+                                    <span className="text-chart-won">●</span>
                                     {t('markOpen')}
                                 </DropdownMenuItem>
                             ) : (
                                 <>
                                     <DropdownMenuItem onSelect={() => toggleDealStatus(d, true)}>
-                                        <span className="text-emerald-400">●</span>
+                                        <span className="text-chart-won">●</span>
                                         {t('markWon')}
                                     </DropdownMenuItem>
                                     <DropdownMenuItem onSelect={() => toggleDealStatus(d, false)}>
-                                        <span className="text-red-400">●</span>
+                                        <span className="text-destructive">●</span>
                                         {t('markLost')}
                                     </DropdownMenuItem>
                                 </>
@@ -617,275 +618,295 @@ export default function DealsBrowser({ deals, savedViews }: { deals: Deal[]; sav
     );
 
     return (
-        <div className="page-grid gap-y-6">
-            <div className="flex items-center justify-between">
-                <h1 className="text-4xl font-extrabold">{t('title')}</h1>
-                <div className="flex items-center gap-2">
-                    {currencyCounts.size > 1 && (
-                        <DropdownMenu>
-                            <DropdownMenuTrigger asChild>
+        <div className="min-h-screen bg-background px-2 pt-8 pb-12">
+            <div className="mx-auto flex w-full max-w-7xl flex-col gap-10">
+                <Rise>
+                    <div className="flex items-center justify-between">
+                        <h1 className="text-4xl font-extrabold">{t('title')}</h1>
+                        <div className="flex items-center gap-2">
+                            {currencyCounts.size > 1 && (
+                                <DropdownMenu>
+                                    <DropdownMenuTrigger asChild>
+                                        <button
+                                            type="button"
+                                            aria-label={t('currency')}
+                                            className="flex items-center gap-1.5 rounded-full bg-muted px-3 py-1.5 text-sm text-foreground ring-1 ring-border transition hover:bg-muted/80"
+                                        >
+                                            {activeCurrency}
+                                            <ChevronDownIcon className="size-3.5 text-muted-foreground" />
+                                        </button>
+                                    </DropdownMenuTrigger>
+                                    <DropdownMenuContent align="end">
+                                        {Array.from(currencyCounts.entries())
+                                            .sort((a, b) => b[1] - a[1])
+                                            .map(([c, n]) => (
+                                                <DropdownMenuItem key={c} onSelect={() => setSelectedCurrency(c)}>
+                                                    <span className={c === activeCurrency ? 'font-semibold' : ''}>{c}</span>
+                                                    <span className="ml-auto text-xs text-muted-foreground">{t('currencyCount', { count: n })}</span>
+                                                </DropdownMenuItem>
+                                            ))}
+                                    </DropdownMenuContent>
+                                </DropdownMenu>
+                            )}
+                            <RecordsImportExport entity="deals" onImported={() => router.refresh()} exportIds={visibleDeals.map((d) => d.id)} />
+                            <Button className="bg-brand text-white" aria-label={t('addDeal')} onClick={() => setNewDialogOpen(true)}>
+                                <PlusIcon strokeWidth={2.5} />
+                                {t('newButton')}
+                            </Button>
+                        </div>
+                    </div>
+                </Rise>
+
+                <Rise delay={0.06}>
+                    <section>
+                        <SectionHeader title={t('sectionPerformance')} />
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                            <SummaryTile className="sm:col-span-2" label={t('revenueTrend')} value={<DealsRevenueChart deals={dealsInCurrency} />} />
+                            <SummaryTile label={t('stageRatio')} value={<StageRatio deals={dealsInCurrency} />} />
+                        </div>
+                    </section>
+                </Rise>
+
+                <Rise delay={0.12}>
+                    <section>
+                        <SectionHeader title={t('sectionSummary')} />
+                        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+                            <SummaryTile
+                                label={t('openPipeline')}
+                                tooltip={t('openPipelineTooltip')}
+                                value={formatCompactCurrency(summary.openValue, activeCurrency, locale)}
+                            />
+                            <SummaryTile
+                                label={t('openDeals')}
+                                tooltip={t('openDealsTooltip')}
+                                value={String(summary.openCount)}
+                            />
+                            <SummaryTile
+                                label={t('closedForecast')}
+                                tooltip={t('closedForecastTooltip')}
+                                value={formatCompactCurrency(summary.closedForecastValue, activeCurrency, locale)}
+                            />
+                            <SummaryTile
+                                label={t('closedRevenue')}
+                                tooltip={t('closedRevenueTooltip')}
+                                value={formatCompactCurrency(summary.closedActualValue, activeCurrency, locale)}
+                            />
+                            <SummaryTile
+                                label={t('forecastAccuracy')}
+                                tooltip={t('forecastAccuracyTooltip')}
+                                value={summary.forecastAccuracy != null ? `${Math.round(summary.forecastAccuracy * 100)}%` : '—'}
+                            />
+                        </div>
+                    </section>
+                </Rise>
+
+                <Rise delay={0.18}>
+                    <SavedViewsBar
+                        recordType="deal"
+                        initialViews={savedViews}
+                        currentConfig={currentConfig}
+                        onApply={applyView}
+                    />
+                </Rise>
+
+                <Rise delay={0.24}>
+                    <FilterBar
+                        reduce={reduce}
+                        chips={chips}
+                        hasActiveFilters={hasActiveFilters}
+                        onClearAll={clearAll}
+                        clearAllLabel={tf('clearAll')}
+                        search={
+                            <SearchField
+                                value={query}
+                                onChange={setQuery}
+                                onClear={() => setQuery('')}
+                                placeholder={t('searchPlaceholder')}
+                                searchAria={tf('searchAria')}
+                                clearAria={tf('clearSearchAria')}
+                            />
+                        }
+                        trailing={
+                            <div
+                                role="group"
+                                aria-label={t('displayMode')}
+                                className="inline-flex rounded-full bg-muted p-0.5 ring-1 ring-border"
+                            >
                                 <button
                                     type="button"
-                                    aria-label={t('currency')}
-                                    className="flex items-center gap-1.5 rounded-full bg-muted px-3 py-1.5 text-sm text-foreground ring-1 ring-border transition hover:bg-muted/80"
+                                    onClick={() => setDisplayMode('grid')}
+                                    aria-label={t('gridView')}
+                                    aria-pressed={displayMode === 'grid'}
+                                    className={`flex h-8 w-8 items-center justify-center rounded-full transition active:scale-[0.97] ${displayMode === 'grid' ? 'bg-background text-foreground shadow' : 'text-muted-foreground hover:text-foreground'}`}
                                 >
-                                    {activeCurrency}
-                                    <ChevronDownIcon className="size-3.5 text-muted-foreground" />
+                                    <Squares2X2Icon className="size-4" />
                                 </button>
-                            </DropdownMenuTrigger>
-                            <DropdownMenuContent align="end">
-                                {Array.from(currencyCounts.entries())
-                                    .sort((a, b) => b[1] - a[1])
-                                    .map(([c, n]) => (
-                                        <DropdownMenuItem key={c} onSelect={() => setSelectedCurrency(c)}>
-                                            <span className={c === activeCurrency ? 'font-semibold' : ''}>{c}</span>
-                                            <span className="ml-auto text-xs text-muted-foreground">{t('currencyCount', { count: n })}</span>
-                                        </DropdownMenuItem>
-                                    ))}
-                            </DropdownMenuContent>
-                        </DropdownMenu>
-                    )}
-                    <RecordsImportExport entity="deals" onImported={() => router.refresh()} exportIds={visibleDeals.map((d) => d.id)} />
-                    <Button className="bg-brand text-white" aria-label={t('addDeal')} onClick={() => setNewDialogOpen(true)}>
-                        <PlusIcon strokeWidth={2.5} />
-                        {t('newButton')}
-                    </Button>
-                </div>
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                <SummaryTile className="sm:col-span-2" label={t('revenueTrend')} value={<DealsRevenueChart deals={dealsInCurrency} />} />
-                <SummaryTile label={t('stageRatio')} value={<StageRatio deals={dealsInCurrency} />} />
-            </div>
-
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
-                <SummaryTile
-                    label={t('openPipeline')}
-                    tooltip={t('openPipelineTooltip')}
-                    value={formatCompactCurrency(summary.openValue, activeCurrency, locale)}
-                />
-                <SummaryTile
-                    label={t('openDeals')}
-                    tooltip={t('openDealsTooltip')}
-                    value={String(summary.openCount)}
-                />
-                <SummaryTile
-                    label={t('closedForecast')}
-                    tooltip={t('closedForecastTooltip')}
-                    value={formatCompactCurrency(summary.closedForecastValue, activeCurrency, locale)}
-                />
-                <SummaryTile
-                    label={t('closedRevenue')}
-                    tooltip={t('closedRevenueTooltip')}
-                    value={formatCompactCurrency(summary.closedActualValue, activeCurrency, locale)}
-                />
-                <SummaryTile
-                    label={t('forecastAccuracy')}
-                    tooltip={t('forecastAccuracyTooltip')}
-                    value={summary.forecastAccuracy != null ? `${Math.round(summary.forecastAccuracy * 100)}%` : '—'}
-                />
-            </div>
-
-            <SavedViewsBar
-                recordType="deal"
-                initialViews={savedViews}
-                currentConfig={currentConfig}
-                onApply={applyView}
-            />
-
-            <FilterBar
-                reduce={reduce}
-                chips={chips}
-                hasActiveFilters={hasActiveFilters}
-                onClearAll={clearAll}
-                clearAllLabel={tf('clearAll')}
-                search={
-                    <SearchField
-                        value={query}
-                        onChange={setQuery}
-                        onClear={() => setQuery('')}
-                        placeholder={t('searchPlaceholder')}
-                        searchAria={tf('searchAria')}
-                        clearAria={tf('clearSearchAria')}
-                    />
-                }
-                trailing={
-                    <div
-                        role="group"
-                        aria-label={t('displayMode')}
-                        className="inline-flex rounded-full bg-muted p-0.5 ring-1 ring-border"
+                                <button
+                                    type="button"
+                                    onClick={() => setDisplayMode('table')}
+                                    aria-label={t('tableView')}
+                                    aria-pressed={displayMode === 'table'}
+                                    className={`flex h-8 w-8 items-center justify-center rounded-full transition active:scale-[0.97] ${displayMode === 'table' ? 'bg-background text-foreground shadow' : 'text-muted-foreground hover:text-foreground'}`}
+                                >
+                                    <TableCellsIcon className="size-4" />
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => setDisplayMode('kanban')}
+                                    aria-label={t('kanbanView')}
+                                    aria-pressed={displayMode === 'kanban'}
+                                    className={`flex h-8 w-8 items-center justify-center rounded-full transition active:scale-[0.97] ${displayMode === 'kanban' ? 'bg-background text-foreground shadow' : 'text-muted-foreground hover:text-foreground'}`}
+                                >
+                                    <ViewColumnsIcon className="size-4" />
+                                </button>
+                            </div>
+                        }
                     >
-                        <button
-                            type="button"
-                            onClick={() => setDisplayMode('grid')}
-                            aria-label={t('gridView')}
-                            aria-pressed={displayMode === 'grid'}
-                            className={`flex h-8 w-8 items-center justify-center rounded-full transition active:scale-[0.97] ${displayMode === 'grid' ? 'bg-background text-foreground shadow' : 'text-muted-foreground hover:text-foreground'}`}
-                        >
-                            <Squares2X2Icon className="size-4" />
-                        </button>
-                        <button
-                            type="button"
-                            onClick={() => setDisplayMode('table')}
-                            aria-label={t('tableView')}
-                            aria-pressed={displayMode === 'table'}
-                            className={`flex h-8 w-8 items-center justify-center rounded-full transition active:scale-[0.97] ${displayMode === 'table' ? 'bg-background text-foreground shadow' : 'text-muted-foreground hover:text-foreground'}`}
-                        >
-                            <TableCellsIcon className="size-4" />
-                        </button>
-                        <button
-                            type="button"
-                            onClick={() => setDisplayMode('kanban')}
-                            aria-label={t('kanbanView')}
-                            aria-pressed={displayMode === 'kanban'}
-                            className={`flex h-8 w-8 items-center justify-center rounded-full transition active:scale-[0.97] ${displayMode === 'kanban' ? 'bg-background text-foreground shadow' : 'text-muted-foreground hover:text-foreground'}`}
-                        >
-                            <ViewColumnsIcon className="size-4" />
-                        </button>
-                    </div>
-                }
-            >
-                <RecordsFilterPills<Deal>
-                    facets={facets}
-                    filterState={filterState}
-                    onChange={setFilterState}
-                />
-            </FilterBar>
+                        <RecordsFilterPills<Deal>
+                            facets={facets}
+                            filterState={filterState}
+                            onChange={setFilterState}
+                        />
+                    </FilterBar>
+                </Rise>
 
-            {displayMode === 'kanban' ? (
-                <DealsKanban
-                    deals={visibleDeals}
-                    pipelines={pipelines}
-                    stagesByPipeline={stagesByPipeline}
-                    companyById={companyById}
-                    pipelineById={pipelineById}
-                    stageById={stageById}
-                    riskByDealId={riskByDealId}
-                    onQuickEdit={quickEditOne}
-                    onDelete={deleteOne}
-                    onMoved={() => router.refresh()}
-                    reduce={reduce}
-                />
-            ) : (
-                <RecordsRenderView<Deal>
-                    data={visibleDeals}
-                    columns={[...columns, ...customColumns]}
-                    addColumnSlot={addColumnSlot}
-                    renderCard={(item, { onQuickEdit, onDelete }) => (
-                        <DealCard
-                            deal={item}
-                            company={item.company != null ? companyById.get(item.company) : undefined}
-                            pipeline={item.pipeline != null ? pipelineById.get(item.pipeline) : undefined}
-                            stage={item.stage != null ? stageById.get(item.stage) : undefined}
-                            risk={riskByDealId.get(item.id)}
-                            onQuickEdit={onQuickEdit ? () => onQuickEdit(item) : undefined}
-                            onDelete={onDelete ? () => onDelete(item) : undefined}
+                <Rise delay={0.3}>
+                    {displayMode === 'kanban' ? (
+                        <DealsKanban
+                            deals={visibleDeals}
+                            pipelines={pipelines}
+                            stagesByPipeline={stagesByPipeline}
+                            companyById={companyById}
+                            pipelineById={pipelineById}
+                            stageById={stageById}
+                            riskByDealId={riskByDealId}
+                            onQuickEdit={quickEditOne}
+                            onDelete={deleteOne}
+                            onMoved={() => router.refresh()}
+                            reduce={reduce}
+                        />
+                    ) : (
+                        <RecordsRenderView<Deal>
+                            data={visibleDeals}
+                            columns={[...columns, ...customColumns]}
+                            addColumnSlot={addColumnSlot}
+                            renderCard={(item, { onQuickEdit, onDelete }) => (
+                                <DealCard
+                                    deal={item}
+                                    company={item.company != null ? companyById.get(item.company) : undefined}
+                                    pipeline={item.pipeline != null ? pipelineById.get(item.pipeline) : undefined}
+                                    stage={item.stage != null ? stageById.get(item.stage) : undefined}
+                                    risk={riskByDealId.get(item.id)}
+                                    onQuickEdit={onQuickEdit ? () => onQuickEdit(item) : undefined}
+                                    onDelete={onDelete ? () => onDelete(item) : undefined}
+                                />
+                            )}
+                            renderAvatar={(item) => {
+                                const company = item.company != null ? companyById.get(item.company) : undefined;
+                                if (company) return <CompanyAvatar company={company} type="large" />;
+                                const contact = contactByDealId.get(item.id);
+                                return (
+                                    <ContactAvatar
+                                        contact={contact ?? { id: 0, name: t('freelancer'), imageUrl: '', email: '', phone: '', title: '', createdAt: '', updatedAt: '' }}
+                                        type="large"
+                                    />
+                                );
+                            }}
+                            detailPath={(item) => `/records/deals/${item.id}`}
+                            displayMode={displayMode}
+                            selectedIds={selectedIds}
+                            onSelectedIdsChange={setSelectedIds}
+                            onQuickEdit={quickEditOne}
+                            onDelete={deleteOne}
+                            gridClassName="grid grid-cols-1 gap-3"
+                            entityLabel={t('entityLabel')}
+                            selectionActions={selectionActions}
                         />
                     )}
-                    renderAvatar={(item) => {
-                        const company = item.company != null ? companyById.get(item.company) : undefined;
-                        if (company) return <CompanyAvatar company={company} type="large" />;
-                        const contact = contactByDealId.get(item.id);
-                        return (
-                            <ContactAvatar
-                                contact={contact ?? { id: 0, name: t('freelancer'), imageUrl: '', email: '', phone: '', title: '', createdAt: '', updatedAt: '' }}
-                                type="large"
-                            />
-                        );
-                    }}
-                    detailPath={(item) => `/records/deals/${item.id}`}
-                    displayMode={displayMode}
+                </Rise>
+
+                <QuickEditDealSheet
+                    open={editSheetOpen}
+                    onOpenChange={setEditSheetOpen}
                     selectedIds={selectedIds}
-                    onSelectedIdsChange={setSelectedIds}
-                    onQuickEdit={quickEditOne}
-                    onDelete={deleteOne}
-                    gridClassName="grid grid-cols-1 gap-3"
-                    entityLabel={t('entityLabel')}
-                    selectionActions={selectionActions}
+                    selectedDeals={selectedDeals}
+                    drafts={drafts}
+                    updateDraft={updateDraft}
+                    companies={companies}
+                    pipelines={pipelines}
+                    stagesByPipeline={stagesByPipeline}
+                    isSaving={isSaving}
+                    saveEdits={saveEdits}
                 />
-            )}
 
-            <QuickEditDealSheet
-                open={editSheetOpen}
-                onOpenChange={setEditSheetOpen}
-                selectedIds={selectedIds}
-                selectedDeals={selectedDeals}
-                drafts={drafts}
-                updateDraft={updateDraft}
-                companies={companies}
-                pipelines={pipelines}
-                stagesByPipeline={stagesByPipeline}
-                isSaving={isSaving}
-                saveEdits={saveEdits}
-            />
+                <NewDealDialog
+                    open={newDialogOpen}
+                    onOpenChange={closeNewDialog}
+                    payload={newPayload}
+                    setPayload={setNewPayload}
+                    companies={companies}
+                    pipelines={pipelines}
+                    stagesByPipeline={stagesByPipeline}
+                    isCreating={isCreating}
+                    isSuccess={creationSucceeded}
+                    createNewDeal={createNewDeal}
+                />
 
-            <NewDealDialog
-                open={newDialogOpen}
-                onOpenChange={closeNewDialog}
-                payload={newPayload}
-                setPayload={setNewPayload}
-                companies={companies}
-                pipelines={pipelines}
-                stagesByPipeline={stagesByPipeline}
-                isCreating={isCreating}
-                isSuccess={creationSucceeded}
-                createNewDeal={createNewDeal}
-            />
+                <DeleteRecordDialog
+                    open={deleteDialogOpen}
+                    onOpenChange={setDeleteDialogOpen}
+                    selectedIds={selectedIds}
+                    selectedItems={selectedDeals}
+                    entityLabel={t('entityLabel')}
+                    getDisplayName={(d) => d.name}
+                    isDeleting={isDeleting}
+                    confirmDelete={confirmDelete}
+                />
 
-            <DeleteRecordDialog
-                open={deleteDialogOpen}
-                onOpenChange={setDeleteDialogOpen}
-                selectedIds={selectedIds}
-                selectedItems={selectedDeals}
-                entityLabel={t('entityLabel')}
-                getDisplayName={(d) => d.name}
-                isDeleting={isDeleting}
-                confirmDelete={confirmDelete}
-            />
+                <BulkTagDialog
+                    open={bulkTag.open}
+                    onOpenChange={(open) => setBulkTag((s) => ({ ...s, open }))}
+                    mode={bulkTag.mode}
+                    count={selectedDealIds.length}
+                    tags={tags}
+                    messages={{
+                        success: (count) => t(bulkTag.mode === 'add' ? 'toastTagAdded' : 'toastTagRemoved', { count }),
+                        partial: (succeeded, total) => t(bulkTag.mode === 'add' ? 'toastTagAddedPartial' : 'toastTagRemovedPartial', { succeeded, total }),
+                        failure: (failed) => t('toastTagFailed', { failed }),
+                    }}
+                    onApply={applyBulkTag}
+                    onSuccess={onBulkSuccess}
+                />
 
-            <BulkTagDialog
-                open={bulkTag.open}
-                onOpenChange={(open) => setBulkTag((s) => ({ ...s, open }))}
-                mode={bulkTag.mode}
-                count={selectedDealIds.length}
-                tags={tags}
-                messages={{
-                    success: (count) => t(bulkTag.mode === 'add' ? 'toastTagAdded' : 'toastTagRemoved', { count }),
-                    partial: (succeeded, total) => t(bulkTag.mode === 'add' ? 'toastTagAddedPartial' : 'toastTagRemovedPartial', { succeeded, total }),
-                    failure: (failed) => t('toastTagFailed', { failed }),
-                }}
-                onApply={applyBulkTag}
-                onSuccess={onBulkSuccess}
-            />
+                <BulkAssignOwnerDialog
+                    open={bulkOwnerOpen}
+                    onOpenChange={setBulkOwnerOpen}
+                    count={selectedDealIds.length}
+                    members={members}
+                    messages={{
+                        success: (count) => t('toastOwnerAssigned', { count }),
+                        partial: (succeeded, total) => t('toastOwnerAssignedPartial', { succeeded, total }),
+                        failure: (failed) => t('toastOwnerFailed', { failed }),
+                    }}
+                    onApply={(ownerId) => bulkAssignDealOwner(selectedDealIds, ownerId)}
+                    onSuccess={onBulkSuccess}
+                />
 
-            <BulkAssignOwnerDialog
-                open={bulkOwnerOpen}
-                onOpenChange={setBulkOwnerOpen}
-                count={selectedDealIds.length}
-                members={members}
-                messages={{
-                    success: (count) => t('toastOwnerAssigned', { count }),
-                    partial: (succeeded, total) => t('toastOwnerAssignedPartial', { succeeded, total }),
-                    failure: (failed) => t('toastOwnerFailed', { failed }),
-                }}
-                onApply={(ownerId) => bulkAssignDealOwner(selectedDealIds, ownerId)}
-                onSuccess={onBulkSuccess}
-            />
-
-            <BulkChangeStageDialog
-                open={bulkStageOpen}
-                onOpenChange={setBulkStageOpen}
-                count={selectedDealIds.length}
-                stages={stageOptions}
-                mixedPipelines={mixedPipelines}
-                messages={{
-                    success: (count) => t('toastStageChanged', { count }),
-                    partial: (succeeded, total) => t('toastStageChangedPartial', { succeeded, total }),
-                    failure: (failed) => t('toastStageFailed', { failed }),
-                }}
-                onApply={(stageId) => bulkChangeDealStage(selectedDealIds, stageId)}
-                onSuccess={onBulkSuccess}
-            />
+                <BulkChangeStageDialog
+                    open={bulkStageOpen}
+                    onOpenChange={setBulkStageOpen}
+                    count={selectedDealIds.length}
+                    stages={stageOptions}
+                    mixedPipelines={mixedPipelines}
+                    messages={{
+                        success: (count) => t('toastStageChanged', { count }),
+                        partial: (succeeded, total) => t('toastStageChangedPartial', { succeeded, total }),
+                        failure: (failed) => t('toastStageFailed', { failed }),
+                    }}
+                    onApply={(stageId) => bulkChangeDealStage(selectedDealIds, stageId)}
+                    onSuccess={onBulkSuccess}
+                />
+            </div>
         </div>
     );
 }

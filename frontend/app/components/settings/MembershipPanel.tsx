@@ -26,12 +26,8 @@ import {
     DialogTitle,
 } from "@/components/ui/dialog";
 import { Skeleton } from "@/components/ui/skeleton";
-
-function SectionLabel({ children }: { children: React.ReactNode }) {
-    return (
-        <h2 className="text-xs font-medium tracking-[0.12em] text-muted-foreground uppercase">{children}</h2>
-    );
-}
+import Rise from "@/app/components/motion/Rise";
+import SectionHeader from "@/app/components/dashboard/SectionHeader";
 
 function writeWorkspaceCookie(id: number | null) {
     if (id == null) {
@@ -103,8 +99,6 @@ export default function MembershipPanel() {
         try {
             await leaveWorkspace(activeWorkspaceId);
             const remaining = workspaces.filter((w) => w.id !== activeWorkspaceId);
-            // Repoint the active-workspace cookie before any further request so it never targets
-            // the workspace we just left (which would now be rejected as a non-membership).
             writeWorkspaceCookie(remaining[0]?.id ?? null);
             toastSuccess(t("left"));
             router.replace(remaining.length > 0 ? "/dashboard" : "/onboarding");
@@ -118,23 +112,25 @@ export default function MembershipPanel() {
 
     return (
         <div className="space-y-10">
-            <section className="space-y-3">
-                <SectionLabel>{t("pendingTitle")}</SectionLabel>
-                <p className="text-sm text-muted-foreground">{t("pendingSubtitle")}</p>
+            <Rise className="space-y-3">
+                <div>
+                    <SectionHeader title={t("pendingTitle")} />
+                    <p className="px-6 text-sm text-muted-foreground">{t("pendingSubtitle")}</p>
+                </div>
 
                 {loading ? (
-                    <div className="overflow-hidden rounded-2xl bg-card ring-1 ring-border">
+                    <div className="overflow-hidden rounded-2xl border border-border bg-card">
                         <div className="flex items-center gap-3 px-4 py-3">
                             <Skeleton className="size-8 shrink-0 rounded-full" />
                             <Skeleton className="h-3.5 w-40" />
                         </div>
                     </div>
                 ) : pending.length === 0 ? (
-                    <p className="rounded-2xl bg-card px-4 py-6 text-center text-sm text-muted-foreground ring-1 ring-border">
+                    <p className="rounded-2xl border border-border bg-card px-4 py-6 text-center text-sm text-muted-foreground">
                         {t("pendingEmpty")}
                     </p>
                 ) : (
-                    <ul className="divide-y divide-border overflow-hidden rounded-2xl bg-card ring-1 ring-border">
+                    <ul className="divide-y divide-border overflow-hidden rounded-2xl border border-border bg-card">
                         {pending.map((workspace) => {
                             const busy = busyId === workspace.id;
                             return (
@@ -168,11 +164,11 @@ export default function MembershipPanel() {
                         })}
                     </ul>
                 )}
-            </section>
+            </Rise>
 
-            <section className="space-y-3">
-                <SectionLabel>{t("leaveTitle")}</SectionLabel>
-                <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl bg-card px-4 py-4 ring-1 ring-border">
+            <Rise className="space-y-3">
+                <SectionHeader title={t("leaveTitle")} />
+                <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-border bg-card px-4 py-4">
                     <p className="text-sm text-muted-foreground">
                         {t("leaveSubtitle", { workspace: activeWorkspace?.name ?? "" })}
                     </p>
@@ -184,7 +180,7 @@ export default function MembershipPanel() {
                         {t("leave")}
                     </Button>
                 </div>
-            </section>
+            </Rise>
 
             <Dialog open={leaveOpen} onOpenChange={(open) => !leaving && setLeaveOpen(open)}>
                 <DialogContent>

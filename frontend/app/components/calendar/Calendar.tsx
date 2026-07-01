@@ -9,6 +9,7 @@ import type { Task, Activity, Deal, Contact, Note } from '@/app/lib/types';
 import { parseMysqlDateTime } from '@/app/lib/utils';
 import { noteContentToPlainText } from '@/app/lib/references';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import Rise from '@/app/components/motion/Rise';
 
 type Props = {
     activities?: Activity[];
@@ -31,8 +32,8 @@ type Entry = {
 
 const CHIP_CLASS: Record<EntryKind, string> = {
     task: 'bg-brand-light text-brand-dark hover:bg-brand/20',
-    activity: 'bg-blue-100 text-blue-900 hover:bg-blue-200 dark:bg-blue-950/40 dark:text-blue-300 dark:hover:bg-blue-950/60',
-    deal: 'bg-amber-100 text-amber-900 hover:bg-amber-200 dark:bg-amber-950/40 dark:text-amber-300 dark:hover:bg-amber-950/60',
+    activity: 'bg-chart-2/12 text-chart-2 hover:bg-chart-2/20',
+    deal: 'bg-chart-open/15 text-chart-open hover:bg-chart-open/25',
     note: 'bg-muted text-foreground hover:bg-muted/70',
 };
 
@@ -135,7 +136,6 @@ export default function Calendar({ activities, tasks, persons, deals, notes }: P
                     kind: 'note',
                     sortAt: when,
                     label: author ? `${author.name}: ${preview}` : preview,
-                    // TODO: add param to /notes so that if specified, the note is highlighted on page visit
                     content: plain,
                     href: `/activity/notes?id=${note.id}`,
                 },
@@ -151,6 +151,11 @@ export default function Calendar({ activities, tasks, persons, deals, notes }: P
     const cells = useMemo(() => {
         return Array.from({ length: 42 }, (_, i) => new Date(gridStart.getTime() + i * DAY_MS));
     }, [gridStart]);
+
+    const hasEntriesInView = useMemo(
+        () => cells.some((day) => (entriesByDay.get(dateKey(day))?.length ?? 0) > 0),
+        [cells, entriesByDay],
+    );
 
     const todayKey = useMemo(() => dateKey(new Date()), []);
     const monthLabel = useMemo(
@@ -170,113 +175,121 @@ export default function Calendar({ activities, tasks, persons, deals, notes }: P
     const goToday = () => setMonthAnchor(startOfMonth(new Date()));
 
     return (
-        <div className="mx-auto w-full max-w-7xl space-y-6">
-            <header className="flex flex-wrap items-end justify-between gap-4">
-                <div>
-                    <h1 className="text-4xl font-extrabold tracking-tight">{t('title')}</h1>
-                    <p className="mt-2 text-sm text-muted-foreground tabular-nums">{monthLabel}</p>
-                </div>
-                <div className="flex items-center gap-2">
-                    <button
-                        type="button"
-                        onClick={goToday}
-                        className="h-8 rounded-full bg-muted px-4 text-xs font-medium text-foreground ring-1 ring-border transition hover:bg-background"
-                    >
-                        {t('today')}
-                    </button>
-                    <button
-                        type="button"
-                        onClick={goPrev}
-                        aria-label={t('prev')}
-                        className="grid size-8 place-items-center rounded-full bg-muted text-foreground ring-1 ring-border transition hover:bg-background"
-                    >
-                        <ChevronLeftIcon className="size-4" />
-                    </button>
-                    <button
-                        type="button"
-                        onClick={goNext}
-                        aria-label={t('next')}
-                        className="grid size-8 place-items-center rounded-full bg-muted text-foreground ring-1 ring-border transition hover:bg-background"
-                    >
-                        <ChevronRightIcon className="size-4" />
-                    </button>
-                </div>
-            </header>
-
-            <div className="overflow-hidden rounded-2xl bg-muted ring-1 ring-border">
-                <div className="grid grid-cols-7 border-b border-border bg-card">
-                    {weekdayLabels.map((label) => (
-                        <div
-                            key={label}
-                            className="px-2 py-2 text-center text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground"
-                        >
-                            {label}
+        <div className="min-h-screen bg-background px-2 pt-8 pb-12">
+            <div className="mx-auto flex w-full max-w-7xl flex-col gap-10">
+                <Rise>
+                    <header className="flex flex-wrap items-end justify-between gap-4">
+                        <div>
+                            <h1 className="text-4xl font-extrabold tracking-tight">{t('title')}</h1>
+                            <p className="mt-2 text-sm text-muted-foreground tabular-nums">{monthLabel}</p>
                         </div>
-                    ))}
-                </div>
-                <div className="grid grid-cols-7 gap-px bg-border">
-                    {cells.map((day) => {
-                        const key = dateKey(day);
-                        const inMonth = day.getMonth() === monthAnchor.getMonth();
-                        const isToday = key === todayKey;
-                        // const entries = entriesByDay.get(key) ?? [];
-
-                        // order entries by importance (deal, task, activity, note)
-                        const entries = entriesByDay.get(key) ?? [];
-                        entries.sort((a, b) => {
-                            if (a.kind === 'deal') return -1;
-                            if (b.kind === 'deal') return 1;
-                            if (a.kind === 'task') return -1;
-                            if (b.kind === 'task') return 1;
-                            if (a.kind === 'activity') return -1;
-                            if (b.kind === 'activity') return 1;
-                            if (a.kind === 'note') return -1;
-                            if (b.kind === 'note') return 1;
-                            return 0;
-                        });
-                        return (
-                            <div
-                                key={key}
-                                className={`flex h-[140px] flex-col gap-1 p-2 ${
-                                    inMonth ? 'bg-card' : 'bg-muted'
-                                }`}
+                        <div className="flex items-center gap-2">
+                            <button
+                                type="button"
+                                onClick={goToday}
+                                className="h-8 rounded-full bg-muted px-4 text-xs font-medium text-foreground ring-1 ring-border transition hover:bg-background"
                             >
-                                <div className="flex items-center justify-end">
-                                    <span
-                                        className={`grid size-6 place-items-center rounded-full text-xs tabular-nums ${
-                                            isToday
-                                                ? 'bg-brand font-semibold text-white'
-                                                : inMonth
-                                                  ? 'text-foreground'
-                                                  : 'text-muted-foreground'
+                                {t('today')}
+                            </button>
+                            <button
+                                type="button"
+                                onClick={goPrev}
+                                aria-label={t('prev')}
+                                className="grid size-8 place-items-center rounded-full bg-muted text-foreground ring-1 ring-border transition hover:bg-background"
+                            >
+                                <ChevronLeftIcon className="size-4" />
+                            </button>
+                            <button
+                                type="button"
+                                onClick={goNext}
+                                aria-label={t('next')}
+                                className="grid size-8 place-items-center rounded-full bg-muted text-foreground ring-1 ring-border transition hover:bg-background"
+                            >
+                                <ChevronRightIcon className="size-4" />
+                            </button>
+                        </div>
+                    </header>
+                </Rise>
+
+                <Rise delay={0.06}>
+                    <div className="overflow-hidden rounded-2xl border border-border bg-card">
+                        {!hasEntriesInView ? (
+                            <p className="border-b border-border px-4 py-3 text-center text-xs text-muted-foreground">
+                                {t('emptyMonth')}
+                            </p>
+                        ) : null}
+                        <div className="grid grid-cols-7 border-b border-border bg-card">
+                            {weekdayLabels.map((label) => (
+                                <div
+                                    key={label}
+                                    className="px-2 py-2 text-center text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground"
+                                >
+                                    {label}
+                                </div>
+                            ))}
+                        </div>
+                        <div className="grid grid-cols-7 gap-px bg-border">
+                            {cells.map((day) => {
+                                const key = dateKey(day);
+                                const inMonth = day.getMonth() === monthAnchor.getMonth();
+                                const isToday = key === todayKey;
+                                const entries = entriesByDay.get(key) ?? [];
+                                entries.sort((a, b) => {
+                                    if (a.kind === 'deal') return -1;
+                                    if (b.kind === 'deal') return 1;
+                                    if (a.kind === 'task') return -1;
+                                    if (b.kind === 'task') return 1;
+                                    if (a.kind === 'activity') return -1;
+                                    if (b.kind === 'activity') return 1;
+                                    if (a.kind === 'note') return -1;
+                                    if (b.kind === 'note') return 1;
+                                    return 0;
+                                });
+                                return (
+                                    <div
+                                        key={key}
+                                        className={`flex h-[140px] flex-col gap-1 p-2 ${
+                                            inMonth ? 'bg-card' : 'bg-muted'
                                         }`}
                                     >
-                                        {day.getDate()}
-                                    </span>
-                                </div>
-                                <ul className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto">
-                                    {entries.map((entry) => (
-                                        <li key={entry.id}>
-                                            <Tooltip>
-                                                <TooltipTrigger asChild>
-                                                    <Link
-                                                        href={entry.href}
-                                                        className={`block truncate rounded-md px-2 py-0.5 text-[11px] font-medium transition ${CHIP_CLASS[entry.kind]}`}
-                                                    >
-                                                        {entry.label}
-                                                    </Link>
-                                                </TooltipTrigger>
-                                                <TooltipContent side="left" align="center">
-                                                    {t(`item${entry.kind.charAt(0).toUpperCase() + entry.kind.slice(1)}` as 'itemTask')}: {entry.content}
-                                                </TooltipContent>
-                                            </Tooltip>
-                                        </li>
-                                    ))}
-                                </ul>
-                            </div>
-                        );
-                    })}
-                </div>
+                                        <div className="flex items-center justify-end">
+                                            <span
+                                                className={`grid size-6 place-items-center rounded-full text-xs tabular-nums ${
+                                                    isToday
+                                                        ? 'bg-brand font-semibold text-white'
+                                                        : inMonth
+                                                          ? 'text-foreground'
+                                                          : 'text-muted-foreground'
+                                                }`}
+                                            >
+                                                {day.getDate()}
+                                            </span>
+                                        </div>
+                                        <ul className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto">
+                                            {entries.map((entry) => (
+                                                <li key={entry.id}>
+                                                    <Tooltip>
+                                                        <TooltipTrigger asChild>
+                                                            <Link
+                                                                href={entry.href}
+                                                                className={`block truncate rounded-md px-2 py-0.5 text-[11px] font-medium transition ${CHIP_CLASS[entry.kind]}`}
+                                                            >
+                                                                {entry.label}
+                                                            </Link>
+                                                        </TooltipTrigger>
+                                                        <TooltipContent side="left" align="center">
+                                                            {t(`item${entry.kind.charAt(0).toUpperCase() + entry.kind.slice(1)}` as 'itemTask')}: {entry.content}
+                                                        </TooltipContent>
+                                                    </Tooltip>
+                                                </li>
+                                            ))}
+                                        </ul>
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    </div>
+                </Rise>
             </div>
         </div>
     );
