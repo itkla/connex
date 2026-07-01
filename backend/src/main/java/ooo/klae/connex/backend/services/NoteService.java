@@ -140,17 +140,18 @@ public class NoteService {
         }
         String snippet = snippet(note.getContent());
         String triggeredAt = LocalDateTime.now(ZoneOffset.UTC).format(TS);
+        String noteAnchor = "?note=" + note.getId();
         String contextType = null;
         Integer contextId = null;
-        String actionUrl = "/activity/notes";
+        String actionUrl = "/activity/notes" + noteAnchor;
         if (note.getDeal() != null && note.getDeal().getId() > 0) {
             contextType = "deal";
             contextId = note.getDeal().getId();
-            actionUrl = "/records/deals/" + contextId;
+            actionUrl = "/records/deals/" + contextId + noteAnchor;
         } else if (note.getPerson() != null && note.getPerson().getId() > 0) {
             contextType = "person";
             contextId = note.getPerson().getId();
-            actionUrl = "/records/contacts/" + contextId;
+            actionUrl = "/records/contacts/" + contextId + noteAnchor;
         }
         for (int recipientId : recipientIds) {
             if (recipientId == actor.getId()) {

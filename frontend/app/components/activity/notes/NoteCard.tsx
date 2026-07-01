@@ -1,6 +1,8 @@
 'use client';
 
 import Link from 'next/link';
+import { useEffect, useRef } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { useLocale, useTranslations } from 'next-intl';
 import { motion, useReducedMotion } from 'motion/react';
 import { toastError, toastSuccess } from '@/app/lib/toast';
@@ -41,6 +43,15 @@ export default function NoteCard({ note, person, deal, author, onEdit, onDelete 
     const t = useTranslations('ActivityNotesCard');
     const locale = useLocale();
     const reduce = useReducedMotion() ?? false;
+    const cardRef = useRef<HTMLDivElement>(null);
+    const searchParams = useSearchParams();
+    const isHighlighted = searchParams.get('note') === String(note.id);
+
+    useEffect(() => {
+        if (isHighlighted) {
+            cardRef.current?.scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: 'center' });
+        }
+    }, [isHighlighted, reduce]);
     const updated = note.updatedAt ?? note.createdAt;
     const authorName = author?.displayName || author?.username || t('unknownAuthor');
     const content = (note.content ?? '').trim();
@@ -67,13 +78,13 @@ export default function NoteCard({ note, person, deal, author, onEdit, onDelete 
     };
 
     return (
-        <motion.div layout={!reduce} {...presence} className="min-w-0">
+        <motion.div ref={cardRef} layout={!reduce} {...presence} className="min-w-0 scroll-mt-24">
             <motion.div
                 whileHover={reduce ? undefined : { y: -2 }}
                 whileTap={reduce ? undefined : { scale: 0.99 }}
                 transition={{ duration: 0.2, ease: EASE_OUT }}
                 onClick={() => onEdit?.()}
-                className="group relative flex aspect-square w-full min-w-0 cursor-pointer flex-col overflow-hidden rounded-2xl bg-card p-4 ring-1 ring-border transition-shadow duration-200 hover:shadow-lg"
+                className={`group relative flex aspect-square w-full min-w-0 cursor-pointer flex-col overflow-hidden rounded-2xl bg-card p-4 transition-shadow duration-200 hover:shadow-lg ${isHighlighted ? 'ring-2 ring-brand' : 'ring-1 ring-border'}`}
             >
                 <DropdownMenu>
                     <DropdownMenuTrigger asChild>

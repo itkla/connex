@@ -124,7 +124,7 @@ class NoteMentionTest extends AbstractServiceTest {
         Notification notification = mentions(mentioned.getId()).get(0);
         assertEquals("person", notification.getContextType());
         assertEquals(person.getId(), notification.getContextId());
-        assertEquals("/records/contacts/" + person.getId(), notification.getActionUrl());
+        assertEquals("/records/contacts/" + person.getId() + "?note=" + note.getId(), notification.getActionUrl());
         assertNull(notification.getContextLabel());
     }
 
