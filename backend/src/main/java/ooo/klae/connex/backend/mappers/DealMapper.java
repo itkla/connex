@@ -4,6 +4,7 @@ import org.apache.ibatis.annotations.Param;
 
 import ooo.klae.connex.backend.beans.Deal;
 import ooo.klae.connex.backend.beans.DealPerson;
+import ooo.klae.connex.backend.beans.DealStakeholder;
 import ooo.klae.connex.backend.beans.User;
 import java.util.List;
 
@@ -59,6 +60,8 @@ public interface DealMapper {
         @Param("workspaceId") int workspaceId,
         @Param("dealId") int dealId
     );
+    /** Every deal stakeholder in the workspace as {@code (dealId, personId, name, role)} rows; for deal-risk scoring. */
+    List<DealStakeholder> getAllDealStakeholders(int workspaceId);
     int addPerson(
         @Param("workspaceId") int workspaceId,
         @Param("dealId") int dealId,

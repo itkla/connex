@@ -26,12 +26,15 @@ import ooo.klae.connex.backend.dto.DealCollaboratorsDto;
 import ooo.klae.connex.backend.dto.DealDto;
 import ooo.klae.connex.backend.dto.DealMoveRequest;
 import ooo.klae.connex.backend.dto.DealOwnerDto;
+import ooo.klae.connex.backend.dto.DealRiskDto;
 import ooo.klae.connex.backend.dto.NoteDto;
 import ooo.klae.connex.backend.dto.TagDto;
 import ooo.klae.connex.backend.dto.TaskDto;
 import ooo.klae.connex.backend.dto.UserDto;
 import ooo.klae.connex.backend.services.BulkOperationService;
+import ooo.klae.connex.backend.services.DealRiskService;
 import ooo.klae.connex.backend.services.DealService;
+import ooo.klae.connex.backend.services.WorkspaceService;
 
 import java.util.List;
 import java.util.Map;
@@ -50,6 +53,8 @@ import lombok.RequiredArgsConstructor;
 public class DealController {
     private final DealService dealService;
     private final BulkOperationService bulkOperationService;
+    private final DealRiskService dealRiskService;
+    private final WorkspaceService workspaceService;
 
     /**
      * GET endpoint to retrieve deals, with filtering by pipelineId, stageId, companyId, personId, or tagId.
@@ -86,6 +91,18 @@ public class DealController {
     @GetMapping("/{id}")
     public DealDto getDealById(@PathVariable int id) {
         return DealDto.from(dealService.getDealById(id));
+    }
+
+    /** Risk assessment for every at-risk open deal in the active workspace, highest risk first. */
+    @GetMapping("/risk")
+    public List<DealRiskDto> getDealRisks() {
+        return dealRiskService.assessWorkspace(workspaceService.getCurrentWorkspaceId());
+    }
+
+    /** Risk assessment for a single deal; {@code level} is {@code "none"} when it is not at risk. */
+    @GetMapping("/{id}/risk")
+    public DealRiskDto getDealRisk(@PathVariable int id) {
+        return dealRiskService.assessDeal(workspaceService.getCurrentWorkspaceId(), id);
     }
 
     /**
