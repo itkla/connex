@@ -85,7 +85,7 @@ export default function ReplayView({
                 </div>
             )}
 
-            <div className="pointer-events-none absolute inset-x-0 top-3 z-10 flex items-center justify-between px-3">
+            <div className="pointer-events-none absolute left-3 top-3 z-10 flex flex-wrap items-center gap-2">
                 <button
                     type="button"
                     onClick={onExit}

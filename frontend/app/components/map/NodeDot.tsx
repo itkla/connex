@@ -23,7 +23,7 @@ export default function NodeDot({
                 onClick={onClick}
                 title={title}
                 className={cn(
-                    'size-3 ring-1 ring-border shadow-sm transition-transform hover:scale-150',
+                    'map-warmth size-3 ring-1 ring-border shadow-sm hover:scale-150',
                     shape === 'circle' ? 'rounded-full' : 'rounded-[3px]',
                     className,
                 )}
