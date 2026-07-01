@@ -376,6 +376,19 @@ export type Activity = {
     timestamp?: string;
 };
 
+export type DealSummary = {
+    id: number;
+    name: string;
+    value: number;
+    currency: string;
+    status: string;
+    expectedCloseDate?: string | null;
+    stageName?: string | null;
+    pipelineName?: string | null;
+    companyName?: string | null;
+    ownerName?: string | null;
+};
+
 export type NoteReferenceType = "user" | "person" | "deal" | "company";
 
 export type NoteReference = {

@@ -26,6 +26,7 @@ import ooo.klae.connex.backend.dto.DealCollaboratorsDto;
 import ooo.klae.connex.backend.dto.DealDto;
 import ooo.klae.connex.backend.dto.DealMoveRequest;
 import ooo.klae.connex.backend.dto.DealOwnerDto;
+import ooo.klae.connex.backend.dto.DealSummaryDto;
 import ooo.klae.connex.backend.dto.NoteDto;
 import ooo.klae.connex.backend.dto.TagDto;
 import ooo.klae.connex.backend.dto.TaskDto;
@@ -86,6 +87,16 @@ public class DealController {
     @GetMapping("/{id}")
     public DealDto getDealById(@PathVariable int id) {
         return DealDto.from(dealService.getDealById(id));
+    }
+
+    /**
+     * GET endpoint returning a name-resolved summary of a deal for previews.
+     * @param id
+     * @return
+     */
+    @GetMapping("/{id}/summary")
+    public DealSummaryDto getDealSummary(@PathVariable int id) {
+        return dealService.getDealSummary(id);
     }
 
     /**

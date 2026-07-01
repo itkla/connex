@@ -17,6 +17,7 @@ import ooo.klae.connex.backend.beans.Pipeline;
 import ooo.klae.connex.backend.beans.Stage;
 import ooo.klae.connex.backend.beans.Task;
 import ooo.klae.connex.backend.beans.User;
+import ooo.klae.connex.backend.dto.DealSummaryDto;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 
@@ -88,6 +89,28 @@ class DealServiceTest extends AbstractServiceTest {
     @Test
     void getTasksByDealId_throwsWhenDealMissing() {
         assertThrows(ResourceNotFoundException.class, () -> dealService.getTasksByDealId(-1));
+    }
+
+    @Test
+    void getDealSummary_resolvesNames() {
+        Company company = newCompany();
+        Pipeline pipeline = newPipeline();
+        Stage stage = newStage(pipeline, 0);
+        Deal deal = newDeal(pipeline, stage, company);
+
+        DealSummaryDto summary = dealService.getDealSummary(deal.getId());
+
+        assertEquals(deal.getId(), summary.getId());
+        assertEquals(pipeline.getName(), summary.getPipelineName());
+        assertEquals(stage.getName(), summary.getStageName());
+        assertEquals(company.getName(), summary.getCompanyName());
+        assertEquals(currentUser.getDisplayName(), summary.getOwnerName());
+        assertEquals("open", summary.getStatus());
+    }
+
+    @Test
+    void getDealSummary_throwsWhenDealMissing() {
+        assertThrows(ResourceNotFoundException.class, () -> dealService.getDealSummary(-1));
     }
 
     @Test

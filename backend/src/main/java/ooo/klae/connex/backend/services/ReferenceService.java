@@ -14,17 +14,20 @@ import org.springframework.transaction.annotation.Transactional;
 
 import ooo.klae.connex.backend.beans.Note;
 import ooo.klae.connex.backend.beans.NoteReference;
+import ooo.klae.connex.backend.mappers.CompanyMapper;
+import ooo.klae.connex.backend.mappers.DealMapper;
 import ooo.klae.connex.backend.mappers.NoteReferenceMapper;
+import ooo.klae.connex.backend.mappers.PersonMapper;
 
 import lombok.RequiredArgsConstructor;
 
 /**
  * Derives the structured @-references for a note from its content tokens
  * ({@code [Label](type:id)}) and persists them, replacing the previous set.
- * Tokens are validated against the workspace, so a client can never inject a
- * reference to an entity outside the current tenant. Phase A resolves only
- * member ({@code user}) references; contact/deal/company references are handled
- * separately (issue #190).
+ * Every token is validated against the active workspace before it is stored, so
+ * a client can never inject a reference to an entity outside the current tenant.
+ * Members ({@code user}) drive mention notifications; contacts ({@code person}),
+ * deals, and companies are stored as inline record references (no notification).
  */
 @Service
 @RequiredArgsConstructor
@@ -32,8 +35,14 @@ public class ReferenceService {
 
     private final NoteReferenceMapper noteReferenceMapper;
     private final WorkspaceService workspaceService;
+    private final PersonMapper personMapper;
+    private final DealMapper dealMapper;
+    private final CompanyMapper companyMapper;
 
     static final String TYPE_USER = "user";
+    static final String TYPE_PERSON = "person";
+    static final String TYPE_DEAL = "deal";
+    static final String TYPE_COMPANY = "company";
     private static final int MAX_REFERENCES = 100;
     private static final int MAX_LABEL_LENGTH = 255;
     private static final Pattern TOKEN =
@@ -101,16 +110,13 @@ public class ReferenceService {
         Matcher matcher = TOKEN.matcher(content);
         while (matcher.find() && unique.size() < MAX_REFERENCES) {
             String type = matcher.group(2);
-            if (!TYPE_USER.equals(type)) {
-                continue;
-            }
             int refId;
             try {
                 refId = Integer.parseInt(matcher.group(3));
             } catch (NumberFormatException ignored) {
                 continue;
             }
-            if (!workspaceService.isMember(workspaceId, refId)) {
+            if (!isVisible(workspaceId, type, refId)) {
                 continue;
             }
             String key = type + ":" + refId;
@@ -120,6 +126,16 @@ public class ReferenceService {
             unique.put(key, build(workspaceId, noteId, type, refId, matcher.group(1)));
         }
         return new ArrayList<>(unique.values());
+    }
+
+    private boolean isVisible(int workspaceId, String type, int refId) {
+        return switch (type) {
+            case TYPE_USER -> workspaceService.isMember(workspaceId, refId);
+            case TYPE_PERSON -> personMapper.exists(workspaceId, refId);
+            case TYPE_DEAL -> dealMapper.exists(workspaceId, refId);
+            case TYPE_COMPANY -> companyMapper.exists(workspaceId, refId);
+            default -> false;
+        };
     }
 
     private NoteReference build(int workspaceId, int noteId, String type, int refId, String label) {
