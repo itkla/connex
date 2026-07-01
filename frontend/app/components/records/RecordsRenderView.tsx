@@ -331,7 +331,7 @@ export default function RecordsRenderView<T extends { id: SelectionId; name?: st
             return (
                 <div className={gridClassName} aria-busy>
                     {Array.from({ length: 8 }).map((_, i) => (
-                        <div key={i} className="overflow-hidden rounded-2xl ring-1 ring-border">
+                        <div key={i} className="overflow-hidden rounded-2xl border border-border">
                             <div className="aspect-[4/3] animate-pulse bg-muted" />
                             <div className="space-y-2 p-3">
                                 <div className="h-3.5 w-3/4 animate-pulse rounded bg-muted" />
@@ -343,7 +343,7 @@ export default function RecordsRenderView<T extends { id: SelectionId; name?: st
             );
         }
         return (
-            <div className="space-y-2 rounded-2xl bg-card p-4 ring-1 ring-border">
+            <div className="space-y-2 rounded-2xl border border-border bg-card p-4">
                 {Array.from({ length: 6 }).map((_, i) => (
                     <div key={i} className="h-9 animate-pulse rounded-lg bg-muted" />
                 ))}
@@ -362,7 +362,7 @@ export default function RecordsRenderView<T extends { id: SelectionId; name?: st
         }
         return (
             <>
-                <div className="rounded-2xl bg-card px-6 py-16 text-center ring-1 ring-border">
+                <div className="rounded-2xl border border-border bg-card px-6 py-16 text-center">
                     <div className="mx-auto flex size-12 items-center justify-center rounded-2xl bg-muted text-muted-foreground">
                         <InboxIcon className="size-6" />
                     </div>
@@ -409,7 +409,7 @@ export default function RecordsRenderView<T extends { id: SelectionId; name?: st
 
     return (
         <>
-            <div className={cn('relative overflow-hidden rounded-2xl bg-card ring-1 ring-border', loading && 'opacity-60 transition-opacity')} aria-busy={loading}>
+            <div className={cn('relative overflow-hidden rounded-2xl border border-border bg-card', loading && 'opacity-60 transition-opacity')} aria-busy={loading}>
                 <div ref={scrollRef} className="overflow-x-auto data-[dragging=true]:cursor-grabbing data-[dragging=true]:select-none data-[dragging=true]:[&_thead]:cursor-grabbing">
                     <table className="w-full min-w-max border-collapse text-left text-sm">
                         <thead>

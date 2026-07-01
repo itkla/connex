@@ -7,9 +7,9 @@ export default function SummaryTile({ label, value, tooltip, className }: { labe
     const valueElement = typeof value === 'string' ? <p className="mt-1 text-2xl font-semibold text-foreground">{value}</p> : value;
 
     return (
-        <div className={`rounded-2xl bg-muted p-4 ring-1 ring-border${className ? ` ${className}` : ''}`}>
+        <div className={`rounded-2xl border border-border bg-card p-4${className ? ` ${className}` : ''}`}>
             <div className="flex items-center gap-1">
-                <p className="text-xs uppercase tracking-wider text-muted-foreground">{label}</p>
+                <p className="text-xs uppercase tracking-[0.12em] text-muted-foreground">{label}</p>
                 {tooltip && (
                     <Tooltip>
                         <TooltipTrigger asChild>
