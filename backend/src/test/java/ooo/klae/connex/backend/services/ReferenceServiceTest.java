@@ -8,9 +8,15 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 
+import ooo.klae.connex.backend.beans.Company;
+import ooo.klae.connex.backend.beans.Deal;
 import ooo.klae.connex.backend.beans.Note;
 import ooo.klae.connex.backend.beans.NoteReference;
+import ooo.klae.connex.backend.beans.Person;
+import ooo.klae.connex.backend.beans.Pipeline;
+import ooo.klae.connex.backend.beans.Stage;
 import ooo.klae.connex.backend.beans.User;
+import ooo.klae.connex.backend.beans.Workspace;
 import ooo.klae.connex.backend.mappers.NoteReferenceMapper;
 
 class ReferenceServiceTest extends AbstractServiceTest {
@@ -139,16 +145,75 @@ class ReferenceServiceTest extends AbstractServiceTest {
     }
 
     /**
-     * Phase A resolves only member tokens; record-reference types are ignored.
+     * Record-reference tokens pointing at non-existent ids are dropped, not stored.
      */
     @Test
-    void syncReferences_ignoresNonUserReferenceTypes() {
+    void syncReferences_dropsUnknownRecordReferences() {
         Note note = newNote(currentUser, null, null);
 
         List<Integer> added = referenceService.syncReferences(workspace.getId(), note.getId(),
-            "See [Acme](deal:1) and [Jane](person:2) and [Globex](company:3)");
+            "See [Acme](deal:999999) and [Jane](person:999998) and [Globex](company:999997)");
 
         assertTrue(added.isEmpty());
+        assertTrue(stored(note).isEmpty());
+    }
+
+    /**
+     * A visible contact reference is stored but is not a mention (no notification).
+     */
+    @Test
+    void syncReferences_storesContactReference_withoutNotifying() {
+        Person person = newPerson(newCompany());
+        Note note = newNote(currentUser, null, null);
+
+        List<Integer> added = referenceService.syncReferences(workspace.getId(), note.getId(),
+            "see [Jane](person:" + person.getId() + ")");
+
+        assertTrue(added.isEmpty());
+        List<NoteReference> refs = stored(note);
+        assertEquals(1, refs.size());
+        assertEquals("person", refs.get(0).getRefType());
+        assertEquals(person.getId(), refs.get(0).getRefId());
+    }
+
+    /**
+     * Visible deal and company references are stored.
+     */
+    @Test
+    void syncReferences_storesDealAndCompanyReferences() {
+        Company company = newCompany();
+        Pipeline pipeline = newPipeline();
+        Stage stage = newStage(pipeline, 0);
+        Deal deal = newDeal(pipeline, stage, company);
+        Note note = newNote(currentUser, null, null);
+
+        referenceService.syncReferences(workspace.getId(), note.getId(),
+            "[Acme](company:" + company.getId() + ") and [Q3](deal:" + deal.getId() + ")");
+
+        List<NoteReference> refs = stored(note);
+        assertEquals(2, refs.size());
+        assertTrue(refs.stream().anyMatch(r -> "company".equals(r.getRefType()) && r.getRefId() == company.getId()));
+        assertTrue(refs.stream().anyMatch(r -> "deal".equals(r.getRefType()) && r.getRefId() == deal.getId()));
+    }
+
+    /**
+     * A record owned by another workspace is not visible and is dropped.
+     */
+    @Test
+    void syncReferences_dropsForeignRecordReference() {
+        Workspace other = new Workspace();
+        other.setName("Other " + unique());
+        other.setSlug("other_" + unique());
+        workspaceMapper.insert(other);
+        Company foreign = new Company();
+        foreign.setName("Foreign " + unique());
+        foreign.setWorkspaceId(other.getId());
+        companyMapper.insert(foreign);
+        Note note = newNote(currentUser, null, null);
+
+        referenceService.syncReferences(workspace.getId(), note.getId(),
+            "[Foreign](company:" + foreign.getId() + ")");
+
         assertTrue(stored(note).isEmpty());
     }
 }
