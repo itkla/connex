@@ -30,6 +30,12 @@ public class TaskDto {
 
     private boolean completed;
 
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
+    private String status;
+
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
+    private Integer position;
+
     @Size(max = 10)
     @Pattern(regexp = "^\\d{4}-\\d{2}-\\d{2}$", message = "Due date must use YYYY-MM-DD")
     private String dueDate;
@@ -57,6 +63,8 @@ public class TaskDto {
         dto.workspaceId = t.getWorkspaceId();
         dto.description = t.getDescription();
         dto.completed = t.isCompleted();
+        dto.status = t.getStatus();
+        dto.position = t.getPosition();
         dto.dueDate = t.getDueDate();
         dto.assignedToId = t.getAssignedTo() == null ? null : t.getAssignedTo().getId();
         dto.person = t.getPerson();

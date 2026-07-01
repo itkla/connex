@@ -1,0 +1,147 @@
+package ooo.klae.connex.backend.services;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
+
+import java.time.Clock;
+import java.time.Instant;
+import java.time.ZoneOffset;
+import java.util.List;
+
+import org.junit.jupiter.api.Test;
+
+import ooo.klae.connex.backend.beans.Activity;
+import ooo.klae.connex.backend.beans.Company;
+import ooo.klae.connex.backend.beans.Deal;
+import ooo.klae.connex.backend.beans.Note;
+import ooo.klae.connex.backend.beans.Person;
+import ooo.klae.connex.backend.beans.Task;
+import ooo.klae.connex.backend.dto.RelationshipTemperatureDto;
+import ooo.klae.connex.backend.mappers.ActivityMapper;
+import ooo.klae.connex.backend.mappers.CompanyMapper;
+import ooo.klae.connex.backend.mappers.DealMapper;
+import ooo.klae.connex.backend.mappers.NoteMapper;
+import ooo.klae.connex.backend.mappers.PersonMapper;
+import ooo.klae.connex.backend.mappers.TaskMapper;
+
+/**
+ * Unit tests for the as-of scoring behaviour that the time-travel replay (#48) relies on: a
+ * past-instant reading must decay against that instant and exclude touches logged after it, while
+ * the no-arg "now" reading stays byte-identical to its previous behaviour.
+ */
+class ScoringServiceTest {
+
+    private static final int WS = 1;
+    private static final Instant NOW = Instant.parse("2026-06-30T00:00:00Z");
+
+    @Test
+    void asOfNow_matchesLiveContactScores() {
+        Person warm = person(1, null);
+        Person quiet = person(2, null);
+        ScoringService service = service(NOW,
+            List.of(warm, quiet), List.of(), List.of(),
+            List.of(activity(warm, "meeting", "2026-06-01 09:00:00"),
+                    activity(warm, "call", "2026-06-20 09:00:00")),
+            List.of(), List.of());
+
+        List<RelationshipTemperatureDto> live = service.scoreContacts(WS);
+        List<RelationshipTemperatureDto> asOfNow = service.scoreContacts(WS, NOW);
+
+        assertEquals(live, asOfNow);
+        assertNotEquals("cold", scoreFor(live, 1).getBand());
+    }
+
+    @Test
+    void asOfNow_matchesLiveCompanyScores() {
+        Person contact = person(1, 10);
+        ScoringService service = service(NOW,
+            List.of(contact), List.of(company(10)), List.of(),
+            List.of(activity(contact, "meeting", "2026-06-25 09:00:00")),
+            List.of(), List.of());
+
+        assertEquals(service.scoreCompanies(WS), service.scoreCompanies(WS, NOW));
+    }
+
+    @Test
+    void asOf_excludesTouchesAfterTheInstant_butLiveStillCountsThem() {
+        Person p = person(1, null);
+        ScoringService service = service(NOW,
+            List.of(p), List.of(), List.of(),
+            List.of(activity(p, "meeting", "2026-07-15 09:00:00")),
+            List.of(), List.of());
+
+        RelationshipTemperatureDto asOfNow = scoreFor(service.scoreContacts(WS, NOW), 1);
+        RelationshipTemperatureDto live = scoreFor(service.scoreContacts(WS), 1);
+
+        assertEquals("cold", asOfNow.getBand());
+        assertEquals(0, asOfNow.getScore());
+        assertNotEquals("cold", live.getBand());
+    }
+
+    @Test
+    void asOf_reAnchorsDecayToTheRequestedInstant() {
+        Person p = person(1, null);
+        ScoringService service = service(NOW,
+            List.of(p), List.of(), List.of(),
+            List.of(activity(p, "meeting", "2026-06-29 12:00:00"),
+                    activity(p, "meeting", "2026-06-29 18:00:00")),
+            List.of(), List.of());
+
+        RelationshipTemperatureDto fresh = scoreFor(service.scoreContacts(WS, Instant.parse("2026-06-30T00:00:00Z")), 1);
+        RelationshipTemperatureDto aged = scoreFor(service.scoreContacts(WS, Instant.parse("2027-06-30T00:00:00Z")), 1);
+
+        assertNotEquals("cold", fresh.getBand());
+        assertTrue(fresh.getScore() > aged.getScore());
+        assertEquals("cold", aged.getBand());
+    }
+
+    private static RelationshipTemperatureDto scoreFor(List<RelationshipTemperatureDto> scores, int id) {
+        return scores.stream().filter(s -> s.getId() == id).findFirst().orElseThrow();
+    }
+
+    private ScoringService service(Instant now, List<Person> persons, List<Company> companies, List<Deal> deals,
+            List<Activity> activities, List<Note> notes, List<Task> tasks) {
+        PersonMapper personMapper = mock(PersonMapper.class);
+        CompanyMapper companyMapper = mock(CompanyMapper.class);
+        DealMapper dealMapper = mock(DealMapper.class);
+        ActivityMapper activityMapper = mock(ActivityMapper.class);
+        NoteMapper noteMapper = mock(NoteMapper.class);
+        TaskMapper taskMapper = mock(TaskMapper.class);
+        when(personMapper.getAllPersons(WS)).thenReturn(persons);
+        when(companyMapper.getAllCompanies(WS)).thenReturn(companies);
+        when(dealMapper.getAllDeals(WS)).thenReturn(deals);
+        when(activityMapper.getAllActivities(WS)).thenReturn(activities);
+        when(noteMapper.getAllNotes(WS)).thenReturn(notes);
+        when(taskMapper.getAllTasks(WS)).thenReturn(tasks);
+        Clock clock = Clock.fixed(now, ZoneOffset.UTC);
+        return new ScoringService(personMapper, companyMapper, dealMapper, activityMapper, noteMapper, taskMapper, clock);
+    }
+
+    private static Person person(int id, Integer companyId) {
+        Person p = new Person();
+        p.setId(id);
+        if (companyId != null) {
+            Company c = new Company();
+            c.setId(companyId);
+            p.setCompany(c);
+        }
+        return p;
+    }
+
+    private static Company company(int id) {
+        Company c = new Company();
+        c.setId(id);
+        return c;
+    }
+
+    private static Activity activity(Person person, String type, String timestamp) {
+        Activity a = new Activity();
+        a.setPerson(person);
+        a.setType(type);
+        a.setTimestamp(timestamp);
+        return a;
+    }
+}

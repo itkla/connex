@@ -35,8 +35,13 @@ public class TaskService {
     private final AuthService authService;
     private final NotificationChangePublisher notificationChanges;
 
+    private static final String STATUS_TODO = "todo";
+    private static final String STATUS_IN_PROGRESS = "in_progress";
+    private static final String STATUS_DONE = "done";
+    private static final Set<String> VALID_STATUSES = Set.of(STATUS_TODO, STATUS_IN_PROGRESS, STATUS_DONE);
+
     private static final Set<String> AUDIT_FIELDS =
-        Set.of("description", "completed", "dueDate");
+        Set.of("description", "completed", "status", "dueDate");
 
     public List<Task> getAllTasks() {
         return taskMapper.getAllTasks(workspaceService.getCurrentWorkspaceId());
@@ -65,6 +70,8 @@ public class TaskService {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         task.setWorkspaceId(workspaceId);
         validateReferences(task, workspaceId);
+        task.setStatus(task.isCompleted() ? STATUS_DONE : STATUS_TODO);
+        task.setPosition(taskMapper.nextTaskPosition(workspaceId, task.getStatus()));
         taskMapper.insert(task);
         auditService.record("task.create", "task", task.getId(), task.getDescription(),
             "Created task " + task.getDescription(),
@@ -81,6 +88,14 @@ public class TaskService {
         task.setId(id);
         task.setWorkspaceId(workspaceId);
         validateReferences(task, workspaceId);
+        String beforeStatus = before.getStatus() != null ? before.getStatus() : STATUS_TODO;
+        String resolved = task.isCompleted() ? STATUS_DONE
+            : (STATUS_DONE.equals(beforeStatus) ? STATUS_TODO : beforeStatus);
+        task.setCompleted(STATUS_DONE.equals(resolved));
+        task.setStatus(resolved);
+        task.setPosition(resolved.equals(beforeStatus)
+            ? before.getPosition()
+            : taskMapper.nextTaskPosition(workspaceId, resolved));
         taskMapper.update(task);
         auditService.record("task.update", "task", id, task.getDescription(),
             "Updated task " + task.getDescription(),
@@ -114,7 +129,8 @@ public class TaskService {
         if (task.isCompleted()) {
             return task;
         }
-        if (taskMapper.complete(workspaceId, id, currentUser.getId()) == 0) {
+        int donePosition = taskMapper.nextTaskPosition(workspaceId, STATUS_DONE);
+        if (taskMapper.complete(workspaceId, id, currentUser.getId(), donePosition) == 0) {
             throw new ForbiddenException("Only the task assignee may complete this task");
         }
         Task completed = taskMapper.getTaskById(workspaceId, id);
@@ -123,6 +139,64 @@ public class TaskService {
             auditService.singleChange("completed", task.isCompleted(), true));
         notificationChanges.publish(workspaceId, "task", id);
         return completed;
+    }
+
+    /**
+     * Moves a task to a target status column and ordinal position on the Kanban board, renumbering
+     * the affected column(s) so positions stay contiguous and 0-based. Dragging a task into the
+     * {@code done} column completes it, so it is gated by the same assignee-only rule as
+     * {@link #complete(int)}; the {@code completed} flag is kept in lockstep with {@code status}.
+     * @param id the task to move
+     * @param status the target status: {@code todo}, {@code in_progress} or {@code done}
+     * @param position the desired 0-based index within the target column (clamped to the column size)
+     * @return the moved task
+     */
+    @Transactional
+    @RequirePermission(Permission.TASK_UPDATE)
+    public Task move(int id, String status, int position) {
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        if (status == null || !VALID_STATUSES.contains(status)) {
+            throw new BadRequestException("Invalid task status: " + status);
+        }
+        Task before = taskMapper.getTaskById(workspaceId, id);
+        if (before == null) throw new ResourceNotFoundException("Task not found with id: " + id);
+        String oldStatus = before.getStatus() != null ? before.getStatus() : STATUS_TODO;
+        boolean toDone = STATUS_DONE.equals(status);
+        boolean fromDone = STATUS_DONE.equals(oldStatus);
+        if (toDone != fromDone) {
+            User currentUser = authService.getCurrentUser();
+            if (before.getAssignedTo() == null || before.getAssignedTo().getId() != currentUser.getId()) {
+                throw new ForbiddenException("Only the task assignee may change this task's completion");
+            }
+        }
+        boolean statusChanged = !status.equals(oldStatus);
+
+        List<Integer> target = taskMapper.getTaskIdsInStatusOrdered(workspaceId, status);
+        target.removeIf(existing -> existing == id);
+        int index = Math.max(0, Math.min(position, target.size()));
+        target.add(index, id);
+
+        if (statusChanged) {
+            List<Integer> source = taskMapper.getTaskIdsInStatusOrdered(workspaceId, oldStatus);
+            source.removeIf(existing -> existing == id);
+            for (int i = 0; i < source.size(); i++) {
+                taskMapper.setPosition(workspaceId, source.get(i), i);
+            }
+        }
+
+        taskMapper.moveTask(workspaceId, id, status, toDone, index);
+        for (int i = 0; i < target.size(); i++) {
+            int tid = target.get(i);
+            if (tid != id) taskMapper.setPosition(workspaceId, tid, i);
+        }
+
+        Task moved = taskMapper.getTaskById(workspaceId, id);
+        auditService.record("task.update", "task", id, before.getDescription(),
+            statusChanged ? "Moved task " + before.getDescription() + " to " + status
+                          : "Reordered task " + before.getDescription(),
+            auditService.diff(before, moved, AUDIT_FIELDS));
+        notificationChanges.publish(workspaceId, "task", id);
+        return moved;
     }
 
     private void validateReferences(Task task, int workspaceId) {

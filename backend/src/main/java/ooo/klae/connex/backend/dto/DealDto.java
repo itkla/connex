@@ -53,6 +53,9 @@ public class DealDto {
     @NotNull
     private Integer stage;
 
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
+    private Integer position;
+
     private Integer company;
 
     @Size(max = 10)
@@ -90,6 +93,7 @@ public class DealDto {
         dto.currency = d.getCurrency();
         dto.pipeline = d.getPipelineId();
         dto.stage = d.getStageId();
+        dto.position = d.getPosition();
         dto.company = d.getCompanyId();
         dto.expectedCloseDate = d.getExpectedCloseDate();
         dto.closedAt = d.getClosedAt();

@@ -28,6 +28,22 @@ public interface TaskMapper {
     int complete(
         @Param("workspaceId") int workspaceId,
         @Param("id") int id,
-        @Param("assignedToId") int assignedToId
+        @Param("assignedToId") int assignedToId,
+        @Param("position") int position
+    );
+
+    /** Task ids in a status column, in board order (position, then id), for renumbering on a move. */
+    List<Integer> getTaskIdsInStatusOrdered(@Param("workspaceId") int workspaceId, @Param("status") String status);
+    /** The next free tail position in a status column ({@code MAX(position)+1}, or 0 when empty). */
+    int nextTaskPosition(@Param("workspaceId") int workspaceId, @Param("status") String status);
+    /** Sets a single task's manual sort position within its status column. */
+    int setPosition(@Param("workspaceId") int workspaceId, @Param("id") int id, @Param("position") int position);
+    /** Sets a task's status, completion flag and position together so the done/completed CHECK holds. */
+    int moveTask(
+        @Param("workspaceId") int workspaceId,
+        @Param("id") int id,
+        @Param("status") String status,
+        @Param("completed") boolean completed,
+        @Param("position") int position
     );
 }

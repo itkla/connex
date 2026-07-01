@@ -27,6 +27,35 @@
             "activeOpen": "アクティブ / オープン",
             "closedWon": "クローズ 受注済み",
             "closedLost": "クローズ 失注済み"
+        },
+        "warmth": {
+            "title": "温度感",
+            "hot": "ホット",
+            "warm": "ウォーム",
+            "cool": "クール",
+            "cold": "コールド"
         }
+    },
+    "Replay": {
+        "enter": "タイムトラベル",
+        "building": "読み込み中…",
+        "exit": "タイムトラベルを終了",
+        "title": "タイムトラベル",
+        "play": "再生",
+        "pause": "一時停止",
+        "restart": "最初から",
+        "speed": "速度",
+        "asOf": "{date} 時点",
+        "range": "期間",
+        "interval": "間隔",
+        "granularityWeekly": "週次",
+        "granularityMonthly": "月次",
+        "range13w": "13週間",
+        "range26w": "26週間",
+        "range52w": "52週間",
+        "loading": "タイムラインを読み込み中…",
+        "empty": "リプレイするための履歴がまだ十分にありません。ネットワークが成長すると、その変化をここで見られるようになります。",
+        "singleFrame": "この期間には時点が1つしかありません。期間を広げてリプレイしてください。",
+        "error": "リプレイのタイムラインを読み込めませんでした。"
     }
 }

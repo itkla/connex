@@ -24,6 +24,7 @@ import ooo.klae.connex.backend.dto.CustomFieldValueRequest;
 import ooo.klae.connex.backend.dto.CustomFieldValuesRequest;
 import ooo.klae.connex.backend.dto.DealCollaboratorsDto;
 import ooo.klae.connex.backend.dto.DealDto;
+import ooo.klae.connex.backend.dto.DealMoveRequest;
 import ooo.klae.connex.backend.dto.DealOwnerDto;
 import ooo.klae.connex.backend.dto.DealSummaryDto;
 import ooo.klae.connex.backend.dto.NoteDto;
@@ -150,6 +151,17 @@ public class DealController {
     @PostMapping("/{id}/reopen")
     public DealDto reopenDeal(@PathVariable int id) {
         return DealDto.from(dealService.reopen(id));
+    }
+
+    /**
+     * POST endpoint to move a deal to a target stage and ordinal position on the Kanban board.
+     * @param id the deal to move
+     * @param req the target stage and 0-based position within that stage's column
+     * @return the moved deal
+     */
+    @PostMapping("/{id}/move")
+    public DealDto moveDeal(@PathVariable int id, @Valid @RequestBody DealMoveRequest req) {
+        return DealDto.from(dealService.move(id, req.getStageId(), req.getPosition()));
     }
 
     /**

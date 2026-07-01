@@ -23,9 +23,8 @@ function ContactNodeImpl({ id, data }: NodeProps<ContactNodeType>) {
     const reduceMotion = useReducedMotion();
     const toggle = () => updateNodeData(id, { expanded: !expanded });
 
-    // TODO: fix the misalignment bug where the image isn't perfectly centered in the ring
     const ring = cn(
-        'flex items-center justify-center rounded-full border-2 p-0.5 transition-transform hover:scale-110',
+        'map-warmth flex items-center justify-center rounded-full border-2 p-0.5 hover:scale-110',
         warmth
             ? cn('border-solid', warmthBorderClass(warmth))
             : hasActivity ? 'border-solid border-emerald-500 dark:border-emerald-400' : 'border-dashed border-border',
