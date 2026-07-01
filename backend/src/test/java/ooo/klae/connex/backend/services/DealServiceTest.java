@@ -2,6 +2,7 @@ package ooo.klae.connex.backend.services;
 
 import java.util.List;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -16,6 +17,7 @@ import ooo.klae.connex.backend.beans.Pipeline;
 import ooo.klae.connex.backend.beans.Stage;
 import ooo.klae.connex.backend.beans.Task;
 import ooo.klae.connex.backend.beans.User;
+import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 
 class DealServiceTest extends AbstractServiceTest {
@@ -86,5 +88,84 @@ class DealServiceTest extends AbstractServiceTest {
     @Test
     void getTasksByDealId_throwsWhenDealMissing() {
         assertThrows(ResourceNotFoundException.class, () -> dealService.getTasksByDealId(-1));
+    }
+
+    @Test
+    void move_reordersWithinStageContiguously() {
+        Pipeline pipeline = newPipeline();
+        Stage stage = newStage(pipeline, 0);
+        Company company = newCompany();
+        Deal d1 = newDeal(pipeline, stage, company);
+        Deal d2 = newDeal(pipeline, stage, company);
+        Deal d3 = newDeal(pipeline, stage, company);
+
+        dealService.move(d3.getId(), stage.getId(), 0);
+
+        List<Deal> column = dealService.getDealsByStageId(stage.getId());
+        assertEquals(List.of(d3.getId(), d1.getId(), d2.getId()),
+            column.stream().map(Deal::getId).toList());
+        assertEquals(List.of(0, 1, 2), column.stream().map(Deal::getPosition).toList());
+    }
+
+    @Test
+    void move_acrossStages_updatesStageAndRenumbersBothColumns() {
+        Pipeline pipeline = newPipeline();
+        Stage from = newStage(pipeline, 0);
+        Stage to = newStage(pipeline, 1);
+        Company company = newCompany();
+        Deal d1 = newDeal(pipeline, from, company);
+        Deal d2 = newDeal(pipeline, from, company);
+        Deal d3 = newDeal(pipeline, to, company);
+
+        dealService.move(d1.getId(), to.getId(), 0);
+
+        List<Deal> target = dealService.getDealsByStageId(to.getId());
+        assertEquals(List.of(d1.getId(), d3.getId()), target.stream().map(Deal::getId).toList());
+        assertEquals(List.of(0, 1), target.stream().map(Deal::getPosition).toList());
+
+        List<Deal> source = dealService.getDealsByStageId(from.getId());
+        assertEquals(List.of(d2.getId()), source.stream().map(Deal::getId).toList());
+        assertEquals(0, source.get(0).getPosition());
+    }
+
+    @Test
+    void move_rejectsStageInAnotherPipeline() {
+        Pipeline pipelineA = newPipeline();
+        Stage stageA = newStage(pipelineA, 0);
+        Pipeline pipelineB = newPipeline();
+        Stage stageB = newStage(pipelineB, 0);
+        Company company = newCompany();
+        Deal deal = newDeal(pipelineA, stageA, company);
+
+        assertThrows(BadRequestException.class,
+            () -> dealService.move(deal.getId(), stageB.getId(), 0));
+    }
+
+    @Test
+    void move_throwsWhenDealMissing() {
+        Pipeline pipeline = newPipeline();
+        Stage stage = newStage(pipeline, 0);
+        assertThrows(ResourceNotFoundException.class, () -> dealService.move(-1, stage.getId(), 0));
+    }
+
+    @Test
+    void update_changingStage_appendsToNewStageTailWithoutCollision() {
+        Pipeline pipeline = newPipeline();
+        Stage from = newStage(pipeline, 0);
+        Stage to = newStage(pipeline, 1);
+        Company company = newCompany();
+        Deal a = newDeal(pipeline, to, company);
+        Deal b = newDeal(pipeline, to, company);
+        Deal moved = newDeal(pipeline, from, company);
+        dealService.move(a.getId(), to.getId(), 0);
+        dealService.move(b.getId(), to.getId(), 1);
+
+        moved.setStageId(to.getId());
+        dealService.update(moved.getId(), moved);
+
+        List<Deal> target = dealService.getDealsByStageId(to.getId());
+        assertEquals(List.of(a.getId(), b.getId(), moved.getId()),
+            target.stream().map(Deal::getId).toList());
+        assertEquals(List.of(0, 1, 2), target.stream().map(Deal::getPosition).toList());
     }
 }

@@ -27,6 +27,7 @@ public class Deal {
     private String currency; // e.g. "JPY"
     private Integer pipelineId;
     private Integer stageId;
+    private int position;
     private Integer companyId;
     private DealPerson[] people;
     private Activity[] activities;

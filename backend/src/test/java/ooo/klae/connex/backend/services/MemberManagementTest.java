@@ -62,6 +62,7 @@ class MemberManagementTest extends AbstractServiceTest {
         task.setWorkspaceId(ws.getId());
         task.setDescription("task_" + unique());
         task.setCompleted(false);
+        task.setStatus("todo");
         task.setDueDate("2024-12-31");
         task.setAssignedTo(member);
         taskMapper.insert(task);

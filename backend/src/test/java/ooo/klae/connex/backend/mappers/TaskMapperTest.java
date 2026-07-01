@@ -29,6 +29,7 @@ class TaskMapperTest extends AbstractMapperTest {
         task.setWorkspaceId(workspace.getId());
         task.setDescription(description);
         task.setCompleted(false);
+        task.setStatus("todo");
         task.setDueDate("2024-12-31");
         task.setAssignedTo(assignedTo);
         task.setPerson(person);
@@ -120,6 +121,7 @@ class TaskMapperTest extends AbstractMapperTest {
 
         task.setDescription("Updated");
         task.setCompleted(true);
+        task.setStatus("done");
         task.setDueDate(null);
 
         taskMapper.update(task);
@@ -215,7 +217,7 @@ class TaskMapperTest extends AbstractMapperTest {
         workspaceMapper.insert(other);
 
         assertNull(taskMapper.getTaskById(other.getId(), task.getId()));
-        assertEquals(0, taskMapper.complete(other.getId(), task.getId(), user.getId()));
+        assertEquals(0, taskMapper.complete(other.getId(), task.getId(), user.getId(), 0));
         assertFalse(taskMapper.getTaskById(workspace.getId(), task.getId()).isCompleted());
     }
 }

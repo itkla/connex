@@ -13,6 +13,8 @@ import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuIte
 import { PlusIcon, TrashIcon, PencilIcon, EllipsisVerticalIcon, EyeIcon } from '@heroicons/react/24/solid';
 import {
     TableCellsIcon,
+    Squares2X2Icon,
+    ViewColumnsIcon,
     ChevronDownIcon,
     TagIcon,
     UserCircleIcon,
@@ -30,6 +32,7 @@ import DeleteRecordDialog from '@/app/components/records/DeleteRecordDialog';
 import { useRecordsBrowser } from '@/app/hooks/useRecordsBrowser';
 import { type ColumnDef, applyRecordFilters, deriveFilterOptions, facetChips, countActiveFilters } from '@/app/components/records/types';
 import DealCard from '@/app/components/records/deals/DealCard';
+import DealsKanban from '@/app/components/records/deals/DealsKanban';
 import NewDealDialog from '@/app/components/records/deals/NewDealDialog';
 import QuickEditDealSheet, { type DealDraft } from '@/app/components/records/deals/QuickEditDealSheet';
 import {
@@ -689,12 +692,30 @@ export default function DealsBrowser({ deals, savedViews }: { deals: Deal[]; sav
                     >
                         <button
                             type="button"
+                            onClick={() => setDisplayMode('grid')}
+                            aria-label={t('gridView')}
+                            aria-pressed={displayMode === 'grid'}
+                            className={`flex h-8 w-8 items-center justify-center rounded-full transition active:scale-[0.97] ${displayMode === 'grid' ? 'bg-background text-foreground shadow' : 'text-muted-foreground hover:text-foreground'}`}
+                        >
+                            <Squares2X2Icon className="size-4" />
+                        </button>
+                        <button
+                            type="button"
                             onClick={() => setDisplayMode('table')}
                             aria-label={t('tableView')}
                             aria-pressed={displayMode === 'table'}
-                            className={`flex h-8 w-8 items-center justify-center rounded-full transition ${displayMode === 'table' ? 'bg-background text-foreground shadow' : 'text-muted-foreground hover:text-foreground'}`}
+                            className={`flex h-8 w-8 items-center justify-center rounded-full transition active:scale-[0.97] ${displayMode === 'table' ? 'bg-background text-foreground shadow' : 'text-muted-foreground hover:text-foreground'}`}
                         >
                             <TableCellsIcon className="size-4" />
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => setDisplayMode('kanban')}
+                            aria-label={t('kanbanView')}
+                            aria-pressed={displayMode === 'kanban'}
+                            className={`flex h-8 w-8 items-center justify-center rounded-full transition active:scale-[0.97] ${displayMode === 'kanban' ? 'bg-background text-foreground shadow' : 'text-muted-foreground hover:text-foreground'}`}
+                        >
+                            <ViewColumnsIcon className="size-4" />
                         </button>
                     </div>
                 }
@@ -706,41 +727,56 @@ export default function DealsBrowser({ deals, savedViews }: { deals: Deal[]; sav
                 />
             </FilterBar>
 
-            <RecordsRenderView<Deal>
-                data={visibleDeals}
-                columns={[...columns, ...customColumns]}
-                addColumnSlot={addColumnSlot}
-                renderCard={(item, { onQuickEdit, onDelete }) => (
-                    <DealCard
-                        deal={item}
-                        company={item.company != null ? companyById.get(item.company) : undefined}
-                        pipeline={item.pipeline != null ? pipelineById.get(item.pipeline) : undefined}
-                        stage={item.stage != null ? stageById.get(item.stage) : undefined}
-                        onQuickEdit={onQuickEdit ? () => onQuickEdit(item) : undefined}
-                        onDelete={onDelete ? () => onDelete(item) : undefined}
-                    />
-                )}
-                renderAvatar={(item) => {
-                    const company = item.company != null ? companyById.get(item.company) : undefined;
-                    if (company) return <CompanyAvatar company={company} type="large" />;
-                    const contact = contactByDealId.get(item.id);
-                    return (
-                        <ContactAvatar
-                            contact={contact ?? { id: 0, name: t('freelancer'), imageUrl: '', email: '', phone: '', title: '', createdAt: '', updatedAt: '' }}
-                            type="large"
+            {displayMode === 'kanban' ? (
+                <DealsKanban
+                    deals={visibleDeals}
+                    pipelines={pipelines}
+                    stagesByPipeline={stagesByPipeline}
+                    companyById={companyById}
+                    pipelineById={pipelineById}
+                    stageById={stageById}
+                    onQuickEdit={quickEditOne}
+                    onDelete={deleteOne}
+                    onMoved={() => router.refresh()}
+                    reduce={reduce}
+                />
+            ) : (
+                <RecordsRenderView<Deal>
+                    data={visibleDeals}
+                    columns={[...columns, ...customColumns]}
+                    addColumnSlot={addColumnSlot}
+                    renderCard={(item, { onQuickEdit, onDelete }) => (
+                        <DealCard
+                            deal={item}
+                            company={item.company != null ? companyById.get(item.company) : undefined}
+                            pipeline={item.pipeline != null ? pipelineById.get(item.pipeline) : undefined}
+                            stage={item.stage != null ? stageById.get(item.stage) : undefined}
+                            onQuickEdit={onQuickEdit ? () => onQuickEdit(item) : undefined}
+                            onDelete={onDelete ? () => onDelete(item) : undefined}
                         />
-                    );
-                }}
-                detailPath={(item) => `/records/deals/${item.id}`}
-                displayMode={displayMode}
-                selectedIds={selectedIds}
-                onSelectedIdsChange={setSelectedIds}
-                onQuickEdit={quickEditOne}
-                onDelete={deleteOne}
-                gridClassName="grid grid-cols-1 gap-3"
-                entityLabel={t('entityLabel')}
-                selectionActions={selectionActions}
-            />
+                    )}
+                    renderAvatar={(item) => {
+                        const company = item.company != null ? companyById.get(item.company) : undefined;
+                        if (company) return <CompanyAvatar company={company} type="large" />;
+                        const contact = contactByDealId.get(item.id);
+                        return (
+                            <ContactAvatar
+                                contact={contact ?? { id: 0, name: t('freelancer'), imageUrl: '', email: '', phone: '', title: '', createdAt: '', updatedAt: '' }}
+                                type="large"
+                            />
+                        );
+                    }}
+                    detailPath={(item) => `/records/deals/${item.id}`}
+                    displayMode={displayMode}
+                    selectedIds={selectedIds}
+                    onSelectedIdsChange={setSelectedIds}
+                    onQuickEdit={quickEditOne}
+                    onDelete={deleteOne}
+                    gridClassName="grid grid-cols-1 gap-3"
+                    entityLabel={t('entityLabel')}
+                    selectionActions={selectionActions}
+                />
+            )}
 
             <QuickEditDealSheet
                 open={editSheetOpen}

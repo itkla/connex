@@ -114,6 +114,18 @@
     "noOpenDealsToAge": "経過日数を表示できるオープン案件はありません",
     "deals": "{value, plural, one {# 件の案件} other {# 件の案件}}"
   },
+  "DealsKanban": {
+    "pipelineLabel": "パイプライン",
+    "noPipeline": "表示できるステージ付きのパイプラインがありません。まずパイプラインとステージを作成してください。",
+    "emptyColumn": "ここに案件をドロップ",
+    "count": "{count, plural, other {# 件}}",
+    "moveFailed": "案件を移動できませんでした",
+    "a11yInstructions": "案件を持ち上げるにはスペースまたはエンターキーを押します。矢印キーでステージや位置の間を移動し、もう一度スペースまたはエンターキーを押してドロップします。キャンセルするにはエスケープキーを押します。",
+    "a11yLifted": "案件「{name}」を持ち上げました。",
+    "a11yOver": "案件「{name}」が「{column}」列の上にあります。",
+    "a11yDropped": "案件「{name}」を「{column}」列にドロップしました。",
+    "a11yCancelled": "案件「{name}」の移動をキャンセルしました。"
+  },
   "DealsBrowser": {
     "title": "案件",
     "addDeal": "案件を追加",
@@ -133,6 +145,7 @@
     "displayMode": "表示モード",
     "gridView": "グリッド表示",
     "tableView": "テーブル表示",
+    "kanbanView": "カンバン表示",
     "selectedCount": "{count} 件選択中",
     "view": "表示",
     "quickEdit": "クイック編集",
