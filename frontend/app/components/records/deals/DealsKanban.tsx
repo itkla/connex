@@ -2,10 +2,11 @@
 
 import { useCallback, useMemo, useState } from 'react';
 import { useTranslations } from 'next-intl';
-import type { Announcements, ScreenReaderInstructions, UniqueIdentifier } from '@dnd-kit/core';
+import type { UniqueIdentifier } from '@dnd-kit/core';
 import { ChevronDownIcon } from '@heroicons/react/24/outline';
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from '@/components/ui/dropdown-menu';
 import KanbanBoard, { type KanbanColumnDef } from '@/app/components/kanban/KanbanBoard';
+import { kanbanAccessibility } from '@/app/components/kanban/kanbanAccessibility';
 import DealCard from '@/app/components/records/deals/DealCard';
 import { classifyStage } from './dealOutcome';
 import { moveDeal } from '@/app/lib/api';
@@ -118,22 +119,9 @@ export default function DealsKanban({
         [dealsById, stageById],
     );
 
-    const announcements: Announcements = useMemo(
-        () => ({
-            onDragStart: ({ active }) => t('a11yLifted', { name: dealName(active.id) }),
-            onDragOver: ({ active, over }) =>
-                over ? t('a11yOver', { name: dealName(active.id), column: columnName(over.id) }) : undefined,
-            onDragEnd: ({ active, over }) =>
-                over
-                    ? t('a11yDropped', { name: dealName(active.id), column: columnName(over.id) })
-                    : t('a11yCancelled', { name: dealName(active.id) }),
-            onDragCancel: ({ active }) => t('a11yCancelled', { name: dealName(active.id) }),
-        }),
+    const { announcements, screenReaderInstructions } = useMemo(
+        () => kanbanAccessibility(t, dealName, columnName),
         [t, dealName, columnName],
-    );
-    const screenReaderInstructions: ScreenReaderInstructions = useMemo(
-        () => ({ draggable: t('a11yInstructions') }),
-        [t],
     );
 
     if (selectedPipelineId == null || columns.length === 0) {

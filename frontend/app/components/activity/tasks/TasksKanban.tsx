@@ -2,14 +2,15 @@
 
 import { useCallback, useMemo } from 'react';
 import { useLocale, useTranslations } from 'next-intl';
-import type { Announcements, ScreenReaderInstructions, UniqueIdentifier } from '@dnd-kit/core';
+import type { UniqueIdentifier } from '@dnd-kit/core';
 import { UserIcon, BriefcaseIcon } from '@heroicons/react/24/outline';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { cn } from '@/lib/utils';
 import KanbanBoard, { type KanbanColumnDef } from '@/app/components/kanban/KanbanBoard';
+import { kanbanAccessibility } from '@/app/components/kanban/kanbanAccessibility';
+import { DUE_CHIP, formatDue } from '@/app/components/activity/tasks/taskDue';
 import { moveTask } from '@/app/lib/api';
 import { toastError } from '@/app/lib/toast';
-import { parseMysqlDateTime } from '@/app/lib/utils';
 import type { Contact, Deal, Task, TaskStatus, User } from '@/app/lib/types';
 
 interface TasksKanbanProps {
@@ -22,34 +23,11 @@ interface TasksKanbanProps {
     reduce: boolean;
 }
 
-type DueTone = 'overdue' | 'today' | 'soon' | 'later';
-
-const DUE_CHIP: Record<DueTone, string> = {
-    overdue: 'bg-red-50 text-red-600 ring-red-600/10 dark:bg-red-950/40 dark:text-red-400 dark:ring-red-400/20',
-    today: 'bg-brand-light/70 text-brand-dark ring-brand-dark/15',
-    soon: 'bg-muted text-muted-foreground ring-border',
-    later: 'bg-muted text-muted-foreground ring-border',
-};
-
 const STATUS_ACCENT: Record<TaskStatus, string> = {
     todo: 'var(--chart-open)',
     in_progress: 'var(--color-brand)',
     done: 'var(--chart-won)',
 };
-
-function formatDue(dueDate: string | undefined, locale: string): { label: string; tone: DueTone } | null {
-    if (!dueDate) return null;
-    const ts = parseMysqlDateTime(dueDate);
-    if (Number.isNaN(ts)) return null;
-    const date = new Date(ts);
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const diffDays = Math.floor((date.getTime() - today.getTime()) / (24 * 60 * 60 * 1000));
-    const short = new Intl.DateTimeFormat(locale, { month: 'short', day: 'numeric' }).format(date);
-    if (diffDays < 0) return { label: short, tone: 'overdue' };
-    if (diffDays === 0) return { label: short, tone: 'today' };
-    return { label: short, tone: diffDays <= 6 ? 'soon' : 'later' };
-}
 
 export default function TasksKanban({
     tasks,
@@ -79,7 +57,7 @@ export default function TasksKanban({
             const person = task.personId != null ? personById.get(task.personId) : undefined;
             const deal = task.dealId != null ? dealById.get(task.dealId) : undefined;
             const assignee = userById.get(task.assignedToId);
-            const due = task.status === 'done' ? null : formatDue(task.dueDate, locale);
+            const due = task.status === 'done' ? null : formatDue(task.dueDate, t, locale);
             return (
                 <div
                     onClick={() => onOpen(task)}
@@ -127,7 +105,7 @@ export default function TasksKanban({
                 </div>
             );
         },
-        [personById, dealById, userById, locale, onOpen],
+        [personById, dealById, userById, locale, onOpen, t],
     );
 
     const onMove = useCallback(
@@ -153,22 +131,9 @@ export default function TasksKanban({
         [tasksById, columns],
     );
 
-    const announcements: Announcements = useMemo(
-        () => ({
-            onDragStart: ({ active }) => t('a11yLifted', { name: taskName(active.id) }),
-            onDragOver: ({ active, over }) =>
-                over ? t('a11yOver', { name: taskName(active.id), column: columnName(over.id) }) : undefined,
-            onDragEnd: ({ active, over }) =>
-                over
-                    ? t('a11yDropped', { name: taskName(active.id), column: columnName(over.id) })
-                    : t('a11yCancelled', { name: taskName(active.id) }),
-            onDragCancel: ({ active }) => t('a11yCancelled', { name: taskName(active.id) }),
-        }),
+    const { announcements, screenReaderInstructions } = useMemo(
+        () => kanbanAccessibility(t, taskName, columnName),
         [t, taskName, columnName],
-    );
-    const screenReaderInstructions: ScreenReaderInstructions = useMemo(
-        () => ({ draggable: t('a11yInstructions') }),
-        [t],
     );
 
     return (

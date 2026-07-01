@@ -29,6 +29,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import EditTaskSheet from '@/app/components/activity/tasks/EditTaskSheet';
 import TaskDialog from '@/app/components/activity/tasks/TaskDialog';
 import TasksKanban from '@/app/components/activity/tasks/TasksKanban';
+import { type DueTone, DUE_CHIP, formatDue } from '@/app/components/activity/tasks/taskDue';
 import { updateTask } from '@/app/lib/api';
 import { toastError } from '@/app/lib/toast';
 import { parseMysqlDateTime } from '@/app/lib/utils';
@@ -112,32 +113,6 @@ function isInQueue(queue: Queue, task: Task, currentUserId: number): boolean {
         case 'completed':
             return !!task.completed;
     }
-}
-
-type DueTone = 'overdue' | 'today' | 'soon' | 'later';
-
-function formatDue(
-    dueDate: string | undefined,
-    t: (key: string) => string,
-    locale: string,
-): { label: string; tone: DueTone } | null {
-    if (!dueDate) return null;
-    const ts = parseMysqlDateTime(dueDate);
-    if (Number.isNaN(ts)) return null;
-    const date = new Date(ts);
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const diffDays = Math.floor((date.getTime() - today.getTime()) / (24 * 60 * 60 * 1000));
-    if (diffDays < 0) {
-        const label = diffDays === -1 ? t('dueYesterday') : new Intl.DateTimeFormat(locale, { month: 'short', day: 'numeric' }).format(date);
-        return { label, tone: 'overdue' };
-    }
-    if (diffDays === 0) return { label: t('dueToday'), tone: 'today' };
-    if (diffDays === 1) return { label: t('dueTomorrow'), tone: 'soon' };
-    return {
-        label: new Intl.DateTimeFormat(locale, { month: 'short', day: 'numeric' }).format(date),
-        tone: diffDays <= 6 ? 'soon' : 'later',
-    };
 }
 
 function bumpOption(map: Map<string, { label: string; count: number }>, key: string, label: string) {
@@ -833,13 +808,6 @@ function QueueButton({
         </button>
     );
 }
-
-const DUE_CHIP: Record<DueTone, string> = {
-    overdue: 'bg-red-50 text-red-600 ring-red-600/10 dark:bg-red-950/40 dark:text-red-400 dark:ring-red-400/20',
-    today: 'bg-brand-light/70 text-brand-dark ring-brand-dark/15',
-    soon: 'bg-muted text-muted-foreground ring-border',
-    later: 'bg-muted text-muted-foreground ring-border',
-};
 
 type TaskRowProps = {
     task: Task;
