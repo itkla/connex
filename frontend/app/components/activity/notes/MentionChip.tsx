@@ -12,7 +12,7 @@ export default function MentionChip({ id, label }: { id: number; label: string }
         <Link
             href={`/users/${id}`}
             onClick={(event) => event.stopPropagation()}
-            className="rounded-sm px-0.5 font-medium text-brand-dark underline-offset-2 transition-colors hover:bg-brand-light/50 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40"
+            className="rounded-sm px-0.5 font-medium text-brand-dark transition-colors duration-150 hover:bg-brand-light/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40"
         >
             @{label}
         </Link>
