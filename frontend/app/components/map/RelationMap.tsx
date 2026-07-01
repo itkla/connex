@@ -30,8 +30,10 @@ import { UC_ID } from '@/app/components/map/graph/buildGraph';
 import { cn } from '@/lib/utils';
 import type { AppNode, Graph, RelationEdge as RelationEdgeType } from './graph/types';
 import type { ComputedFrame } from './graph/replay';
+import type { TemperatureBand } from '@/app/lib/types';
 
 type ReplayState = { frames: ComputedFrame[]; frameIndex: number };
+type FlowProps = { graph: Graph; focusId?: string; replay?: ReplayState; extraEdges?: RelationEdgeType[] };
 
 const nodeTypes = { uc: UCNode, user: UserNode, company: CompanyNode, contact: ContactNode };
 const edgeTypes = { relation: RelationEdge };
@@ -99,7 +101,7 @@ function LabelFade() {
     return null;
 }
 
-function Flow({ graph, focusId, replay }: { graph: Graph; focusId?: string; replay?: ReplayState }) {
+function Flow({ graph, focusId, replay, extraEdges }: FlowProps) {
     const [nodes, setNodes] = useState<AppNode[]>(() => {
         const seeded = radialLayout(graph);
         if (!focusId) return seeded;
@@ -121,6 +123,18 @@ function Flow({ graph, focusId, replay }: { graph: Graph; focusId?: string; repl
     );
     const lod = useMemo(() => lodConfigForCompanyCount(companyCount), [companyCount]);
     const adjacency = useMemo(() => buildAdjacency(graph.edges), [graph.edges]);
+
+    const liveWarmth = useMemo(
+        () =>
+            new Map<string, TemperatureBand | undefined>(
+                graph.nodes.map((n) => [n.id, n.type === 'company' || n.type === 'contact' ? n.data.warmth : undefined]),
+            ),
+        [graph.nodes],
+    );
+    const liveEdgeColor = useMemo(
+        () => new Map<string, string | undefined>(graph.edges.map((e) => [e.id, e.data?.ccColor])),
+        [graph.edges],
+    );
 
     const { settling, onNodeDragStart, onNodeDragStop } = useForceLayout(focusId);
 
@@ -250,12 +264,60 @@ function Flow({ graph, focusId, replay }: { graph: Graph; focusId?: string; repl
         });
     }, []);
 
+    const mergeExtra = useCallback((extra: RelationEdgeType[]) => {
+        setEdges((snapshot) => {
+            const have = new Set(snapshot.map((e) => e.id));
+            const additions = extra.filter((e) => !have.has(e.id)).map((e) => ({ ...e, hidden: true }));
+            return additions.length > 0 ? [...snapshot, ...additions] : snapshot;
+        });
+    }, []);
+
+    const resetToLive = useCallback(() => {
+        setNodes((snapshot) => {
+            let changed = false;
+            const next = snapshot.map((n): AppNode => {
+                const styleChanged = ((n.style?.opacity as number | undefined) ?? 1) !== 1 || n.style?.pointerEvents != null;
+                const style = { ...n.style, opacity: 1, pointerEvents: undefined as 'none' | undefined };
+                const live = liveWarmth.get(n.id);
+                if (n.type === 'company') {
+                    if (!styleChanged && n.data.warmth === live) return n;
+                    changed = true;
+                    return { ...n, style, data: { ...n.data, warmth: live } };
+                }
+                if (n.type === 'contact') {
+                    if (!styleChanged && n.data.warmth === live) return n;
+                    changed = true;
+                    return { ...n, style, data: { ...n.data, warmth: live } };
+                }
+                if (!styleChanged) return n;
+                changed = true;
+                return { ...n, style };
+            });
+            return changed ? next : snapshot;
+        });
+        setEdges((snapshot) => {
+            let changed = false;
+            const next = snapshot.map((e) => {
+                const hidden = !liveEdgeColor.has(e.id);
+                const cc = liveEdgeColor.get(e.id);
+                const ccChanged = cc !== undefined && e.data?.ccColor !== cc;
+                if ((e.hidden ?? false) === hidden && !ccChanged) return e;
+                changed = true;
+                return { ...e, hidden, data: cc !== undefined && e.data ? { ...e.data, ccColor: cc } : e.data };
+            });
+            return changed ? next : snapshot;
+        });
+    }, [liveWarmth, liveEdgeColor]);
+
     const frame = replay ? replay.frames[replay.frameIndex] : undefined;
     useEffect(() => {
-        if (!frame) return;
-        const raf = requestAnimationFrame(() => applyFrame(frame));
+        const raf = requestAnimationFrame(() => {
+            if (extraEdges && extraEdges.length > 0) mergeExtra(extraEdges);
+            if (frame) applyFrame(frame);
+            else resetToLive();
+        });
         return () => cancelAnimationFrame(raf);
-    }, [frame, applyFrame]);
+    }, [frame, extraEdges, applyFrame, mergeExtra, resetToLive]);
 
     return (
         <LodContext.Provider value={lod}>
@@ -288,19 +350,11 @@ function Flow({ graph, focusId, replay }: { graph: Graph; focusId?: string; repl
     );
 }
 
-export default function RelationMap({
-    graph,
-    focusId,
-    replay,
-}: {
-    graph: Graph;
-    focusId?: string;
-    replay?: ReplayState;
-}) {
+export default function RelationMap({ graph, focusId, replay, extraEdges }: FlowProps) {
     return (
         <div className="w-full h-full">
             <ReactFlowProvider>
-                <Flow graph={graph} focusId={focusId} replay={replay} />
+                <Flow graph={graph} focusId={focusId} replay={replay} extraEdges={extraEdges} />
             </ReactFlowProvider>
         </div>
     );

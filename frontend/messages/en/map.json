@@ -37,8 +37,9 @@
         }
     },
     "Replay": {
-        "enter": "Replay",
-        "exit": "Exit replay",
+        "enter": "Time travel",
+        "building": "Building…",
+        "exit": "Exit time travel",
         "title": "Time travel",
         "play": "Play",
         "pause": "Pause",

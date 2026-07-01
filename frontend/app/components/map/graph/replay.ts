@@ -20,15 +20,12 @@ export type ComputedFrame = {
 };
 
 /**
- * Augments the live graph into the master graph for replay. The live graph's nodes are already the
- * union of every node that can appear in any frame (a node present in a past frame still exists now,
- * hard-deletes aside); this adds a company→contact edge for every employer a contact held across the
- * window, plus an org-node fallback edge for any frame in which they were unaffiliated, so employment
- * moves render by toggling which edge is present rather than by relaying out.
+ * The historical employment edges to overlay on the live graph for replay: a company→contact edge for
+ * every employer a contact held across the window that isn't already on the live graph, plus an
+ * org-node fallback edge for any frame in which they were unaffiliated. Overlaying these (rather than
+ * rebuilding the graph) lets employment moves render by toggling edge presence without relaying out.
  */
-export function augmentMasterGraph(base: Graph, frames: ReplayFrame[]): Graph {
-    const edges = base.edges.slice();
-    const edgeIds = new Set(edges.map((e) => e.id));
+export function employmentEdges(base: Graph, frames: ReplayFrame[]): RelationEdge[] {
     const companyNodeIds = new Set(base.nodes.filter((n) => n.data.kind === 'company').map((n) => n.id));
 
     const employersByContact = new Map<number, Set<number>>();
@@ -48,29 +45,46 @@ export function augmentMasterGraph(base: Graph, frames: ReplayFrame[]): Graph {
         }
     }
 
-    const addEmploymentEdge = (source: string, contactId: number) => {
+    const extra: RelationEdge[] = [];
+    const seen = new Set(base.edges.map((e) => e.id));
+    const push = (source: string, contactId: number) => {
         const id = `${source}--${contactNodeId(contactId)}`;
-        if (edgeIds.has(id)) return;
-        edgeIds.add(id);
-        const edge: RelationEdge = {
-            id,
-            type: 'relation',
-            source,
-            target: contactNodeId(contactId),
-            data: { variant: 'cc-co', dashed: false },
-        };
-        edges.push(edge);
+        if (seen.has(id)) return;
+        seen.add(id);
+        extra.push({ id, type: 'relation', source, target: contactNodeId(contactId), data: { variant: 'cc-co', dashed: false } });
     };
-
     for (const [contactId, employers] of employersByContact) {
         for (const employerId of employers) {
             const source = companyNodeId(employerId);
-            if (companyNodeIds.has(source)) addEmploymentEdge(source, contactId);
+            if (companyNodeIds.has(source)) push(source, contactId);
         }
     }
-    for (const contactId of unaffiliated) addEmploymentEdge(UC_ID, contactId);
+    for (const contactId of unaffiliated) push(UC_ID, contactId);
+    return extra;
+}
 
-    return { nodes: base.nodes, edges };
+/** The live graph plus its historical employment edges — the full node/edge set a frame can reference. */
+export function augmentMasterGraph(base: Graph, frames: ReplayFrame[]): Graph {
+    return { nodes: base.nodes, edges: [...base.edges, ...employmentEdges(base, frames)] };
+}
+
+const BAND_VALUE: Record<TemperatureBand, number> = { hot: 3, warm: 2, cool: 1, cold: 0 };
+const VALUE_BAND: readonly TemperatureBand[] = ['cold', 'cool', 'warm', 'hot'];
+
+/** Average warmth band across the contacts and companies present in a frame — the timeline bar colour. */
+export function frameAvgBand(frame: ReplayFrame): TemperatureBand {
+    let sum = 0;
+    let count = 0;
+    for (const c of frame.contacts) {
+        sum += BAND_VALUE[c.band];
+        count++;
+    }
+    for (const c of frame.companies) {
+        sum += BAND_VALUE[c.band];
+        count++;
+    }
+    if (count === 0) return 'cold';
+    return VALUE_BAND[Math.round(sum / count)];
 }
 
 /**

@@ -1,83 +1,121 @@
 'use client';
 
-import { useCallback } from 'react';
-import { usePathname, useRouter, useSearchParams } from 'next/navigation';
+import { useCallback, useState } from 'react';
 import { useTranslations } from 'next-intl';
-import { ClockIcon } from '@heroicons/react/24/outline';
 
 import RelationMap from '@/app/components/map/RelationMap';
-import ReplayView from '@/app/components/map/replay/ReplayView';
-import type { Graph } from '@/app/components/map/graph/types';
+import ReplayControl, { type ReplayPhase } from '@/app/components/map/replay/ReplayControl';
+import {
+    augmentMasterGraph,
+    employmentEdges,
+    toComputedFrames,
+    type ComputedFrame,
+} from '@/app/components/map/graph/replay';
+import { getMapReplay } from '@/app/lib/api';
+import { toastError, toastInfo } from '@/app/lib/toast';
+import { useReplayClock } from '@/app/hooks/useReplayClock';
+import type { Graph, RelationEdge } from '@/app/components/map/graph/types';
+import type { ReplayFrame } from '@/app/lib/types';
 
 const DEFAULT_WEEKS = 26;
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+function isoDate(ms: number): string {
+    return new Date(ms).toISOString().slice(0, 10);
+}
+
+type ReplayData = { extraEdges: RelationEdge[]; computed: ComputedFrame[]; frames: ReplayFrame[] };
 
 /**
- * The relationship map surface: renders the live map by default with a "Replay" affordance, and the
- * time-travel replay experience when {@code ?replay=1} is set. Mode and range live in the URL so a
- * replay view is a shareable link.
+ * The relationship map surface. The live map renders immediately; historical "time-travel" data is
+ * fetched only on intent (the bottom-left control), then overlaid onto the existing layout so the map
+ * never re-settles — nodes fade/recolour and employment edges appear in place. Collapsing the control
+ * returns the map to its live state.
  */
 export default function MapView({ graph, focusId }: { graph: Graph; focusId?: string }) {
     const t = useTranslations('Replay');
-    const searchParams = useSearchParams();
-    const router = useRouter();
-    const pathname = usePathname();
-    const replayMode = searchParams.get('replay') === '1';
+    const [phase, setPhase] = useState<ReplayPhase>('idle');
+    const [weeks, setWeeks] = useState(DEFAULT_WEEKS);
+    const [data, setData] = useState<ReplayData | null>(null);
+    const clock = useReplayClock(data?.computed.length ?? 0, 1);
 
-    const setParams = useCallback(
-        (mutate: (params: URLSearchParams) => void) => {
-            const params = new URLSearchParams(searchParams.toString());
-            mutate(params);
-            const qs = params.toString();
-            router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
+    const load = useCallback(
+        async (w: number): Promise<ReplayData> => {
+            const now = Date.now();
+            const res = await getMapReplay({
+                from: isoDate(now - w * 7 * DAY_MS),
+                to: isoDate(now),
+                granularity: 'weekly',
+            });
+            const extraEdges = employmentEdges(graph, res.frames);
+            const computed = toComputedFrames(res.frames, augmentMasterGraph(graph, res.frames));
+            return { extraEdges, computed, frames: res.frames };
         },
-        [pathname, router, searchParams],
+        [graph],
     );
 
-    const enterReplay = useCallback(
-        () =>
-            setParams((params) => {
-                params.set('replay', '1');
-                if (!params.get('weeks')) params.set('weeks', String(DEFAULT_WEEKS));
-            }),
-        [setParams],
+    const enter = useCallback(async () => {
+        setPhase('loading');
+        try {
+            const next = await load(weeks);
+            if (next.computed.length < 2) {
+                toastInfo(t('singleFrame'));
+                setPhase('idle');
+                return;
+            }
+            setData(next);
+            clock.seek(0);
+            setPhase('active');
+        } catch {
+            setPhase('idle');
+            toastError(t('error'));
+        }
+    }, [load, weeks, clock, t]);
+
+    const changeWeeks = useCallback(
+        async (next: number) => {
+            setWeeks(next);
+            try {
+                const loaded = await load(next);
+                setData(loaded);
+                clock.seek(0);
+            } catch {
+                toastError(t('error'));
+            }
+        },
+        [load, clock, t],
     );
 
-    const exitReplay = useCallback(
-        () =>
-            setParams((params) => {
-                params.delete('replay');
-                params.delete('weeks');
-            }),
-        [setParams],
-    );
+    const exit = useCallback(() => {
+        clock.seek(0);
+        setData(null);
+        setPhase('idle');
+    }, [clock]);
 
-    const setWeeks = useCallback((weeks: number) => setParams((params) => params.set('weeks', String(weeks))), [setParams]);
-
-    if (replayMode) {
-        const weeks = Number(searchParams.get('weeks')) || DEFAULT_WEEKS;
-        return (
-            <ReplayView
-                key={weeks}
-                baseGraph={graph}
-                focusId={focusId}
-                weeks={weeks}
-                onExit={exitReplay}
-                onWeeksChange={setWeeks}
-            />
-        );
-    }
+    const active = phase === 'active';
 
     return (
         <div className="relative h-full w-full">
-            <RelationMap graph={graph} focusId={focusId} />
-            <button
-                type="button"
-                onClick={enterReplay}
-                className="absolute left-3 top-3 z-10 flex items-center gap-1.5 rounded-lg border border-border bg-card/90 px-2.5 py-1.5 text-xs font-medium text-foreground shadow-md backdrop-blur transition-transform duration-150 ease-out hover:bg-card active:scale-95"
-            >
-                <ClockIcon className="size-4" />
-                {t('enter')}
-            </button>
+            <RelationMap
+                graph={graph}
+                focusId={focusId}
+                extraEdges={data?.extraEdges}
+                replay={active && data ? { frames: data.computed, frameIndex: clock.frameIndex } : undefined}
+            />
+            <div className="absolute bottom-4 left-4 z-10">
+                <ReplayControl
+                    phase={phase}
+                    frames={data?.frames ?? []}
+                    frameIndex={clock.frameIndex}
+                    playing={clock.playing}
+                    weeks={weeks}
+                    onEnter={enter}
+                    onExit={exit}
+                    onToggle={clock.toggle}
+                    onSeek={clock.seek}
+                    onWeeksChange={changeWeeks}
+                />
+            </div>
         </div>
     );
 }
