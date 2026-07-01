@@ -61,15 +61,18 @@ export default function TasksKanban({
             return (
                 <div
                     onClick={() => onOpen(task)}
-                    className="group cursor-pointer rounded-xl bg-card p-3 ring-1 ring-border transition duration-200 hover:bg-muted hover:shadow-md"
+                    className={cn(
+                        'group flex cursor-pointer flex-col gap-2.5 rounded-xl bg-card p-3.5 ring-1 ring-border transition duration-200 hover:-translate-y-0.5 hover:shadow-md hover:ring-border active:scale-[0.98] active:shadow-sm',
+                        task.status === 'done' && 'opacity-70',
+                    )}
                 >
-                    <p className={cn('text-sm font-medium text-foreground', task.status === 'done' && 'text-muted-foreground line-through')}>
+                    <p className={cn('text-sm font-medium leading-snug text-foreground line-clamp-3', task.status === 'done' && 'text-muted-foreground line-through')}>
                         {task.description}
                     </p>
                     {(person || deal) && (
-                        <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                        <div className="flex flex-wrap items-center gap-1.5">
                             {deal && (
-                                <span className="inline-flex max-w-full items-center gap-1 rounded-full bg-card px-2 py-0.5 text-xs font-medium text-foreground ring-1 ring-inset ring-border">
+                                <span className="inline-flex max-w-full items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground ring-1 ring-inset ring-border">
                                     <BriefcaseIcon className="size-3 shrink-0" />
                                     <span className="truncate">{deal.name}</span>
                                 </span>
@@ -82,26 +85,26 @@ export default function TasksKanban({
                             )}
                         </div>
                     )}
-                    <div className="mt-2 flex items-center justify-between">
-                        {due ? (
-                            <span className={cn('inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium tabular-nums ring-1 ring-inset', DUE_CHIP[due.tone])}>
-                                {due.label}
-                            </span>
-                        ) : (
-                            <span />
-                        )}
-                        {assignee && (
-                            <Avatar size="sm" className="ring-1 ring-border">
-                                {assignee.profilePictureUrl ? (
-                                    <AvatarImage src={assignee.profilePictureUrl} alt={assignee.displayName} />
-                                ) : (
-                                    <AvatarFallback>
-                                        <UserIcon className="size-3 text-muted-foreground" />
-                                    </AvatarFallback>
-                                )}
-                            </Avatar>
-                        )}
-                    </div>
+                    {(due || assignee) && (
+                        <div className={cn('flex items-center gap-2', due ? 'justify-between' : 'justify-end')}>
+                            {due && (
+                                <span className={cn('inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium tabular-nums ring-1 ring-inset', DUE_CHIP[due.tone])}>
+                                    {due.label}
+                                </span>
+                            )}
+                            {assignee && (
+                                <Avatar size="sm" className="shrink-0 ring-1 ring-border">
+                                    {assignee.profilePictureUrl ? (
+                                        <AvatarImage src={assignee.profilePictureUrl} alt={assignee.displayName} />
+                                    ) : (
+                                        <AvatarFallback>
+                                            <UserIcon className="size-3 text-muted-foreground" />
+                                        </AvatarFallback>
+                                    )}
+                                </Avatar>
+                            )}
+                        </div>
+                    )}
                 </div>
             );
         },
