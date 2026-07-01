@@ -203,7 +203,6 @@ function NoteDialogForm({
                                     clearError('content');
                                 }}
                                 placeholder={t('contentPlaceholder')}
-                                excludeUserId={currentUserId}
                                 ariaInvalid={Boolean(fieldErrors.content)}
                                 ariaDescribedby={fieldErrors.content ? 'note-content-error' : undefined}
                                 autoFocus

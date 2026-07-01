@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
 import { BriefcaseIcon, BuildingOffice2Icon, UserIcon } from '@heroicons/react/24/outline';
 
@@ -433,8 +434,10 @@ export default function MentionEditor({
                     className,
                 )}
             />
-            <AnimatePresence>
-                {menuOpen && query && (
+            {typeof document !== 'undefined' &&
+                createPortal(
+                    <AnimatePresence>
+                        {menuOpen && query && (
                     <motion.ul
                         key="mention-menu"
                         id={listboxId}
@@ -449,7 +452,7 @@ export default function MentionEditor({
                             bottom: query.bottom,
                             transformOrigin: query.above ? 'bottom left' : 'top left',
                         }}
-                        className="fixed z-50 max-h-80 w-72 overflow-y-auto rounded-md bg-popover p-1 text-popover-foreground shadow-md ring-1 ring-foreground/10"
+                        className="fixed z-[100] max-h-80 w-72 overflow-y-auto rounded-md bg-popover p-1 text-popover-foreground shadow-md ring-1 ring-foreground/10"
                     >
                         {suggestions.map((suggestion, index) => {
                             const optionId = `${listboxId}-opt-${index}`;
@@ -497,7 +500,9 @@ export default function MentionEditor({
                         })}
                     </motion.ul>
                 )}
-            </AnimatePresence>
+                    </AnimatePresence>,
+                    document.body,
+                )}
         </>
     );
 }
