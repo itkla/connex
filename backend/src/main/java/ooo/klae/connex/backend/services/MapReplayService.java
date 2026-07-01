@@ -26,6 +26,7 @@ import ooo.klae.connex.backend.dto.ReplayCompanyDto;
 import ooo.klae.connex.backend.dto.ReplayContactDto;
 import ooo.klae.connex.backend.dto.ReplayDealDto;
 import ooo.klae.connex.backend.dto.ReplayFrameDto;
+import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.mappers.CompanyMapper;
 import ooo.klae.connex.backend.mappers.DealMapper;
 import ooo.klae.connex.backend.mappers.PersonEmploymentMapper;
@@ -58,6 +59,9 @@ public class MapReplayService {
     private static final DateTimeFormatter MYSQL_DATETIME =
         DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
+    /** Upper bound on emitted entries (frames x nodes) so a huge workspace can't produce a giant payload. */
+    private static final long MAX_ENTRIES = 2_000_000L;
+
     /** One stint of employment as epoch-millis bounds; {@code endMillis == Long.MAX_VALUE} is current. */
     private record Stint(long startMillis, long endMillis, Integer companyId) {}
 
@@ -75,6 +79,10 @@ public class MapReplayService {
         List<Person> persons = personMapper.getAllPersons(workspaceId);
         List<Company> companies = companyMapper.getAllCompanies(workspaceId);
         List<Deal> deals = dealMapper.getAllDeals(workspaceId);
+        if ((long) dates.size() * (persons.size() + companies.size() + deals.size()) > MAX_ENTRIES) {
+            throw new BadRequestException(
+                "Workspace is too large to replay this range; narrow the range or use a coarser granularity");
+        }
         Map<Integer, List<Stint>> stints = stintsByPerson(personEmploymentMapper.getAllEmployment(workspaceId));
 
         List<Map<Integer, Integer>> employerByFrame = new ArrayList<>(cutoffs.length);
@@ -123,7 +131,11 @@ public class MapReplayService {
     /** The frame dates from {@code from} to {@code to} stepping by {@code step}, always ending at {@code to}. */
     private List<LocalDate> frameDates(LocalDate from, LocalDate to, Period step) {
         List<LocalDate> dates = new ArrayList<>();
-        for (LocalDate d = from; !d.isAfter(to); d = d.plus(step)) dates.add(d);
+        for (int k = 0; ; k++) {
+            LocalDate d = from.plus(step.multipliedBy(k));
+            if (d.isAfter(to)) break;
+            dates.add(d);
+        }
         if (dates.isEmpty() || !dates.get(dates.size() - 1).equals(to)) dates.add(to);
         return dates;
     }
@@ -167,7 +179,8 @@ public class MapReplayService {
     private String resolutionAsOf(Deal deal, long cutoff) {
         Long closed = epoch(deal.getClosedAt());
         if (closed == null || closed > cutoff) return "open";
-        return Boolean.TRUE.equals(deal.getWon()) ? "won" : "lost";
+        Boolean won = deal.getWon();
+        return won == null ? "open" : won ? "won" : "lost";
     }
 
     private boolean presentAsOf(String createdAt, long cutoff) {
