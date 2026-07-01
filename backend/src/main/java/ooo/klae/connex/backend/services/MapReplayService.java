@@ -80,9 +80,14 @@ public class MapReplayService {
         List<Map<Integer, Integer>> employerByFrame = new ArrayList<>(cutoffs.length);
         for (long cutoff : cutoffs) employerByFrame.add(employerAsOf(stints, cutoff));
 
-        List<Map<Integer, String>> contactBands = scoringService.contactBandFrames(workspaceId, cutoffs);
-        List<Map<Integer, String>> companyBands = scoringService.companyBandFrames(workspaceId, cutoffs,
-            (personId, epochMillis) -> employerAt(stints.get(personId), epochMillis));
+        Map<Integer, Integer> dealCompany = new HashMap<>();
+        for (Deal d : deals) {
+            if (d.getCompanyId() != null) dealCompany.put(d.getId(), d.getCompanyId());
+        }
+        ScoringService.ReplayBands bands = scoringService.replayBands(workspaceId, cutoffs,
+            (personId, epochMillis) -> employerAt(stints.get(personId), epochMillis), dealCompany);
+        List<Map<Integer, String>> contactBands = bands.contactFrames();
+        List<Map<Integer, String>> companyBands = bands.companyFrames();
 
         List<ReplayFrameDto> frames = new ArrayList<>(dates.size());
         for (int i = 0; i < dates.size(); i++) {

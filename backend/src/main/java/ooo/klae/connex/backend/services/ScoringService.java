@@ -201,51 +201,68 @@ public class ScoringService {
         return map;
     }
 
-    /**
-     * Warmth band for every contact with any touch, at each instant in {@code frameMillis} — decayed
-     * against that instant and counting only touches logged on or before it. Touches load once; the
-     * map for a frame omits contacts with no qualifying touch (the caller defaults them to "cold").
-     * Used by the time-travel replay to avoid re-querying per frame.
-     */
-    public List<Map<Integer, String>> contactBandFrames(int workspaceId, long[] frameMillis) {
-        Map<Integer, List<Touch>> byPerson = collectContactTouches(workspaceId);
-        List<Map<Integer, String>> frames = new ArrayList<>(frameMillis.length);
-        for (long t : frameMillis) {
-            Map<Integer, String> bands = new HashMap<>();
-            for (Map.Entry<Integer, List<Touch>> e : byPerson.entrySet()) {
-                bands.put(e.getKey(), temperature(e.getKey(), e.getValue(), t, t).getBand());
-            }
-            frames.add(bands);
-        }
-        return frames;
-    }
+    /** Per-frame contact and company warmth bands, produced from a single touch load. */
+    public record ReplayBands(List<Map<Integer, String>> contactFrames, List<Map<Integer, String>> companyFrames) {}
 
     /**
-     * Warmth band for every company at each instant in {@code frameMillis}. A contact's touch is
-     * attributed to the company that contact worked at <em>when the touch occurred</em> (via
-     * {@code employerAt}), so a contact moving employers cools their old account and heats the new
-     * one rather than retroactively re-crediting their whole history; a deal's touch uses the deal's
-     * present-day company. Attribution is fixed once and touches load once. The map for a frame omits
-     * companies with no qualifying touch (the caller defaults them to "cold").
+     * Warmth bands for every contact and company across {@code frameMillis}, for the time-travel
+     * replay. Activities, notes, and tasks are loaded <em>once</em> and bucketed for both contacts
+     * (their own touches) and companies (each touch attributed to the company that contact worked at
+     * <em>when the touch occurred</em> via {@code employerAt}, so a contact moving employers cools the
+     * old account and heats the new one rather than retroactively re-crediting their whole history; a
+     * deal's touch uses {@code dealCompany}, the present-day parentage). Each frame's map omits nodes
+     * with no qualifying touch (the caller defaults them to "cold").
      */
-    public List<Map<Integer, String>> companyBandFrames(int workspaceId, long[] frameMillis,
-            EmployerResolver employerAt) {
-        List<AttributedTouch> touches =
-            attributeCompanyTouches(collectCompanyAttributableTouches(workspaceId), employerAt);
-        List<Map<Integer, String>> frames = new ArrayList<>(frameMillis.length);
+    public ReplayBands replayBands(int workspaceId, long[] frameMillis, EmployerResolver employerAt,
+            Map<Integer, Integer> dealCompany) {
+        Map<Integer, List<Touch>> byPerson = new HashMap<>();
+        List<CompanyTouch> companyTouches = new ArrayList<>();
+        for (Activity a : activityMapper.getAllActivities(workspaceId)) {
+            collectTouch(epoch(a.getTimestamp()), activityWeight(a.getType()), a.getPerson(), a.getDeal(),
+                dealCompany, byPerson, companyTouches);
+        }
+        for (Note n : noteMapper.getAllNotes(workspaceId)) {
+            collectTouch(epoch(n.getCreatedAt()), NOTE_WEIGHT, n.getPerson(), n.getDeal(),
+                dealCompany, byPerson, companyTouches);
+        }
+        for (Task t : taskMapper.getAllTasks(workspaceId)) {
+            collectTouch(epoch(t.getCreatedAt()), TASK_WEIGHT, t.getPerson(), t.getDeal(),
+                dealCompany, byPerson, companyTouches);
+        }
+
+        List<AttributedTouch> attributed = attributeCompanyTouches(companyTouches, employerAt);
+
+        List<Map<Integer, String>> contactFrames = new ArrayList<>(frameMillis.length);
+        List<Map<Integer, String>> companyFrames = new ArrayList<>(frameMillis.length);
         for (long t : frameMillis) {
+            Map<Integer, String> contactBands = new HashMap<>();
+            for (Map.Entry<Integer, List<Touch>> e : byPerson.entrySet()) {
+                contactBands.put(e.getKey(), temperature(e.getKey(), e.getValue(), t, t).getBand());
+            }
+            contactFrames.add(contactBands);
+
             Map<Integer, List<Touch>> byCompany = new HashMap<>();
-            for (AttributedTouch at : touches) {
+            for (AttributedTouch at : attributed) {
                 if (at.epochMillis() > t) continue;
                 for (Integer cid : at.companies()) add(byCompany, cid, new Touch(at.epochMillis(), at.weight()));
             }
-            Map<Integer, String> bands = new HashMap<>();
+            Map<Integer, String> companyBands = new HashMap<>();
             for (Map.Entry<Integer, List<Touch>> e : byCompany.entrySet()) {
-                bands.put(e.getKey(), temperature(e.getKey(), e.getValue(), t, t).getBand());
+                companyBands.put(e.getKey(), temperature(e.getKey(), e.getValue(), t, t).getBand());
             }
-            frames.add(bands);
+            companyFrames.add(companyBands);
         }
-        return frames;
+        return new ReplayBands(contactFrames, companyFrames);
+    }
+
+    /** Buckets one touch into the per-contact map and the company-attributable list in a single pass. */
+    private static void collectTouch(Long ts, double weight, Person person, Deal deal,
+            Map<Integer, Integer> dealCompany, Map<Integer, List<Touch>> byPerson,
+            List<CompanyTouch> companyTouches) {
+        if (ts == null) return;
+        Integer pid = personId(person);
+        if (pid != null) add(byPerson, pid, new Touch(ts, weight));
+        companyTouches.add(new CompanyTouch(ts, weight, pid, dealCompanyFor(deal, dealCompany)));
     }
 
     /** Resolves which company a contact worked at at a given instant, for touch-time attribution. */
@@ -273,31 +290,6 @@ public class ScoringService {
             }
             if (ct.dealCompanyId() != null) companies.add(ct.dealCompanyId());
             if (!companies.isEmpty()) out.add(new AttributedTouch(ct.epochMillis(), ct.weight(), companies));
-        }
-        return out;
-    }
-
-    /** Collects every touch with its contact and present-day deal-company linkage, for as-of attribution. */
-    private List<CompanyTouch> collectCompanyAttributableTouches(int workspaceId) {
-        Map<Integer, Integer> dealCompany = new HashMap<>();
-        for (Deal d : dealMapper.getAllDeals(workspaceId)) {
-            if (d.getCompanyId() != null) dealCompany.put(d.getId(), d.getCompanyId());
-        }
-        List<CompanyTouch> out = new ArrayList<>();
-        for (Activity a : activityMapper.getAllActivities(workspaceId)) {
-            Long ts = epoch(a.getTimestamp());
-            if (ts != null) out.add(new CompanyTouch(ts, activityWeight(a.getType()),
-                personId(a.getPerson()), dealCompanyFor(a.getDeal(), dealCompany)));
-        }
-        for (Note n : noteMapper.getAllNotes(workspaceId)) {
-            Long ts = epoch(n.getCreatedAt());
-            if (ts != null) out.add(new CompanyTouch(ts, NOTE_WEIGHT,
-                personId(n.getPerson()), dealCompanyFor(n.getDeal(), dealCompany)));
-        }
-        for (Task t : taskMapper.getAllTasks(workspaceId)) {
-            Long ts = epoch(t.getCreatedAt());
-            if (ts != null) out.add(new CompanyTouch(ts, TASK_WEIGHT,
-                personId(t.getPerson()), dealCompanyFor(t.getDeal(), dealCompany)));
         }
         return out;
     }
