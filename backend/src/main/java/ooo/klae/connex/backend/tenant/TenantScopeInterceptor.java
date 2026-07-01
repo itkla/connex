@@ -48,6 +48,7 @@ public class TenantScopeInterceptor implements Interceptor {
     public static final Set<String> SCOPED_NAMESPACES = Set.of(
         MAPPERS + "CompanyMapper",
         MAPPERS + "PersonMapper",
+        MAPPERS + "PersonEmploymentMapper",
         MAPPERS + "PipelineMapper",
         MAPPERS + "TagMapper",
         MAPPERS + "CustomFieldDefinitionMapper",

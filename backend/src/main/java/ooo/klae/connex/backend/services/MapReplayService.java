@@ -1,5 +1,7 @@
 package ooo.klae.connex.backend.services;
 
+import java.time.Clock;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.Period;
@@ -51,6 +53,7 @@ public class MapReplayService {
     private final CompanyMapper companyMapper;
     private final DealMapper dealMapper;
     private final PersonEmploymentMapper personEmploymentMapper;
+    private final Clock clock;
 
     private static final DateTimeFormatter MYSQL_DATETIME =
         DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
@@ -65,8 +68,9 @@ public class MapReplayService {
      */
     public MapReplayDto buildReplay(int workspaceId, LocalDate from, LocalDate to, Period step) {
         List<LocalDate> dates = frameDates(from, to, step);
+        long now = Instant.now(clock).toEpochMilli();
         long[] cutoffs = new long[dates.size()];
-        for (int i = 0; i < dates.size(); i++) cutoffs[i] = endOfDayMillis(dates.get(i));
+        for (int i = 0; i < dates.size(); i++) cutoffs[i] = Math.min(endOfDayMillis(dates.get(i)), now);
 
         List<Person> persons = personMapper.getAllPersons(workspaceId);
         List<Company> companies = companyMapper.getAllCompanies(workspaceId);

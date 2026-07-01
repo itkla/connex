@@ -98,7 +98,7 @@ class MapReplayServiceTest {
         Clock clock = Clock.fixed(Instant.parse("2026-06-30T00:00:00Z"), ZoneOffset.UTC);
         ScoringService scoring = new ScoringService(
             personMapper, companyMapper, dealMapper, activityMapper, noteMapper, taskMapper, clock);
-        return new MapReplayService(scoring, personMapper, companyMapper, dealMapper, employmentMapper);
+        return new MapReplayService(scoring, personMapper, companyMapper, dealMapper, employmentMapper, clock);
     }
 
     private static ReplayFrameDto frameOn(MapReplayDto out, String asOf) {

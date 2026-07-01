@@ -34,6 +34,9 @@ public class MapReplayController {
     /** Maximum frames a single replay may produce; wider ranges must coarsen the granularity. */
     private static final int MAX_FRAMES = 120;
 
+    /** Earliest replayable date; no relationship data predates it, and it keeps date math well within range. */
+    private static final LocalDate MIN_FROM = LocalDate.of(1970, 1, 1);
+
     /**
      * Replay frames for {@code [from, to]} (inclusive ISO {@code yyyy-MM-dd} dates) at weekly or
      * monthly granularity. A weekly range that would exceed {@link #MAX_FRAMES} is automatically
@@ -46,6 +49,9 @@ public class MapReplayController {
             @RequestParam(defaultValue = "weekly") String granularity) {
         LocalDate fromDate = parseDate(from, "from");
         LocalDate toDate = parseDate(to, "to");
+        if (fromDate.isBefore(MIN_FROM)) {
+            throw new BadRequestException("'from' must not be before " + MIN_FROM);
+        }
         if (fromDate.isAfter(toDate)) {
             throw new BadRequestException("'from' must not be after 'to'");
         }
