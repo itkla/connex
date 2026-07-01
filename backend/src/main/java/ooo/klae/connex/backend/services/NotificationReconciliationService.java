@@ -219,9 +219,10 @@ public class NotificationReconciliationService {
      * Surfaces open deals the risk engine flags as high or medium (see {@link DealRiskService}) to
      * each deal's owner and collaborators. Low-level risk is intentionally not pushed — it stays on
      * the deal page, not the inbox. Deduped per (deal, recipient); the resolve pass clears a
-     * notification once the deal is no longer at risk or has closed, and the upsert re-surfaces one
-     * whose level has escalated (severity change). Like the relationship-nudge pass this rescores the
-     * whole workspace, so it runs only on the scheduled sweep.
+     * notification once the deal is no longer at risk or has closed. A same-severity re-emit does not
+     * disturb a dismissed notification, but any severity change (in either direction) re-surfaces it
+     * as unread — the shared upsert's behaviour for every reminder type. Like the relationship-nudge
+     * pass this rescores the whole workspace, so it runs only on the scheduled sweep.
      */
     private void addDealRiskNotifications(
         int workspaceId,
