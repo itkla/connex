@@ -6,6 +6,7 @@ import org.apache.ibatis.annotations.Param;
 
 import ooo.klae.connex.backend.beans.DealReminderCandidate;
 import ooo.klae.connex.backend.beans.Notification;
+import ooo.klae.connex.backend.beans.OpenDealRecipient;
 import ooo.klae.connex.backend.beans.RelationshipNudgeCandidate;
 import ooo.klae.connex.backend.beans.TaskReminderCandidate;
 import ooo.klae.connex.backend.dto.NotificationCountsDto;
@@ -101,6 +102,13 @@ public interface NotificationMapper {
      * from — used to derive the high-value threshold that weights a nudge's priority.
      */
     List<Double> findOpenDealValues(@Param("workspaceId") int workspaceId);
+
+    /**
+     * One row per (open, owned deal, recipient) where the recipient is the deal owner or a
+     * collaborator and a current workspace member. The deal-risk pass joins these against computed
+     * risk to emit per-recipient notifications.
+     */
+    List<OpenDealRecipient> findOpenDealRecipients(@Param("workspaceId") int workspaceId);
 
     List<Integer> findWorkspaceIds();
 

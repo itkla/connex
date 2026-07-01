@@ -23,4 +23,5 @@ public class NotificationProperties {
     private int coolingCloseSoonDays = 14;
     private boolean introOpportunitiesEnabled = true;
     private int introOpportunityLimit = 3;
+    private boolean dealRiskEnabled = true;
 }

@@ -32,6 +32,8 @@ import DeleteRecordDialog from '@/app/components/records/DeleteRecordDialog';
 import { useRecordsBrowser } from '@/app/hooks/useRecordsBrowser';
 import { type ColumnDef, applyRecordFilters, deriveFilterOptions, facetChips, countActiveFilters } from '@/app/components/records/types';
 import DealCard from '@/app/components/records/deals/DealCard';
+import DealRiskPill from '@/app/components/records/deals/DealRiskPill';
+import { useRiskText } from '@/app/components/records/deals/dealRisk';
 import DealsKanban from '@/app/components/records/deals/DealsKanban';
 import NewDealDialog from '@/app/components/records/deals/NewDealDialog';
 import QuickEditDealSheet, { type DealDraft } from '@/app/components/records/deals/QuickEditDealSheet';
@@ -44,6 +46,7 @@ import {
     getPipelines,
     getStagesByPipelineId,
     getDealPeople,
+    getDealRisks,
     getTags,
     getActiveWorkspaceMembers,
     bulkAddTagToDeals,
@@ -62,6 +65,7 @@ import {
     type Company,
     type CreateDealPayload,
     type Deal,
+    type DealRisk,
     type Pipeline,
     type Stage,
     type Contact,
@@ -112,12 +116,14 @@ export default function DealsBrowser({ deals, savedViews }: { deals: Deal[]; sav
     const router = useRouter();
     const t = useTranslations('DealsBrowser');
     const tf = useTranslations('Filters');
+    const { levelLabel } = useRiskText();
     const locale = useLocale();
     const reduce = useReducedMotion() ?? false;
 
     const [companies, setCompanies] = useState<Company[]>([]);
     const [pipelines, setPipelines] = useState<Pipeline[]>([]);
     const [contactByDealId, setContactByDealId] = useState<Map<number, Contact>>(new Map());
+    const [riskByDealId, setRiskByDealId] = useState<Map<number, DealRisk>>(new Map());
     const [stagesByPipeline, setStagesByPipeline] = useState<Record<number, Stage[]>>({});
 
     useEffect(() => {
@@ -367,6 +373,11 @@ export default function DealsBrowser({ deals, savedViews }: { deals: Deal[]; sav
 
     const [tags, setTags] = useState<Tag[]>([]);
     useEffect(() => { getTags().then(setTags).catch(() => setTags([])); }, []);
+    useEffect(() => {
+        getDealRisks()
+            .then((risks) => setRiskByDealId(new Map(risks.map((r) => [r.dealId, r]))))
+            .catch(() => setRiskByDealId(new Map()));
+    }, []);
     const [members, setMembers] = useState<WorkspaceMember[]>([]);
     useEffect(() => { getActiveWorkspaceMembers().then(setMembers).catch(() => setMembers([])); }, []);
 
@@ -468,6 +479,20 @@ export default function DealsBrowser({ deals, savedViews }: { deals: Deal[]; sav
             render: (d) => formatDate(d.expectedCloseDate, locale),
         },
         {
+            key: 'risk',
+            label: t('columnRisk'),
+            getSortValue: (d) => riskByDealId.get(d.id)?.score ?? null,
+            render: (d) => <DealRiskPill risk={riskByDealId.get(d.id)} />,
+            filter: {
+                getValue: (d) => {
+                    const level = riskByDealId.get(d.id)?.level;
+                    return level && level !== 'none' ? level : null;
+                },
+                formatValue: (v) =>
+                    v === 'high' || v === 'medium' || v === 'low' ? levelLabel(v) : String(v),
+            },
+        },
+        {
             key: 'status',
             label: t('columnStatus'),
             getSortValue: (d) => (isDealClosed(d) ? 1 : 0),
@@ -519,7 +544,7 @@ export default function DealsBrowser({ deals, savedViews }: { deals: Deal[]; sav
             getSortValue: (d) => (d.updatedAt ? Date.parse(d.updatedAt) : null),
             render: (d) => formatDateTime(d.updatedAt, locale),
         },
-    ], [companyById, pipelineById, stageById, toggleDealStatus, t, locale]);
+    ], [companyById, pipelineById, stageById, riskByDealId, toggleDealStatus, levelLabel, t, locale]);
 
     const visibleDeals = useMemo(
         () => applyRecordFilters(filteredDeals, columns, filterState),
@@ -735,6 +760,7 @@ export default function DealsBrowser({ deals, savedViews }: { deals: Deal[]; sav
                     companyById={companyById}
                     pipelineById={pipelineById}
                     stageById={stageById}
+                    riskByDealId={riskByDealId}
                     onQuickEdit={quickEditOne}
                     onDelete={deleteOne}
                     onMoved={() => router.refresh()}
@@ -751,6 +777,7 @@ export default function DealsBrowser({ deals, savedViews }: { deals: Deal[]; sav
                             company={item.company != null ? companyById.get(item.company) : undefined}
                             pipeline={item.pipeline != null ? pipelineById.get(item.pipeline) : undefined}
                             stage={item.stage != null ? stageById.get(item.stage) : undefined}
+                            risk={riskByDealId.get(item.id)}
                             onQuickEdit={onQuickEdit ? () => onQuickEdit(item) : undefined}
                             onDelete={onDelete ? () => onDelete(item) : undefined}
                         />

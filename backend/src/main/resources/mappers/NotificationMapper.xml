@@ -70,6 +70,12 @@
     <result property="recipientId" column="recipient_id"/>
   </resultMap>
 
+  <resultMap id="OpenDealRecipientResult" type="OpenDealRecipient">
+    <result property="dealId" column="deal_id"/>
+    <result property="dealLabel" column="deal_label"/>
+    <result property="recipientId" column="recipient_id"/>
+  </resultMap>
+
   <sql id="notificationColumns">
     n.id, n.workspace_id, n.recipient_id, n.type, n.category, n.severity,
     n.template_version, n.title, n.body, n.actor_id, n.actor_label,
@@ -86,7 +92,7 @@
   <!-- Reconciliation-managed reminder types. Every reconcile/resolve/purge statement scopes to
        this list so a new reminder producer only has to extend it here, in one place. -->
   <sql id="reminderTypes">
-    'task.due', 'deal.close', 'relationship.cooling', 'relationship.intro_opportunity'
+    'task.due', 'deal.close', 'deal.risk', 'relationship.cooling', 'relationship.intro_opportunity'
   </sql>
 
   <!-- The inbox/bell is recipient-scoped across every workspace the user belongs to (not the active
@@ -418,6 +424,36 @@
     WHERE workspace_id = #{workspaceId}
       AND owner_id IS NOT NULL
       AND closed_at IS NULL
+  </select>
+
+  <select id="findOpenDealRecipients" resultMap="OpenDealRecipientResult">
+    SELECT d.id AS deal_id,
+           d.name AS deal_label,
+           recipients.recipient_id
+    FROM deal d
+    JOIN (
+      SELECT owned.workspace_id, owned.id AS deal_id, owned.owner_id AS recipient_id
+      FROM deal owned
+      WHERE owned.workspace_id = #{workspaceId}
+        AND owned.owner_id IS NOT NULL
+      UNION
+      SELECT collaborated.workspace_id, collaborated.id AS deal_id, dc.user_id AS recipient_id
+      FROM deal collaborated
+      JOIN deal_collaborator dc
+        ON dc.workspace_id = collaborated.workspace_id
+       AND dc.deal_id = collaborated.id
+      WHERE collaborated.workspace_id = #{workspaceId}
+        AND collaborated.owner_id IS NOT NULL
+    ) recipients
+      ON recipients.workspace_id = d.workspace_id
+     AND recipients.deal_id = d.id
+    JOIN workspace_member wm
+      ON wm.workspace_id = d.workspace_id
+     AND wm.user_id = recipients.recipient_id
+    WHERE d.workspace_id = #{workspaceId}
+      AND d.owner_id IS NOT NULL
+      AND d.closed_at IS NULL
+    ORDER BY d.id, recipients.recipient_id
   </select>
 
   <select id="findWorkspaceIds" resultType="int">

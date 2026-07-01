@@ -13,11 +13,16 @@
     "viewAll": "View all",
     "viewMap": "View map",
     "coolingRelationships": "Cooling relationships",
+    "atRiskDeals": "At-risk deals",
+    "viewDeals": "View deals",
     "introductions": "Introductions",
     "recentlyMoved": "Recently moved",
     "files": "Files",
     "storageUsed": "{count, plural, =1 {# file} other {# files}} · {size}",
     "noFiles": "No files yet"
+  },
+  "AtRiskDeals": {
+    "empty": "No deals need attention right now."
   },
   "CoolingRelationships": {
     "empty": "Every relationship is warm — nothing cooling off.",
