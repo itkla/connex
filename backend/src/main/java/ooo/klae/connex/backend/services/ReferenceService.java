@@ -130,7 +130,7 @@ public class ReferenceService {
 
     private boolean isVisible(int workspaceId, String type, int refId) {
         return switch (type) {
-            case TYPE_USER -> workspaceService.isMember(workspaceId, refId);
+            case TYPE_USER -> workspaceService.isMemberIncludingPending(workspaceId, refId);
             case TYPE_PERSON -> personMapper.exists(workspaceId, refId);
             case TYPE_DEAL -> dealMapper.exists(workspaceId, refId);
             case TYPE_COMPANY -> companyMapper.exists(workspaceId, refId);
