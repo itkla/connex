@@ -15,15 +15,29 @@ const MAX_SUGGESTIONS = 6;
 const MENU_WIDTH = 256;
 const MENU_MAX_HEIGHT = 280;
 
-let membersCache: Promise<WorkspaceMember[]> | null = null;
+function currentWorkspaceKey(): string {
+    if (typeof document === 'undefined') return '';
+    const match = document.cookie.match(/(?:^|;\s*)connex_workspace=([^;]+)/);
+    return match ? match[1] : '';
+}
+
+let membersCache: { key: string; promise: Promise<WorkspaceMember[]> } | null = null;
 function loadMembers(): Promise<WorkspaceMember[]> {
-    if (!membersCache) {
-        membersCache = getActiveWorkspaceMembers().catch(() => {
-            membersCache = null;
-            return [];
-        });
+    const key = currentWorkspaceKey();
+    if (!membersCache || membersCache.key !== key) {
+        membersCache = {
+            key,
+            promise: getActiveWorkspaceMembers().catch(() => {
+                membersCache = null;
+                return [];
+            }),
+        };
     }
-    return membersCache;
+    return membersCache.promise;
+}
+
+function sanitizeLabel(label: string): string {
+    return label.replace(/[[\]\r\n]/g, '').trim();
 }
 
 type EditorSegment = { kind: 'text'; value: string } | { kind: 'mention'; id: number; label: string };
@@ -59,18 +73,24 @@ function renderInto(root: HTMLElement, value: string) {
     }
 }
 
+function serializeNode(node: Node): string {
+    if (node.nodeType === Node.TEXT_NODE) return node.textContent ?? '';
+    if (!(node instanceof HTMLElement)) return '';
+    if (node.dataset.userId) return `[${node.dataset.label ?? ''}](user:${node.dataset.userId})`;
+    if (node.tagName === 'BR') return '\n';
+    let inner = '';
+    node.childNodes.forEach((child) => {
+        inner += serializeNode(child);
+    });
+    return node.tagName === 'DIV' || node.tagName === 'P' ? `\n${inner}` : inner;
+}
+
 function serialize(root: HTMLElement): string {
     let out = '';
     root.childNodes.forEach((node) => {
-        if (node.nodeType === Node.TEXT_NODE) {
-            out += node.textContent ?? '';
-        } else if (node instanceof HTMLElement) {
-            if (node.dataset.userId) out += `[${node.dataset.label ?? ''}](user:${node.dataset.userId})`;
-            else if (node.tagName === 'BR') out += '\n';
-            else out += node.textContent ?? '';
-        }
+        out += serializeNode(node);
     });
-    return out;
+    return out.replace(/^\n/, '');
 }
 
 type ActiveQuery = { text: string; left: number; top?: number; bottom?: number; above: boolean };
@@ -220,22 +240,30 @@ export default function MentionEditor({
         (member: WorkspaceMember) => {
             const el = editorRef.current;
             const selection = window.getSelection();
-            if (!el || !selection || selection.rangeCount === 0) return;
+            if (!el || !selection || selection.rangeCount === 0) {
+                closeMenu();
+                return;
+            }
             const range = selection.getRangeAt(0);
             const node = range.startContainer;
-            if (node.nodeType !== Node.TEXT_NODE) return;
+            if (node.nodeType !== Node.TEXT_NODE) {
+                closeMenu();
+                return;
+            }
 
             const text = node.textContent ?? '';
             const caret = range.startOffset;
             const at = text.lastIndexOf('@', caret - 1);
-            if (at === -1) return;
+            const parent = node.parentNode;
+            if (at === -1 || !parent) {
+                closeMenu();
+                return;
+            }
 
             const before = text.slice(0, at);
             const after = text.slice(caret);
-            const parent = node.parentNode;
-            if (!parent) return;
 
-            const chip = makeChip(member.id, member.displayName);
+            const chip = makeChip(member.id, sanitizeLabel(member.displayName) || member.username);
             const spacer = document.createTextNode(' ');
             const afterNode = document.createTextNode(after);
             const beforeNode = document.createTextNode(before);
@@ -284,9 +312,10 @@ export default function MentionEditor({
             if (event.key === 'Enter') {
                 event.preventDefault();
                 document.execCommand('insertText', false, '\n');
+                emit();
             }
         },
-        [menuOpen, suggestions, activeIndex, insertMention, closeMenu],
+        [menuOpen, suggestions, activeIndex, insertMention, closeMenu, emit],
     );
 
     return (
