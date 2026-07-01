@@ -12,26 +12,31 @@ import org.springframework.transaction.annotation.Transactional;
 
 import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.beans.Activity;
+import ooo.klae.connex.backend.beans.Company;
 import ooo.klae.connex.backend.beans.Deal;
 import ooo.klae.connex.backend.beans.DealPerson;
 import ooo.klae.connex.backend.beans.Note;
 import ooo.klae.connex.backend.beans.Person;
+import ooo.klae.connex.backend.beans.Pipeline;
 import ooo.klae.connex.backend.beans.Stage;
 import ooo.klae.connex.backend.beans.Tag;
 import ooo.klae.connex.backend.beans.Task;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.dto.CustomFieldEntryDto;
+import ooo.klae.connex.backend.dto.DealSummaryDto;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.tenant.Permission;
 import ooo.klae.connex.backend.tenant.RequirePermission;
 import ooo.klae.connex.backend.mappers.ActivityMapper;
+import ooo.klae.connex.backend.mappers.CompanyMapper;
 import ooo.klae.connex.backend.mappers.DealMapper;
 import ooo.klae.connex.backend.mappers.NoteMapper;
 import ooo.klae.connex.backend.mappers.PersonMapper;
 import ooo.klae.connex.backend.mappers.PipelineMapper;
 import ooo.klae.connex.backend.mappers.TagMapper;
 import ooo.klae.connex.backend.mappers.TaskMapper;
+import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.notifications.NotificationChangePublisher;
 
 /**
@@ -57,6 +62,8 @@ public class DealService {
     private final NotificationChangePublisher notificationChanges;
     private final CustomFieldValueService customFieldValueService;
     private final ReferenceService referenceService;
+    private final CompanyMapper companyMapper;
+    private final UserMapper userMapper;
 
     private static final DateTimeFormatter MYSQL_DATETIME = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
@@ -153,6 +160,43 @@ public class DealService {
         Deal deal = dealMapper.getDealById(workspaceService.getCurrentWorkspaceId(), id);
         if (deal == null) throw new ResourceNotFoundException("Deal not found with id: " + id);
         return deal;
+    }
+
+    /**
+     * Name-resolved projection of a deal for hover previews / inline references:
+     * stage, pipeline, company, and owner are hydrated to display names.
+     *
+     * @param id the deal to summarize
+     * @return the workspace-scoped {@link DealSummaryDto}
+     */
+    public DealSummaryDto getDealSummary(int id) {
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        Deal deal = dealMapper.getDealById(workspaceId, id);
+        if (deal == null) throw new ResourceNotFoundException("Deal not found with id: " + id);
+
+        String status = deal.getWon() == null ? "open" : deal.getWon() ? "won" : "lost";
+        String pipelineName = null;
+        if (deal.getPipelineId() != null) {
+            Pipeline pipeline = pipelineMapper.getPipelineById(workspaceId, deal.getPipelineId());
+            if (pipeline != null) pipelineName = pipeline.getName();
+        }
+        String stageName = null;
+        if (deal.getStageId() != null) {
+            Stage stage = pipelineMapper.getStageById(workspaceId, deal.getStageId());
+            if (stage != null) stageName = stage.getName();
+        }
+        String companyName = null;
+        if (deal.getCompanyId() != null) {
+            Company company = companyMapper.getCompanyById(workspaceId, deal.getCompanyId());
+            if (company != null) companyName = company.getName();
+        }
+        String ownerName = null;
+        if (deal.getOwnerId() != null) {
+            User owner = userMapper.getUserById(deal.getOwnerId());
+            if (owner != null) ownerName = owner.getDisplayName();
+        }
+        return new DealSummaryDto(deal.getId(), deal.getName(), deal.getValue(), deal.getCurrency(),
+            status, deal.getExpectedCloseDate(), stageName, pipelineName, companyName, ownerName);
     }
 
     /**
