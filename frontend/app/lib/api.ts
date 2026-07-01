@@ -650,6 +650,14 @@ export function getCompanyTemperaturesFromCookie(cookie: string | null) {
 }
 
 /*
+* == Map replay (time-travel, #48)
+*/
+
+export function getMapReplay(params: Types.ReplayParams, init: RequestInit = {}) {
+    return getJson<Types.MapReplay>(`/api/map/replay${buildQuery({ ...params })}`, init);
+}
+
+/*
 * == Reverse introductions (the "give side" of the graph)
 */
 
