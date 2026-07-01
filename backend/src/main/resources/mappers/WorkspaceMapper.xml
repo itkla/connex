@@ -47,6 +47,15 @@
     )
   </select>
 
+  <select id="isMemberIncludingPending" resultType="boolean">
+    SELECT EXISTS(
+      SELECT 1
+      FROM workspace_member
+      WHERE workspace_id = #{workspaceId} AND user_id = #{userId}
+        AND status IN ('active', 'pending')
+    )
+  </select>
+
   <select id="getMembers" resultType="User">
     SELECT u.id, u.username, u.display_name, u.email, u.password_hash, u.timezone,
            u.last_login_at, u.profile_picture_url, u.created_at, u.updated_at

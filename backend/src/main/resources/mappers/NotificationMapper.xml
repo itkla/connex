@@ -95,11 +95,25 @@
     'task.due', 'deal.close', 'deal.risk', 'relationship.cooling', 'relationship.intro_opportunity'
   </sql>
 
-  <!-- The inbox/bell is recipient-scoped across every workspace the user belongs to (not the active
-       one), so nothing is missed while viewing another workspace. Each row is labeled with its source
-       workspace. Member removal cascades a member's notifications, so rows always map to live memberships. -->
+  <!-- The inbox/bell is recipient-scoped across every workspace where the user is an ACTIVE member
+       (not just the active one), so nothing is missed while viewing another workspace. Each row is
+       labeled with its source workspace. Content notifications for a workspace where the recipient is
+       only 'pending' (invited, not yet accepted) are withheld until they accept: the row exists — e.g.
+       a mention queued while pending — but surfaces only once their membership activates, so workspace
+       content is never disclosed to a not-yet-joined invitee. The sole exception is the
+       'workspace.join' invitation itself, which carries no workspace content and must reach the
+       pending member so they can accept. Member removal cascades a member's content notifications. -->
   <sql id="inboxScope">
     n.recipient_id = #{recipientId}
+      AND (
+        n.type = 'workspace.join'
+        OR EXISTS (
+          SELECT 1 FROM workspace_member wm
+          WHERE wm.workspace_id = n.workspace_id
+            AND wm.user_id = n.recipient_id
+            AND wm.status = 'active'
+        )
+      )
   </sql>
 
   <!-- A snoozed notification is hidden from the active inbox and unread count until its snooze

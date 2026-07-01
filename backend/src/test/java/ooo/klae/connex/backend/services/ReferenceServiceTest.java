@@ -79,6 +79,24 @@ class ReferenceServiceTest extends AbstractServiceTest {
     }
 
     /**
+     * A pending (invited-but-not-yet-joined) member is a valid mention target:
+     * their reference is persisted so the chip renders, and they are returned as
+     * newly-added so the caller can notify them; they see it once they accept.
+     */
+    @Test
+    void syncReferences_persistsPendingMemberMention() {
+        User pending = newPendingMember();
+        Note note = newNote(currentUser, null, null);
+
+        List<Integer> added = referenceService.syncReferences(workspace.getId(), note.getId(),
+            "Welcome " + mention("Invitee", pending));
+
+        assertEquals(List.of(pending.getId()), added);
+        assertEquals(1, stored(note).size());
+        assertEquals(pending.getId(), stored(note).get(0).getRefId());
+    }
+
+    /**
      * A token for a user outside the workspace is ignored (no cross-tenant mention).
      */
     @Test

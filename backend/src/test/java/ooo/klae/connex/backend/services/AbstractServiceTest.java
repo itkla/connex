@@ -89,6 +89,19 @@ abstract class AbstractServiceTest {
         return user;
     }
 
+    protected User newPendingMember() {
+        String s = unique();
+        User user = new User();
+        user.setUsername("user_" + s);
+        user.setDisplayName("User " + s);
+        user.setEmail(s + "@example.com");
+        user.setPasswordHash("hash_" + s);
+        user.setTimezone("UTC");
+        userMapper.insert(user);
+        workspaceMapper.addPendingMember(workspace.getId(), user.getId(), "member");
+        return user;
+    }
+
     protected Company newCompany() {
         String s = unique();
         Company company = new Company();
