@@ -42,6 +42,32 @@ import CustomFieldRows from "@/app/components/records/CustomFieldRows";
 
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 
+/**
+ * Builds the trailing 12-week engagement series (activities, tasks, notes bucketed by week).
+ * Kept at module scope so the `Date.now()` read stays out of the component render body.
+ */
+function buildWeeklyEngagement(activities: Activity[], tasks: Task[], notes: Note[]): EngagementPoint[] {
+    const firstWeekStart = Date.now() - 11 * WEEK_MS;
+    const weeklyEngagement: EngagementPoint[] = Array.from({ length: 12 }, (_, i) => ({
+        weekStart: firstWeekStart + i * WEEK_MS,
+        count: 0,
+        activities: 0,
+        tasks: 0,
+        notes: 0,
+    }));
+    const bucket = (ts: number, kind: 'activities' | 'tasks' | 'notes') => {
+        if (!Number.isFinite(ts)) return;
+        const idx = Math.floor((ts - firstWeekStart) / WEEK_MS);
+        if (idx < 0 || idx >= weeklyEngagement.length) return;
+        weeklyEngagement[idx][kind]++;
+        weeklyEngagement[idx].count++;
+    };
+    for (const a of activities) bucket(parseMysqlDateTime(a.timestamp), 'activities');
+    for (const t of tasks) bucket(parseMysqlDateTime(t.createdAt), 'tasks');
+    for (const n of notes) bucket(parseMysqlDateTime(n.createdAt), 'notes');
+    return weeklyEngagement;
+}
+
 export default async function CompanyPage({ params }: { params: { id: number } }) {
     const { id } = await params;
     const cookie = (await cookies()).toString();
@@ -110,25 +136,7 @@ export default async function CompanyPage({ params }: { params: { id: number } }
         await Promise.all(interactionUserIds.map((uid) => getUserById(uid, init).catch(() => null)))
     ).filter((u): u is User => u !== null);
 
-    const now = Date.now();
-    const firstWeekStart = now - 11 * WEEK_MS;
-    const weeklyEngagement: EngagementPoint[] = Array.from({ length: 12 }, (_, i) => ({
-        weekStart: firstWeekStart + i * WEEK_MS,
-        count: 0,
-        activities: 0,
-        tasks: 0,
-        notes: 0,
-    }));
-    const bucket = (ts: number, kind: 'activities' | 'tasks' | 'notes') => {
-        if (!Number.isFinite(ts)) return;
-        const idx = Math.floor((ts - firstWeekStart) / WEEK_MS);
-        if (idx < 0 || idx >= weeklyEngagement.length) return;
-        weeklyEngagement[idx][kind]++;
-        weeklyEngagement[idx].count++;
-    };
-    for (const a of activities) bucket(parseMysqlDateTime(a.timestamp), 'activities');
-    for (const t of tasks) bucket(parseMysqlDateTime(t.createdAt), 'tasks');
-    for (const n of notes) bucket(parseMysqlDateTime(n.createdAt), 'notes');
+    const weeklyEngagement = buildWeeklyEngagement(activities, tasks, notes);
 
     const revenueCurrency = pickDominantCurrency(deals);
     let pastRevenue = 0;
