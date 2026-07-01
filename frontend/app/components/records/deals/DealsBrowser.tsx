@@ -5,12 +5,12 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { useLocale, useTranslations } from 'next-intl';
 import { Button } from '@/components/ui/button';
-import RecordsImportExport from '@/app/components/import/RecordsImportExport';
+import RecordsActions from '@/app/components/import/RecordsActions';
 import { ButtonGroup } from '@/components/ui/button-group';
 import { toast } from 'sonner';
 import { toastError, toastSuccess } from '@/app/lib/toast';
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
-import { PlusIcon, TrashIcon, PencilIcon, EllipsisVerticalIcon, EyeIcon } from '@heroicons/react/24/solid';
+import { TrashIcon, PencilIcon, EllipsisVerticalIcon, EyeIcon } from '@heroicons/react/24/solid';
 import {
     TableCellsIcon,
     Squares2X2Icon,
@@ -645,11 +645,14 @@ export default function DealsBrowser({ deals, savedViews }: { deals: Deal[]; sav
                             </DropdownMenuContent>
                         </DropdownMenu>
                     )}
-                    <RecordsImportExport entity="deals" onImported={() => router.refresh()} exportIds={visibleDeals.map((d) => d.id)} />
-                    <Button className="bg-brand text-white" aria-label={t('addDeal')} onClick={() => setNewDialogOpen(true)}>
-                        <PlusIcon strokeWidth={2.5} />
-                        {t('newButton')}
-                    </Button>
+                    <RecordsActions
+                        entity="deals"
+                        onNew={() => setNewDialogOpen(true)}
+                        newLabel={t('newButton')}
+                        newAriaLabel={t('addDeal')}
+                        onImported={() => router.refresh()}
+                        exportIds={visibleDeals.map((d) => d.id)}
+                    />
                 </div>
             </div>
 
