@@ -7,10 +7,12 @@ import {
     KeyboardSensor,
     PointerSensor,
     closestCorners,
+    pointerWithin,
     useDroppable,
     useSensor,
     useSensors,
     type Announcements,
+    type CollisionDetection,
     type DragEndEvent,
     type DragOverEvent,
     type DragStartEvent,
@@ -71,6 +73,11 @@ function findColumn(map: ColumnItems, id: number): string | null {
     }
     return null;
 }
+
+const boardCollisionDetection: CollisionDetection = (args) => {
+    const pointerCollisions = pointerWithin(args);
+    return pointerCollisions.length > 0 ? pointerCollisions : closestCorners(args);
+};
 
 export default function KanbanBoard<T>(props: KanbanBoardProps<T>) {
     const { columns, items, getId, renderCard, onMove, reduce, emptyHint, countLabel, accessibility } = props;
@@ -175,7 +182,7 @@ export default function KanbanBoard<T>(props: KanbanBoardProps<T>) {
     return (
         <DndContext
             sensors={sensors}
-            collisionDetection={closestCorners}
+            collisionDetection={boardCollisionDetection}
             onDragStart={onDragStart}
             onDragOver={onDragOver}
             onDragEnd={onDragEnd}
