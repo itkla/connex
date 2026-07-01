@@ -32,8 +32,8 @@ type Entry = {
 
 const CHIP_CLASS: Record<EntryKind, string> = {
     task: 'bg-brand-light text-brand-dark hover:bg-brand/20',
-    activity: 'bg-chart-2/12 text-chart-2 hover:bg-chart-2/20',
-    deal: 'bg-chart-open/15 text-chart-open hover:bg-chart-open/25',
+    activity: 'bg-chart-2/12 text-foreground hover:bg-chart-2/20',
+    deal: 'bg-chart-open/20 text-foreground hover:bg-chart-open/30',
     note: 'bg-muted text-foreground hover:bg-muted/70',
 };
 

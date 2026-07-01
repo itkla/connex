@@ -159,7 +159,7 @@ export default function ContactCard({
     return (
         <>
         <div
-            className="group relative flex cursor-pointer flex-col overflow-hidden rounded-2xl bg-card ring-1 ring-border transition duration-200 hover:-translate-y-1 hover:shadow-lg dark:hover:shadow-[0_20px_45px_-18px_rgb(0_0_0/0.6)] hover:ring-border"
+            className="group relative flex cursor-pointer flex-col overflow-hidden rounded-2xl border border-border bg-card transition duration-200 hover:-translate-y-1 hover:shadow-lg dark:hover:shadow-[0_20px_45px_-18px_rgb(0_0_0/0.6)]"
             onClick={openContactPage}
         >
             <div className="relative aspect-square w-full overflow-hidden">

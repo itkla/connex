@@ -339,7 +339,8 @@ function Flow({ graph, focusId, replay, extraEdges }: FlowProps) {
                 nodeOrigin={NODE_ORIGIN}
                 onlyRenderVisibleElements
                 minZoom={0.1}
-                fitView={!reduceMotion}
+                fitView
+                fitViewOptions={{ duration: reduceMotion ? 0 : undefined }}
             >
                 <LabelFade />
                 <Background />

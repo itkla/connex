@@ -10,7 +10,7 @@ export default function RulesLoading() {
                 </div>
             </div>
 
-            <ul className="divide-y divide-border overflow-hidden rounded-2xl bg-card ring-1 ring-border">
+            <ul className="divide-y divide-border overflow-hidden rounded-2xl border border-border bg-card">
                 {Array.from({ length: 3 }, (_, i) => (
                     <li key={i} className="flex items-center gap-3 px-4 py-3.5">
                         <Skeleton className="h-5 w-9 shrink-0 rounded-full" />

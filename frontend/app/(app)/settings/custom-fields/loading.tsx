@@ -9,7 +9,7 @@ export default function CustomFieldsLoading() {
                         <Skeleton className="h-3 w-20" />
                         <Skeleton className="h-8 w-28 rounded-md" />
                     </div>
-                    <ul className="divide-y divide-border overflow-hidden rounded-2xl bg-card ring-1 ring-border">
+                    <ul className="divide-y divide-border overflow-hidden rounded-2xl border border-border bg-card">
                         {Array.from({ length: 2 }, (_, row) => (
                             <li key={row} className="flex items-center gap-3 px-4 py-3.5">
                                 <div className="flex-1 space-y-2">

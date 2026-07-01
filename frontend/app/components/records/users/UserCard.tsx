@@ -10,7 +10,7 @@ export default function UserCard({ user }: { user: User }) {
         <button
             type="button"
             onClick={() => router.push(`/users/${user.id}`)}
-            className="group flex w-full cursor-pointer flex-col items-center gap-4 rounded-2xl bg-card p-6 text-center ring-1 ring-border transition duration-200 hover:-translate-y-1 hover:shadow-lg dark:hover:shadow-[0_18px_40px_-16px_rgb(0_0_0/0.6)] hover:ring-border"
+            className="group flex w-full cursor-pointer flex-col items-center gap-4 rounded-2xl border border-border bg-card p-6 text-center transition duration-200 hover:-translate-y-1 hover:shadow-lg dark:hover:shadow-[0_18px_40px_-16px_rgb(0_0_0/0.6)]"
         >
             <div className="transition-transform duration-200 group-hover:scale-[1.03]">
                 <UserAvatar user={user} type="2xlarge" />

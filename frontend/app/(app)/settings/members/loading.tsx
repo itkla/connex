@@ -2,7 +2,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 
 function MemberRows({ count }: { count: number }) {
     return (
-        <ul className="divide-y divide-border overflow-hidden rounded-2xl bg-card ring-1 ring-border">
+        <ul className="divide-y divide-border overflow-hidden rounded-2xl border border-border bg-card">
             {Array.from({ length: count }).map((_, i) => (
                 <li key={i} className="flex items-center gap-3 px-4 py-3">
                     <Skeleton className="size-8 shrink-0 rounded-full" />

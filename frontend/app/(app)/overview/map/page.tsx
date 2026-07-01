@@ -90,7 +90,7 @@ export default async function MapPage({ searchParams }: { searchParams: Promise<
     const isEmpty = companies.length === 0 && contacts.length === 0;
 
     return (
-        <div className="flex min-h-0 w-full flex-1 flex-col gap-4">
+        <div className="flex h-full min-h-0 w-full flex-1 flex-col gap-4">
             <Rise>
                 <header className="flex flex-col gap-1">
                     <h1 className="text-3xl font-extrabold tracking-tight text-foreground md:text-4xl">{t("title")}</h1>

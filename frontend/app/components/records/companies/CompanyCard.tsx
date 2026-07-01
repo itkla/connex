@@ -34,7 +34,7 @@ export default function CompanyCard({ company, metrics, metricsStatus, onFirstEx
     };
 
     return (
-        <div className="group rounded-2xl bg-card ring-1 ring-border transition duration-200 hover:ring-border hover:shadow-lg dark:hover:shadow-[0_10px_30px_-12px_rgb(0_0_0/0.5)]">
+        <div className="group rounded-2xl border border-border bg-card transition duration-200 hover:shadow-lg dark:hover:shadow-[0_10px_30px_-12px_rgb(0_0_0/0.5)]">
             <div
                 className="flex cursor-pointer items-center gap-4 rounded-2xl p-4 transition-colors hover:bg-muted"
                 onClick={toggleExpand}

@@ -393,7 +393,7 @@ export default function MembersPanel({ currentUserId }: { currentUserId: number 
                                                 </Badge>
                                             )}
                                             {pending && (
-                                                <Badge className="border-transparent bg-warmth-cool/10 text-warmth-cool">
+                                                <Badge className="border-transparent bg-warmth-cool/15 text-foreground">
                                                     {t("pending")}
                                                 </Badge>
                                             )}
