@@ -37,6 +37,7 @@ public class UserService implements UserDetailsService {
     private final AuditService auditService;
     private final WorkspaceService workspaceService;
     private final NotificationChangePublisher notificationChanges;
+    private final ReferenceService referenceService;
 
     private static final Set<String> AUDIT_FIELDS =
         Set.of("username", "displayName", "email", "department", "title",
@@ -128,7 +129,8 @@ public class UserService implements UserDetailsService {
      */
     public List<Note> getNotesByUserId(int userId) {
         getUserById(userId);
-        return noteMapper.getNotesByAuthorId(workspaceService.getCurrentWorkspaceId(), userId);
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        return referenceService.hydrate(workspaceId, noteMapper.getNotesByAuthorId(workspaceId, userId));
     }
 
     /**

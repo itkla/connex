@@ -44,6 +44,7 @@ public class SearchService {
     private final AttachmentMapper attachmentMapper;
     private final AuditService auditService;
     private final WorkspaceService workspaceService;
+    private final ReferenceService referenceService;
 
     public SearchResultsDto search(String query) {
         if (query == null || query.isBlank()) {
@@ -61,7 +62,7 @@ public class SearchService {
             pipelineMapper.search(workspaceId, pattern).stream().map(PipelineDto::from).toList(),
             tagMapper.search(workspaceId, pattern).stream().map(TagDto::from).toList(),
             activityMapper.search(workspaceId, pattern).stream().map(ActivityDto::from).toList(),
-            noteMapper.search(workspaceId, pattern).stream().map(NoteDto::from).toList(),
+            referenceService.hydrate(workspaceId, noteMapper.search(workspaceId, pattern)).stream().map(NoteDto::from).toList(),
             taskMapper.search(workspaceId, pattern).stream().map(TaskDto::from).toList(),
             userMapper.search(workspaceId, pattern).stream().map(UserDto::from).toList(),
             attachmentMapper.search(workspaceId, pattern).stream().map(AttachmentDto::from).toList()

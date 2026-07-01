@@ -21,6 +21,7 @@ class NoteMentionTest extends AbstractServiceTest {
 
     @Autowired NoteService noteService;
     @Autowired NotificationMapper notificationMapper;
+    @Autowired PersonService personService;
 
     private String mention(String label, User user) {
         return "[" + label + "](user:" + user.getId() + ")";
@@ -149,5 +150,28 @@ class NoteMentionTest extends AbstractServiceTest {
         assertNull(notification.getContextType());
         assertNull(notification.getContextId());
         assertEquals("/activity/notes", notification.getActionUrl());
+    }
+
+    /**
+     * Loading a contact hydrates references on its embedded notes so mentions render as chips.
+     */
+    @Test
+    void personDetail_hydratesReferencesOnEmbeddedNotes() {
+        User mentioned = newUser();
+        Person person = newPerson(newCompany());
+        Note note = draft(mention("Mentioned", mentioned));
+        note.setPerson(person);
+        noteService.create(note);
+
+        Note[] notes = personService.getPersonById(person.getId()).getNotes();
+        assertNotNull(notes);
+        var reference = java.util.Arrays.stream(notes)
+            .filter((n) -> n.getReferences() != null && !n.getReferences().isEmpty())
+            .findFirst()
+            .orElseThrow()
+            .getReferences()
+            .get(0);
+        assertEquals(mentioned.getId(), reference.getRefId());
+        assertEquals("user", reference.getRefType());
     }
 }

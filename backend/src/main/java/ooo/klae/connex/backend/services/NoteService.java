@@ -3,8 +3,6 @@ package ooo.klae.connex.backend.services;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
-import java.util.ArrayList;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -15,7 +13,6 @@ import org.springframework.transaction.annotation.Transactional;
 import tools.jackson.databind.ObjectMapper;
 
 import ooo.klae.connex.backend.beans.Note;
-import ooo.klae.connex.backend.beans.NoteReference;
 import ooo.klae.connex.backend.beans.Notification;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
@@ -61,12 +58,12 @@ public class NoteService {
 
     public List<Note> getAllNotes() {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        return hydrateReferences(workspaceId, noteMapper.getAllNotes(workspaceId));
+        return referenceService.hydrate(workspaceId, noteMapper.getAllNotes(workspaceId));
     }
 
     public List<Note> getNotesByPersonId(int personId) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        return hydrateReferences(workspaceId, noteMapper.getNotesByPersonId(workspaceId, personId));
+        return referenceService.hydrate(workspaceId, noteMapper.getNotesByPersonId(workspaceId, personId));
     }
 
     public List<Note> getNotesByDealId(int dealId) {
@@ -74,12 +71,12 @@ public class NoteService {
         if (!dealMapper.exists(workspaceId, dealId)) {
             throw new ResourceNotFoundException("Deal not found with id: " + dealId);
         }
-        return hydrateReferences(workspaceId, noteMapper.getNotesByDealId(workspaceId, dealId));
+        return referenceService.hydrate(workspaceId, noteMapper.getNotesByDealId(workspaceId, dealId));
     }
 
     public List<Note> getNotesByAuthorId(int authorId) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        return hydrateReferences(workspaceId, noteMapper.getNotesByAuthorId(workspaceId, authorId));
+        return referenceService.hydrate(workspaceId, noteMapper.getNotesByAuthorId(workspaceId, authorId));
     }
 
     public Note getNoteById(int id) {
@@ -191,21 +188,6 @@ public class NoteService {
     private Note hydrateReferences(int workspaceId, Note note) {
         note.setReferences(noteReferenceMapper.findByNote(workspaceId, note.getId()));
         return note;
-    }
-
-    private List<Note> hydrateReferences(int workspaceId, List<Note> notes) {
-        if (notes.isEmpty()) {
-            return notes;
-        }
-        List<Integer> noteIds = notes.stream().map(Note::getId).toList();
-        Map<Integer, List<NoteReference>> byNote = new LinkedHashMap<>();
-        for (NoteReference reference : noteReferenceMapper.findByNotes(workspaceId, noteIds)) {
-            byNote.computeIfAbsent(reference.getNoteId(), key -> new ArrayList<>()).add(reference);
-        }
-        for (Note note : notes) {
-            note.setReferences(byNote.getOrDefault(note.getId(), List.of()));
-        }
-        return notes;
     }
 
     private static String snippet(String content) {

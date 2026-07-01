@@ -12,6 +12,7 @@ import java.util.regex.Pattern;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import ooo.klae.connex.backend.beans.Note;
 import ooo.klae.connex.backend.beans.NoteReference;
 import ooo.klae.connex.backend.mappers.NoteReferenceMapper;
 
@@ -64,6 +65,31 @@ public class ReferenceService {
         Set<Integer> added = mentionedMemberIds(resolved);
         added.removeAll(before);
         return new ArrayList<>(added);
+    }
+
+    /**
+     * Attaches each note's resolved references in a single batch query, so any
+     * read path (including MyBatis collections that bypass {@code NoteService})
+     * returns notes the frontend can render as chips. Mutates the notes in place
+     * and returns them. Scoped to {@code workspaceId}.
+     *
+     * @param workspaceId the owning workspace
+     * @param notes the notes to hydrate
+     * @return the same notes, each with its references populated
+     */
+    public List<Note> hydrate(int workspaceId, List<Note> notes) {
+        if (notes == null || notes.isEmpty()) {
+            return notes;
+        }
+        List<Integer> noteIds = notes.stream().map(Note::getId).toList();
+        Map<Integer, List<NoteReference>> byNote = new LinkedHashMap<>();
+        for (NoteReference reference : noteReferenceMapper.findByNotes(workspaceId, noteIds)) {
+            byNote.computeIfAbsent(reference.getNoteId(), key -> new ArrayList<>()).add(reference);
+        }
+        for (Note note : notes) {
+            note.setReferences(byNote.getOrDefault(note.getId(), List.of()));
+        }
+        return notes;
     }
 
     private List<NoteReference> resolve(int workspaceId, int noteId, String content, int authorId) {
