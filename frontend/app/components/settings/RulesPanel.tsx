@@ -25,6 +25,8 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
 import DeleteRecordDialog from "@/app/components/records/DeleteRecordDialog";
+import Rise from "@/app/components/motion/Rise";
+import SectionHeader from "@/app/components/dashboard/SectionHeader";
 import RuleDialog from "./RuleDialog";
 
 const rowActionTrigger =
@@ -159,31 +161,33 @@ export default function RulesPanel() {
 
     if (accessDenied) {
         return (
-            <p className="rounded-2xl bg-card px-4 py-6 text-center text-sm text-muted-foreground ring-1 ring-border">
+            <p className="rounded-2xl border border-border bg-card px-4 py-6 text-center text-sm text-muted-foreground">
                 {t("noAccess")}
             </p>
         );
     }
 
     return (
-        <div className="space-y-4">
-            <div className="flex items-start justify-between gap-4">
-                <div className="space-y-1">
-                    <h2 className="text-sm font-medium text-foreground">{t("title")}</h2>
-                    <p className="max-w-prose text-sm text-muted-foreground">{t("subtitle")}</p>
-                </div>
-                {!loading && (
-                    <Button onClick={openCreate} className="shrink-0 bg-brand text-white hover:bg-brand-hover">
-                        <PlusIcon className="size-4" />
-                        {t("newRule")}
-                    </Button>
-                )}
+        <Rise className="space-y-4">
+            <div>
+                <SectionHeader
+                    title={t("title")}
+                    action={
+                        !loading && (
+                            <Button onClick={openCreate} className="bg-brand text-white hover:bg-brand-hover">
+                                <PlusIcon className="size-4" />
+                                {t("newRule")}
+                            </Button>
+                        )
+                    }
+                />
+                <p className="max-w-prose px-6 text-sm text-muted-foreground">{t("subtitle")}</p>
             </div>
 
             {loading ? (
                 <RuleSkeleton rows={3} />
             ) : rules.length === 0 ? (
-                <div className="flex flex-col items-center gap-3 rounded-2xl bg-card px-6 py-12 text-center ring-1 ring-border">
+                <div className="flex flex-col items-center gap-3 rounded-2xl border border-border bg-card px-6 py-12 text-center">
                     <span aria-hidden className="grid size-11 place-items-center rounded-full bg-muted text-muted-foreground">
                         <BoltIcon className="size-5" />
                     </span>
@@ -195,7 +199,7 @@ export default function RulesPanel() {
                     </Button>
                 </div>
             ) : (
-                <ul className="divide-y divide-border overflow-hidden rounded-2xl bg-card ring-1 ring-border">
+                <ul className="divide-y divide-border overflow-hidden rounded-2xl border border-border bg-card">
                     {rules.map((rule) => (
                         <li key={rule.id} className="group flex items-center gap-3 px-4 py-3.5">
                             <Switch
@@ -262,13 +266,13 @@ export default function RulesPanel() {
                 isDeleting={isRemoving}
                 confirmDelete={confirmRemove}
             />
-        </div>
+        </Rise>
     );
 }
 
 function RuleSkeleton({ rows }: { rows: number }) {
     return (
-        <ul className="divide-y divide-border overflow-hidden rounded-2xl bg-card ring-1 ring-border">
+        <ul className="divide-y divide-border overflow-hidden rounded-2xl border border-border bg-card">
             {Array.from({ length: rows }, (_, i) => (
                 <li key={i} className="flex items-center gap-3 px-4 py-3.5">
                     <Skeleton className="h-5 w-9 shrink-0 rounded-full" />

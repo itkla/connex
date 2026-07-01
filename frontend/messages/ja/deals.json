@@ -214,7 +214,9 @@
     "toastOwnerFailed": "{failed}件の取引を更新できませんでした",
     "toastStageChanged": "{count}件の取引を移動しました",
     "toastStageChangedPartial": "{total}件中{succeeded}件の取引を移動しました",
-    "toastStageFailed": "{failed}件の取引を移動できませんでした"
+    "toastStageFailed": "{failed}件の取引を移動できませんでした",
+    "sectionPerformance": "実績",
+    "sectionSummary": "パイプライン概要"
   },
   "DealsRevenueChart": {
     "actualRevenue": "実績収益",

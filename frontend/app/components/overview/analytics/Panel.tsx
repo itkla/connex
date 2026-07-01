@@ -22,7 +22,7 @@ export default function Panel({
     children: ReactNode;
 }) {
     return (
-        <section className={cn('flex h-full flex-col rounded-2xl bg-card p-6 ring-1 ring-border', className)}>
+        <section className={cn('flex h-full flex-col rounded-2xl border border-border bg-card p-6', className)}>
             {(title || action) && (
                 <div className="mb-5 flex items-start justify-between gap-4">
                     <div className="min-w-0">

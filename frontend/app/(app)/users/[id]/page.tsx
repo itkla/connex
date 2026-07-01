@@ -1,5 +1,3 @@
-// user detail page, ripped straight from /me
-
 import { headers } from "next/headers";
 import { notFound, redirect } from "next/navigation";
 import Link from "next/link";
@@ -24,7 +22,10 @@ import UserAvatar from "@/app/components/records/users/UserAvatar";
 import InfoRow from "@/app/components/me/InfoRow";
 import StatCard from "@/app/components/me/StatCard";
 import Timeline from "@/app/components/me/Timeline";
+import EmptyState from "@/app/components/me/EmptyState";
 import Attachments from "@/app/components/attachments/Attachments";
+import Rise from "@/app/components/motion/Rise";
+import SectionHeader from "@/app/components/dashboard/SectionHeader";
 
 export default async function UserPage({ params }: { params: { id: number } }) {
     const { id } = await params;
@@ -53,90 +54,95 @@ export default async function UserPage({ params }: { params: { id: number } }) {
     }
 
     const openTasks = tasks.filter((task) => !task.completed).length;
+    const hasActivity = tasks.length > 0 || activities.length > 0 || notes.length > 0;
 
     return (
-        <div className="mx-auto w-full max-w-5xl md:flex md:min-h-0 md:flex-1 md:flex-col">
-            <Link
-                href="/users"
-                className="inline-flex w-fit items-center gap-2 text-base text-brand hover:text-brand-hover"
-            >
-                <ArrowLeftIcon className="h-4 w-4" />
-                <span>{t("allUsers")}</span>
-            </Link>
+        <div className="min-h-screen bg-background px-2 pt-8 pb-12">
+            <div className="mx-auto flex w-full max-w-5xl flex-col gap-10">
+                <Rise>
+                    <div className="flex flex-col gap-8">
+                        <Link
+                            href="/users"
+                            className="inline-flex w-fit items-center gap-2 text-base text-brand hover:text-brand-hover"
+                        >
+                            <ArrowLeftIcon className="h-4 w-4" />
+                            <span>{t("allUsers")}</span>
+                        </Link>
 
-            <header className="mt-8 flex items-center gap-6 py-8">
-                <UserAvatar user={user} type="xlarge" />
-                <div className="flex flex-col gap-2">
-                    <h1 className="text-4xl font-extrabold tracking-tight text-foreground">{user.displayName}</h1>
-                    <h3 className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
-                        <span className="rounded-md bg-muted px-2 py-1">@{user.username}</span>
-                        <span>{user.email}</span>
-                    </h3>
-                </div>
-            </header>
-
-            <div className="mt-4 grid grid-cols-1 gap-8 md:grid-cols-[minmax(0,1fr)_minmax(0,2fr)] md:min-h-0 md:flex-1">
-                <aside>
-                    <div className="mb-3 flex h-8 items-center">
-                        <h2 className="px-6 text-xs font-medium uppercase tracking-[0.12em] text-muted-foreground">
-                            {t("profile")}
-                        </h2>
+                        <header className="flex items-center gap-6">
+                            <UserAvatar user={user} type="xlarge" />
+                            <div className="flex flex-col gap-2">
+                                <h1 className="text-4xl font-extrabold tracking-tight text-foreground">
+                                    {user.displayName}
+                                </h1>
+                                <h3 className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
+                                    <span className="rounded-md bg-muted px-2 py-1">@{user.username}</span>
+                                    <span>{user.email}</span>
+                                </h3>
+                            </div>
+                        </header>
                     </div>
-                    <dl className="divide-y divide-border overflow-hidden rounded-2xl bg-muted ring-1 ring-border">
-                        <InfoRow label={t("username")} value={`@${user.username}`} />
-                        <InfoRow label={t("email")} value={user.email ?? ""} />
-                        <InfoRow
-                            label={t("lastLogin")}
-                            value={user.lastLoginAt ? formatDateTime(user.lastLoginAt, locale) : t("neverLoggedIn")}
-                        />
-                        <InfoRow label={t("memberSince")} value={formatDate(user.createdAt, locale)} />
-                        <InfoRow label={t("updated")} value={formatDateTime(user.updatedAt, locale)} />
-                    </dl>
+                </Rise>
 
-                    <Attachments
-                        entityType="user"
-                        entityId={user.id}
-                        initialAttachments={attachments}
-                        className="mt-6"
-                    />
-                </aside>
+                <div className="grid grid-cols-1 gap-8 md:grid-cols-[minmax(0,1fr)_minmax(0,2fr)]">
+                    <Rise delay={0.06}>
+                        <aside>
+                            <SectionHeader title={t("profile")} />
+                            <dl className="divide-y divide-border overflow-hidden rounded-2xl border border-border bg-card">
+                                <InfoRow label={t("username")} value={`@${user.username}`} />
+                                <InfoRow label={t("email")} value={user.email ?? ""} />
+                                <InfoRow
+                                    label={t("lastLogin")}
+                                    value={user.lastLoginAt ? formatDateTime(user.lastLoginAt, locale) : t("neverLoggedIn")}
+                                />
+                                <InfoRow label={t("memberSince")} value={formatDate(user.createdAt, locale)} />
+                                <InfoRow label={t("updated")} value={formatDateTime(user.updatedAt, locale)} />
+                            </dl>
 
-                <section className="md:flex md:min-h-0 md:flex-col">
-                    <div className="mb-3 flex h-8 items-center">
-                        <h2 className="px-6 text-xs font-medium uppercase tracking-[0.12em] text-muted-foreground">
-                            {t("theirActivity")}
-                        </h2>
-                    </div>
-
-                    <div className="grid grid-cols-3 gap-3">
-                        <StatCard label={t("activities")} value={activities.length} />
-                        <StatCard
-                            label={t("tasks")}
-                            value={tasks.length}
-                            subtitle={tasks.length > 0 ? t("openCount", { count: openTasks }) : undefined}
-                        />
-                        <StatCard label={t("notes")} value={notes.length} />
-                    </div>
-
-                    <div className="mb-3 mt-6 flex h-8 items-center">
-                        <h2 className="px-6 text-xs font-medium uppercase tracking-[0.12em] text-muted-foreground">
-                            {t("timeline")}
-                        </h2>
-                    </div>
-                    <div className="overflow-hidden rounded-2xl bg-card ring-1 ring-border md:flex md:min-h-0 md:flex-1 md:flex-col">
-                        <div className="md:min-h-0 md:flex-1 md:overflow-y-auto md:[-webkit-mask-image:linear-gradient(to_bottom,transparent_0,black_24px)] md:[mask-image:linear-gradient(to_bottom,transparent_0,black_24px)]">
-                            <Timeline
-                                tasks={tasks}
-                                activities={activities}
-                                notes={notes}
-                                users={users}
-                                persons={persons}
-                                deals={deals}
-                                currentUserId={currentUser.id}
+                            <Attachments
+                                entityType="user"
+                                entityId={user.id}
+                                initialAttachments={attachments}
+                                className="mt-6"
                             />
-                        </div>
-                    </div>
-                </section>
+                        </aside>
+                    </Rise>
+
+                    <Rise delay={0.12}>
+                        <section>
+                            <SectionHeader title={t("theirActivity")} />
+
+                            <div className="grid grid-cols-3 gap-3">
+                                <StatCard label={t("activities")} value={activities.length} />
+                                <StatCard
+                                    label={t("tasks")}
+                                    value={tasks.length}
+                                    subtitle={tasks.length > 0 ? t("openCount", { count: openTasks }) : undefined}
+                                />
+                                <StatCard label={t("notes")} value={notes.length} />
+                            </div>
+
+                            <div className="mt-6">
+                                <SectionHeader title={t("timeline")} />
+                                <div className="overflow-hidden rounded-2xl border border-border bg-card">
+                                    {hasActivity ? (
+                                        <Timeline
+                                            tasks={tasks}
+                                            activities={activities}
+                                            notes={notes}
+                                            users={users}
+                                            persons={persons}
+                                            deals={deals}
+                                            currentUserId={currentUser.id}
+                                        />
+                                    ) : (
+                                        <EmptyState message={t("emptyActivity")} />
+                                    )}
+                                </div>
+                            </div>
+                        </section>
+                    </Rise>
+                </div>
             </div>
         </div>
     );

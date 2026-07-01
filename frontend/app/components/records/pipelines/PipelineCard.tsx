@@ -67,7 +67,7 @@ export default function PipelineCard({
     }, [metrics]);
 
     return (
-        <div className="rounded-2xl bg-muted ring-1 ring-border transition">
+        <div className="rounded-2xl border border-border bg-muted transition">
             <div
                 className="flex items-center gap-4 p-4 cursor-pointer hover:bg-muted/60 rounded-2xl"
                 onClick={toggleExpand}

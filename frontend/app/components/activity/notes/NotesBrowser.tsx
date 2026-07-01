@@ -27,6 +27,8 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { SearchField, FilterBar, RadioFilter, SegmentedToggle, type FilterChipData } from '@/app/components/filters';
 import { useRecordsBrowser } from '@/app/hooks/useRecordsBrowser';
 import RecordsRenderView from '@/app/components/records/RecordsRenderView';
+import Rise from '@/app/components/motion/Rise';
+import SectionHeader from '@/app/components/dashboard/SectionHeader';
 import DeleteRecordDialog from '@/app/components/records/DeleteRecordDialog';
 import NoteContent from './NoteContent';
 import { noteContentToPlainText } from '@/app/lib/references';
@@ -358,138 +360,144 @@ export default function NotesBrowser({ notes, persons, deals, users, currentUser
     );
 
     return (
-        <div className="page-grid gap-y-8">
-            <div className="flex flex-wrap items-start justify-between gap-4">
-                <div>
-                    <h1 className="text-4xl font-extrabold">{t('title')}</h1>
-                    <p className="mt-1 max-w-prose text-sm text-muted-foreground">{t('subtitle')}</p>
-                </div>
-                <Button
-                    className="bg-brand text-white hover:bg-brand-dark"
-                    aria-label={t('newAria')}
-                    onClick={() => setCreating(true)}
-                >
-                    <PlusIcon strokeWidth={2.5} />
-                    {t('new')}
-                </Button>
-            </div>
-
-            <FilterBar
-                reduce={reduce}
-                chips={chips}
-                hasActiveFilters={hasActiveFilters}
-                onClearAll={() => { setQuery(''); setGroupBy('none'); }}
-                clearAllLabel={tf('clearAll')}
-                search={
-                    <SearchField
-                        value={query}
-                        onChange={setQuery}
-                        onClear={() => setQuery('')}
-                        placeholder={t('searchPlaceholder')}
-                        searchAria={tf('searchAria')}
-                        clearAria={tf('clearSearchAria')}
-                    />
-                }
-                trailing={
-                    <SegmentedToggle
-                        ariaLabel={t('displayModeAria')}
-                        value={displayMode}
-                        onChange={setDisplayMode}
-                        options={[
-                            { value: 'grid', icon: <Squares2X2Icon className="size-4" />, ariaLabel: t('gridViewAria') },
-                            { value: 'table', icon: <TableCellsIcon className="size-4" />, ariaLabel: t('tableViewAria') },
-                        ]}
-                    />
-                }
-            >
-                {displayMode === 'grid' && (
-                    <RadioFilter
-                        label={t('groupBy')}
-                        ariaLabel={t('groupByAria')}
-                        value={groupBy}
-                        onValueChange={(v) => setGroupBy(v as typeof groupBy)}
-                        options={[
-                            { value: 'none', label: t('groupNone') },
-                            { value: 'person', label: t('groupPerson') },
-                            { value: 'company', label: t('groupCompany') },
-                        ]}
-                    />
-                )}
-            </FilterBar>
-
-            {filteredNotes.length === 0 ? (
-                <div className="rounded-2xl bg-card px-6 py-20 text-center ring-1 ring-border">
-                    <div className="mx-auto flex size-14 items-center justify-center rounded-2xl bg-brand-light text-brand-dark">
-                        <PencilSquareIcon className="size-7" />
-                    </div>
-                    <p className="mx-auto mt-5 max-w-sm text-sm font-medium text-foreground">
-                        {notes.length === 0 ? t('empty') : t('emptyFiltered')}
-                    </p>
-                    {notes.length === 0 && (
+        <div className="min-h-screen bg-background px-2 pt-8 pb-12">
+            <div className="mx-auto flex w-full max-w-7xl flex-col gap-10">
+                <Rise>
+                    <div className="flex flex-wrap items-start justify-between gap-4">
+                        <div>
+                            <h1 className="text-4xl font-extrabold">{t('title')}</h1>
+                            <p className="mt-1 max-w-prose text-sm text-muted-foreground">{t('subtitle')}</p>
+                        </div>
                         <Button
+                            className="bg-brand text-white hover:bg-brand-dark"
+                            aria-label={t('newAria')}
                             onClick={() => setCreating(true)}
-                            className="mt-6 bg-brand text-white hover:bg-brand-dark"
                         >
                             <PlusIcon strokeWidth={2.5} />
                             {t('new')}
                         </Button>
-                    )}
-                </div>
-            ) : displayMode === 'grid' ? (
-                <div className="space-y-8">
-                    {groups.map((g) => (
-                        <section key={g.id}>
-                            {g.label && (
-                                <div className="mb-3 flex items-center gap-2 px-1">
-                                    <h2 className="text-xs font-medium uppercase tracking-[0.12em] text-muted-foreground">
-                                        {g.label}
-                                    </h2>
-                                    <Badge variant="outline">{g.notes.length}</Badge>
-                                </div>
-                            )}
-                            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-                                <AnimatePresence mode="popLayout" initial={false}>
-                                    {g.notes.map((note) => (
-                                        <NoteCard
-                                            key={note.id}
-                                            note={note}
-                                            person={note.person ? personById.get(note.person) : undefined}
-                                            deal={note.deal ? dealById.get(note.deal) : undefined}
-                                            author={userById.get(note.author)}
-                                            onEdit={() => openEdit(note)}
-                                            onDelete={() => requestDelete(note)}
-                                        />
-                                    ))}
-                                </AnimatePresence>
+                    </div>
+                </Rise>
+
+                <Rise delay={0.06}>
+                    <FilterBar
+                        reduce={reduce}
+                        chips={chips}
+                        hasActiveFilters={hasActiveFilters}
+                        onClearAll={() => { setQuery(''); setGroupBy('none'); }}
+                        clearAllLabel={tf('clearAll')}
+                        search={
+                            <SearchField
+                                value={query}
+                                onChange={setQuery}
+                                onClear={() => setQuery('')}
+                                placeholder={t('searchPlaceholder')}
+                                searchAria={tf('searchAria')}
+                                clearAria={tf('clearSearchAria')}
+                            />
+                        }
+                        trailing={
+                            <SegmentedToggle
+                                ariaLabel={t('displayModeAria')}
+                                value={displayMode}
+                                onChange={setDisplayMode}
+                                options={[
+                                    { value: 'grid', icon: <Squares2X2Icon className="size-4" />, ariaLabel: t('gridViewAria') },
+                                    { value: 'table', icon: <TableCellsIcon className="size-4" />, ariaLabel: t('tableViewAria') },
+                                ]}
+                            />
+                        }
+                    >
+                        {displayMode === 'grid' && (
+                            <RadioFilter
+                                label={t('groupBy')}
+                                ariaLabel={t('groupByAria')}
+                                value={groupBy}
+                                onValueChange={(v) => setGroupBy(v as typeof groupBy)}
+                                options={[
+                                    { value: 'none', label: t('groupNone') },
+                                    { value: 'person', label: t('groupPerson') },
+                                    { value: 'company', label: t('groupCompany') },
+                                ]}
+                            />
+                        )}
+                    </FilterBar>
+                </Rise>
+
+                <Rise delay={0.12}>
+                    {filteredNotes.length === 0 ? (
+                        <div className="rounded-2xl border border-border bg-card px-6 py-20 text-center">
+                            <div className="mx-auto flex size-14 items-center justify-center rounded-2xl bg-brand-light text-brand-dark">
+                                <PencilSquareIcon className="size-7" />
                             </div>
-                        </section>
-                    ))}
-                </div>
-            ) : (
-                <RecordsRenderView<Note>
-                    data={filteredNotes}
-                    columns={columns}
-                    renderCard={(item, { onQuickEdit, onDelete }) => (
-                        <NoteCard
-                            note={item}
-                            person={item.person ? personById.get(item.person) : undefined}
-                            deal={item.deal ? dealById.get(item.deal) : undefined}
-                            author={userById.get(item.author)}
-                            onEdit={onQuickEdit ? () => onQuickEdit(item) : undefined}
-                            onDelete={onDelete ? () => onDelete(item) : undefined}
+                            <p className="mx-auto mt-5 max-w-sm text-sm font-medium text-foreground">
+                                {notes.length === 0 ? t('empty') : t('emptyFiltered')}
+                            </p>
+                            {notes.length === 0 && (
+                                <Button
+                                    onClick={() => setCreating(true)}
+                                    className="mt-6 bg-brand text-white hover:bg-brand-dark"
+                                >
+                                    <PlusIcon strokeWidth={2.5} />
+                                    {t('new')}
+                                </Button>
+                            )}
+                        </div>
+                    ) : displayMode === 'grid' ? (
+                        <div className="space-y-8">
+                            {groups.map((g) => (
+                                <section key={g.id}>
+                                    {g.label && (
+                                        <SectionHeader
+                                            title={g.label}
+                                            action={<Badge variant="outline">{g.notes.length}</Badge>}
+                                        />
+                                    )}
+                                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                                        <AnimatePresence mode="popLayout" initial={false}>
+                                            {g.notes.map((note) => (
+                                                <NoteCard
+                                                    key={note.id}
+                                                    note={note}
+                                                    person={note.person ? personById.get(note.person) : undefined}
+                                                    deal={note.deal ? dealById.get(note.deal) : undefined}
+                                                    author={userById.get(note.author)}
+                                                    onEdit={() => openEdit(note)}
+                                                    onDelete={() => requestDelete(note)}
+                                                />
+                                            ))}
+                                        </AnimatePresence>
+                                    </div>
+                                </section>
+                            ))}
+                        </div>
+                    ) : (
+                        <RecordsRenderView<Note>
+                            data={filteredNotes}
+                            columns={columns}
+                            renderCard={(item, { onQuickEdit, onDelete }) => (
+                                <NoteCard
+                                    note={item}
+                                    person={item.person ? personById.get(item.person) : undefined}
+                                    deal={item.deal ? dealById.get(item.deal) : undefined}
+                                    author={userById.get(item.author)}
+                                    onEdit={onQuickEdit ? () => onQuickEdit(item) : undefined}
+                                    onDelete={onDelete ? () => onDelete(item) : undefined}
+                                />
+                            )}
+                            renderAvatar={renderRowAvatar}
+                            onRowClick={openEdit}
+                            displayMode={displayMode}
+                            selectedIds={selectedIds}
+                            onSelectedIdsChange={setSelectedIds}
+                            onQuickEdit={openEdit}
+                            onDelete={requestDelete}
+                            entityLabel={t('entityLabel')}
+                            selectionActions={selectionActions}
                         />
                     )}
-                    renderAvatar={renderRowAvatar}
-                    onRowClick={openEdit}
-                    displayMode={displayMode}
-                    selectedIds={selectedIds}
-                    onSelectedIdsChange={setSelectedIds}
-                    onQuickEdit={openEdit}
-                    onDelete={requestDelete}
-                    entityLabel={t('entityLabel')}
-                    selectionActions={selectionActions}
-                />
-            )}
+                </Rise>
+            </div>
 
             <NoteDialog
                 open={creating || editingNote !== null}

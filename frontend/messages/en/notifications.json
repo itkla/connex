@@ -72,6 +72,7 @@
     "emptyHint": "New tasks, deal reminders, and relationship nudges show up here.",
     "noUsers": "No users found",
     "noCollaborators": "No teammates available",
-    "cancel": "Cancel"
+    "cancel": "Cancel",
+    "inbox": "Inbox"
   }
 }

@@ -12,7 +12,7 @@ type T = ReturnType<typeof useTranslations>;
  */
 export default function EmptyState({ t }: { t: T }) {
     return (
-        <div className="rounded-2xl bg-card px-6 py-20 text-center ring-1 ring-border">
+        <div className="rounded-2xl border border-border bg-card px-6 py-20 text-center">
             <div className="mx-auto flex size-14 items-center justify-center rounded-2xl bg-brand-light text-brand-dark">
                 <FolderOpenIcon className="size-7" />
             </div>

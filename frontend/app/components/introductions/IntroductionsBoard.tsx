@@ -10,6 +10,7 @@ import { dismissIntroSuggestion, recordIntroduction } from '@/app/lib/api';
 import { toastError, toastSuccess } from '@/app/lib/toast';
 import type { Contact, IntroSuggestion, IntroductionRecord } from '@/app/lib/types';
 
+import Rise from '@/app/components/motion/Rise';
 import IntroLineageList from './IntroLineageList';
 import IntroStats from './IntroStats';
 import { tierFor } from './IntroStrength';
@@ -147,28 +148,33 @@ export default function IntroductionsBoard({
 
     return (
         <div className="mx-auto w-full max-w-7xl space-y-6 px-2 pb-12">
-            <header className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-                <div>
-                    <h1 className="text-3xl font-extrabold tracking-tight text-foreground md:text-4xl">
-                        {t('pageTitle')}
-                    </h1>
-                    <p className="mt-1.5 max-w-2xl text-sm text-muted-foreground">{t('pageSubtitle')}</p>
-                </div>
-                <LogIntroDialog
-                    contacts={contacts}
-                    onRecord={logManual}
-                    trigger={
-                        <Button variant="outline">
-                            <PlusIcon className="size-4" />
-                            {t('logIntro')}
-                        </Button>
-                    }
-                />
-            </header>
+            <Rise>
+                <header className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+                    <div>
+                        <h1 className="text-3xl font-extrabold tracking-tight text-foreground md:text-4xl">
+                            {t('pageTitle')}
+                        </h1>
+                        <p className="mt-1.5 max-w-2xl text-sm text-muted-foreground">{t('pageSubtitle')}</p>
+                    </div>
+                    <LogIntroDialog
+                        contacts={contacts}
+                        onRecord={logManual}
+                        trigger={
+                            <Button variant="outline">
+                                <PlusIcon className="size-4" />
+                                {t('logIntro')}
+                            </Button>
+                        }
+                    />
+                </header>
+            </Rise>
 
-            <IntroStats opportunities={suggestions.length} strong={strongCount} made={madeTotal} />
+            <Rise delay={0.06}>
+                <IntroStats opportunities={suggestions.length} strong={strongCount} made={madeTotal} />
+            </Rise>
 
-            <section className="space-y-3">
+            <Rise delay={0.12}>
+                <section className="space-y-3">
                 <SectionHeading title={t('toMake')} count={suggestions.length} />
                 {suggestions.length === 0 ? (
                     <div className="flex flex-col items-center justify-center gap-2 rounded-2xl border border-dashed border-border bg-card px-6 py-16 text-center">
@@ -204,12 +210,15 @@ export default function IntroductionsBoard({
                         </AnimatePresence>
                     </motion.div>
                 )}
-            </section>
+                </section>
+            </Rise>
 
-            <section className="space-y-3">
-                <SectionHeading title={t('lineageTitle')} count={madeTotal} />
-                <IntroLineageList items={lineage} />
-            </section>
+            <Rise delay={0.18}>
+                <section className="space-y-3">
+                    <SectionHeading title={t('lineageTitle')} count={madeTotal} />
+                    <IntroLineageList items={lineage} />
+                </section>
+            </Rise>
         </div>
     );
 }

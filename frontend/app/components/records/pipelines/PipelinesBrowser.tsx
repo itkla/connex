@@ -5,16 +5,16 @@ import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { Button } from '@/components/ui/button';
 import { ButtonGroup } from '@/components/ui/button-group';
-import { toast } from 'sonner';
 import { toastError, toastInfo, toastSuccess } from '@/app/lib/toast';
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from '@/components/ui/dropdown-menu';
-import { PlusIcon, TrashIcon, PencilIcon, EllipsisVerticalIcon, EyeIcon, ShareIcon } from '@heroicons/react/24/solid';
+import { PlusIcon, TrashIcon, PencilIcon, EllipsisVerticalIcon, ShareIcon } from '@heroicons/react/24/solid';
 import {
     Squares2X2Icon,
 } from '@heroicons/react/24/outline';
 import { useReducedMotion } from 'motion/react';
 
 import RecordsRenderView from '@/app/components/records/RecordsRenderView';
+import Rise from '@/app/components/motion/Rise';
 import { SearchField, FilterBar, type FilterChipData } from '@/app/components/filters';
 import DeleteRecordDialog from '@/app/components/records/DeleteRecordDialog';
 import ShareDialog from '@/app/components/records/ShareDialog';
@@ -23,7 +23,7 @@ import { useRecordsBrowser } from '@/app/hooks/useRecordsBrowser';
 import { type ColumnDef } from '@/app/components/records/types';
 import PipelineCard from '@/app/components/records/pipelines/PipelineCard';
 import NewPipelineDialog from '@/app/components/records/pipelines/NewPipelineDialog';
-import QuickEditPipelineSheet, { type PipelineDraft, type PipelineStageDraft, type StageKind } from '@/app/components/records/pipelines/QuickEditPipelineSheet';
+import QuickEditPipelineSheet, { type PipelineDraft, type StageKind } from '@/app/components/records/pipelines/QuickEditPipelineSheet';
 import {
     createPipeline,
     createStage,
@@ -120,6 +120,7 @@ export default function PipelinesBrowser({ pipelines }: { pipelines: Pipeline[] 
     const [allNotes, setAllNotes] = useState<Note[]>([]);
     const [allUsers, setAllUsers] = useState<User[]>([]);
     const [metricsStatus, setMetricsStatus] = useState<LoadStatus>('idle');
+    const [now] = useState(() => Date.now());
 
     const ensureMetricsLoaded = useCallback(() => {
         if (metricsStatus === 'loading' || metricsStatus === 'ready') return;
@@ -141,8 +142,7 @@ export default function PipelinesBrowser({ pipelines }: { pipelines: Pipeline[] 
                 setAllUsers(users);
                 setMetricsStatus('ready');
             })
-            .catch((err) => {
-                console.error(err);
+            .catch(() => {
                 setMetricsStatus('error');
                 toastError(t('failedToLoadMetrics'));
             });
@@ -180,7 +180,6 @@ export default function PipelinesBrowser({ pipelines }: { pipelines: Pipeline[] 
                 );
                 const failed = results.filter((r) => r.status === 'rejected').length;
                 if (failed > 0) {
-                    console.error('Some stages failed to create', results);
                     toastError(t('pipelineCreatedWithFailedStages', { failed, total: validStages.length }));
                 } else {
                     toastSuccess(t('pipelineCreated'));
@@ -200,7 +199,6 @@ export default function PipelinesBrowser({ pipelines }: { pipelines: Pipeline[] 
             if (isFieldError(err)) {
                 throw err;
             }
-            console.error(err);
             toastError(t('failedToCreate'));
         } finally {
             setIsCreating(false);
@@ -396,14 +394,6 @@ export default function PipelinesBrowser({ pipelines }: { pipelines: Pipeline[] 
         }
     };
 
-    const viewSelected = () => {
-        if (selectedPipelines.length === 1) {
-            router.push(`/records/pipelines/${selectedPipelines[0].id}`);
-        } else {
-            selectedPipelines.forEach((p) => window.open(`/records/pipelines/${p.id}`, '_blank'));
-        }
-    };
-
     const columns: ColumnDef<Pipeline>[] = useMemo(() => [
         { key: 'name', label: t('columnName'), getSortValue: (p) => p.name ?? null, widthClass: 'min-w-48' },
         {
@@ -423,7 +413,6 @@ export default function PipelinesBrowser({ pipelines }: { pipelines: Pipeline[] 
     const metricsByPipelineId = useMemo(() => {
         const map = new Map<number, PipelineMetrics>();
         const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
-        const now = Date.now();
         const firstWeekStart = now - 11 * WEEK_MS;
 
         for (const pipeline of pipelines) {
@@ -494,7 +483,7 @@ export default function PipelinesBrowser({ pipelines }: { pipelines: Pipeline[] 
             });
         }
         return map;
-    }, [pipelines, stagesByPipeline, allDeals, allTasks, allActivities, allNotes, allUsers]);
+    }, [now, pipelines, stagesByPipeline, allDeals, allTasks, allActivities, allNotes, allUsers]);
 
     const selectionActions = (
         <ButtonGroup className="rounded-full bg-muted">
@@ -526,119 +515,127 @@ export default function PipelinesBrowser({ pipelines }: { pipelines: Pipeline[] 
     );
 
     return (
-        <div className="page-grid gap-y-6">
-            <div className="flex items-center justify-between">
-                <h1 className="text-4xl font-extrabold">{t('title')}</h1>
-                <Button className="bg-brand text-white" aria-label={t('addPipelineAriaLabel')} onClick={() => setNewPipelineDialogOpen(true)}>
-                    <PlusIcon strokeWidth={2.5} />
-                    {t('new')}
-                </Button>
-            </div>
-
-            <FilterBar
-                reduce={reduce}
-                chips={query.trim() ? [{ id: 'q', label: tf('chipSearch', { query: query.trim() }), onRemove: () => setQuery('') }] as FilterChipData[] : []}
-                hasActiveFilters={query.trim() !== ''}
-                onClearAll={() => setQuery('')}
-                clearAllLabel={tf('clearAll')}
-                search={
-                    <SearchField
-                        value={query}
-                        onChange={setQuery}
-                        onClear={() => setQuery('')}
-                        placeholder={t('searchPlaceholder')}
-                        searchAria={tf('searchAria')}
-                        clearAria={tf('clearSearchAria')}
-                    />
-                }
-                trailing={
-                    <div
-                        role="group"
-                        aria-label={t('displayModeAriaLabel')}
-                        className="inline-flex rounded-full bg-muted p-0.5 ring-1 ring-border"
-                    >
-                        <button
-                            type="button"
-                            onClick={() => setDisplayMode('grid')}
-                            aria-label={t('gridViewAriaLabel')}
-                            aria-pressed={displayMode === 'grid'}
-                            className={`flex h-8 w-8 items-center justify-center rounded-full transition ${displayMode === 'grid' ? 'bg-background text-foreground shadow' : 'text-muted-foreground hover:text-foreground'}`}
-                        >
-                            <Squares2X2Icon className="size-4" />
-                        </button>
+        <div className="min-h-screen bg-background px-2 pt-8 pb-12">
+            <div className="mx-auto flex w-full max-w-7xl flex-col gap-10">
+                <Rise>
+                    <div className="flex items-center justify-between">
+                        <h1 className="text-4xl font-extrabold">{t('title')}</h1>
+                        <Button className="bg-brand text-white" aria-label={t('addPipelineAriaLabel')} onClick={() => setNewPipelineDialogOpen(true)}>
+                            <PlusIcon strokeWidth={2.5} />
+                            {t('new')}
+                        </Button>
                     </div>
-                }
-            />
+                </Rise>
 
-            <RecordsRenderView<Pipeline>
-                data={filteredPipelines}
-                columns={columns}
-                renderCard={(item, { onQuickEdit, onDelete }) => (
-                    <PipelineCard
-                        pipeline={item}
-                        metrics={metricsByPipelineId.get(item.id)}
-                        metricsStatus={metricsStatus}
-                        onFirstExpand={ensureMetricsLoaded}
-                        onQuickEdit={onQuickEdit ? () => onQuickEdit(item) : undefined}
-                        onDelete={onDelete ? () => onDelete(item) : undefined}
+                <Rise delay={0.06}>
+                    <FilterBar
+                        reduce={reduce}
+                        chips={query.trim() ? [{ id: 'q', label: tf('chipSearch', { query: query.trim() }), onRemove: () => setQuery('') }] as FilterChipData[] : []}
+                        hasActiveFilters={query.trim() !== ''}
+                        onClearAll={() => setQuery('')}
+                        clearAllLabel={tf('clearAll')}
+                        search={
+                            <SearchField
+                                value={query}
+                                onChange={setQuery}
+                                onClear={() => setQuery('')}
+                                placeholder={t('searchPlaceholder')}
+                                searchAria={tf('searchAria')}
+                                clearAria={tf('clearSearchAria')}
+                            />
+                        }
+                        trailing={
+                            <div
+                                role="group"
+                                aria-label={t('displayModeAriaLabel')}
+                                className="inline-flex rounded-full bg-muted p-0.5 ring-1 ring-border"
+                            >
+                                <button
+                                    type="button"
+                                    onClick={() => setDisplayMode('grid')}
+                                    aria-label={t('gridViewAriaLabel')}
+                                    aria-pressed={displayMode === 'grid'}
+                                    className={`flex h-8 w-8 items-center justify-center rounded-full transition ${displayMode === 'grid' ? 'bg-background text-foreground shadow' : 'text-muted-foreground hover:text-foreground'}`}
+                                >
+                                    <Squares2X2Icon className="size-4" />
+                                </button>
+                            </div>
+                        }
+                    />
+                </Rise>
+
+                <Rise delay={0.12}>
+                    <RecordsRenderView<Pipeline>
+                        data={filteredPipelines}
+                        columns={columns}
+                        renderCard={(item, { onQuickEdit, onDelete }) => (
+                            <PipelineCard
+                                pipeline={item}
+                                metrics={metricsByPipelineId.get(item.id)}
+                                metricsStatus={metricsStatus}
+                                onFirstExpand={ensureMetricsLoaded}
+                                onQuickEdit={onQuickEdit ? () => onQuickEdit(item) : undefined}
+                                onDelete={onDelete ? () => onDelete(item) : undefined}
+                            />
+                        )}
+                        detailPath={(item) => `/records/pipelines/${item.id}`}
+                        displayMode={displayMode}
+                        selectedIds={selectedIds}
+                        onSelectedIdsChange={setSelectedIds}
+                        onQuickEdit={quickEditOne}
+                        onDelete={deleteOne}
+                        gridClassName="grid grid-cols-1 gap-3"
+                        entityLabel={t('entityLabel')}
+                        selectionActions={selectionActions}
+                    />
+                </Rise>
+
+                <QuickEditPipelineSheet
+                    open={editSheetOpen}
+                    onOpenChange={setEditSheetOpen}
+                    selectedIds={selectedIds}
+                    selectedPipelines={selectedPipelines}
+                    drafts={drafts}
+                    updateDraft={updateDraft}
+                    updateStageName={updateStageName}
+                    updateStageKind={updateStageKind}
+                    addStage={addStage}
+                    removeStage={removeStage}
+                    isSaving={isSaving}
+                    saveEdits={saveEdits}
+                />
+
+                <NewPipelineDialog
+                    open={newPipelineDialogOpen}
+                    onOpenChange={closeNewPipelineDialog}
+                    payload={newPipelinePayload}
+                    setPayload={setNewPipelinePayload}
+                    isCreating={isCreating}
+                    isSuccess={creationSucceeded}
+                    createNewPipeline={createNewPipeline}
+                />
+
+                <DeleteRecordDialog
+                    open={deleteDialogOpen}
+                    onOpenChange={setDeleteDialogOpen}
+                    selectedIds={selectedIds}
+                    selectedItems={selectedPipelines}
+                    entityLabel={t('entityLabel')}
+                    getDisplayName={(p) => p.name}
+                    isDeleting={isDeleting}
+                    confirmDelete={confirmDelete}
+                />
+
+                {selectedPipelines.length === 1 && (
+                    <ShareDialog
+                        type="pipeline"
+                        entityId={selectedPipelines[0].id}
+                        entityName={selectedPipelines[0].name}
+                        open={shareOpen}
+                        onOpenChange={setShareOpen}
                     />
                 )}
-                detailPath={(item) => `/records/pipelines/${item.id}`}
-                displayMode={displayMode}
-                selectedIds={selectedIds}
-                onSelectedIdsChange={setSelectedIds}
-                onQuickEdit={quickEditOne}
-                onDelete={deleteOne}
-                gridClassName="grid grid-cols-1 gap-3"
-                entityLabel={t('entityLabel')}
-                selectionActions={selectionActions}
-            />
-
-            <QuickEditPipelineSheet
-                open={editSheetOpen}
-                onOpenChange={setEditSheetOpen}
-                selectedIds={selectedIds}
-                selectedPipelines={selectedPipelines}
-                drafts={drafts}
-                updateDraft={updateDraft}
-                updateStageName={updateStageName}
-                updateStageKind={updateStageKind}
-                addStage={addStage}
-                removeStage={removeStage}
-                isSaving={isSaving}
-                saveEdits={saveEdits}
-            />
-
-            <NewPipelineDialog
-                open={newPipelineDialogOpen}
-                onOpenChange={closeNewPipelineDialog}
-                payload={newPipelinePayload}
-                setPayload={setNewPipelinePayload}
-                isCreating={isCreating}
-                isSuccess={creationSucceeded}
-                createNewPipeline={createNewPipeline}
-            />
-
-            <DeleteRecordDialog
-                open={deleteDialogOpen}
-                onOpenChange={setDeleteDialogOpen}
-                selectedIds={selectedIds}
-                selectedItems={selectedPipelines}
-                entityLabel={t('entityLabel')}
-                getDisplayName={(p) => p.name}
-                isDeleting={isDeleting}
-                confirmDelete={confirmDelete}
-            />
-
-            {selectedPipelines.length === 1 && (
-                <ShareDialog
-                    type="pipeline"
-                    entityId={selectedPipelines[0].id}
-                    entityName={selectedPipelines[0].name}
-                    open={shareOpen}
-                    onOpenChange={setShareOpen}
-                />
-            )}
+            </div>
         </div>
     );
 }

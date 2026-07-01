@@ -8,6 +8,7 @@
     "itemActivity": "アクティビティ",
     "itemDeal": "案件",
     "itemNote": "メモ",
-    "emptyDay": "予定なし"
+    "emptyDay": "予定なし",
+    "emptyMonth": "今月の予定はありません"
   }
 }

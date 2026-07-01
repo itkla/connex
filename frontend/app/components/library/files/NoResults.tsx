@@ -11,7 +11,7 @@ type T = ReturnType<typeof useTranslations>;
  */
 export default function NoResults({ t, onClear }: { t: T; onClear: () => void }) {
     return (
-        <div className="rounded-2xl bg-card px-6 py-20 text-center ring-1 ring-border">
+        <div className="rounded-2xl border border-border bg-card px-6 py-20 text-center">
             <h2 className="text-lg font-semibold text-foreground">{t('noResultsTitle')}</h2>
             <p className="mx-auto mt-1.5 max-w-sm text-sm text-muted-foreground">{t('noResultsBody')}</p>
             <Button variant="outline" className="mt-6" onClick={onClear}>

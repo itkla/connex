@@ -27,6 +27,8 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Skeleton } from "@/components/ui/skeleton";
 import DeleteRecordDialog from "@/app/components/records/DeleteRecordDialog";
+import Rise from "@/app/components/motion/Rise";
+import SectionHeader from "@/app/components/dashboard/SectionHeader";
 import CustomFieldDialog from "./CustomFieldDialog";
 
 const ENTITY_TYPES: CustomFieldEntityType[] = ["company", "person", "deal"];
@@ -147,7 +149,7 @@ export default function CustomFieldsPanel() {
 
     if (accessDenied) {
         return (
-            <p className="rounded-2xl bg-card px-4 py-6 text-center text-sm text-muted-foreground ring-1 ring-border">
+            <p className="rounded-2xl border border-border bg-card px-4 py-6 text-center text-sm text-muted-foreground">
                 {t("noAccess")}
             </p>
         );
@@ -155,33 +157,32 @@ export default function CustomFieldsPanel() {
 
     return (
         <div className="space-y-10">
-            {ENTITY_TYPES.map((entityType) => (
-                <section key={entityType} className="space-y-3">
-                    <div className="flex items-center justify-between gap-4">
-                        <h2 className="text-xs font-medium tracking-[0.12em] text-muted-foreground uppercase">
-                            {entityLabels[entityType]}
-                        </h2>
-                        {!loading && (
-                            <Button
-                                variant="outline"
-                                size="sm"
-                                onClick={() => openCreate(entityType)}
-                                className="shrink-0"
-                            >
-                                <PlusIcon className="size-4" />
-                                {t("newField")}
-                            </Button>
-                        )}
-                    </div>
+            {ENTITY_TYPES.map((entityType, index) => (
+                <Rise key={entityType} index={index} className="space-y-3">
+                    <SectionHeader
+                        title={entityLabels[entityType]}
+                        action={
+                            !loading && (
+                                <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={() => openCreate(entityType)}
+                                >
+                                    <PlusIcon className="size-4" />
+                                    {t("newField")}
+                                </Button>
+                            )
+                        }
+                    />
 
                     {loading ? (
                         <FieldSkeleton rows={2} />
                     ) : byEntity[entityType].length === 0 ? (
-                        <p className="rounded-2xl bg-card px-4 py-6 text-center text-sm text-muted-foreground ring-1 ring-border">
+                        <p className="rounded-2xl border border-border bg-card px-4 py-6 text-center text-sm text-muted-foreground">
                             {emptyLabels[entityType]}
                         </p>
                     ) : (
-                        <ul className="divide-y divide-border overflow-hidden rounded-2xl bg-card ring-1 ring-border">
+                        <ul className="divide-y divide-border overflow-hidden rounded-2xl border border-border bg-card">
                             {byEntity[entityType].map((field) => (
                                 <li key={field.id} className="group flex items-center gap-3 px-4 py-3.5">
                                     <div className="min-w-0 flex-1 space-y-1">
@@ -229,7 +230,7 @@ export default function CustomFieldsPanel() {
                             ))}
                         </ul>
                     )}
-                </section>
+                </Rise>
             ))}
 
             <CustomFieldDialog
@@ -259,7 +260,7 @@ export default function CustomFieldsPanel() {
 
 function FieldSkeleton({ rows }: { rows: number }) {
     return (
-        <ul className="divide-y divide-border overflow-hidden rounded-2xl bg-card ring-1 ring-border">
+        <ul className="divide-y divide-border overflow-hidden rounded-2xl border border-border bg-card">
             {Array.from({ length: rows }, (_, i) => (
                 <li key={i} className="flex items-center gap-3 px-4 py-3.5">
                     <div className="flex-1 space-y-2">

@@ -9,6 +9,7 @@ import { useReducedMotion } from "motion/react";
 import { Button } from "@/components/ui/button";
 
 import RecordsRenderView from "@/app/components/records/RecordsRenderView";
+import Rise from "@/app/components/motion/Rise";
 import RecordsSortMenu from "@/app/components/records/RecordsSortMenu";
 import { SearchField, FilterBar, SegmentedToggle, type FilterChipData } from "@/app/components/filters";
 import UserAvatar from "@/app/components/records/users/UserAvatar";
@@ -101,64 +102,72 @@ export default function UsersBrowser({ users }: { users: User[] }) {
     );
 
     return (
-        <div className="page-grid gap-y-6">
-            <div className="flex items-center justify-between">
-                <h1 className="text-4xl font-extrabold">{t("heading")}</h1>
-                <NewUserDialog />
-            </div>
-
-            <FilterBar
-                reduce={reduce}
-                chips={chips}
-                hasActiveFilters={query.trim() !== ""}
-                onClearAll={() => setQuery("")}
-                clearAllLabel={tf("clearAll")}
-                search={
-                    <SearchField
-                        value={query}
-                        onChange={setQuery}
-                        onClear={() => setQuery("")}
-                        placeholder={t("searchPlaceholder")}
-                        searchAria={tf("searchAria")}
-                        clearAria={tf("clearSearchAria")}
-                    />
-                }
-                trailing={
-                    <div className="flex items-center gap-2">
-                        {displayMode === "grid" && (
-                            <RecordsSortMenu
-                                columns={columns}
-                                sortKey={sortKey}
-                                sortDirection={sortDirection}
-                                onSortChange={onSortChange}
-                            />
-                        )}
-                        <SegmentedToggle
-                            ariaLabel={t("displayModeAria")}
-                            value={displayMode}
-                            onChange={setDisplayMode}
-                            options={[
-                                { value: "grid", icon: <Squares2X2Icon className="size-4" />, ariaLabel: t("gridViewAria") },
-                                { value: "table", icon: <TableCellsIcon className="size-4" />, ariaLabel: t("tableViewAria") },
-                            ]}
-                        />
+        <div className="min-h-screen bg-background px-2 pt-8 pb-12">
+            <div className="mx-auto flex w-full max-w-7xl flex-col gap-10">
+                <Rise>
+                    <div className="flex items-center justify-between">
+                        <h1 className="text-4xl font-extrabold">{t("heading")}</h1>
+                        <NewUserDialog />
                     </div>
-                }
-            />
+                </Rise>
 
-            <RecordsRenderView<User>
-                data={filteredUsers}
-                columns={columns}
-                renderCard={(item) => <UserCard user={item} />}
-                renderAvatar={(item) => <UserAvatar user={item} />}
-                detailPath={(item) => `/users/${item.id}`}
-                displayMode={displayMode}
-                selectedIds={selectedIds}
-                onSelectedIdsChange={setSelectedIds}
-                entityLabel={t("entityLabel")}
-                selectionActions={selectionActions}
-                sortState={sortState}
-            />
+                <Rise delay={0.06}>
+                    <FilterBar
+                        reduce={reduce}
+                        chips={chips}
+                        hasActiveFilters={query.trim() !== ""}
+                        onClearAll={() => setQuery("")}
+                        clearAllLabel={tf("clearAll")}
+                        search={
+                            <SearchField
+                                value={query}
+                                onChange={setQuery}
+                                onClear={() => setQuery("")}
+                                placeholder={t("searchPlaceholder")}
+                                searchAria={tf("searchAria")}
+                                clearAria={tf("clearSearchAria")}
+                            />
+                        }
+                        trailing={
+                            <div className="flex items-center gap-2">
+                                {displayMode === "grid" && (
+                                    <RecordsSortMenu
+                                        columns={columns}
+                                        sortKey={sortKey}
+                                        sortDirection={sortDirection}
+                                        onSortChange={onSortChange}
+                                    />
+                                )}
+                                <SegmentedToggle
+                                    ariaLabel={t("displayModeAria")}
+                                    value={displayMode}
+                                    onChange={setDisplayMode}
+                                    options={[
+                                        { value: "grid", icon: <Squares2X2Icon className="size-4" />, ariaLabel: t("gridViewAria") },
+                                        { value: "table", icon: <TableCellsIcon className="size-4" />, ariaLabel: t("tableViewAria") },
+                                    ]}
+                                />
+                            </div>
+                        }
+                    />
+                </Rise>
+
+                <Rise delay={0.12}>
+                    <RecordsRenderView<User>
+                        data={filteredUsers}
+                        columns={columns}
+                        renderCard={(item) => <UserCard user={item} />}
+                        renderAvatar={(item) => <UserAvatar user={item} />}
+                        detailPath={(item) => `/users/${item.id}`}
+                        displayMode={displayMode}
+                        selectedIds={selectedIds}
+                        onSelectedIdsChange={setSelectedIds}
+                        entityLabel={t("entityLabel")}
+                        selectionActions={selectionActions}
+                        sortState={sortState}
+                    />
+                </Rise>
+            </div>
         </div>
     );
 }

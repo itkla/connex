@@ -37,7 +37,7 @@ import OverviewCard from '@/app/components/dashboard/OverviewCard';
 import PipelineChart from '@/app/components/dashboard/PipelineChart';
 import RecentFiles from '@/app/components/dashboard/RecentFiles';
 import RecentMoves from '@/app/components/dashboard/RecentMoves';
-import Rise from '@/app/components/dashboard/Rise';
+import Rise from '@/app/components/motion/Rise';
 import SectionHeader from '@/app/components/dashboard/SectionHeader';
 import TaskSummary from '@/app/components/dashboard/TaskSummary';
 import Timeline from '@/app/components/me/Timeline';

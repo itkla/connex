@@ -5,7 +5,7 @@ export type DueTone = 'overdue' | 'today' | 'soon' | 'later';
 
 /** Tailwind classes for the due-date chip, keyed by {@link DueTone}. */
 export const DUE_CHIP: Record<DueTone, string> = {
-    overdue: 'bg-red-50 text-red-600 ring-red-600/10 dark:bg-red-950/40 dark:text-red-400 dark:ring-red-400/20',
+    overdue: 'bg-destructive/10 text-destructive ring-destructive/15',
     today: 'bg-brand-light/70 text-brand-dark ring-brand-dark/15',
     soon: 'bg-muted text-muted-foreground ring-border',
     later: 'bg-muted text-muted-foreground ring-border',

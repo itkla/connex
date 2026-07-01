@@ -30,6 +30,7 @@ import EditTaskSheet from '@/app/components/activity/tasks/EditTaskSheet';
 import TaskDialog from '@/app/components/activity/tasks/TaskDialog';
 import TasksKanban from '@/app/components/activity/tasks/TasksKanban';
 import { type DueTone, DUE_CHIP, formatDue } from '@/app/components/activity/tasks/taskDue';
+import Rise from '@/app/components/motion/Rise';
 import { updateTask } from '@/app/lib/api';
 import { toastError } from '@/app/lib/toast';
 import { parseMysqlDateTime } from '@/app/lib/utils';
@@ -418,237 +419,245 @@ export default function TasksBrowser({ tasks: initialTasks, persons, deals, user
     );
 
     return (
-        <div className="mx-auto w-full max-w-7xl space-y-6">
-            <header className="flex flex-wrap items-start justify-between gap-4">
-                <div>
-                    <h1 className="text-4xl font-extrabold tracking-tight">{t('title')}</h1>
-                    <p className="mt-1 text-sm text-muted-foreground">{t('subtitle')}</p>
-                </div>
-                <div className="flex items-center gap-2">
-                    <div
-                        role="group"
-                        aria-label={t('displayMode')}
-                        className="inline-flex rounded-full bg-muted p-0.5 ring-1 ring-border"
-                    >
-                        <button
-                            type="button"
-                            onClick={() => setView('list')}
-                            aria-label={t('viewList')}
-                            aria-pressed={view === 'list'}
-                            className={cn(
-                                'flex h-8 w-8 items-center justify-center rounded-full transition active:scale-[0.97]',
-                                view === 'list' ? 'bg-background text-foreground shadow' : 'text-muted-foreground hover:text-foreground',
-                            )}
-                        >
-                            <QueueListIcon className="size-4" />
-                        </button>
-                        <button
-                            type="button"
-                            onClick={() => setView('board')}
-                            aria-label={t('viewBoard')}
-                            aria-pressed={view === 'board'}
-                            className={cn(
-                                'flex h-8 w-8 items-center justify-center rounded-full transition active:scale-[0.97]',
-                                view === 'board' ? 'bg-background text-foreground shadow' : 'text-muted-foreground hover:text-foreground',
-                            )}
-                        >
-                            <ViewColumnsIcon className="size-4" />
-                        </button>
-                    </div>
-                    <Button
-                        className="bg-brand text-white shadow-sm transition-transform hover:bg-brand-dark active:scale-[0.98]"
-                        aria-label={t('newAria')}
-                        onClick={() => setCreating(true)}
-                    >
-                        <PlusIcon strokeWidth={2.5} />
-                        {t('new')}
-                    </Button>
-                </div>
-            </header>
+        <div className="min-h-screen bg-background px-2 pt-8 pb-12">
+            <div className="mx-auto flex w-full max-w-7xl flex-col gap-10">
+                <Rise>
+                    <header className="flex flex-wrap items-start justify-between gap-4">
+                        <div>
+                            <h1 className="text-4xl font-extrabold tracking-tight">{t('title')}</h1>
+                            <p className="mt-1 text-sm text-muted-foreground">{t('subtitle')}</p>
+                        </div>
+                        <div className="flex items-center gap-2">
+                            <div
+                                role="group"
+                                aria-label={t('displayMode')}
+                                className="inline-flex rounded-full bg-muted p-0.5 ring-1 ring-border"
+                            >
+                                <button
+                                    type="button"
+                                    onClick={() => setView('list')}
+                                    aria-label={t('viewList')}
+                                    aria-pressed={view === 'list'}
+                                    className={cn(
+                                        'flex h-8 w-8 items-center justify-center rounded-full transition active:scale-[0.97]',
+                                        view === 'list' ? 'bg-background text-foreground shadow' : 'text-muted-foreground hover:text-foreground',
+                                    )}
+                                >
+                                    <QueueListIcon className="size-4" />
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => setView('board')}
+                                    aria-label={t('viewBoard')}
+                                    aria-pressed={view === 'board'}
+                                    className={cn(
+                                        'flex h-8 w-8 items-center justify-center rounded-full transition active:scale-[0.97]',
+                                        view === 'board' ? 'bg-background text-foreground shadow' : 'text-muted-foreground hover:text-foreground',
+                                    )}
+                                >
+                                    <ViewColumnsIcon className="size-4" />
+                                </button>
+                            </div>
+                            <Button
+                                className="bg-brand text-white shadow-sm transition-transform hover:bg-brand-dark active:scale-[0.98]"
+                                aria-label={t('newAria')}
+                                onClick={() => setCreating(true)}
+                            >
+                                <PlusIcon strokeWidth={2.5} />
+                                {t('new')}
+                            </Button>
+                        </div>
+                    </header>
+                </Rise>
 
-            {hasAnyTasks && (
-                <FocusStrip
-                    focus={todayFocus}
-                    reduce={reduce}
-                    t={t}
-                    onSelectToday={() => setQueue('dueToday')}
-                    onSelectOverdue={() => setQueue('overdue')}
-                    onSelectWeek={() => setQueue('completed')}
-                />
-            )}
-
-            {view === 'board' ? (
-                <div className="min-w-0 space-y-4">
-                    <FilterBar
-                        reduce={reduce}
-                        chips={query.trim() ? [{ id: 'q', label: tf('chipSearch', { query: query.trim() }), onRemove: () => setQuery('') }] : []}
-                        hasActiveFilters={query.trim() !== ''}
-                        onClearAll={() => setQuery('')}
-                        clearAllLabel={tf('clearAll')}
-                        className="py-0"
-                        search={
-                            <SearchField
-                                value={query}
-                                onChange={setQuery}
-                                onClear={() => setQuery('')}
-                                placeholder={t('searchPlaceholder')}
-                                searchAria={tf('searchAria')}
-                                clearAria={tf('clearSearchAria')}
-                            />
-                        }
-                    />
-                    <TasksKanban
-                        tasks={boardTasks}
-                        personById={personById}
-                        dealById={dealById}
-                        userById={userById}
-                        onMoved={() => router.refresh()}
-                        onOpen={setEditingTask}
-                        reduce={reduce}
-                    />
-                </div>
-            ) : (
-            <div className="grid grid-cols-1 gap-6 md:grid-cols-[200px_minmax(0,1fr)] md:gap-10">
-                <aside className="md:sticky md:top-6 md:self-start">
-                    <h2 className="mb-2 px-3 text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
-                        {t('queuesHeader')}
-                    </h2>
-                    <nav className="space-y-0.5">
-                        {ACTIVE_QUEUES.map((q) => (
-                            <QueueButton
-                                key={q}
-                                Icon={QUEUE_ICON[q]}
-                                label={t(`queue_${q}` as 'queue_myOpen')}
-                                count={queueCounts[q]}
-                                active={queue === q}
-                                reduce={reduce}
-                                onClick={() => setQueue(q)}
-                            />
-                        ))}
-                        <div className="mx-3 my-3 h-px bg-border" />
-                        <QueueButton
-                            Icon={QUEUE_ICON.completed}
-                            label={t('queue_completed')}
-                            count={queueCounts.completed}
-                            active={queue === 'completed'}
+                {hasAnyTasks && (
+                    <Rise delay={0.06}>
+                        <FocusStrip
+                            focus={todayFocus}
                             reduce={reduce}
-                            onClick={() => setQueue('completed')}
+                            t={t}
+                            onSelectToday={() => setQueue('dueToday')}
+                            onSelectOverdue={() => setQueue('overdue')}
+                            onSelectWeek={() => setQueue('completed')}
                         />
-                    </nav>
-                </aside>
+                    </Rise>
+                )}
 
-                <div className="min-w-0 space-y-4">
-                    <FilterBar
-                        reduce={reduce}
-                        chips={chips}
-                        hasActiveFilters={query.trim() !== '' || dimensionsActive}
-                        onClearAll={clearAllFilters}
-                        clearAllLabel={tf('clearAll')}
-                        className="py-0"
-                        search={
-                            <SearchField
-                                value={query}
-                                onChange={setQuery}
-                                onClear={() => setQuery('')}
-                                placeholder={t('searchPlaceholder')}
-                                searchAria={tf('searchAria')}
-                                clearAria={tf('clearSearchAria')}
+                <Rise delay={0.12}>
+                    {view === 'board' ? (
+                        <div className="min-w-0 space-y-4">
+                            <FilterBar
+                                reduce={reduce}
+                                chips={query.trim() ? [{ id: 'q', label: tf('chipSearch', { query: query.trim() }), onRemove: () => setQuery('') }] : []}
+                                hasActiveFilters={query.trim() !== ''}
+                                onClearAll={() => setQuery('')}
+                                clearAllLabel={tf('clearAll')}
+                                className="py-0"
+                                search={
+                                    <SearchField
+                                        value={query}
+                                        onChange={setQuery}
+                                        onClear={() => setQuery('')}
+                                        placeholder={t('searchPlaceholder')}
+                                        searchAria={tf('searchAria')}
+                                        clearAria={tf('clearSearchAria')}
+                                    />
+                                }
                             />
-                        }
-                    >
-                        {dimensionOptions.assignees.length > 0 && (
-                            <MultiSelectFilter
-                                label={tf('assignee')}
-                                ariaLabel={tf('assignee')}
-                                options={dimensionOptions.assignees}
-                                selected={assigneeFilter}
-                                onToggle={(v) => toggleInSet(setAssigneeFilter, v)}
-                                onClear={() => setAssigneeFilter(new Set())}
-                                clearLabel={tf('clear')}
-                                scroll
+                            <TasksKanban
+                                tasks={boardTasks}
+                                personById={personById}
+                                dealById={dealById}
+                                userById={userById}
+                                onMoved={() => router.refresh()}
+                                onOpen={setEditingTask}
+                                reduce={reduce}
                             />
-                        )}
-                        {dimensionOptions.persons.length > 0 && (
-                            <MultiSelectFilter
-                                label={tf('contact')}
-                                ariaLabel={tf('contact')}
-                                options={dimensionOptions.persons}
-                                selected={personFilter}
-                                onToggle={(v) => toggleInSet(setPersonFilter, v)}
-                                onClear={() => setPersonFilter(new Set())}
-                                clearLabel={tf('clear')}
-                                scroll
-                            />
-                        )}
-                        {dimensionOptions.deals.length > 0 && (
-                            <MultiSelectFilter
-                                label={tf('deal')}
-                                ariaLabel={tf('deal')}
-                                options={dimensionOptions.deals}
-                                selected={dealFilter}
-                                onToggle={(v) => toggleInSet(setDealFilter, v)}
-                                onClear={() => setDealFilter(new Set())}
-                                clearLabel={tf('clear')}
-                                scroll
-                            />
-                        )}
-                        {dimensionOptions.companies.length > 0 && (
-                            <MultiSelectFilter
-                                label={tf('company')}
-                                ariaLabel={tf('company')}
-                                options={dimensionOptions.companies}
-                                selected={companyFilter}
-                                onToggle={(v) => toggleInSet(setCompanyFilter, v)}
-                                onClear={() => setCompanyFilter(new Set())}
-                                clearLabel={tf('clear')}
-                                scroll
-                            />
-                        )}
-                    </FilterBar>
-
-                    {isEmpty ? (
-                        <TaskEmptyState
-                            filtered={!!query.trim()}
-                            completed={isCompletedQueue}
-                            message={emptyMessage}
-                        />
-                    ) : isCompletedQueue ? (
-                        <div className="overflow-hidden rounded-2xl bg-card ring-1 ring-border">
-                            <ul className="divide-y divide-border">
-                                <AnimatePresence initial={false} mode="popLayout">
-                                    {filtered.map((task) => renderRow(task, 'completed'))}
-                                </AnimatePresence>
-                            </ul>
                         </div>
                     ) : (
-                        <div className="overflow-hidden rounded-2xl bg-card ring-1 ring-border">
-                            {visibleBuckets.map((bucket, i) => (
-                                <section key={bucket} className={cn(i > 0 && 'border-t border-border')}>
-                                    <div className="flex items-baseline justify-between px-5 pt-4 pb-2">
-                                        <h3
-                                            className={cn(
-                                                'text-sm font-semibold',
-                                                bucket === 'overdue' ? 'text-destructive' : 'text-foreground',
-                                            )}
-                                        >
-                                            {t(`bucket_${bucket}` as 'bucket_overdue')}
-                                        </h3>
-                                        <span className="text-xs tabular-nums text-muted-foreground">
-                                            {grouped[bucket].length}
-                                        </span>
+                        <div className="grid grid-cols-1 gap-6 md:grid-cols-[200px_minmax(0,1fr)] md:gap-10">
+                            <aside className="md:sticky md:top-6 md:self-start">
+                                <h2 className="mb-2 px-3 text-xs font-medium uppercase tracking-[0.12em] text-muted-foreground">
+                                    {t('queuesHeader')}
+                                </h2>
+                                <nav className="space-y-0.5">
+                                    {ACTIVE_QUEUES.map((q) => (
+                                        <QueueButton
+                                            key={q}
+                                            Icon={QUEUE_ICON[q]}
+                                            label={t(`queue_${q}` as 'queue_myOpen')}
+                                            count={queueCounts[q]}
+                                            active={queue === q}
+                                            reduce={reduce}
+                                            onClick={() => setQueue(q)}
+                                        />
+                                    ))}
+                                    <div className="mx-3 my-3 h-px bg-border" />
+                                    <QueueButton
+                                        Icon={QUEUE_ICON.completed}
+                                        label={t('queue_completed')}
+                                        count={queueCounts.completed}
+                                        active={queue === 'completed'}
+                                        reduce={reduce}
+                                        onClick={() => setQueue('completed')}
+                                    />
+                                </nav>
+                            </aside>
+
+                            <div className="min-w-0 space-y-4">
+                                <FilterBar
+                                    reduce={reduce}
+                                    chips={chips}
+                                    hasActiveFilters={query.trim() !== '' || dimensionsActive}
+                                    onClearAll={clearAllFilters}
+                                    clearAllLabel={tf('clearAll')}
+                                    className="py-0"
+                                    search={
+                                        <SearchField
+                                            value={query}
+                                            onChange={setQuery}
+                                            onClear={() => setQuery('')}
+                                            placeholder={t('searchPlaceholder')}
+                                            searchAria={tf('searchAria')}
+                                            clearAria={tf('clearSearchAria')}
+                                        />
+                                    }
+                                >
+                                    {dimensionOptions.assignees.length > 0 && (
+                                        <MultiSelectFilter
+                                            label={tf('assignee')}
+                                            ariaLabel={tf('assignee')}
+                                            options={dimensionOptions.assignees}
+                                            selected={assigneeFilter}
+                                            onToggle={(v) => toggleInSet(setAssigneeFilter, v)}
+                                            onClear={() => setAssigneeFilter(new Set())}
+                                            clearLabel={tf('clear')}
+                                            scroll
+                                        />
+                                    )}
+                                    {dimensionOptions.persons.length > 0 && (
+                                        <MultiSelectFilter
+                                            label={tf('contact')}
+                                            ariaLabel={tf('contact')}
+                                            options={dimensionOptions.persons}
+                                            selected={personFilter}
+                                            onToggle={(v) => toggleInSet(setPersonFilter, v)}
+                                            onClear={() => setPersonFilter(new Set())}
+                                            clearLabel={tf('clear')}
+                                            scroll
+                                        />
+                                    )}
+                                    {dimensionOptions.deals.length > 0 && (
+                                        <MultiSelectFilter
+                                            label={tf('deal')}
+                                            ariaLabel={tf('deal')}
+                                            options={dimensionOptions.deals}
+                                            selected={dealFilter}
+                                            onToggle={(v) => toggleInSet(setDealFilter, v)}
+                                            onClear={() => setDealFilter(new Set())}
+                                            clearLabel={tf('clear')}
+                                            scroll
+                                        />
+                                    )}
+                                    {dimensionOptions.companies.length > 0 && (
+                                        <MultiSelectFilter
+                                            label={tf('company')}
+                                            ariaLabel={tf('company')}
+                                            options={dimensionOptions.companies}
+                                            selected={companyFilter}
+                                            onToggle={(v) => toggleInSet(setCompanyFilter, v)}
+                                            onClear={() => setCompanyFilter(new Set())}
+                                            clearLabel={tf('clear')}
+                                            scroll
+                                        />
+                                    )}
+                                </FilterBar>
+
+                                {isEmpty ? (
+                                    <TaskEmptyState
+                                        filtered={!!query.trim()}
+                                        completed={isCompletedQueue}
+                                        message={emptyMessage}
+                                    />
+                                ) : isCompletedQueue ? (
+                                    <div className="overflow-hidden rounded-2xl border border-border bg-card">
+                                        <ul className="divide-y divide-border">
+                                            <AnimatePresence initial={false} mode="popLayout">
+                                                {filtered.map((task) => renderRow(task, 'completed'))}
+                                            </AnimatePresence>
+                                        </ul>
                                     </div>
-                                    <ul className="divide-y divide-border">
-                                        <AnimatePresence initial={false} mode="popLayout">
-                                            {grouped[bucket].map((task) => renderRow(task, bucket))}
-                                        </AnimatePresence>
-                                    </ul>
-                                </section>
-                            ))}
+                                ) : (
+                                    <div className="overflow-hidden rounded-2xl border border-border bg-card">
+                                        {visibleBuckets.map((bucket, i) => (
+                                            <section key={bucket} className={cn(i > 0 && 'border-t border-border')}>
+                                                <div className="flex items-baseline justify-between px-5 pt-4 pb-2">
+                                                    <h3
+                                                        className={cn(
+                                                            'text-sm font-semibold',
+                                                            bucket === 'overdue' ? 'text-destructive' : 'text-foreground',
+                                                        )}
+                                                    >
+                                                        {t(`bucket_${bucket}` as 'bucket_overdue')}
+                                                    </h3>
+                                                    <span className="text-xs tabular-nums text-muted-foreground">
+                                                        {grouped[bucket].length}
+                                                    </span>
+                                                </div>
+                                                <ul className="divide-y divide-border">
+                                                    <AnimatePresence initial={false} mode="popLayout">
+                                                        {grouped[bucket].map((task) => renderRow(task, bucket))}
+                                                    </AnimatePresence>
+                                                </ul>
+                                            </section>
+                                        ))}
+                                    </div>
+                                )}
+                            </div>
                         </div>
                     )}
-                </div>
+                </Rise>
             </div>
-            )}
 
             {editingTask && (
                 <EditTaskSheet
@@ -726,7 +735,7 @@ function FocusStrip({
         total === 0 ? t('nothingDueToday') : left === 0 ? t('allDoneToday') : t('tasksLeft', { count: left });
 
     return (
-        <div className="grid grid-cols-3 gap-px overflow-hidden rounded-2xl bg-border ring-1 ring-border">
+        <div className="grid grid-cols-3 gap-px overflow-hidden rounded-2xl border border-border bg-border">
             <button
                 type="button"
                 onClick={onSelectToday}
@@ -938,7 +947,7 @@ function TaskRow({
 function TaskEmptyState({ filtered, completed, message }: { filtered: boolean; completed: boolean; message: string }) {
     const Icon = completed ? CheckCircleIcon : filtered ? MagnifyingGlassIcon : CheckIcon;
     return (
-        <div className="rounded-2xl bg-card px-6 py-20 text-center ring-1 ring-border">
+        <div className="rounded-2xl border border-border bg-card px-6 py-20 text-center">
             <div className="mx-auto flex size-14 items-center justify-center rounded-2xl bg-brand-light text-brand-dark">
                 <Icon className="size-7" strokeWidth={1.75} />
             </div>

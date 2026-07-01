@@ -67,7 +67,7 @@ export default function DealCard({ deal, company, pipeline, stage, risk, onQuick
 
     return (
         <div
-            className="group flex cursor-pointer items-center gap-4 rounded-2xl bg-card p-4 ring-1 ring-border transition duration-200 hover:bg-muted hover:ring-border hover:shadow-lg"
+            className="group flex cursor-pointer items-center gap-4 rounded-2xl border border-border bg-card p-4 transition duration-200 hover:bg-muted hover:shadow-lg"
             onClick={open}
         >
             {/* if company exists, show avatar; if not, assume freelancer and show a placeholder avatar */}

@@ -13,6 +13,7 @@ import {
     type SimulationLinkDatum,
 } from 'd3';
 import { useNodesInitialized, useReactFlow } from '@xyflow/react';
+import { useReducedMotion } from 'motion/react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { UC_ID } from '@/app/components/map/graph/buildGraph';
 import { RING_RADIUS } from '@/app/components/map/graph/radialLayout';
@@ -68,6 +69,7 @@ export function useForceLayout(focusId?: string) {
     const { getNodes, getEdges, setNodes, fitView, setCenter } =
         useReactFlow<AppNode, RelationEdge>();
     const initialized = useNodesInitialized();
+    const reduce = useReducedMotion() ?? false;
 
     const [settling, setSettling] = useState(true);
 
@@ -178,9 +180,9 @@ export function useForceLayout(focusId?: string) {
             focusFrame = requestAnimationFrame(() => {
                 const sn = focusId ? index.get(focusId) : undefined;
                 if (sn) {
-                    setCenter(sn.x ?? 0, sn.y ?? 0, { zoom: 1, duration: SETTLE_MS });
+                    setCenter(sn.x ?? 0, sn.y ?? 0, { zoom: 1, duration: reduce ? 0 : SETTLE_MS });
                 } else {
-                    fitView({ padding: 0.2, duration: SETTLE_MS });
+                    fitView({ padding: 0.2, duration: reduce ? 0 : SETTLE_MS });
                 }
             });
 
@@ -196,7 +198,7 @@ export function useForceLayout(focusId?: string) {
             sim.stop();
             simRef.current = null;
         };
-    }, [initialized, getNodes, getEdges, setNodes, fitView, setCenter, focusId]);
+    }, [initialized, getNodes, getEdges, setNodes, fitView, setCenter, focusId, reduce]);
 
     const onNodeDragStart = useCallback(
         (_: unknown, node: AppNode) => {
