@@ -1,4 +1,17 @@
 {
+  "DealRisk": {
+    "levelHigh": "高リスク",
+    "levelMedium": "中リスク",
+    "levelLow": "低リスク",
+    "panelTitle": "リスクの兆候",
+    "factorCloseOverdue": "予定成約日を{days}日超過しています",
+    "factorClosingSoonQuiet": "あと{days}日で成約予定ですが、最近の活動がありません",
+    "factorStalled": "{days}日間、活動の記録がありません",
+    "factorNoStakeholders": "この商談に関係者が登録されていません",
+    "factorStakeholderCold": "{contact}との関係が冷え込んでいます",
+    "factorStakeholderCooling": "{contact}との関係が冷めつつあります",
+    "factorSinceContact": " — 最終接触から{days}日"
+  },
   "DealsPage": {
     "allDeals": "案件一覧",
     "actual": "実績",
@@ -162,6 +175,7 @@
     "columnStage": "ステージ",
     "columnExpectedClose": "決着予定日",
     "columnStatus": "ステータス",
+    "columnRisk": "リスク",
     "columnUpdated": "更新日",
     "statusOpen": "オープン",
     "statusClosed": "決着",

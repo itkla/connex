@@ -11,7 +11,7 @@ import DealCard from '@/app/components/records/deals/DealCard';
 import { classifyStage } from './dealOutcome';
 import { moveDeal } from '@/app/lib/api';
 import { toastError } from '@/app/lib/toast';
-import type { Company, Deal, Pipeline, Stage } from '@/app/lib/types';
+import type { Company, Deal, DealRisk, Pipeline, Stage } from '@/app/lib/types';
 
 interface DealsKanbanProps {
     deals: Deal[];
@@ -20,6 +20,7 @@ interface DealsKanbanProps {
     companyById: Map<number, Company>;
     pipelineById: Map<number, Pipeline>;
     stageById: Map<number, Stage>;
+    riskByDealId: Map<number, DealRisk>;
     onQuickEdit: (deal: Deal) => void;
     onDelete: (deal: Deal) => void;
     onMoved: () => void;
@@ -38,6 +39,7 @@ export default function DealsKanban({
     companyById,
     pipelineById,
     stageById,
+    riskByDealId,
     onQuickEdit,
     onDelete,
     onMoved,
@@ -89,11 +91,12 @@ export default function DealsKanban({
                 company={deal.company != null ? companyById.get(deal.company) : undefined}
                 pipeline={deal.pipeline != null ? pipelineById.get(deal.pipeline) : undefined}
                 stage={deal.stage != null ? stageById.get(deal.stage) : undefined}
+                risk={riskByDealId.get(deal.id)}
                 onQuickEdit={() => onQuickEdit(deal)}
                 onDelete={() => onDelete(deal)}
             />
         ),
-        [companyById, pipelineById, stageById, onQuickEdit, onDelete],
+        [companyById, pipelineById, stageById, riskByDealId, onQuickEdit, onDelete],
     );
 
     const onMove = useCallback(

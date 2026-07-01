@@ -47,6 +47,13 @@
                  resultMap="ooo.klae.connex.backend.mappers.PersonMapper.PersonResult"/>
   </resultMap>
 
+  <resultMap id="DealStakeholderResult" type="DealStakeholder">
+    <result property="dealId" column="deal_id"/>
+    <result property="personId" column="person_id"/>
+    <result property="personLabel" column="person_label"/>
+    <result property="role" column="role"/>
+  </resultMap>
+
   <sql id="dealColumns">
     id, workspace_id, owner_id, name, value, actual_value, currency, pipeline_id, stage_id, position, company_id,
     expected_close_date, closed_at, closed_reason, won, created_at, updated_at
@@ -67,6 +74,18 @@
     JOIN person p ON p.id = dp.person_id
     WHERE d.workspace_id = #{workspaceId} AND dp.deal_id = #{dealId}
     ORDER BY p.name
+  </select>
+
+  <select id="getAllDealStakeholders" resultMap="DealStakeholderResult">
+    SELECT dp.deal_id AS deal_id,
+           p.id AS person_id,
+           p.name AS person_label,
+           dp.role AS role
+    FROM deal_person dp
+    JOIN deal d ON d.id = dp.deal_id AND d.workspace_id = #{workspaceId}
+    JOIN person p ON p.id = dp.person_id AND p.workspace_id = d.workspace_id
+    WHERE d.workspace_id = #{workspaceId}
+    ORDER BY dp.deal_id, p.name
   </select>
 
   <select id="getAllDeals" resultMap="DealResult">

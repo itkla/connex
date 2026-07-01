@@ -158,6 +158,35 @@ export type ReplayParams = {
     granularity?: ReplayGranularity;
 };
 
+export type DealRiskSeverity = 'high' | 'medium' | 'low';
+/** Overall risk band for a deal; {@code none} when the deal is not at risk. */
+export type DealRiskLevel = DealRiskSeverity | 'none';
+export type DealRiskFactorCode =
+    | 'close_overdue'
+    | 'closing_soon_quiet'
+    | 'stalled'
+    | 'stakeholder_cold'
+    | 'no_stakeholders';
+
+/** One deterministic risk signal on a deal; {@link params} feed the localized sentence. */
+export type DealRiskFactor = {
+    code: DealRiskFactorCode;
+    severity: DealRiskSeverity;
+    params: Record<string, unknown>;
+};
+
+/**
+ * Computed risk assessment for a single open deal. Derived on read by the backend from the deal's
+ * timeline, expected close date, and stakeholder warmth; consumed by the deal card and detail page.
+ */
+export type DealRisk = {
+    dealId: number;
+    level: DealRiskLevel;
+    score: number;
+    factors: DealRiskFactor[];
+    assessedAt: string;
+};
+
 /** One stint in a contact's employment history. The row with {@code current} is the present company. */
 export type PersonEmployment = {
     id: number;

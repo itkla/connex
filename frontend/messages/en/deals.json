@@ -1,4 +1,17 @@
 {
+  "DealRisk": {
+    "levelHigh": "High risk",
+    "levelMedium": "Medium risk",
+    "levelLow": "Low risk",
+    "panelTitle": "Risk signals",
+    "factorCloseOverdue": "Expected close date passed {days, plural, one {# day} other {# days}} ago",
+    "factorClosingSoonQuiet": "Closing in {days, plural, one {# day} other {# days}} with no recent activity",
+    "factorStalled": "No activity logged in {days, plural, one {# day} other {# days}}",
+    "factorNoStakeholders": "No stakeholders added to this deal",
+    "factorStakeholderCold": "{contact} has gone cold",
+    "factorStakeholderCooling": "{contact} is cooling off",
+    "factorSinceContact": " — {days, plural, one {# day} other {# days}} since last contact"
+  },
   "DealsPage": {
     "allDeals": "All Deals",
     "actual": "Actual",
@@ -162,6 +175,7 @@
     "columnStage": "Stage",
     "columnExpectedClose": "Expected close",
     "columnStatus": "Status",
+    "columnRisk": "Risk",
     "columnUpdated": "Updated",
     "statusOpen": "Open",
     "statusClosed": "Closed",
