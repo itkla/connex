@@ -761,6 +761,10 @@ export function getDealById(id: number, init: RequestInit = {}) {
     return getJson<Types.Deal>(`/api/deals/${id}`, init);
 }
 
+export function getDealSummary(id: number, init: RequestInit = {}) {
+    return getJson<Types.DealSummary>(`/api/deals/${id}/summary`, init);
+}
+
 export function createDeal(payload: Types.CreateDealPayload) {
     return postJson<Types.Deal>(`/api/deals`, payload);
 }

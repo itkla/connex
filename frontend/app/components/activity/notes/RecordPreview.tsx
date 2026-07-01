@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { BriefcaseIcon, BuildingOffice2Icon, EnvelopeIcon, GlobeAltIcon, UserIcon } from "@heroicons/react/24/outline";
 
-import { getCompanyById, getContactById, getDealById } from "@/app/lib/api";
+import { getCompanyById, getContactById, getDealSummary } from "@/app/lib/api";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 
 type RecordType = "person" | "deal" | "company";
@@ -28,7 +28,7 @@ function useRecord<T>(fetcher: (id: number) => Promise<T>, id: number) {
     return { data, loading };
 }
 
-function PreviewSkeleton() {
+export function PreviewSkeleton() {
     return (
         <div className="flex animate-pulse gap-3">
             <div className="size-10 shrink-0 rounded-full bg-muted" />
@@ -88,10 +88,11 @@ function ContactPreview({ id }: { id: number }) {
 }
 
 function DealPreview({ id }: { id: number }) {
-    const { data, loading } = useRecord(getDealById, id);
+    const { data, loading } = useRecord(getDealSummary, id);
     if (loading) return <PreviewSkeleton />;
     if (!data) return <p className="text-sm text-muted-foreground">Deal unavailable</p>;
-    const status = data.won === true ? "Won" : data.won === false ? "Lost" : "Open";
+    const status = data.status.charAt(0).toUpperCase() + data.status.slice(1);
+    const stage = [data.pipelineName, data.stageName].filter(Boolean).join(" · ");
     return (
         <div>
             <div className="flex items-center gap-2">
@@ -105,6 +106,18 @@ function DealPreview({ id }: { id: number }) {
                     <dt>Value</dt>
                     <dd className="font-medium tabular-nums text-foreground">{formatCurrency(data.value, data.currency)}</dd>
                 </div>
+                {data.companyName ? (
+                    <div className="flex justify-between gap-2">
+                        <dt>Company</dt>
+                        <dd className="ml-2 truncate font-medium text-foreground">{data.companyName}</dd>
+                    </div>
+                ) : null}
+                {stage ? (
+                    <div className="flex justify-between gap-2">
+                        <dt>Stage</dt>
+                        <dd className="ml-2 truncate font-medium text-foreground">{stage}</dd>
+                    </div>
+                ) : null}
                 <div className="flex justify-between gap-2">
                     <dt>Status</dt>
                     <dd className="font-medium text-foreground">{status}</dd>
