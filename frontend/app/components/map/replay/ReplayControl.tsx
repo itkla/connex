@@ -71,7 +71,7 @@ export default function ReplayControl({
                     type="button"
                     onClick={onEnter}
                     disabled={loading}
-                    className="flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium text-foreground transition-transform duration-150 ease-out hover:bg-muted active:scale-95 disabled:opacity-80"
+                    className="flex h-8 items-center gap-1.5 rounded-full px-3 text-xs font-medium text-foreground transition-transform duration-150 ease-out hover:bg-muted active:scale-95 disabled:opacity-80"
                 >
                     {loading ? <ArrowPathIcon className="size-4 animate-spin" /> : <ClockIcon className="size-4" />}
                     {loading ? t('building') : t('enter')}
@@ -96,7 +96,7 @@ export default function ReplayControl({
                         ariaValueText={currentDate}
                     />
 
-                    <span className="shrink-0 whitespace-nowrap tabular-nums text-xs font-medium text-foreground">
+                    <span className="w-24 shrink-0 whitespace-nowrap text-center tabular-nums text-xs font-medium text-foreground">
                         {currentDate}
                     </span>
 
