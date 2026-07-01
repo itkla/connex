@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
 
 import RelationMap from '@/app/components/map/RelationMap';
@@ -18,19 +18,35 @@ import type { Graph, RelationEdge } from '@/app/components/map/graph/types';
 import type { ReplayFrame } from '@/app/lib/types';
 
 const DEFAULT_WEEKS = 26;
+const WEEK_CHOICES = new Set([13, 26, 52]);
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 function isoDate(ms: number): string {
     return new Date(ms).toISOString().slice(0, 10);
 }
 
+function reflectUrl(on: boolean, weeks: number) {
+    if (typeof window === 'undefined') return;
+    const params = new URLSearchParams(window.location.search);
+    if (on) {
+        params.set('replay', '1');
+        params.set('weeks', String(weeks));
+    } else {
+        params.delete('replay');
+        params.delete('weeks');
+    }
+    const qs = params.toString();
+    window.history.replaceState(null, '', qs ? `${window.location.pathname}?${qs}` : window.location.pathname);
+}
+
 type ReplayData = { extraEdges: RelationEdge[]; computed: ComputedFrame[]; frames: ReplayFrame[] };
 
 /**
  * The relationship map surface. The live map renders immediately; historical "time-travel" data is
- * fetched only on intent (the bottom-left control), then overlaid onto the existing layout so the map
- * never re-settles — nodes fade/recolour and employment edges appear in place. Collapsing the control
- * returns the map to its live state.
+ * fetched only on intent (the bottom-left control, or a {@code ?replay=1} deep link), then overlaid
+ * onto the existing layout so the map never re-settles — nodes fade/recolour and employment edges
+ * appear in place. Collapsing returns the map to its live state. Replay state is reflected into the URL
+ * (without a navigation) so a replay view is shareable.
  */
 export default function MapView({ graph, focusId }: { graph: Graph; focusId?: string }) {
     const t = useTranslations('Replay');
@@ -54,30 +70,38 @@ export default function MapView({ graph, focusId }: { graph: Graph; focusId?: st
         [graph],
     );
 
-    const enter = useCallback(async () => {
-        setPhase('loading');
-        try {
-            const next = await load(weeks);
-            if (next.computed.length < 2) {
-                toastInfo(t('singleFrame'));
+    const enter = useCallback(
+        async (w: number) => {
+            setWeeks(w);
+            setPhase('loading');
+            reflectUrl(true, w);
+            try {
+                const next = await load(w);
+                if (next.computed.length < 2) {
+                    toastInfo(t('singleFrame'));
+                    setPhase('idle');
+                    reflectUrl(false, w);
+                    return;
+                }
+                setData(next);
+                clock.seek(0);
+                setPhase('active');
+            } catch {
                 setPhase('idle');
-                return;
+                reflectUrl(false, w);
+                toastError(t('error'));
             }
-            setData(next);
-            clock.seek(0);
-            setPhase('active');
-        } catch {
-            setPhase('idle');
-            toastError(t('error'));
-        }
-    }, [load, weeks, clock, t]);
+        },
+        [load, clock, t],
+    );
 
     const changeWeeks = useCallback(
-        async (next: number) => {
-            setWeeks(next);
+        async (w: number) => {
+            setWeeks(w);
+            reflectUrl(true, w);
             try {
-                const loaded = await load(next);
-                setData(loaded);
+                const next = await load(w);
+                setData(next);
                 clock.seek(0);
             } catch {
                 toastError(t('error'));
@@ -90,7 +114,23 @@ export default function MapView({ graph, focusId }: { graph: Graph; focusId?: st
         clock.seek(0);
         setData(null);
         setPhase('idle');
-    }, [clock]);
+        reflectUrl(false, weeks);
+    }, [clock, weeks]);
+
+    const handleEnter = useCallback(() => enter(weeks), [enter, weeks]);
+
+    const enterRef = useRef(enter);
+    useEffect(() => {
+        enterRef.current = enter;
+    }, [enter]);
+    useEffect(() => {
+        const params = new URLSearchParams(window.location.search);
+        if (params.get('replay') !== '1') return;
+        const parsed = Number(params.get('weeks'));
+        const w = WEEK_CHOICES.has(parsed) ? parsed : DEFAULT_WEEKS;
+        const raf = requestAnimationFrame(() => enterRef.current(w));
+        return () => cancelAnimationFrame(raf);
+    }, []);
 
     const active = phase === 'active';
 
@@ -109,7 +149,7 @@ export default function MapView({ graph, focusId }: { graph: Graph; focusId?: st
                     frameIndex={clock.frameIndex}
                     playing={clock.playing}
                     weeks={weeks}
-                    onEnter={enter}
+                    onEnter={handleEnter}
                     onExit={exit}
                     onToggle={clock.toggle}
                     onSeek={clock.seek}
