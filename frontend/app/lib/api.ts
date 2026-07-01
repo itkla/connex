@@ -779,6 +779,10 @@ export function getDealRisk(id: number, init: RequestInit = {}) {
     return getJson<Types.DealRisk>(`/api/deals/${id}/risk`, init);
 }
 
+export function getDealRisksFromCookie(cookie: string | null) {
+    return safeWithCookie<Types.DealRisk>((init) => getDealRisks(init), cookie);
+}
+
 export function createDeal(payload: Types.CreateDealPayload) {
     return postJson<Types.Deal>(`/api/deals`, payload);
 }

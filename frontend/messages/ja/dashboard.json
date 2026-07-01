@@ -13,11 +13,16 @@
     "viewAll": "すべて表示",
     "viewMap": "マップを表示",
     "coolingRelationships": "冷め込んでいる関係",
+    "atRiskDeals": "リスクのある商談",
+    "viewDeals": "商談を表示",
     "introductions": "紹介",
     "recentlyMoved": "最近の転職",
     "files": "ファイル",
     "storageUsed": "{count}件のファイル · {size}",
     "noFiles": "ファイルはまだありません"
+  },
+  "AtRiskDeals": {
+    "empty": "現在、対応が必要な商談はありません。"
   },
   "CoolingRelationships": {
     "empty": "すべての関係が良好です。冷め込みはありません。",

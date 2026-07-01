@@ -17,6 +17,7 @@ import {
     getContactsFromCookie,
     getContactTemperaturesFromCookie,
     getCurrentUserFromCookie,
+    getDealRisksFromCookie,
     getDealsFromCookie,
     getIntroSuggestionsFromCookie,
     getNotesFromCookie,
@@ -28,6 +29,7 @@ import {
 import type { Attachment, AttachmentFacets, Page, User } from '@/app/lib/types';
 import { startOfLocalDay, timeOf } from '@/app/lib/utils';
 
+import AtRiskDeals, { type AtRiskItem } from '@/app/components/dashboard/AtRiskDeals';
 import CoolingRelationships, { type CoolingItem } from '@/app/components/dashboard/CoolingRelationships';
 import Greeting from '@/app/components/dashboard/Greeting';
 import IntroOpportunities from '@/app/components/dashboard/IntroOpportunities';
@@ -55,7 +57,7 @@ export default async function Dashboard() {
 
     const init = { headers: { cookie: cookie ?? '' } } as const;
     const emptyFacets: AttachmentFacets = { sources: [], kinds: [], tags: [], orphaned: 0, total: 0, totalSize: 0 };
-    const [companies, contacts, deals, pipelines, tasks, activities, notes, users, recentFiles, fileFacets, contactTemps, recentMoves, introSuggestions] =
+    const [companies, contacts, deals, pipelines, tasks, activities, notes, users, recentFiles, fileFacets, contactTemps, recentMoves, introSuggestions, dealRisks] =
         await Promise.all([
             getCompaniesFromCookie(cookie),
             getContactsFromCookie(cookie),
@@ -72,7 +74,20 @@ export default async function Dashboard() {
             getContactTemperaturesFromCookie(cookie),
             getRecentMovesFromCookie(cookie),
             getIntroSuggestionsFromCookie(cookie, 4),
+            getDealRisksFromCookie(cookie),
         ]);
+
+    const companyById = new Map(companies.map((company) => [company.id, company]));
+    const dealById = new Map(deals.map((deal) => [deal.id, deal]));
+    const atRiskDeals: AtRiskItem[] = dealRisks
+        .map((risk) => ({ risk, deal: dealById.get(risk.dealId) }))
+        .filter((entry): entry is { risk: (typeof dealRisks)[number]; deal: (typeof deals)[number] } => entry.deal != null)
+        .slice(0, 6)
+        .map(({ risk, deal }) => ({
+            risk,
+            deal,
+            company: deal.company != null ? companyById.get(deal.company) : undefined,
+        }));
 
     const tempByContactId = new Map(contactTemps.map((temp) => [temp.id, temp]));
     const coolingContacts: CoolingItem[] = contacts
@@ -166,6 +181,20 @@ export default async function Dashboard() {
                 </div>
 
                 <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+                    <Rise delay={0.31} className="flex flex-col">
+                        <SectionHeader
+                            title={t('atRiskDeals')}
+                            action={
+                                <Link
+                                    href="/records/deals"
+                                    className="text-xs text-brand hover:text-brand-hover"
+                                >
+                                    {t('viewDeals')}
+                                </Link>
+                            }
+                        />
+                        <AtRiskDeals items={atRiskDeals} />
+                    </Rise>
                     <Rise delay={0.33} className="flex flex-col">
                         <SectionHeader
                             title={t('coolingRelationships')}

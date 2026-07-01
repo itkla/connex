@@ -175,6 +175,7 @@
     "columnStage": "Stage",
     "columnExpectedClose": "Expected close",
     "columnStatus": "Status",
+    "columnRisk": "Risk",
     "columnUpdated": "Updated",
     "statusOpen": "Open",
     "statusClosed": "Closed",

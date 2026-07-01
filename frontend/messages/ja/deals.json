@@ -175,6 +175,7 @@
     "columnStage": "ステージ",
     "columnExpectedClose": "決着予定日",
     "columnStatus": "ステータス",
+    "columnRisk": "リスク",
     "columnUpdated": "更新日",
     "statusOpen": "オープン",
     "statusClosed": "決着",
