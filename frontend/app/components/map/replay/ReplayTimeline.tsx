@@ -97,21 +97,21 @@ export default function ReplayTimeline({
             onPointerMove={onPointerMove}
             onPointerUp={onPointerUp}
             onKeyDown={onKeyDown}
-            className="relative flex h-7 min-w-[9rem] flex-1 cursor-pointer touch-none items-center gap-px rounded-md px-0.5 outline-none focus-visible:ring-2 focus-visible:ring-brand/40"
+            className="relative flex h-8 min-w-[9rem] flex-1 cursor-pointer touch-none items-stretch rounded-md outline-none focus-visible:ring-2 focus-visible:ring-brand/40"
         >
             {bands.map((band, i) => (
-                <motion.span
-                    key={i}
-                    aria-hidden
-                    initial={reduce ? false : { opacity: 0, scaleY: 0.4 }}
-                    animate={{ opacity: 1, scaleY: 1 }}
-                    transition={reduce ? { duration: 0 } : { delay: Math.min(i * 0.012, 0.5), duration: 0.22, ease: EASE_OUT }}
-                    className={cn('h-full flex-1 origin-bottom rounded-[1px]', warmthDotClass(band))}
-                />
+                <span key={i} aria-hidden className="flex flex-1 items-stretch px-px py-1">
+                    <motion.span
+                        initial={reduce ? false : { opacity: 0, scaleY: 0.4 }}
+                        animate={{ opacity: 1, scaleY: 1 }}
+                        transition={reduce ? { duration: 0 } : { delay: Math.min(i * 0.012, 0.5), duration: 0.22, ease: EASE_OUT }}
+                        className={cn('w-full origin-bottom rounded-[1px]', warmthDotClass(band))}
+                    />
+                </span>
             ))}
             <span
                 aria-hidden
-                className="pointer-events-none absolute inset-y-0.5 w-0.5 -translate-x-1/2 rounded-full bg-foreground shadow-sm transition-[left] duration-200 ease-out"
+                className="pointer-events-none absolute inset-y-1 w-0.5 -translate-x-1/2 rounded-full bg-foreground shadow-sm transition-[left] duration-200 ease-out"
                 style={{ left: `${((frameIndex + 0.5) / Math.max(1, frames.length)) * 100}%` }}
             />
         </div>
