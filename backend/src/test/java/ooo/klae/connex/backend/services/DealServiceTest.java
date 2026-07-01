@@ -147,4 +147,25 @@ class DealServiceTest extends AbstractServiceTest {
         Stage stage = newStage(pipeline, 0);
         assertThrows(ResourceNotFoundException.class, () -> dealService.move(-1, stage.getId(), 0));
     }
+
+    @Test
+    void update_changingStage_appendsToNewStageTailWithoutCollision() {
+        Pipeline pipeline = newPipeline();
+        Stage from = newStage(pipeline, 0);
+        Stage to = newStage(pipeline, 1);
+        Company company = newCompany();
+        Deal a = newDeal(pipeline, to, company);
+        Deal b = newDeal(pipeline, to, company);
+        Deal moved = newDeal(pipeline, from, company);
+        dealService.move(a.getId(), to.getId(), 0);
+        dealService.move(b.getId(), to.getId(), 1);
+
+        moved.setStageId(to.getId());
+        dealService.update(moved.getId(), moved);
+
+        List<Deal> target = dealService.getDealsByStageId(to.getId());
+        assertEquals(List.of(a.getId(), b.getId(), moved.getId()),
+            target.stream().map(Deal::getId).toList());
+        assertEquals(List.of(0, 1, 2), target.stream().map(Deal::getPosition).toList());
+    }
 }

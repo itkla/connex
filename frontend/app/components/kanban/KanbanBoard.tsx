@@ -142,11 +142,24 @@ export default function KanbanBoard<T>(props: KanbanBoardProps<T>) {
 
         let toIds = current[toCol];
         const oldIndex = toIds.indexOf(activeId);
-        let newIndex = overStr.startsWith(COL_PREFIX) ? toIds.length - 1 : toIds.indexOf(Number(over.id));
-        if (newIndex < 0) newIndex = toIds.length - 1;
-        if (oldIndex >= 0 && oldIndex !== newIndex) {
-            toIds = arrayMove(toIds, oldIndex, newIndex);
-            commit({ ...current, [toCol]: toIds });
+        if (oldIndex < 0) {
+            const fromCol = findColumn(current, activeId);
+            const insertAt = overStr.startsWith(COL_PREFIX)
+                ? toIds.length
+                : Math.max(0, toIds.indexOf(Number(over.id)));
+            toIds = [...toIds.slice(0, insertAt), activeId, ...toIds.slice(insertAt)];
+            const next = { ...current, [toCol]: toIds };
+            if (fromCol && fromCol !== toCol) {
+                next[fromCol] = current[fromCol].filter((id) => id !== activeId);
+            }
+            commit(next);
+        } else {
+            let newIndex = overStr.startsWith(COL_PREFIX) ? toIds.length - 1 : toIds.indexOf(Number(over.id));
+            if (newIndex < 0) newIndex = toIds.length - 1;
+            if (oldIndex !== newIndex) {
+                toIds = arrayMove(toIds, oldIndex, newIndex);
+                commit({ ...current, [toCol]: toIds });
+            }
         }
         const finalIndex = toIds.indexOf(activeId);
 

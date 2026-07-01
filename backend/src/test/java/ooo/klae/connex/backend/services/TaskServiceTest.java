@@ -89,4 +89,18 @@ class TaskServiceTest extends AbstractServiceTest {
     void move_throwsWhenTaskMissing() {
         assertThrows(ResourceNotFoundException.class, () -> taskService.move(-1, "todo", 0));
     }
+
+    @Test
+    void move_outOfDone_byNonAssignee_throwsForbidden() {
+        User assignee = newUser();
+        Task task = new Task();
+        task.setWorkspaceId(workspace.getId());
+        task.setDescription("done_" + unique());
+        task.setCompleted(true);
+        task.setStatus("done");
+        task.setAssignedTo(assignee);
+        taskMapper.insert(task);
+
+        assertThrows(ForbiddenException.class, () -> taskService.move(task.getId(), "todo", 0));
+    }
 }

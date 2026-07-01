@@ -191,15 +191,18 @@ public class DealService {
         deal.setId(id);
         deal.setWorkspaceId(workspaceId);
         deal.setOwnerId(before.getOwnerId());
-        deal.setPosition(before.getPosition());
+        Integer beforeStage = before.getStageId();
+        Integer newStage = deal.getStageId();
+        boolean stageChanged = newStage != null && (beforeStage == null || !beforeStage.equals(newStage));
+        deal.setPosition(stageChanged
+            ? dealMapper.nextDealPosition(workspaceId, newStage)
+            : before.getPosition());
         reconcileCloseState(deal);
         dealMapper.update(deal);
         auditService.record("deal.update", "deal", id, deal.getName(),
             "Updated deal " + deal.getName(),
             auditService.diff(before, deal, AUDIT_FIELDS));
         notificationChanges.publish(workspaceId, "deal", id);
-        Integer beforeStage = before.getStageId();
-        boolean stageChanged = beforeStage == null ? deal.getStageId() != null : !beforeStage.equals(deal.getStageId());
         ruleTriggers.publish(workspaceId, "deal", id, stageChanged ? "deal.stage_changed" : "deal.updated");
         return deal;
     }

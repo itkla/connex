@@ -162,10 +162,11 @@ public class TaskService {
         if (before == null) throw new ResourceNotFoundException("Task not found with id: " + id);
         String oldStatus = before.getStatus() != null ? before.getStatus() : STATUS_TODO;
         boolean toDone = STATUS_DONE.equals(status);
-        if (toDone && !STATUS_DONE.equals(oldStatus)) {
+        boolean fromDone = STATUS_DONE.equals(oldStatus);
+        if (toDone != fromDone) {
             User currentUser = authService.getCurrentUser();
             if (before.getAssignedTo() == null || before.getAssignedTo().getId() != currentUser.getId()) {
-                throw new ForbiddenException("Only the task assignee may complete this task");
+                throw new ForbiddenException("Only the task assignee may change this task's completion");
             }
         }
         boolean statusChanged = !status.equals(oldStatus);
