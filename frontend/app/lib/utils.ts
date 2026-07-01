@@ -1,6 +1,6 @@
 // transplanted from /me 
 
-import { type TemperatureBand, type UploadedFile } from '@/app/lib/types';
+import { type DealRiskSeverity, type TemperatureBand, type UploadedFile } from '@/app/lib/types';
 
 export function formatShortDate(value: string | undefined, locale: string) {
     if (!value) {
@@ -552,4 +552,37 @@ export function warmthSurfaceClasses(band: TemperatureBand): string {
 /** Border-colour class for a warmth band — used for the map contact ring. */
 export function warmthBorderClass(band: TemperatureBand): string {
     return WARMTH_BORDER[band] ?? WARMTH_BORDER.cold;
+}
+
+const RISK_SURFACE: Record<DealRiskSeverity, string> = {
+    high: 'bg-risk-high/10 ring-risk-high/25',
+    medium: 'bg-risk-medium/12 ring-risk-medium/25',
+    low: 'bg-risk-low/12 ring-risk-low/30',
+};
+
+const RISK_CONTAINER: Record<DealRiskSeverity, string> = {
+    high: 'border-risk-high/30 bg-risk-high/10',
+    medium: 'border-risk-medium/30 bg-risk-medium/10',
+    low: 'border-risk-low/30 bg-risk-low/10',
+};
+
+const RISK_TEXT: Record<DealRiskSeverity, string> = {
+    high: 'text-risk-high',
+    medium: 'text-risk-medium',
+    low: 'text-risk-low',
+};
+
+/** Tinted background + inset-ring classes for a deal-risk pill surface (mirrors {@link warmthSurfaceClasses}). */
+export function riskSurfaceClasses(severity: DealRiskSeverity): string {
+    return RISK_SURFACE[severity] ?? RISK_SURFACE.low;
+}
+
+/** Border + tint classes for a deal-risk panel row, keyed by factor severity. */
+export function riskContainerClasses(severity: DealRiskSeverity): string {
+    return RISK_CONTAINER[severity] ?? RISK_CONTAINER.low;
+}
+
+/** Foreground colour class for a deal-risk icon/accent, keyed by severity. */
+export function riskTextClass(severity: DealRiskSeverity): string {
+    return RISK_TEXT[severity] ?? RISK_TEXT.low;
 }

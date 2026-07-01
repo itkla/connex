@@ -769,6 +769,16 @@ export function getDealById(id: number, init: RequestInit = {}) {
     return getJson<Types.Deal>(`/api/deals/${id}`, init);
 }
 
+/** Risk assessment for every at-risk open deal in the active workspace, highest risk first. */
+export function getDealRisks(init: RequestInit = {}) {
+    return getJson<Types.DealRisk[]>(`/api/deals/risk`, init);
+}
+
+/** Risk assessment for a single deal; {@code level} is {@code "none"} when it is not at risk. */
+export function getDealRisk(id: number, init: RequestInit = {}) {
+    return getJson<Types.DealRisk>(`/api/deals/${id}/risk`, init);
+}
+
 export function createDeal(payload: Types.CreateDealPayload) {
     return postJson<Types.Deal>(`/api/deals`, payload);
 }

@@ -44,6 +44,7 @@ import {
     getPipelines,
     getStagesByPipelineId,
     getDealPeople,
+    getDealRisks,
     getTags,
     getActiveWorkspaceMembers,
     bulkAddTagToDeals,
@@ -62,6 +63,7 @@ import {
     type Company,
     type CreateDealPayload,
     type Deal,
+    type DealRisk,
     type Pipeline,
     type Stage,
     type Contact,
@@ -118,6 +120,7 @@ export default function DealsBrowser({ deals, savedViews }: { deals: Deal[]; sav
     const [companies, setCompanies] = useState<Company[]>([]);
     const [pipelines, setPipelines] = useState<Pipeline[]>([]);
     const [contactByDealId, setContactByDealId] = useState<Map<number, Contact>>(new Map());
+    const [riskByDealId, setRiskByDealId] = useState<Map<number, DealRisk>>(new Map());
     const [stagesByPipeline, setStagesByPipeline] = useState<Record<number, Stage[]>>({});
 
     useEffect(() => {
@@ -367,6 +370,11 @@ export default function DealsBrowser({ deals, savedViews }: { deals: Deal[]; sav
 
     const [tags, setTags] = useState<Tag[]>([]);
     useEffect(() => { getTags().then(setTags).catch(() => setTags([])); }, []);
+    useEffect(() => {
+        getDealRisks()
+            .then((risks) => setRiskByDealId(new Map(risks.map((r) => [r.dealId, r]))))
+            .catch(() => setRiskByDealId(new Map()));
+    }, []);
     const [members, setMembers] = useState<WorkspaceMember[]>([]);
     useEffect(() => { getActiveWorkspaceMembers().then(setMembers).catch(() => setMembers([])); }, []);
 
@@ -751,6 +759,7 @@ export default function DealsBrowser({ deals, savedViews }: { deals: Deal[]; sav
                             company={item.company != null ? companyById.get(item.company) : undefined}
                             pipeline={item.pipeline != null ? pipelineById.get(item.pipeline) : undefined}
                             stage={item.stage != null ? stageById.get(item.stage) : undefined}
+                            risk={riskByDealId.get(item.id)}
                             onQuickEdit={onQuickEdit ? () => onQuickEdit(item) : undefined}
                             onDelete={onDelete ? () => onDelete(item) : undefined}
                         />

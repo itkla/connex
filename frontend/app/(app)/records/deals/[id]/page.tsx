@@ -18,6 +18,7 @@ import {
     getDealById,
     getDealCollaborators,
     getDealPeople,
+    getDealRisk,
     getDeals,
     getNotesForDeal,
     getPipelines,
@@ -54,6 +55,8 @@ import SummaryTile from '@/app/components/SummaryTile';
 import { EngagementSparkline, type EngagementPoint } from '@/app/components/records/companies/CompanyCard';
 import DealActionsMenu from '@/app/components/records/deals/DealActionsMenu';
 import DealActivityBreakdown from '@/app/components/records/deals/DealActivityBreakdown';
+import DealRiskPanel from '@/app/components/records/deals/DealRiskPanel';
+import DealRiskPill from '@/app/components/records/deals/DealRiskPill';
 import DealLifecycleProgress from '@/app/components/records/deals/DealLifecycleProgress';
 import { dealOutcome, type DealOutcome } from '@/app/components/records/deals/dealOutcome';
 // import { Button } from '@/components/ui/button';
@@ -76,7 +79,7 @@ export default async function DealPage({ params }: { params: { id: number } }) {
     const t = await getTranslations('DealsPage');
     const locale = await getLocale();
 
-    const [deal, currentUser, activities, notes, tasks, tags, peopleRaw, allPipelines, allCompanies, allPersons, allDeals, allUsers, attachments, notificationPage, collaborators, customFields] =
+    const [deal, currentUser, activities, notes, tasks, tags, peopleRaw, allPipelines, allCompanies, allPersons, allDeals, allUsers, attachments, notificationPage, collaborators, customFields, risk] =
         await Promise.all([
             getDealById(id, init).catch(() => null),
             getCurrentUserFromCookie(cookie),
@@ -94,6 +97,7 @@ export default async function DealPage({ params }: { params: { id: number } }) {
             getContextNotifications("deal", id, init).catch(() => ({ items: [], total: 0 })),
             getDealCollaborators(id, init).catch(() => [] as User[]),
             getEntityCustomFieldsFromCookie("deal", id, cookie),
+            getDealRisk(id, init).catch(() => null),
         ]);
 
     if (!deal) notFound();
@@ -201,6 +205,7 @@ export default async function DealPage({ params }: { params: { id: number } }) {
                                 {t('closeBy', { date: formatDate(deal.expectedCloseDate, locale) })}
                             </span>
                         ) : null}
+                        <DealRiskPill risk={risk} />
                     </h3>
                 </div>
 
@@ -228,6 +233,7 @@ export default async function DealPage({ params }: { params: { id: number } }) {
                 />
             </div>
             <EntityNotificationBanner initialNotifications={notificationPage.items} />
+            <DealRiskPanel risk={risk} />
 
             <div className="mt-8 mb-3 flex h-8 items-center gap-1.5">
                 <h2 className="px-6 text-xs font-medium uppercase tracking-[0.12em] text-muted-foreground">

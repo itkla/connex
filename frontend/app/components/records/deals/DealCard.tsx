@@ -21,8 +21,9 @@ import { ChevronRightIcon } from '@heroicons/react/24/solid';
 import { Button } from '@/components/ui/button';
 import { formatCompactCurrency, formatShortDate } from '@/app/lib/utils';
 import CompanyAvatar from '@/app/components/records/companies/CompanyAvatar';
-import { type Company, type Contact, type Deal, type Pipeline, type Stage } from '@/app/lib/types';
+import { type Company, type Contact, type Deal, type DealRisk, type Pipeline, type Stage } from '@/app/lib/types';
 import { isDealClosed } from './dealOutcome';
+import DealRiskPill from './DealRiskPill';
 import Chip from '@/app/components/Chip';
 import ContactAvatar from '../contacts/ContactAvatar';
 import { Suspense } from 'react';
@@ -34,6 +35,7 @@ interface DealCardProps {
     company?: Company;
     pipeline?: Pipeline;
     stage?: Stage;
+    risk?: DealRisk | null;
     onQuickEdit?: () => void;
     onDelete?: () => void;
 }
@@ -42,7 +44,7 @@ function dealStatus(deal: Deal): 'open' | 'closed' {
     return isDealClosed(deal) ? 'closed' : 'open';
 }
 
-export default function DealCard({ deal, company, pipeline, stage, onQuickEdit, onDelete }: DealCardProps) {
+export default function DealCard({ deal, company, pipeline, stage, risk, onQuickEdit, onDelete }: DealCardProps) {
     const router = useRouter();
     const t = useTranslations('DealsCard');
     const locale = useLocale();
@@ -93,9 +95,7 @@ export default function DealCard({ deal, company, pipeline, stage, onQuickEdit, 
                     >
                         {statusLabel}
                     </span>
-                    {/* <span>
-                            {switch}
-                    </span> */}
+                    <DealRiskPill risk={risk} />
                 </div>
                 <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
                     {company && (
