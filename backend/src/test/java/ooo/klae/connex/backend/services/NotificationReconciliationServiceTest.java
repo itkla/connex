@@ -15,6 +15,7 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneOffset;
 import java.util.List;
+import java.util.Map;
 
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -22,8 +23,11 @@ import org.mockito.Mockito;
 
 import ooo.klae.connex.backend.beans.Notification;
 import ooo.klae.connex.backend.beans.NotificationPreference;
+import ooo.klae.connex.backend.beans.OpenDealRecipient;
 import ooo.klae.connex.backend.beans.RelationshipNudgeCandidate;
 import ooo.klae.connex.backend.beans.TaskReminderCandidate;
+import ooo.klae.connex.backend.dto.DealRiskDto;
+import ooo.klae.connex.backend.dto.DealRiskFactor;
 import ooo.klae.connex.backend.dto.RelationshipTemperatureDto;
 import ooo.klae.connex.backend.mappers.NotificationMapper;
 import ooo.klae.connex.backend.mappers.PreferenceMapper;
@@ -92,6 +96,7 @@ class NotificationReconciliationServiceTest {
             properties,
             scoringService,
             introductionService,
+            noRiskService(),
             clock,
             new ObjectMapper()
         );
@@ -373,9 +378,80 @@ class NotificationReconciliationServiceTest {
             new NotificationProperties(),
             scoringService,
             Mockito.mock(IntroductionService.class),
+            noRiskService(),
             clock,
             new ObjectMapper()
         );
+    }
+
+    /** A deal-risk service that flags nothing, so the deal-risk pass is a no-op in unrelated tests. */
+    private static DealRiskService noRiskService() {
+        DealRiskService mock = Mockito.mock(DealRiskService.class);
+        when(mock.assessWorkspace(anyInt())).thenReturn(List.of());
+        return mock;
+    }
+
+    private static OpenDealRecipient recipient(int dealId, String dealLabel, int recipientId) {
+        OpenDealRecipient recipient = new OpenDealRecipient();
+        recipient.setDealId(dealId);
+        recipient.setDealLabel(dealLabel);
+        recipient.setRecipientId(recipientId);
+        return recipient;
+    }
+
+    @Test
+    void reconciliationEmitsDealRiskNotificationForHighButSkipsLow() {
+        NotificationMapper notificationMapper = Mockito.mock(NotificationMapper.class);
+        PreferenceMapper preferenceMapper = Mockito.mock(PreferenceMapper.class);
+        NotificationDispatcher dispatcher = Mockito.mock(NotificationDispatcher.class);
+        ScoringService scoringService = Mockito.mock(ScoringService.class);
+        DealRiskService dealRiskService = Mockito.mock(DealRiskService.class);
+        Clock clock = Clock.fixed(Instant.parse("2026-06-23T15:30:00Z"), ZoneOffset.UTC);
+
+        DealRiskDto high = new DealRiskDto(101, "high", 60,
+            List.of(new DealRiskFactor("close_overdue", "high", Map.of("daysOverdue", 22L))),
+            "2026-06-23 15:30:00");
+        DealRiskDto low = new DealRiskDto(102, "low", 10,
+            List.of(new DealRiskFactor("no_stakeholders", "low", Map.of())),
+            "2026-06-23 15:30:00");
+        when(dealRiskService.assessWorkspace(7)).thenReturn(List.of(high, low));
+        when(notificationMapper.findOpenDealRecipients(7)).thenReturn(List.of(
+            recipient(101, "Acme renewal", 42),
+            recipient(102, "Beta deal", 42)));
+
+        NotificationReconciliationService service = new NotificationReconciliationService(
+            notificationMapper, preferenceMapper, dispatcher, new NotificationProperties(),
+            scoringService, Mockito.mock(IntroductionService.class), dealRiskService, clock, new ObjectMapper());
+        service.reconcileWorkspace(7, true);
+
+        ArgumentCaptor<Notification> captor = ArgumentCaptor.forClass(Notification.class);
+        verify(dispatcher).dispatch(captor.capture());
+        Notification notification = captor.getValue();
+        assertEquals(NotificationReconciliationService.DEAL_RISK_TYPE, notification.getType());
+        assertEquals(NotificationReconciliationService.CRITICAL, notification.getSeverity());
+        assertEquals(101, notification.getSourceId());
+        assertEquals("deal.risk:101", notification.getDedupeKey());
+        assertEquals("/records/deals/101", notification.getActionUrl());
+        assertTrue(notification.getData().contains("close_overdue"));
+    }
+
+    @Test
+    void dealRiskPassIsSkippedWhenDisabled() {
+        NotificationMapper notificationMapper = Mockito.mock(NotificationMapper.class);
+        PreferenceMapper preferenceMapper = Mockito.mock(PreferenceMapper.class);
+        NotificationDispatcher dispatcher = Mockito.mock(NotificationDispatcher.class);
+        DealRiskService dealRiskService = Mockito.mock(DealRiskService.class);
+        Clock clock = Clock.fixed(Instant.parse("2026-06-23T15:30:00Z"), ZoneOffset.UTC);
+        NotificationProperties properties = new NotificationProperties();
+        properties.setDealRiskEnabled(false);
+
+        NotificationReconciliationService service = new NotificationReconciliationService(
+            notificationMapper, preferenceMapper, dispatcher, properties,
+            Mockito.mock(ScoringService.class), Mockito.mock(IntroductionService.class),
+            dealRiskService, clock, new ObjectMapper());
+        service.reconcileWorkspace(7, true);
+
+        verify(dealRiskService, never()).assessWorkspace(anyInt());
     }
 
     @Test
@@ -392,7 +468,7 @@ class NotificationReconciliationServiceTest {
 
         NotificationReconciliationService service = new NotificationReconciliationService(
             notificationMapper, preferenceMapper, dispatcher, new NotificationProperties(),
-            scoringService, introductionService, clock, new ObjectMapper());
+            scoringService, introductionService, noRiskService(), clock, new ObjectMapper());
         service.reconcileWorkspace(7, true);
 
         ArgumentCaptor<Notification> captor = ArgumentCaptor.forClass(Notification.class);
@@ -424,7 +500,7 @@ class NotificationReconciliationServiceTest {
 
         NotificationReconciliationService service = new NotificationReconciliationService(
             notificationMapper, preferenceMapper, dispatcher, properties,
-            scoringService, introductionService, clock, new ObjectMapper());
+            scoringService, introductionService, noRiskService(), clock, new ObjectMapper());
         service.reconcileWorkspace(7, true);
 
         verify(introductionService, never()).computeSuggestions(anyInt(), anyInt(), any());
@@ -442,7 +518,7 @@ class NotificationReconciliationServiceTest {
 
         NotificationReconciliationService service = new NotificationReconciliationService(
             notificationMapper, preferenceMapper, dispatcher, new NotificationProperties(),
-            scoringService, introductionService, clock, new ObjectMapper());
+            scoringService, introductionService, noRiskService(), clock, new ObjectMapper());
         service.reconcileWorkspace(7, false);
 
         verify(introductionService, never()).computeSuggestions(anyInt(), anyInt(), any());
@@ -468,7 +544,7 @@ class NotificationReconciliationServiceTest {
 
         NotificationReconciliationService service = new NotificationReconciliationService(
             notificationMapper, preferenceMapper, dispatcher, new NotificationProperties(),
-            scoringService, introductionService, clock, new ObjectMapper());
+            scoringService, introductionService, noRiskService(), clock, new ObjectMapper());
         service.reconcileWorkspace(7, false);
 
         verify(notificationMapper, never()).resolveReminder(anyInt(), anyInt(), anyInt(), any());

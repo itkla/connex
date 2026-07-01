@@ -26,8 +26,10 @@ import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.beans.DealReminderCandidate;
 import ooo.klae.connex.backend.beans.Notification;
 import ooo.klae.connex.backend.beans.NotificationPreference;
+import ooo.klae.connex.backend.beans.OpenDealRecipient;
 import ooo.klae.connex.backend.beans.RelationshipNudgeCandidate;
 import ooo.klae.connex.backend.beans.TaskReminderCandidate;
+import ooo.klae.connex.backend.dto.DealRiskDto;
 import ooo.klae.connex.backend.dto.IntroSuggestionDto;
 import ooo.klae.connex.backend.dto.RelationshipTemperatureDto;
 import ooo.klae.connex.backend.mappers.NotificationMapper;
@@ -44,8 +46,11 @@ import tools.jackson.databind.ObjectMapper;
 public class NotificationReconciliationService {
     static final String TASK_TYPE = "task.due";
     static final String DEAL_TYPE = "deal.close";
+    static final String DEAL_RISK_TYPE = "deal.risk";
     static final String RELATIONSHIP_TYPE = "relationship.cooling";
     static final String INTRO_OPPORTUNITY_TYPE = "relationship.intro_opportunity";
+    private static final String RISK_HIGH = "high";
+    private static final String RISK_MEDIUM = "medium";
     private static final String INFO = "info";
     static final String WARNING = "warning";
     static final String CRITICAL = "critical";
@@ -68,6 +73,7 @@ public class NotificationReconciliationService {
     private final NotificationProperties properties;
     private final ScoringService scoringService;
     private final IntroductionService introductionService;
+    private final DealRiskService dealRiskService;
     private final Clock clock;
     private final ObjectMapper objectMapper;
 
@@ -130,6 +136,13 @@ public class NotificationReconciliationService {
                     log.warn("Intro-opportunity reconciliation failed for workspace={}", workspaceId, exception);
                 }
             }
+            if (properties.isDealRiskEnabled()) {
+                try {
+                    addDealRiskNotifications(workspaceId, expected, preferences, triggeredAt);
+                } catch (RuntimeException exception) {
+                    log.warn("Deal-risk reconciliation failed for workspace={}", workspaceId, exception);
+                }
+            }
         }
 
         expected.values().forEach(dispatcher::dispatch);
@@ -157,7 +170,7 @@ public class NotificationReconciliationService {
      */
     private static Set<String> managedReminderTypes(boolean includeRelationshipNudges) {
         return includeRelationshipNudges
-            ? Set.of(TASK_TYPE, DEAL_TYPE, RELATIONSHIP_TYPE, INTRO_OPPORTUNITY_TYPE)
+            ? Set.of(TASK_TYPE, DEAL_TYPE, DEAL_RISK_TYPE, RELATIONSHIP_TYPE, INTRO_OPPORTUNITY_TYPE)
             : Set.of(TASK_TYPE, DEAL_TYPE);
     }
 
@@ -200,6 +213,94 @@ public class NotificationReconciliationService {
             expected.put(key, relationshipNudgeNotification(
                 candidate, temperature, severity, reasons, dedupeKey, triggeredAt));
         }
+    }
+
+    /**
+     * Surfaces open deals the risk engine flags as high or medium (see {@link DealRiskService}) to
+     * each deal's owner and collaborators. Low-level risk is intentionally not pushed — it stays on
+     * the deal page, not the inbox. Deduped per (deal, recipient); the resolve pass clears a
+     * notification once the deal is no longer at risk or has closed, and the upsert re-surfaces one
+     * whose level has escalated (severity change). Like the relationship-nudge pass this rescores the
+     * whole workspace, so it runs only on the scheduled sweep.
+     */
+    private void addDealRiskNotifications(
+        int workspaceId,
+        Map<ReminderKey, Notification> expected,
+        Map<PreferenceKey, Boolean> preferences,
+        String triggeredAt
+    ) {
+        Map<Integer, DealRiskDto> byDeal = new HashMap<>();
+        for (DealRiskDto risk : dealRiskService.assessWorkspace(workspaceId)) {
+            if (riskSeverity(risk.getLevel()) != null) {
+                byDeal.put(risk.getDealId(), risk);
+            }
+        }
+        if (byDeal.isEmpty()) {
+            return;
+        }
+        for (OpenDealRecipient recipient : notificationMapper.findOpenDealRecipients(workspaceId)) {
+            DealRiskDto risk = byDeal.get(recipient.getDealId());
+            if (risk == null) {
+                continue;
+            }
+            String severity = riskSeverity(risk.getLevel());
+            if (severity == null || !enabled(preferences, recipient.getRecipientId(), DEAL_RISK_TYPE)) {
+                continue;
+            }
+            String dedupeKey = DEAL_RISK_TYPE + ":" + recipient.getDealId();
+            ReminderKey key = new ReminderKey(workspaceId, recipient.getRecipientId(), dedupeKey);
+            expected.put(key, dealRiskNotification(workspaceId, recipient, risk, severity, dedupeKey, triggeredAt));
+        }
+    }
+
+    /** Notification severity for a deal-risk level: high → critical, medium → warning; low/none not pushed. */
+    private static String riskSeverity(String level) {
+        if (RISK_HIGH.equals(level)) {
+            return CRITICAL;
+        }
+        if (RISK_MEDIUM.equals(level)) {
+            return WARNING;
+        }
+        return null;
+    }
+
+    private Notification dealRiskNotification(
+        int workspaceId,
+        OpenDealRecipient recipient,
+        DealRiskDto risk,
+        String severity,
+        String dedupeKey,
+        String triggeredAt
+    ) {
+        Notification notification = base(
+            workspaceId,
+            recipient.getRecipientId(),
+            DEAL_RISK_TYPE,
+            "deal",
+            severity,
+            "deal",
+            recipient.getDealId(),
+            recipient.getDealLabel(),
+            dedupeKey,
+            triggeredAt
+        );
+        notification.setContextType("deal");
+        notification.setContextId(recipient.getDealId());
+        notification.setContextLabel(recipient.getDealLabel());
+        notification.setTitle(CRITICAL.equals(severity) ? "Deal at high risk" : "Deal needs attention");
+        notification.setBody(recipient.getDealLabel() + " — " + risk.getLevel() + " risk");
+        notification.setActionUrl("/records/deals/" + recipient.getDealId());
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("dealId", recipient.getDealId());
+        data.put("deal", recipient.getDealLabel());
+        data.put("level", risk.getLevel());
+        data.put("score", risk.getScore());
+        data.put("factorCount", risk.getFactors().size());
+        if (!risk.getFactors().isEmpty()) {
+            data.put("topFactor", risk.getFactors().get(0).getCode());
+        }
+        notification.setData(json(data));
+        return notification;
     }
 
     /**

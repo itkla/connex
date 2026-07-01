@@ -19,6 +19,14 @@ const RELATIONSHIP_REASON_KEYS: Record<string, string> = {
     key_role: "relationshipReasonKeyContact",
 };
 
+const DEAL_RISK_FACTOR_KEYS: Record<string, string> = {
+    close_overdue: "dealRiskReasonOverdue",
+    closing_soon_quiet: "dealRiskReasonClosingQuiet",
+    stalled: "dealRiskReasonStalled",
+    stakeholder_cold: "dealRiskReasonStakeholderCold",
+    no_stakeholders: "dealRiskReasonNoStakeholders",
+};
+
 /**
  * Notification content for a given notification.
  * @param notification - The notification to get the content for.
@@ -44,6 +52,15 @@ export function notificationContent(notification: Notification, t: Translator, l
                 deal: text(data.deal, notification.sourceLabel ?? notification.title),
                 date: dateText(data.expectedCloseDate, locale),
             }),
+        };
+    }
+    if (notification.type === "deal.risk") {
+        const topFactor = typeof data.topFactor === "string" ? data.topFactor : undefined;
+        const reasonKey = topFactor ? DEAL_RISK_FACTOR_KEYS[topFactor] : undefined;
+        const deal = text(data.deal, notification.sourceLabel ?? notification.title);
+        return {
+            title: t(notification.severity === "critical" ? "dealRiskHighTitle" : "dealRiskMediumTitle"),
+            body: reasonKey ? t("dealRiskBody", { deal, reason: t(reasonKey) }) : t("dealRiskBodyGeneric", { deal }),
         };
     }
     if (notification.type === "relationship.intro_opportunity") {
