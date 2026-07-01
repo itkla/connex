@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import { motion, useReducedMotion } from 'motion/react';
 import { useTranslations } from 'next-intl';
 import { ArrowUturnLeftIcon } from '@heroicons/react/24/outline';
 
@@ -40,6 +41,7 @@ export default function ReplayView({
     onWeeksChange: (weeks: number) => void;
 }) {
     const t = useTranslations('Replay');
+    const reduce = useReducedMotion();
     const [frames, setFrames] = useState<ReplayFrame[] | null>(null);
     const [errored, setErrored] = useState(false);
     const [speed, setSpeed] = useState(1);
@@ -108,13 +110,20 @@ export default function ReplayView({
                                 onClick={() => onWeeksChange(option)}
                                 aria-pressed={active}
                                 className={cn(
-                                    'rounded-full px-3 py-1 text-xs font-medium transition-colors duration-150',
-                                    active
-                                        ? 'bg-background text-foreground shadow-sm ring-1 ring-border'
-                                        : 'text-muted-foreground hover:text-foreground',
+                                    'relative rounded-full px-3 py-1 text-xs font-medium transition-colors duration-150',
+                                    active ? 'text-foreground' : 'text-muted-foreground hover:text-foreground',
                                 )}
                             >
-                                {t(option === 13 ? 'range13w' : option === 26 ? 'range26w' : 'range52w')}
+                                {active && (
+                                    <motion.span
+                                        layoutId="replay-range-thumb"
+                                        className="absolute inset-0 rounded-full bg-background shadow-sm ring-1 ring-border"
+                                        transition={reduce ? { duration: 0 } : { type: 'spring', stiffness: 420, damping: 34 }}
+                                    />
+                                )}
+                                <span className="relative z-10">
+                                    {t(option === 13 ? 'range13w' : option === 26 ? 'range26w' : 'range52w')}
+                                </span>
                             </button>
                         );
                     })}

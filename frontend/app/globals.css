@@ -288,7 +288,7 @@
     transition: opacity 0.25s ease;
   }
   .react-flow__node .map-warmth {
-    transition: background-color 0.3s ease, border-color 0.3s ease, transform 0.15s ease;
+    transition: background-color 0.22s ease-out, border-color 0.22s ease-out, transform 0.15s ease-out;
   }
   .map-dim .react-flow__node,
   .map-dim .react-flow__edge {
@@ -301,7 +301,7 @@
 
   @keyframes mapNodeBloom {
     from {
-      transform: scale(0.2);
+      transform: scale(0.92);
       opacity: 0;
     }
     to {
@@ -310,7 +310,7 @@
     }
   }
   .map-node-bloom {
-    animation: mapNodeBloom 0.22s cubic-bezier(0.23, 1, 0.32, 1);
+    animation: mapNodeBloom 0.18s cubic-bezier(0.23, 1, 0.32, 1);
   }
 }
 

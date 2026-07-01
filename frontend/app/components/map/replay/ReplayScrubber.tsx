@@ -80,7 +80,7 @@ export default function ReplayScrubber({
             >
                 <Slider.Control className="flex h-5 w-full touch-none items-center">
                     <Slider.Track className="relative h-1 w-full rounded-full bg-muted">
-                        <Slider.Indicator className="rounded-full bg-brand" />
+                        <Slider.Indicator className="h-full rounded-full bg-brand" />
                         <Slider.Thumb className="size-3.5 rounded-full border-2 border-brand bg-background shadow-sm outline-none ring-brand/30 focus-visible:ring-2" />
                     </Slider.Track>
                 </Slider.Control>
@@ -107,7 +107,7 @@ export default function ReplayScrubber({
                             onClick={() => onSpeedChange(option)}
                             aria-pressed={active}
                             className={cn(
-                                'relative rounded-full px-2.5 py-1 text-[11px] font-medium transition-colors duration-150',
+                                'relative rounded-full px-3 py-1 text-xs font-medium transition-colors duration-150',
                                 active ? 'text-foreground' : 'text-muted-foreground hover:text-foreground',
                             )}
                         >
