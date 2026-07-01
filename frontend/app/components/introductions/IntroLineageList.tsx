@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useLocale, useTranslations } from 'next-intl';
-import { ArrowLongRightIcon } from '@heroicons/react/24/outline';
+import { ArrowLongRightIcon, CheckIcon } from '@heroicons/react/24/outline';
 
 import { formatRelativeTime } from '@/app/lib/utils';
 import type { IntroductionRecord } from '@/app/lib/types';
@@ -10,8 +10,9 @@ import type { IntroductionRecord } from '@/app/lib/types';
 import PartyAvatar from './PartyAvatar';
 
 /**
- * The lineage feed: introductions the team has made, newest first. Each row shows the two contacts
- * that were connected, when, and by whom — the goodwill that compounds over time (issue #43).
+ * The lineage timeline: introductions the team has made, newest first, rendered as a connected feed
+ * so the compounding goodwill reads as history. Each node shows the two contacts that were connected,
+ * when, by whom, and the note (issue #43).
  */
 export default function IntroLineageList({ items }: { items: IntroductionRecord[] }) {
     const t = useTranslations('Introductions');
@@ -19,19 +20,40 @@ export default function IntroLineageList({ items }: { items: IntroductionRecord[
 
     if (items.length === 0) {
         return (
-            <div className="rounded-2xl border border-border bg-card">
-                <p className="px-6 py-10 text-center text-sm text-muted-foreground">{t('lineageEmpty')}</p>
+            <div className="flex flex-col items-center justify-center gap-2 rounded-2xl border border-dashed border-border bg-card px-6 py-14 text-center">
+                <span className="grid size-9 place-items-center rounded-full bg-muted text-muted-foreground">
+                    <CheckIcon className="size-5" aria-hidden />
+                </span>
+                <p className="max-w-md text-sm text-muted-foreground">{t('lineageEmpty')}</p>
             </div>
         );
     }
 
     return (
-        <div className="overflow-hidden rounded-2xl border border-border bg-card">
-            <ul className="divide-y divide-border">
-                {items.map((item) => (
-                    <li key={item.id} className="px-4 py-3 sm:px-6">
-                        <div className="flex items-center gap-3">
-                            <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1">
+        <ol className="overflow-hidden rounded-2xl border border-border bg-card">
+            {items.map((item, index) => {
+                const meta = [
+                    item.introducerName ? t('byIntroducer', { name: item.introducerName }) : null,
+                    item.note,
+                ]
+                    .filter(Boolean)
+                    .join(' · ');
+                return (
+                    <li
+                        key={item.id}
+                        className="flex gap-4 px-4 py-4 transition-colors hover:bg-muted/30 sm:px-6"
+                    >
+                        <div className="flex flex-col items-center" aria-hidden>
+                            <span className="grid size-7 shrink-0 place-items-center rounded-full bg-brand/12 text-brand ring-1 ring-inset ring-brand/25">
+                                <CheckIcon className="size-3.5" />
+                            </span>
+                            {index < items.length - 1 ? (
+                                <span className="mt-1 w-px flex-1 bg-border" />
+                            ) : null}
+                        </div>
+
+                        <div className="min-w-0 flex-1">
+                            <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
                                 <span className="flex min-w-0 items-center gap-2">
                                     <PartyAvatar imageUrl={item.personAImageUrl} />
                                     <Link
@@ -41,7 +63,10 @@ export default function IntroLineageList({ items }: { items: IntroductionRecord[
                                         {item.personAName}
                                     </Link>
                                 </span>
-                                <ArrowLongRightIcon className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+                                <ArrowLongRightIcon
+                                    className="size-4 shrink-0 text-muted-foreground"
+                                    aria-hidden
+                                />
                                 <span className="flex min-w-0 items-center gap-2">
                                     <PartyAvatar imageUrl={item.personBImageUrl} />
                                     <Link
@@ -51,24 +76,17 @@ export default function IntroLineageList({ items }: { items: IntroductionRecord[
                                         {item.personBName}
                                     </Link>
                                 </span>
-                            </div>
-                            <div className="shrink-0 text-right">
-                                <p className="text-xs text-muted-foreground">
+                                <span className="ml-auto shrink-0 text-xs text-muted-foreground tabular-nums">
                                     {formatRelativeTime(item.introducedAt, locale)}
-                                </p>
-                                {item.introducerName ? (
-                                    <p className="text-xs text-muted-foreground/70">
-                                        {t('byIntroducer', { name: item.introducerName })}
-                                    </p>
-                                ) : null}
+                                </span>
                             </div>
+                            {meta ? (
+                                <p className="mt-1 truncate text-xs text-muted-foreground">{meta}</p>
+                            ) : null}
                         </div>
-                        {item.note ? (
-                            <p className="mt-1.5 truncate text-xs text-muted-foreground">{item.note}</p>
-                        ) : null}
                     </li>
-                ))}
-            </ul>
-        </div>
+                );
+            })}
+        </ol>
     );
 }
