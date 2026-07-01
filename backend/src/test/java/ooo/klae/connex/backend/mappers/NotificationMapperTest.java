@@ -114,6 +114,7 @@ class NotificationMapperTest extends AbstractMapperTest {
         Task task = new Task();
         task.setWorkspaceId(workspace.getId());
         task.setDescription("Prepare proposal");
+        task.setStatus("todo");
         task.setDueDate("2026-06-24");
         task.setAssignedTo(owner);
         task.setDeal(deal);

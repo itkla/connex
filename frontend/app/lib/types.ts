@@ -296,10 +296,17 @@ export type UpdateActivityPayload = {
     timestamp?: string;
 };
 
+/** Workflow status of a task, used as the Kanban board columns. `done` mirrors `completed`. */
+export type TaskStatus = 'todo' | 'in_progress' | 'done';
+
 export type Task = {
     id: number;
     description: string;
     completed: boolean;
+    /** Kanban workflow column; kept in lockstep with `completed` (done ⇔ completed) by the server. */
+    status: TaskStatus;
+    /** Manual sort order within the status column (0-based, contiguous). */
+    position: number;
     dueDate?: string;
     assignedToId: number;
     personId?: number | null;
@@ -441,6 +448,8 @@ export type Deal = {
     currency: string;
     pipeline: number | null;
     stage: number | null;
+    /** Manual sort order within the stage column (0-based, contiguous). */
+    position: number;
     company: number | null;
     workspaceId?: number;
     ownerId?: number | null;

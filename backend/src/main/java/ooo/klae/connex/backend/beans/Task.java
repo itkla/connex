@@ -21,6 +21,8 @@ public class Task {
     private int workspaceId;
     private String description;
     private boolean completed;
+    private String status;
+    private int position;
     private String dueDate;
     @JsonIdentityReference(alwaysAsId = true)
     private User assignedTo;

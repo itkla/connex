@@ -114,6 +114,18 @@
     "noOpenDealsToAge": "No open deals to age",
     "deals": "{value, plural, one {# deal} other {# deals}}"
   },
+  "DealsKanban": {
+    "pipelineLabel": "Pipeline",
+    "noPipeline": "No pipeline with stages to display. Create a pipeline and stages first.",
+    "emptyColumn": "Drop deals here",
+    "count": "{count, plural, one {# deal} other {# deals}}",
+    "moveFailed": "Couldn't move the deal",
+    "a11yInstructions": "To pick up a deal, press space or enter. Use the arrow keys to move it between stages and positions, then press space or enter again to drop it. Press escape to cancel.",
+    "a11yLifted": "Picked up deal {name}.",
+    "a11yOver": "Deal {name} is over the {column} column.",
+    "a11yDropped": "Deal {name} was dropped into the {column} column.",
+    "a11yCancelled": "Moving deal {name} was cancelled."
+  },
   "DealsBrowser": {
     "title": "Deals",
     "addDeal": "Add deal",
@@ -133,6 +145,7 @@
     "displayMode": "Display mode",
     "gridView": "Grid view",
     "tableView": "Table view",
+    "kanbanView": "Kanban view",
     "selectedCount": "{count} selected",
     "view": "View",
     "quickEdit": "Quick edit",

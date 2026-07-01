@@ -345,6 +345,14 @@ export function completeTask(id: number, init: RequestInit = {}) {
     return postJson<Types.Task>(`/api/tasks/${id}/complete`, {}, init);
 }
 
+/**
+ * Moves a task to a target status column and 0-based position on the Kanban board. Dragging to
+ * `done` completes the task (assignee-only on the server).
+ */
+export function moveTask(id: number, status: Types.TaskStatus, position: number, init: RequestInit = {}) {
+    return postJson<Types.Task>(`/api/tasks/${id}/move`, { status, position }, init);
+}
+
 /*
 * == Activity management
 */
@@ -785,6 +793,14 @@ export function closeDeal(id: number, payload: { won: boolean; reason?: string |
 /** Reopens a closed deal: clears the outcome/close date and moves it off any terminal stage. */
 export function reopenDeal(id: number) {
     return postJson<Types.Deal>(`/api/deals/${id}/reopen`, {});
+}
+
+/**
+ * Moves a deal to a target stage and 0-based position on the Kanban board. The server renumbers
+ * the affected stage column(s) so positions stay contiguous.
+ */
+export function moveDeal(id: number, stageId: number, position: number) {
+    return postJson<Types.Deal>(`/api/deals/${id}/move`, { stageId, position });
 }
 
 export function updateDealOwner(id: number, ownerId: number | null) {

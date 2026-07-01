@@ -13,6 +13,7 @@
     <result property="currency" column="currency"/>
     <result property="pipelineId" column="pipeline_id"/>
     <result property="stageId" column="stage_id"/>
+    <result property="position" column="position"/>
     <result property="companyId" column="company_id"/>
     <result property="expectedCloseDate" column="expected_close_date"/>
     <result property="closedAt" column="closed_at"/>
@@ -47,13 +48,13 @@
   </resultMap>
 
   <sql id="dealColumns">
-    id, workspace_id, owner_id, name, value, actual_value, currency, pipeline_id, stage_id, company_id,
+    id, workspace_id, owner_id, name, value, actual_value, currency, pipeline_id, stage_id, position, company_id,
     expected_close_date, closed_at, closed_reason, won, created_at, updated_at
   </sql>
 
   <sql id="qualifiedDealColumns">
     d.id, d.workspace_id, d.owner_id, d.name, d.value, d.actual_value, d.currency,
-    d.pipeline_id, d.stage_id, d.company_id, d.expected_close_date, d.closed_at,
+    d.pipeline_id, d.stage_id, d.position, d.company_id, d.expected_close_date, d.closed_at,
     d.closed_reason, d.won, d.created_at, d.updated_at
   </sql>
 
@@ -72,18 +73,21 @@
     SELECT <include refid="dealColumns"/>
     FROM deal
     WHERE workspace_id = #{workspaceId}
+    ORDER BY stage_id, position, id
   </select>
 
   <select id="getDealsByPipelineId" resultMap="DealResult">
     SELECT <include refid="dealColumns"/>
     FROM deal
     WHERE workspace_id = #{workspaceId} AND pipeline_id = #{pipelineId}
+    ORDER BY stage_id, position, id
   </select>
 
   <select id="getDealsByStageId" resultMap="DealResult">
     SELECT <include refid="dealColumns"/>
     FROM deal
     WHERE workspace_id = #{workspaceId} AND stage_id = #{stageId}
+    ORDER BY position, id
   </select>
 
   <select id="getDealsByCompanyId" resultMap="DealFullResult">
@@ -143,25 +147,25 @@
 
   <insert id="insert" useGeneratedKeys="true" keyProperty="id">
     INSERT INTO deal (
-      workspace_id, owner_id, name, value, actual_value, currency, pipeline_id, stage_id, company_id,
+      workspace_id, owner_id, name, value, actual_value, currency, pipeline_id, stage_id, position, company_id,
       expected_close_date, closed_at, closed_reason, won
     )
     VALUES (
       #{workspaceId}, #{ownerId,jdbcType=INTEGER}, #{name}, #{value}, #{actualValue}, #{currency},
-      #{pipelineId}, #{stageId}, #{companyId}, #{expectedCloseDate}, #{closedAt},
+      #{pipelineId}, #{stageId}, #{position}, #{companyId}, #{expectedCloseDate}, #{closedAt},
       #{closedReason}, #{won}
     )
   </insert>
 
   <insert id="insertBatch" useGeneratedKeys="true" keyProperty="id">
     INSERT INTO deal (
-      workspace_id, owner_id, name, value, actual_value, currency, pipeline_id, stage_id, company_id,
+      workspace_id, owner_id, name, value, actual_value, currency, pipeline_id, stage_id, position, company_id,
       expected_close_date, closed_at, closed_reason, won
     )
     VALUES
     <foreach collection="list" item="d" separator=",">
       (#{d.workspaceId}, #{d.ownerId,jdbcType=INTEGER}, #{d.name}, #{d.value}, #{d.actualValue}, #{d.currency},
-       #{d.pipelineId}, #{d.stageId}, #{d.companyId}, #{d.expectedCloseDate}, #{d.closedAt},
+       #{d.pipelineId}, #{d.stageId}, #{d.position}, #{d.companyId}, #{d.expectedCloseDate}, #{d.closedAt},
        #{d.closedReason}, #{d.won})
     </foreach>
   </insert>
@@ -174,11 +178,28 @@
         currency = #{currency},
         pipeline_id = #{pipelineId},
         stage_id = #{stageId},
+        position = #{position},
         company_id = #{companyId},
         expected_close_date = #{expectedCloseDate},
         closed_at = #{closedAt},
         closed_reason = #{closedReason},
         won = #{won}
+    WHERE workspace_id = #{workspaceId} AND id = #{id}
+  </update>
+
+  <select id="getDealIdsInStageOrdered" resultType="java.lang.Integer">
+    SELECT id FROM deal
+    WHERE workspace_id = #{workspaceId} AND stage_id = #{stageId}
+    ORDER BY position, id
+  </select>
+
+  <select id="nextDealPosition" resultType="int">
+    SELECT COALESCE(MAX(position) + 1, 0) FROM deal
+    WHERE workspace_id = #{workspaceId} AND stage_id = #{stageId}
+  </select>
+
+  <update id="setPosition">
+    UPDATE deal SET position = #{position}
     WHERE workspace_id = #{workspaceId} AND id = #{id}
   </update>
 

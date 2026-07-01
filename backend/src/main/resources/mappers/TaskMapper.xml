@@ -8,6 +8,8 @@
     <result property="workspaceId" column="workspace_id"/>
     <result property="description" column="description"/>
     <result property="completed" column="completed"/>
+    <result property="status" column="status"/>
+    <result property="position" column="position"/>
     <result property="dueDate" column="due_date"/>
     <result property="createdAt" column="created_at"/>
     <result property="updatedAt" column="updated_at"/>
@@ -23,7 +25,7 @@
   </resultMap>
 
   <sql id="taskColumns">
-    id, workspace_id, description, completed, due_date, assigned_to_id, person_id, deal_id,
+    id, workspace_id, description, completed, status, position, due_date, assigned_to_id, person_id, deal_id,
     created_at, updated_at
   </sql>
 
@@ -71,10 +73,10 @@
 
   <insert id="insert" useGeneratedKeys="true" keyProperty="id">
     INSERT INTO task (
-      workspace_id, description, completed, due_date, assigned_to_id, person_id, deal_id
+      workspace_id, description, completed, status, position, due_date, assigned_to_id, person_id, deal_id
     )
     VALUES (
-      #{workspaceId}, #{description}, #{completed}, #{dueDate}, #{assignedTo.id},
+      #{workspaceId}, #{description}, #{completed}, #{status}, #{position}, #{dueDate}, #{assignedTo.id},
       <choose>
         <when test="person != null">#{person.id}</when>
         <otherwise>NULL</otherwise>
@@ -90,6 +92,8 @@
     UPDATE task
     SET description = #{description},
         completed = #{completed},
+        status = #{status},
+        position = #{position},
         due_date = #{dueDate},
         assigned_to_id = #{assignedTo.id},
         person_id =
@@ -111,9 +115,30 @@
 
   <update id="complete">
     UPDATE task
-    SET completed = TRUE
+    SET completed = TRUE, status = 'done', position = #{position}
     WHERE workspace_id = #{workspaceId}
       AND id = #{id}
       AND assigned_to_id = #{assignedToId}
+  </update>
+
+  <select id="getTaskIdsInStatusOrdered" resultType="java.lang.Integer">
+    SELECT id FROM task
+    WHERE workspace_id = #{workspaceId} AND status = #{status}
+    ORDER BY position, id
+  </select>
+
+  <select id="nextTaskPosition" resultType="int">
+    SELECT COALESCE(MAX(position) + 1, 0) FROM task
+    WHERE workspace_id = #{workspaceId} AND status = #{status}
+  </select>
+
+  <update id="setPosition">
+    UPDATE task SET position = #{position}
+    WHERE workspace_id = #{workspaceId} AND id = #{id}
+  </update>
+
+  <update id="moveTask">
+    UPDATE task SET status = #{status}, completed = #{completed}, position = #{position}
+    WHERE workspace_id = #{workspaceId} AND id = #{id}
   </update>
 </mapper>

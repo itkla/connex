@@ -3,7 +3,7 @@ import type { ReactNode } from 'react';
 // test code - move to lib/types.ts or elsewhere later
 
 export type SelectionId = string | number;
-export type DisplayMode = 'grid' | 'table';
+export type DisplayMode = 'grid' | 'table' | 'kanban';
 export type SortValue = string | number | null;
 
 export type FilterFacetValue = string | number;
@@ -132,5 +132,5 @@ export interface CardCallbacks<T> {
 }
 
 export function isDisplayMode(value: unknown): value is DisplayMode {
-    return value === 'grid' || value === 'table';
+    return value === 'grid' || value === 'table' || value === 'kanban';
 }

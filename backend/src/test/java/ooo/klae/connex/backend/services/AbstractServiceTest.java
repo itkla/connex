@@ -186,6 +186,7 @@ abstract class AbstractServiceTest {
         task.setDescription("task_" + unique());
         task.setWorkspaceId(workspace.getId());
         task.setCompleted(false);
+        task.setStatus("todo");
         task.setDueDate("2024-12-31");
         task.setAssignedTo(assignedTo);
         task.setPerson(person);

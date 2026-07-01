@@ -12,6 +12,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 import ooo.klae.connex.backend.beans.Task;
 import ooo.klae.connex.backend.dto.TaskDto;
+import ooo.klae.connex.backend.dto.TaskMoveRequest;
 import ooo.klae.connex.backend.services.TaskService;
 
 import java.util.List;
@@ -96,5 +97,16 @@ public class TaskController {
     @PostMapping("/{id}/complete")
     public TaskDto completeTask(@PathVariable int id) {
         return TaskDto.from(taskService.complete(id));
+    }
+
+    /**
+     * POST endpoint to move a task to a target status column and ordinal position on the Kanban board.
+     * @param id the task to move
+     * @param req the target status and 0-based position within that status column
+     * @return the moved task
+     */
+    @PostMapping("/{id}/move")
+    public TaskDto moveTask(@PathVariable int id, @Valid @RequestBody TaskMoveRequest req) {
+        return TaskDto.from(taskService.move(id, req.getStatus(), req.getPosition()));
     }
 }
