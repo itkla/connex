@@ -337,7 +337,9 @@
   },
   "WorkspaceNotifications": {
     "title": "Notifications",
-    "subtitle": "Choose which reminders show up in your inbox. These settings apply to you, not the whole workspace.",
+    "subtitle": "Choose how you're notified. These settings apply to you, not the whole workspace. Email needs a configured SMTP server (Settings → Email).",
+    "columnInApp": "In app",
+    "columnEmail": "Email",
     "taskTitle": "Task reminders",
     "taskDescription": "When a task you're assigned is due or overdue.",
     "dealTitle": "Deal reminders",

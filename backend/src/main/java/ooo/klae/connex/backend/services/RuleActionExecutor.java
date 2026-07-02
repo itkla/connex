@@ -15,7 +15,7 @@ import ooo.klae.connex.backend.beans.Task;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.dto.RuleAction;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
-import ooo.klae.connex.backend.notifications.InAppNotificationDispatcher;
+import ooo.klae.connex.backend.notifications.NotificationDelivery;
 
 /**
  * Performs a single rule {@link RuleAction} within an already-established automation context (the
@@ -31,7 +31,7 @@ public class RuleActionExecutor {
     private final CompanyService companyService;
     private final PersonService personService;
     private final DealService dealService;
-    private final InAppNotificationDispatcher notificationDispatcher;
+    private final NotificationDelivery notificationDelivery;
 
     private static final DateTimeFormatter TIMESTAMP = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
     private static final DateTimeFormatter DATE = DateTimeFormatter.ofPattern("yyyy-MM-dd");
@@ -100,7 +100,7 @@ public class RuleActionExecutor {
         notification.setSourceId(ctx.entityId());
         notification.setDedupeKey("rule:" + ctx.ruleId() + ":" + ctx.entityId() + ":" + ctx.dedupeSuffix());
         notification.setTriggeredAt(LocalDateTime.now().format(TIMESTAMP));
-        notificationDispatcher.dispatch(notification);
+        notificationDelivery.deliver(notification);
     }
 
     private static Person person(int id) {

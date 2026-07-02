@@ -294,6 +294,15 @@
       severity = incoming.severity
   </insert>
 
+  <select id="existsByDedupe" resultType="boolean">
+    SELECT EXISTS(
+      SELECT 1 FROM notification
+      WHERE workspace_id = #{workspaceId}
+        AND recipient_id = #{recipientId}
+        AND dedupe_key = #{dedupeKey}
+    )
+  </select>
+
   <select id="findReminderNotifications" resultMap="NotificationResult">
     SELECT <include refid="notificationColumns"/>
     FROM notification n

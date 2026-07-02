@@ -24,7 +24,7 @@ import ooo.klae.connex.backend.dto.WorkspaceMembershipDto;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
-import ooo.klae.connex.backend.mappers.NotificationMapper;
+import ooo.klae.connex.backend.notifications.NotificationDelivery;
 import ooo.klae.connex.backend.mappers.OrganizationMapper;
 import ooo.klae.connex.backend.mappers.RoleMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
@@ -43,7 +43,7 @@ public class WorkspaceService {
     private final WorkspaceMapper workspaceMapper;
     private final OrganizationMapper organizationMapper;
     private final RoleMapper roleMapper;
-    private final NotificationMapper notificationMapper;
+    private final NotificationDelivery notificationDelivery;
     private final TenantContext tenantContext;
     private final AuditService auditService;
     private final SystemActor systemActor;
@@ -486,7 +486,7 @@ public class WorkspaceService {
             notification.setActionUrl("/settings/membership");
             notification.setDedupeKey("workspace.join:" + workspaceId);
             notification.setTriggeredAt(LocalDateTime.now(ZoneOffset.UTC).format(TS));
-            notificationMapper.upsert(notification);
+            notificationDelivery.deliver(notification);
         } catch (RuntimeException e) {
             // Best-effort: the pending membership row is the source of truth.
         }

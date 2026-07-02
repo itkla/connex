@@ -31,6 +31,7 @@ import ooo.klae.connex.backend.dto.DealRiskFactor;
 import ooo.klae.connex.backend.dto.RelationshipTemperatureDto;
 import ooo.klae.connex.backend.mappers.NotificationMapper;
 import ooo.klae.connex.backend.mappers.PreferenceMapper;
+import ooo.klae.connex.backend.notifications.NotificationDelivery;
 import ooo.klae.connex.backend.notifications.NotificationDispatcher;
 import ooo.klae.connex.backend.notifications.NotificationProperties;
 import tools.jackson.databind.ObjectMapper;
@@ -92,7 +93,7 @@ class NotificationReconciliationServiceTest {
         NotificationReconciliationService service = new NotificationReconciliationService(
             notificationMapper,
             preferenceMapper,
-            dispatcher,
+            wrap(dispatcher, notificationMapper, preferenceMapper),
             properties,
             scoringService,
             introductionService,
@@ -364,6 +365,15 @@ class NotificationReconciliationServiceTest {
         return candidate;
     }
 
+    private static NotificationDelivery wrap(
+        NotificationDispatcher dispatcher,
+        NotificationMapper notificationMapper,
+        PreferenceMapper preferenceMapper
+    ) {
+        Mockito.lenient().when(dispatcher.channel()).thenReturn("in_app");
+        return new NotificationDelivery(List.of(dispatcher), notificationMapper, preferenceMapper);
+    }
+
     private static NotificationReconciliationService nudgeService(
         NotificationMapper notificationMapper,
         PreferenceMapper preferenceMapper,
@@ -374,7 +384,7 @@ class NotificationReconciliationServiceTest {
         return new NotificationReconciliationService(
             notificationMapper,
             preferenceMapper,
-            dispatcher,
+            wrap(dispatcher, notificationMapper, preferenceMapper),
             new NotificationProperties(),
             scoringService,
             Mockito.mock(IntroductionService.class),
@@ -420,7 +430,7 @@ class NotificationReconciliationServiceTest {
             recipient(102, "Beta deal", 42)));
 
         NotificationReconciliationService service = new NotificationReconciliationService(
-            notificationMapper, preferenceMapper, dispatcher, new NotificationProperties(),
+            notificationMapper, preferenceMapper, wrap(dispatcher, notificationMapper, preferenceMapper), new NotificationProperties(),
             scoringService, Mockito.mock(IntroductionService.class), dealRiskService, clock, new ObjectMapper());
         service.reconcileWorkspace(7, true);
 
@@ -446,7 +456,7 @@ class NotificationReconciliationServiceTest {
         properties.setDealRiskEnabled(false);
 
         NotificationReconciliationService service = new NotificationReconciliationService(
-            notificationMapper, preferenceMapper, dispatcher, properties,
+            notificationMapper, preferenceMapper, wrap(dispatcher, notificationMapper, preferenceMapper), properties,
             Mockito.mock(ScoringService.class), Mockito.mock(IntroductionService.class),
             dealRiskService, clock, new ObjectMapper());
         service.reconcileWorkspace(7, true);
@@ -471,7 +481,7 @@ class NotificationReconciliationServiceTest {
             recipient(101, "Acme renewal", 43)));
 
         NotificationReconciliationService service = new NotificationReconciliationService(
-            notificationMapper, preferenceMapper, dispatcher, new NotificationProperties(),
+            notificationMapper, preferenceMapper, wrap(dispatcher, notificationMapper, preferenceMapper), new NotificationProperties(),
             Mockito.mock(ScoringService.class), Mockito.mock(IntroductionService.class), dealRiskService, clock, new ObjectMapper());
         service.reconcileWorkspace(7, true);
 
@@ -503,7 +513,7 @@ class NotificationReconciliationServiceTest {
         when(notificationMapper.findOpenDealRecipients(7)).thenReturn(List.of(recipient(101, "Acme renewal", 42)));
 
         NotificationReconciliationService service = new NotificationReconciliationService(
-            notificationMapper, preferenceMapper, dispatcher, new NotificationProperties(),
+            notificationMapper, preferenceMapper, wrap(dispatcher, notificationMapper, preferenceMapper), new NotificationProperties(),
             Mockito.mock(ScoringService.class), Mockito.mock(IntroductionService.class), dealRiskService, clock, new ObjectMapper());
         service.reconcileWorkspace(7, true);
 
@@ -529,7 +539,7 @@ class NotificationReconciliationServiceTest {
         when(dealRiskService.assessWorkspace(7)).thenReturn(List.of());
 
         NotificationReconciliationService service = new NotificationReconciliationService(
-            notificationMapper, preferenceMapper, dispatcher, new NotificationProperties(),
+            notificationMapper, preferenceMapper, wrap(dispatcher, notificationMapper, preferenceMapper), new NotificationProperties(),
             Mockito.mock(ScoringService.class), Mockito.mock(IntroductionService.class), dealRiskService, clock, new ObjectMapper());
         service.reconcileWorkspace(7, true);
 
@@ -550,7 +560,7 @@ class NotificationReconciliationServiceTest {
         when(introductionService.computeSuggestions(eq(7), anyInt(), any())).thenReturn(List.of(introSuggestion()));
 
         NotificationReconciliationService service = new NotificationReconciliationService(
-            notificationMapper, preferenceMapper, dispatcher, new NotificationProperties(),
+            notificationMapper, preferenceMapper, wrap(dispatcher, notificationMapper, preferenceMapper), new NotificationProperties(),
             scoringService, introductionService, noRiskService(), clock, new ObjectMapper());
         service.reconcileWorkspace(7, true);
 
@@ -582,7 +592,7 @@ class NotificationReconciliationServiceTest {
         properties.setIntroOpportunitiesEnabled(false);
 
         NotificationReconciliationService service = new NotificationReconciliationService(
-            notificationMapper, preferenceMapper, dispatcher, properties,
+            notificationMapper, preferenceMapper, wrap(dispatcher, notificationMapper, preferenceMapper), properties,
             scoringService, introductionService, noRiskService(), clock, new ObjectMapper());
         service.reconcileWorkspace(7, true);
 
@@ -600,7 +610,7 @@ class NotificationReconciliationServiceTest {
         Clock clock = Clock.fixed(Instant.parse("2026-06-23T15:30:00Z"), ZoneOffset.UTC);
 
         NotificationReconciliationService service = new NotificationReconciliationService(
-            notificationMapper, preferenceMapper, dispatcher, new NotificationProperties(),
+            notificationMapper, preferenceMapper, wrap(dispatcher, notificationMapper, preferenceMapper), new NotificationProperties(),
             scoringService, introductionService, noRiskService(), clock, new ObjectMapper());
         service.reconcileWorkspace(7, false);
 
@@ -626,7 +636,7 @@ class NotificationReconciliationServiceTest {
         when(notificationMapper.findWorkspaceReminderNotifications(7)).thenReturn(List.of(existing));
 
         NotificationReconciliationService service = new NotificationReconciliationService(
-            notificationMapper, preferenceMapper, dispatcher, new NotificationProperties(),
+            notificationMapper, preferenceMapper, wrap(dispatcher, notificationMapper, preferenceMapper), new NotificationProperties(),
             scoringService, introductionService, noRiskService(), clock, new ObjectMapper());
         service.reconcileWorkspace(7, false);
 

@@ -19,7 +19,7 @@ import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.DealMapper;
 import ooo.klae.connex.backend.mappers.NoteMapper;
 import ooo.klae.connex.backend.mappers.NoteReferenceMapper;
-import ooo.klae.connex.backend.mappers.NotificationMapper;
+import ooo.klae.connex.backend.notifications.NotificationDelivery;
 import ooo.klae.connex.backend.mappers.PersonMapper;
 import ooo.klae.connex.backend.tenant.Permission;
 import ooo.klae.connex.backend.tenant.RequirePermission;
@@ -44,7 +44,7 @@ public class NoteService {
     private final WorkspaceService workspaceService;
     private final AuthService authService;
     private final ReferenceService referenceService;
-    private final NotificationMapper notificationMapper;
+    private final NotificationDelivery notificationDelivery;
     private final NotificationPreferenceService notificationPreferenceService;
     private final ObjectMapper objectMapper;
 
@@ -181,7 +181,7 @@ public class NoteService {
                 notification.setDedupeKey(MENTION_TYPE + ":" + note.getId() + ":" + recipientId);
                 notification.setTriggeredAt(triggeredAt);
                 notification.setData(json(Map.of("noteId", note.getId())));
-                notificationMapper.upsert(notification);
+                notificationDelivery.deliver(notification);
             } catch (RuntimeException ignored) {
             }
         }

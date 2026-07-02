@@ -34,7 +34,7 @@ import ooo.klae.connex.backend.dto.IntroSuggestionDto;
 import ooo.klae.connex.backend.dto.RelationshipTemperatureDto;
 import ooo.klae.connex.backend.mappers.NotificationMapper;
 import ooo.klae.connex.backend.mappers.PreferenceMapper;
-import ooo.klae.connex.backend.notifications.NotificationDispatcher;
+import ooo.klae.connex.backend.notifications.NotificationDelivery;
 import ooo.klae.connex.backend.notifications.NotificationProperties;
 import tools.jackson.databind.ObjectMapper;
 
@@ -69,7 +69,7 @@ public class NotificationReconciliationService {
 
     private final NotificationMapper notificationMapper;
     private final PreferenceMapper preferenceMapper;
-    private final NotificationDispatcher dispatcher;
+    private final NotificationDelivery notificationDelivery;
     private final NotificationProperties properties;
     private final ScoringService scoringService;
     private final IntroductionService introductionService;
@@ -145,7 +145,7 @@ public class NotificationReconciliationService {
             }
         }
 
-        expected.values().forEach(dispatcher::dispatch);
+        expected.values().forEach(notificationDelivery::deliver);
         Set<String> managedTypes = managedReminderTypes(includeRelationshipNudges);
         for (Map.Entry<ReminderKey, Notification> entry : existing.entrySet()) {
             Notification notification = entry.getValue();

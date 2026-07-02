@@ -70,6 +70,12 @@ public interface NotificationMapper {
 
     int upsert(Notification notification);
 
+    boolean existsByDedupe(
+        @Param("workspaceId") int workspaceId,
+        @Param("recipientId") int recipientId,
+        @Param("dedupeKey") String dedupeKey
+    );
+
     List<Notification> findReminderNotifications(
         @Param("workspaceId") int workspaceId,
         @Param("recipientId") int recipientId

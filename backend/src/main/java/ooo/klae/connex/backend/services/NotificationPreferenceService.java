@@ -19,6 +19,7 @@ import ooo.klae.connex.backend.notifications.NotificationChangePublisher;
 @RequiredArgsConstructor
 public class NotificationPreferenceService {
     private static final String IN_APP = "in_app";
+    private static final String EMAIL = "email";
 
     private final PreferenceMapper preferenceMapper;
     private final AuthService authService;
@@ -61,8 +62,8 @@ public class NotificationPreferenceService {
         if (dto == null || dto.getType() == null || dto.getType().isBlank()) {
             throw new BadRequestException("Preference type is required");
         }
-        if (!IN_APP.equals(dto.getChannel())) {
-            throw new BadRequestException("Only the in_app notification channel is supported");
+        if (!IN_APP.equals(dto.getChannel()) && !EMAIL.equals(dto.getChannel())) {
+            throw new BadRequestException("Only the in_app and email notification channels are supported");
         }
     }
 }

@@ -13,7 +13,8 @@ import { Switch } from "@/components/ui/switch";
 import Rise from "@/app/components/motion/Rise";
 import SectionHeader from "@/app/components/dashboard/SectionHeader";
 
-const CHANNEL = "in_app";
+const IN_APP = "in_app";
+const EMAIL = "email";
 
 const TYPES = [
     { type: "task.due", icon: CheckCircleIcon, titleKey: "taskTitle", descriptionKey: "taskDescription" },
@@ -27,12 +28,26 @@ const TYPES = [
     { type: "note.mention", icon: AtSymbolIcon, titleKey: "mentionTitle", descriptionKey: "mentionDescription" },
 ] as const;
 
+type Channels = { inApp: boolean; email: boolean };
+
+function resolve(
+    preferences: NotificationPreference[],
+    type: string,
+    channel: string,
+    fallback: boolean,
+): boolean {
+    const match = preferences.find((p) => p.type === type && p.channel === channel);
+    if (match) return match.enabled;
+    const wildcard = preferences.find((p) => p.type === "*" && p.channel === channel);
+    return wildcard ? wildcard.enabled : fallback;
+}
+
 export default function NotificationsPanel() {
     const t = useTranslations("WorkspaceNotifications");
-    const [enabled, setEnabled] = useState<Record<string, boolean>>({});
+    const [prefs, setPrefs] = useState<Record<string, Channels>>({});
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(false);
-    const [savingType, setSavingType] = useState<string | null>(null);
+    const [saving, setSaving] = useState(false);
     const [reloadKey, setReloadKey] = useState(0);
 
     useEffect(() => {
@@ -43,13 +58,14 @@ export default function NotificationsPanel() {
             try {
                 const preferences = await getNotificationPreferences();
                 if (cancelled) return;
-                const wildcard = preferences.find((p) => p.type === "*" && p.channel === CHANNEL);
-                const next: Record<string, boolean> = {};
+                const next: Record<string, Channels> = {};
                 for (const { type } of TYPES) {
-                    const match = preferences.find((p) => p.type === type && p.channel === CHANNEL);
-                    next[type] = match ? match.enabled : wildcard ? wildcard.enabled : true;
+                    next[type] = {
+                        inApp: resolve(preferences, type, IN_APP, true),
+                        email: resolve(preferences, type, EMAIL, false),
+                    };
                 }
-                setEnabled(next);
+                setPrefs(next);
             } catch {
                 if (!cancelled) {
                     setError(true);
@@ -64,23 +80,22 @@ export default function NotificationsPanel() {
         };
     }, [t, reloadKey]);
 
-    const toggle = async (type: string, value: boolean) => {
-        const previous = enabled;
-        const next = { ...enabled, [type]: value };
-        setEnabled(next);
-        setSavingType(type);
+    const toggle = async (type: string, channel: "inApp" | "email", value: boolean) => {
+        const previous = prefs;
+        const next = { ...prefs, [type]: { ...prefs[type], [channel]: value } };
+        setPrefs(next);
+        setSaving(true);
         try {
-            const payload: NotificationPreference[] = TYPES.map(({ type: key }) => ({
-                type: key,
-                channel: CHANNEL,
-                enabled: next[key] ?? true,
-            }));
+            const payload: NotificationPreference[] = TYPES.flatMap(({ type: key }) => [
+                { type: key, channel: IN_APP, enabled: next[key]?.inApp ?? true },
+                { type: key, channel: EMAIL, enabled: next[key]?.email ?? false },
+            ]);
             await updateNotificationPreferences(payload);
         } catch {
-            setEnabled(previous);
+            setPrefs(previous);
             toastError(t("saveFailed"));
         } finally {
-            setSavingType(null);
+            setSaving(false);
         }
     };
 
@@ -99,27 +114,53 @@ export default function NotificationsPanel() {
                     </Button>
                 </div>
             ) : (
-                <ul className="divide-y divide-border overflow-hidden rounded-2xl border border-border bg-card">
-                    {TYPES.map(({ type, icon: Icon, titleKey, descriptionKey }) => (
-                        <li key={type} className="flex items-center gap-4 px-4 py-3.5">
-                            <Icon aria-hidden className="size-5 shrink-0 text-muted-foreground" />
-                            <div className="min-w-0 flex-1">
-                                <p className="text-sm font-medium text-foreground">{t(titleKey)}</p>
-                                <p className="text-sm text-muted-foreground">{t(descriptionKey)}</p>
-                            </div>
-                            {loading ? (
-                                <Skeleton className="h-[18.4px] w-8 shrink-0 rounded-full" />
-                            ) : (
-                                <Switch
-                                    checked={enabled[type] ?? true}
-                                    disabled={savingType !== null}
-                                    onCheckedChange={(value) => toggle(type, value)}
-                                    aria-label={t(titleKey)}
-                                />
-                            )}
-                        </li>
-                    ))}
-                </ul>
+                <div className="overflow-hidden rounded-2xl border border-border bg-card">
+                    <div className="flex items-center gap-4 border-b border-border px-4 py-2">
+                        <div className="min-w-0 flex-1" />
+                        <span className="w-16 shrink-0 text-center text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                            {t("columnInApp")}
+                        </span>
+                        <span className="w-16 shrink-0 text-center text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                            {t("columnEmail")}
+                        </span>
+                    </div>
+                    <ul className="divide-y divide-border">
+                        {TYPES.map(({ type, icon: Icon, titleKey, descriptionKey }) => (
+                            <li key={type} className="flex items-center gap-4 px-4 py-3.5">
+                                <Icon aria-hidden className="size-5 shrink-0 text-muted-foreground" />
+                                <div className="min-w-0 flex-1">
+                                    <p className="text-sm font-medium text-foreground">{t(titleKey)}</p>
+                                    <p className="text-sm text-muted-foreground">{t(descriptionKey)}</p>
+                                </div>
+                                {loading ? (
+                                    <>
+                                        <Skeleton className="h-[18.4px] w-16 shrink-0 rounded-full" />
+                                        <Skeleton className="h-[18.4px] w-16 shrink-0 rounded-full" />
+                                    </>
+                                ) : (
+                                    <>
+                                        <div className="flex w-16 shrink-0 justify-center">
+                                            <Switch
+                                                checked={prefs[type]?.inApp ?? true}
+                                                disabled={saving}
+                                                onCheckedChange={(value) => toggle(type, "inApp", value)}
+                                                aria-label={`${t(titleKey)} — ${t("columnInApp")}`}
+                                            />
+                                        </div>
+                                        <div className="flex w-16 shrink-0 justify-center">
+                                            <Switch
+                                                checked={prefs[type]?.email ?? false}
+                                                disabled={saving}
+                                                onCheckedChange={(value) => toggle(type, "email", value)}
+                                                aria-label={`${t(titleKey)} — ${t("columnEmail")}`}
+                                            />
+                                        </div>
+                                    </>
+                                )}
+                            </li>
+                        ))}
+                    </ul>
+                </div>
             )}
         </Rise>
     );
