@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="ooo.klae.connex.backend.mappers.EntityReferenceMapper">
+
+  <resultMap id="EntityReferenceResult" type="EntityReference">
+    <result property="workspaceId" column="workspace_id"/>
+    <result property="sourceType"  column="source_type"/>
+    <result property="sourceId"    column="source_id"/>
+    <result property="refType"     column="ref_type"/>
+    <result property="refId"       column="ref_id"/>
+    <result property="label"       column="label"/>
+    <result property="createdAt"   column="created_at"/>
+  </resultMap>
+
+  <select id="findBySource" resultMap="EntityReferenceResult">
+    SELECT workspace_id, source_type, source_id, ref_type, ref_id, label, created_at
+    FROM entity_reference
+    WHERE workspace_id = #{workspaceId} AND source_type = #{sourceType} AND source_id = #{sourceId}
+    ORDER BY ref_type, ref_id
+  </select>
+
+  <select id="findBySources" resultMap="EntityReferenceResult">
+    SELECT workspace_id, source_type, source_id, ref_type, ref_id, label, created_at
+    FROM entity_reference
+    WHERE workspace_id = #{workspaceId} AND source_type = #{sourceType} AND source_id IN
+    <foreach item="sourceId" collection="sourceIds" open="(" separator="," close=")">#{sourceId}</foreach>
+    ORDER BY source_id, ref_type, ref_id
+  </select>
+
+  <insert id="insert">
+    INSERT INTO entity_reference (workspace_id, source_type, source_id, ref_type, ref_id, label)
+    VALUES (#{workspaceId}, #{sourceType}, #{sourceId}, #{refType}, #{refId}, #{label})
+  </insert>
+
+  <delete id="deleteBySource">
+    DELETE FROM entity_reference
+    WHERE workspace_id = #{workspaceId} AND source_type = #{sourceType} AND source_id = #{sourceId}
+  </delete>
+</mapper>

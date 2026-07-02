@@ -1,16 +1,24 @@
 package ooo.klae.connex.backend.services;
 
+import java.time.LocalDateTime;
+import java.time.ZoneOffset;
+import java.time.format.DateTimeFormatter;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
+
+import tools.jackson.databind.ObjectMapper;
 
 import ooo.klae.connex.backend.mappers.DealMapper;
 import ooo.klae.connex.backend.mappers.TaskMapper;
+import ooo.klae.connex.backend.beans.Notification;
 import ooo.klae.connex.backend.beans.Task;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.notifications.NotificationChangePublisher;
+import ooo.klae.connex.backend.notifications.NotificationDelivery;
 import ooo.klae.connex.backend.tenant.Permission;
 import ooo.klae.connex.backend.tenant.RequirePermission;
 
@@ -22,7 +30,9 @@ import lombok.RequiredArgsConstructor;
 /**
  * Business logic for {@code Task} operations.
  * Handles mapping between {@code TaskDto} and {@code Task} bean.
- * Delegates persistence to {@code TaskMapper}.
+ * Delegates persistence to {@code TaskMapper}, resolves inline @/# references in
+ * the task description via {@code ReferenceService}, and dispatches member-mention
+ * notifications.
  */
 
 @Service
@@ -34,6 +44,10 @@ public class TaskService {
     private final WorkspaceService workspaceService;
     private final AuthService authService;
     private final NotificationChangePublisher notificationChanges;
+    private final ReferenceService referenceService;
+    private final NotificationDelivery notificationDelivery;
+    private final NotificationPreferenceService notificationPreferenceService;
+    private final ObjectMapper objectMapper;
 
     private static final String STATUS_TODO = "todo";
     private static final String STATUS_IN_PROGRESS = "in_progress";
@@ -43,31 +57,45 @@ public class TaskService {
     private static final Set<String> AUDIT_FIELDS =
         Set.of("description", "completed", "status", "dueDate");
 
+    private static final String MENTION_TYPE = "task.mention";
+    private static final String MENTION_CATEGORY = "task";
+    private static final String MENTION_SEVERITY = "info";
+    private static final String IN_APP = "in_app";
+    private static final int SNIPPET_LENGTH = 140;
+    private static final DateTimeFormatter TS = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
+
     public List<Task> getAllTasks() {
-        return taskMapper.getAllTasks(workspaceService.getCurrentWorkspaceId());
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        return referenceService.hydrateTasks(workspaceId, taskMapper.getAllTasks(workspaceId));
     }
 
     public List<Task> getTasksByAssignedToId(int assignedToId) {
-        return taskMapper.getTasksByAssignedToId(workspaceService.getCurrentWorkspaceId(), assignedToId);
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        return referenceService.hydrateTasks(workspaceId, taskMapper.getTasksByAssignedToId(workspaceId, assignedToId));
     }
 
     public List<Task> getTasksByPersonId(int personId) {
-        return taskMapper.getTasksByPersonId(workspaceService.getCurrentWorkspaceId(), personId);
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        return referenceService.hydrateTasks(workspaceId, taskMapper.getTasksByPersonId(workspaceId, personId));
     }
 
     public List<Task> getTasksByDealId(int dealId) {
-        return taskMapper.getTasksByDealId(workspaceService.getCurrentWorkspaceId(), dealId);
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        return referenceService.hydrateTasks(workspaceId, taskMapper.getTasksByDealId(workspaceId, dealId));
     }
 
     public Task getTaskById(int id) {
-        Task task = taskMapper.getTaskById(workspaceService.getCurrentWorkspaceId(), id);
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        Task task = taskMapper.getTaskById(workspaceId, id);
         if (task == null) throw new ResourceNotFoundException("Task not found with id: " + id);
-        return task;
+        return hydrate(workspaceId, task);
     }
 
+    @Transactional
     @RequirePermission(Permission.TASK_CREATE)
     public Task create(Task task) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
+        User actor = currentActorOrNull();
         task.setWorkspaceId(workspaceId);
         validateReferences(task, workspaceId);
         task.setStatus(task.isCompleted() ? STATUS_DONE : STATUS_TODO);
@@ -77,14 +105,21 @@ public class TaskService {
             "Created task " + task.getDescription(),
             auditService.diff(null, task, AUDIT_FIELDS));
         notificationChanges.publish(workspaceId, "task", task.getId());
-        return task;
+        List<Integer> mentioned =
+            referenceService.syncReferences(workspaceId, ReferenceService.SOURCE_TASK, task.getId(), task.getDescription());
+        if (actor != null) {
+            notifyMentions(workspaceId, task, mentioned, actor);
+        }
+        return hydrate(workspaceId, task);
     }
 
+    @Transactional
     @RequirePermission(Permission.TASK_UPDATE)
     public Task update(int id, Task task) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         Task before = taskMapper.getTaskById(workspaceId, id);
         if (before == null) throw new ResourceNotFoundException("Task not found with id: " + id);
+        User actor = currentActorOrNull();
         task.setId(id);
         task.setWorkspaceId(workspaceId);
         validateReferences(task, workspaceId);
@@ -101,15 +136,22 @@ public class TaskService {
             "Updated task " + task.getDescription(),
             auditService.diff(before, task, AUDIT_FIELDS));
         notificationChanges.publish(workspaceId, "task", id);
-        return task;
+        List<Integer> mentioned =
+            referenceService.syncReferences(workspaceId, ReferenceService.SOURCE_TASK, id, task.getDescription());
+        if (actor != null) {
+            notifyMentions(workspaceId, task, mentioned, actor);
+        }
+        return hydrate(workspaceId, task);
     }
 
+    @Transactional
     @RequirePermission(Permission.TASK_DELETE)
     public void delete(int id) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         Task before = taskMapper.getTaskById(workspaceId, id);
         if (before == null) throw new ResourceNotFoundException("Task not found with id: " + id);
         taskMapper.delete(workspaceId, id);
+        referenceService.deleteReferences(workspaceId, ReferenceService.SOURCE_TASK, id);
         auditService.record("task.delete", "task", id, before.getDescription(),
             "Deleted task " + before.getDescription(),
             auditService.diff(before, null, AUDIT_FIELDS));
@@ -127,7 +169,7 @@ public class TaskService {
             throw new ForbiddenException("Only the task assignee may complete this task");
         }
         if (task.isCompleted()) {
-            return task;
+            return hydrate(workspaceId, task);
         }
         int donePosition = taskMapper.nextTaskPosition(workspaceId, STATUS_DONE);
         if (taskMapper.complete(workspaceId, id, currentUser.getId(), donePosition) == 0) {
@@ -138,7 +180,7 @@ public class TaskService {
             "Completed task " + task.getDescription(),
             auditService.singleChange("completed", task.isCompleted(), true));
         notificationChanges.publish(workspaceId, "task", id);
-        return completed;
+        return hydrate(workspaceId, completed);
     }
 
     /**
@@ -196,7 +238,7 @@ public class TaskService {
                           : "Reordered task " + before.getDescription(),
             auditService.diff(before, moved, AUDIT_FIELDS));
         notificationChanges.publish(workspaceId, "task", id);
-        return moved;
+        return hydrate(workspaceId, moved);
     }
 
     private void validateReferences(Task task, int workspaceId) {
@@ -206,6 +248,85 @@ public class TaskService {
         workspaceService.requireMember(workspaceId, task.getAssignedTo().getId());
         if (task.getDeal() != null && !dealMapper.exists(workspaceId, task.getDeal().getId())) {
             throw new BadRequestException("Task deal must belong to the current workspace");
+        }
+    }
+
+    private Task hydrate(int workspaceId, Task task) {
+        task.setReferences(referenceService.referencesFor(workspaceId, ReferenceService.SOURCE_TASK, task.getId()));
+        return task;
+    }
+
+    private User currentActorOrNull() {
+        try {
+            return authService.getCurrentUser();
+        } catch (RuntimeException ignored) {
+            return null;
+        }
+    }
+
+    private void notifyMentions(int workspaceId, Task task, List<Integer> recipientIds, User actor) {
+        if (recipientIds.isEmpty()) {
+            return;
+        }
+        String snippet = snippet(task.getDescription());
+        String triggeredAt = LocalDateTime.now(ZoneOffset.UTC).format(TS);
+        String taskAnchor = "?task=" + task.getId();
+        String contextType = null;
+        Integer contextId = null;
+        String actionUrl = "/activity/tasks" + taskAnchor;
+        if (task.getDeal() != null && task.getDeal().getId() > 0) {
+            contextType = "deal";
+            contextId = task.getDeal().getId();
+            actionUrl = "/records/deals/" + contextId + taskAnchor;
+        } else if (task.getPerson() != null && task.getPerson().getId() > 0) {
+            contextType = "person";
+            contextId = task.getPerson().getId();
+            actionUrl = "/records/contacts/" + contextId + taskAnchor;
+        }
+        for (int recipientId : recipientIds) {
+            if (recipientId == actor.getId()) {
+                continue;
+            }
+            if (!notificationPreferenceService.isEnabled(recipientId, MENTION_TYPE, IN_APP)) {
+                continue;
+            }
+            try {
+                Notification notification = new Notification();
+                notification.setWorkspaceId(workspaceId);
+                notification.setRecipientId(recipientId);
+                notification.setType(MENTION_TYPE);
+                notification.setCategory(MENTION_CATEGORY);
+                notification.setSeverity(MENTION_SEVERITY);
+                notification.setTemplateVersion(1);
+                notification.setTitle("New mention");
+                notification.setBody(actor.getDisplayName() + " mentioned you in a task");
+                notification.setActorId(actor.getId());
+                notification.setActorLabel(actor.getDisplayName());
+                notification.setSourceType("task");
+                notification.setSourceId(task.getId());
+                notification.setSourceLabel(snippet);
+                notification.setContextType(contextType);
+                notification.setContextId(contextId);
+                notification.setActionUrl(actionUrl);
+                notification.setDedupeKey(MENTION_TYPE + ":" + task.getId() + ":" + recipientId);
+                notification.setTriggeredAt(triggeredAt);
+                notification.setData(json(Map.of("taskId", task.getId())));
+                notificationDelivery.deliver(notification);
+            } catch (RuntimeException ignored) {
+            }
+        }
+    }
+
+    private static String snippet(String content) {
+        String plain = ReferenceService.toPlainText(content).strip();
+        return plain.length() > SNIPPET_LENGTH ? plain.substring(0, SNIPPET_LENGTH) : plain;
+    }
+
+    private String json(Object value) {
+        try {
+            return objectMapper.writeValueAsString(value);
+        } catch (Exception exception) {
+            throw new IllegalStateException("Could not serialize notification data", exception);
         }
     }
 }

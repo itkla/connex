@@ -129,7 +129,8 @@ public class UserService implements UserDetailsService {
      */
     public List<Task> getTasksByUserId(int userId) {
         getUserById(userId);
-        return taskMapper.getTasksByAssignedToId(workspaceService.getCurrentWorkspaceId(), userId);
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        return referenceService.hydrateTasks(workspaceId, taskMapper.getTasksByAssignedToId(workspaceId, userId));
     }
 
     /**

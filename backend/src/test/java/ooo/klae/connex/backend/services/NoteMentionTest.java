@@ -24,6 +24,7 @@ class NoteMentionTest extends AbstractServiceTest {
     @Autowired NoteService noteService;
     @Autowired NotificationMapper notificationMapper;
     @Autowired PersonService personService;
+    @Autowired ReferenceService referenceService;
 
     private String mention(String label, User user) {
         return "[" + label + "](user:" + user.getId() + ")";
@@ -168,6 +169,22 @@ class NoteMentionTest extends AbstractServiceTest {
         note.setPerson(foreign);
 
         assertThrows(ResourceNotFoundException.class, () -> noteService.create(note));
+    }
+
+    /**
+     * Deleting a note purges its references (the polymorphic table has no FK cascade).
+     */
+    @Test
+    void delete_purgesReferences() {
+        User mentioned = newUser();
+        Note created = noteService.create(draft(mention("Mentioned", mentioned)));
+        assertEquals(1,
+            referenceService.referencesFor(workspace.getId(), ReferenceService.SOURCE_NOTE, created.getId()).size());
+
+        noteService.delete(created.getId());
+
+        assertTrue(referenceService
+            .referencesFor(workspace.getId(), ReferenceService.SOURCE_NOTE, created.getId()).isEmpty());
     }
 
     /**

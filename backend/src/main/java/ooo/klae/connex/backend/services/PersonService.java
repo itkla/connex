@@ -311,7 +311,7 @@ public class PersonService {
     public List<Task> getTasksByPersonId(int personId) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         requirePerson(workspaceId, personId);
-        return taskMapper.getTasksByPersonId(workspaceId, personId);
+        return referenceService.hydrateTasks(workspaceId, taskMapper.getTasksByPersonId(workspaceId, personId));
     }
 
     /**
@@ -360,7 +360,8 @@ public class PersonService {
 
     private Person hydrateScopedRelationships(Person person, int workspaceId) {
         person.setDeals(dealMapper.getDealsByPersonId(workspaceId, person.getId()).toArray(Deal[]::new));
-        person.setTasks(taskMapper.getTasksByPersonId(workspaceId, person.getId()).toArray(Task[]::new));
+        person.setTasks(referenceService.hydrateTasks(workspaceId,
+            taskMapper.getTasksByPersonId(workspaceId, person.getId())).toArray(Task[]::new));
         return person;
     }
 }
