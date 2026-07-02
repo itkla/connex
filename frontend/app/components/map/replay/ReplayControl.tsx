@@ -6,6 +6,8 @@ import { ArrowPathIcon, ChevronDoubleLeftIcon, ClockIcon } from '@heroicons/reac
 import { useLocale, useTranslations } from 'next-intl';
 
 import ReplayTimeline from '@/app/components/map/replay/ReplayTimeline';
+import LiquidGlass from '@/app/components/map/replay/LiquidGlass';
+import { frameAvgBand } from '@/app/components/map/graph/replay';
 import { cn } from '@/lib/utils';
 import type { ReplayFrame } from '@/app/lib/types';
 
@@ -59,13 +61,11 @@ export default function ReplayControl({
     const active = phase === 'active';
     const loading = phase === 'loading';
     const currentDate = active && frames[frameIndex] ? formatAsOf(frames[frameIndex].asOf, locale) : '';
+    const accentBand = active && frames[frameIndex] ? frameAvgBand(frames[frameIndex]) : undefined;
+    const accent = accentBand ? `var(--warmth-${accentBand})` : undefined;
 
     return (
-        <motion.div
-            layout
-            transition={reduce ? { duration: 0 } : { type: 'spring', stiffness: 380, damping: 36 }}
-            className="pointer-events-auto flex items-center gap-2 rounded-full border border-border bg-card/95 p-1 shadow-xl backdrop-blur"
-        >
+        <LiquidGlass className="rounded-full" accent={accent} suppressRefraction={playing}>
             {!active ? (
                 <button
                     type="button"
@@ -141,6 +141,6 @@ export default function ReplayControl({
                     </button>
                 </>
             )}
-        </motion.div>
+        </LiquidGlass>
     );
 }
