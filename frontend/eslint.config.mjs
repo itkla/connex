@@ -12,6 +12,8 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Standalone React Email authoring package with its own toolchain/deps.
+    "emails/**",
   ]),
 ]);
 
