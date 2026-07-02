@@ -202,6 +202,7 @@ export default function MentionEditor({
 }: Props) {
     const editorRef = useRef<HTMLDivElement>(null);
     const lastValue = useRef<string | null>(null);
+    const savedRange = useRef<Range | null>(null);
     const listboxId = useId();
     const reduceMotion = useReducedMotion();
     const [members, setMembers] = useState<WorkspaceMember[]>([]);
@@ -313,6 +314,7 @@ export default function MentionEditor({
                     const spaceBelow = window.innerHeight - rect.bottom;
                     const above = spaceBelow < MENU_MAX_HEIGHT && rect.top > spaceBelow;
                     const left = Math.max(8, Math.min(rect.left, window.innerWidth - MENU_WIDTH - 8));
+                    savedRange.current = range.cloneRange();
                     setQuery({
                         text: handle,
                         trigger: char,
@@ -342,14 +344,23 @@ export default function MentionEditor({
     const insertReference = useCallback(
         (suggestion: Suggestion) => {
             const el = editorRef.current;
+            if (!el) {
+                closeMenu();
+                return;
+            }
             const selection = window.getSelection();
-            if (!el || !selection || selection.rangeCount === 0) {
+            if (selection && savedRange.current) {
+                el.focus();
+                selection.removeAllRanges();
+                selection.addRange(savedRange.current);
+            }
+            if (!selection || selection.rangeCount === 0) {
                 closeMenu();
                 return;
             }
             const range = selection.getRangeAt(0);
             const node = range.startContainer;
-            if (node.nodeType !== Node.TEXT_NODE) {
+            if (node.nodeType !== Node.TEXT_NODE || !el.contains(node)) {
                 closeMenu();
                 return;
             }
@@ -400,17 +411,17 @@ export default function MentionEditor({
     const handleKeyDown = useCallback(
         (event: React.KeyboardEvent<HTMLDivElement>) => {
             if (menuOpen) {
-                if (event.key === 'ArrowDown') {
+                if (event.key === 'ArrowDown' || (event.key === 'Tab' && !event.shiftKey)) {
                     event.preventDefault();
                     setActiveIndex((index) => (index + 1) % suggestions.length);
                     return;
                 }
-                if (event.key === 'ArrowUp') {
+                if (event.key === 'ArrowUp' || (event.key === 'Tab' && event.shiftKey)) {
                     event.preventDefault();
                     setActiveIndex((index) => (index - 1 + suggestions.length) % suggestions.length);
                     return;
                 }
-                if (event.key === 'Enter' || event.key === 'Tab') {
+                if (event.key === 'Enter') {
                     event.preventDefault();
                     insertReference(suggestions[activeIndex]);
                     return;
@@ -478,7 +489,7 @@ export default function MentionEditor({
                             bottom: query.bottom,
                             transformOrigin: query.above ? 'bottom left' : 'top left',
                         }}
-                        className="fixed z-[100] max-h-80 w-72 overflow-y-auto rounded-md bg-popover p-1 text-popover-foreground shadow-md ring-1 ring-foreground/10"
+                        className="pointer-events-auto fixed z-[100] max-h-80 w-72 overflow-y-auto rounded-md bg-popover p-1 text-popover-foreground shadow-md ring-1 ring-foreground/10"
                     >
                         {suggestions.map((suggestion, index) => {
                             const optionId = `${listboxId}-opt-${index}`;
