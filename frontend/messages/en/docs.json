@@ -1,0 +1,464 @@
+{
+    "DocsMeta": {
+        "metaTitle": "Connex Documentation",
+        "metaDescription": "Learn everything Connex can do, from the core relationship-intelligence fundamentals to the smallest interface details.",
+        "sectionLabel": "Docs",
+        "tagline": "Everything Connex can do, from fundamentals to the fine details.",
+        "home": "Home",
+        "browseDocs": "Browse docs",
+        "searchPlaceholder": "Search the docs",
+        "searchEmpty": "No matches",
+        "onThisPage": "On this page",
+        "inThisCategory": "In this category",
+        "previous": "Previous",
+        "next": "Next",
+        "backToApp": "Back to app",
+        "openApp": "Open app",
+        "signIn": "Sign in",
+        "getStarted": "Get started",
+        "categoriesHeading": "Browse by area",
+        "emptyTitle": "This page is coming together",
+        "emptyBody": "We are still writing this section. Check back shortly."
+    },
+    "DocsHome": {
+        "title": "Connex documentation",
+        "lead": "Connex is a relationship-intelligence CRM: it scores how warm each relationship is, predicts when one is cooling, and surfaces the warmest path to any introduction. These docs walk every capability, from the big fundamentals down to the small interface details."
+    },
+    "DocsGettingStarted": {
+        "title": "Getting started",
+        "description": "What Connex is, how workspaces and tenancy work, and how to find your way around.",
+        "lead": "Start here. These pages cover the mental model behind Connex and the fundamentals every other section builds on.",
+        "articles": {
+            "what-is-connex": {
+                "title": "What is Connex",
+                "description": "The relationship-intelligence CRM and the ideas that make it different.",
+                "blocks": [
+                    {
+                        "type": "prose",
+                        "text": [
+                            "Connex is a multi-tenant CRM built around one idea: your relationships have a temperature, and that temperature changes over time. Instead of a static list of contacts, Connex continuously scores how warm each relationship is, warns you when one is cooling, and shows you the warmest path to reach anyone.",
+                            "Everything in the product is tenant-scoped and permission-aware. What you see, edit, and share is always bounded by your workspace and your role within it."
+                        ]
+                    },
+                    {
+                        "type": "heading",
+                        "text": "What makes it different"
+                    },
+                    {
+                        "type": "featureList",
+                        "columns": 2,
+                        "items": [
+                            {
+                                "title": "Warmth scoring",
+                                "description": "Every relationship carries a temperature score derived from recency, frequency, and depth of interaction."
+                            },
+                            {
+                                "title": "Decay prediction",
+                                "description": "Connex forecasts when a warm relationship is about to cool so you can act before it does."
+                            },
+                            {
+                                "title": "Warm-intro paths",
+                                "description": "Reverse-introduction search finds the strongest chain of people who can connect you to a target."
+                            },
+                            {
+                                "title": "Employment history",
+                                "description": "People carry their job history, so a contact who changes companies keeps their relationship context."
+                            }
+                        ]
+                    },
+                    {
+                        "type": "callout",
+                        "variant": "tip",
+                        "title": "Read in any order",
+                        "body": "Every article stands on its own, but Getting started and Core concepts give you the vocabulary the rest of the docs assume."
+                    }
+                ]
+            },
+            "workspaces-and-tenancy": {
+                "title": "Workspaces and tenancy",
+                "description": "How multi-tenant isolation, workspace switching, and membership work.",
+                "blocks": [
+                    {
+                        "type": "prose",
+                        "text": "A workspace is your tenant. Every record, file, tag, and setting belongs to exactly one workspace, and Connex enforces that boundary on every request. You can belong to more than one workspace and switch between them without logging out."
+                    },
+                    {
+                        "type": "steps",
+                        "title": "Switching workspaces",
+                        "items": [
+                            {
+                                "title": "Open the workspace switcher",
+                                "description": "It sits at the top of the sidebar, showing your current workspace."
+                            },
+                            {
+                                "title": "Pick another workspace",
+                                "description": "Your active tenant changes immediately and the whole app re-scopes to it."
+                            },
+                            {
+                                "title": "Stay oriented",
+                                "description": "Your selection is remembered, so you land back in the same workspace next time."
+                            }
+                        ]
+                    },
+                    {
+                        "type": "callout",
+                        "variant": "warning",
+                        "title": "Isolation is absolute",
+                        "body": "Data never crosses workspaces. An invitation or a shared record is the only way someone in another tenant sees anything you own."
+                    }
+                ]
+            },
+            "navigating-connex": {
+                "title": "Navigating Connex",
+                "description": "The sidebar, global search, breadcrumbs, and how the app is laid out.",
+                "blocks": [
+                    {
+                        "type": "prose",
+                        "text": "The left sidebar groups the app into Overview, Records, Activity, Library, and Team. The header carries global search and your workspace context. Most detail pages offer a back button to their list."
+                    },
+                    {
+                        "type": "shortcuts",
+                        "title": "Handy shortcuts",
+                        "items": [
+                            { "keys": "/", "action": "Focus global search" },
+                            { "keys": "Esc", "action": "Dismiss the open menu or dialog" },
+                            { "keys": "Enter", "action": "Open the highlighted search result" }
+                        ]
+                    }
+                ]
+            },
+            "core-concepts": {
+                "title": "Core concepts",
+                "description": "Records, relationships, signals, and the shared table mechanics.",
+                "blocks": [
+                    {
+                        "type": "prose",
+                        "text": "A few concepts recur throughout Connex. Learning them once makes every other section easier to read."
+                    },
+                    {
+                        "type": "table",
+                        "title": "Vocabulary",
+                        "columns": ["Term", "Meaning"],
+                        "rows": [
+                            ["Record", "A company, contact, deal, or pipeline you track."],
+                            ["Signal", "An interaction that feeds a relationship's warmth."],
+                            ["Segment", "A saved, rule-based slice of your records."],
+                            ["Introduction", "A requested warm connection routed through a mutual contact."]
+                        ]
+                    },
+                    {
+                        "type": "faq",
+                        "title": "Common questions",
+                        "items": [
+                            {
+                                "question": "Is my data shared across workspaces?",
+                                "answer": "No. Every record is scoped to one workspace and never leaks to another tenant."
+                            },
+                            {
+                                "question": "Do I need to score relationships manually?",
+                                "answer": "No. Warmth is computed automatically from the signals Connex already tracks."
+                            }
+                        ]
+                    }
+                ]
+            }
+        }
+    },
+    "DocsDashboard": {
+        "title": "Dashboard & home",
+        "description": "Your personalized home: greeting, at-a-glance metrics, and what needs attention.",
+        "lead": "The dashboard is the first thing you see. It summarizes your workspace and points you at what is urgent.",
+        "articles": {
+            "home-dashboard": {
+                "title": "The home dashboard",
+                "description": "Greeting, overview cards, cooling relationships, tasks, and recent moves."
+            }
+        }
+    },
+    "DocsRecords": {
+        "title": "Records",
+        "description": "Companies, contacts, deals, and pipelines, plus the shared table mechanics they all use.",
+        "lead": "Records are the people and organizations you track. They share a common table, filtering, and detail-page experience.",
+        "articles": {
+            "records-overview": {
+                "title": "Records overview",
+                "description": "How the four record types relate and what they have in common."
+            },
+            "companies": {
+                "title": "Companies",
+                "description": "Organizations, their people, deals, custom fields, and timeline."
+            },
+            "contacts": {
+                "title": "Contacts",
+                "description": "People, their employment history, warmth, and connections."
+            },
+            "deals-and-pipelines": {
+                "title": "Deals & pipelines",
+                "description": "Opportunities moving through stages, and the pipelines that shape them."
+            },
+            "table-and-grid": {
+                "title": "Table & grid mechanics",
+                "description": "Sorting, column controls, selection, and bulk actions shared across records."
+            }
+        }
+    },
+    "DocsRelationshipIntelligence": {
+        "title": "Relationship intelligence",
+        "description": "Warmth scoring, decay prediction, connections, and employment history: the heart of Connex.",
+        "lead": "This is what sets Connex apart. Relationships are scored, watched for decay, and mapped into a graph you can traverse.",
+        "articles": {
+            "warmth-and-temperature": {
+                "title": "Warmth & temperature",
+                "description": "How relationship temperature is scored and what the bands mean.",
+                "blocks": [
+                    {
+                        "type": "prose",
+                        "text": "Every relationship in Connex carries a temperature. It rises with recent, frequent, meaningful contact and falls as interactions thin out. The score rolls up into four readable bands so you can scan a list and know where each relationship stands."
+                    },
+                    {
+                        "type": "warmthLegend",
+                        "title": "The temperature bands",
+                        "items": [
+                            {
+                                "band": "hot",
+                                "label": "Hot",
+                                "description": "Active, frequent, recent contact. The relationship is thriving."
+                            },
+                            {
+                                "band": "warm",
+                                "label": "Warm",
+                                "description": "Healthy and current, with steady but less frequent touchpoints."
+                            },
+                            {
+                                "band": "cool",
+                                "label": "Cool",
+                                "description": "Fading. Contact has slowed and the relationship needs attention."
+                            },
+                            {
+                                "band": "cold",
+                                "label": "Cold",
+                                "description": "Dormant. Little or no recent interaction to draw on."
+                            }
+                        ]
+                    },
+                    {
+                        "type": "callout",
+                        "variant": "note",
+                        "title": "Scores are computed, not entered",
+                        "body": "You never set a temperature by hand. It is derived from the signals Connex already tracks: notes, activities, meetings, and messages."
+                    }
+                ]
+            },
+            "decay-and-signals": {
+                "title": "Decay & signals",
+                "description": "How Connex predicts cooling relationships and what feeds the score.",
+                "blocks": [
+                    {
+                        "type": "prose",
+                        "text": "Warmth decays over time. Connex models that decay and flags relationships that are about to slip a band, so you can reach out before they cool. The dashboard surfaces these as cooling relationships."
+                    },
+                    {
+                        "type": "featureList",
+                        "title": "What counts as a signal",
+                        "columns": 2,
+                        "items": [
+                            { "title": "Notes", "description": "Written context you log against a record." },
+                            { "title": "Activities", "description": "Calls, meetings, and touchpoints you record." },
+                            { "title": "Tasks", "description": "Completed follow-ups tied to a relationship." },
+                            { "title": "Calendar events", "description": "Meetings connected to the people involved." }
+                        ]
+                    },
+                    {
+                        "type": "callout",
+                        "variant": "quirk",
+                        "title": "Quiet days are counted",
+                        "body": "A relationship's cooling estimate reflects how many days it has been quiet, not just the last interaction type, so a long gap after many touchpoints still triggers a warning."
+                    }
+                ]
+            },
+            "connections-and-employment": {
+                "title": "Connections & employment",
+                "description": "The relationship graph and how job history keeps context when people move.",
+                "blocks": [
+                    {
+                        "type": "prose",
+                        "text": "People are connected to companies through employment history. When someone changes jobs, their relationships and context travel with them, and the connection graph updates to reflect where they are now."
+                    },
+                    {
+                        "type": "cards",
+                        "title": "Related reading",
+                        "items": [
+                            {
+                                "title": "Warm-intro paths",
+                                "description": "Traverse the connection graph to find the strongest route to a target.",
+                                "href": "/docs/overview-suite/warm-intro-paths"
+                            },
+                            {
+                                "title": "Relationship map",
+                                "description": "See the graph visually and explore how people connect.",
+                                "href": "/docs/overview-suite/relationship-map"
+                            }
+                        ]
+                    }
+                ]
+            }
+        }
+    },
+    "DocsOverviewSuite": {
+        "title": "Overview suite",
+        "description": "Analytics, the relationship map, calendar, introductions, and warm-intro paths.",
+        "lead": "The overview suite turns your records into insight: charts, a live relationship graph, and tools for engineering introductions.",
+        "articles": {
+            "analytics": {
+                "title": "Analytics",
+                "description": "Revenue trends, pipeline value, win rates, and team leaderboards."
+            },
+            "relationship-map": {
+                "title": "Relationship map",
+                "description": "An interactive graph of people, companies, and how they connect."
+            },
+            "calendar": {
+                "title": "Calendar",
+                "description": "Your meetings and events tied back to the relationships they involve."
+            },
+            "introductions": {
+                "title": "Introductions",
+                "description": "Request, track, and fulfill warm introductions between contacts."
+            },
+            "warm-intro-paths": {
+                "title": "Warm-intro paths",
+                "description": "Reverse-introduction search for the strongest path to any target."
+            }
+        }
+    },
+    "DocsActivity": {
+        "title": "Activity",
+        "description": "Notes, tasks, activities, and calendar events: the signals behind warmth.",
+        "lead": "Activity is where the relationship signal comes from. Everything you log here feeds warmth and keeps history complete.",
+        "articles": {
+            "notes": {
+                "title": "Notes",
+                "description": "Freeform context logged against any record, with mentions."
+            },
+            "tasks": {
+                "title": "Tasks",
+                "description": "Follow-ups with due dates, assignment, and completion."
+            },
+            "activities": {
+                "title": "Activities",
+                "description": "Calls, meetings, and touchpoints that record real interaction."
+            },
+            "calendar-events": {
+                "title": "Calendar events",
+                "description": "Meetings connected to the people and companies involved."
+            }
+        }
+    },
+    "DocsLibrary": {
+        "title": "Library",
+        "description": "Tags, files, saved views, and segments that organize your workspace.",
+        "lead": "The library holds the reusable structure of your workspace: how records are labeled, filed, and sliced.",
+        "articles": {
+            "tags": {
+                "title": "Tags",
+                "description": "Flexible labels for grouping and filtering records."
+            },
+            "files": {
+                "title": "Files",
+                "description": "Attachments stored against records, with previews and detail."
+            },
+            "saved-views-and-segments": {
+                "title": "Saved views & segments",
+                "description": "Reusable, rule-based slices of your records you can return to."
+            }
+        }
+    },
+    "DocsData": {
+        "title": "Search, import & data",
+        "description": "Global search, filters, bulk operations, import/export, and custom fields.",
+        "lead": "These tools move data in and out of Connex and help you find and change it at scale.",
+        "articles": {
+            "search": {
+                "title": "Global search",
+                "description": "Search across every record type with keyboard navigation."
+            },
+            "filters-and-bulk": {
+                "title": "Filters & bulk actions",
+                "description": "Narrow a table, select many rows, and act on them at once."
+            },
+            "import-and-export": {
+                "title": "Import & export",
+                "description": "Bring records in from CSV and take your data back out."
+            },
+            "custom-fields": {
+                "title": "Custom fields",
+                "description": "Extend records with fields specific to your workspace."
+            }
+        }
+    },
+    "DocsCollaboration": {
+        "title": "Collaboration",
+        "description": "Invites, invite links, record sharing, permissions, notifications, and mentions.",
+        "lead": "Connex is multiplayer. These pages cover how you bring people in and work together without crossing tenant lines.",
+        "articles": {
+            "invites-and-links": {
+                "title": "Invites & invite links",
+                "description": "Add teammates directly or with a shareable link."
+            },
+            "sharing-and-permissions": {
+                "title": "Sharing & permissions",
+                "description": "Share individual records and control who can see what."
+            },
+            "notifications-and-mentions": {
+                "title": "Notifications & mentions",
+                "description": "Stay in the loop with an inbox and @-mentions on records."
+            }
+        }
+    },
+    "DocsSettings": {
+        "title": "Settings & administration",
+        "description": "Members, roles and RBAC, rules and automation, notification settings, and audit logs.",
+        "lead": "Administration controls who can do what, automates routine work, and keeps a record of every change.",
+        "articles": {
+            "members-and-roles": {
+                "title": "Members & roles",
+                "description": "Manage who is in the workspace and what their role permits."
+            },
+            "rules-and-automation": {
+                "title": "Rules & automation",
+                "description": "Automate routine changes with workspace rules."
+            },
+            "notification-settings": {
+                "title": "Notification settings",
+                "description": "Tune which events reach you and how."
+            },
+            "audit-logs": {
+                "title": "Audit logs",
+                "description": "A tamper-evident history of actions taken in the workspace."
+            }
+        }
+    },
+    "DocsPreferences": {
+        "title": "Preferences & the little things",
+        "description": "Theming, language, keyboard shortcuts, and the small quirks worth knowing.",
+        "lead": "The details. How Connex looks, speaks your language, responds to the keyboard, and the tiny behaviors that make it feel considered.",
+        "articles": {
+            "theming-and-appearance": {
+                "title": "Theming & appearance",
+                "description": "Light, dark, and system themes across the whole app."
+            },
+            "language-and-i18n": {
+                "title": "Language & internationalization",
+                "description": "Switch between English and Japanese anywhere."
+            },
+            "keyboard-and-shortcuts": {
+                "title": "Keyboard & shortcuts",
+                "description": "Move faster with keyboard navigation."
+            },
+            "tips-and-quirks": {
+                "title": "Tips & quirks",
+                "description": "Small behaviors and details that reward knowing."
+            }
+        }
+    }
+}
