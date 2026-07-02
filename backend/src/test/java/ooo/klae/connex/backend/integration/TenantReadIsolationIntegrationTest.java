@@ -30,9 +30,11 @@ import org.springframework.web.context.WebApplicationContext;
 import org.springframework.web.context.request.RequestContextHolder;
 
 import ooo.klae.connex.backend.beans.Company;
+import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.beans.Workspace;
 import ooo.klae.connex.backend.mappers.CompanyMapper;
+import ooo.klae.connex.backend.mappers.PersonMapper;
 import ooo.klae.connex.backend.mappers.ShareMapper;
 import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
@@ -55,6 +57,7 @@ class TenantReadIsolationIntegrationTest {
     @Autowired @Qualifier("springSecurityFilterChain") private Filter springSecurityFilterChain;
     @Autowired private UserMapper userMapper;
     @Autowired private CompanyMapper companyMapper;
+    @Autowired private PersonMapper personMapper;
     @Autowired private WorkspaceMapper workspaceMapper;
     @Autowired private PasswordEncoder passwordEncoder;
     @Autowired private ShareMapper shareMapper;
@@ -116,6 +119,33 @@ class TenantReadIsolationIntegrationTest {
                 .header("X-Workspace-Id", wsB.getId())
                 .session(bobSession))
             .andExpect(status().isOk());
+    }
+
+    @Test
+    void sharedCompanyDoesNotLeakOwnerContactsToGrantee() throws Exception {
+        RequestContextHolder.resetRequestAttributes();
+        Workspace wsA = newWorkspace();
+        Workspace wsB = newWorkspace();
+        User alice = newMember(wsA);
+        User bob = newMember(wsB);
+        Company companyA = newCompany(wsA);
+        Person contactA = newPerson(wsA, companyA);
+
+        shareMapper.shareCompany(companyA.getId(), wsB.getId(), alice.getId(), false);
+
+        MockHttpSession aliceSession = login(alice.getUsername());
+        mockMvc.perform(get("/api/companies/" + companyA.getId())
+                .header("X-Workspace-Id", wsA.getId())
+                .session(aliceSession))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.personIds", hasItem(contactA.getId())));
+
+        MockHttpSession bobSession = login(bob.getUsername());
+        mockMvc.perform(get("/api/companies/" + companyA.getId())
+                .header("X-Workspace-Id", wsB.getId())
+                .session(bobSession))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.personIds", not(hasItem(contactA.getId()))));
     }
 
     @Test
@@ -199,5 +229,16 @@ class TenantReadIsolationIntegrationTest {
         company.setWorkspaceId(workspace.getId());
         companyMapper.insert(company);
         return company;
+    }
+
+    private Person newPerson(Workspace workspace, Company company) {
+        String suffix = UUID.randomUUID().toString().substring(0, 8);
+        Person person = new Person();
+        person.setName("Person " + suffix);
+        person.setEmail(suffix + ".person@example.com");
+        person.setCompany(company);
+        person.setWorkspaceId(workspace.getId());
+        personMapper.insert(person);
+        return person;
     }
 }

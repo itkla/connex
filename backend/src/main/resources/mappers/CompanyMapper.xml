@@ -18,8 +18,8 @@
     <result property="logoUrl" column="logo_url"/>
     <result property="createdAt" column="created_at"/>
     <result property="updatedAt" column="updated_at"/>
-    <collection property="people" ofType="Person" column="{workspaceId=workspace_id,companyId=id}" select="ooo.klae.connex.backend.mappers.PersonMapper.getPersonsByCompanyId"/>
-    <collection property="tags" ofType="Tag" column="{workspaceId=workspace_id,companyId=id}" select="ooo.klae.connex.backend.mappers.TagMapper.getTagsByCompanyId"/>
+    <collection property="people" ofType="Person" column="{workspaceId=req_workspace_id,companyId=id}" select="ooo.klae.connex.backend.mappers.PersonMapper.getPersonsByCompanyId"/>
+    <collection property="tags" ofType="Tag" column="{workspaceId=req_workspace_id,companyId=id}" select="ooo.klae.connex.backend.mappers.TagMapper.getTagsByCompanyId"/>
   </resultMap>
 
   <!-- Visibility is owned-or-shared: a company is visible to its owning workspace and to any
@@ -45,7 +45,8 @@
   </select>
 
   <select id="getCompanyById" resultMap="CompanyFullResult">
-    SELECT <include refid="companyColumns"/> FROM company WHERE <include refid="visible"/> AND id = #{id}
+    SELECT <include refid="companyColumns"/>, #{workspaceId} AS req_workspace_id
+    FROM company WHERE <include refid="visible"/> AND id = #{id}
   </select>
 
   <select id="getCompaniesWithWebsite" resultType="Company">
