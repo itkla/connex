@@ -22,6 +22,7 @@ import ooo.klae.connex.backend.dto.SearchResultsDto;
 import ooo.klae.connex.backend.dto.TagDto;
 import ooo.klae.connex.backend.dto.TaskDto;
 import ooo.klae.connex.backend.dto.UserDto;
+import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.util.LikePattern;
 
 import org.springframework.stereotype.Service;
@@ -32,6 +33,9 @@ import lombok.RequiredArgsConstructor;
 @Service
 @RequiredArgsConstructor
 public class SearchService {
+
+    private static final int MAX_QUERY_LENGTH = 200;
+
     private final CompanyMapper companyMapper;
     private final PersonMapper personMapper;
     private final DealMapper dealMapper;
@@ -52,7 +56,12 @@ public class SearchService {
                     List.of(), List.of(), List.of(), List.of(), List.of(), List.of());
         }
 
-        String pattern = LikePattern.containing(query.trim());
+        String trimmed = query.trim();
+        if (trimmed.length() > MAX_QUERY_LENGTH) {
+            throw new BadRequestException("Search query is too long (max " + MAX_QUERY_LENGTH + " characters)");
+        }
+
+        String pattern = LikePattern.containing(trimmed);
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         auditService.record("search", "search", null, query, "Search performed", null);
         return new SearchResultsDto(
