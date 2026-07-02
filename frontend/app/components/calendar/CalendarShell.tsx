@@ -23,6 +23,7 @@ import {
 } from '@/app/lib/calendar';
 import { useCalendar, WEEK_STARTS_ON } from './useCalendar';
 import { useCoarsePointer } from './useCoarsePointer';
+import { useMediaQuery } from './useMediaQuery';
 import ViewSwitcher from './ViewSwitcher';
 import TypeFilter from './TypeFilter';
 import MonthView from './MonthView';
@@ -34,11 +35,23 @@ import QuickCreateHost from './QuickCreateHost';
 
 const SWIPE_OFFSET = 40;
 
-/** Direction-aware slide: `custom` is the nav direction (1 next, -1 prev, 0 jump/crossfade). */
+/**
+ * Direction-aware transition: `custom` is the nav direction. 1/-1 (prev/next period) slide
+ * laterally; 0 (view change / day drill-in) scales in subtly so it reads as drilling into
+ * the view rather than a sideways move.
+ */
 const SLIDE_VARIANTS = {
-    enter: (dir: number) => ({ x: dir > 0 ? SWIPE_OFFSET : dir < 0 ? -SWIPE_OFFSET : 0, opacity: 0 }),
-    center: { x: 0, opacity: 1 },
-    exit: (dir: number) => ({ x: dir > 0 ? -SWIPE_OFFSET : dir < 0 ? SWIPE_OFFSET : 0, opacity: 0 }),
+    enter: (dir: number) => ({
+        x: dir > 0 ? SWIPE_OFFSET : dir < 0 ? -SWIPE_OFFSET : 0,
+        scale: dir === 0 ? 0.98 : 1,
+        opacity: 0,
+    }),
+    center: { x: 0, scale: 1, opacity: 1 },
+    exit: (dir: number) => ({
+        x: dir > 0 ? -SWIPE_OFFSET : dir < 0 ? SWIPE_OFFSET : 0,
+        scale: 1,
+        opacity: 0,
+    }),
 };
 
 export interface CalendarShellProps {
@@ -64,6 +77,7 @@ export default function CalendarShell({
     const router = useRouter();
     const reduce = useReducedMotion() ?? false;
     const coarse = useCoarsePointer();
+    const isWide = useMediaQuery('(min-width: 1024px)');
     const swipeRef = useRef<HTMLDivElement>(null);
     const [today] = useState(() => startOfDay(new Date()));
     const [openEventId, setOpenEventId] = useState<string | null>(null);
@@ -185,6 +199,11 @@ export default function CalendarShell({
     );
     const onOpenEvent = (event: CalendarEvent) => setOpenEventId(event.id);
 
+    const onSelectDay = (day: Date) => {
+        if (isWide) cal.selectDay(day);
+        else cal.openDay(day);
+    };
+
     const periodKey = useMemo(() => {
         switch (cal.view) {
             case 'month':
@@ -214,6 +233,7 @@ export default function CalendarShell({
               exit: 'exit' as const,
               transition: {
                   x: { type: 'spring' as const, stiffness: 420, damping: 34 },
+                  scale: { duration: 0.22, ease: [0.23, 1, 0.32, 1] as const },
                   opacity: { duration: 0.2 },
               },
           };
@@ -230,7 +250,7 @@ export default function CalendarShell({
                         locale={locale}
                         pendingIds={pendingIds}
                         dragEnabled={!coarse}
-                        onSelectDay={cal.setSelectedDay}
+                        onSelectDay={onSelectDay}
                         onOpenEvent={onOpenEvent}
                         onReschedule={handleReschedule}
                     />
