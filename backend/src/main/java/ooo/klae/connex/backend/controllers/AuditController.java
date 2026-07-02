@@ -31,13 +31,14 @@ public class AuditController {
     public List<AuditLog> getAuditLog(
         @RequestParam(required = false) String entityType,
         @RequestParam(required = false) Integer entityId,
-        @RequestParam(defaultValue = "50") int limit
+        @RequestParam(defaultValue = "50") int limit,
+        @RequestParam(defaultValue = "0") int offset
     ) {
         workspaceService.requirePermission(Permission.AUDIT_READ);
         if (entityType != null && entityId != null) {
-            return auditService.forEntity(entityType, entityId, limit);
+            return auditService.forEntity(entityType, entityId, limit, offset);
         }
-        return auditService.recent(limit);
+        return auditService.recent(limit, offset);
     }
 
     // @PostMapping("/add")

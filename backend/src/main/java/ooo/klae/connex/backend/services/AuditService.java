@@ -166,22 +166,24 @@ public class AuditService {
 
     /**
      * Retrieves the most recent events across all entities, newest first.
-     * @param limit
-     * @return
+     * @param limit the maximum number of events to return, capped per request
+     * @param offset the number of events to skip, enabling incremental paging
+     * @return the page of events
      */
-    public List<AuditLog> recent(int limit) {
-        return auditLogMapper.findRecent(tenantContext.getWorkspaceId(), cap(limit));
+    public List<AuditLog> recent(int limit, int offset) {
+        return auditLogMapper.findRecent(tenantContext.getWorkspaceId(), cap(limit), offset(offset));
     }
 
     /**
      * Retrieves events for a single target, newest first.
-     * @param entityType
-     * @param entityId
-     * @param limit
-     * @return
+     * @param entityType the entity type to scope to
+     * @param entityId the entity id to scope to
+     * @param limit the maximum number of events to return, capped per request
+     * @param offset the number of events to skip, enabling incremental paging
+     * @return the page of events
      */
-    public List<AuditLog> forEntity(String entityType, int entityId, int limit) {
-        return auditLogMapper.findByEntity(tenantContext.getWorkspaceId(), entityType, entityId, cap(limit));
+    public List<AuditLog> forEntity(String entityType, int entityId, int limit, int offset) {
+        return auditLogMapper.findByEntity(tenantContext.getWorkspaceId(), entityType, entityId, cap(limit), offset(offset));
     }
 
     /**
@@ -292,6 +294,15 @@ public class AuditService {
      */
     private static int cap(int limit) {
         return Math.max(1, Math.min(limit, 200));
+    }
+
+    /**
+     * Clamps an offset to a minimum of 0.
+     * @param offset
+     * @return
+     */
+    private static int offset(int offset) {
+        return Math.max(0, offset);
     }
 
     /**
