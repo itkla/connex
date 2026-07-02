@@ -1,11 +1,15 @@
 'use client';
 
-import { useMemo, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useMemo, useRef, useState, type ReactNode } from 'react';
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
 import { useLocale, useTranslations } from 'next-intl';
+import { useRouter } from 'next/navigation';
+import { toast } from 'sonner';
 import { ChevronLeftIcon, ChevronRightIcon } from '@heroicons/react/24/outline';
 
 import Rise from '@/app/components/motion/Rise';
+import { updateDeal, updateTask } from '@/app/lib/api';
+import { parseCalendarDate } from '@/app/lib/utils';
 import type { Activity, Contact, Deal, Note, Task } from '@/app/lib/types';
 import {
     buildEvents,
@@ -57,11 +61,14 @@ export default function CalendarShell({
     const t = useTranslations('Calendar');
     const locale = useLocale();
     const cal = useCalendar();
+    const router = useRouter();
     const reduce = useReducedMotion() ?? false;
     const coarse = useCoarsePointer();
     const swipeRef = useRef<HTMLDivElement>(null);
     const [today] = useState(() => startOfDay(new Date()));
-    const [openEvent, setOpenEvent] = useState<CalendarEvent | null>(null);
+    const [openEventId, setOpenEventId] = useState<string | null>(null);
+    const [overrides, setOverrides] = useState<Map<string, string>>(() => new Map());
+    const [pendingId, setPendingId] = useState<string | null>(null);
 
     const personById = useMemo(() => {
         const map = new Map<number, Contact>();
@@ -75,14 +82,92 @@ export default function CalendarShell({
         return map;
     }, [deals]);
 
-    const events = useMemo(
+    const baseEvents = useMemo(
         () => buildEvents({ tasks, activities, deals, notes, persons }),
         [tasks, activities, deals, notes, persons],
     );
 
+    const baseSignature = useMemo(
+        () => baseEvents.map((e) => `${e.id}:${e.dayKey}`).join('|'),
+        [baseEvents],
+    );
+    const [syncedSignature, setSyncedSignature] = useState(baseSignature);
+    if (syncedSignature !== baseSignature && pendingId == null) {
+        setSyncedSignature(baseSignature);
+        if (overrides.size > 0) {
+            const baseByEventId = new Map(baseEvents.map((e) => [e.id, e.dayKey]));
+            const next = new Map(overrides);
+            let changed = false;
+            for (const [id, key] of overrides) {
+                if (baseByEventId.get(id) === key) {
+                    next.delete(id);
+                    changed = true;
+                }
+            }
+            if (changed) setOverrides(next);
+        }
+    }
+
+    const events = useMemo(() => {
+        if (overrides.size === 0) return baseEvents;
+        return baseEvents.map((e) => {
+            const key = overrides.get(e.id);
+            if (!key || key === e.dayKey) return e;
+            const ms = parseCalendarDate(key);
+            if (Number.isNaN(ms)) return e;
+            return { ...e, dayKey: key, startMs: ms };
+        });
+    }, [baseEvents, overrides]);
+
     const visibleEvents = useMemo(
         () => events.filter((e) => cal.visibleKinds.has(e.kind)),
         [events, cal.visibleKinds],
+    );
+
+    const handleReschedule = useCallback(
+        async (event: CalendarEvent, newDayKey: string) => {
+            if (!event.draggable || newDayKey === event.dayKey || Number.isNaN(parseCalendarDate(newDayKey))) {
+                return;
+            }
+            setOverrides((prev) => new Map(prev).set(event.id, newDayKey));
+            setPendingId(event.id);
+            try {
+                if (event.kind === 'task') {
+                    await updateTask(event.entityId, { dueDate: newDayKey });
+                } else if (event.kind === 'deal') {
+                    const deal = event.raw;
+                    if (deal.pipeline == null || deal.stage == null) throw new Error('deal-missing-pipeline-stage');
+                    await updateDeal(event.entityId, {
+                        name: deal.name,
+                        value: deal.value,
+                        actualValue: deal.actualValue,
+                        currency: deal.currency,
+                        pipeline: deal.pipeline,
+                        stage: deal.stage,
+                        company: deal.company,
+                        ownerId: deal.ownerId ?? null,
+                        expectedCloseDate: newDayKey,
+                        closedAt: deal.closedAt ?? null,
+                        closedReason: deal.closedReason ?? null,
+                        won: deal.won ?? null,
+                    });
+                } else {
+                    return;
+                }
+                toast.success(t('rescheduled'));
+                router.refresh();
+            } catch {
+                setOverrides((prev) => {
+                    const next = new Map(prev);
+                    next.delete(event.id);
+                    return next;
+                });
+                toast.error(t('rescheduleFailed'));
+            } finally {
+                setPendingId((current) => (current === event.id ? null : current));
+            }
+        },
+        [router, t],
     );
 
     const eventsByDay = useMemo(() => groupByDay(visibleEvents), [visibleEvents]);
@@ -114,7 +199,11 @@ export default function CalendarShell({
         return null;
     }, [cal.view, cal.anchor, locale]);
 
-    const onOpenEvent = (event: CalendarEvent) => setOpenEvent(event);
+    const openEvent = useMemo(
+        () => (openEventId ? events.find((e) => e.id === openEventId) ?? null : null),
+        [openEventId, events],
+    );
+    const onOpenEvent = (event: CalendarEvent) => setOpenEventId(event.id);
 
     const periodKey = useMemo(() => {
         switch (cal.view) {
@@ -159,8 +248,10 @@ export default function CalendarShell({
                         today={today}
                         eventsByDay={eventsByDay}
                         locale={locale}
+                        pendingId={pendingId}
                         onSelectDay={cal.setSelectedDay}
                         onOpenEvent={onOpenEvent}
+                        onReschedule={handleReschedule}
                     />
                 );
             case 'week':
@@ -278,11 +369,13 @@ export default function CalendarShell({
                 event={openEvent}
                 open={openEvent != null}
                 onOpenChange={(next) => {
-                    if (!next) setOpenEvent(null);
+                    if (!next) setOpenEventId(null);
                 }}
                 locale={locale}
                 personById={personById}
                 dealById={dealById}
+                onReschedule={handleReschedule}
+                rescheduling={openEvent != null && pendingId === openEvent.id}
             />
 
             <QuickCreateHost

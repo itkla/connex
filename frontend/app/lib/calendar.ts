@@ -18,7 +18,8 @@ const KIND_PRIORITY: Record<CalendarEventKind, number> = { deal: 0, task: 1, act
  * Shared shape of a record projected onto the calendar. `startMs` drives ordering
  * and timeline placement; `allDay` distinguishes date-only records (tasks, deals)
  * from timed ones (activities, notes). `draggable` marks the two kinds whose date
- * is reschedulable by drag: any task, and any open deal.
+ * is reschedulable by drag: any task, and any open deal that has a pipeline and
+ * stage (both are required to rebuild the non-partial deal-update payload).
  */
 interface CalendarEventBase {
     id: string;
@@ -193,7 +194,7 @@ export function buildEvents(data: CalendarData): CalendarEvent[] {
             allDay: true,
             dayKey: dayKeyFromMs(ms),
             href: `/records/deals/${deal.id}`,
-            draggable: !isDealClosed(deal),
+            draggable: !isDealClosed(deal) && deal.pipeline != null && deal.stage != null,
             raw: deal,
         });
     }
