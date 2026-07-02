@@ -1128,6 +1128,7 @@ export type MailConfig = {
     ssl: boolean;
     auth: boolean;
     hasPassword: boolean;
+    configured: boolean;
     updatedAt: string | null;
 };
 

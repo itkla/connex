@@ -67,6 +67,8 @@ export default function EmailPanel() {
 
     const [form, setForm] = useState<FormState>(EMPTY);
     const [hasPassword, setHasPassword] = useState(false);
+    const [configured, setConfigured] = useState(false);
+    const [savedEnabled, setSavedEnabled] = useState(false);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(false);
     const [saving, setSaving] = useState(false);
@@ -84,6 +86,8 @@ export default function EmailPanel() {
                 if (cancelled) return;
                 setForm(toForm(config));
                 setHasPassword(config.hasPassword);
+                setConfigured(config.configured);
+                setSavedEnabled(config.enabled);
             } catch {
                 if (!cancelled) {
                     setError(true);
@@ -101,10 +105,12 @@ export default function EmailPanel() {
     const set = <K extends keyof FormState>(key: K, value: FormState[K]) =>
         setForm((prev) => ({ ...prev, [key]: value }));
 
-    const buildRequest = (): MailConfigRequest => ({
+    const buildRequest = (): MailConfigRequest => {
+        const parsedPort = Number.parseInt(form.port.trim(), 10);
+        return {
         enabled: form.enabled,
         host: form.host.trim() || null,
-        port: form.port.trim() ? Number(form.port) : null,
+        port: Number.isFinite(parsedPort) ? parsedPort : null,
         username: form.username.trim() || null,
         password: form.password ? form.password : null,
         fromAddress: form.fromAddress.trim() || null,
@@ -112,7 +118,8 @@ export default function EmailPanel() {
         starttls: form.starttls,
         ssl: form.ssl,
         auth: form.auth,
-    });
+        };
+    };
 
     const save = async () => {
         if (activeWorkspaceId == null) return;
@@ -121,6 +128,8 @@ export default function EmailPanel() {
             const saved = await saveWorkspaceMailConfig(activeWorkspaceId, buildRequest());
             setForm(toForm(saved));
             setHasPassword(saved.hasPassword);
+            setConfigured(saved.configured);
+            setSavedEnabled(saved.enabled);
             toastSuccess(t("saved"));
         } catch (err) {
             toastError(err instanceof Error ? err.message : t("saveFailed"));
@@ -153,6 +162,8 @@ export default function EmailPanel() {
             await deleteWorkspaceMailConfig(activeWorkspaceId);
             setForm(EMPTY);
             setHasPassword(false);
+            setConfigured(false);
+            setSavedEnabled(false);
             toastSuccess(t("removed"));
         } catch (err) {
             toastError(err instanceof Error ? err.message : t("saveFailed"));
@@ -307,10 +318,10 @@ export default function EmailPanel() {
                             <Button onClick={save} disabled={saving}>
                                 {t("save")}
                             </Button>
-                            <Button variant="outline" onClick={runTest} disabled={testing || saving || !form.enabled}>
+                            <Button variant="outline" onClick={runTest} disabled={testing || saving || !savedEnabled}>
                                 {testing ? t("testing") : t("sendTest")}
                             </Button>
-                            {hasPassword && (
+                            {configured && (
                                 <Button
                                     variant="ghost"
                                     className="ml-auto text-destructive hover:text-destructive"

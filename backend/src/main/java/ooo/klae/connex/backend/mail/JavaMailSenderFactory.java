@@ -54,7 +54,7 @@ public class JavaMailSenderFactory {
                 config.host(),
                 String.valueOf(config.port()),
                 String.valueOf(config.username()),
-                String.valueOf(config.password() == null ? 0 : config.password().hashCode()),
+                String.valueOf(config.password()),
                 config.starttls() + ":" + config.ssl() + ":" + config.auth());
     }
 }

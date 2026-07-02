@@ -114,4 +114,32 @@ class MailConfigResolverTest {
         when(mailConfigMapper.findByWorkspace(7)).thenReturn(null);
         assertNull(resolver.resolveForWorkspace(7));
     }
+
+    @Test
+    void resolveWorkspaceOnly_enabledUsable_returnsWorkspaceNeverInstance() {
+        enableInstance();
+        WorkspaceMailConfig ws = new WorkspaceMailConfig();
+        ws.setEnabled(true);
+        ws.setHost("smtp.workspace.test");
+        ws.setFromAddress("team@workspace.test");
+        when(mailConfigMapper.findByWorkspace(7)).thenReturn(ws);
+        assertEquals("smtp.workspace.test", resolver.resolveWorkspaceOnly(7).host());
+    }
+
+    @Test
+    void resolveWorkspaceOnly_noEnabledConfig_returnsNullNotInstanceFallback() {
+        enableInstance();
+        when(mailConfigMapper.findByWorkspace(7)).thenReturn(null);
+        assertNull(resolver.resolveWorkspaceOnly(7));
+    }
+
+    @Test
+    void resolveWorkspaceOnly_disabledRow_returnsNull() {
+        enableInstance();
+        WorkspaceMailConfig ws = new WorkspaceMailConfig();
+        ws.setEnabled(false);
+        ws.setHost("smtp.workspace.test");
+        when(mailConfigMapper.findByWorkspace(7)).thenReturn(ws);
+        assertNull(resolver.resolveWorkspaceOnly(7));
+    }
 }

@@ -1,7 +1,11 @@
 package ooo.klae.connex.backend.services;
 
+import java.net.InetAddress;
+import java.net.UnknownHostException;
 import java.util.Map;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 import lombok.RequiredArgsConstructor;
@@ -13,6 +17,7 @@ import ooo.klae.connex.backend.dto.MailTestResult;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.mail.EmailTemplateRenderer;
 import ooo.klae.connex.backend.mail.MailMessage;
+import ooo.klae.connex.backend.mail.MailProperties;
 import ooo.klae.connex.backend.mail.MailService;
 import ooo.klae.connex.backend.mail.ResolvedMailConfig;
 import ooo.klae.connex.backend.mail.MailConfigResolver;
@@ -31,6 +36,8 @@ import ooo.klae.connex.backend.tenant.Permission;
 @RequiredArgsConstructor
 public class WorkspaceMailConfigService {
 
+    private static final Logger log = LoggerFactory.getLogger(WorkspaceMailConfigService.class);
+
     private final MailConfigMapper mailConfigMapper;
     private final WorkspaceService workspaceService;
     private final AuditService auditService;
@@ -39,6 +46,7 @@ public class WorkspaceMailConfigService {
     private final MailService mailService;
     private final EmailTemplateRenderer templateRenderer;
     private final UserMapper userMapper;
+    private final MailProperties mailProperties;
 
     /**
      * Returns the workspace's SMTP config for the settings page (password omitted).
@@ -69,6 +77,7 @@ public class WorkspaceMailConfigService {
             if (isBlank(request.getFromAddress())) {
                 throw new BadRequestException("A from address is required to enable workspace email");
             }
+            validateHost(request.getHost());
         }
 
         WorkspaceMailConfig existing = mailConfigMapper.findByWorkspace(workspaceId);
@@ -118,23 +127,41 @@ public class WorkspaceMailConfigService {
      */
     public MailTestResult sendTest(int workspaceId, int actorId) {
         workspaceService.requirePermission(workspaceId, actorId, Permission.WORKSPACE_SETTINGS);
-        ResolvedMailConfig config = mailConfigResolver.resolveForWorkspace(workspaceId);
-        if (config == null || !config.usable()) {
-            return MailTestResult.failure("No SMTP configuration is enabled for this workspace or instance");
-        }
         User actor = userMapper.getUserById(actorId);
         if (actor == null || isBlank(actor.getEmail())) {
             return MailTestResult.failure("Your account has no email address to send a test to");
         }
         try {
-            String body = templateRenderer.render("test", "en",
-                    Map.of("recipient", actor.getEmail()));
+            ResolvedMailConfig config = mailConfigResolver.resolveWorkspaceOnly(workspaceId);
+            if (config == null || !config.usable()) {
+                return MailTestResult.failure("Save an enabled SMTP configuration for this workspace first");
+            }
+            String body = templateRenderer.render("test", "en", Map.of("recipient", actor.getEmail()));
             mailService.sendNow(config, MailMessage.html(actor.getEmail(), "Connex email test", body));
             auditService.record("workspace.mail_config.test", "workspace", workspaceId, actor.getEmail(),
                     "Sent a test email", null);
             return MailTestResult.ok();
         } catch (Exception e) {
-            return MailTestResult.failure(e.getMessage());
+            log.warn("Test email for workspace {} failed: {}", workspaceId, e.getMessage());
+            return MailTestResult.failure("Could not send the test email. Check the host, port, and credentials.");
+        }
+    }
+
+    private void validateHost(String host) {
+        if (mailProperties.isAllowInternalHosts()) {
+            return;
+        }
+        InetAddress address;
+        try {
+            address = InetAddress.getByName(host.trim());
+        } catch (UnknownHostException e) {
+            throw new BadRequestException("The SMTP host could not be resolved");
+        }
+        if (address.isLoopbackAddress() || address.isAnyLocalAddress()
+                || address.isSiteLocalAddress() || address.isLinkLocalAddress()
+                || address.isMulticastAddress()) {
+            throw new BadRequestException(
+                    "The SMTP host must be a public server; private and loopback addresses are not allowed");
         }
     }
 

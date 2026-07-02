@@ -20,6 +20,7 @@ public class MailConfigDto {
     private boolean ssl;
     private boolean auth;
     private boolean hasPassword;
+    private boolean configured;
     private String updatedAt;
 
     /**
@@ -45,6 +46,7 @@ public class MailConfigDto {
         dto.setSsl(config.isSsl());
         dto.setAuth(config.isAuth());
         dto.setHasPassword(config.getPasswordEnc() != null && !config.getPasswordEnc().isBlank());
+        dto.setConfigured(true);
         dto.setUpdatedAt(config.getUpdatedAt());
         return dto;
     }

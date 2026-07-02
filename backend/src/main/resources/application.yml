@@ -94,6 +94,9 @@ connex:
         # Required once a workspace stores its own password; rotating it invalidates them.
         secret-key: ${CONNEX_MAIL_SECRET_KEY:}
         app-base-url: ${CONNEX_MAIL_APP_BASE_URL:http://localhost:3000}
+        # Allow workspace-supplied SMTP hosts that resolve to private/loopback/link-local
+        # addresses. Off by default (blocks SSRF probing); enable for on-prem internal relays.
+        allow-internal-hosts: ${CONNEX_MAIL_ALLOW_INTERNAL_HOSTS:false}
     password-reset:
         # Forgot-password flow. token-expiry-minutes bounds how long a reset link is
         # valid; email-enabled=false keeps the dev fallback that logs the link instead

@@ -1,5 +1,7 @@
 package ooo.klae.connex.backend.mail;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 import lombok.RequiredArgsConstructor;
@@ -16,6 +18,8 @@ import ooo.klae.connex.backend.mappers.MailConfigMapper;
 @Component
 @RequiredArgsConstructor
 public class MailConfigResolver {
+
+    private static final Logger log = LoggerFactory.getLogger(MailConfigResolver.class);
 
     private final MailProperties properties;
     private final MailConfigMapper mailConfigMapper;
@@ -46,8 +50,27 @@ public class MailConfigResolver {
             if (resolved != null && resolved.usable()) {
                 return resolved;
             }
+            log.warn("Workspace {} has SMTP enabled but its config is unusable; "
+                    + "falling back to the instance default sender", workspaceId);
         }
         return resolveInstance();
+    }
+
+    /**
+     * The workspace's own sender only, with no instance fallback. Used by the test-send
+     * action so it validates exactly what the workspace has configured.
+     * @param workspaceId the workspace
+     * @return the workspace's resolved config, or null when it has none enabled/usable
+     */
+    public ResolvedMailConfig resolveWorkspaceOnly(int workspaceId) {
+        WorkspaceMailConfig ws = mailConfigMapper.findByWorkspace(workspaceId);
+        if (ws != null && ws.isEnabled()) {
+            ResolvedMailConfig resolved = fromWorkspace(ws);
+            if (resolved != null && resolved.usable()) {
+                return resolved;
+            }
+        }
+        return null;
     }
 
     private ResolvedMailConfig fromProperties() {

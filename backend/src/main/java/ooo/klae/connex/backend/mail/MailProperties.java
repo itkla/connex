@@ -46,4 +46,12 @@ public class MailProperties {
 
     /** Frontend origin used to build workspace invite links (never derived from a request header). */
     private String appBaseUrl = "http://localhost:3000";
+
+    /**
+     * Whether workspace-supplied SMTP hosts may resolve to private, loopback, or
+     * link-local addresses. False (default) blocks them to prevent a workspace admin
+     * from using the mail config as an SSRF probe of the internal network; enable only
+     * for on-prem deployments that intentionally relay through an internal host.
+     */
+    private boolean allowInternalHosts = false;
 }

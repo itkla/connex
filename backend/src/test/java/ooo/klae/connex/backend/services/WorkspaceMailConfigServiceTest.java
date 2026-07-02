@@ -6,21 +6,25 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.beans.WorkspaceMailConfig;
 import ooo.klae.connex.backend.dto.MailConfigRequest;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.mail.EmailTemplateRenderer;
 import ooo.klae.connex.backend.mail.MailConfigResolver;
+import ooo.klae.connex.backend.mail.MailProperties;
 import ooo.klae.connex.backend.mail.MailService;
 import ooo.klae.connex.backend.mail.SecretCipher;
 import ooo.klae.connex.backend.mappers.MailConfigMapper;
@@ -29,7 +33,8 @@ import ooo.klae.connex.backend.tenant.Permission;
 
 /**
  * Verifies workspace SMTP config management: permission gating, password
- * encryption at rest, blank-password preservation, and enable-time validation.
+ * encryption at rest, blank-password preservation, enable-time validation, and
+ * the SSRF host guard.
  */
 @ExtendWith(MockitoExtension.class)
 class WorkspaceMailConfigServiceTest {
@@ -43,9 +48,16 @@ class WorkspaceMailConfigServiceTest {
     @Mock private EmailTemplateRenderer templateRenderer;
     @Mock private UserMapper userMapper;
 
+    private final MailProperties mailProperties = new MailProperties();
+
+    @BeforeEach
+    void allowInternalHostsByDefault() {
+        mailProperties.setAllowInternalHosts(true);
+    }
+
     private WorkspaceMailConfigService service() {
         return new WorkspaceMailConfigService(mailConfigMapper, workspaceService, auditService,
-                secretCipher, mailConfigResolver, mailService, templateRenderer, userMapper);
+                secretCipher, mailConfigResolver, mailService, templateRenderer, userMapper, mailProperties);
     }
 
     private MailConfigRequest enabledRequest() {
@@ -115,8 +127,45 @@ class WorkspaceMailConfigServiceTest {
     }
 
     @Test
-    void sendTest_noConfig_returnsFailure() {
-        when(mailConfigResolver.resolveForWorkspace(3)).thenReturn(null);
+    void saveConfig_loopbackHost_rejectedWhenInternalHostsBlocked() {
+        mailProperties.setAllowInternalHosts(false);
+        MailConfigRequest req = enabledRequest();
+        req.setHost("127.0.0.1");
+        assertThrows(BadRequestException.class, () -> service().saveConfig(3, 9, req));
+        verify(mailConfigMapper, never()).upsert(any());
+    }
+
+    @Test
+    void saveConfig_privateHost_rejectedWhenInternalHostsBlocked() {
+        mailProperties.setAllowInternalHosts(false);
+        MailConfigRequest req = enabledRequest();
+        req.setHost("10.0.0.5");
+        assertThrows(BadRequestException.class, () -> service().saveConfig(3, 9, req));
+    }
+
+    @Test
+    void saveConfig_linkLocalMetadataHost_rejectedWhenInternalHostsBlocked() {
+        mailProperties.setAllowInternalHosts(false);
+        MailConfigRequest req = enabledRequest();
+        req.setHost("169.254.169.254");
+        assertThrows(BadRequestException.class, () -> service().saveConfig(3, 9, req));
+    }
+
+    @Test
+    void saveConfig_publicHost_allowedWhenInternalHostsBlocked() {
+        mailProperties.setAllowInternalHosts(false);
+        MailConfigRequest req = enabledRequest();
+        req.setHost("8.8.8.8");
+        service().saveConfig(3, 9, req);
+        verify(mailConfigMapper).upsert(any());
+    }
+
+    @Test
+    void sendTest_noWorkspaceConfig_returnsFailure() {
+        User actor = new User();
+        actor.setEmail("owner@test");
+        when(userMapper.getUserById(9)).thenReturn(actor);
+        when(mailConfigResolver.resolveWorkspaceOnly(3)).thenReturn(null);
         assertFalse(service().sendTest(3, 9).success());
     }
 
