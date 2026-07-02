@@ -22,8 +22,10 @@ import {
     UserPlusIcon,
     UserMinusIcon,
     TagIcon,
+    ArrowPathIcon,
 } from "@heroicons/react/20/solid";
 import { Badge } from "@/components/ui/badge";
+import { getAuditLogs } from "@/app/lib/api";
 import Rise from "@/app/components/motion/Rise";
 import {
     SearchField,
@@ -125,10 +127,41 @@ function isFailed(e: AuditLogEntry): boolean {
     return e.outcome != null && e.outcome !== "success";
 }
 
-export default function AuditLogBrowser({ entries }: { entries: AuditLogEntry[] }) {
+export default function AuditLogBrowser({
+    initialEntries,
+    pageSize,
+}: {
+    initialEntries: AuditLogEntry[];
+    pageSize: number;
+}) {
     const t = useTranslations("AdminAuditLog");
     const locale = useLocale();
     const reduce = useReducedMotion() ?? false;
+
+    const [entries, setEntries] = useState<AuditLogEntry[]>(initialEntries);
+    const [hasMore, setHasMore] = useState<boolean>(initialEntries.length >= pageSize);
+    const [loadingMore, setLoadingMore] = useState(false);
+    const [loadError, setLoadError] = useState(false);
+
+    async function loadMore() {
+        if (loadingMore || !hasMore) return;
+        setLoadingMore(true);
+        setLoadError(false);
+        try {
+            const batch = await getAuditLogs({ limit: pageSize, offset: entries.length });
+            setEntries((prev) => {
+                const seen = new Set(prev.map((e) => e.id));
+                const merged = [...prev];
+                for (const e of batch) if (!seen.has(e.id)) merged.push(e);
+                return merged;
+            });
+            setHasMore(batch.length >= pageSize);
+        } catch {
+            setLoadError(true);
+        } finally {
+            setLoadingMore(false);
+        }
+    }
 
     const [filters, setFilters] = useState<Filters>({
         query: "",
@@ -549,13 +582,21 @@ export default function AuditLogBrowser({ entries }: { entries: AuditLogEntry[] 
                     </div>
 
                     {filtered.length === 0 ? (
-                        <EmptyState
-                            title={t("noMatchesTitle")}
-                            body={t("noMatchesBody")}
-                            muted
-                            actionLabel={t("clearAll")}
-                            onAction={clearAll}
-                        />
+                        hasActiveFilters && hasMore ? (
+                            <EmptyState
+                                title={t("noMatchesTitle")}
+                                body={t("noMatchesMoreBody", { loaded: entries.length })}
+                                muted
+                            />
+                        ) : (
+                            <EmptyState
+                                title={t("noMatchesTitle")}
+                                body={t("noMatchesBody")}
+                                muted
+                                actionLabel={t("clearAll")}
+                                onAction={clearAll}
+                            />
+                        )
                     ) : (
                         <ul className="relative">
                             <AnimatePresence initial={false} mode="popLayout">
@@ -588,9 +629,60 @@ export default function AuditLogBrowser({ entries }: { entries: AuditLogEntry[] 
                             </AnimatePresence>
                         </ul>
                     )}
+
+                    {hasMore && (
+                        <LoadMore
+                            loading={loadingMore}
+                            error={loadError}
+                            onLoad={loadMore}
+                            t={t}
+                        />
+                    )}
                     </Rise>
                 )}
             </div>
+        </div>
+    );
+}
+
+function LoadMore({
+    loading,
+    error,
+    onLoad,
+    t,
+}: {
+    loading: boolean;
+    error: boolean;
+    onLoad: () => void;
+    t: Translator;
+}) {
+    const label = loading ? t("loadMoreLoading") : error ? t("loadMoreRetry") : t("loadMore");
+    return (
+        <div className="flex flex-col items-center gap-2 pt-2">
+            <p role="status" aria-live="polite" className="sr-only">
+                {loading ? t("loadMoreLoading") : ""}
+            </p>
+            {error && (
+                <p role="alert" className="text-xs text-destructive">
+                    {t("loadMoreError")}
+                </p>
+            )}
+            <button
+                type="button"
+                onClick={onLoad}
+                disabled={loading}
+                aria-busy={loading}
+                className="inline-flex h-9 items-center gap-2 rounded-full bg-muted px-4 text-sm font-medium text-foreground ring-1 ring-border outline-none transition duration-150 ease-out hover:bg-accent active:scale-[0.97] focus-visible:ring-2 focus-visible:ring-brand/40 disabled:cursor-not-allowed disabled:opacity-70 disabled:active:scale-100"
+            >
+                {loading || error ? (
+                    <ArrowPathIcon
+                        className={cn("size-4 text-muted-foreground", loading && "motion-safe:animate-spin [animation-duration:0.6s]")}
+                    />
+                ) : (
+                    <ArrowDownIcon className="size-4 text-muted-foreground" />
+                )}
+                {label}
+            </button>
         </div>
     );
 }

@@ -1115,6 +1115,7 @@ export type AuditLogParams = PageParams & {
     entityType?: string;
     entityId?: number;
     limit?: number;
+    offset?: number;
 };
 
 export type MailConfig = {

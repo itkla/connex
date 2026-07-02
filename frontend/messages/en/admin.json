@@ -61,12 +61,17 @@
     "resultCount": "{shown} of {total} events",
     "noMatchesTitle": "No matching events",
     "noMatchesBody": "Try removing a filter or widening your date range.",
+    "noMatchesMoreBody": "Nothing in the {loaded} events loaded so far matches. Load more to keep searching, or adjust your filters.",
     "searchAria": "Search audit log",
     "clearSearchAria": "Clear search",
     "filtersAria": "Filter events",
     "sortAria": "Sort order",
     "chipSearch": "Search: \"{query}\"",
     "lastEventNever": "never",
-    "failedOnly": "Failed only"
+    "failedOnly": "Failed only",
+    "loadMore": "Load more",
+    "loadMoreLoading": "Loading…",
+    "loadMoreRetry": "Try again",
+    "loadMoreError": "Couldn't load more events."
   }
 }
