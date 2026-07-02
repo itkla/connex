@@ -68,8 +68,8 @@ export default function RecordsActions({
                 <ButtonGroupSeparator className="bg-white/20" />
                 <DropdownMenu>
                     <DropdownMenuTrigger asChild>
-                        <Button size="icon" className="bg-brand text-white hover:bg-brand-hover" aria-label={t('moreActions')}>
-                            <ChevronDownIcon className="size-3.5 transition-transform duration-200 ease-out group-data-[state=open]/button:rotate-180 motion-reduce:transition-none" />
+                        <Button size="icon" className="border-r-0 bg-brand text-white hover:bg-brand-hover data-[state=open]:bg-brand-hover data-[state=open]:[&>svg]:rotate-180" aria-label={t('moreActions')}>
+                            <ChevronDownIcon className="size-3.5 transition-transform duration-200 ease-out motion-reduce:transition-none" />
                         </Button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end" className="w-44">
