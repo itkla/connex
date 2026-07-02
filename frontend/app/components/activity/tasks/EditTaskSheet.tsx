@@ -21,7 +21,7 @@ import {
 } from '@/components/ui/sheet';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
-import { Textarea } from '@/components/ui/textarea';
+import MentionEditor from '@/app/components/activity/notes/MentionEditor';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import RecordSelect from '@/app/components/records/RecordSelect';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -137,12 +137,12 @@ export default function EditTaskSheet({
                     <div className="grid gap-4 pt-6">
                         <div className="grid gap-1.5">
                             <Label htmlFor="task-description">{t('descriptionLabel')}</Label>
-                            <Textarea
+                            <MentionEditor
                                 id="task-description"
                                 value={draft.description}
-                                onChange={(e) => setDraft((d) => ({ ...d, description: e.target.value }))}
-                                required
+                                onChange={(next) => setDraft((d) => ({ ...d, description: next }))}
                                 autoFocus
+                                className="min-h-[6rem] rounded-lg bg-muted px-3 py-2 text-sm ring-1 ring-border focus:ring-2 focus:ring-brand"
                             />
                         </div>
 

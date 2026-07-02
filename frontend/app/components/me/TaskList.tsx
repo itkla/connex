@@ -4,6 +4,7 @@ import { getLocale, getTranslations } from "next-intl/server";
 
 import { type Task } from "@/app/lib/types";
 import EmptyState from "./EmptyState";
+import NoteContent from "@/app/components/activity/notes/NoteContent";
 import { timeOf, formatShortDate } from "@/app/lib/utils";
 
 export default async function TaskList({ tasks }: { tasks: Task[] }) {
@@ -37,7 +38,7 @@ export default async function TaskList({ tasks }: { tasks: Task[] }) {
                     <span
                         className={`text-sm ${task.completed ? 'text-muted-foreground line-through' : 'text-foreground'}`}
                     >
-                        {task.description}
+                        <NoteContent content={task.description} references={task.references} />
                     </span>
                     {task.dueDate ? (
                         <span className="shrink-0 text-xs text-muted-foreground">

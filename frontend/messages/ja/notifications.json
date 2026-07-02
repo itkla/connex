@@ -33,6 +33,8 @@
     "workspaceJoinBody": "{workspace} に招待されました。設定で承認すると参加できます。",
     "noteMentionTitle": "新しいメンション",
     "noteMentionBody": "{actor} さんがノートであなたにメンションしました。",
+    "taskMentionTitle": "新しいメンション",
+    "taskMentionBody": "{actor} さんがタスクであなたにメンションしました。",
     "taskDueTitle": "期限が近いタスク",
     "taskDueBody": "{task} の期限は {date} です。",
     "taskOverdueTitle": "期限切れのタスク",

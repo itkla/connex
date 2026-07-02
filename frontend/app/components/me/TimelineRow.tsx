@@ -100,7 +100,7 @@ export default function TimelineRow({
         const { task } = entry;
         title = (
             <p className={`text-sm ${task.completed ? 'text-muted-foreground line-through' : 'text-foreground'}`}>
-                {task.description}
+                <NoteContent content={task.description} references={task.references} />
             </p>
         );
         if (task.completed) {

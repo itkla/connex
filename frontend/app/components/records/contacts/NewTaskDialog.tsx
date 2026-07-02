@@ -19,7 +19,7 @@ import {
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
-import { Textarea } from '@/components/ui/textarea';
+import MentionEditor from '@/app/components/activity/notes/MentionEditor';
 
 import { ApiError, addDealPerson, createTask, getCompanyDeals, getUsers } from '@/app/lib/api';
 import { toastError, toastSuccess } from '@/app/lib/toast';
@@ -61,8 +61,9 @@ export default function NewTaskDialog({
     const [assignedToId, setAssignedToId] = useState(currentUserId);
     const [dealId, setDealId] = useState('none');
     const [deals, setDeals] = useState<Deal[]>([]);
-    const [loadingDeals, setLoadingDeals] = useState(false);
+    const [dealsLoaded, setDealsLoaded] = useState(false);
     const [succeeded, setSucceeded] = useState(false);
+    const loadingDeals = open && Boolean(companyId) && !dealsLoaded;
     const reset = () => {
         setDescription('');
         setDueDate('');
@@ -102,37 +103,24 @@ export default function NewTaskDialog({
         }
     }
 
-    async function getOrgUsers() {
-        const users = await getUsers();
-        setUsers(users);
-    }
-
-    // load the deals for the company associated with the contact
-    async function loadCompanyDeals() {
-        if (!companyId) {
-            setDeals([]);
-            return;
-        }
-        setLoadingDeals(true);
-        try {
-            const companyDeals = await getCompanyDeals(companyId);
-            setDeals(companyDeals);
-        } catch (err) {
-            const message = err instanceof ApiError ? err.message : err instanceof Error ? err.message : t('toastFailedLoadDeals');
-            toastError(message);
-            setDeals([]);
-        } finally {
-            setLoadingDeals(false);
-        }
-    }
-
     useEffect(() => {
-        getOrgUsers();
+        getUsers().then(setUsers).catch(() => setUsers([]));
     }, []);
 
     useEffect(() => {
-        if (open) loadCompanyDeals();
-    }, [open, companyId]);
+        if (!open || !companyId) return;
+        getCompanyDeals(companyId)
+            .then((companyDeals) => {
+                setDeals(companyDeals);
+                setDealsLoaded(true);
+            })
+            .catch((err) => {
+                const message = err instanceof ApiError ? err.message : err instanceof Error ? err.message : t('toastFailedLoadDeals');
+                toastError(message);
+                setDeals([]);
+                setDealsLoaded(true);
+            });
+    }, [open, companyId, t]);
 
     const status = resolveDialogStatus({ isLoading: submitting, isSuccess: succeeded });
 
@@ -226,14 +214,13 @@ export default function NewTaskDialog({
                         <Label htmlFor="task-description">{t('descriptionField')}</Label>
                         <div className="group relative">
                             <Bars3BottomLeftIcon className="pointer-events-none absolute left-3 top-3 size-4 text-muted-foreground transition-colors group-focus-within:text-brand" />
-                            <Textarea
+                            <MentionEditor
                                 id="task-description"
                                 value={description}
-                                onChange={(e) => setDescription(e.target.value)}
+                                onChange={setDescription}
                                 placeholder={t('descriptionPlaceholder')}
-                                required
                                 autoFocus
-                                className={cn(fieldInputClass, 'min-h-24 pl-9 pr-3')}
+                                className={cn(fieldInputClass, 'min-h-24 pl-9 pr-3 py-2')}
                             />
                         </div>
                     </div>

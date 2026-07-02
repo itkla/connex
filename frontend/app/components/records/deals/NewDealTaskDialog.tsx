@@ -17,7 +17,7 @@ import {
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
-import { Textarea } from '@/components/ui/textarea';
+import MentionEditor from '@/app/components/activity/notes/MentionEditor';
 import { DialogStatusCover, resolveDialogStatus, fieldInputClass, fieldLeadIconClass } from '@/components/ui/dialog-status-cover';
 import RecordSelect from '@/app/components/records/RecordSelect';
 import { UserCircleIcon, UserIcon, Bars3BottomLeftIcon, CalendarIcon } from '@heroicons/react/24/outline';
@@ -177,14 +177,13 @@ export default function NewDealTaskDialog({
                         <Label htmlFor="deal-task-description">{t('descriptionLabel')}</Label>
                         <div className="group relative">
                             <Bars3BottomLeftIcon className="pointer-events-none absolute left-3 top-3 size-4 text-muted-foreground transition-colors group-focus-within:text-brand" />
-                            <Textarea
+                            <MentionEditor
                                 id="deal-task-description"
                                 value={description}
-                                onChange={(e) => setDescription(e.target.value)}
+                                onChange={setDescription}
                                 placeholder={t('descriptionPlaceholder')}
-                                required
                                 autoFocus
-                                className={cn(fieldInputClass, 'min-h-24 pl-9 pr-3')}
+                                className={cn(fieldInputClass, 'min-h-24 pl-9 pr-3 py-2')}
                             />
                         </div>
                     </div>

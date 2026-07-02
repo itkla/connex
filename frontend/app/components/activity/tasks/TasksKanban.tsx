@@ -8,8 +8,10 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { cn } from '@/lib/utils';
 import KanbanBoard, { type KanbanColumnDef } from '@/app/components/kanban/KanbanBoard';
 import { kanbanAccessibility } from '@/app/components/kanban/kanbanAccessibility';
+import NoteContent from '@/app/components/activity/notes/NoteContent';
 import { DUE_CHIP, formatDue } from '@/app/components/activity/tasks/taskDue';
 import { moveTask } from '@/app/lib/api';
+import { noteContentToPlainText } from '@/app/lib/references';
 import { toastError } from '@/app/lib/toast';
 import type { Contact, Deal, Task, TaskStatus, User } from '@/app/lib/types';
 
@@ -67,7 +69,7 @@ export default function TasksKanban({
                     )}
                 >
                     <p className={cn('text-sm font-medium leading-snug text-foreground line-clamp-3', task.status === 'done' && 'text-muted-foreground line-through')}>
-                        {task.description}
+                        <NoteContent content={task.description} references={task.references} />
                     </p>
                     {(person || deal) && (
                         <div className="flex flex-wrap items-center gap-1.5">
@@ -124,7 +126,7 @@ export default function TasksKanban({
         [onMoved, t],
     );
 
-    const taskName = useCallback((id: UniqueIdentifier) => tasksById.get(Number(id))?.description ?? '', [tasksById]);
+    const taskName = useCallback((id: UniqueIdentifier) => noteContentToPlainText(tasksById.get(Number(id))?.description ?? ''), [tasksById]);
     const columnName = useCallback(
         (id: UniqueIdentifier) => {
             const s = String(id);

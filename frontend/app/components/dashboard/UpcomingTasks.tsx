@@ -5,7 +5,9 @@ import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 
 import { Checkbox } from '@/components/ui/checkbox';
+import NoteContent from '@/app/components/activity/notes/NoteContent';
 import { updateTask } from '@/app/lib/api';
+import { noteContentToPlainText } from '@/app/lib/references';
 import { toastError, toastSuccess } from '@/app/lib/toast';
 import { formatShortDate, startOfLocalDay, timeOf } from '@/app/lib/utils';
 import { type Task } from '@/app/lib/types';
@@ -70,11 +72,11 @@ export default function UpcomingTasks({ tasks, locale }: { tasks: Task[]; locale
                         <Checkbox
                             checked={false}
                             onCheckedChange={() => complete(task)}
-                            aria-label={t('completeAria', { description: task.description })}
+                            aria-label={t('completeAria', { description: noteContentToPlainText(task.description) })}
                             className="size-4 shrink-0 cursor-pointer"
                         />
                         <span className="line-clamp-1 flex-1 text-sm text-foreground">
-                            {task.description}
+                            <NoteContent content={task.description} references={task.references} />
                         </span>
                         {task.dueDate ? (
                             <span

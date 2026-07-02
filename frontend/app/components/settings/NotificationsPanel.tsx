@@ -26,6 +26,7 @@ const TYPES = [
         descriptionKey: "relationshipDescription",
     },
     { type: "note.mention", icon: AtSymbolIcon, titleKey: "mentionTitle", descriptionKey: "mentionDescription" },
+    { type: "task.mention", icon: AtSymbolIcon, titleKey: "taskMentionTitle", descriptionKey: "taskMentionDescription" },
 ] as const;
 
 type Channels = { inApp: boolean; email: boolean };

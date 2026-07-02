@@ -100,6 +100,12 @@ export function notificationContent(notification: Notification, t: Translator, l
             body: t("noteMentionBody", { actor: notification.actorLabel ?? "" }),
         };
     }
+    if (notification.type === "task.mention") {
+        return {
+            title: t("taskMentionTitle"),
+            body: t("taskMentionBody", { actor: notification.actorLabel ?? "" }),
+        };
+    }
     return { title: notification.title, body: notification.body ?? "" };
 }
 
@@ -109,6 +115,7 @@ export function safeNotificationUrl(value?: string | null) {
 
 /** Leading icon for a notification, mirroring the sidebar's entity icons. */
 export function notificationIcon(notification: Notification) {
+    if (notification.type === "task.mention") return AtSymbolIcon;
     if (notification.type.startsWith("task.")) return CheckCircleIcon;
     if (notification.type.startsWith("deal.")) return BriefcaseIcon;
     if (notification.type === "relationship.intro_opportunity") return ArrowsRightLeftIcon;

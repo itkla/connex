@@ -405,6 +405,8 @@ export type Task = {
     workspaceId?: number;
     createdAt: string;
     updatedAt: string;
+    /** Server-resolved @/# references parsed from `description`; read-only, drives chip rendering. */
+    references?: NoteReference[];
 };
 
 export type Activity = {
