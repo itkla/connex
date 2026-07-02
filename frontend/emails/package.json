@@ -1,0 +1,21 @@
+{
+  "name": "connex-emails",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "description": "React Email authoring workspace for Connex transactional emails. Renders to backend/src/main/resources/templates/emails/*.html.",
+  "scripts": {
+    "dev": "email dev --dir ./templates",
+    "render": "tsx render.tsx"
+  },
+  "dependencies": {
+    "@react-email/components": "^1.0.12",
+    "@react-email/render": "^2.0.9",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7"
+  },
+  "devDependencies": {
+    "tsx": "^4.22.4",
+    "typescript": "^6.0.3"
+  }
+}
