@@ -49,6 +49,9 @@ public class CustomFieldDefinitionDto {
     @Pattern(regexp = "^(text|textarea|number|date|boolean|select|url)$", message = "unsupported field type")
     private String fieldType;
 
+    @Pattern(regexp = "^(standard|sensitive|special_care)$", message = "must be standard, sensitive, or special_care")
+    private String dataClassification;
+
     @Valid
     private List<CustomFieldOption> options;
 
@@ -74,6 +77,7 @@ public class CustomFieldDefinitionDto {
         dto.fieldKey = d.getFieldKey();
         dto.label = d.getLabel();
         dto.fieldType = d.getFieldType();
+        dto.dataClassification = d.getDataClassification();
         dto.required = d.isRequired();
         dto.position = d.getPosition();
         dto.archived = d.isArchived();
@@ -89,6 +93,7 @@ public class CustomFieldDefinitionDto {
         d.setFieldKey(fieldKey);
         d.setLabel(label);
         d.setFieldType(fieldType);
+        d.setDataClassification(dataClassification);
         d.setRequired(required != null && required);
         d.setPosition(position != null ? position : 0);
         d.setArchived(archived != null && archived);

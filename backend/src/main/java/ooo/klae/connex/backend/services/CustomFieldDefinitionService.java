@@ -27,7 +27,8 @@ import ooo.klae.connex.backend.tenant.RequirePermission;
  * requires {@code CUSTOM_FIELD_MANAGE}; member-facing field rendering reads
  * definitions through the record (entity) endpoints, not this catalog.
  * {@code entityType}, {@code fieldKey}, and {@code fieldType} are fixed at
- * creation; label, options, required, position, and archived are editable.
+ * creation; label, data classification, options, required, position, and
+ * archived are editable.
  * Delegates persistence to {@code CustomFieldDefinitionMapper}.
  */
 @Service
@@ -43,8 +44,11 @@ public class CustomFieldDefinitionService {
     private static final Set<String> ENTITY_TYPES = Set.of("company", "person", "deal");
     private static final Set<String> FIELD_TYPES =
         Set.of("text", "textarea", "number", "date", "boolean", "select", "url");
+    private static final Set<String> DATA_CLASSIFICATIONS = Set.of("standard", "sensitive", "special_care");
+    private static final String DEFAULT_CLASSIFICATION = "standard";
     private static final Set<String> AUDIT_FIELDS =
-        Set.of("entityType", "fieldKey", "label", "fieldType", "optionsJson", "required", "position", "archived");
+        Set.of("entityType", "fieldKey", "label", "fieldType", "dataClassification", "optionsJson",
+            "required", "position", "archived");
 
     /**
      * All field definitions in the active workspace, across entity types.
@@ -93,7 +97,10 @@ public class CustomFieldDefinitionService {
     /**
      * Updates a field's editable attributes. {@code entityType}, {@code fieldKey},
      * and {@code fieldType} are immutable — preserved from the stored record so a
-     * structural change can never orphan existing values.
+     * structural change can never orphan existing values. {@code dataClassification}
+     * is editable, but an omitted (null/blank) value preserves the stored one rather
+     * than resetting it, so a partial update can never silently downgrade a
+     * special-care marking.
      */
     @RequirePermission(Permission.CUSTOM_FIELD_MANAGE)
     public CustomFieldDefinition update(int id, CustomFieldDefinition def, List<CustomFieldOption> options) {
@@ -105,6 +112,9 @@ public class CustomFieldDefinitionService {
         def.setEntityType(before.getEntityType());
         def.setFieldKey(before.getFieldKey());
         def.setFieldType(before.getFieldType());
+        if (def.getDataClassification() == null || def.getDataClassification().isBlank()) {
+            def.setDataClassification(before.getDataClassification());
+        }
         validateShape(def, options);
         def.setOptionsJson(serializeOptions(def.getFieldType(), options));
         definitionMapper.update(def);
@@ -154,6 +164,11 @@ public class CustomFieldDefinitionService {
         }
         if (!FIELD_TYPES.contains(def.getFieldType())) {
             throw new BadRequestException("Unsupported field type: " + def.getFieldType());
+        }
+        if (def.getDataClassification() == null || def.getDataClassification().isBlank()) {
+            def.setDataClassification(DEFAULT_CLASSIFICATION);
+        } else if (!DATA_CLASSIFICATIONS.contains(def.getDataClassification())) {
+            throw new BadRequestException("Unsupported data classification: " + def.getDataClassification());
         }
         if ("select".equals(def.getFieldType())) {
             if (options == null || options.isEmpty()) {

@@ -295,9 +295,23 @@
       "optionsRequired": "選択肢を1つ以上追加してください。",
       "optionsDuplicate": "選択肢のラベルは重複できません。",
       "nameRequired": "フィールド名を入力してください",
+      "classificationLabel": "データ分類",
+      "classificationHint": "機微な個人情報を含むフィールドを分類します。",
+      "classificationSpecialCareHint": "要配慮個人情報は、個人情報保護法上、ご本人の同意を得た場合に限り取得できます。",
+      "classificationStandard": "標準",
+      "classificationSensitive": "機微",
+      "classificationSpecialCare": "要配慮個人情報",
+      "specialCareConfirmTitle": "要配慮個人情報として設定しますか？",
+      "specialCareConfirmBody": "「{field}」は要配慮個人情報として取り扱われます。個人情報保護法に従い、ご本人の同意を得た場合に限り取得してください。",
+      "specialCareConfirm": "要配慮として設定",
       "cancel": "キャンセル",
       "create": "フィールドを作成",
       "save": "保存"
+    },
+    "classificationBadge": {
+      "standard": "標準",
+      "sensitive": "機微",
+      "special_care": "要配慮"
     }
   },
   "WorkspaceMembership": {

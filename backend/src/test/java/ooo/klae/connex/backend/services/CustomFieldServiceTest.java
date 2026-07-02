@@ -145,6 +145,70 @@ class CustomFieldServiceTest extends AbstractServiceTest {
     }
 
     @Test
+    void create_defaultsClassificationToStandard() {
+        CustomFieldDefinition created = service.create(def("person", "text", "hobby"), null);
+
+        assertEquals("standard", service.getById(created.getId()).getDataClassification());
+    }
+
+    @Test
+    void create_acceptsSpecialCareClassification() {
+        CustomFieldDefinition def = def("person", "text", "health_note");
+        def.setDataClassification("special_care");
+
+        CustomFieldDefinition created = service.create(def, null);
+
+        assertEquals("special_care", service.getById(created.getId()).getDataClassification());
+    }
+
+    @Test
+    void create_unsupportedClassification_throws() {
+        CustomFieldDefinition def = def("person", "text", "bogus");
+        def.setDataClassification("top_secret");
+
+        assertThrows(BadRequestException.class, () -> service.create(def, null));
+    }
+
+    @Test
+    void update_canReclassifyExistingField() {
+        CustomFieldDefinition created = service.create(def("person", "text", "notes_field"), null);
+        CustomFieldDefinition edit = def("person", "text", "notes_field");
+        edit.setDataClassification("special_care");
+
+        CustomFieldDefinition updated = service.update(created.getId(), edit, null);
+
+        assertEquals("special_care", updated.getDataClassification());
+        assertEquals("special_care", service.getById(created.getId()).getDataClassification());
+    }
+
+    @Test
+    void update_omittingClassification_preservesSpecialCare() {
+        CustomFieldDefinition def = def("person", "text", "diagnosis");
+        def.setDataClassification("special_care");
+        CustomFieldDefinition created = service.create(def, null);
+
+        CustomFieldDefinition edit = def("person", "text", "diagnosis");
+        edit.setLabel("Diagnosis notes");
+
+        service.update(created.getId(), edit, null);
+
+        assertEquals("special_care", service.getById(created.getId()).getDataClassification());
+    }
+
+    @Test
+    void update_explicitStandard_downgradesFromSpecialCare() {
+        CustomFieldDefinition def = def("person", "text", "sensitive_note");
+        def.setDataClassification("special_care");
+        CustomFieldDefinition created = service.create(def, null);
+
+        CustomFieldDefinition edit = def("person", "text", "sensitive_note");
+        edit.setDataClassification("standard");
+        service.update(created.getId(), edit, null);
+
+        assertEquals("standard", service.getById(created.getId()).getDataClassification());
+    }
+
+    @Test
     void manage_asMember_isForbidden() {
         User member = newUser();
         SecurityContextHolder.getContext().setAuthentication(

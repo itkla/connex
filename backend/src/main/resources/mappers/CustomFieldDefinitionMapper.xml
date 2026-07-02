@@ -4,7 +4,7 @@
 <mapper namespace="ooo.klae.connex.backend.mappers.CustomFieldDefinitionMapper">
 
   <sql id="columns">
-    id, workspace_id, entity_type, field_key, label, field_type, options_json,
+    id, workspace_id, entity_type, field_key, label, field_type, data_classification, options_json,
     required, position, archived, created_at, updated_at
   </sql>
 
@@ -38,15 +38,15 @@
 
   <insert id="insert" useGeneratedKeys="true" keyProperty="id">
     INSERT INTO custom_field_definition
-      (workspace_id, entity_type, field_key, label, field_type, options_json, required, position, archived)
+      (workspace_id, entity_type, field_key, label, field_type, data_classification, options_json, required, position, archived)
     VALUES
-      (#{workspaceId}, #{entityType}, #{fieldKey}, #{label}, #{fieldType}, #{optionsJson}, #{required}, #{position}, #{archived})
+      (#{workspaceId}, #{entityType}, #{fieldKey}, #{label}, #{fieldType}, COALESCE(#{dataClassification}, 'standard'), #{optionsJson}, #{required}, #{position}, #{archived})
   </insert>
 
   <update id="update">
     UPDATE custom_field_definition
-    SET label = #{label}, field_type = #{fieldType}, options_json = #{optionsJson},
-        required = #{required}, position = #{position}, archived = #{archived}
+    SET label = #{label}, field_type = #{fieldType}, data_classification = COALESCE(#{dataClassification}, 'standard'),
+        options_json = #{optionsJson}, required = #{required}, position = #{position}, archived = #{archived}
     WHERE workspace_id = #{workspaceId} AND id = #{id}
   </update>
 
