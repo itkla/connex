@@ -222,6 +222,11 @@
     WHERE workspace_id = #{workspaceId} AND id = #{id}
   </update>
 
+  <update id="updateExpectedCloseDate">
+    UPDATE deal SET expected_close_date = #{expectedCloseDate}
+    WHERE workspace_id = #{workspaceId} AND id = #{id}
+  </update>
+
   <delete id="delete">
     DELETE FROM deal WHERE workspace_id = #{workspaceId} AND id = #{id}
   </delete>

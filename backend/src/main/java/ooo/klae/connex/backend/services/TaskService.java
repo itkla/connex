@@ -1,5 +1,7 @@
 package ooo.klae.connex.backend.services;
 
+import java.time.LocalDate;
+import java.time.format.DateTimeParseException;
 import java.util.List;
 import java.util.Set;
 
@@ -197,6 +199,35 @@ public class TaskService {
             auditService.diff(before, moved, AUDIT_FIELDS));
         notificationChanges.publish(workspaceId, "task", id);
         return moved;
+    }
+
+    /**
+     * Changes only a task's due date, leaving description, assignee, status, position and links
+     * untouched. Unlike {@link #update(int, Task)} this cannot clobber other fields from a stale
+     * client payload — it writes a single column after confirming the task belongs to the caller's
+     * workspace.
+     * @param id the task to reschedule
+     * @param dueDate the target due date as a {@code YYYY-MM-DD} calendar day
+     * @return the rescheduled task
+     */
+    @Transactional
+    @RequirePermission(Permission.TASK_UPDATE)
+    public Task reschedule(int id, String dueDate) {
+        try {
+            LocalDate.parse(dueDate);
+        } catch (DateTimeParseException e) {
+            throw new BadRequestException("Invalid task due date: " + dueDate);
+        }
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        Task before = taskMapper.getTaskById(workspaceId, id);
+        if (before == null) throw new ResourceNotFoundException("Task not found with id: " + id);
+        taskMapper.updateDueDate(workspaceId, id, dueDate);
+        Task after = taskMapper.getTaskById(workspaceId, id);
+        auditService.record("task.update", "task", id, after.getDescription(),
+            "Rescheduled task " + after.getDescription(),
+            auditService.singleChange("dueDate", before.getDueDate(), dueDate));
+        notificationChanges.publish(workspaceId, "task", id);
+        return after;
     }
 
     private void validateReferences(Task task, int workspaceId) {

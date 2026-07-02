@@ -1,8 +1,10 @@
 package ooo.klae.connex.backend.services;
 
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeParseException;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -250,6 +252,36 @@ public class DealService {
         notificationChanges.publish(workspaceId, "deal", id);
         ruleTriggers.publish(workspaceId, "deal", id, stageChanged ? "deal.stage_changed" : "deal.updated");
         return deal;
+    }
+
+    /**
+     * Changes only a deal's expected close date, leaving name, value, pipeline, stage, outcome and
+     * every other field untouched. Unlike {@link #update(int, Deal)} this cannot clobber other
+     * fields — or reopen a concurrently-closed deal — from a stale client payload: it writes a
+     * single column after confirming the deal belongs to the caller's workspace.
+     * @param id the deal to reschedule
+     * @param expectedCloseDate the target expected close date as a {@code YYYY-MM-DD} calendar day
+     * @return the rescheduled deal
+     */
+    @Transactional
+    @RequirePermission(Permission.DEAL_UPDATE)
+    public Deal reschedule(int id, String expectedCloseDate) {
+        try {
+            LocalDate.parse(expectedCloseDate);
+        } catch (DateTimeParseException e) {
+            throw new BadRequestException("Invalid deal expected close date: " + expectedCloseDate);
+        }
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        Deal before = dealMapper.getDealById(workspaceId, id);
+        if (before == null) throw new ResourceNotFoundException("Deal not found with id: " + id);
+        dealMapper.updateExpectedCloseDate(workspaceId, id, expectedCloseDate);
+        Deal after = dealMapper.getDealById(workspaceId, id);
+        auditService.record("deal.update", "deal", id, after.getName(),
+            "Rescheduled deal " + after.getName(),
+            auditService.singleChange("expectedCloseDate", before.getExpectedCloseDate(), expectedCloseDate));
+        notificationChanges.publish(workspaceId, "deal", id);
+        ruleTriggers.publish(workspaceId, "deal", id, "deal.updated");
+        return after;
     }
 
     /**

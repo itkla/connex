@@ -1,5 +1,5 @@
-import Calendar from '@/app/components/calendar/Calendar';
-import { getActivities, getTasks, getContacts, getDeals, getNotes, getContactsFromCookie, getDealsFromCookie, getCurrentUserFromCookie, getNotesFromCookie, getActivitiesFromCookie, getTasksFromCookie } from '@/app/lib/api';
+import CalendarShell from '@/app/components/calendar/CalendarShell';
+import { getContactsFromCookie, getDealsFromCookie, getCurrentUserFromCookie, getNotesFromCookie, getActivitiesFromCookie, getTasksFromCookie } from '@/app/lib/api';
 import { headers } from 'next/headers';
 import { redirect } from 'next/navigation';
 
@@ -17,5 +17,14 @@ export default async function CalendarPage() {
         getDealsFromCookie(cookie),
         getNotesFromCookie(cookie),
     ]);
-    return <Calendar activities={activities} tasks={tasks} persons={persons} deals={deals} notes={notes} />;
+    return (
+        <CalendarShell
+            activities={activities}
+            tasks={tasks}
+            persons={persons}
+            deals={deals}
+            notes={notes}
+            currentUserId={user.id}
+        />
+    );
 }
