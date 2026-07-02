@@ -67,6 +67,10 @@
     "sortAria": "並び替え",
     "chipSearch": "検索: 「{query}」",
     "lastEventNever": "なし",
-    "failedOnly": "失敗のみ"
+    "failedOnly": "失敗のみ",
+    "loadMore": "さらに読み込む",
+    "loadMoreLoading": "読み込み中…",
+    "loadMoreRetry": "再試行",
+    "loadMoreError": "追加のイベントを読み込めませんでした。"
   }
 }

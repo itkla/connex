@@ -67,6 +67,10 @@
     "sortAria": "Sort order",
     "chipSearch": "Search: \"{query}\"",
     "lastEventNever": "never",
-    "failedOnly": "Failed only"
+    "failedOnly": "Failed only",
+    "loadMore": "Load more",
+    "loadMoreLoading": "Loading…",
+    "loadMoreRetry": "Try again",
+    "loadMoreError": "Couldn't load more events."
   }
 }

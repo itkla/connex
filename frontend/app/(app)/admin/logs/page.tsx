@@ -10,7 +10,7 @@ export const metadata: Metadata = {
     description: "Recent activity across your workspace",
 };
 
-const RECENT_LIMIT = 200;
+const PAGE_SIZE = 200;
 
 export default async function AuditLogPage() {
     const cookie = (await headers()).get("cookie");
@@ -21,9 +21,9 @@ export default async function AuditLogPage() {
     }
 
     const entries = await getAuditLogs(
-        { limit: RECENT_LIMIT },
+        { limit: PAGE_SIZE, offset: 0 },
         { headers: { cookie: cookie ?? "" }, cache: "no-store" },
     ).catch(() => [] as AuditLogEntry[]);
 
-    return <AuditLogBrowser entries={entries} />;
+    return <AuditLogBrowser initialEntries={entries} pageSize={PAGE_SIZE} />;
 }
