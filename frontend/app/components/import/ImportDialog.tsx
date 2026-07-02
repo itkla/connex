@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { motion, useReducedMotion } from 'motion/react';
 import { ArrowUpTrayIcon, CheckCircleIcon, DocumentTextIcon, ExclamationTriangleIcon, XMarkIcon } from '@heroicons/react/24/outline';
@@ -306,22 +306,24 @@ function StepRail({ step }: { step: Step }) {
     return (
         <div className="mt-3 flex items-center gap-2" aria-hidden>
             {STEPS.map((s, i) => (
-                <div key={s} className="flex flex-1 items-center gap-2">
-                    <span
-                        className={cn(
-                            'flex size-5 shrink-0 items-center justify-center rounded-full text-xs font-semibold transition-colors',
-                            i < current && 'bg-brand text-white',
-                            i === current && 'bg-foreground text-background',
-                            i > current && 'bg-muted text-muted-foreground',
-                        )}
-                    >
-                        {i + 1}
-                    </span>
-                    <span className={cn('text-xs', i === current ? 'font-medium text-foreground' : 'text-muted-foreground')}>
-                        {t(`step.${s}`)}
-                    </span>
+                <Fragment key={s}>
+                    <div className="flex items-center gap-2">
+                        <span
+                            className={cn(
+                                'flex size-5 shrink-0 items-center justify-center rounded-full text-xs font-semibold transition-colors',
+                                i < current && 'bg-brand text-white',
+                                i === current && 'bg-foreground text-background',
+                                i > current && 'bg-muted text-muted-foreground',
+                            )}
+                        >
+                            {i + 1}
+                        </span>
+                        <span className={cn('text-xs', i === current ? 'font-medium text-foreground' : 'text-muted-foreground')}>
+                            {t(`step.${s}`)}
+                        </span>
+                    </div>
                     {i < STEPS.length - 1 && <span className="h-px flex-1 bg-border" />}
-                </div>
+                </Fragment>
             ))}
         </div>
     );
