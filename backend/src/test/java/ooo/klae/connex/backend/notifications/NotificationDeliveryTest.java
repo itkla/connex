@@ -1,6 +1,7 @@
 package ooo.klae.connex.backend.notifications;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -33,8 +34,8 @@ class NotificationDeliveryTest {
 
     @BeforeEach
     void setUp() {
-        when(inApp.channel()).thenReturn("in_app");
-        when(email.channel()).thenReturn("email");
+        lenient().when(inApp.channel()).thenReturn("in_app");
+        lenient().when(email.channel()).thenReturn("email");
         delivery = new NotificationDelivery(List.of(inApp, email), notificationMapper, preferenceMapper);
     }
 
@@ -94,18 +95,26 @@ class NotificationDeliveryTest {
     }
 
     @Test
-    void inAppFailure_doesNotBlockEmail() {
+    void inAppFailure_propagates_andSkipsEmail() {
+        Notification n = notification();
+        when(notificationMapper.existsByDedupe(1, 9, n.getDedupeKey())).thenReturn(false);
+        org.mockito.Mockito.doThrow(new RuntimeException("boom")).when(inApp).dispatch(any());
+
+        org.junit.jupiter.api.Assertions.assertThrows(RuntimeException.class, () -> delivery.deliver(n));
+
+        verify(email, never()).dispatch(any());
+    }
+
+    @Test
+    void emailFailure_isIsolated_andDoesNotPropagate() {
         Notification n = notification();
         when(notificationMapper.existsByDedupe(1, 9, n.getDedupeKey())).thenReturn(false);
         when(preferenceMapper.isEnabledOptIn(9, "note.mention", "email")).thenReturn(true);
-        doThrowOnDispatch(inApp);
+        org.mockito.Mockito.doThrow(new RuntimeException("smtp down")).when(email).dispatch(any());
 
         delivery.deliver(n);
 
+        verify(inApp).dispatch(n);
         verify(email).dispatch(n);
-    }
-
-    private static void doThrowOnDispatch(NotificationDispatcher dispatcher) {
-        org.mockito.Mockito.doThrow(new RuntimeException("boom")).when(dispatcher).dispatch(any());
     }
 }

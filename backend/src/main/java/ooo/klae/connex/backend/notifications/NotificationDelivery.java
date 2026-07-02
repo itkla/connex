@@ -17,8 +17,15 @@ import ooo.klae.connex.backend.mappers.PreferenceMapper;
  * {@code email} — delivers only when the recipient has opted in for that
  * (type, channel) preference AND the notification is new: reconciliation
  * re-dispatches idempotent reminders every cycle, so email is gated to the
- * first occurrence (by {@code dedupe_key}) to avoid repeat sends. Each channel
- * dispatch is isolated so one channel's failure never blocks another.
+ * first occurrence (by {@code dedupe_key}) to avoid repeat sends. The in-app
+ * dispatch propagates its failure (it is the load-bearing inbox, and callers such
+ * as the rule engine record that failure); secondary channels are isolated so an
+ * email outage never blocks in-app delivery.
+ *
+ * <p>The first-occurrence check is a pre-read: two reconcile passes for the same
+ * workspace running concurrently can each observe "new" and both email once. This
+ * is bounded to a single duplicate per brand-new reminder (repeat reminders are
+ * always suppressed) and is tracked for a claim-based hardening.
  */
 @Component
 @RequiredArgsConstructor
@@ -40,7 +47,7 @@ public class NotificationDelivery {
 
         for (NotificationDispatcher dispatcher : dispatchers) {
             if (IN_APP.equals(dispatcher.channel())) {
-                safeDispatch(dispatcher, notification);
+                dispatcher.dispatch(notification);
             }
         }
 
