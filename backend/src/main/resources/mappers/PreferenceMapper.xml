@@ -52,6 +52,28 @@
     )
   </select>
 
+  <select id="isEnabledOptIn" resultType="boolean">
+    SELECT COALESCE(
+      (
+        SELECT enabled
+        FROM notification_preference
+        WHERE user_id = #{userId}
+          AND type = #{type}
+          AND channel = #{channel}
+        LIMIT 1
+      ),
+      (
+        SELECT enabled
+        FROM notification_preference
+        WHERE user_id = #{userId}
+          AND type = '*'
+          AND channel = #{channel}
+        LIMIT 1
+      ),
+      FALSE
+    )
+  </select>
+
   <insert id="upsert" useGeneratedKeys="true" keyProperty="id">
     INSERT INTO notification_preference (user_id, type, channel, enabled)
     VALUES (#{userId}, #{type}, #{channel}, #{enabled})

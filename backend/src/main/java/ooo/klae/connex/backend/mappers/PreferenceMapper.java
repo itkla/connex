@@ -23,5 +23,11 @@ public interface PreferenceMapper {
         @Param("channel") String channel
     );
 
+    boolean isEnabledOptIn(
+        @Param("userId") int userId,
+        @Param("type") String type,
+        @Param("channel") String channel
+    );
+
     int upsert(NotificationPreference preference);
 }
