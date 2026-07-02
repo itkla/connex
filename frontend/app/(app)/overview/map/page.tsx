@@ -20,7 +20,6 @@ import {
 } from "@/app/lib/api";
 import type { Activity, Company, Contact, Deal, Note, Pipeline, RelationshipTemperature, Stage, Task, TemperatureBand, User } from "@/app/lib/types";
 import MapView from "@/app/components/map/MapView";
-import Rise from "@/app/components/motion/Rise";
 import { buildGraph, companyNodeId, contactNodeId } from "@/app/components/map/graph/buildGraph";
 
 type MapSearchParams = { companyId?: string; contactId?: string };
@@ -90,13 +89,7 @@ export default async function MapPage({ searchParams }: { searchParams: Promise<
     const isEmpty = companies.length === 0 && contacts.length === 0;
 
     return (
-        <div className="flex h-full min-h-0 w-full flex-1 flex-col gap-4">
-            <Rise>
-                <header className="flex flex-col gap-1">
-                    <h1 className="text-3xl font-extrabold tracking-tight text-foreground md:text-4xl">{t("title")}</h1>
-                    <p className="text-sm text-muted-foreground">{t("subtitle")}</p>
-                </header>
-            </Rise>
+        <div className="flex h-full min-h-0 w-full flex-1 flex-col">
             {isEmpty ? (
                 <div className="flex min-h-0 flex-1 items-center justify-center">
                     <div className="flex max-w-md flex-col items-center rounded-2xl border border-border bg-card px-6 py-16 text-center">

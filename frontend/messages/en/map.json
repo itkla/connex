@@ -1,7 +1,5 @@
 {
     "MapPage": {
-        "title": "Relationship Map",
-        "subtitle": "See how your team, companies, and contacts connect at a glance.",
         "yourCompany": "Your Company",
         "emptyTitle": "Your relationship map is empty",
         "emptyBody": "Add companies and contacts to see how your network connects and grows over time.",
