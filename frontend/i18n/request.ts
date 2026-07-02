@@ -31,6 +31,7 @@ const namespaces = [
     "admin",
     "notifications",
     "importExport",
+    "legal",
 ] as const;
 
 async function loadMessages(locale: Locale) {
