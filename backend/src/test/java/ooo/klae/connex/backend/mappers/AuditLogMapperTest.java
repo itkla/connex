@@ -1,0 +1,90 @@
+package ooo.klae.connex.backend.mappers;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+
+import ooo.klae.connex.backend.beans.AuditLog;
+import ooo.klae.connex.backend.beans.Workspace;
+
+class AuditLogMapperTest extends AbstractMapperTest {
+    @Autowired private AuditLogMapper auditLogMapper;
+
+    @Test
+    void findRecentPagesThroughWorkspaceScopedEventsWithoutOverlap() {
+        Workspace ws = newWorkspace();
+        List<Integer> ids = new ArrayList<>();
+        for (int i = 0; i < 5; i++) {
+            ids.add(insertAudit(ws.getId(), "company", 1, "event-" + i));
+        }
+        List<Integer> newestFirst = new ArrayList<>(ids);
+        Collections.reverse(newestFirst);
+
+        List<Integer> paged = new ArrayList<>();
+        paged.addAll(idsOf(auditLogMapper.findRecent(ws.getId(), 2, 0)));
+        paged.addAll(idsOf(auditLogMapper.findRecent(ws.getId(), 2, 2)));
+        paged.addAll(idsOf(auditLogMapper.findRecent(ws.getId(), 2, 4)));
+
+        assertEquals(newestFirst, paged);
+    }
+
+    @Test
+    void findRecentStaysScopedToItsWorkspace() {
+        Workspace mine = newWorkspace();
+        Workspace other = newWorkspace();
+        insertAudit(mine.getId(), "company", 1, "mine");
+        int otherId = insertAudit(other.getId(), "company", 1, "theirs");
+
+        List<Integer> mineIds = idsOf(auditLogMapper.findRecent(mine.getId(), 50, 0));
+        assertTrue(mineIds.stream().noneMatch(id -> id == otherId));
+        assertEquals(List.of(otherId), idsOf(auditLogMapper.findRecent(other.getId(), 50, 0)));
+    }
+
+    @Test
+    void findByEntityPagesOnlyMatchingEntity() {
+        Workspace ws = newWorkspace();
+        List<Integer> ids = new ArrayList<>();
+        for (int i = 0; i < 4; i++) {
+            ids.add(insertAudit(ws.getId(), "deal", 9, "deal-" + i));
+        }
+        insertAudit(ws.getId(), "company", 9, "noise");
+        List<Integer> newestFirst = new ArrayList<>(ids);
+        Collections.reverse(newestFirst);
+
+        List<Integer> paged = new ArrayList<>();
+        paged.addAll(idsOf(auditLogMapper.findByEntity(ws.getId(), "deal", 9, 3, 0)));
+        paged.addAll(idsOf(auditLogMapper.findByEntity(ws.getId(), "deal", 9, 3, 3)));
+
+        assertEquals(newestFirst, paged);
+    }
+
+    private Workspace newWorkspace() {
+        Workspace ws = new Workspace();
+        ws.setName("WS " + unique());
+        ws.setSlug("ws-" + unique());
+        workspaceMapper.insert(ws);
+        return ws;
+    }
+
+    private int insertAudit(Integer workspaceId, String entityType, Integer entityId, String summary) {
+        AuditLog entry = new AuditLog();
+        entry.setWorkspaceId(workspaceId);
+        entry.setAction("company.update");
+        entry.setEntityType(entityType);
+        entry.setEntityId(entityId);
+        entry.setOutcome("success");
+        entry.setSummary(summary);
+        auditLogMapper.insert(entry);
+        return entry.getId();
+    }
+
+    private static List<Integer> idsOf(List<AuditLog> entries) {
+        return entries.stream().map(AuditLog::getId).toList();
+    }
+}
