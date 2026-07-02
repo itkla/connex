@@ -1,6 +1,7 @@
 package ooo.klae.connex.backend.notifications;
 
 import java.util.List;
+import java.util.Objects;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -8,6 +9,7 @@ import org.springframework.stereotype.Component;
 
 import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.beans.Notification;
+import ooo.klae.connex.backend.dto.NotificationDto;
 import ooo.klae.connex.backend.mappers.NotificationMapper;
 import ooo.klae.connex.backend.mappers.PreferenceMapper;
 
@@ -22,10 +24,20 @@ import ooo.klae.connex.backend.mappers.PreferenceMapper;
  * as the rule engine record that failure); secondary channels are isolated so an
  * email outage never blocks in-app delivery.
  *
- * <p>The first-occurrence check is a pre-read: two reconcile passes for the same
- * workspace running concurrently can each observe "new" and both email once. This
- * is bounded to a single duplicate per brand-new reminder (repeat reminders are
- * always suppressed) and is tracked for a claim-based hardening.
+ * <p>A single dedupe pre-read serves two purposes. It gates email to the first
+ * occurrence, and it classifies the in-app write as <em>created</em> (no prior
+ * row), <em>updated</em> (a prior row whose severity shifts or is revived from
+ * resolved — the exact condition under which the upsert clears read/dismiss
+ * state) or an idempotent no-op. A realtime frame is published only for the
+ * first two, so the every-cycle re-dispatch of an unchanged reminder never
+ * re-notifies a live client.
+ *
+ * <p>The pre-read is not transactionally isolated across concurrent reconcile
+ * passes: two passes for the same workspace can each observe "new" and both
+ * email — and both push a {@code created} frame — once. This is bounded to a
+ * single duplicate per brand-new reminder (repeat reminders are always
+ * suppressed), absorbed client-side by dedupe-key suppression, and tracked for a
+ * claim-based hardening.
  */
 @Component
 @RequiredArgsConstructor
@@ -37,19 +49,23 @@ public class NotificationDelivery {
     private final List<NotificationDispatcher> dispatchers;
     private final NotificationMapper notificationMapper;
     private final PreferenceMapper preferenceMapper;
+    private final NotificationPushPublisher pushPublisher;
 
     /**
      * Delivers a notification across every eligible channel.
      * @param notification the generated notification
      */
     public void deliver(Notification notification) {
-        boolean firstOccurrence = isFirstOccurrence(notification);
+        Notification existing = findExisting(notification);
+        boolean firstOccurrence = existing == null;
 
         for (NotificationDispatcher dispatcher : dispatchers) {
             if (IN_APP.equals(dispatcher.channel())) {
                 dispatcher.dispatch(notification);
             }
         }
+
+        pushRealtime(notification, existing);
 
         if (!firstOccurrence) {
             return;
@@ -65,12 +81,41 @@ public class NotificationDelivery {
         }
     }
 
-    private boolean isFirstOccurrence(Notification notification) {
+    private Notification findExisting(Notification notification) {
         if (notification.getDedupeKey() == null || notification.getDedupeKey().isBlank()) {
-            return true;
+            return null;
         }
-        return !notificationMapper.existsByDedupe(
+        return notificationMapper.findByDedupe(
                 notification.getWorkspaceId(), notification.getRecipientId(), notification.getDedupeKey());
+    }
+
+    private void pushRealtime(Notification notification, Notification existing) {
+        boolean created = existing == null;
+        boolean updated = !created && isMaterialChange(existing, notification);
+        if (!created && !updated) {
+            return;
+        }
+        int id = created ? notification.getId() : existing.getId();
+        Notification persisted = notificationMapper.findById(notification.getRecipientId(), id);
+        if (persisted == null) {
+            return;
+        }
+        NotificationDto dto = NotificationDto.from(persisted);
+        if (created) {
+            pushPublisher.created(notification.getRecipientId(), dto, notification.getDedupeKey());
+        } else {
+            pushPublisher.updated(notification.getRecipientId(), dto, notification.getDedupeKey());
+        }
+    }
+
+    /**
+     * A re-delivered reminder is materially changed when its severity shifts or a
+     * previously resolved row is revived — the same condition under which the in-app
+     * upsert clears read/dismiss/snooze state, so a live client should refresh.
+     */
+    private boolean isMaterialChange(Notification existing, Notification incoming) {
+        return !Objects.equals(existing.getSeverity(), incoming.getSeverity())
+                || existing.getResolvedAt() != null;
     }
 
     private void safeDispatch(NotificationDispatcher dispatcher, Notification notification) {
