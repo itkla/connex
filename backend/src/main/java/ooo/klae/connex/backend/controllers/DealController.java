@@ -26,6 +26,7 @@ import ooo.klae.connex.backend.dto.DealCollaboratorsDto;
 import ooo.klae.connex.backend.dto.DealDto;
 import ooo.klae.connex.backend.dto.DealMoveRequest;
 import ooo.klae.connex.backend.dto.DealOwnerDto;
+import ooo.klae.connex.backend.dto.DealRescheduleRequest;
 import ooo.klae.connex.backend.dto.DealRiskDto;
 import ooo.klae.connex.backend.dto.DealSummaryDto;
 import ooo.klae.connex.backend.dto.NoteDto;
@@ -179,6 +180,17 @@ public class DealController {
     @PostMapping("/{id}/move")
     public DealDto moveDeal(@PathVariable int id, @Valid @RequestBody DealMoveRequest req) {
         return DealDto.from(dealService.move(id, req.getStageId(), req.getPosition()));
+    }
+
+    /**
+     * POST endpoint to change only a deal's expected close date, leaving every other field untouched.
+     * @param id the deal to reschedule
+     * @param req the target expected close date as a {@code YYYY-MM-DD} calendar day
+     * @return the rescheduled deal
+     */
+    @PostMapping("/{id}/reschedule")
+    public DealDto rescheduleDeal(@PathVariable int id, @Valid @RequestBody DealRescheduleRequest req) {
+        return DealDto.from(dealService.reschedule(id, req.getExpectedCloseDate()));
     }
 
     /**

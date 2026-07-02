@@ -46,4 +46,10 @@ public interface TaskMapper {
         @Param("completed") boolean completed,
         @Param("position") int position
     );
+    /** Sets only a task's due date, scoped to the workspace. */
+    int updateDueDate(
+        @Param("workspaceId") int workspaceId,
+        @Param("id") int id,
+        @Param("dueDate") String dueDate
+    );
 }

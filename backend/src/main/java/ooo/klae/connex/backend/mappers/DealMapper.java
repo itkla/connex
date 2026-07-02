@@ -43,6 +43,13 @@ public interface DealMapper {
     /** Sets a single deal's manual sort position within its stage column. */
     int setPosition(@Param("workspaceId") int workspaceId, @Param("id") int id, @Param("position") int position);
 
+    /** Sets only a deal's expected close date, scoped to the workspace. */
+    int updateExpectedCloseDate(
+        @Param("workspaceId") int workspaceId,
+        @Param("id") int id,
+        @Param("expectedCloseDate") String expectedCloseDate
+    );
+
     String getStageOutcome(@Param("workspaceId") int workspaceId, @Param("stageId") int stageId);
 
     Integer getLastNormalStageId(@Param("workspaceId") int workspaceId, @Param("pipelineId") int pipelineId);

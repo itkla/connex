@@ -199,6 +199,29 @@ public class TaskService {
         return moved;
     }
 
+    /**
+     * Changes only a task's due date, leaving description, assignee, status, position and links
+     * untouched. Unlike {@link #update(int, Task)} this cannot clobber other fields from a stale
+     * client payload — it writes a single column after confirming the task belongs to the caller's
+     * workspace.
+     * @param id the task to reschedule
+     * @param dueDate the target due date as a {@code YYYY-MM-DD} calendar day
+     * @return the rescheduled task
+     */
+    @RequirePermission(Permission.TASK_UPDATE)
+    public Task reschedule(int id, String dueDate) {
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        Task before = taskMapper.getTaskById(workspaceId, id);
+        if (before == null) throw new ResourceNotFoundException("Task not found with id: " + id);
+        taskMapper.updateDueDate(workspaceId, id, dueDate);
+        Task after = taskMapper.getTaskById(workspaceId, id);
+        auditService.record("task.update", "task", id, after.getDescription(),
+            "Rescheduled task " + after.getDescription(),
+            auditService.singleChange("dueDate", before.getDueDate(), dueDate));
+        notificationChanges.publish(workspaceId, "task", id);
+        return after;
+    }
+
     private void validateReferences(Task task, int workspaceId) {
         if (task.getAssignedTo() == null || task.getAssignedTo().getId() == 0) {
             throw new BadRequestException("Task assignee is required");

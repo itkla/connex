@@ -253,6 +253,30 @@ public class DealService {
     }
 
     /**
+     * Changes only a deal's expected close date, leaving name, value, pipeline, stage, outcome and
+     * every other field untouched. Unlike {@link #update(int, Deal)} this cannot clobber other
+     * fields — or reopen a concurrently-closed deal — from a stale client payload: it writes a
+     * single column after confirming the deal belongs to the caller's workspace.
+     * @param id the deal to reschedule
+     * @param expectedCloseDate the target expected close date as a {@code YYYY-MM-DD} calendar day
+     * @return the rescheduled deal
+     */
+    @RequirePermission(Permission.DEAL_UPDATE)
+    public Deal reschedule(int id, String expectedCloseDate) {
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        Deal before = dealMapper.getDealById(workspaceId, id);
+        if (before == null) throw new ResourceNotFoundException("Deal not found with id: " + id);
+        dealMapper.updateExpectedCloseDate(workspaceId, id, expectedCloseDate);
+        Deal after = dealMapper.getDealById(workspaceId, id);
+        auditService.record("deal.update", "deal", id, after.getName(),
+            "Rescheduled deal " + after.getName(),
+            auditService.singleChange("expectedCloseDate", before.getExpectedCloseDate(), expectedCloseDate));
+        notificationChanges.publish(workspaceId, "deal", id);
+        ruleTriggers.publish(workspaceId, "deal", id, "deal.updated");
+        return after;
+    }
+
+    /**
      * Closes a deal as an atomic, intent-expressing operation: records the outcome
      * ({@code won} = true won / false lost), an optional reason and actual value, then
      * reconciles {@code closedAt}. Works at any stage and does not move the stage, so the
