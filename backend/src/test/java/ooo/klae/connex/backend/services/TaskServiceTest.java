@@ -103,4 +103,30 @@ class TaskServiceTest extends AbstractServiceTest {
 
         assertThrows(ForbiddenException.class, () -> taskService.move(task.getId(), "todo", 0));
     }
+
+    @Test
+    void reschedule_updatesOnlyDueDate() {
+        Task task = newTask(currentUser, null, null);
+        String originalDescription = taskService.getTaskById(task.getId()).getDescription();
+
+        taskService.reschedule(task.getId(), "2025-03-15");
+
+        Task after = taskService.getTaskById(task.getId());
+        assertEquals("2025-03-15", after.getDueDate());
+        assertEquals(originalDescription, after.getDescription());
+        assertEquals("todo", after.getStatus());
+        assertFalse(after.isCompleted());
+        assertEquals(currentUser.getId(), after.getAssignedTo().getId());
+    }
+
+    @Test
+    void reschedule_throwsWhenTaskMissing() {
+        assertThrows(ResourceNotFoundException.class, () -> taskService.reschedule(-1, "2025-03-15"));
+    }
+
+    @Test
+    void reschedule_rejectsInvalidDate() {
+        Task task = newTask(currentUser, null, null);
+        assertThrows(BadRequestException.class, () -> taskService.reschedule(task.getId(), "2025-13-45"));
+    }
 }

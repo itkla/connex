@@ -17,6 +17,7 @@
     "priority": "Priority",
     "logTouch": "Log a touch",
     "viewAll": "View all notifications",
+    "viewAction": "View",
     "loading": "Loading notifications…",
     "loadError": "Notifications could not be loaded.",
     "actionError": "The notification could not be updated.",

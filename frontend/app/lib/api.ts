@@ -42,7 +42,14 @@ async function fetchCsrfToken(): Promise<{ token: string; headerName: string } |
     }
 }
 
-async function csrfHeader(forceRefresh = false): Promise<Record<string, string>> {
+/**
+ * Resolves the CSRF header the backend expects on state-changing requests,
+ * as a single-entry `{ [headerName]: token }` map (empty during SSR). Shared
+ * with the realtime client, which echoes the same token on the STOMP CONNECT.
+ * @param forceRefresh when true, discards the cached token and refetches it
+ * @returns the CSRF header map, or an empty map when unavailable
+ */
+export async function csrfHeader(forceRefresh = false): Promise<Record<string, string>> {
     if (typeof window === "undefined") return {}; // SSR issues GETs only; CSRF does not apply
     if (forceRefresh) csrfTokenCache = null;
     if (!csrfTokenCache) csrfTokenCache = await fetchCsrfToken();
@@ -386,6 +393,15 @@ export function completeTask(id: number, init: RequestInit = {}) {
  */
 export function moveTask(id: number, status: Types.TaskStatus, position: number, init: RequestInit = {}) {
     return postJson<Types.Task>(`/api/tasks/${id}/move`, { status, position }, init);
+}
+
+/**
+ * Changes only a task's due date (a `YYYY-MM-DD` calendar day) without touching any other field.
+ * Safe for optimistic reschedule; the server rejects a stale full-payload update, so this narrow
+ * intent endpoint is used instead of `updateTask`.
+ */
+export function rescheduleTask(id: number, dueDate: string, init: RequestInit = {}) {
+    return postJson<Types.Task>(`/api/tasks/${id}/reschedule`, { dueDate }, init);
 }
 
 /*
@@ -862,6 +878,15 @@ export function reopenDeal(id: number) {
  */
 export function moveDeal(id: number, stageId: number, position: number) {
     return postJson<Types.Deal>(`/api/deals/${id}/move`, { stageId, position });
+}
+
+/**
+ * Changes only a deal's expected close date (a `YYYY-MM-DD` calendar day) without touching any
+ * other field. Unlike `updateDeal` this cannot clobber a concurrent edit or reopen a closed deal,
+ * so it is used for optimistic reschedule.
+ */
+export function rescheduleDeal(id: number, expectedCloseDate: string) {
+    return postJson<Types.Deal>(`/api/deals/${id}/reschedule`, { expectedCloseDate });
 }
 
 export function updateDealOwner(id: number, ownerId: number | null) {

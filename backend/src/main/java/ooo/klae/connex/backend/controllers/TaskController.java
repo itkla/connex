@@ -13,6 +13,7 @@ import org.springframework.web.bind.annotation.RestController;
 import ooo.klae.connex.backend.beans.Task;
 import ooo.klae.connex.backend.dto.TaskDto;
 import ooo.klae.connex.backend.dto.TaskMoveRequest;
+import ooo.klae.connex.backend.dto.TaskRescheduleRequest;
 import ooo.klae.connex.backend.services.TaskService;
 
 import java.util.List;
@@ -108,5 +109,16 @@ public class TaskController {
     @PostMapping("/{id}/move")
     public TaskDto moveTask(@PathVariable int id, @Valid @RequestBody TaskMoveRequest req) {
         return TaskDto.from(taskService.move(id, req.getStatus(), req.getPosition()));
+    }
+
+    /**
+     * POST endpoint to change only a task's due date, leaving every other field untouched.
+     * @param id the task to reschedule
+     * @param req the target due date as a {@code YYYY-MM-DD} calendar day
+     * @return the rescheduled task
+     */
+    @PostMapping("/{id}/reschedule")
+    public TaskDto rescheduleTask(@PathVariable int id, @Valid @RequestBody TaskRescheduleRequest req) {
+        return TaskDto.from(taskService.reschedule(id, req.getDueDate()));
     }
 }

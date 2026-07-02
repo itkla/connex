@@ -51,15 +51,47 @@ function DialogContent({
   className,
   children,
   showCloseButton = true,
+  onPointerDownOutside,
+  ref,
   ...props
 }: React.ComponentProps<typeof DialogPrimitive.Content> & {
   showCloseButton?: boolean
 }) {
+  const contentRef = React.useRef<HTMLDivElement>(null)
+  const composedRef = React.useCallback(
+    (node: HTMLDivElement | null) => {
+      contentRef.current = node
+      if (typeof ref === "function") ref(node)
+      else if (ref) ref.current = node
+    },
+    [ref]
+  )
   return (
     <DialogPortal>
       <DialogOverlay />
       <DialogPrimitive.Content
+        ref={composedRef}
         data-slot="dialog-content"
+        onPointerDownOutside={(event) => {
+          const origin = event.detail.originalEvent
+          const target = origin.target instanceof Element ? origin.target : null
+          const rect = contentRef.current?.getBoundingClientRect()
+          const withinContentBounds =
+            !!rect &&
+            origin.clientX >= rect.left &&
+            origin.clientX <= rect.right &&
+            origin.clientY >= rect.top &&
+            origin.clientY <= rect.bottom
+          const withinPortaledPopup = Boolean(
+            target?.closest(
+              "[data-slot='combobox-content'],[data-slot='autocomplete-content']"
+            )
+          )
+          if (withinContentBounds || withinPortaledPopup) {
+            event.preventDefault()
+          }
+          onPointerDownOutside?.(event)
+        }}
         className={cn(
           "fixed top-1/2 left-1/2 z-50 grid w-full max-w-[calc(100%-2rem)] -translate-x-1/2 -translate-y-1/2 gap-6 rounded-xl bg-popover p-6 text-sm text-popover-foreground ring-1 ring-foreground/10 duration-100 outline-none sm:max-w-md data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95",
           className

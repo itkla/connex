@@ -3,6 +3,7 @@ package ooo.klae.connex.backend.services;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -190,5 +191,53 @@ class DealServiceTest extends AbstractServiceTest {
         assertEquals(List.of(a.getId(), b.getId(), moved.getId()),
             target.stream().map(Deal::getId).toList());
         assertEquals(List.of(0, 1, 2), target.stream().map(Deal::getPosition).toList());
+    }
+
+    @Test
+    void reschedule_updatesOnlyExpectedCloseDate() {
+        Pipeline pipeline = newPipeline();
+        Stage stage = newStage(pipeline, 0);
+        Company company = newCompany();
+        Deal deal = newDeal(pipeline, stage, company);
+        String name = deal.getName();
+
+        dealService.reschedule(deal.getId(), "2025-06-30");
+
+        Deal after = dealService.getDealById(deal.getId());
+        assertEquals("2025-06-30", after.getExpectedCloseDate());
+        assertEquals(name, after.getName());
+        assertEquals(1000.0, after.getValue(), 0.0001);
+        assertEquals(stage.getId(), after.getStageId());
+        assertEquals(pipeline.getId(), after.getPipelineId());
+    }
+
+    @Test
+    void reschedule_doesNotReopenClosedDeal() {
+        Pipeline pipeline = newPipeline();
+        Stage stage = newStage(pipeline, 0);
+        Company company = newCompany();
+        Deal deal = newDeal(pipeline, stage, company);
+        dealService.close(deal.getId(), Boolean.TRUE, "signed", 1500.0);
+
+        dealService.reschedule(deal.getId(), "2025-06-30");
+
+        Deal after = dealService.getDealById(deal.getId());
+        assertEquals("2025-06-30", after.getExpectedCloseDate());
+        assertEquals(Boolean.TRUE, after.getWon());
+        assertNotNull(after.getClosedAt());
+    }
+
+    @Test
+    void reschedule_throwsWhenDealMissing() {
+        assertThrows(ResourceNotFoundException.class, () -> dealService.reschedule(-1, "2025-06-30"));
+    }
+
+    @Test
+    void reschedule_rejectsInvalidDate() {
+        Pipeline pipeline = newPipeline();
+        Stage stage = newStage(pipeline, 0);
+        Company company = newCompany();
+        Deal deal = newDeal(pipeline, stage, company);
+        assertThrows(BadRequestException.class, () -> dealService.reschedule(deal.getId(), "9999-99-99"));
     }
 }

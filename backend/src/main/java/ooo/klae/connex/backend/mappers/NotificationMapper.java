@@ -70,7 +70,13 @@ public interface NotificationMapper {
 
     int upsert(Notification notification);
 
-    boolean existsByDedupe(
+    /**
+     * Slim projection of an existing notification matched by dedupe key: only
+     * {@code id}, {@code severity} and {@code resolvedAt} are populated — enough to
+     * classify a re-delivery as brand-new, materially changed, or an idempotent
+     * no-op. Returns {@code null} when no row matches.
+     */
+    Notification findByDedupe(
         @Param("workspaceId") int workspaceId,
         @Param("recipientId") int recipientId,
         @Param("dedupeKey") String dedupeKey

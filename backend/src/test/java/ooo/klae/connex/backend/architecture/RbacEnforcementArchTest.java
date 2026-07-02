@@ -47,7 +47,7 @@ class RbacEnforcementArchTest {
 
     /** Verb prefixes that denote a state-changing public method in these services. */
     private static final Pattern MUTATOR = Pattern.compile(
-        "^(create|update|delete|add|remove|replace|close|reopen|complete|assign|change)[A-Z]?\\w*");
+        "^(create|update|delete|add|remove|replace|close|reopen|complete|assign|change|reschedule)[A-Z]?\\w*");
 
     @Test
     void every_mutating_entity_service_method_is_permission_guarded() throws Exception {

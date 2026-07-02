@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useTranslations } from "next-intl";
 import { Bars3Icon, XMarkIcon, SunIcon, MoonIcon } from "@heroicons/react/24/outline";
 import { useTheme } from "next-themes";
@@ -10,13 +10,7 @@ import LanguageSwitcher from "./LanguageSwitcher";
 function ThemeToggle() {
     const t = useTranslations("CommonHome");
     const { resolvedTheme, setTheme } = useTheme();
-    const [mounted, setMounted] = useState(false);
-
-    // next-themes has no theme on the server; wait for mount to avoid a hydration mismatch.
-    useEffect(() => setMounted(true), []);
-
-    const isDark = resolvedTheme === "dark";
-    const next = isDark ? "light" : "dark";
+    const next = resolvedTheme === "dark" ? "light" : "dark";
 
     return (
         <button
@@ -25,7 +19,8 @@ function ThemeToggle() {
             aria-label={t("toggleLightDarkMode", { mode: next })}
             className="inline-flex size-9 items-center justify-center rounded-full border border-border text-foreground transition active:scale-[0.95]"
         >
-            {mounted && isDark ? <SunIcon className="size-5" /> : <MoonIcon className="size-5" />}
+            <MoonIcon className="size-5 dark:hidden" />
+            <SunIcon className="hidden size-5 dark:block" />
         </button>
     );
 }
@@ -35,8 +30,9 @@ export default function LandingNav({ ctaHref, ctaLabel }: { ctaHref: string; cta
     const [open, setOpen] = useState(false);
 
     const links = [
-        { href: "#features", label: t("navFeatures") },
-        { href: "#workflow", label: t("navWorkflow") },
+        { href: "#features", label: t("navFeatures"), route: false },
+        { href: "#workflow", label: t("navWorkflow"), route: false },
+        { href: "/docs", label: t("navDocs"), route: true },
     ];
 
     return (
@@ -50,15 +46,25 @@ export default function LandingNav({ ctaHref, ctaLabel }: { ctaHref: string; cta
                     </Link>
 
                     <div className="hidden items-center gap-7 md:flex">
-                        {links.map((link) => (
-                            <a
-                                key={link.href}
-                                href={link.href}
-                                className="text-sm font-medium text-muted-foreground transition-colors hover:text-foreground"
-                            >
-                                {link.label}
-                            </a>
-                        ))}
+                        {links.map((link) =>
+                            link.route ? (
+                                <Link
+                                    key={link.href}
+                                    href={link.href}
+                                    className="text-sm font-medium text-muted-foreground transition-colors hover:text-foreground"
+                                >
+                                    {link.label}
+                                </Link>
+                            ) : (
+                                <a
+                                    key={link.href}
+                                    href={link.href}
+                                    className="text-sm font-medium text-muted-foreground transition-colors hover:text-foreground"
+                                >
+                                    {link.label}
+                                </a>
+                            ),
+                        )}
                     </div>
                 </div>
 
@@ -97,16 +103,27 @@ export default function LandingNav({ ctaHref, ctaLabel }: { ctaHref: string; cta
             {open && (
                 <div className="border-t border-border bg-background px-6 py-4 duration-200 animate-in fade-in-0 slide-in-from-top-2 md:hidden">
                     <div className="flex flex-col gap-1">
-                        {links.map((link) => (
-                            <a
-                                key={link.href}
-                                href={link.href}
-                                onClick={() => setOpen(false)}
-                                className="rounded-lg px-2 py-2.5 text-base font-medium text-foreground transition-colors hover:bg-muted"
-                            >
-                                {link.label}
-                            </a>
-                        ))}
+                        {links.map((link) =>
+                            link.route ? (
+                                <Link
+                                    key={link.href}
+                                    href={link.href}
+                                    onClick={() => setOpen(false)}
+                                    className="rounded-lg px-2 py-2.5 text-base font-medium text-foreground transition-colors hover:bg-muted"
+                                >
+                                    {link.label}
+                                </Link>
+                            ) : (
+                                <a
+                                    key={link.href}
+                                    href={link.href}
+                                    onClick={() => setOpen(false)}
+                                    className="rounded-lg px-2 py-2.5 text-base font-medium text-foreground transition-colors hover:bg-muted"
+                                >
+                                    {link.label}
+                                </a>
+                            ),
+                        )}
                         <Link
                             href="/auth/login"
                             onClick={() => setOpen(false)}

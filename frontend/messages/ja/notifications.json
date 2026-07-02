@@ -17,6 +17,7 @@
     "priority": "優先",
     "logTouch": "接点を記録",
     "viewAll": "すべての通知を見る",
+    "viewAction": "表示",
     "loading": "通知を読み込んでいます…",
     "loadError": "通知を読み込めませんでした。",
     "actionError": "通知を更新できませんでした。",

@@ -19,6 +19,7 @@ import {
     CalendarIcon,
     MapIcon,
     ArrowsRightLeftIcon,
+    BookOpenIcon,
     ChartBarIcon,
     PresentationChartLineIcon,
     GlobeAltIcon,
@@ -101,6 +102,10 @@ function useSections(): NavSection[] {
                 { label: t("navSettings"), href: "/settings/members", icon: Cog6ToothIcon },
                 { label: t("navAuditLog"), href: "/admin/logs", icon: ClipboardDocumentListIcon },
             ],
+        },
+        {
+            label: t("sectionHelp"),
+            items: [{ label: t("navDocs"), href: "/docs", icon: BookOpenIcon }],
         },
     ];
 }
