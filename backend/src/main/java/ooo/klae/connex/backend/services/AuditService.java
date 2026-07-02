@@ -45,6 +45,7 @@ public class AuditService {
     private static final int IP_MAX = 45;
     private static final int HASH_LEN = 64;
     private static final int ERROR_MAX = 500;
+    private static final int MAX_OFFSET = 100_000;
 
     private static final String OUTCOME_SUCCESS = "success";
     private static final String OUTCOME_FAILURE = "failure";
@@ -297,12 +298,13 @@ public class AuditService {
     }
 
     /**
-     * Clamps an offset to a minimum of 0.
+     * Clamps an offset to the range [0, {@value #MAX_OFFSET}], bounding how deep a
+     * paged read can scan regardless of the requested value.
      * @param offset
      * @return
      */
     private static int offset(int offset) {
-        return Math.max(0, offset);
+        return Math.min(Math.max(0, offset), MAX_OFFSET);
     }
 
     /**

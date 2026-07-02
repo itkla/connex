@@ -582,13 +582,21 @@ export default function AuditLogBrowser({
                     </div>
 
                     {filtered.length === 0 ? (
-                        <EmptyState
-                            title={t("noMatchesTitle")}
-                            body={t("noMatchesBody")}
-                            muted
-                            actionLabel={t("clearAll")}
-                            onAction={clearAll}
-                        />
+                        hasActiveFilters && hasMore ? (
+                            <EmptyState
+                                title={t("noMatchesTitle")}
+                                body={t("noMatchesMoreBody", { loaded: entries.length })}
+                                muted
+                            />
+                        ) : (
+                            <EmptyState
+                                title={t("noMatchesTitle")}
+                                body={t("noMatchesBody")}
+                                muted
+                                actionLabel={t("clearAll")}
+                                onAction={clearAll}
+                            />
+                        )
                     ) : (
                         <ul className="relative">
                             <AnimatePresence initial={false} mode="popLayout">
@@ -648,8 +656,12 @@ function LoadMore({
     onLoad: () => void;
     t: Translator;
 }) {
+    const label = loading ? t("loadMoreLoading") : error ? t("loadMoreRetry") : t("loadMore");
     return (
         <div className="flex flex-col items-center gap-2 pt-2">
+            <p role="status" aria-live="polite" className="sr-only">
+                {loading ? t("loadMoreLoading") : ""}
+            </p>
             {error && (
                 <p role="alert" className="text-xs text-destructive">
                     {t("loadMoreError")}
@@ -662,12 +674,14 @@ function LoadMore({
                 aria-busy={loading}
                 className="inline-flex h-9 items-center gap-2 rounded-full bg-muted px-4 text-sm font-medium text-foreground ring-1 ring-border outline-none transition duration-150 ease-out hover:bg-accent active:scale-[0.97] focus-visible:ring-2 focus-visible:ring-brand/40 disabled:cursor-not-allowed disabled:opacity-70 disabled:active:scale-100"
             >
-                {loading ? (
-                    <ArrowPathIcon className="size-4 animate-spin [animation-duration:0.6s]" />
+                {loading || error ? (
+                    <ArrowPathIcon
+                        className={cn("size-4 text-muted-foreground", loading && "motion-safe:animate-spin [animation-duration:0.6s]")}
+                    />
                 ) : (
                     <ArrowDownIcon className="size-4 text-muted-foreground" />
                 )}
-                {loading ? t("loadMoreLoading") : error ? t("loadMoreRetry") : t("loadMore")}
+                {label}
             </button>
         </div>
     );

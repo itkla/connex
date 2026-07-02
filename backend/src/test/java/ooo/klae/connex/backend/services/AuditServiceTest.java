@@ -59,6 +59,13 @@ class AuditServiceTest {
     }
 
     @Test
+    void recentCapsExcessiveOffset() {
+        when(auditLogMapper.findRecent(7, 50, 100_000)).thenReturn(List.of());
+        service.recent(50, Integer.MAX_VALUE);
+        verify(auditLogMapper).findRecent(7, 50, 100_000);
+    }
+
+    @Test
     void forEntityScopesToWorkspaceWithLimitAndOffset() {
         when(auditLogMapper.findByEntity(7, "company", 12, 100, 300)).thenReturn(List.of());
         service.forEntity("company", 12, 100, 300);
