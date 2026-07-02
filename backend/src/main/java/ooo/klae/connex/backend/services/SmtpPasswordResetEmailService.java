@@ -4,7 +4,6 @@ import java.util.Map;
 
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
-import org.springframework.context.annotation.Primary;
 import org.springframework.stereotype.Service;
 import org.springframework.web.util.UriComponentsBuilder;
 
@@ -15,15 +14,16 @@ import ooo.klae.connex.backend.mail.MailMessage;
 import ooo.klae.connex.backend.mail.MailService;
 
 /**
- * Real SMTP delivery of password-reset links, active when {@code connex.mail.enabled=true}.
- * Marked {@link Primary} so it supersedes the dev {@link LoggingPasswordResetEmailService}.
- * Account-level mail goes through the instance sender; delivery itself is async and
- * failure-tolerant inside {@link MailService}, preserving the enumeration-safe timing
- * of the reset request.
+ * Real SMTP delivery of password-reset links, active when
+ * {@code connex.password-reset.email-enabled=true} (the seam contract). That same flag
+ * stands the dev {@link LoggingPasswordResetEmailService} down, so exactly one delivery
+ * bean exists — no {@code @Primary} needed. Transport comes from the instance sender
+ * ({@code connex.mail.*}); when none is configured {@link MailService} logs and skips.
+ * Delivery is async and failure-tolerant, preserving the enumeration-safe timing of the
+ * reset request.
  */
 @Service
-@Primary
-@ConditionalOnProperty(prefix = "connex.mail", name = "enabled", havingValue = "true")
+@ConditionalOnProperty(prefix = "connex.password-reset", name = "email-enabled", havingValue = "true")
 @RequiredArgsConstructor
 public class SmtpPasswordResetEmailService implements PasswordResetEmailService {
 
