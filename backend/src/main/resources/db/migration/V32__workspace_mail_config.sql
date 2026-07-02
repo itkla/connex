@@ -18,8 +18,8 @@ CREATE TABLE workspace_mail_config (
     from_address VARCHAR(320) COMMENT 'Envelope/from address',
     from_name    VARCHAR(255) COMMENT 'Display name for the from address',
     starttls     BOOLEAN NOT NULL DEFAULT TRUE COMMENT 'Use STARTTLS',
-    ssl          BOOLEAN NOT NULL DEFAULT FALSE COMMENT 'Use implicit SSL/TLS',
-    auth         BOOLEAN NOT NULL DEFAULT TRUE COMMENT 'SMTP AUTH required',
+    `ssl`        BOOLEAN NOT NULL DEFAULT FALSE COMMENT 'Use implicit SSL/TLS',
+    `auth`       BOOLEAN NOT NULL DEFAULT TRUE COMMENT 'SMTP AUTH required',
     updated_at   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT 'Last update timestamp',
     PRIMARY KEY (workspace_id),
     CONSTRAINT fk_workspace_mail_config_workspace FOREIGN KEY (workspace_id) REFERENCES workspace(id) ON DELETE CASCADE

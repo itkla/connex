@@ -5,7 +5,7 @@
 
   <select id="findByWorkspace" resultType="WorkspaceMailConfig">
     SELECT workspace_id, enabled, host, port, username, password_enc,
-           from_address, from_name, starttls, ssl, auth, updated_at
+           from_address, from_name, starttls, `ssl`, `auth`, updated_at
     FROM workspace_mail_config
     WHERE workspace_id = #{workspaceId}
   </select>
@@ -13,7 +13,7 @@
   <insert id="upsert">
     INSERT INTO workspace_mail_config
       (workspace_id, enabled, host, port, username, password_enc,
-       from_address, from_name, starttls, ssl, auth)
+       from_address, from_name, starttls, `ssl`, `auth`)
     VALUES
       (#{workspaceId}, #{enabled}, #{host}, #{port}, #{username}, #{passwordEnc},
        #{fromAddress}, #{fromName}, #{starttls}, #{ssl}, #{auth})
@@ -26,8 +26,8 @@
       from_address = VALUES(from_address),
       from_name = VALUES(from_name),
       starttls = VALUES(starttls),
-      ssl = VALUES(ssl),
-      auth = VALUES(auth)
+      `ssl` = VALUES(`ssl`),
+      `auth` = VALUES(`auth`)
   </insert>
 
   <delete id="delete">
