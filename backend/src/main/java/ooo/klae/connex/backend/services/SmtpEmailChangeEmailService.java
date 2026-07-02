@@ -4,7 +4,6 @@ import java.util.Map;
 
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
-import org.springframework.context.annotation.Primary;
 import org.springframework.stereotype.Service;
 import org.springframework.web.util.UriComponentsBuilder;
 
@@ -16,13 +15,13 @@ import ooo.klae.connex.backend.mail.MailService;
 
 /**
  * Real SMTP delivery of email-change verification links, active when
- * {@code connex.mail.enabled=true}. Marked {@link Primary} so it supersedes the
- * dev {@link LoggingEmailChangeEmailService}. The verification link is sent to the
- * pending new address through the instance sender.
+ * {@code connex.email-change.email-enabled=true} (the seam contract). That same flag
+ * stands the dev {@link LoggingEmailChangeEmailService} down, so exactly one delivery
+ * bean exists — no {@code @Primary} needed. The verification link is sent to the pending
+ * new address through the instance sender ({@code connex.mail.*}).
  */
 @Service
-@Primary
-@ConditionalOnProperty(prefix = "connex.mail", name = "enabled", havingValue = "true")
+@ConditionalOnProperty(prefix = "connex.email-change", name = "email-enabled", havingValue = "true")
 @RequiredArgsConstructor
 public class SmtpEmailChangeEmailService implements EmailChangeEmailService {
 

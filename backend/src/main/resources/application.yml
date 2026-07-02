@@ -71,12 +71,14 @@ connex:
         evaluation-delay-ms: ${CONNEX_RULES_EVALUATION_DELAY_MS:900000}
         initial-delay-ms: ${CONNEX_RULES_INITIAL_DELAY_MS:900000}
     mail:
-        # Instance-wide SMTP transport: the default sender for account-level mail
-        # (password reset, email change) and the fallback for workspaces without their
-        # own SMTP. enabled=false (default) builds no transport, so those flows keep the
-        # dev logging fallback. A workspace can override host/from via Settings → Email;
-        # its SMTP password is AES/GCM-encrypted at rest with secret-key. app-base-url is
-        # the frontend origin used to build invite links (never from a request header).
+        # Instance-wide SMTP transport. enabled=true wires the default sender and lets
+        # workspace invites be emailed; it is also the transport that the account-level
+        # flows use once THEY are switched on via their own flags below
+        # (password-reset.email-enabled / email-change.email-enabled) — enabling mail alone
+        # does NOT start sending reset/verification mail. It is the fallback sender for
+        # workspaces without their own SMTP. A workspace can override host/from via
+        # Settings → Email; its SMTP password is AES/GCM-encrypted at rest with secret-key.
+        # app-base-url is the frontend origin used to build invite links (never a request header).
         enabled: ${CONNEX_MAIL_ENABLED:false}
         host: ${CONNEX_MAIL_HOST:}
         port: ${CONNEX_MAIL_PORT:587}
@@ -99,10 +101,11 @@ connex:
         allow-internal-hosts: ${CONNEX_MAIL_ALLOW_INTERNAL_HOSTS:false}
     password-reset:
         # Forgot-password flow. token-expiry-minutes bounds how long a reset link is
-        # valid; email-enabled=false keeps the dev fallback that logs the link instead
-        # of sending mail. base-url is the frontend origin used to build the reset link
-        # (never derived from a request header). request-window-seconds / max-requests
-        # cap how many reset links one account can request in that window.
+        # valid; email-enabled=true sends real reset mail over the connex.mail.* transport
+        # (configure that too), while false keeps the dev fallback that only logs the link.
+        # base-url is the frontend origin used to build the reset link (never derived from a
+        # request header). request-window-seconds / max-requests cap how many reset links one
+        # account can request in that window.
         token-expiry-minutes: ${CONNEX_PASSWORD_RESET_TOKEN_EXPIRY_MINUTES:30}
         email-enabled: ${CONNEX_PASSWORD_RESET_EMAIL_ENABLED:false}
         # Dev-only: log the raw reset link. Never enable where logs are accessible.
@@ -119,11 +122,12 @@ connex:
         initial-delay-ms: ${CONNEX_PASSWORD_RESET_INITIAL_DELAY_MS:3600000}
     email-change:
         # Verified account email-change flow. A change is applied only after the
-        # recipient redeems a single-use token sent to the new address; email-enabled=false
-        # keeps the dev fallback that logs the link instead of sending mail. base-url is the
-        # frontend origin used to build the verification link (never derived from a request
-        # header). request-window-seconds / max-requests cap how many changes one account can
-        # request in that window; the raw token is never stored (only its SHA-256 hash).
+        # recipient redeems a single-use token sent to the new address; email-enabled=true
+        # sends real verification mail over the connex.mail.* transport (configure that too),
+        # while false keeps the dev fallback that only logs the link. base-url is the frontend
+        # origin used to build the verification link (never derived from a request header).
+        # request-window-seconds / max-requests cap how many changes one account can request
+        # in that window; the raw token is never stored (only its SHA-256 hash).
         token-expiry-minutes: ${CONNEX_EMAIL_CHANGE_TOKEN_EXPIRY_MINUTES:30}
         email-enabled: ${CONNEX_EMAIL_CHANGE_EMAIL_ENABLED:false}
         # Dev-only: log the raw verification link. Never enable where logs are accessible.
