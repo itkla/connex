@@ -302,6 +302,27 @@ public class WorkspaceService {
         return permissions;
     }
 
+    /**
+     * Ensures the actor may confer every permission in {@code requested}: a member
+     * can only grant permissions they themselves hold in the workspace. This caps
+     * ROLE_MANAGE so a delegate cannot mint or assign a role broader than their own
+     * authority (privilege escalation). Owners hold the full catalog and are
+     * unaffected.
+     *
+     * @param workspaceId the workspace the grant applies to
+     * @param actorId the member performing the grant
+     * @param requested the permissions being conferred
+     */
+    public void requireGrantable(int workspaceId, int actorId, Set<Permission> requested) {
+        Set<Permission> held = permissionsFor(workspaceId, actorId);
+        for (Permission permission : requested) {
+            if (!held.contains(permission)) {
+                throw new ForbiddenException("You cannot grant the " + permission
+                        + " permission because you do not hold it");
+            }
+        }
+    }
+
     /** Assigns a custom role to a member; managing roles requires the ROLE_MANAGE permission. */
     public MemberDto assignCustomRole(int workspaceId, int actorId, int targetUserId, int roleId) {
         requirePermission(workspaceId, actorId, Permission.ROLE_MANAGE);
@@ -312,6 +333,7 @@ public class WorkspaceService {
         if (!roleMapper.roleExists(workspaceId, roleId)) {
             throw new ResourceNotFoundException("Role not found in this workspace");
         }
+        requireGrantable(workspaceId, actorId, parsePermissions(roleMapper.findPermissions(roleId)));
         workspaceMapper.setMemberCustomRole(workspaceId, targetUserId, roleId);
         auditService.record("workspace.member.role", "workspace", workspaceId, target.getDisplayName(),
                 "Assigned a custom role to " + target.getDisplayName(), null);
@@ -361,9 +383,11 @@ public class WorkspaceService {
         if (newRole == Role.OWNER) {
             requireRole(workspaceId, actorId, Role.OWNER);
         }
-        if ("owner".equals(target.getRole()) && newRole != Role.OWNER
-                && workspaceMapper.countOwners(workspaceId) <= 1) {
-            throw new BadRequestException("A workspace must keep at least one owner");
+        if ("owner".equals(target.getRole()) && newRole != Role.OWNER) {
+            requireRole(workspaceId, actorId, Role.OWNER);
+            if (workspaceMapper.countOwners(workspaceId) <= 1) {
+                throw new BadRequestException("A workspace must keep at least one owner");
+            }
         }
         workspaceMapper.updateMemberRole(workspaceId, targetUserId, newRole.name().toLowerCase());
         auditService.record("workspace.member.role", "workspace", workspaceId, target.getDisplayName(),

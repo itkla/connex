@@ -1,7 +1,9 @@
 package ooo.klae.connex.backend.services;
 
 import java.util.ArrayList;
+import java.util.EnumSet;
 import java.util.List;
+import java.util.Set;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -37,11 +39,13 @@ public class RoleService {
     @Transactional
     public WorkspaceRole createRole(int workspaceId, int actorId, String name, List<String> permissions) {
         workspaceService.requirePermission(workspaceId, actorId, Permission.ROLE_MANAGE);
+        List<String> valid = validatePermissions(permissions);
+        workspaceService.requireGrantable(workspaceId, actorId, toEnumSet(valid));
         WorkspaceRole role = new WorkspaceRole();
         role.setWorkspaceId(workspaceId);
         role.setName(name.trim());
         roleMapper.insertRole(role);
-        applyPermissions(role.getId(), permissions);
+        applyPermissions(role.getId(), valid);
         auditService.record("workspace.role.create", "workspace", workspaceId, name,
                 "Created role " + name, null);
         return roleMapper.findRole(workspaceId, role.getId());
@@ -50,10 +54,12 @@ public class RoleService {
     @Transactional
     public WorkspaceRole updateRole(int workspaceId, int actorId, int roleId, String name, List<String> permissions) {
         workspaceService.requirePermission(workspaceId, actorId, Permission.ROLE_MANAGE);
+        List<String> valid = validatePermissions(permissions);
+        workspaceService.requireGrantable(workspaceId, actorId, toEnumSet(valid));
         if (roleMapper.updateRoleName(workspaceId, roleId, name.trim()) == 0) {
             throw new ResourceNotFoundException("Role not found");
         }
-        applyPermissions(roleId, permissions);
+        applyPermissions(roleId, valid);
         auditService.record("workspace.role.update", "workspace", workspaceId, name,
                 "Updated role " + name, null);
         return roleMapper.findRole(workspaceId, roleId);
@@ -68,11 +74,10 @@ public class RoleService {
                 "Deleted role " + roleId, null);
     }
 
-    private void applyPermissions(int roleId, List<String> permissions) {
+    private void applyPermissions(int roleId, List<String> validPermissions) {
         roleMapper.clearPermissions(roleId);
-        List<String> valid = validatePermissions(permissions);
-        if (!valid.isEmpty()) {
-            roleMapper.insertPermissions(roleId, valid);
+        if (!validPermissions.isEmpty()) {
+            roleMapper.insertPermissions(roleId, validPermissions);
         }
     }
 
@@ -89,5 +94,13 @@ public class RoleService {
             }
         }
         return valid;
+    }
+
+    private static Set<Permission> toEnumSet(List<String> validPermissionNames) {
+        EnumSet<Permission> permissions = EnumSet.noneOf(Permission.class);
+        for (String name : validPermissionNames) {
+            permissions.add(Permission.valueOf(name));
+        }
+        return permissions;
     }
 }

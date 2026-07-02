@@ -84,4 +84,49 @@ class RbacTest extends AbstractServiceTest {
         assertThrows(ForbiddenException.class,
             () -> roleService.createRole(ws.getId(), member.getId(), "Nope", List.of()));
     }
+
+    @Test
+    void adminCannotDemoteAnOwnerWithoutOwnerRole() {
+        WorkspaceMembershipDto ws = workspaceService.createWorkspace("Owner Guard WS", currentUser.getId());
+        User coOwner = newUser();
+        workspaceMapper.addMember(ws.getId(), coOwner.getId(), "owner");
+        User admin = newUser();
+        workspaceMapper.addMember(ws.getId(), admin.getId(), "admin");
+
+        assertThrows(ForbiddenException.class,
+            () -> workspaceService.changeMemberRole(ws.getId(), admin.getId(), coOwner.getId(), "member"));
+
+        assertDoesNotThrow(
+            () -> workspaceService.changeMemberRole(ws.getId(), currentUser.getId(), coOwner.getId(), "member"));
+    }
+
+    @Test
+    void roleManageCannotMintRoleGrantingPermissionsActorLacks() {
+        WorkspaceMembershipDto ws = workspaceService.createWorkspace("Ceiling WS", currentUser.getId());
+        User delegate = newUser();
+        workspaceMapper.addMember(ws.getId(), delegate.getId(), "member");
+        WorkspaceRole roleAdmin = roleService.createRole(ws.getId(), currentUser.getId(), "RoleAdmin",
+            List.of("ROLE_MANAGE", "PERSON_CREATE"));
+        workspaceService.assignCustomRole(ws.getId(), currentUser.getId(), delegate.getId(), roleAdmin.getId());
+
+        assertThrows(ForbiddenException.class,
+            () -> roleService.createRole(ws.getId(), delegate.getId(), "SuperRole", List.of("MEMBER_MANAGE")));
+        assertDoesNotThrow(
+            () -> roleService.createRole(ws.getId(), delegate.getId(), "NarrowRole", List.of("PERSON_CREATE")));
+    }
+
+    @Test
+    void roleManageCannotSelfAssignRoleBroaderThanActor() {
+        WorkspaceMembershipDto ws = workspaceService.createWorkspace("Assign Ceiling WS", currentUser.getId());
+        User delegate = newUser();
+        workspaceMapper.addMember(ws.getId(), delegate.getId(), "member");
+        WorkspaceRole roleAdmin = roleService.createRole(ws.getId(), currentUser.getId(), "RoleAdmin",
+            List.of("ROLE_MANAGE"));
+        workspaceService.assignCustomRole(ws.getId(), currentUser.getId(), delegate.getId(), roleAdmin.getId());
+        WorkspaceRole superRole = roleService.createRole(ws.getId(), currentUser.getId(), "Super",
+            List.of("MEMBER_MANAGE", "WORKSPACE_SETTINGS"));
+
+        assertThrows(ForbiddenException.class,
+            () -> workspaceService.assignCustomRole(ws.getId(), delegate.getId(), delegate.getId(), superRole.getId()));
+    }
 }
