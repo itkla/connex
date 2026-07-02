@@ -288,6 +288,8 @@ export type IntroductionRecord = {
     introducerId?: number | null;
     introducerName?: string | null;
     note?: string | null;
+    /** Server-resolved @/# references parsed from `note`; read-only, drives chip rendering. */
+    references?: NoteReference[];
     introducedAt: string;
 };
 
@@ -418,6 +420,8 @@ export type Activity = {
     dealId?: number | null;
     createdById: number;
     timestamp?: string;
+    /** Server-resolved @/# references parsed from `notes`; read-only, drives chip rendering. */
+    references?: NoteReference[];
 };
 
 export type DealSummary = {

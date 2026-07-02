@@ -19,7 +19,7 @@ import {
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
-import { Textarea } from '@/components/ui/textarea';
+import MentionEditor from '@/app/components/activity/notes/MentionEditor';
 import { Select, SelectItem, SelectContent, SelectValue, SelectTrigger } from '@/components/ui/select';
 import { DialogStatusCover, resolveDialogStatus, fieldInputClass, fieldLeadIconClass } from '@/components/ui/dialog-status-cover';
 import { TagIcon, CalendarIcon, BriefcaseIcon, PencilSquareIcon, Bars3BottomLeftIcon } from '@heroicons/react/24/outline';
@@ -63,7 +63,7 @@ export default function NewActivityDialog({
     const [timestamp, setTimestamp] = useState('');
     const [dealId, setDealId] = useState('none');
     const [deals, setDeals] = useState<Deal[]>([]);
-    const [loadingDeals, setLoadingDeals] = useState(false);
+    const [loadedCompanyId, setLoadedCompanyId] = useState<number | null>(null);
     const [submitting, setSubmitting] = useState(false);
     const [succeeded, setSucceeded] = useState(false);
 
@@ -109,27 +109,29 @@ export default function NewActivityDialog({
         }
     }
 
-    async function loadCompanyDeals() {
-        if (!companyId) {
-            setDeals([]);
-            return;
-        }
-        setLoadingDeals(true);
-        try {
-            const companyDeals = await getCompanyDeals(companyId);
-            setDeals(companyDeals);
-        } catch (err) {
-            const message = err instanceof ApiError ? err.message : err instanceof Error ? err.message : t('toastFailedLoadDeals');
-            toastError(message);
-            setDeals([]);
-        } finally {
-            setLoadingDeals(false);
-        }
-    }
+    const loadingDeals = open && Boolean(companyId) && loadedCompanyId !== companyId;
 
     useEffect(() => {
-        if (open) loadCompanyDeals();
-    }, [open, companyId]);
+        if (!open || !companyId) return;
+        const cid = companyId;
+        let active = true;
+        getCompanyDeals(cid)
+            .then((companyDeals) => {
+                if (!active) return;
+                setDeals(companyDeals);
+                setLoadedCompanyId(cid);
+            })
+            .catch((err) => {
+                if (!active) return;
+                const message = err instanceof ApiError ? err.message : err instanceof Error ? err.message : t('toastFailedLoadDeals');
+                toastError(message);
+                setDeals([]);
+                setLoadedCompanyId(cid);
+            });
+        return () => {
+            active = false;
+        };
+    }, [open, companyId, t]);
 
     const status = resolveDialogStatus({ isLoading: submitting, isSuccess: succeeded });
 
@@ -256,12 +258,12 @@ export default function NewActivityDialog({
                         <Label htmlFor="activity-notes">{t('notes')}</Label>
                         <div className="group relative">
                             <Bars3BottomLeftIcon className="pointer-events-none absolute left-3 top-3 size-4 text-muted-foreground transition-colors group-focus-within:text-brand" />
-                            <Textarea
+                            <MentionEditor
                                 id="activity-notes"
                                 value={notes}
-                                onChange={(e) => setNotes(e.target.value)}
+                                onChange={setNotes}
                                 placeholder={t('notesPlaceholder')}
-                                className={cn(fieldInputClass, 'min-h-24 pl-9 pr-3')}
+                                className={cn(fieldInputClass, 'min-h-24 pl-9 pr-3 py-2')}
                             />
                         </div>
                     </div>

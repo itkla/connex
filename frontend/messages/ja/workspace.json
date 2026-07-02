@@ -350,6 +350,10 @@
     "mentionDescription": "メンバーがノートであなたをメンションしたとき。",
     "taskMentionTitle": "タスクのメンション",
     "taskMentionDescription": "メンバーがタスクであなたをメンションしたとき。",
+    "activityMentionTitle": "アクティビティのメンション",
+    "activityMentionDescription": "メンバーがアクティビティであなたをメンションしたとき。",
+    "introductionMentionTitle": "紹介のメンション",
+    "introductionMentionDescription": "メンバーが紹介であなたをメンションしたとき。",
     "loadFailed": "通知設定を読み込めませんでした。",
     "saveFailed": "変更を保存できませんでした。もう一度お試しください。",
     "retry": "再試行"

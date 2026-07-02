@@ -127,7 +127,7 @@ export default function TimelineRow({
                 </span>
                 {activity.notes ? (
                     <span className="truncate text-xs text-muted-foreground">
-                        · {activity.notes}
+                        · <NoteContent content={activity.notes} references={activity.references} />
                     </span>
                 ) : null}
             </div>

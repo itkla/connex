@@ -31,11 +31,13 @@ import {
 
 import EditActivitySheet from '@/app/components/activity/activities/EditActivitySheet';
 import ActivityDialog from '@/app/components/activity/activities/ActivityDialog';
+import NoteContent from '@/app/components/activity/notes/NoteContent';
 import DeleteRecordDialog from '@/app/components/records/DeleteRecordDialog';
 import Rise from '@/app/components/motion/Rise';
 import { ACTIVITY_TYPES, TYPE_META, normalizeType, type ActivityType } from '@/app/components/activity/activities/activityTypes';
 import { deleteActivity } from '@/app/lib/api';
 import { toastError, toastSuccess } from '@/app/lib/toast';
+import { noteContentToPlainText } from '@/app/lib/references';
 import { parseMysqlDateTime } from '@/app/lib/utils';
 import { cn } from '@/lib/utils';
 import type { Activity, Contact, Deal, User } from '@/app/lib/types';
@@ -216,7 +218,7 @@ export default function ActivitiesBrowser({ activities, persons, deals, users, c
                 if (!q) return true;
                 const haystacks = [
                     a.subject,
-                    a.notes,
+                    a.notes ? noteContentToPlainText(a.notes) : null,
                     a.personId ? personById.get(a.personId)?.name : null,
                     a.dealId ? dealById.get(a.dealId)?.name : null,
                     userById.get(a.createdById)?.displayName,
@@ -707,7 +709,7 @@ function TimelineRow({
                 </div>
 
                 {activity.notes ? (
-                    <p className="mt-1 line-clamp-2 text-sm text-muted-foreground">{activity.notes}</p>
+                    <p className="mt-1 line-clamp-2 text-sm text-muted-foreground"><NoteContent content={activity.notes} references={activity.references} /></p>
                 ) : null}
 
                 {(person || deal || creator) && (
