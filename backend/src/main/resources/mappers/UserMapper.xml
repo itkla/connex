@@ -65,6 +65,12 @@
     WHERE id = #{id}
   </update>
 
+  <update id="updatePasswordHash">
+    UPDATE app_user
+    SET password_hash = #{passwordHash}
+    WHERE id = #{id}
+  </update>
+
   <update id="updateProfilePictureUrl">
     UPDATE app_user
     SET profile_picture_url = #{profilePictureUrl}

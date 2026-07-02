@@ -70,6 +70,20 @@ connex:
         scheduling-enabled: ${CONNEX_RULES_SCHEDULING_ENABLED:true}
         evaluation-delay-ms: ${CONNEX_RULES_EVALUATION_DELAY_MS:900000}
         initial-delay-ms: ${CONNEX_RULES_INITIAL_DELAY_MS:900000}
+    password-reset:
+        # Forgot-password flow. token-expiry-minutes bounds how long a reset link is
+        # valid; email-enabled=false keeps the dev fallback that logs the link instead
+        # of sending mail. base-url is the frontend origin used to build the reset link
+        # (never derived from a request header). request-window-seconds / max-requests
+        # cap how many reset links one account can request in that window.
+        token-expiry-minutes: ${CONNEX_PASSWORD_RESET_TOKEN_EXPIRY_MINUTES:30}
+        email-enabled: ${CONNEX_PASSWORD_RESET_EMAIL_ENABLED:false}
+        base-url: ${CONNEX_PASSWORD_RESET_BASE_URL:http://localhost:3000}
+        request-window-seconds: ${CONNEX_PASSWORD_RESET_REQUEST_WINDOW_SECONDS:900}
+        max-requests: ${CONNEX_PASSWORD_RESET_MAX_REQUESTS:5}
+        scheduling-enabled: ${CONNEX_PASSWORD_RESET_SCHEDULING_ENABLED:true}
+        cleanup-delay-ms: ${CONNEX_PASSWORD_RESET_CLEANUP_DELAY_MS:3600000}
+        initial-delay-ms: ${CONNEX_PASSWORD_RESET_INITIAL_DELAY_MS:3600000}
 
 mybatis:
     mapper-locations: classpath:mappers/*.xml
