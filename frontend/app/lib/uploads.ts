@@ -35,6 +35,38 @@ export function resolveContained(targetDir: string, fileName: string): string | 
     return resolved;
 }
 
+const RENDERABLE_EXTENSIONS = new Set([
+    ".html", ".htm", ".xhtml", ".shtml", ".svg", ".svgz", ".xml", ".xsl", ".xslt",
+    ".js", ".mjs", ".cjs", ".htaccess",
+]);
+const RENDERABLE_CONTENT_TYPES = new Set([
+    "text/html", "application/xhtml+xml", "image/svg+xml",
+    "text/xml", "application/xml",
+    "text/javascript", "application/javascript", "application/ecmascript", "text/ecmascript",
+]);
+
+/**
+ * Rejects uploads whose type a browser can render or execute inline (HTML, SVG,
+ * XML, JavaScript). Such files are safe as opaque downloads but become stored
+ * XSS if ever served inline from the app origin, so the generic attachment route
+ * refuses them (documents, images, PDFs, archives, etc. remain allowed). Returns
+ * a rejection describing the HTTP error, or `null` when acceptable.
+ */
+export function rejectRenderableUpload(file: File): UploadRejection | null {
+    if (file.size > MAX_BYTES) {
+        return {
+            status: 413,
+            error: `File exceeds the maximum size of ${Math.floor(MAX_BYTES / (1024 * 1024))}MB`,
+        };
+    }
+    const extension = path.extname(file.name).toLowerCase();
+    const contentType = file.type.toLowerCase().split(";")[0].trim();
+    if (RENDERABLE_EXTENSIONS.has(extension) || RENDERABLE_CONTENT_TYPES.has(contentType)) {
+        return { status: 415, error: "This file type can't be uploaded as an attachment" };
+    }
+    return null;
+}
+
 /**
  * Validates an uploaded image against the size limit and the content-type /
  * extension allowlist (PNG, JPEG, WebP, GIF, AVIF). Returns a rejection

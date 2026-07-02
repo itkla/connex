@@ -3,7 +3,7 @@ import { headers } from "next/headers";
 import path from "path";
 import fs from "fs/promises";
 import { getCurrentUserFromCookie } from "@/app/lib/api";
-import { MAX_BYTES, resolveContained, safeFileName } from "@/app/lib/uploads";
+import { rejectRenderableUpload, resolveContained, safeFileName } from "@/app/lib/uploads";
 
 const PUBLIC_PREFIX = "/attachments";
 
@@ -39,11 +39,9 @@ export async function POST(request: NextRequest) {
     }
 
     const upload = file as File;
-    if (upload.size > MAX_BYTES) {
-        return NextResponse.json(
-            { error: `File exceeds the maximum size of ${Math.floor(MAX_BYTES / (1024 * 1024))}MB` },
-            { status: 413 },
-        );
+    const rejection = rejectRenderableUpload(upload);
+    if (rejection) {
+        return NextResponse.json({ error: rejection.error }, { status: rejection.status });
     }
 
     const entityType = safeEntityType(entityTypeRaw);

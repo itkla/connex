@@ -2,12 +2,17 @@ import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 
 const PROTECTED_PREFIXES = [
-    '/dashboard',
-    '/me',
-    '/records',
-    '/library',
     '/activity',
+    '/admin',
+    '/dashboard',
+    '/library',
+    '/me',
     '/notifications',
+    '/overview',
+    '/records',
+    '/search',
+    '/settings',
+    '/users',
 ];
 
 const SESSION_COOKIE = 'JSESSIONID';
@@ -76,12 +81,17 @@ export function proxy(request: NextRequest) {
 export const config = {
     matcher: [
         '/auth/:path*',
-        '/dashboard/:path*',
-        '/me/:path*',
-        '/records/:path*',
-        '/library/:path*',
         '/activity/:path*',
+        '/admin/:path*',
+        '/dashboard/:path*',
+        '/library/:path*',
+        '/me/:path*',
         '/notifications/:path*',
+        '/overview/:path*',
+        '/records/:path*',
+        '/search/:path*',
+        '/settings/:path*',
+        '/users/:path*',
         '/onboarding',
         '/invite/:path*',
         '/invite-link/:path*',
