@@ -11,10 +11,9 @@ import {
 } from "@heroicons/react/24/outline";
 import { getCurrentUserFromCookie } from "@/app/lib/api";
 import LandingNav from "@/app/components/landing/LandingNav";
-import LanguageSwitcher from "@/app/components/landing/LanguageSwitcher";
+import LandingFooter from "@/app/components/landing/LandingFooter";
 import HeroVisual from "@/app/components/landing/HeroVisual";
 import Reveal from "@/app/components/landing/Reveal";
-import { Link2 } from "lucide-react";
 
 const btnPrimary =
     "inline-flex items-center justify-center gap-2 rounded-full bg-brand px-6 py-3 text-base font-semibold text-neutral-950 transition-[transform,background-color] duration-150 ease-out hover:bg-brand-hover active:scale-[0.98]";
@@ -224,43 +223,7 @@ export default async function Home() {
                 </section>
             </main>
 
-            <footer className="border-t border-border bg-card">
-                <div className="mx-auto max-w-7xl px-6 py-12 lg:px-8">
-                    <div className="flex flex-col gap-8 sm:flex-row sm:items-start sm:justify-between">
-                        <div className="max-w-xs">
-                            <Link href="/" className="flex items-center gap-2.5">
-                                <span className="size-3 rounded-[5px] bg-brand" aria-hidden="true" />
-                                <span className="text-lg font-bold tracking-tight text-foreground">
-                                    {t("brand")}
-                                </span>
-                            </Link>
-                            <p className="mt-3 text-sm leading-relaxed text-muted-foreground">{t("footerTagline")}</p>
-                        </div>
-
-                        <div className="flex flex-col gap-6 sm:flex-row sm:items-start sm:gap-12">
-                            <nav className="flex flex-col gap-3 text-sm">
-                                <a href="#features" className="text-muted-foreground transition-colors hover:text-foreground">
-                                    {t("navFeatures")}
-                                </a>
-                                <a href="#workflow" className="text-muted-foreground transition-colors hover:text-foreground">
-                                    {t("navWorkflow")}
-                                </a>
-                                <Link
-                                    href="/auth/login"
-                                    className="text-muted-foreground transition-colors hover:text-foreground"
-                                >
-                                    {t("navLogin")}
-                                </Link>
-                            </nav>
-                            <LanguageSwitcher align="start" />
-                        </div>
-                    </div>
-
-                    <div className="mt-10 border-t border-border pt-6 text-sm text-muted-foreground">
-                        {t("footerRights")}
-                    </div>
-                </div>
-            </footer>
+            <LandingFooter />
         </div>
     );
 }
