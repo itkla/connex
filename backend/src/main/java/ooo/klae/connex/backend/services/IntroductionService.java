@@ -18,14 +18,21 @@ import org.springframework.transaction.annotation.Transactional;
 
 import lombok.RequiredArgsConstructor;
 
+import tools.jackson.databind.ObjectMapper;
+
+import ooo.klae.connex.backend.beans.EntityReference;
 import ooo.klae.connex.backend.beans.IntroCandidatePerson;
 import ooo.klae.connex.backend.beans.IntroEmploymentRow;
 import ooo.klae.connex.backend.beans.Introduction;
+import ooo.klae.connex.backend.beans.Notification;
 import ooo.klae.connex.backend.beans.PersonEdge;
+import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.dto.IntroSuggestionDto;
 import ooo.klae.connex.backend.dto.IntroductionDto;
 import ooo.klae.connex.backend.dto.PageResponse;
+import ooo.klae.connex.backend.dto.ReferenceDto;
 import ooo.klae.connex.backend.dto.RelationshipTemperatureDto;
+import ooo.klae.connex.backend.notifications.NotificationDelivery;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.IntroductionMapper;
@@ -54,6 +61,16 @@ public class IntroductionService {
     private final WorkspaceService workspaceService;
     private final AuthService authService;
     private final Clock clock;
+    private final ReferenceService referenceService;
+    private final NotificationDelivery notificationDelivery;
+    private final NotificationPreferenceService notificationPreferenceService;
+    private final ObjectMapper objectMapper;
+
+    private static final String MENTION_TYPE = "introduction.mention";
+    private static final String MENTION_CATEGORY = "introduction";
+    private static final String MENTION_SEVERITY = "info";
+    private static final String IN_APP = "in_app";
+    private static final int SNIPPET_LENGTH = 140;
 
     /** Mutual-connection count at which that signal is maxed out. */
     private static final int MUTUAL_CAP = 5;
@@ -346,12 +363,13 @@ public class IntroductionService {
         }
         requireOwnedPerson(workspaceId, personAId);
         requireOwnedPerson(workspaceId, personBId);
+        User actor = authService.getCurrentUser();
         int lower = Math.min(personAId, personBId);
         int higher = Math.max(personAId, personBId);
 
         Introduction introduction = new Introduction();
         introduction.setWorkspaceId(workspaceId);
-        introduction.setIntroducerUserId(authService.getCurrentUser().getId());
+        introduction.setIntroducerUserId(actor.getId());
         introduction.setPersonAId(lower);
         introduction.setPersonBId(higher);
         introduction.setNote(trimToNull(note));
@@ -366,7 +384,14 @@ public class IntroductionService {
         edge.setStrength(DEFAULT_EDGE_STRENGTH);
         edgeMapper.insertIfAbsent(edge);
 
-        return introductionMapper.findByPair(workspaceId, lower, higher);
+        IntroductionDto dto = introductionMapper.findByPair(workspaceId, lower, higher);
+        List<Integer> mentioned =
+            referenceService.syncReferences(workspaceId, ReferenceService.SOURCE_INTRODUCTION, dto.getId(), dto.getNote());
+        notifyMentions(workspaceId, dto, mentioned, actor);
+        dto.setReferences(referenceService
+            .referencesFor(workspaceId, ReferenceService.SOURCE_INTRODUCTION, dto.getId())
+            .stream().map(ReferenceDto::from).toList());
+        return dto;
     }
 
     /** Dismisses a suggested pair so it stops being surfaced; never undoes a recorded introduction. */
@@ -394,8 +419,73 @@ public class IntroductionService {
         int limit = size <= 0 ? DEFAULT_SUGGESTION_LIMIT : Math.min(size, MAX_PAGE_SIZE);
         int offset = (Math.max(1, page) - 1) * limit;
         List<IntroductionDto> items = introductionMapper.findLineage(workspaceId, limit, offset);
+        hydrateReferences(workspaceId, items);
         long total = introductionMapper.countLineage(workspaceId);
         return new PageResponse<>(items, total);
+    }
+
+    private void hydrateReferences(int workspaceId, List<IntroductionDto> items) {
+        if (items.isEmpty()) {
+            return;
+        }
+        Map<Integer, List<EntityReference>> bySource = referenceService.referencesBySource(
+            workspaceId, ReferenceService.SOURCE_INTRODUCTION, items.stream().map(IntroductionDto::getId).toList());
+        for (IntroductionDto item : items) {
+            item.setReferences(bySource.getOrDefault(item.getId(), List.of())
+                .stream().map(ReferenceDto::from).toList());
+        }
+    }
+
+    private void notifyMentions(int workspaceId, IntroductionDto dto, List<Integer> recipientIds, User actor) {
+        if (recipientIds.isEmpty()) {
+            return;
+        }
+        String snippet = snippet(dto.getNote());
+        String triggeredAt = now();
+        String actionUrl = "/introductions";
+        for (int recipientId : recipientIds) {
+            if (recipientId == actor.getId()) {
+                continue;
+            }
+            if (!notificationPreferenceService.isEnabled(recipientId, MENTION_TYPE, IN_APP)) {
+                continue;
+            }
+            try {
+                Notification notification = new Notification();
+                notification.setWorkspaceId(workspaceId);
+                notification.setRecipientId(recipientId);
+                notification.setType(MENTION_TYPE);
+                notification.setCategory(MENTION_CATEGORY);
+                notification.setSeverity(MENTION_SEVERITY);
+                notification.setTemplateVersion(1);
+                notification.setTitle("New mention");
+                notification.setBody(actor.getDisplayName() + " mentioned you in an introduction");
+                notification.setActorId(actor.getId());
+                notification.setActorLabel(actor.getDisplayName());
+                notification.setSourceType("introduction");
+                notification.setSourceId(dto.getId());
+                notification.setSourceLabel(snippet);
+                notification.setActionUrl(actionUrl);
+                notification.setDedupeKey(MENTION_TYPE + ":" + dto.getId() + ":" + recipientId);
+                notification.setTriggeredAt(triggeredAt);
+                notification.setData(json(Map.of("introductionId", dto.getId())));
+                notificationDelivery.deliver(notification);
+            } catch (RuntimeException ignored) {
+            }
+        }
+    }
+
+    private static String snippet(String content) {
+        String plain = ReferenceService.toPlainText(content).strip();
+        return plain.length() > SNIPPET_LENGTH ? plain.substring(0, SNIPPET_LENGTH) : plain;
+    }
+
+    private String json(Object value) {
+        try {
+            return objectMapper.writeValueAsString(value);
+        } catch (Exception exception) {
+            throw new IllegalStateException("Could not serialize notification data", exception);
+        }
     }
 
     private void requireOwnedPerson(int workspaceId, int personId) {
