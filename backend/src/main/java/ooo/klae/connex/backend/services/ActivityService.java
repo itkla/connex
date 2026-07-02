@@ -1,6 +1,7 @@
 package ooo.klae.connex.backend.services;
 
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import tools.jackson.databind.ObjectMapper;
 
@@ -93,6 +94,7 @@ public class ActivityService {
     /**
      * Creates a new activity in the active workspace.
      */
+    @Transactional
     @RequirePermission(Permission.ACTIVITY_CREATE)
     public Activity create(Activity activity) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
@@ -119,6 +121,7 @@ public class ActivityService {
     /**
      * Updates a workspace-scoped activity.
      */
+    @Transactional
     @RequirePermission(Permission.ACTIVITY_UPDATE)
     public Activity update(int id, Activity activity) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();

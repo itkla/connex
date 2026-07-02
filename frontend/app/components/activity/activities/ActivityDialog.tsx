@@ -223,7 +223,7 @@ export default function ActivityDialog({
                                     value={notes}
                                     onChange={setNotes}
                                     placeholder={t('notesPlaceholder')}
-                                    className={cn(fieldInputClass, 'pl-9 pr-3 py-2')}
+                                    className={cn(fieldInputClass, 'min-h-24 pl-9 pr-3 py-2')}
                                 />
                             </div>
                         </div>

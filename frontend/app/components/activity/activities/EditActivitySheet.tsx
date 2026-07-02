@@ -218,7 +218,7 @@ export default function EditActivitySheet({
                                 id="activity-notes"
                                 value={draft.notes}
                                 onChange={(value) => setDraft((d) => ({ ...d, notes: value }))}
-                                className={inputClass}
+                                className={`${inputClass} min-h-24`}
                             />
                         </div>
                     </div>
