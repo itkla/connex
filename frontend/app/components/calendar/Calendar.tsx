@@ -175,7 +175,7 @@ export default function Calendar({ activities, tasks, persons, deals, notes }: P
     const goToday = () => setMonthAnchor(startOfMonth(new Date()));
 
     return (
-        <div className="min-h-screen bg-background px-2 pt-8 pb-12">
+        <div className="min-h-full bg-background px-2 pt-8 pb-12">
             <div className="mx-auto flex w-full max-w-7xl flex-col gap-10">
                 <Rise>
                     <header className="flex flex-wrap items-end justify-between gap-4">
