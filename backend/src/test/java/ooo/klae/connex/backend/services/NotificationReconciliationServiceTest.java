@@ -34,6 +34,7 @@ import ooo.klae.connex.backend.mappers.PreferenceMapper;
 import ooo.klae.connex.backend.notifications.NotificationDelivery;
 import ooo.klae.connex.backend.notifications.NotificationDispatcher;
 import ooo.klae.connex.backend.notifications.NotificationProperties;
+import ooo.klae.connex.backend.notifications.NotificationPushPublisher;
 import tools.jackson.databind.ObjectMapper;
 
 class NotificationReconciliationServiceTest {
@@ -371,7 +372,9 @@ class NotificationReconciliationServiceTest {
         PreferenceMapper preferenceMapper
     ) {
         Mockito.lenient().when(dispatcher.channel()).thenReturn("in_app");
-        return new NotificationDelivery(List.of(dispatcher), notificationMapper, preferenceMapper);
+        return new NotificationDelivery(
+            List.of(dispatcher), notificationMapper, preferenceMapper,
+            Mockito.mock(NotificationPushPublisher.class));
     }
 
     private static NotificationReconciliationService nudgeService(
