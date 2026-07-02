@@ -5,8 +5,8 @@ import { createPortal } from 'react-dom';
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
 import { BriefcaseIcon, BuildingOffice2Icon, UserIcon } from '@heroicons/react/24/outline';
 
-import { getActiveWorkspaceMembers, search } from '@/app/lib/api';
-import { type NoteReferenceType, type SearchResults, type WorkspaceMember } from '@/app/lib/types';
+import { getActiveWorkspaceMembers, getCompanies, getDeals, search } from '@/app/lib/api';
+import { type Company, type Deal, type NoteReferenceType, type SearchResults, type WorkspaceMember } from '@/app/lib/types';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { cn } from '@/lib/utils';
 
@@ -101,6 +101,39 @@ function searchSuggestions(results: SearchResults, excludeUserId?: number): Sugg
         sublabel: company.industry || 'Company',
     }));
     return [...users, ...people, ...deals, ...companies];
+}
+
+let recordsCache: { key: string; promise: Promise<Suggestion[]> } | null = null;
+function loadRecords(): Promise<Suggestion[]> {
+    const key = currentWorkspaceKey();
+    if (!recordsCache || recordsCache.key !== key) {
+        recordsCache = {
+            key,
+            promise: Promise.all([
+                getCompanies().catch((): Company[] => []),
+                getDeals().catch((): Deal[] => []),
+            ])
+                .then(([companies, deals]): Suggestion[] => [
+                    ...companies.map((company): Suggestion => ({
+                        type: 'company',
+                        id: company.id,
+                        label: company.name,
+                        sublabel: company.industry || 'Company',
+                    })),
+                    ...deals.map((deal): Suggestion => ({
+                        type: 'deal',
+                        id: deal.id,
+                        label: deal.name,
+                        sublabel: 'Deal',
+                    })),
+                ])
+                .catch(() => {
+                    recordsCache = null;
+                    return [];
+                }),
+        };
+    }
+    return recordsCache.promise;
 }
 
 type EditorSegment =
@@ -206,6 +239,7 @@ export default function MentionEditor({
     const listboxId = useId();
     const reduceMotion = useReducedMotion();
     const [members, setMembers] = useState<WorkspaceMember[]>([]);
+    const [records, setRecords] = useState<Suggestion[]>([]);
     const [results, setResults] = useState<SearchResults | null>(null);
     const [query, setQuery] = useState<ActiveQuery | null>(null);
     const [activeIndex, setActiveIndex] = useState(0);
@@ -219,6 +253,18 @@ export default function MentionEditor({
             cancelled = true;
         };
     }, []);
+
+    const trigger = query?.trigger;
+    useEffect(() => {
+        if (trigger !== '#') return;
+        let cancelled = false;
+        loadRecords().then((list) => {
+            if (!cancelled) setRecords(list);
+        });
+        return () => {
+            cancelled = true;
+        };
+    }, [trigger]);
 
     useEffect(() => {
         const el = editorRef.current;
@@ -254,24 +300,22 @@ export default function MentionEditor({
         if (!query) return [];
         const allowed = TRIGGER_TYPES[query.trigger];
         const needle = query.text.toLowerCase();
+        const pool = query.trigger === '@' ? memberSuggestions(members, excludeUserId) : records;
         if (needle.length === 0) {
-            return query.trigger === '@'
-                ? memberSuggestions(members, excludeUserId).slice(0, MAX_SUGGESTIONS)
-                : [];
+            return pool.slice(0, MAX_SUGGESTIONS);
         }
         if (results) {
             return searchSuggestions(results, excludeUserId)
                 .filter((suggestion) => allowed.includes(suggestion.type))
                 .slice(0, MAX_SUGGESTIONS);
         }
-        if (query.trigger !== '@') return [];
-        return memberSuggestions(members, excludeUserId)
+        return pool
             .filter(
                 (suggestion) =>
                     suggestion.label.toLowerCase().includes(needle) || suggestion.sublabel.toLowerCase().includes(needle),
             )
             .slice(0, MAX_SUGGESTIONS);
-    }, [query, members, results, excludeUserId]);
+    }, [query, members, records, results, excludeUserId]);
 
     const menuOpen = query !== null && suggestions.length > 0;
     const activeOptionId = menuOpen ? `${listboxId}-opt-${activeIndex}` : undefined;
