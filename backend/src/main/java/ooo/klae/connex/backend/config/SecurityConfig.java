@@ -9,10 +9,15 @@ import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
 import org.springframework.security.config.http.SessionCreationPolicy;
+import org.springframework.security.core.session.SessionRegistry;
+import org.springframework.security.core.session.SessionRegistryImpl;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.csrf.CsrfTokenRequestAttributeHandler;
+import org.springframework.security.web.session.HttpSessionEventPublisher;
+
+import jakarta.servlet.http.HttpServletResponse;
 
 /**
  * Spring Security configuration.
@@ -37,8 +42,28 @@ public class SecurityConfig {
         return config.getAuthenticationManager();
     }
 
+    /**
+     * Tracks live sessions per principal so a password reset can expire every
+     * session a user holds. In-memory and single-JVM, matching the current
+     * Tomcat session model; sessions are registered explicitly at login.
+     */
+    @Bean
+    public SessionRegistry sessionRegistry() {
+        return new SessionRegistryImpl();
+    }
+
+    /**
+     * Publishes servlet session lifecycle events so {@link SessionRegistry}
+     * drops entries when a session is destroyed or expires.
+     */
+    @Bean
+    public HttpSessionEventPublisher httpSessionEventPublisher() {
+        return new HttpSessionEventPublisher();
+    }
+
     @Bean
     SecurityFilterChain chain(HttpSecurity http,
+            SessionRegistry sessionRegistry,
             @Value("${connex.security.csrf-enabled:true}") boolean csrfEnabled) throws Exception {
         if (csrfEnabled) {
             // Session-stored token (default repo), echoed by the SPA in a header it fetches from
@@ -57,6 +82,9 @@ public class SecurityConfig {
             )
             .sessionManagement(session -> session
                 .sessionCreationPolicy(SessionCreationPolicy.IF_REQUIRED)
+                .maximumSessions(-1)
+                .sessionRegistry(sessionRegistry)
+                .expiredSessionStrategy(event -> event.getResponse().setStatus(HttpServletResponse.SC_UNAUTHORIZED))
             )
             .headers(headers -> headers
                 .httpStrictTransportSecurity(hsts -> hsts

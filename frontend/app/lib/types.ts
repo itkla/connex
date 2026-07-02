@@ -327,6 +327,19 @@ export type AuthResponse = {
     message: string;
 };
 
+export type ForgotPasswordPayload = {
+    email: string;
+};
+
+export type ResetPasswordPayload = {
+    token: string;
+    newPassword: string;
+};
+
+export type ResetTokenValidation = {
+    valid: boolean;
+};
+
 export type UpdateUserPayload = {
     username: string;
     displayName: string;

@@ -265,6 +265,41 @@ export function logout() {
     return postJson<void>("/api/auth/logout");
 }
 
+/**
+ * Requests a password reset email for the given address. The backend always responds
+ * identically whether or not the account exists, so callers must not infer existence.
+ *
+ * @param payload - The email to send a reset link to
+ * @returns A promise resolving to the generic confirmation message
+ */
+export function requestPasswordReset(payload: Types.ForgotPasswordPayload) {
+    return postJson<Types.AuthResponse>("/api/auth/forgot-password", payload);
+}
+
+/**
+ * Checks whether a password reset token is still valid (unconsumed and unexpired).
+ *
+ * @param token - The raw reset token from the link
+ * @returns A promise resolving to the validation result
+ */
+export function validateResetToken(token: string, init: RequestInit = {}) {
+    return getJson<Types.ResetTokenValidation>(
+        `/api/auth/reset-password/validate?token=${encodeURIComponent(token)}`,
+        init,
+    );
+}
+
+/**
+ * Sets a new password using a valid reset token.
+ *
+ * @param payload - The reset token and the new password
+ * @returns A promise resolving to the confirmation message
+ * @throws ApiError with fieldErrors when the password fails policy or the token is invalid
+ */
+export function resetPassword(payload: Types.ResetPasswordPayload) {
+    return postJson<Types.AuthResponse>("/api/auth/reset-password", payload);
+}
+
 /*
 * == User profile management
 */

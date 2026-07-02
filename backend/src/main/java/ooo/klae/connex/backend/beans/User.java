@@ -5,6 +5,7 @@ import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.ObjectIdGenerators;
 
 import lombok.Data;
+import lombok.EqualsAndHashCode;
 import lombok.NoArgsConstructor;
 
 import java.util.Collection;
@@ -24,6 +25,7 @@ import jakarta.annotation.Nullable;
 
 @JsonIdentityInfo(generator = ObjectIdGenerators.PropertyGenerator.class, property = "id", scope = User.class)
 @Data
+@EqualsAndHashCode(of = "id")
 @NoArgsConstructor
 public class User implements org.springframework.security.core.userdetails.UserDetails {
     private int id;
