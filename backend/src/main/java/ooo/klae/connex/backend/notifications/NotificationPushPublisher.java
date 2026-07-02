@@ -38,14 +38,4 @@ public class NotificationPushPublisher {
         eventPublisher.publishEvent(new NotificationPushEvent(
                 recipientId, RealtimeNotificationPayload.updated(notification, dedupeKey)));
     }
-
-    /**
-     * Queues a {@code counts} frame carrying the recipient's unread total.
-     * @param recipientId the recipient user id
-     * @param unread the recomputed unread count
-     */
-    public void counts(int recipientId, long unread) {
-        eventPublisher.publishEvent(new NotificationPushEvent(
-                recipientId, RealtimeNotificationPayload.counts(unread)));
-    }
 }

@@ -40,6 +40,7 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
     const [connected, setConnected] = useState(false);
     const requestRef = useRef<AbortController | null>(null);
     const loadingRef = useRef(false);
+    const pendingRef = useRef(false);
     const seenRef = useRef<Set<string>>(new Set());
 
     const t = useTranslations("Notifications");
@@ -47,20 +48,30 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
     const router = useRouter();
 
     const refreshUnread = useCallback(async () => {
-        if (loadingRef.current || document.hidden) return;
+        if (document.hidden) return;
+        if (loadingRef.current) {
+            pendingRef.current = true;
+            return;
+        }
         loadingRef.current = true;
-        requestRef.current?.abort();
-        const controller = new AbortController();
-        requestRef.current = controller;
         try {
-            const counts = await getNotificationCounts({ signal: controller.signal });
-            setUnread(counts.unread);
-        } catch (error) {
-            if (!(error instanceof DOMException && error.name === "AbortError")) {
-                console.error("Failed to refresh notification count", error);
-            }
+            do {
+                pendingRef.current = false;
+                requestRef.current?.abort();
+                const controller = new AbortController();
+                requestRef.current = controller;
+                try {
+                    const counts = await getNotificationCounts({ signal: controller.signal });
+                    setUnread(counts.unread);
+                } catch (error) {
+                    if (!(error instanceof DOMException && error.name === "AbortError")) {
+                        console.error("Failed to refresh notification count", error);
+                    }
+                } finally {
+                    if (requestRef.current === controller) requestRef.current = null;
+                }
+            } while (pendingRef.current && !document.hidden);
         } finally {
-            if (requestRef.current === controller) requestRef.current = null;
             loadingRef.current = false;
         }
     }, []);
@@ -82,10 +93,6 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
 
     const handleFrame = useCallback(
         (frame: RealtimeNotificationFrame) => {
-            if (frame.kind === "counts") {
-                if (typeof frame.unread === "number") setUnread(frame.unread);
-                return;
-            }
             if (frame.kind === "updated") {
                 void refreshUnread();
                 return;
@@ -101,7 +108,7 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
                 }
             }
             void refreshUnread();
-            if (notification) toastNotification(notification);
+            if (notification && !document.hidden) toastNotification(notification);
         },
         [refreshUnread, toastNotification],
     );

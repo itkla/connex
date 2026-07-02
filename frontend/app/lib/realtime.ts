@@ -12,14 +12,13 @@ export type RealtimeStatus = "connecting" | "connected" | "disconnected";
 
 /**
  * A frame pushed by the backend on the recipient's per-user queue. `created`
- * carries a brand-new notification worth surfacing, `updated` a materially
- * changed one worth a silent refresh, and `counts` a recomputed unread total.
+ * carries a brand-new notification worth surfacing; `updated` a materially
+ * changed one worth a silent refresh.
  */
 export type RealtimeNotificationFrame = {
-    kind: "created" | "updated" | "counts";
+    kind: "created" | "updated";
     notification?: Notification | null;
     dedupeKey?: string | null;
-    unread?: number | null;
 };
 
 /** Callbacks a consumer supplies to react to frames and connection changes. */
@@ -63,7 +62,7 @@ function parseFrame(message: IMessage): RealtimeNotificationFrame | null {
         return null;
     }
     const kind = (parsed as { kind?: unknown }).kind;
-    if (kind !== "created" && kind !== "updated" && kind !== "counts") {
+    if (kind !== "created" && kind !== "updated") {
         return null;
     }
     return parsed as RealtimeNotificationFrame;
