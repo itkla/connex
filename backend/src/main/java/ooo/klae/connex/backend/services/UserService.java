@@ -77,10 +77,20 @@ public class UserService implements UserDetailsService {
         return user;
     }
 
+    /**
+     * Updates the caller's own editable profile fields. The account email is
+     * intentionally immutable here: because email is a trust anchor (email-bound
+     * invites rely on it), it can only change through the verified, ownership-proving
+     * flow in {@code EmailChangeService}, so any email in the request body is ignored.
+     * @param id the user being updated (must be the caller)
+     * @param user the submitted profile fields
+     * @return the updated user
+     */
     public User update(int id, User user) {
         workspaceService.requireSelf(id);
         User before = getUserById(id);
         user.setId(id);
+        user.setEmail(before.getEmail());
         if (user.getTimezone() == null || user.getTimezone().isBlank()) {
             user.setTimezone(before.getTimezone());
         } else {

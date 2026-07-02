@@ -90,6 +90,23 @@ connex:
         scheduling-enabled: ${CONNEX_PASSWORD_RESET_SCHEDULING_ENABLED:true}
         cleanup-delay-ms: ${CONNEX_PASSWORD_RESET_CLEANUP_DELAY_MS:3600000}
         initial-delay-ms: ${CONNEX_PASSWORD_RESET_INITIAL_DELAY_MS:3600000}
+    email-change:
+        # Verified account email-change flow. A change is applied only after the
+        # recipient redeems a single-use token sent to the new address; email-enabled=false
+        # keeps the dev fallback that logs the link instead of sending mail. base-url is the
+        # frontend origin used to build the verification link (never derived from a request
+        # header). request-window-seconds / max-requests cap how many changes one account can
+        # request in that window; the raw token is never stored (only its SHA-256 hash).
+        token-expiry-minutes: ${CONNEX_EMAIL_CHANGE_TOKEN_EXPIRY_MINUTES:30}
+        email-enabled: ${CONNEX_EMAIL_CHANGE_EMAIL_ENABLED:false}
+        # Dev-only: log the raw verification link. Never enable where logs are accessible.
+        log-link: ${CONNEX_EMAIL_CHANGE_LOG_LINK:false}
+        base-url: ${CONNEX_EMAIL_CHANGE_BASE_URL:http://localhost:3000}
+        request-window-seconds: ${CONNEX_EMAIL_CHANGE_REQUEST_WINDOW_SECONDS:900}
+        max-requests: ${CONNEX_EMAIL_CHANGE_MAX_REQUESTS:5}
+        scheduling-enabled: ${CONNEX_EMAIL_CHANGE_SCHEDULING_ENABLED:true}
+        cleanup-delay-ms: ${CONNEX_EMAIL_CHANGE_CLEANUP_DELAY_MS:3600000}
+        initial-delay-ms: ${CONNEX_EMAIL_CHANGE_INITIAL_DELAY_MS:3600000}
 
 mybatis:
     mapper-locations: classpath:mappers/*.xml

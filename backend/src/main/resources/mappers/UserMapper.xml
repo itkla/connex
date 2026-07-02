@@ -71,6 +71,12 @@
     WHERE id = #{id}
   </update>
 
+  <update id="updateEmail">
+    UPDATE app_user
+    SET email = #{email}
+    WHERE id = #{id}
+  </update>
+
   <update id="updateProfilePictureUrl">
     UPDATE app_user
     SET profile_picture_url = #{profilePictureUrl}

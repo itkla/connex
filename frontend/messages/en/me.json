@@ -42,7 +42,8 @@
     "profileUpdatedDescription": "Your profile has been updated successfully.",
     "errorUpdatingTitle": "An error occurred while updating your profile",
     "errorUpdatingDescription": "Please try again.",
-    "failedToUpdateProfile": "Failed to update profile"
+    "failedToUpdateProfile": "Failed to update profile",
+    "emailReadonlyHint": "Your email address can only be changed through a verified process, so it can't be edited here."
   },
   "MeNoteList": {
     "empty": "No notes authored yet."

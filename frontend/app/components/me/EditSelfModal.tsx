@@ -71,8 +71,7 @@ export default function EditSelfModal({ user }: Props) {
         // check if text fields were changed
         const textChanged =
             username !== user.username ||
-            displayName !== user.displayName ||
-            email !== user.email;
+            displayName !== user.displayName;
 
         // check if pfp was changed
         const pictureChanged = profilePicture !== null;
@@ -226,10 +225,11 @@ export default function EditSelfModal({ user }: Props) {
                             id="email"
                             type="email"
                             value={email}
-                            onChange={(e) => setEmail(e.target.value)}
-                            className={inputClass}
-                            required
+                            readOnly
+                            aria-readonly="true"
+                            className={`${inputClass} cursor-not-allowed text-muted-foreground focus:ring-1 focus:ring-border`}
                         />
+                        <p className="text-sm text-muted-foreground">{t('emailReadonlyHint')}</p>
                         {fieldErrors.email && (
                             <p className="text-sm text-destructive">{fieldErrors.email}</p>
                         )}

@@ -42,7 +42,8 @@
     "profileUpdatedDescription": "プロフィールを正常に更新しました。",
     "errorUpdatingTitle": "プロフィールの更新中にエラーが発生しました",
     "errorUpdatingDescription": "もう一度お試しください。",
-    "failedToUpdateProfile": "プロフィールを更新できませんでした"
+    "failedToUpdateProfile": "プロフィールを更新できませんでした",
+    "emailReadonlyHint": "メールアドレスは本人確認を経てのみ変更できます。ここでは編集できません。"
   },
   "MeNoteList": {
     "empty": "メモはまだ作成されていません。"
