@@ -141,7 +141,7 @@ export default function SearchResultsView({
     const hasResults = groups.length > 0;
 
     return (
-        <div className="min-h-screen bg-background px-2 pt-8 pb-12">
+        <div className="min-h-full bg-background px-2 pt-8 pb-12">
             <div className="mx-auto flex w-full max-w-7xl flex-col gap-10">
                 <Rise delay={0}>
                     <header className="px-4 sm:px-6">

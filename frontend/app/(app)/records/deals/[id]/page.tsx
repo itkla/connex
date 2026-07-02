@@ -155,7 +155,7 @@ export default async function DealPage({ params }: { params: { id: number } }) {
     for (const n of notes) bucket(parseMysqlDateTime(n.createdAt), 'notes');
 
     return (
-        <div className="min-h-screen bg-background px-2 pt-8 pb-12">
+        <div className="min-h-full bg-background px-2 pt-8 pb-12">
             <div className="mx-auto flex w-full max-w-5xl flex-col gap-10">
                 <Rise>
                     <div className="flex flex-row justify-between">

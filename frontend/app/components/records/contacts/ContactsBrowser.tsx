@@ -474,7 +474,7 @@ export default function ContactsBrowser({ savedViews }: { savedViews: SavedView[
     );
 
     return (
-        <div className="min-h-screen bg-background px-2 pt-8 pb-12">
+        <div className="min-h-full bg-background px-2 pt-8 pb-12">
             <div className="mx-auto flex w-full max-w-7xl flex-col gap-10">
                 <Rise>
                     <div className="flex items-center justify-between">

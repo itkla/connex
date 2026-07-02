@@ -2,7 +2,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 
 export default function DealsLoading() {
     return (
-        <div className="min-h-screen bg-background px-2 pt-8 pb-12">
+        <div className="min-h-full bg-background px-2 pt-8 pb-12">
             <div className="mx-auto flex w-full max-w-7xl flex-col gap-10">
                 <div className="flex items-center justify-between">
                     <Skeleton className="h-10 w-40" />

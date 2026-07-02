@@ -160,7 +160,7 @@ export default function NotificationsInbox() {
     const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
     return (
-        <div className="min-h-screen bg-background px-2 pt-8 pb-12">
+        <div className="min-h-full bg-background px-2 pt-8 pb-12">
             <div className="mx-auto flex w-full max-w-7xl flex-col gap-10">
                 <Rise>
                     <header className="flex flex-wrap items-end justify-between gap-4 px-4 sm:px-6">

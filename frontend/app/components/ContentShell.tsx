@@ -19,9 +19,11 @@ export default function ContentShell({
     const pathname = usePathname();
     const t = useTranslations("CommonContentShell");
 
-    useEffect(() => {
+    const [prevPathname, setPrevPathname] = useState(pathname);
+    if (pathname !== prevPathname) {
+        setPrevPathname(pathname);
         setMobileOpen(false);
-    }, [pathname]);
+    }
 
     useEffect(() => {
         const mql = window.matchMedia("(min-width: 768px)");
@@ -60,7 +62,7 @@ export default function ContentShell({
     }, [mobileOpen]);
 
     return (
-        <div className="flex h-screen overflow-hidden">
+        <div className="flex h-dvh overflow-hidden">
             <div
                 aria-hidden
                 onClick={() => setMobileOpen(false)}
@@ -79,7 +81,7 @@ export default function ContentShell({
             </div>
 
             <div className="flex min-w-0 flex-1 flex-col">
-                <div className="relative flex items-center gap-3 p-6 w-full md:justify-center">
+                <div className="relative flex w-full shrink-0 items-center gap-3 p-6 md:justify-center">
                     <Button
                         type="button"
                         variant="ghost"

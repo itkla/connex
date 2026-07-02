@@ -57,7 +57,7 @@ export default async function UserPage({ params }: { params: { id: number } }) {
     const hasActivity = tasks.length > 0 || activities.length > 0 || notes.length > 0;
 
     return (
-        <div className="min-h-screen bg-background px-2 pt-8 pb-12">
+        <div className="min-h-full bg-background px-2 pt-8 pb-12">
             <div className="mx-auto flex w-full max-w-5xl flex-col gap-10">
                 <Rise>
                     <div className="flex flex-col gap-8">
