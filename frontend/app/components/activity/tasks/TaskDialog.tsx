@@ -325,7 +325,7 @@ function TaskDialogForm({
                         </DialogClose>
                         <Button
                             type="submit"
-                            disabled={submitting || succeeded}
+                            disabled={submitting || succeeded || !description.trim()}
                             className="min-w-24 bg-brand text-white shadow-sm transition hover:bg-brand-hover hover:shadow-md"
                         >
                             {submitting ? (

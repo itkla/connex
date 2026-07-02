@@ -20,6 +20,7 @@ class TaskMentionTest extends AbstractServiceTest {
     @Autowired TaskService taskService;
     @Autowired ReferenceService referenceService;
     @Autowired NotificationMapper notificationMapper;
+    @Autowired PersonService personService;
 
     private String mention(String label, User user) {
         return "[" + label + "](user:" + user.getId() + ")";
@@ -148,6 +149,29 @@ class TaskMentionTest extends AbstractServiceTest {
 
         assertTrue(referenceService
             .referencesFor(workspace.getId(), ReferenceService.SOURCE_TASK, created.getId()).isEmpty());
+    }
+
+    /**
+     * Loading a contact hydrates references on its embedded tasks so mentions render as chips.
+     */
+    @Test
+    void personDetail_hydratesReferencesOnEmbeddedTasks() {
+        User mentioned = newUser();
+        Person person = newPerson(newCompany());
+        Task task = draft(mention("Mentioned", mentioned));
+        task.setPerson(person);
+        taskService.create(task);
+
+        Task[] tasks = personService.getPersonById(person.getId()).getTasks();
+        assertNotNull(tasks);
+        var reference = java.util.Arrays.stream(tasks)
+            .filter((tk) -> tk.getReferences() != null && !tk.getReferences().isEmpty())
+            .findFirst()
+            .orElseThrow()
+            .getReferences()
+            .get(0);
+        assertEquals(mentioned.getId(), reference.getRefId());
+        assertEquals("user", reference.getRefType());
     }
 
     /**

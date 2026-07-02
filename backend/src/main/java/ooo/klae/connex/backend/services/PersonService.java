@@ -148,6 +148,7 @@ public class PersonService {
         Person person = personMapper.getPersonById(workspaceId, id);
         if (person == null) throw new ResourceNotFoundException("Person not found with id: " + id);
         Person hydrated = hydrateScopedRelationships(person, workspaceId);
+        referenceService.hydrateTasks(workspaceId, List.of(hydrated.getTasks()));
         hydrated.setNotes(
             referenceService.hydrate(workspaceId, noteMapper.getNotesByPersonId(workspaceId, id)).toArray(new Note[0]));
         return hydrated;
@@ -360,8 +361,7 @@ public class PersonService {
 
     private Person hydrateScopedRelationships(Person person, int workspaceId) {
         person.setDeals(dealMapper.getDealsByPersonId(workspaceId, person.getId()).toArray(Deal[]::new));
-        person.setTasks(referenceService.hydrateTasks(workspaceId,
-            taskMapper.getTasksByPersonId(workspaceId, person.getId())).toArray(Task[]::new));
+        person.setTasks(taskMapper.getTasksByPersonId(workspaceId, person.getId()).toArray(Task[]::new));
         return person;
     }
 }

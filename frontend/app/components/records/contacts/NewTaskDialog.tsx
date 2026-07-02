@@ -61,9 +61,9 @@ export default function NewTaskDialog({
     const [assignedToId, setAssignedToId] = useState(currentUserId);
     const [dealId, setDealId] = useState('none');
     const [deals, setDeals] = useState<Deal[]>([]);
-    const [dealsLoaded, setDealsLoaded] = useState(false);
+    const [loadedCompanyId, setLoadedCompanyId] = useState<number | null>(null);
     const [succeeded, setSucceeded] = useState(false);
-    const loadingDeals = open && Boolean(companyId) && !dealsLoaded;
+    const loadingDeals = open && Boolean(companyId) && loadedCompanyId !== companyId;
     const reset = () => {
         setDescription('');
         setDueDate('');
@@ -109,17 +109,24 @@ export default function NewTaskDialog({
 
     useEffect(() => {
         if (!open || !companyId) return;
-        getCompanyDeals(companyId)
+        const cid = companyId;
+        let active = true;
+        getCompanyDeals(cid)
             .then((companyDeals) => {
+                if (!active) return;
                 setDeals(companyDeals);
-                setDealsLoaded(true);
+                setLoadedCompanyId(cid);
             })
             .catch((err) => {
+                if (!active) return;
                 const message = err instanceof ApiError ? err.message : err instanceof Error ? err.message : t('toastFailedLoadDeals');
                 toastError(message);
                 setDeals([]);
-                setDealsLoaded(true);
+                setLoadedCompanyId(cid);
             });
+        return () => {
+            active = false;
+        };
     }, [open, companyId, t]);
 
     const status = resolveDialogStatus({ isLoading: submitting, isSuccess: succeeded });
