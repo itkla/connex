@@ -42,7 +42,14 @@ async function fetchCsrfToken(): Promise<{ token: string; headerName: string } |
     }
 }
 
-async function csrfHeader(forceRefresh = false): Promise<Record<string, string>> {
+/**
+ * Resolves the CSRF header the backend expects on state-changing requests,
+ * as a single-entry `{ [headerName]: token }` map (empty during SSR). Shared
+ * with the realtime client, which echoes the same token on the STOMP CONNECT.
+ * @param forceRefresh when true, discards the cached token and refetches it
+ * @returns the CSRF header map, or an empty map when unavailable
+ */
+export async function csrfHeader(forceRefresh = false): Promise<Record<string, string>> {
     if (typeof window === "undefined") return {}; // SSR issues GETs only; CSRF does not apply
     if (forceRefresh) csrfTokenCache = null;
     if (!csrfTokenCache) csrfTokenCache = await fetchCsrfToken();
