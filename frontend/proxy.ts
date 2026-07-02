@@ -51,7 +51,14 @@ export function proxy(request: NextRequest) {
         return NextResponse.next();
     }
 
-    if (hasSession && pathname.startsWith('/auth/') && !searchParams.has('redirect')) {
+    // A logged-in user may legitimately follow a reset link (e.g. from another device),
+    // so let /auth/reset-password through instead of bouncing them to the dashboard.
+    if (
+        hasSession &&
+        pathname.startsWith('/auth/') &&
+        pathname !== '/auth/reset-password' &&
+        !searchParams.has('redirect')
+    ) {
         return NextResponse.redirect(new URL('/dashboard', request.url));
     }
 

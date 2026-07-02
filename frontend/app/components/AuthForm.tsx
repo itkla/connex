@@ -264,6 +264,20 @@ export function AuthForm({ mode, redirectUrl }: { mode: AuthMode; redirectUrl: s
                                 );
                             })}
 
+                            {mode === "login" && (
+                                <div
+                                    className="connex-rise flex justify-end"
+                                    style={{ animationDelay: `${120 + fields.length * 60}ms` }}
+                                >
+                                    <Link
+                                        href="/auth/forgot-password"
+                                        className="text-sm font-medium text-muted-foreground transition-colors duration-150 ease-out hover:text-foreground"
+                                    >
+                                        {tLogin("forgotPassword")}
+                                    </Link>
+                                </div>
+                            )}
+
                             {error && !hasFieldErrors && (
                                 <p
                                     role="alert"
