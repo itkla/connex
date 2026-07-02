@@ -149,6 +149,9 @@ public class PersonService {
         if (person == null) throw new ResourceNotFoundException("Person not found with id: " + id);
         Person hydrated = hydrateScopedRelationships(person, workspaceId);
         referenceService.hydrateTasks(workspaceId, List.of(hydrated.getTasks()));
+        if (hydrated.getActivities() != null && hydrated.getActivities().length > 0) {
+            referenceService.hydrateActivities(workspaceId, List.of(hydrated.getActivities()));
+        }
         hydrated.setNotes(
             referenceService.hydrate(workspaceId, noteMapper.getNotesByPersonId(workspaceId, id)).toArray(new Note[0]));
         return hydrated;
@@ -294,7 +297,8 @@ public class PersonService {
     public List<Activity> getActivitiesByPersonId(int personId) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         requirePerson(workspaceId, personId);
-        return activityMapper.getActivitiesByPersonId(workspaceId, personId);
+        return referenceService.hydrateActivities(workspaceId,
+            activityMapper.getActivitiesByPersonId(workspaceId, personId));
     }
 
     /**

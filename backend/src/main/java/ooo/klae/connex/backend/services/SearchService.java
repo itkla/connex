@@ -70,7 +70,7 @@ public class SearchService {
             dealMapper.search(workspaceId, pattern).stream().map(DealDto::from).toList(),
             pipelineMapper.search(workspaceId, pattern).stream().map(PipelineDto::from).toList(),
             tagMapper.search(workspaceId, pattern).stream().map(TagDto::from).toList(),
-            activityMapper.search(workspaceId, pattern).stream().map(ActivityDto::from).toList(),
+            referenceService.hydrateActivities(workspaceId, activityMapper.search(workspaceId, pattern)).stream().map(ActivityDto::from).toList(),
             referenceService.hydrate(workspaceId, noteMapper.search(workspaceId, pattern)).stream().map(NoteDto::from).toList(),
             referenceService.hydrateTasks(workspaceId, taskMapper.search(workspaceId, pattern)).stream().map(TaskDto::from).toList(),
             userMapper.search(workspaceId, pattern).stream().map(UserDto::from).toList(),

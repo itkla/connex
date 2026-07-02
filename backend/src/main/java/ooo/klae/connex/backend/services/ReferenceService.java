@@ -12,6 +12,7 @@ import java.util.regex.Pattern;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import ooo.klae.connex.backend.beans.Activity;
 import ooo.klae.connex.backend.beans.EntityReference;
 import ooo.klae.connex.backend.beans.Note;
 import ooo.klae.connex.backend.beans.Task;
@@ -30,7 +31,7 @@ import lombok.RequiredArgsConstructor;
  * current tenant. Members ({@code user}) drive mention notifications; contacts
  * ({@code person}), deals, and companies are stored as inline record references
  * (no notification). The source entity is polymorphic ({@code sourceType} /
- * {@code sourceId}): notes and tasks share this machinery.
+ * {@code sourceId}): notes, tasks, activities, and introductions share this machinery.
  */
 @Service
 @RequiredArgsConstructor
@@ -44,6 +45,8 @@ public class ReferenceService {
 
     public static final String SOURCE_NOTE = "note";
     public static final String SOURCE_TASK = "task";
+    public static final String SOURCE_ACTIVITY = "activity";
+    public static final String SOURCE_INTRODUCTION = "introduction";
 
     static final String TYPE_USER = "user";
     static final String TYPE_PERSON = "person";
@@ -166,9 +169,43 @@ public class ReferenceService {
         return tasks;
     }
 
-    private Map<Integer, List<EntityReference>> referencesBySource(
+    /**
+     * Attaches each activity's resolved references in a single batch query, so any
+     * read path returns activities the frontend can render as chips. Mutates the
+     * activities in place and returns them. Scoped to {@code workspaceId}.
+     *
+     * @param workspaceId the owning workspace
+     * @param activities the activities to hydrate
+     * @return the same activities, each with its references populated
+     */
+    public List<Activity> hydrateActivities(int workspaceId, List<Activity> activities) {
+        if (activities == null || activities.isEmpty()) {
+            return activities;
+        }
+        Map<Integer, List<EntityReference>> bySource =
+            referencesBySource(workspaceId, SOURCE_ACTIVITY, activities.stream().map(Activity::getId).toList());
+        for (Activity activity : activities) {
+            activity.setReferences(bySource.getOrDefault(activity.getId(), List.of()));
+        }
+        return activities;
+    }
+
+    /**
+     * Groups a set of source entities' references by {@code sourceId} in a single
+     * batch query, for callers that hydrate a projection DTO (which has no bean to
+     * mutate). Returns an empty map for an empty id list. Scoped to {@code workspaceId}.
+     *
+     * @param workspaceId the owning workspace
+     * @param sourceType the source entity type
+     * @param sourceIds the source entity ids
+     * @return references grouped by source id
+     */
+    public Map<Integer, List<EntityReference>> referencesBySource(
             int workspaceId, String sourceType, List<Integer> sourceIds) {
         Map<Integer, List<EntityReference>> bySource = new LinkedHashMap<>();
+        if (sourceIds == null || sourceIds.isEmpty()) {
+            return bySource;
+        }
         for (EntityReference reference : entityReferenceMapper.findBySources(workspaceId, sourceType, sourceIds)) {
             bySource.computeIfAbsent(reference.getSourceId(), key -> new ArrayList<>()).add(reference);
         }
