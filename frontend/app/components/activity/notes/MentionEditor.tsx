@@ -19,6 +19,13 @@ const SEARCH_DEBOUNCE_MS = 220;
 
 const RECORD_ICON = { person: UserIcon, deal: BriefcaseIcon, company: BuildingOffice2Icon };
 
+type Trigger = '@' | '#';
+
+const TRIGGER_TYPES: Record<Trigger, readonly NoteReferenceType[]> = {
+    '@': ['user', 'person'],
+    '#': ['deal', 'company'],
+};
+
 function currentWorkspaceKey(): string {
     if (typeof document === 'undefined') return '';
     const match = document.cookie.match(/(?:^|;\s*)connex_workspace=([^;]+)/);
@@ -159,7 +166,7 @@ function serialize(root: HTMLElement): string {
     return out.replace(/^\n/, '');
 }
 
-type ActiveQuery = { text: string; left: number; top?: number; bottom?: number; above: boolean };
+type ActiveQuery = { text: string; trigger: Trigger; left: number; top?: number; bottom?: number; above: boolean };
 
 type Props = {
     id?: string;
@@ -177,10 +184,10 @@ type Props = {
  * A contentEditable note composer with inline reference chips. The editable DOM
  * is driven imperatively (never re-rendered by React while focused) to keep the
  * caret stable; {@link serialize} converts it back to the `[Label](type:id)`
- * token string exposed via {@code onChange}. Typing `@` opens a picker — an ARIA
- * combobox popup, positioned from the caret and flipping above when there isn't
- * room below — that searches workspace members, contacts, deals, and companies;
- * a selection inserts a non-editable chip.
+ * token string exposed via {@code onChange}. Typing `@` or `#` opens a picker — an
+ * ARIA combobox popup, positioned from the caret and flipping above when there
+ * isn't room below. `@` searches people (workspace members and contacts); `#`
+ * searches records (deals and companies). A selection inserts a non-editable chip.
  */
 export default function MentionEditor({
     id,
@@ -195,6 +202,7 @@ export default function MentionEditor({
 }: Props) {
     const editorRef = useRef<HTMLDivElement>(null);
     const lastValue = useRef<string | null>(null);
+    const savedRange = useRef<Range | null>(null);
     const listboxId = useId();
     const reduceMotion = useReducedMotion();
     const [members, setMembers] = useState<WorkspaceMember[]>([]);
@@ -244,13 +252,19 @@ export default function MentionEditor({
 
     const suggestions = useMemo(() => {
         if (!query) return [];
+        const allowed = TRIGGER_TYPES[query.trigger];
         const needle = query.text.toLowerCase();
         if (needle.length === 0) {
-            return memberSuggestions(members, excludeUserId).slice(0, MAX_SUGGESTIONS);
+            return query.trigger === '@'
+                ? memberSuggestions(members, excludeUserId).slice(0, MAX_SUGGESTIONS)
+                : [];
         }
         if (results) {
-            return searchSuggestions(results, excludeUserId).slice(0, MAX_SUGGESTIONS);
+            return searchSuggestions(results, excludeUserId)
+                .filter((suggestion) => allowed.includes(suggestion.type))
+                .slice(0, MAX_SUGGESTIONS);
         }
+        if (query.trigger !== '@') return [];
         return memberSuggestions(members, excludeUserId)
             .filter(
                 (suggestion) =>
@@ -293,15 +307,17 @@ export default function MentionEditor({
         let handle = '';
         while (index >= 0) {
             const char = textBefore[index];
-            if (char === '@') {
+            if (char === '@' || char === '#') {
                 const preceding = index === 0 ? ' ' : textBefore[index - 1];
                 if (/\s/.test(preceding) || (index === 0 && !(node.previousSibling instanceof Text))) {
                     const rect = range.getBoundingClientRect();
                     const spaceBelow = window.innerHeight - rect.bottom;
                     const above = spaceBelow < MENU_MAX_HEIGHT && rect.top > spaceBelow;
                     const left = Math.max(8, Math.min(rect.left, window.innerWidth - MENU_WIDTH - 8));
+                    savedRange.current = range.cloneRange();
                     setQuery({
                         text: handle,
+                        trigger: char,
                         left,
                         top: above ? undefined : rect.bottom + 6,
                         bottom: above ? window.innerHeight - rect.top + 6 : undefined,
@@ -328,21 +344,30 @@ export default function MentionEditor({
     const insertReference = useCallback(
         (suggestion: Suggestion) => {
             const el = editorRef.current;
+            if (!el) {
+                closeMenu();
+                return;
+            }
             const selection = window.getSelection();
-            if (!el || !selection || selection.rangeCount === 0) {
+            if (selection && savedRange.current) {
+                el.focus();
+                selection.removeAllRanges();
+                selection.addRange(savedRange.current);
+            }
+            if (!selection || selection.rangeCount === 0) {
                 closeMenu();
                 return;
             }
             const range = selection.getRangeAt(0);
             const node = range.startContainer;
-            if (node.nodeType !== Node.TEXT_NODE) {
+            if (node.nodeType !== Node.TEXT_NODE || !el.contains(node)) {
                 closeMenu();
                 return;
             }
 
             const text = node.textContent ?? '';
             const caret = range.startOffset;
-            const at = text.lastIndexOf('@', caret - 1);
+            const at = text.lastIndexOf(query?.trigger ?? '@', caret - 1);
             const parent = node.parentNode;
             if (at === -1 || !parent) {
                 closeMenu();
@@ -380,23 +405,23 @@ export default function MentionEditor({
             closeMenu();
             emit();
         },
-        [closeMenu, emit, reduceMotion],
+        [closeMenu, emit, reduceMotion, query],
     );
 
     const handleKeyDown = useCallback(
         (event: React.KeyboardEvent<HTMLDivElement>) => {
             if (menuOpen) {
-                if (event.key === 'ArrowDown') {
+                if (event.key === 'ArrowDown' || (event.key === 'Tab' && !event.shiftKey)) {
                     event.preventDefault();
                     setActiveIndex((index) => (index + 1) % suggestions.length);
                     return;
                 }
-                if (event.key === 'ArrowUp') {
+                if (event.key === 'ArrowUp' || (event.key === 'Tab' && event.shiftKey)) {
                     event.preventDefault();
                     setActiveIndex((index) => (index - 1 + suggestions.length) % suggestions.length);
                     return;
                 }
-                if (event.key === 'Enter' || event.key === 'Tab') {
+                if (event.key === 'Enter') {
                     event.preventDefault();
                     insertReference(suggestions[activeIndex]);
                     return;
@@ -464,7 +489,7 @@ export default function MentionEditor({
                             bottom: query.bottom,
                             transformOrigin: query.above ? 'bottom left' : 'top left',
                         }}
-                        className="fixed z-[100] max-h-80 w-72 overflow-y-auto rounded-md bg-popover p-1 text-popover-foreground shadow-md ring-1 ring-foreground/10"
+                        className="pointer-events-auto fixed z-[100] max-h-80 w-72 overflow-y-auto rounded-md bg-popover p-1 text-popover-foreground shadow-md ring-1 ring-foreground/10"
                     >
                         {suggestions.map((suggestion, index) => {
                             const optionId = `${listboxId}-opt-${index}`;
