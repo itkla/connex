@@ -2,11 +2,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 
 export default function MapLoading() {
     return (
-        <div className="flex min-h-0 w-full flex-1 flex-col gap-4">
-            <div className="flex flex-col gap-2">
-                <Skeleton className="h-9 w-56 md:h-10" />
-                <Skeleton className="h-4 w-72" />
-            </div>
+        <div className="flex min-h-0 w-full flex-1 flex-col">
             <div className="relative min-h-0 w-full flex-1 overflow-hidden rounded-lg">
                 <Skeleton className="h-full w-full rounded-lg" />
                 <div className="absolute right-4 top-4 flex flex-col gap-2 rounded-2xl border border-border bg-card p-3">
