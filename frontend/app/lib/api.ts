@@ -1503,3 +1503,18 @@ export function addWorkspaceAllowedDomain(workspaceId: number, domain: string) {
 export function removeWorkspaceAllowedDomain(workspaceId: number, domain: string) {
     return deleteJson<void>(`/api/workspaces/${workspaceId}/allowed-domains?domain=${encodeURIComponent(domain)}`);
 }
+export function getWorkspaceMailConfig(workspaceId: number, init: RequestInit = {}) {
+    return getJson<Types.MailConfig>(`/api/workspaces/${workspaceId}/mail-config`, { cache: "no-store", ...init });
+}
+
+export function saveWorkspaceMailConfig(workspaceId: number, request: Types.MailConfigRequest) {
+    return putJson<Types.MailConfig>(`/api/workspaces/${workspaceId}/mail-config`, request);
+}
+
+export function deleteWorkspaceMailConfig(workspaceId: number) {
+    return deleteJson<void>(`/api/workspaces/${workspaceId}/mail-config`);
+}
+
+export function sendWorkspaceMailTest(workspaceId: number) {
+    return postJson<Types.MailTestResult>(`/api/workspaces/${workspaceId}/mail-config/test`, {});
+}

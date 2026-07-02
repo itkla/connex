@@ -1116,3 +1116,36 @@ export type AuditLogParams = PageParams & {
     entityId?: number;
     limit?: number;
 };
+
+export type MailConfig = {
+    enabled: boolean;
+    host: string | null;
+    port: number | null;
+    username: string | null;
+    fromAddress: string | null;
+    fromName: string | null;
+    starttls: boolean;
+    ssl: boolean;
+    auth: boolean;
+    hasPassword: boolean;
+    configured: boolean;
+    updatedAt: string | null;
+};
+
+export type MailConfigRequest = {
+    enabled: boolean;
+    host?: string | null;
+    port?: number | null;
+    username?: string | null;
+    password?: string | null;
+    fromAddress?: string | null;
+    fromName?: string | null;
+    starttls: boolean;
+    ssl: boolean;
+    auth: boolean;
+};
+
+export type MailTestResult = {
+    success: boolean;
+    error: string | null;
+};

@@ -40,6 +40,7 @@ public class InviteService {
     private final UserMapper userMapper;
     private final WorkspaceService workspaceService;
     private final AuditService auditService;
+    private final InviteEmailService inviteEmailService;
 
     /**
      * Invites someone to a workspace by email. An address that already belongs to
@@ -75,6 +76,9 @@ public class InviteService {
 
         auditService.record("workspace.invite", "workspace", workspaceId, email,
                 "Invited " + email + " as " + role, null);
+
+        inviteEmailService.sendInvite(workspaceId, workspaceNameFor(actor, workspaceId), email,
+                actor.getDisplayName(), role, invite.getToken());
 
         WorkspaceInvite saved = inviteMapper.findByToken(invite.getToken());
         InviteDto dto = new InviteDto();
@@ -156,6 +160,14 @@ public class InviteService {
         }
         User actor = userMapper.getUserById(actorId);
         return workspaceService.addPendingMember(workspaceId, actor, user, role);
+    }
+
+    private String workspaceNameFor(User actor, int workspaceId) {
+        return workspaceMapper.getWorkspacesForUser(actor.getId()).stream()
+            .filter(w -> w.getId() == workspaceId)
+            .map(ooo.klae.connex.backend.beans.Workspace::getName)
+            .findFirst()
+            .orElse(null);
     }
 
     private WorkspaceMembershipDto membership(int userId, int workspaceId) {

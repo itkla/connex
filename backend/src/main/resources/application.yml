@@ -70,6 +70,33 @@ connex:
         scheduling-enabled: ${CONNEX_RULES_SCHEDULING_ENABLED:true}
         evaluation-delay-ms: ${CONNEX_RULES_EVALUATION_DELAY_MS:900000}
         initial-delay-ms: ${CONNEX_RULES_INITIAL_DELAY_MS:900000}
+    mail:
+        # Instance-wide SMTP transport: the default sender for account-level mail
+        # (password reset, email change) and the fallback for workspaces without their
+        # own SMTP. enabled=false (default) builds no transport, so those flows keep the
+        # dev logging fallback. A workspace can override host/from via Settings → Email;
+        # its SMTP password is AES/GCM-encrypted at rest with secret-key. app-base-url is
+        # the frontend origin used to build invite links (never from a request header).
+        enabled: ${CONNEX_MAIL_ENABLED:false}
+        host: ${CONNEX_MAIL_HOST:}
+        port: ${CONNEX_MAIL_PORT:587}
+        username: ${CONNEX_MAIL_USERNAME:}
+        password: ${CONNEX_MAIL_PASSWORD:}
+        from: ${CONNEX_MAIL_FROM:}
+        from-name: ${CONNEX_MAIL_FROM_NAME:Connex}
+        starttls: ${CONNEX_MAIL_STARTTLS:true}
+        ssl: ${CONNEX_MAIL_SSL:false}
+        auth: ${CONNEX_MAIL_AUTH:true}
+        connection-timeout-ms: ${CONNEX_MAIL_CONNECTION_TIMEOUT_MS:10000}
+        timeout-ms: ${CONNEX_MAIL_TIMEOUT_MS:10000}
+        write-timeout-ms: ${CONNEX_MAIL_WRITE_TIMEOUT_MS:10000}
+        # Base64 AES key (16/24/32 bytes) for encrypting per-workspace SMTP passwords.
+        # Required once a workspace stores its own password; rotating it invalidates them.
+        secret-key: ${CONNEX_MAIL_SECRET_KEY:}
+        app-base-url: ${CONNEX_MAIL_APP_BASE_URL:http://localhost:3000}
+        # Allow workspace-supplied SMTP hosts that resolve to private/loopback/link-local
+        # addresses. Off by default (blocks SSRF probing); enable for on-prem internal relays.
+        allow-internal-hosts: ${CONNEX_MAIL_ALLOW_INTERNAL_HOSTS:false}
     password-reset:
         # Forgot-password flow. token-expiry-minutes bounds how long a reset link is
         # valid; email-enabled=false keeps the dev fallback that logs the link instead

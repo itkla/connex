@@ -68,6 +68,7 @@
     "tabRules": "Rules",
     "tabCustomFields": "Custom fields",
     "tabNotifications": "Notifications",
+    "tabEmail": "Email",
     "tabMembership": "Membership"
   },
   "WorkspaceMembers": {
@@ -347,6 +348,34 @@
     "mentionDescription": "When a teammate @-mentions you in a note.",
     "loadFailed": "Your notification preferences couldn't be loaded.",
     "saveFailed": "Your change couldn't be saved. Try again.",
+    "retry": "Try again"
+  },
+  "WorkspaceEmail": {
+    "title": "Email",
+    "subtitle": "Send this workspace's invites from your own SMTP server. Without a custom server, mail uses the instance default.",
+    "enableTitle": "Use a custom SMTP server",
+    "enableDescription": "When off, this workspace sends through the instance default sender.",
+    "host": "SMTP host",
+    "port": "Port",
+    "fromAddress": "From address",
+    "fromName": "From name",
+    "username": "Username",
+    "password": "Password",
+    "passwordConfigured": "•••••••• (unchanged)",
+    "passwordHint": "Leave blank to keep the stored password. Stored encrypted; never shown.",
+    "starttls": "STARTTLS",
+    "ssl": "SSL/TLS",
+    "auth": "Require auth",
+    "save": "Save",
+    "saved": "Email settings saved.",
+    "saveFailed": "Your change couldn't be saved. Try again.",
+    "sendTest": "Send test email",
+    "testing": "Sending…",
+    "testSent": "Test email sent. Check your inbox.",
+    "testFailed": "The test email couldn't be sent.",
+    "remove": "Remove configuration",
+    "removed": "Email settings removed.",
+    "loadFailed": "Your email settings couldn't be loaded.",
     "retry": "Try again"
   }
 }

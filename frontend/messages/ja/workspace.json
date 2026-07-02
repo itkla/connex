@@ -68,6 +68,7 @@
     "tabRules": "ルール",
     "tabCustomFields": "カスタムフィールド",
     "tabNotifications": "通知",
+    "tabEmail": "メール",
     "tabMembership": "メンバーシップ"
   },
   "WorkspaceMembers": {
@@ -347,6 +348,34 @@
     "mentionDescription": "メンバーがノートであなたをメンションしたとき。",
     "loadFailed": "通知設定を読み込めませんでした。",
     "saveFailed": "変更を保存できませんでした。もう一度お試しください。",
+    "retry": "再試行"
+  },
+  "WorkspaceEmail": {
+    "title": "メール",
+    "subtitle": "このワークスペースの招待を独自のSMTPサーバーから送信します。設定しない場合は、インスタンス既定の送信元が使われます。",
+    "enableTitle": "独自のSMTPサーバーを使用",
+    "enableDescription": "オフの場合、このワークスペースはインスタンス既定の送信元から送信します。",
+    "host": "SMTPホスト",
+    "port": "ポート",
+    "fromAddress": "送信元アドレス",
+    "fromName": "送信者名",
+    "username": "ユーザー名",
+    "password": "パスワード",
+    "passwordConfigured": "••••••••（変更なし）",
+    "passwordHint": "保存済みのパスワードを保持するには空欄のままにします。暗号化して保存され、表示されません。",
+    "starttls": "STARTTLS",
+    "ssl": "SSL/TLS",
+    "auth": "認証を要求",
+    "save": "保存",
+    "saved": "メール設定を保存しました。",
+    "saveFailed": "変更を保存できませんでした。もう一度お試しください。",
+    "sendTest": "テストメールを送信",
+    "testing": "送信中…",
+    "testSent": "テストメールを送信しました。受信トレイをご確認ください。",
+    "testFailed": "テストメールを送信できませんでした。",
+    "remove": "設定を削除",
+    "removed": "メール設定を削除しました。",
+    "loadFailed": "メール設定を読み込めませんでした。",
     "retry": "再試行"
   }
 }
