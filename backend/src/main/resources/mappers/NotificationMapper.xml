@@ -339,7 +339,9 @@
     LEFT JOIN deal d
       ON d.workspace_id = t.workspace_id
      AND d.id = t.deal_id
-    LEFT JOIN person p ON p.id = t.person_id
+    LEFT JOIN person p
+      ON p.workspace_id = t.workspace_id
+     AND p.id = t.person_id
     WHERE t.workspace_id = #{workspaceId}
       AND t.completed = FALSE
       AND t.due_date IS NOT NULL
