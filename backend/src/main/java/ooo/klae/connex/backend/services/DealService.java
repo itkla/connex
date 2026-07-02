@@ -1,8 +1,10 @@
 package ooo.klae.connex.backend.services;
 
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeParseException;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -261,8 +263,14 @@ public class DealService {
      * @param expectedCloseDate the target expected close date as a {@code YYYY-MM-DD} calendar day
      * @return the rescheduled deal
      */
+    @Transactional
     @RequirePermission(Permission.DEAL_UPDATE)
     public Deal reschedule(int id, String expectedCloseDate) {
+        try {
+            LocalDate.parse(expectedCloseDate);
+        } catch (DateTimeParseException e) {
+            throw new BadRequestException("Invalid deal expected close date: " + expectedCloseDate);
+        }
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         Deal before = dealMapper.getDealById(workspaceId, id);
         if (before == null) throw new ResourceNotFoundException("Deal not found with id: " + id);

@@ -1,5 +1,7 @@
 package ooo.klae.connex.backend.services;
 
+import java.time.LocalDate;
+import java.time.format.DateTimeParseException;
 import java.util.List;
 import java.util.Set;
 
@@ -208,8 +210,14 @@ public class TaskService {
      * @param dueDate the target due date as a {@code YYYY-MM-DD} calendar day
      * @return the rescheduled task
      */
+    @Transactional
     @RequirePermission(Permission.TASK_UPDATE)
     public Task reschedule(int id, String dueDate) {
+        try {
+            LocalDate.parse(dueDate);
+        } catch (DateTimeParseException e) {
+            throw new BadRequestException("Invalid task due date: " + dueDate);
+        }
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         Task before = taskMapper.getTaskById(workspaceId, id);
         if (before == null) throw new ResourceNotFoundException("Task not found with id: " + id);

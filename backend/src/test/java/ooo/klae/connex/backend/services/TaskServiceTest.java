@@ -123,4 +123,10 @@ class TaskServiceTest extends AbstractServiceTest {
     void reschedule_throwsWhenTaskMissing() {
         assertThrows(ResourceNotFoundException.class, () -> taskService.reschedule(-1, "2025-03-15"));
     }
+
+    @Test
+    void reschedule_rejectsInvalidDate() {
+        Task task = newTask(currentUser, null, null);
+        assertThrows(BadRequestException.class, () -> taskService.reschedule(task.getId(), "2025-13-45"));
+    }
 }

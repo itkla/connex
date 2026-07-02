@@ -231,4 +231,13 @@ class DealServiceTest extends AbstractServiceTest {
     void reschedule_throwsWhenDealMissing() {
         assertThrows(ResourceNotFoundException.class, () -> dealService.reschedule(-1, "2025-06-30"));
     }
+
+    @Test
+    void reschedule_rejectsInvalidDate() {
+        Pipeline pipeline = newPipeline();
+        Stage stage = newStage(pipeline, 0);
+        Company company = newCompany();
+        Deal deal = newDeal(pipeline, stage, company);
+        assertThrows(BadRequestException.class, () -> dealService.reschedule(deal.getId(), "9999-99-99"));
+    }
 }
