@@ -44,6 +44,8 @@ type Props = {
     currentUserId: number;
     defaultPerson?: Contact | null;
     defaultDeal?: Deal | null;
+    /** Prefills the due date (a `YYYY-MM-DD` value), e.g. the day tapped in the calendar. */
+    defaultDueDate?: string;
 };
 
 export default function TaskDialog({
@@ -55,6 +57,7 @@ export default function TaskDialog({
     currentUserId,
     defaultPerson = null,
     defaultDeal = null,
+    defaultDueDate = '',
 }: Props) {
     const router = useRouter();
     const t = useTranslations('ActivityTasksDialog');
@@ -70,13 +73,16 @@ export default function TaskDialog({
 
     useEffect(() => {
         if (!open) return;
-        setDescription('');
-        setDueDate('');
-        setAssignee(users.find((u) => u.id === currentUserId) ?? null);
-        setSelectedPerson(defaultPerson ?? null);
-        setSelectedDeal(defaultDeal ?? null);
-        resetFieldErrors();
-    }, [open, users, currentUserId, defaultPerson, defaultDeal, resetFieldErrors]);
+        const raf = window.requestAnimationFrame(() => {
+            setDescription('');
+            setDueDate(defaultDueDate);
+            setAssignee(users.find((u) => u.id === currentUserId) ?? null);
+            setSelectedPerson(defaultPerson ?? null);
+            setSelectedDeal(defaultDeal ?? null);
+            resetFieldErrors();
+        });
+        return () => window.cancelAnimationFrame(raf);
+    }, [open, users, currentUserId, defaultPerson, defaultDeal, defaultDueDate, resetFieldErrors]);
 
     const handleListWheel = (e: WheelEvent<HTMLDivElement>) => {
         const lineHeightPx = 16;

@@ -26,6 +26,7 @@ import WeekView from './WeekView';
 import DayView from './DayView';
 import AgendaView from './AgendaView';
 import EventDetailSheet from './EventDetailSheet';
+import QuickCreateHost from './QuickCreateHost';
 
 const SWIPE_OFFSET = 40;
 
@@ -42,9 +43,17 @@ export interface CalendarShellProps {
     persons?: Contact[];
     deals?: Deal[];
     notes?: Note[];
+    currentUserId: number;
 }
 
-export default function CalendarShell({ activities, tasks, persons, deals, notes }: CalendarShellProps) {
+export default function CalendarShell({
+    activities,
+    tasks,
+    persons,
+    deals,
+    notes,
+    currentUserId,
+}: CalendarShellProps) {
     const t = useTranslations('Calendar');
     const locale = useLocale();
     const cal = useCalendar();
@@ -274,6 +283,13 @@ export default function CalendarShell({ activities, tasks, persons, deals, notes
                 locale={locale}
                 personById={personById}
                 dealById={dealById}
+            />
+
+            <QuickCreateHost
+                selectedDay={cal.selectedDay}
+                persons={persons ?? []}
+                deals={deals ?? []}
+                currentUserId={currentUserId}
             />
         </div>
     );

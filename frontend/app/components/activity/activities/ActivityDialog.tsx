@@ -56,6 +56,8 @@ type Props = {
     currentUserId: number;
     defaultPerson?: Contact | null;
     defaultDeal?: Deal | null;
+    /** Prefills the timestamp (a `datetime-local` value); defaults to now when omitted. */
+    defaultTimestamp?: string;
 };
 
 function nowLocalValue(): string {
@@ -72,6 +74,7 @@ export default function ActivityDialog({
     currentUserId,
     defaultPerson = null,
     defaultDeal = null,
+    defaultTimestamp,
 }: Props) {
     const router = useRouter();
     const t = useTranslations('ActivityCreateDialog');
@@ -92,11 +95,11 @@ export default function ActivityDialog({
         setType(ACTIVITY_TYPES[0]);
         setSubject('');
         setNotes('');
-        setWhen(nowLocalValue());
+        setWhen(defaultTimestamp ?? nowLocalValue());
         setSelectedPerson(defaultPerson ?? null);
         setSelectedDeal(defaultDeal ?? null);
         resetFieldErrors();
-    }, [open, defaultPerson, defaultDeal, resetFieldErrors]);
+    }, [open, defaultPerson, defaultDeal, defaultTimestamp, resetFieldErrors]);
 
     const handleListWheel = (e: WheelEvent<HTMLDivElement>) => {
         const lineHeightPx = 16;

@@ -17,5 +17,14 @@ export default async function CalendarPage() {
         getDealsFromCookie(cookie),
         getNotesFromCookie(cookie),
     ]);
-    return <CalendarShell activities={activities} tasks={tasks} persons={persons} deals={deals} notes={notes} />;
+    return (
+        <CalendarShell
+            activities={activities}
+            tasks={tasks}
+            persons={persons}
+            deals={deals}
+            notes={notes}
+            currentUserId={user.id}
+        />
+    );
 }
