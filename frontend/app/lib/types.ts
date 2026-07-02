@@ -701,6 +701,8 @@ export type CustomFieldOption = {
     label: string;
 };
 
+export type CustomFieldDataClassification = 'standard' | 'sensitive' | 'special_care';
+
 export type CustomFieldDefinition = {
     id: number;
     workspaceId: number;
@@ -708,6 +710,7 @@ export type CustomFieldDefinition = {
     fieldKey: string;
     label: string;
     fieldType: CustomFieldType;
+    dataClassification: CustomFieldDataClassification;
     options: CustomFieldOption[] | null;
     required: boolean;
     position: number;
@@ -721,6 +724,7 @@ export type CustomFieldInput = {
     fieldKey: string;
     label: string;
     fieldType: CustomFieldType;
+    dataClassification?: CustomFieldDataClassification;
     options?: CustomFieldOption[] | null;
     required?: boolean;
     position?: number;

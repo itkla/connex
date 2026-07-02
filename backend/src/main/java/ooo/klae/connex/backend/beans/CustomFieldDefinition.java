@@ -19,6 +19,7 @@ public class CustomFieldDefinition {
     private String fieldKey;
     private String label;
     private String fieldType;
+    private String dataClassification;
     private String optionsJson;
     private boolean required;
     private int position;

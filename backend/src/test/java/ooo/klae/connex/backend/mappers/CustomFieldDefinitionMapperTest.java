@@ -147,6 +147,18 @@ class CustomFieldDefinitionMapperTest extends AbstractMapperTest {
         assertTrue(found.getOptionsJson().contains("Hot"));
     }
 
+    @Test
+    void dataClassification_defaultsToStandardThenPersistsUpdate() {
+        CustomFieldDefinition def = newDefinition();
+        assertEquals("standard", definitionMapper.getById(workspace.getId(), def.getId()).getDataClassification());
+
+        def.setDataClassification("special_care");
+        definitionMapper.update(def);
+
+        assertEquals("special_care",
+            definitionMapper.getById(workspace.getId(), def.getId()).getDataClassification());
+    }
+
     private CustomFieldDefinition newDefinition() {
         return newDefinitionIn(workspace);
     }

@@ -36,6 +36,7 @@ import { cn } from "@/lib/utils";
 import { ApiError, createCustomField, updateCustomField } from "@/app/lib/api";
 import { toastError, toastSuccess } from "@/app/lib/toast";
 import type {
+    CustomFieldDataClassification,
     CustomFieldDefinition,
     CustomFieldEntityType,
     CustomFieldType,
@@ -50,6 +51,8 @@ const FIELD_TYPES: CustomFieldType[] = [
     "select",
     "url",
 ];
+
+const DATA_CLASSIFICATIONS: CustomFieldDataClassification[] = ["standard", "sensitive", "special_care"];
 
 const EASE_OUT: [number, number, number, number] = [0.23, 1, 0.32, 1];
 
@@ -134,6 +137,10 @@ function CustomFieldForm({
 
     const [label, setLabel] = useState(field?.label ?? "");
     const [fieldType, setFieldType] = useState<CustomFieldType>(field?.fieldType ?? "text");
+    const [dataClassification, setDataClassification] = useState<CustomFieldDataClassification>(
+        field?.dataClassification ?? "standard",
+    );
+    const [confirmOpen, setConfirmOpen] = useState(false);
     const [required, setRequired] = useState(field?.required ?? false);
     const [options, setOptions] = useState<OptionRow[]>(
         field?.options?.length
@@ -152,6 +159,12 @@ function CustomFieldForm({
         boolean: t("typeBoolean"),
         select: t("typeSelect"),
         url: t("typeUrl"),
+    };
+
+    const classificationLabels: Record<CustomFieldDataClassification, string> = {
+        standard: t("dialog.classificationStandard"),
+        sensitive: t("dialog.classificationSensitive"),
+        special_care: t("dialog.classificationSpecialCare"),
     };
 
     const trimmedLabel = label.trim();
@@ -175,6 +188,8 @@ function CustomFieldForm({
     const removeOption = (id: number) =>
         setOptions((prev) => (prev.length <= 1 ? prev : prev.filter((option) => option.id !== id)));
 
+    const isNewlySpecialCare = dataClassification === "special_care" && field?.dataClassification !== "special_care";
+
     const handleSubmit = async (e: React.SubmitEvent<HTMLFormElement>) => {
         e.preventDefault();
         if (!trimmedLabel || !keyValid) {
@@ -185,6 +200,15 @@ function CustomFieldForm({
             toastError(submitOptions.length === 0 ? t("dialog.optionsRequired") : t("dialog.optionsDuplicate"));
             return;
         }
+        if (isNewlySpecialCare) {
+            setConfirmOpen(true);
+            return;
+        }
+        await doSubmit();
+    };
+
+    const doSubmit = async () => {
+        setConfirmOpen(false);
         setSubmitting(true);
         try {
             const payload = {
@@ -192,6 +216,7 @@ function CustomFieldForm({
                 fieldKey: derivedKey,
                 label: trimmedLabel,
                 fieldType,
+                dataClassification,
                 required,
                 options: isSelect ? submitOptions : null,
                 position: field?.position ?? 0,
@@ -266,6 +291,30 @@ function CustomFieldForm({
                                 ))}
                             </SelectContent>
                         </Select>
+                    </div>
+
+                    <div className="ncd-rise grid gap-1.5" style={{ animationDelay: "165ms" }}>
+                        <Label htmlFor="cf-classification">{t("dialog.classificationLabel")}</Label>
+                        <Select
+                            value={dataClassification}
+                            onValueChange={(value) => setDataClassification(value as CustomFieldDataClassification)}
+                        >
+                            <SelectTrigger id="cf-classification" className="w-full">
+                                <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                                {DATA_CLASSIFICATIONS.map((classification) => (
+                                    <SelectItem key={classification} value={classification}>
+                                        {classificationLabels[classification]}
+                                    </SelectItem>
+                                ))}
+                            </SelectContent>
+                        </Select>
+                        <p className="text-xs text-muted-foreground">
+                            {dataClassification === "special_care"
+                                ? t("dialog.classificationSpecialCareHint")
+                                : t("dialog.classificationHint")}
+                        </p>
                     </div>
 
                     <AnimatePresence initial={false}>
@@ -358,6 +407,25 @@ function CustomFieldForm({
                     </DialogFooter>
                 </form>
             </div>
+
+            <Dialog open={confirmOpen} onOpenChange={(next) => !submitting && setConfirmOpen(next)}>
+                <DialogContent className="sm:max-w-md">
+                    <DialogHeader>
+                        <DialogTitle>{t("dialog.specialCareConfirmTitle")}</DialogTitle>
+                        <DialogDescription>
+                            {t("dialog.specialCareConfirmBody", { field: trimmedLabel })}
+                        </DialogDescription>
+                    </DialogHeader>
+                    <DialogFooter>
+                        <Button type="button" variant="outline" disabled={submitting} onClick={() => setConfirmOpen(false)}>
+                            {t("dialog.cancel")}
+                        </Button>
+                        <Button type="button" variant="destructive" disabled={submitting} onClick={doSubmit}>
+                            {submitting ? <Loader2Icon className="size-4 animate-spin" /> : t("dialog.specialCareConfirm")}
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
         </>
     );
 }

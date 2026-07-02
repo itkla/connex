@@ -295,9 +295,23 @@
       "optionsRequired": "Add at least one option.",
       "optionsDuplicate": "Option labels must be unique.",
       "nameRequired": "Enter a field name",
+      "classificationLabel": "Data classification",
+      "classificationHint": "Flag fields that hold sensitive personal information.",
+      "classificationSpecialCareHint": "Special care-required personal information (要配慮個人情報) may only be collected with the person's consent under the APPI.",
+      "classificationStandard": "Standard",
+      "classificationSensitive": "Sensitive",
+      "classificationSpecialCare": "Special care (要配慮)",
+      "specialCareConfirmTitle": "Mark as special care-required?",
+      "specialCareConfirmBody": "\"{field}\" will be treated as special care-required personal information (要配慮個人情報). Only collect it where you have obtained the person's consent, as required by the APPI.",
+      "specialCareConfirm": "Mark as special care",
       "cancel": "Cancel",
       "create": "Create field",
       "save": "Save"
+    },
+    "classificationBadge": {
+      "standard": "Standard",
+      "sensitive": "Sensitive",
+      "special_care": "要配慮"
     }
   },
   "WorkspaceMembership": {

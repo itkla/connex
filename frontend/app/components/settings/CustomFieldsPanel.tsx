@@ -10,6 +10,7 @@ import {
 } from "@heroicons/react/24/outline";
 
 import type {
+    CustomFieldDataClassification,
     CustomFieldDefinition,
     CustomFieldEntityType,
     CustomFieldType,
@@ -70,6 +71,11 @@ export default function CustomFieldsPanel() {
         company: t("emptyCompany"),
         person: t("emptyPerson"),
         deal: t("emptyDeal"),
+    };
+    const classificationLabels: Record<CustomFieldDataClassification, string> = {
+        standard: t("classificationBadge.standard"),
+        sensitive: t("classificationBadge.sensitive"),
+        special_care: t("classificationBadge.special_care"),
     };
 
     useEffect(() => {
@@ -193,6 +199,17 @@ export default function CustomFieldsPanel() {
                                             {field.required && (
                                                 <Badge variant="secondary" className="text-muted-foreground">
                                                     {t("requiredBadge")}
+                                                </Badge>
+                                            )}
+                                            {field.dataClassification !== "standard" && (
+                                                <Badge
+                                                    variant={
+                                                        field.dataClassification === "special_care"
+                                                            ? "destructive"
+                                                            : "secondary"
+                                                    }
+                                                >
+                                                    {classificationLabels[field.dataClassification]}
                                                 </Badge>
                                             )}
                                         </div>
