@@ -39,11 +39,8 @@
     "newDeal": "New deal",
     "dealCreated": "Deal created",
     "createFailed": "Could not create",
-    "upcoming": "Upcoming",
     "noUpcoming": "Nothing coming up",
     "past": "Past",
-    "emptyPeriod": "Nothing scheduled",
-    "emptyDay": "No items",
-    "emptyMonth": "Nothing scheduled this month"
+    "emptyPeriod": "Nothing scheduled"
   }
 }

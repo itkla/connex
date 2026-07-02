@@ -52,7 +52,7 @@ export default function QuickCreateHost({
                 if (!cancelled) setUsers(next);
             })
             .catch(() => {
-                // task dialog still works with an empty user list (assignee falls back to current user)
+                if (!cancelled) setUsers([]);
             });
         return () => {
             cancelled = true;

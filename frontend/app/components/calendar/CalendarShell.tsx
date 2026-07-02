@@ -8,7 +8,7 @@ import { toast } from 'sonner';
 import { ChevronLeftIcon, ChevronRightIcon } from '@heroicons/react/24/outline';
 
 import Rise from '@/app/components/motion/Rise';
-import { updateDeal, updateTask } from '@/app/lib/api';
+import { rescheduleDeal, rescheduleTask } from '@/app/lib/api';
 import { parseCalendarDate } from '@/app/lib/utils';
 import type { Activity, Contact, Deal, Note, Task } from '@/app/lib/types';
 import {
@@ -68,7 +68,7 @@ export default function CalendarShell({
     const [today] = useState(() => startOfDay(new Date()));
     const [openEventId, setOpenEventId] = useState<string | null>(null);
     const [overrides, setOverrides] = useState<Map<string, string>>(() => new Map());
-    const [pendingId, setPendingId] = useState<string | null>(null);
+    const [pendingIds, setPendingIds] = useState<Set<string>>(() => new Set());
 
     const personById = useMemo(() => {
         const map = new Map<number, Contact>();
@@ -87,25 +87,16 @@ export default function CalendarShell({
         [tasks, activities, deals, notes, persons],
     );
 
-    const baseSignature = useMemo(
-        () => baseEvents.map((e) => `${e.id}:${e.dayKey}`).join('|'),
-        [baseEvents],
-    );
-    const [syncedSignature, setSyncedSignature] = useState(baseSignature);
-    if (syncedSignature !== baseSignature && pendingId == null) {
-        setSyncedSignature(baseSignature);
-        if (overrides.size > 0) {
-            const baseByEventId = new Map(baseEvents.map((e) => [e.id, e.dayKey]));
-            const next = new Map(overrides);
-            let changed = false;
-            for (const [id, key] of overrides) {
-                if (baseByEventId.get(id) === key) {
-                    next.delete(id);
-                    changed = true;
-                }
+    if (overrides.size > 0) {
+        const baseByEventId = new Map(baseEvents.map((e) => [e.id, e.dayKey]));
+        let pruned: Map<string, string> | null = null;
+        for (const [id, key] of overrides) {
+            if (!pendingIds.has(id) && baseByEventId.get(id) === key) {
+                if (!pruned) pruned = new Map(overrides);
+                pruned.delete(id);
             }
-            if (changed) setOverrides(next);
         }
+        if (pruned) setOverrides(pruned);
     }
 
     const events = useMemo(() => {
@@ -130,41 +121,30 @@ export default function CalendarShell({
                 return;
             }
             setOverrides((prev) => new Map(prev).set(event.id, newDayKey));
-            setPendingId(event.id);
+            setPendingIds((prev) => new Set(prev).add(event.id));
             try {
                 if (event.kind === 'task') {
-                    await updateTask(event.entityId, { dueDate: newDayKey });
+                    await rescheduleTask(event.entityId, newDayKey);
                 } else if (event.kind === 'deal') {
-                    const deal = event.raw;
-                    if (deal.pipeline == null || deal.stage == null) throw new Error('deal-missing-pipeline-stage');
-                    await updateDeal(event.entityId, {
-                        name: deal.name,
-                        value: deal.value,
-                        actualValue: deal.actualValue,
-                        currency: deal.currency,
-                        pipeline: deal.pipeline,
-                        stage: deal.stage,
-                        company: deal.company,
-                        ownerId: deal.ownerId ?? null,
-                        expectedCloseDate: newDayKey,
-                        closedAt: deal.closedAt ?? null,
-                        closedReason: deal.closedReason ?? null,
-                        won: deal.won ?? null,
-                    });
-                } else {
-                    return;
+                    await rescheduleDeal(event.entityId, newDayKey);
                 }
                 toast.success(t('rescheduled'));
                 router.refresh();
             } catch {
                 setOverrides((prev) => {
+                    if (prev.get(event.id) !== newDayKey) return prev;
                     const next = new Map(prev);
                     next.delete(event.id);
                     return next;
                 });
                 toast.error(t('rescheduleFailed'));
             } finally {
-                setPendingId((current) => (current === event.id ? null : current));
+                setPendingIds((prev) => {
+                    if (!prev.has(event.id)) return prev;
+                    const next = new Set(prev);
+                    next.delete(event.id);
+                    return next;
+                });
             }
         },
         [router, t],
@@ -248,7 +228,8 @@ export default function CalendarShell({
                         today={today}
                         eventsByDay={eventsByDay}
                         locale={locale}
-                        pendingId={pendingId}
+                        pendingIds={pendingIds}
+                        dragEnabled={!coarse}
                         onSelectDay={cal.setSelectedDay}
                         onOpenEvent={onOpenEvent}
                         onReschedule={handleReschedule}
@@ -375,7 +356,7 @@ export default function CalendarShell({
                 personById={personById}
                 dealById={dealById}
                 onReschedule={handleReschedule}
-                rescheduling={openEvent != null && pendingId === openEvent.id}
+                rescheduling={openEvent != null && pendingIds.has(openEvent.id)}
             />
 
             <QuickCreateHost

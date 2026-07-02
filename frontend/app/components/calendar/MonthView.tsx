@@ -51,7 +51,9 @@ interface MonthViewProps {
     today: Date;
     eventsByDay: Map<string, CalendarEvent[]>;
     locale: string;
-    pendingId: string | null;
+    pendingIds: Set<string>;
+    /** Fine-pointer only: chips are draggable on the desktop grid, never on touch (swipe owns touch). */
+    dragEnabled: boolean;
     onSelectDay: (day: Date) => void;
     onOpenEvent: (event: CalendarEvent) => void;
     onReschedule: (event: CalendarEvent, dayKey: string) => void;
@@ -63,7 +65,8 @@ export default function MonthView({
     today,
     eventsByDay,
     locale,
-    pendingId,
+    pendingIds,
+    dragEnabled,
     onSelectDay,
     onOpenEvent,
     onReschedule,
@@ -165,7 +168,8 @@ export default function MonthView({
                                 today={today}
                                 selectedDay={selectedDay}
                                 events={eventsByDay.get(dayKeyOf(day)) ?? []}
-                                pendingId={pendingId}
+                                pendingIds={pendingIds}
+                                dragEnabled={dragEnabled}
                                 reduce={reduce}
                                 onSelectDay={onSelectDay}
                                 onOpenEvent={onOpenEvent}
@@ -206,7 +210,8 @@ interface MonthCellProps {
     today: Date;
     selectedDay: Date;
     events: CalendarEvent[];
-    pendingId: string | null;
+    pendingIds: Set<string>;
+    dragEnabled: boolean;
     reduce: boolean;
     onSelectDay: (day: Date) => void;
     onOpenEvent: (event: CalendarEvent) => void;
@@ -218,7 +223,8 @@ function MonthCell({
     today,
     selectedDay,
     events,
-    pendingId,
+    pendingIds,
+    dragEnabled,
     reduce,
     onSelectDay,
     onOpenEvent,
@@ -297,7 +303,8 @@ function MonthCell({
                             <DraggableChip
                                 key={event.id}
                                 event={event}
-                                pending={pendingId === event.id}
+                                pending={pendingIds.has(event.id)}
+                                dragEnabled={dragEnabled}
                                 onOpenEvent={onOpenEvent}
                             />
                         ))}
@@ -320,13 +327,15 @@ function MonthCell({
 interface DraggableChipProps {
     event: CalendarEvent;
     pending: boolean;
+    dragEnabled: boolean;
     onOpenEvent: (event: CalendarEvent) => void;
 }
 
-function DraggableChip({ event, pending, onOpenEvent }: DraggableChipProps) {
+function DraggableChip({ event, pending, dragEnabled, onOpenEvent }: DraggableChipProps) {
+    const canDrag = event.draggable && dragEnabled && !pending;
     const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
         id: event.id,
-        disabled: !event.draggable,
+        disabled: !canDrag,
     });
 
     return (
@@ -338,7 +347,7 @@ function DraggableChip({ event, pending, onOpenEvent }: DraggableChipProps) {
             onClick={() => onOpenEvent(event)}
             className={cn(
                 'pointer-events-auto',
-                event.draggable && 'cursor-grab touch-none',
+                canDrag && 'cursor-grab touch-none',
                 pending && 'animate-pulse',
             )}
             {...attributes}

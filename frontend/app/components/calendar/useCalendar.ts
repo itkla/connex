@@ -33,6 +33,39 @@ function clampDayToMonth(year: number, month: number, day: number): Date {
     return new Date(year, month, Math.min(day, lastOfMonth));
 }
 
+/** Reads a persisted string preference; returns null when Web Storage is unavailable. */
+function readPref(key: string): string | null {
+    try {
+        return window.localStorage.getItem(key);
+    } catch {
+        return null;
+    }
+}
+
+/** Best-effort persist of a string preference; a no-op returning false when storage is unavailable. */
+function writePref(key: string, value: string): boolean {
+    try {
+        window.localStorage.setItem(key, value);
+        return true;
+    } catch {
+        return false;
+    }
+}
+
+/** Parses a persisted kinds array, dropping unknown kinds; returns [] on missing or malformed input. */
+function parseStoredKinds(raw: string | null): CalendarEventKind[] {
+    if (!raw) return [];
+    try {
+        const parsed: unknown = JSON.parse(raw);
+        if (!Array.isArray(parsed)) return [];
+        return parsed.filter((k): k is CalendarEventKind =>
+            (EVENT_KINDS as readonly string[]).includes(k as string),
+        );
+    } catch {
+        return [];
+    }
+}
+
 export interface UseCalendar {
     view: CalendarView;
     setView: (view: CalendarView) => void;
@@ -65,48 +98,22 @@ export function useCalendar(): UseCalendar {
     const [hydrated, setHydrated] = useState(false);
 
     useEffect(() => {
-        // Defer reading persisted prefs to after paint: the first client render must
-        // match the server's defaults (SSR-safe), and applying stored values in a rAF
-        // callback keeps the setState out of the synchronous effect body.
         const raf = window.requestAnimationFrame(() => {
-            try {
-                const storedView = window.localStorage.getItem(VIEW_STORAGE_KEY);
-                if (isView(storedView)) setViewState(storedView);
-
-                const storedKinds = window.localStorage.getItem(KINDS_STORAGE_KEY);
-                if (storedKinds) {
-                    const parsed: unknown = JSON.parse(storedKinds);
-                    if (Array.isArray(parsed)) {
-                        const next = parsed.filter((k): k is CalendarEventKind =>
-                            (EVENT_KINDS as readonly string[]).includes(k as string),
-                        );
-                        if (next.length > 0) setVisibleKinds(new Set(next));
-                    }
-                }
-            } catch {
-                // ignore malformed storage; defaults already applied
-            }
+            const storedView = readPref(VIEW_STORAGE_KEY);
+            if (isView(storedView)) setViewState(storedView);
+            const storedKinds = parseStoredKinds(readPref(KINDS_STORAGE_KEY));
+            if (storedKinds.length > 0) setVisibleKinds(new Set(storedKinds));
             setHydrated(true);
         });
         return () => window.cancelAnimationFrame(raf);
     }, []);
 
     useEffect(() => {
-        if (!hydrated) return;
-        try {
-            window.localStorage.setItem(VIEW_STORAGE_KEY, view);
-        } catch {
-            // storage may be unavailable (private mode); preference is best-effort
-        }
+        if (hydrated) writePref(VIEW_STORAGE_KEY, view);
     }, [view, hydrated]);
 
     useEffect(() => {
-        if (!hydrated) return;
-        try {
-            window.localStorage.setItem(KINDS_STORAGE_KEY, JSON.stringify([...visibleKinds]));
-        } catch {
-            // best-effort
-        }
+        if (hydrated) writePref(KINDS_STORAGE_KEY, JSON.stringify([...visibleKinds]));
     }, [visibleKinds, hydrated]);
 
     const setSelectedDay = useCallback((day: Date, direction: NavDirection = 0) => {

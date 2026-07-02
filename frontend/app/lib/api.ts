@@ -388,6 +388,15 @@ export function moveTask(id: number, status: Types.TaskStatus, position: number,
     return postJson<Types.Task>(`/api/tasks/${id}/move`, { status, position }, init);
 }
 
+/**
+ * Changes only a task's due date (a `YYYY-MM-DD` calendar day) without touching any other field.
+ * Safe for optimistic reschedule; the server rejects a stale full-payload update, so this narrow
+ * intent endpoint is used instead of `updateTask`.
+ */
+export function rescheduleTask(id: number, dueDate: string, init: RequestInit = {}) {
+    return postJson<Types.Task>(`/api/tasks/${id}/reschedule`, { dueDate }, init);
+}
+
 /*
 * == Activity management
 */
@@ -862,6 +871,15 @@ export function reopenDeal(id: number) {
  */
 export function moveDeal(id: number, stageId: number, position: number) {
     return postJson<Types.Deal>(`/api/deals/${id}/move`, { stageId, position });
+}
+
+/**
+ * Changes only a deal's expected close date (a `YYYY-MM-DD` calendar day) without touching any
+ * other field. Unlike `updateDeal` this cannot clobber a concurrent edit or reopen a closed deal,
+ * so it is used for optimistic reschedule.
+ */
+export function rescheduleDeal(id: number, expectedCloseDate: string) {
+    return postJson<Types.Deal>(`/api/deals/${id}/reschedule`, { expectedCloseDate });
 }
 
 export function updateDealOwner(id: number, ownerId: number | null) {
