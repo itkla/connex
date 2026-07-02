@@ -92,4 +92,29 @@ class InviteLinkServiceTest extends AbstractServiceTest {
 
         assertTrue(workspaceMapper.isMember(workspace.getId(), user.getId()));
     }
+
+    @Test
+    void redeemLink_afterRemoval_doesNotBypassMaxUses() {
+        InviteLinkDto link = inviteLinkService.createLink(workspace.getId(), currentUser, "member", null, 1);
+        User user = outsider();
+        inviteLinkService.redeemLink(link.getToken(), user);
+        workspaceMapper.removeMember(workspace.getId(), user.getId());
+
+        assertThrows(BadRequestException.class,
+            () -> inviteLinkService.redeemLink(link.getToken(), user));
+        assertFalse(workspaceMapper.isMember(workspace.getId(), user.getId()));
+    }
+
+    @Test
+    void redeemLink_afterRemoval_revokedLink_rejected() {
+        InviteLinkDto link = inviteLinkService.createLink(workspace.getId(), currentUser, "member", null, null);
+        User user = outsider();
+        inviteLinkService.redeemLink(link.getToken(), user);
+        workspaceMapper.removeMember(workspace.getId(), user.getId());
+        inviteLinkService.revokeLink(workspace.getId(), link.getId(), currentUser.getId());
+
+        assertThrows(BadRequestException.class,
+            () -> inviteLinkService.redeemLink(link.getToken(), user));
+        assertFalse(workspaceMapper.isMember(workspace.getId(), user.getId()));
+    }
 }

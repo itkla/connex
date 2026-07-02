@@ -78,7 +78,12 @@ public class InviteLinkService {
         return preview;
     }
 
-    /** Redeems a link for the authenticated user, joining them with the link's role. Idempotent per user. */
+    /**
+     * Redeems a link for the authenticated user, joining them with the link's role.
+     * Idempotent for an existing member; re-joining after removal is treated as a
+     * fresh redemption, so a prior redemption record never bypasses revocation,
+     * expiry, use-exhaustion, or the domain allow-list.
+     */
     @Transactional
     public WorkspaceMembershipDto redeemLink(String token, User user) {
         WorkspaceInviteLink link = inviteLinkMapper.findByToken(token);
@@ -87,31 +92,28 @@ public class InviteLinkService {
         }
         int workspaceId = link.getWorkspaceId();
 
-        // A user who already redeemed this link just re-resolves their membership (no double count).
-        if (inviteLinkMapper.hasRedeemed(link.getId(), user.getId())) {
-            ensureMember(workspaceId, user, link.getRole());
+        // Already an active member: idempotent no-op, regardless of prior redemption.
+        if (workspaceMapper.isMember(workspaceId, user.getId())) {
             return membership(user.getId(), workspaceId);
         }
 
+        // Joining (or re-joining after removal): the link must currently be valid and the
+        // domain allowed. A past redemption record is history, not a standing grant.
         if (!allowedDomainService.isJoinAllowed(workspaceId, user.getEmail())) {
             throw new ForbiddenException("Your email domain isn't permitted to join this workspace");
         }
 
-        // First redemption: atomically claim a use, rejecting revoked / expired / exhausted links.
+        // Atomically claim a use, rejecting revoked / expired / exhausted links.
         if (inviteLinkMapper.incrementUsedCount(link.getId()) == 0) {
             throw new BadRequestException("This invite link is no longer available");
         }
-        inviteLinkMapper.recordRedemption(link.getId(), user.getId());
-        ensureMember(workspaceId, user, link.getRole());
+        if (!inviteLinkMapper.hasRedeemed(link.getId(), user.getId())) {
+            inviteLinkMapper.recordRedemption(link.getId(), user.getId());
+        }
+        workspaceMapper.addMember(workspaceId, user.getId(), link.getRole());
         auditService.record("workspace.invite_link.accept", "workspace", workspaceId, user.getDisplayName(),
                 user.getDisplayName() + " joined via an invite link", null);
         return membership(user.getId(), workspaceId);
-    }
-
-    private void ensureMember(int workspaceId, User user, String role) {
-        if (!workspaceMapper.isMember(workspaceId, user.getId())) {
-            workspaceMapper.addMember(workspaceId, user.getId(), role);
-        }
     }
 
     private WorkspaceMembershipDto membership(int userId, int workspaceId) {
