@@ -13,6 +13,7 @@ const TABS = [
     { key: "tabRules", href: "/settings/rules" },
     { key: "tabCustomFields", href: "/settings/custom-fields" },
     { key: "tabNotifications", href: "/settings/notifications" },
+    { key: "tabEmail", href: "/settings/email" },
     { key: "tabMembership", href: "/settings/membership" },
 ] as const;
 
