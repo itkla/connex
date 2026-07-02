@@ -5,7 +5,6 @@ import { useTranslations } from 'next-intl';
 
 import RelationMap from '@/app/components/map/RelationMap';
 import ReplayControl, { type ReplayPhase } from '@/app/components/map/replay/ReplayControl';
-import LiquidGlassDefs from '@/app/components/map/replay/LiquidGlassDefs';
 import {
     augmentMasterGraph,
     employmentEdges,
@@ -137,7 +136,6 @@ export default function MapView({ graph, focusId }: { graph: Graph; focusId?: st
 
     return (
         <div className="relative h-full w-full">
-            <LiquidGlassDefs />
             <RelationMap
                 graph={graph}
                 focusId={focusId}
