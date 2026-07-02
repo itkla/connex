@@ -19,6 +19,13 @@ const SEARCH_DEBOUNCE_MS = 220;
 
 const RECORD_ICON = { person: UserIcon, deal: BriefcaseIcon, company: BuildingOffice2Icon };
 
+type Trigger = '@' | '#';
+
+const TRIGGER_TYPES: Record<Trigger, readonly NoteReferenceType[]> = {
+    '@': ['user', 'person'],
+    '#': ['deal', 'company'],
+};
+
 function currentWorkspaceKey(): string {
     if (typeof document === 'undefined') return '';
     const match = document.cookie.match(/(?:^|;\s*)connex_workspace=([^;]+)/);
@@ -159,7 +166,7 @@ function serialize(root: HTMLElement): string {
     return out.replace(/^\n/, '');
 }
 
-type ActiveQuery = { text: string; left: number; top?: number; bottom?: number; above: boolean };
+type ActiveQuery = { text: string; trigger: Trigger; left: number; top?: number; bottom?: number; above: boolean };
 
 type Props = {
     id?: string;
@@ -177,10 +184,10 @@ type Props = {
  * A contentEditable note composer with inline reference chips. The editable DOM
  * is driven imperatively (never re-rendered by React while focused) to keep the
  * caret stable; {@link serialize} converts it back to the `[Label](type:id)`
- * token string exposed via {@code onChange}. Typing `@` opens a picker — an ARIA
- * combobox popup, positioned from the caret and flipping above when there isn't
- * room below — that searches workspace members, contacts, deals, and companies;
- * a selection inserts a non-editable chip.
+ * token string exposed via {@code onChange}. Typing `@` or `#` opens a picker — an
+ * ARIA combobox popup, positioned from the caret and flipping above when there
+ * isn't room below. `@` searches people (workspace members and contacts); `#`
+ * searches records (deals and companies). A selection inserts a non-editable chip.
  */
 export default function MentionEditor({
     id,
@@ -244,13 +251,19 @@ export default function MentionEditor({
 
     const suggestions = useMemo(() => {
         if (!query) return [];
+        const allowed = TRIGGER_TYPES[query.trigger];
         const needle = query.text.toLowerCase();
         if (needle.length === 0) {
-            return memberSuggestions(members, excludeUserId).slice(0, MAX_SUGGESTIONS);
+            return query.trigger === '@'
+                ? memberSuggestions(members, excludeUserId).slice(0, MAX_SUGGESTIONS)
+                : [];
         }
         if (results) {
-            return searchSuggestions(results, excludeUserId).slice(0, MAX_SUGGESTIONS);
+            return searchSuggestions(results, excludeUserId)
+                .filter((suggestion) => allowed.includes(suggestion.type))
+                .slice(0, MAX_SUGGESTIONS);
         }
+        if (query.trigger !== '@') return [];
         return memberSuggestions(members, excludeUserId)
             .filter(
                 (suggestion) =>
@@ -293,7 +306,7 @@ export default function MentionEditor({
         let handle = '';
         while (index >= 0) {
             const char = textBefore[index];
-            if (char === '@') {
+            if (char === '@' || char === '#') {
                 const preceding = index === 0 ? ' ' : textBefore[index - 1];
                 if (/\s/.test(preceding) || (index === 0 && !(node.previousSibling instanceof Text))) {
                     const rect = range.getBoundingClientRect();
@@ -302,6 +315,7 @@ export default function MentionEditor({
                     const left = Math.max(8, Math.min(rect.left, window.innerWidth - MENU_WIDTH - 8));
                     setQuery({
                         text: handle,
+                        trigger: char,
                         left,
                         top: above ? undefined : rect.bottom + 6,
                         bottom: above ? window.innerHeight - rect.top + 6 : undefined,
@@ -342,7 +356,7 @@ export default function MentionEditor({
 
             const text = node.textContent ?? '';
             const caret = range.startOffset;
-            const at = text.lastIndexOf('@', caret - 1);
+            const at = text.lastIndexOf(query?.trigger ?? '@', caret - 1);
             const parent = node.parentNode;
             if (at === -1 || !parent) {
                 closeMenu();
@@ -380,7 +394,7 @@ export default function MentionEditor({
             closeMenu();
             emit();
         },
-        [closeMenu, emit, reduceMotion],
+        [closeMenu, emit, reduceMotion, query],
     );
 
     const handleKeyDown = useCallback(
