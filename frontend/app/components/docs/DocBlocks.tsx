@@ -52,11 +52,11 @@ const CALLOUT_STYLES: Record<
     },
 };
 
-const WARMTH_VARS: Record<WarmthBand, string> = {
-    hot: "var(--warmth-hot)",
-    warm: "var(--warmth-warm)",
-    cool: "var(--warmth-cool)",
-    cold: "var(--warmth-cold)",
+const WARMTH_CLASS: Record<WarmthBand, string> = {
+    hot: "bg-warmth-hot",
+    warm: "bg-warmth-warm",
+    cool: "bg-warmth-cool",
+    cold: "bg-warmth-cold",
 };
 
 function toParagraphs(text: string | string[]): string[] {
@@ -65,9 +65,9 @@ function toParagraphs(text: string | string[]): string[] {
 
 function BlockTitle({ children }: { children: React.ReactNode }) {
     return (
-        <h3 className="mb-3 text-xs font-medium uppercase tracking-[0.12em] text-muted-foreground">
+        <p className="mb-3 text-xs font-medium uppercase tracking-[0.12em] text-muted-foreground">
             {children}
-        </h3>
+        </p>
     );
 }
 
@@ -198,7 +198,7 @@ function Cards({ block }: { block: CardsBlock }) {
                             <div className="flex items-start justify-between gap-3">
                                 <p className="text-sm font-semibold text-foreground">{item.title}</p>
                                 {item.href ? (
-                                    <ArrowRightIcon className="size-4 shrink-0 text-muted-foreground transition-transform group-hover:translate-x-0.5 group-hover:text-brand-dark" />
+                                    <ArrowRightIcon className="size-4 shrink-0 text-muted-foreground transition-transform group-hover:translate-x-0.5 group-hover:text-brand-dark motion-reduce:transition-none" />
                                 ) : null}
                             </div>
                             <p className="mt-1.5 text-sm leading-6 text-muted-foreground">
@@ -238,8 +238,7 @@ function WarmthLegend({ block }: { block: WarmthLegendBlock }) {
                         className="flex gap-3 rounded-xl border border-border bg-card p-4"
                     >
                         <span
-                            className="mt-1 size-3 shrink-0 rounded-full ring-2 ring-inset ring-black/5"
-                            style={{ backgroundColor: WARMTH_VARS[item.band] }}
+                            className={`mt-1 size-3 shrink-0 rounded-full ring-2 ring-inset ring-foreground/10 ${WARMTH_CLASS[item.band]}`}
                             aria-hidden="true"
                         />
                         <div>
@@ -294,9 +293,9 @@ function Heading({ text, level, id }: { text: string; level: 2 | 3; id: string }
     if (level === 3) {
         return (
             <h3 id={id} className="group scroll-mt-24 text-lg font-semibold text-foreground">
-                <a href={`#${id}`} className="inline-flex items-center gap-2">
+                <a href={`#${id}`} className="inline-flex items-center gap-2 rounded outline-none focus-visible:ring-2 focus-visible:ring-brand">
                     {text}
-                    <span className="text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100">
+                    <span className="text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 motion-reduce:transition-none">
                         #
                     </span>
                 </a>

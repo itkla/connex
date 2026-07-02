@@ -49,7 +49,8 @@ export default function OnThisPage({ headings }: { headings: DocHeading[] }) {
                         <li key={heading.id}>
                             <a
                                 href={`#${heading.id}`}
-                                className={`-ml-px block border-l-2 py-1 transition-colors ${
+                                aria-current={active ? "location" : undefined}
+                                className={`-ml-px block border-l-2 py-1 transition-colors motion-reduce:transition-none ${
                                     heading.level === 3 ? "pl-7" : "pl-4"
                                 } ${
                                     active

@@ -19,7 +19,7 @@ function ThemeToggle() {
             type="button"
             onClick={() => setTheme(next)}
             aria-label={t("toggleLightDarkMode", { mode: next })}
-            className="inline-flex size-9 items-center justify-center rounded-full border border-border text-foreground transition active:scale-[0.95]"
+            className="inline-flex size-9 items-center justify-center rounded-full border border-border text-foreground outline-none transition active:scale-[0.95] focus-visible:ring-2 focus-visible:ring-brand"
         >
             <MoonIcon className="size-5 dark:hidden" />
             <SunIcon className="hidden size-5 dark:block" />
@@ -46,12 +46,12 @@ export default function DocsTopBar({ authed }: { authed: boolean }) {
                             <button
                                 type="button"
                                 aria-label={t("browseDocs")}
-                                className="inline-flex size-9 items-center justify-center rounded-full border border-border text-foreground transition active:scale-[0.95] lg:hidden"
+                                className="inline-flex size-9 items-center justify-center rounded-full border border-border text-foreground outline-none transition active:scale-[0.95] focus-visible:ring-2 focus-visible:ring-brand lg:hidden"
                             >
                                 <Bars3Icon className="size-5" />
                             </button>
                         </SheetTrigger>
-                        <SheetContent side="left" className="w-80 p-0">
+                        <SheetContent side="left" aria-describedby={undefined} className="w-80 p-0">
                             <SheetTitle className="px-6 pt-6 text-sm font-medium uppercase tracking-[0.12em] text-muted-foreground">
                                 {t("browseDocs")}
                             </SheetTitle>

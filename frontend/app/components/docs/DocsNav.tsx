@@ -32,6 +32,7 @@ function DocsNavGroup({
                 <Link
                     href={`/docs/${category.slug}`}
                     onClick={onNavigate}
+                    aria-current={pathname === `/docs/${category.slug}` ? "page" : undefined}
                     className={`flex min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1.5 text-sm font-medium transition-colors ${
                         pathname === `/docs/${category.slug}`
                             ? "text-brand-dark"
@@ -47,7 +48,7 @@ function DocsNavGroup({
                     aria-expanded={open}
                     aria-controls={groupId}
                     aria-label={t(`${category.namespace}.title`)}
-                    className="rounded-md p-1 text-muted-foreground transition-colors hover:text-foreground"
+                    className="rounded-md p-1 text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-brand"
                 >
                     <ChevronDownIcon className={`size-3.5 transition-transform ${open ? "" : "-rotate-90"}`} />
                 </button>
@@ -87,8 +88,9 @@ function DocsNavGroup({
  */
 export default function DocsNav({ onNavigate }: { onNavigate?: () => void }) {
     const pathname = usePathname() ?? "";
+    const t = useTranslations("DocsMeta");
     return (
-        <nav className="space-y-1.5">
+        <nav aria-label={t("browseDocs")} className="space-y-1.5">
             {docsCategories.map((category) => (
                 <DocsNavGroup
                     key={category.slug}

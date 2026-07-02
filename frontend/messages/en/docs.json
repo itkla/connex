@@ -12,6 +12,7 @@
         "inThisCategory": "In this category",
         "previous": "Previous",
         "next": "Next",
+        "pagination": "Article navigation",
         "backToApp": "Back to app",
         "openApp": "Open app",
         "signIn": "Sign in",
@@ -3443,7 +3444,7 @@
                         "items": [
                             {
                                 "title": "Email invite",
-                                "description": "Invite by email address. If the address already belongs to a Connex user they join as pending with an in-app notification; otherwise they get an invite link that expires in 24 hours by default."
+                                "description": "Invite by email address. If the address already belongs to a Connex user they join as pending with an in-app notification; otherwise they get an invite link that expires in 14 days by default."
                             },
                             {
                                 "title": "Shareable invite link",

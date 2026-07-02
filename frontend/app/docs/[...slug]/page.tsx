@@ -208,7 +208,13 @@ async function renderArticle(categorySlug: string, articleSlug: string) {
                     )}
                 </div>
 
-                <ArticleNav previous={previous} next={next} previousLabel={meta("previous")} nextLabel={meta("next")} />
+                <ArticleNav
+                    previous={previous}
+                    next={next}
+                    previousLabel={meta("previous")}
+                    nextLabel={meta("next")}
+                    navLabel={meta("pagination")}
+                />
             </div>
 
             {headings.length > 0 ? (
@@ -227,11 +233,13 @@ async function ArticleNav({
     next,
     previousLabel,
     nextLabel,
+    navLabel,
 }: {
     previous: ResolvedArticle | null;
     next: ResolvedArticle | null;
     previousLabel: string;
     nextLabel: string;
+    navLabel: string;
 }) {
     if (!previous && !next) return null;
     const t = await getTranslations();
@@ -241,14 +249,14 @@ async function ArticleNav({
     }
 
     return (
-        <nav className="mt-14 grid gap-4 border-t border-border pt-8 sm:grid-cols-2">
+        <nav aria-label={navLabel} className="mt-14 grid gap-4 border-t border-border pt-8 sm:grid-cols-2">
             {previous ? (
                 <Link
                     href={`/docs/${previous.category.slug}/${previous.article.slug}`}
                     className="group flex flex-col gap-1 rounded-2xl border border-border p-5 transition-colors hover:border-brand/40 hover:bg-muted/40"
                 >
                     <span className="flex items-center gap-1.5 text-xs font-medium uppercase tracking-[0.12em] text-muted-foreground">
-                        <ArrowLeftIcon className="size-3.5 transition-transform group-hover:-translate-x-0.5" />
+                        <ArrowLeftIcon className="size-3.5 transition-transform group-hover:-translate-x-0.5 motion-reduce:transition-none" />
                         {previousLabel}
                     </span>
                     <span className="text-sm font-semibold text-foreground">{titleOf(previous)}</span>
@@ -263,7 +271,7 @@ async function ArticleNav({
                 >
                     <span className="flex items-center gap-1.5 text-xs font-medium uppercase tracking-[0.12em] text-muted-foreground">
                         {nextLabel}
-                        <ArrowRightIcon className="size-3.5 transition-transform group-hover:translate-x-0.5" />
+                        <ArrowRightIcon className="size-3.5 transition-transform group-hover:translate-x-0.5 motion-reduce:transition-none" />
                     </span>
                     <span className="text-sm font-semibold text-foreground">{titleOf(next)}</span>
                 </Link>

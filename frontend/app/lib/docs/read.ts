@@ -72,7 +72,8 @@ function projectCard(entry: RawRecord): CardEntry | null {
     const description = asString(entry.description);
     if (!title || !description) return null;
     const href = asString(entry.href);
-    return href ? { title, description, href } : { title, description };
+    const internalHref = href && href.startsWith("/") ? href : undefined;
+    return internalHref ? { title, description, href: internalHref } : { title, description };
 }
 
 function projectWarmth(entry: RawRecord): WarmthEntry | null {
@@ -86,9 +87,9 @@ function projectWarmth(entry: RawRecord): WarmthEntry | null {
 }
 
 function projectRow(value: unknown): string[] | null {
-    if (!Array.isArray(value)) return null;
-    const cells = value.filter((cell): cell is string => typeof cell === "string");
-    return cells.length > 0 ? cells : null;
+    if (!Array.isArray(value) || value.length === 0) return null;
+    if (!value.every((cell): cell is string => typeof cell === "string")) return null;
+    return value as string[];
 }
 
 /**
@@ -167,9 +168,10 @@ function validateBlock(raw: unknown): DocBlock | null {
             const columns = Array.isArray(raw.columns)
                 ? raw.columns.filter((column): column is string => typeof column === "string")
                 : [];
-            const rows = Array.isArray(raw.rows)
+            const rows = (Array.isArray(raw.rows)
                 ? raw.rows.map(projectRow).filter((row): row is string[] => row !== null)
-                : [];
+                : []
+            ).filter((row) => row.length === columns.length);
             if (columns.length === 0 || rows.length === 0) return null;
             return { type: "table", title: asString(raw.title) ?? undefined, columns, rows };
         }
