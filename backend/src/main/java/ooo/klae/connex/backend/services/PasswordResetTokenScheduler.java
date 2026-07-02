@@ -25,6 +25,7 @@ public class PasswordResetTokenScheduler {
     private static final Logger log = LoggerFactory.getLogger(PasswordResetTokenScheduler.class);
 
     private final PasswordResetTokenMapper passwordResetTokenMapper;
+    private final PasswordResetRateLimiter rateLimiter;
 
     @Scheduled(
         fixedDelayString = "${connex.password-reset.cleanup-delay-ms:3600000}",
@@ -36,6 +37,7 @@ public class PasswordResetTokenScheduler {
             if (removed > 0) {
                 log.info("Purged {} expired/consumed password reset tokens", removed);
             }
+            rateLimiter.evictStale(System.currentTimeMillis());
         } catch (Exception exception) {
             log.error("Scheduled password reset token purge failed", exception);
         }

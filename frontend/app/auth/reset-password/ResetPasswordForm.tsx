@@ -13,7 +13,7 @@ import {
 } from "@heroicons/react/24/outline";
 import { LoaderCircle } from "lucide-react";
 
-import { ApiError, resetPassword, validateResetToken } from "@/app/lib/api";
+import { ApiError, logout, resetPassword, validateResetToken } from "@/app/lib/api";
 import { toastError, toastSuccess } from "@/app/lib/toast";
 import { useFieldErrors } from "@/app/hooks/useFieldErrors";
 import AuthBrandPanel from "@/app/components/auth/AuthBrandPanel";
@@ -74,14 +74,18 @@ export function ResetPasswordForm({ token }: { token: string | null }) {
         try {
             await resetPassword({ token, newPassword: password });
             toastSuccess(t("successMessage"));
+            // The reset kills any live session; clear the stale cookie so the login
+            // guard doesn't bounce a previously-signed-in user to a broken dashboard.
+            await logout().catch(() => undefined);
             router.push("/auth/login");
         } catch (err) {
             if (err instanceof ApiError) {
-                if (err.status === 400 && !captureFieldErrors(err)) {
+                const captured = captureFieldErrors(err);
+                if (err.status === 400 && !captured) {
                     setStatus("invalid");
                     return;
                 }
-                if (!captureFieldErrors(err)) {
+                if (!captured) {
                     toastError(err.message);
                 }
             } else {

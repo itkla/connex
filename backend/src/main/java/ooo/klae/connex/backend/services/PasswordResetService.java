@@ -38,6 +38,7 @@ public class PasswordResetService {
     private final PasswordResetTokenMapper passwordResetTokenMapper;
     private final PasswordEncoder passwordEncoder;
     private final PasswordResetEmailService passwordResetEmailService;
+    private final PasswordResetRateLimiter rateLimiter;
     private final AuditService auditService;
     private final SessionRegistry sessionRegistry;
 
@@ -59,6 +60,12 @@ public class PasswordResetService {
      */
     @Transactional
     public void requestReset(String email, String requestIp) {
+        if (!rateLimiter.tryAcquire(requestIp, System.currentTimeMillis())) {
+            auditService.record("auth.password_reset_throttled", "user", null, requestIp,
+                    "Password reset requests throttled for this client", null);
+            return;
+        }
+
         User user = userMapper.getUserByEmail(email);
         if (user == null) {
             return;

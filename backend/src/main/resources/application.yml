@@ -78,9 +78,15 @@ connex:
         # cap how many reset links one account can request in that window.
         token-expiry-minutes: ${CONNEX_PASSWORD_RESET_TOKEN_EXPIRY_MINUTES:30}
         email-enabled: ${CONNEX_PASSWORD_RESET_EMAIL_ENABLED:false}
+        # Dev-only: log the raw reset link. Never enable where logs are accessible.
+        log-link: ${CONNEX_PASSWORD_RESET_LOG_LINK:false}
         base-url: ${CONNEX_PASSWORD_RESET_BASE_URL:http://localhost:3000}
+        # Per-account request throttle (enumeration-safe branch is also covered by the per-IP cap).
         request-window-seconds: ${CONNEX_PASSWORD_RESET_REQUEST_WINDOW_SECONDS:900}
         max-requests: ${CONNEX_PASSWORD_RESET_MAX_REQUESTS:5}
+        # Per-IP throttle spanning the same window, applied before the account lookup so probing
+        # unknown emails is bounded too.
+        max-requests-per-ip: ${CONNEX_PASSWORD_RESET_MAX_REQUESTS_PER_IP:20}
         scheduling-enabled: ${CONNEX_PASSWORD_RESET_SCHEDULING_ENABLED:true}
         cleanup-delay-ms: ${CONNEX_PASSWORD_RESET_CLEANUP_DELAY_MS:3600000}
         initial-delay-ms: ${CONNEX_PASSWORD_RESET_INITIAL_DELAY_MS:3600000}

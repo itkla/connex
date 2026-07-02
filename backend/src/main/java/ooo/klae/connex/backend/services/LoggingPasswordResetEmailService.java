@@ -4,16 +4,18 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 import org.springframework.web.util.UriComponentsBuilder;
 
 import ooo.klae.connex.backend.beans.User;
 
 /**
- * Development fallback that logs the reset link instead of sending an email.
- * Active only while {@code connex.password-reset.email-enabled} is false, which
- * is the default. This is the single, deliberate exception to the "never log a
- * token" rule and must not run in any environment where email is enabled.
+ * Fallback delivery used when no real email provider is configured. It never sends mail; it only
+ * records that a reset was requested. The full reset link (with the raw token) is logged solely
+ * when {@code connex.password-reset.log-link} is explicitly enabled — a local-development aid that
+ * must never be turned on where logs are accessible, since the link is a bearer credential.
+ * Runs asynchronously so response timing does not reveal whether the account exists.
  */
 @Service
 @ConditionalOnProperty(
@@ -27,18 +29,28 @@ public class LoggingPasswordResetEmailService implements PasswordResetEmailServi
     private static final Logger log = LoggerFactory.getLogger(LoggingPasswordResetEmailService.class);
 
     private final String baseUrl;
+    private final boolean logLink;
 
-    public LoggingPasswordResetEmailService(@Value("${connex.password-reset.base-url:http://localhost:3000}") String baseUrl) {
+    public LoggingPasswordResetEmailService(
+            @Value("${connex.password-reset.base-url:http://localhost:3000}") String baseUrl,
+            @Value("${connex.password-reset.log-link:false}") boolean logLink) {
         this.baseUrl = baseUrl;
+        this.logLink = logLink;
     }
 
     @Override
+    @Async
     public void sendResetEmail(User user, String rawToken) {
-        String link = UriComponentsBuilder.fromUriString(baseUrl)
-                .path("/auth/reset-password")
-                .queryParam("token", rawToken)
-                .build()
-                .toUriString();
-        log.info("Password reset link for user {} (email delivery disabled): {}", user.getUsername(), link);
+        if (logLink) {
+            String link = UriComponentsBuilder.fromUriString(baseUrl)
+                    .path("/auth/reset-password")
+                    .queryParam("token", rawToken)
+                    .build()
+                    .toUriString();
+            log.info("Password reset link for user {} (dev link logging enabled): {}", user.getUsername(), link);
+            return;
+        }
+        log.warn("Password reset requested for user {} but no email delivery is configured; "
+                + "set connex.password-reset.log-link=true in local dev to log the link.", user.getUsername());
     }
 }

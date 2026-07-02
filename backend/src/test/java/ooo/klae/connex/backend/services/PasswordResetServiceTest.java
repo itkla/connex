@@ -42,7 +42,7 @@ class PasswordResetServiceTest extends AbstractServiceTest {
 
     @Test
     void requestReset_unknownEmail_issuesNothing() {
-        passwordResetService.requestReset("nobody_" + unique() + "@example.com", "127.0.0.1");
+        passwordResetService.requestReset("nobody_" + unique() + "@example.com", unique());
         assertNull(email.lastToken, "no reset email should be sent for an unknown address");
         assertEquals(0, email.calls);
     }
@@ -50,7 +50,7 @@ class PasswordResetServiceTest extends AbstractServiceTest {
     @Test
     void requestReset_knownEmail_issuesRedeemableToken() {
         User user = newUser();
-        passwordResetService.requestReset(user.getEmail(), "127.0.0.1");
+        passwordResetService.requestReset(user.getEmail(), unique());
 
         assertNotNull(email.lastToken);
         assertEquals(user.getId(), email.lastUser.getId());
@@ -60,9 +60,9 @@ class PasswordResetServiceTest extends AbstractServiceTest {
     @Test
     void requestReset_supersedesPriorToken() {
         User user = newUser();
-        passwordResetService.requestReset(user.getEmail(), "127.0.0.1");
+        passwordResetService.requestReset(user.getEmail(), unique());
         String firstToken = email.lastToken;
-        passwordResetService.requestReset(user.getEmail(), "127.0.0.1");
+        passwordResetService.requestReset(user.getEmail(), unique());
         String secondToken = email.lastToken;
 
         assertFalse(passwordResetService.validateToken(firstToken), "issuing a new token must invalidate the prior one");
@@ -72,7 +72,7 @@ class PasswordResetServiceTest extends AbstractServiceTest {
     @Test
     void resetPassword_validToken_updatesHashAndConsumesToken() {
         User user = newUser();
-        passwordResetService.requestReset(user.getEmail(), "127.0.0.1");
+        passwordResetService.requestReset(user.getEmail(), unique());
         String token = email.lastToken;
 
         passwordResetService.resetPassword(token, NEW_PASSWORD);
@@ -85,7 +85,7 @@ class PasswordResetServiceTest extends AbstractServiceTest {
     @Test
     void resetPassword_tokenIsSingleUse() {
         User user = newUser();
-        passwordResetService.requestReset(user.getEmail(), "127.0.0.1");
+        passwordResetService.requestReset(user.getEmail(), unique());
         String token = email.lastToken;
         passwordResetService.resetPassword(token, NEW_PASSWORD);
 
@@ -101,10 +101,10 @@ class PasswordResetServiceTest extends AbstractServiceTest {
     void requestReset_rateLimited_stopsIssuing() {
         User user = newUser();
         for (int i = 0; i < 5; i++) {
-            passwordResetService.requestReset(user.getEmail(), "127.0.0.1");
+            passwordResetService.requestReset(user.getEmail(), unique());
         }
         int callsBeforeLimit = email.calls;
-        passwordResetService.requestReset(user.getEmail(), "127.0.0.1");
+        passwordResetService.requestReset(user.getEmail(), unique());
 
         assertEquals(callsBeforeLimit, email.calls, "requests beyond the limit must not send more emails");
         assertTrue(passwordResetTokenMapper.countRecentByUser(user.getId(), 900) <= 5);
