@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.webauthn;
 
+import java.time.Instant;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
@@ -71,6 +72,7 @@ public class MyBatisUserCredentialRepository implements UserCredentialRepository
         row.setAttestationObject(record.getAttestationObject() == null ? null : record.getAttestationObject().getBytes());
         row.setAttestationClientDataJson(record.getAttestationClientDataJSON() == null ? null : record.getAttestationClientDataJSON().getBytes());
         row.setLabel(record.getLabel());
+        row.setCreatedAt(record.getCreated() != null ? record.getCreated() : Instant.now());
         row.setLastUsedAt(record.getLastUsed());
         return row;
     }
