@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { headers } from "next/headers";
 import path from "path";
 import fs from "fs/promises";
-import { getCurrentUserFromCookie } from "@/app/lib/api";
+import { backendResolves, getCurrentUserFromCookie, workspaceCanAccessEntity } from "@/app/lib/api";
 import { rejectRenderableUpload, resolveContained, safeFileName } from "@/app/lib/uploads";
 
 const PUBLIC_PREFIX = "/attachments";
@@ -38,13 +38,17 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: "file is required" }, { status: 400 });
     }
 
+    const entityType = safeEntityType(entityTypeRaw);
+    if (!(await workspaceCanAccessEntity(cookie, entityType, Number(entityIdRaw)))) {
+        return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+
     const upload = file as File;
     const rejection = rejectRenderableUpload(upload);
     if (rejection) {
         return NextResponse.json({ error: rejection.error }, { status: rejection.status });
     }
 
-    const entityType = safeEntityType(entityTypeRaw);
     const fileName = `${entityType}-${entityIdRaw}-${Date.now()}-${safeFileName(upload.name)}`;
     const targetDir = path.join(uploadsBaseDir(), entityType);
     const filePath = resolveContained(targetDir, fileName);
@@ -81,6 +85,10 @@ export async function DELETE(request: NextRequest) {
     const resolved = resolveContained(baseDir, relative);
     if (!resolved) {
         return NextResponse.json({ error: "Invalid attachment url" }, { status: 400 });
+    }
+
+    if (!(await backendResolves(cookie, `/api/attachments/by-url?url=${encodeURIComponent(url)}`))) {
+        return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
     try {

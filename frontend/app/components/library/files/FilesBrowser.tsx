@@ -254,8 +254,8 @@ export default function FilesBrowser() {
         if (!deleting) return;
         setBusy(true);
         try {
-            await deleteAttachment(deleting.id);
             await deleteUploadedFile(deleting.url);
+            await deleteAttachment(deleting.id);
             toastSuccess(t('toastDeleted'));
             setDeleting(null);
             reload();
@@ -287,7 +287,7 @@ export default function FilesBrowser() {
         setBulkBusy(true);
         try {
             await Promise.all(
-                selectedAttachments.map((a) => deleteAttachment(a.id).then(() => deleteUploadedFile(a.url))),
+                selectedAttachments.map((a) => deleteUploadedFile(a.url).then(() => deleteAttachment(a.id))),
             );
             toastSuccess(t('toastDeletedCount', { count: selectedAttachments.length }));
             setBulkDeleting(false);
