@@ -259,6 +259,7 @@ export default async function DealPage({ params }: { params: { id: number } }) {
                             expectedCloseDate={deal.expectedCloseDate}
                             closedAt={deal.closedAt}
                             closedReason={deal.closedReason}
+                            references={deal.references}
                         />
                     </section>
                 </Rise>

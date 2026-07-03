@@ -40,6 +40,8 @@
     "activityMentionBody": "{actor} mentioned you in an activity.",
     "introductionMentionTitle": "New mention",
     "introductionMentionBody": "{actor} mentioned you in an introduction.",
+    "dealMentionTitle": "New mention",
+    "dealMentionBody": "{actor} mentioned you in a deal.",
     "taskDueTitle": "Task due soon",
     "taskDueBody": "{task} is due {date}.",
     "taskOverdueTitle": "Task overdue",

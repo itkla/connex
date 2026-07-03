@@ -6,7 +6,7 @@ import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
 import { BanknotesIcon } from '@heroicons/react/24/outline';
 
 import { Input } from '@/components/ui/input';
-import { Textarea } from '@/components/ui/textarea';
+import MentionEditor from '@/app/components/activity/notes/MentionEditor';
 import { Combobox, ComboboxItem, ComboboxList, ComboboxContent, ComboboxEmpty, ComboboxInput } from '@/components/ui/combobox';
 import { type Company, type Deal, type Pipeline, type Stage } from '@/app/lib/types';
 import { type SelectionId } from '@/app/components/records/types';
@@ -300,12 +300,11 @@ export default function QuickEditDealSheet({
                                             />
                                         </QuickEditField>
                                         <QuickEditField label={t('closedReason')} htmlFor={`deal-closed-reason-${d.id}`}>
-                                            <Textarea
+                                            <MentionEditor
                                                 id={`deal-closed-reason-${d.id}`}
                                                 value={draft.closedReason ?? ''}
-                                                onChange={(e) => updateDraft(d.id, { closedReason: e.target.value })}
-                                                rows={3}
-                                                maxLength={255}
+                                                onChange={(value) => updateDraft(d.id, { closedReason: value })}
+                                                className="min-h-[6rem] rounded-lg bg-muted px-3 py-2 text-sm ring-1 ring-border focus:ring-2 focus:ring-brand"
                                             />
                                         </QuickEditField>
                                     </div>

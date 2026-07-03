@@ -118,6 +118,12 @@ export function notificationContent(notification: Notification, t: Translator, l
             body: t("introductionMentionBody", { actor: notification.actorLabel ?? "" }),
         };
     }
+    if (notification.type === "deal.mention") {
+        return {
+            title: t("dealMentionTitle"),
+            body: t("dealMentionBody", { actor: notification.actorLabel ?? "" }),
+        };
+    }
     return { title: notification.title, body: notification.body ?? "" };
 }
 
@@ -130,6 +136,7 @@ export function notificationIcon(notification: Notification) {
     if (notification.type === "task.mention") return AtSymbolIcon;
     if (notification.type === "activity.mention") return AtSymbolIcon;
     if (notification.type === "introduction.mention") return AtSymbolIcon;
+    if (notification.type === "deal.mention") return AtSymbolIcon;
     if (notification.type.startsWith("task.")) return CheckCircleIcon;
     if (notification.type.startsWith("deal.")) return BriefcaseIcon;
     if (notification.type === "relationship.intro_opportunity") return ArrowsRightLeftIcon;

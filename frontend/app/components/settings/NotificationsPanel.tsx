@@ -29,6 +29,7 @@ const TYPES = [
     { type: "task.mention", icon: AtSymbolIcon, titleKey: "taskMentionTitle", descriptionKey: "taskMentionDescription" },
     { type: "activity.mention", icon: AtSymbolIcon, titleKey: "activityMentionTitle", descriptionKey: "activityMentionDescription" },
     { type: "introduction.mention", icon: AtSymbolIcon, titleKey: "introductionMentionTitle", descriptionKey: "introductionMentionDescription" },
+    { type: "deal.mention", icon: AtSymbolIcon, titleKey: "dealMentionTitle", descriptionKey: "dealMentionDescription" },
 ] as const;
 
 type Channels = { inApp: boolean; email: boolean };

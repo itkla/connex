@@ -1,6 +1,7 @@
 package ooo.klae.connex.backend.dto;
 
 import java.util.Arrays;
+import java.util.List;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
 
@@ -65,7 +66,7 @@ public class DealDto {
     @Size(max = 32)
     private String closedAt;
 
-    @Size(max = 255)
+    @Size(max = 1000)
     private String closedReason;
 
     // Explicit outcome: TRUE=won, FALSE=lost, NULL=open. Client-settable; the server
@@ -80,6 +81,9 @@ public class DealDto {
 
     private String createdAt;
     private String updatedAt;
+
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
+    private List<ReferenceDto> references;
 
     public static DealDto from(Deal d) {
         if (d == null) return null;
@@ -110,6 +114,9 @@ public class DealDto {
         dto.tagIds = d.getTags() == null ? null : Arrays.stream(d.getTags()).mapToInt(Tag::getId).toArray();
         dto.createdAt = d.getCreatedAt();
         dto.updatedAt = d.getUpdatedAt();
+        dto.references = d.getReferences() == null
+            ? List.of()
+            : d.getReferences().stream().map(ReferenceDto::from).toList();
         return dto;
     }
 

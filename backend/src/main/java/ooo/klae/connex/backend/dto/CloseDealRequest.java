@@ -17,7 +17,7 @@ public class CloseDealRequest {
     // Outcome to record: TRUE = won, FALSE = lost. Null defaults to lost server-side.
     private Boolean won;
 
-    @Size(max = 255)
+    @Size(max = 1000)
     private String reason;
 
     private Double actualValue;

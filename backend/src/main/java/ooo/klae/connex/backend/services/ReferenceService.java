@@ -47,6 +47,7 @@ public class ReferenceService {
     public static final String SOURCE_TASK = "task";
     public static final String SOURCE_ACTIVITY = "activity";
     public static final String SOURCE_INTRODUCTION = "introduction";
+    public static final String SOURCE_DEAL = "deal";
 
     static final String TYPE_USER = "user";
     static final String TYPE_PERSON = "person";

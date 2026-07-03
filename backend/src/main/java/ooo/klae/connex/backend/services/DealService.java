@@ -12,12 +12,15 @@ import java.util.Set;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import tools.jackson.databind.ObjectMapper;
+
 import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.beans.Activity;
 import ooo.klae.connex.backend.beans.Company;
 import ooo.klae.connex.backend.beans.Deal;
 import ooo.klae.connex.backend.beans.DealPerson;
 import ooo.klae.connex.backend.beans.Note;
+import ooo.klae.connex.backend.beans.Notification;
 import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.beans.Pipeline;
 import ooo.klae.connex.backend.beans.Stage;
@@ -40,6 +43,7 @@ import ooo.klae.connex.backend.mappers.TagMapper;
 import ooo.klae.connex.backend.mappers.TaskMapper;
 import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.notifications.NotificationChangePublisher;
+import ooo.klae.connex.backend.notifications.NotificationDelivery;
 
 /**
  * Business logic for logging and retrieving {@code Deal} records.
@@ -66,8 +70,17 @@ public class DealService {
     private final ReferenceService referenceService;
     private final CompanyMapper companyMapper;
     private final UserMapper userMapper;
+    private final NotificationDelivery notificationDelivery;
+    private final NotificationPreferenceService notificationPreferenceService;
+    private final ObjectMapper objectMapper;
 
     private static final DateTimeFormatter MYSQL_DATETIME = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
+
+    private static final String MENTION_TYPE = "deal.mention";
+    private static final String MENTION_CATEGORY = "deal";
+    private static final String MENTION_SEVERITY = "info";
+    private static final String IN_APP = "in_app";
+    private static final int SNIPPET_LENGTH = 140;
 
     private static final Set<String> AUDIT_FIELDS =
         Set.of("name", "value", "actualValue", "currency", "pipelineId", "stageId",
@@ -97,6 +110,84 @@ public class DealService {
             deal.setClosedReason(null);
         } else if (deal.getClosedAt() == null || deal.getClosedAt().isBlank()) {
             deal.setClosedAt(LocalDateTime.now(ZoneOffset.UTC).format(MYSQL_DATETIME));
+        }
+    }
+
+    /**
+     * Re-derives the deal's {@code closedReason} @/# references and notifies newly-mentioned members.
+     * Passing a null/blank reason (e.g. a reopened deal, whose reason was just cleared) purges the set.
+     */
+    private void syncClosedReasonMentions(int workspaceId, Deal deal) {
+        User actor = currentActorOrNull();
+        List<Integer> mentioned = referenceService.syncReferences(
+            workspaceId, ReferenceService.SOURCE_DEAL, deal.getId(), deal.getClosedReason());
+        if (actor != null) {
+            notifyMentions(workspaceId, deal, mentioned, actor);
+        }
+    }
+
+    private Deal hydrateReferences(int workspaceId, Deal deal) {
+        deal.setReferences(referenceService.referencesFor(workspaceId, ReferenceService.SOURCE_DEAL, deal.getId()));
+        return deal;
+    }
+
+    private User currentActorOrNull() {
+        try {
+            return authService.getCurrentUser();
+        } catch (RuntimeException ignored) {
+            return null;
+        }
+    }
+
+    private void notifyMentions(int workspaceId, Deal deal, List<Integer> recipientIds, User actor) {
+        if (recipientIds.isEmpty()) {
+            return;
+        }
+        String snippet = snippet(deal.getClosedReason());
+        String triggeredAt = LocalDateTime.now(ZoneOffset.UTC).format(MYSQL_DATETIME);
+        String actionUrl = "/records/deals/" + deal.getId();
+        for (int recipientId : recipientIds) {
+            if (recipientId == actor.getId()) {
+                continue;
+            }
+            if (!notificationPreferenceService.isEnabled(recipientId, MENTION_TYPE, IN_APP)) {
+                continue;
+            }
+            try {
+                Notification notification = new Notification();
+                notification.setWorkspaceId(workspaceId);
+                notification.setRecipientId(recipientId);
+                notification.setType(MENTION_TYPE);
+                notification.setCategory(MENTION_CATEGORY);
+                notification.setSeverity(MENTION_SEVERITY);
+                notification.setTemplateVersion(1);
+                notification.setTitle("New mention");
+                notification.setBody(actor.getDisplayName() + " mentioned you in a deal");
+                notification.setActorId(actor.getId());
+                notification.setActorLabel(actor.getDisplayName());
+                notification.setSourceType("deal");
+                notification.setSourceId(deal.getId());
+                notification.setSourceLabel(snippet);
+                notification.setActionUrl(actionUrl);
+                notification.setDedupeKey(MENTION_TYPE + ":" + deal.getId() + ":" + recipientId);
+                notification.setTriggeredAt(triggeredAt);
+                notification.setData(json(Map.of("dealId", deal.getId())));
+                notificationDelivery.deliver(notification);
+            } catch (RuntimeException ignored) {
+            }
+        }
+    }
+
+    private static String snippet(String content) {
+        String plain = ReferenceService.toPlainText(content).strip();
+        return plain.length() > SNIPPET_LENGTH ? plain.substring(0, SNIPPET_LENGTH) : plain;
+    }
+
+    private String json(Object value) {
+        try {
+            return objectMapper.writeValueAsString(value);
+        } catch (Exception exception) {
+            throw new IllegalStateException("Could not serialize notification data", exception);
         }
     }
 
@@ -159,9 +250,10 @@ public class DealService {
      * @return
      */
     public Deal getDealById(int id) {
-        Deal deal = dealMapper.getDealById(workspaceService.getCurrentWorkspaceId(), id);
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        Deal deal = dealMapper.getDealById(workspaceId, id);
         if (deal == null) throw new ResourceNotFoundException("Deal not found with id: " + id);
-        return deal;
+        return hydrateReferences(workspaceId, deal);
     }
 
     /**
@@ -206,6 +298,7 @@ public class DealService {
      * @param deal
      * @return
      */
+    @Transactional
     @RequirePermission(Permission.DEAL_CREATE)
     public Deal create(Deal deal) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
@@ -221,7 +314,8 @@ public class DealService {
             auditService.diff(null, deal, AUDIT_FIELDS));
         notificationChanges.publish(workspaceId, "deal", deal.getId());
         ruleTriggers.publish(workspaceId, "deal", deal.getId(), "deal.created");
-        return deal;
+        syncClosedReasonMentions(workspaceId, deal);
+        return hydrateReferences(workspaceId, deal);
     }
 
     /**
@@ -230,6 +324,7 @@ public class DealService {
      * @param deal
      * @return
      */
+    @Transactional
     @RequirePermission(Permission.DEAL_UPDATE)
     public Deal update(int id, Deal deal) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
@@ -251,7 +346,8 @@ public class DealService {
             auditService.diff(before, deal, AUDIT_FIELDS));
         notificationChanges.publish(workspaceId, "deal", id);
         ruleTriggers.publish(workspaceId, "deal", id, stageChanged ? "deal.stage_changed" : "deal.updated");
-        return deal;
+        syncClosedReasonMentions(workspaceId, deal);
+        return hydrateReferences(workspaceId, deal);
     }
 
     /**
@@ -312,7 +408,8 @@ public class DealService {
             auditService.diff(before, deal, AUDIT_FIELDS));
         notificationChanges.publish(workspaceId, "deal", id);
         ruleTriggers.publish(workspaceId, "deal", id, Boolean.TRUE.equals(deal.getWon()) ? "deal.won" : "deal.lost");
-        return deal;
+        syncClosedReasonMentions(workspaceId, deal);
+        return hydrateReferences(workspaceId, deal);
     }
 
     /**
@@ -347,7 +444,8 @@ public class DealService {
             "Reopened deal " + deal.getName(),
             auditService.diff(before, deal, AUDIT_FIELDS));
         notificationChanges.publish(workspaceId, "deal", id);
-        return deal;
+        syncClosedReasonMentions(workspaceId, deal);
+        return hydrateReferences(workspaceId, deal);
     }
 
     /**
@@ -406,6 +504,7 @@ public class DealService {
         if (before == null) throw new ResourceNotFoundException("Deal not found with id: " + id);
         customFieldValueService.deleteByEntity("deal", id);
         dealMapper.delete(workspaceId, id);
+        referenceService.deleteReferences(workspaceId, ReferenceService.SOURCE_DEAL, id);
         auditService.record("deal.delete", "deal", id, before.getName(),
             "Deleted deal " + before.getName(),
             auditService.diff(before, null, AUDIT_FIELDS));
