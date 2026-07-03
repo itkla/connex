@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="ooo.klae.connex.backend.mappers.WebauthnUserEntityMapper">
+
+  <sql id="cols">id, user_id, name, display_name, created_at</sql>
+
+  <select id="findById" resultType="ooo.klae.connex.backend.webauthn.WebauthnUserEntityRow">
+    SELECT <include refid="cols"/> FROM webauthn_user_entity WHERE id = #{id}
+  </select>
+
+  <select id="findByUserId" resultType="ooo.klae.connex.backend.webauthn.WebauthnUserEntityRow">
+    SELECT <include refid="cols"/> FROM webauthn_user_entity WHERE user_id = #{userId}
+  </select>
+
+  <select id="findByUsername" resultType="ooo.klae.connex.backend.webauthn.WebauthnUserEntityRow">
+    SELECT e.id, e.user_id, e.name, e.display_name, e.created_at
+    FROM webauthn_user_entity e
+    JOIN app_user u ON u.id = e.user_id
+    WHERE u.username = #{username}
+  </select>
+
+  <select id="findUserIdByHandle" resultType="java.lang.Integer">
+    SELECT user_id FROM webauthn_user_entity WHERE id = #{id}
+  </select>
+
+  <insert id="insert">
+    INSERT INTO webauthn_user_entity (id, user_id, name, display_name)
+    VALUES (#{id}, #{userId}, #{name}, #{displayName})
+  </insert>
+
+  <update id="updateProfile">
+    UPDATE webauthn_user_entity SET name = #{name}, display_name = #{displayName} WHERE id = #{id}
+  </update>
+
+  <delete id="delete">DELETE FROM webauthn_user_entity WHERE id = #{id}</delete>
+</mapper>

@@ -9,8 +9,13 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.core.userdetails.UserDetails;
+import org.springframework.security.core.userdetails.UsernameNotFoundException;
+import org.springframework.security.crypto.password.PasswordEncoder;
 
 import ooo.klae.connex.backend.beans.Activity;
 import ooo.klae.connex.backend.beans.Note;
@@ -22,6 +27,8 @@ import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 class UserServiceTest extends AbstractServiceTest {
 
     @Autowired UserService userService;
+    @Autowired AuthenticationManager authenticationManager;
+    @Autowired PasswordEncoder passwordEncoder;
 
     @Test
     void getActivitiesByUserId_returnsOnlyActivitiesCreatedByUser() {
@@ -124,6 +131,65 @@ class UserServiceTest extends AbstractServiceTest {
         assertThrows(ForbiddenException.class,
             () -> userService.update(member.getId(), profileUpdate(member, "Renamed By Admin")));
         assertEquals(member.getDisplayName(), userMapper.getUserById(member.getId()).getDisplayName());
+    }
+
+    @Test
+    void loadUserByUsername_resolvesByUsername() {
+        User user = newUser();
+        UserDetails loaded = userService.loadUserByUsername(user.getUsername());
+        assertEquals(user.getId(), ((User) loaded).getId());
+    }
+
+    @Test
+    void loadUserByUsername_resolvesByEmail() {
+        User user = newUser();
+        UserDetails loaded = userService.loadUserByUsername(user.getEmail());
+        assertEquals(user.getId(), ((User) loaded).getId());
+    }
+
+    @Test
+    void loadUserByUsername_throwsForUnknownIdentifier() {
+        assertThrows(UsernameNotFoundException.class,
+            () -> userService.loadUserByUsername("no_such_" + unique()));
+        assertThrows(UsernameNotFoundException.class,
+            () -> userService.loadUserByUsername(unique() + "@nowhere.example.com"));
+    }
+
+    @Test
+    void loadUserByUsername_keepsUsernameAndEmailNamespacesDisjoint() {
+        String token = "collider_" + unique();
+        User byUsername = insertRawUser(token, unique() + "@example.com");
+        User byEmail = insertRawUser("user_" + unique(), token + "@example.com");
+
+        assertEquals(byUsername.getId(), ((User) userService.loadUserByUsername(token)).getId());
+        assertEquals(byEmail.getId(),
+            ((User) userService.loadUserByUsername(token + "@example.com")).getId());
+    }
+
+    @Test
+    void authenticationManager_authenticatesByEitherUsernameOrEmail() {
+        String raw = "Sup3rSecret!";
+        User user = insertRawUser("user_" + unique(), unique() + "@example.com");
+        userMapper.updatePasswordHash(user.getId(), passwordEncoder.encode(raw));
+
+        Authentication byUsername = authenticationManager.authenticate(
+            new UsernamePasswordAuthenticationToken(user.getUsername(), raw));
+        Authentication byEmail = authenticationManager.authenticate(
+            new UsernamePasswordAuthenticationToken(user.getEmail(), raw));
+
+        assertEquals(user.getId(), ((User) byUsername.getPrincipal()).getId());
+        assertEquals(user.getId(), ((User) byEmail.getPrincipal()).getId());
+    }
+
+    private User insertRawUser(String username, String email) {
+        User user = new User();
+        user.setUsername(username);
+        user.setDisplayName("Raw " + username);
+        user.setEmail(email);
+        user.setPasswordHash("hash");
+        user.setTimezone("UTC");
+        userMapper.insert(user);
+        return user;
     }
 
     private void authenticateAs(User user) {

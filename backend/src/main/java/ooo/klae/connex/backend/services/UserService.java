@@ -43,10 +43,21 @@ public class UserService implements UserDetailsService {
         Set.of("username", "displayName", "email", "department", "title",
                "employeeId", "phoneNumber", "profilePictureUrl", "timezone");
 
+    /**
+     * Resolves the authenticating principal by login identifier, which may be either a
+     * username or an email address. Because a username can never contain an {@code @}
+     * (registration validation forbids it), the presence of {@code @} unambiguously selects
+     * an email lookup, keeping the username and email namespaces disjoint and collision-free.
+     * @param identifier the submitted username or email address
+     * @return the matching user as Spring Security {@code UserDetails}
+     * @throws UsernameNotFoundException if no account matches the identifier
+     */
     @Override
-    public UserDetails loadUserByUsername(String username) throws UsernameNotFoundException {
-        User user = userMapper.getUserByUsername(username);
-        if (user == null) throw new UsernameNotFoundException("User not found: " + username);
+    public UserDetails loadUserByUsername(String identifier) throws UsernameNotFoundException {
+        User user = identifier != null && identifier.indexOf('@') >= 0
+            ? userMapper.getUserByEmail(identifier)
+            : userMapper.getUserByUsername(identifier);
+        if (user == null) throw new UsernameNotFoundException("User not found: " + identifier);
         return user;
     }
 
