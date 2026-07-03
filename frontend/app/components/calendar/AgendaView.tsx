@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from 'react';
 import { useTranslations } from 'next-intl';
-import { ChevronDownIcon } from '@heroicons/react/24/outline';
+import { ChevronDownIcon, CalendarDaysIcon } from '@heroicons/react/24/outline';
 
 import { cn } from '@/lib/utils';
 import { dayKeyOf, groupByDay, type CalendarEvent } from '@/app/lib/calendar';
@@ -87,8 +87,12 @@ export default function AgendaView({
 
     if (upcoming.length === 0 && past.length === 0) {
         return (
-            <div className="rounded-2xl border border-dashed border-border px-6 py-16 text-center text-sm text-muted-foreground">
-                {t('emptyPeriod')}
+            <div className="mx-auto flex max-w-sm flex-col items-center gap-2 rounded-2xl border border-dashed border-border px-6 py-16 text-center">
+                <div className="grid size-11 place-items-center rounded-full bg-muted text-muted-foreground">
+                    <CalendarDaysIcon className="size-5" aria-hidden />
+                </div>
+                <p className="text-sm font-medium text-foreground">{t('emptyPeriod')}</p>
+                <p className="text-xs text-muted-foreground">{t('emptyPeriodHint')}</p>
             </div>
         );
     }

@@ -244,6 +244,7 @@ function MonthCell({
             className={cn(
                 'relative flex min-h-14 flex-col gap-1 p-1 transition-colors md:min-h-28 md:p-1.5',
                 inMonth ? 'bg-card' : 'bg-muted/50',
+                isToday && !isSelected && 'bg-brand/[0.06]',
                 isDropTarget && 'bg-brand/5 ring-2 ring-inset ring-brand/40',
             )}
         >
