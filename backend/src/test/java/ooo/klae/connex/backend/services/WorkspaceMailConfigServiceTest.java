@@ -191,8 +191,17 @@ class WorkspaceMailConfigServiceTest {
                 "no-reply@test", "Connex", true, false, false, 10000, 10000, 10000);
         when(mailConfigResolver.resolveWorkspaceOnly(3)).thenReturn(internal);
 
-        assertThrows(BadRequestException.class, () -> service().sendTest(3, 9));
+        assertFalse(service().sendTest(3, 9).success());
         verify(mailService, never()).sendNow(any(), any());
+    }
+
+    @Test
+    void saveConfig_carrierGradeNatHost_rejectedWhenInternalHostsBlocked() {
+        mailProperties.setAllowInternalHosts(false);
+        MailConfigRequest req = enabledRequest();
+        req.setHost("100.64.1.1");
+        assertThrows(BadRequestException.class, () -> service().saveConfig(3, 9, req));
+        verify(mailConfigMapper, never()).upsert(any());
     }
 
     @Test

@@ -134,17 +134,19 @@ public class WorkspaceMailConfigService {
         if (actor == null || isBlank(actor.getEmail())) {
             return MailTestResult.failure("Your account has no email address to send a test to");
         }
-        ResolvedMailConfig config = mailConfigResolver.resolveWorkspaceOnly(workspaceId);
-        if (config == null || !config.usable()) {
-            return MailTestResult.failure("Save an enabled SMTP configuration for this workspace first");
-        }
-        validateTransport(config.host(), config.port());
         try {
+            ResolvedMailConfig config = mailConfigResolver.resolveWorkspaceOnly(workspaceId);
+            if (config == null || !config.usable()) {
+                return MailTestResult.failure("Save an enabled SMTP configuration for this workspace first");
+            }
+            validateTransport(config.host(), config.port());
             String body = templateRenderer.render("test", "en", Map.of("recipient", actor.getEmail()));
             mailService.sendNow(config, MailMessage.html(actor.getEmail(), "Connex email test", body));
             auditService.record("workspace.mail_config.test", "workspace", workspaceId, actor.getEmail(),
                     "Sent a test email", null);
             return MailTestResult.ok();
+        } catch (BadRequestException e) {
+            return MailTestResult.failure(e.getMessage());
         } catch (Exception e) {
             log.warn("Test email for workspace {} failed: {}", workspaceId, e.getMessage());
             return MailTestResult.failure("Could not send the test email. Check the host, port, and credentials.");
@@ -173,13 +175,34 @@ public class WorkspaceMailConfigService {
             throw new BadRequestException("The SMTP host could not be resolved");
         }
         for (InetAddress address : addresses) {
-            if (address.isLoopbackAddress() || address.isAnyLocalAddress()
-                    || address.isSiteLocalAddress() || address.isLinkLocalAddress()
-                    || address.isMulticastAddress()) {
+            if (isInternalAddress(address)) {
                 throw new BadRequestException(
                         "The SMTP host must be a public server; private and loopback addresses are not allowed");
             }
         }
+    }
+
+    /**
+     * Whether an address is not safely routable to a public SMTP server: the JDK's
+     * loopback/any/site-local/link-local/multicast predicates plus the ranges those predicates
+     * miss — IPv6 unique-local {@code fc00::/7} and IPv4 carrier-grade NAT {@code 100.64.0.0/10}.
+     */
+    private static boolean isInternalAddress(InetAddress address) {
+        if (address.isLoopbackAddress() || address.isAnyLocalAddress()
+                || address.isSiteLocalAddress() || address.isLinkLocalAddress()
+                || address.isMulticastAddress()) {
+            return true;
+        }
+        byte[] bytes = address.getAddress();
+        if (bytes.length == 16) {
+            return (bytes[0] & 0xFE) == 0xFC;
+        }
+        if (bytes.length == 4) {
+            int first = bytes[0] & 0xFF;
+            int second = bytes[1] & 0xFF;
+            return first == 100 && second >= 64 && second <= 127;
+        }
+        return false;
     }
 
     private static boolean isBlank(String value) {
