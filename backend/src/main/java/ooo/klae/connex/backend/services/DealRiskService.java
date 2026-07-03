@@ -34,6 +34,7 @@ import ooo.klae.connex.backend.mappers.ActivityMapper;
 import ooo.klae.connex.backend.mappers.DealMapper;
 import ooo.klae.connex.backend.mappers.NoteMapper;
 import ooo.klae.connex.backend.mappers.TaskMapper;
+import ooo.klae.connex.backend.util.DateTimes;
 
 /**
  * Assesses deal risk on read, layering a small set of deterministic signals over the deal timeline,
@@ -386,29 +387,8 @@ public class DealRiskService {
         }
     }
 
-    /** Parses a UTC {@code yyyy-MM-dd HH:mm:ss} (or ISO-ish) datetime to epoch millis, tolerantly. */
     private static Long epoch(String value) {
-        if (value == null || value.isBlank()) {
-            return null;
-        }
-        String normalized = value.trim().replace('T', ' ');
-        int dot = normalized.indexOf('.');
-        if (dot > 0) {
-            normalized = normalized.substring(0, dot);
-        }
-        if (normalized.endsWith("Z")) {
-            normalized = normalized.substring(0, normalized.length() - 1).trim();
-        }
-        if (normalized.length() == 10) {
-            normalized = normalized + " 00:00:00";
-        } else if (normalized.length() == 16) {
-            normalized = normalized + ":00";
-        }
-        try {
-            return LocalDateTime.parse(normalized, MYSQL_DATETIME).toInstant(ZoneOffset.UTC).toEpochMilli();
-        } catch (DateTimeParseException exception) {
-            return null;
-        }
+        return DateTimes.epochMillis(value);
     }
 
     private static String utc(Instant instant) {

@@ -5,7 +5,6 @@ import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
-import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -30,6 +29,7 @@ import ooo.klae.connex.backend.mappers.DealMapper;
 import ooo.klae.connex.backend.mappers.NoteMapper;
 import ooo.klae.connex.backend.mappers.PersonMapper;
 import ooo.klae.connex.backend.mappers.TaskMapper;
+import ooo.klae.connex.backend.util.DateTimes;
 
 /**
  * Computes relationship "temperature" (warmth) for contacts and companies on read.
@@ -437,17 +437,7 @@ public class ScoringService {
         return (d == null || d.getId() == 0) ? null : d.getId();
     }
 
-    /** Parses a UTC {@code yyyy-MM-dd HH:mm:ss} (or ISO-ish) datetime to epoch millis, tolerantly. */
     private static Long epoch(String s) {
-        if (s == null || s.isBlank()) return null;
-        String v = s.trim().replace('T', ' ');
-        int dot = v.indexOf('.');
-        if (dot > 0) v = v.substring(0, dot);
-        if (v.endsWith("Z")) v = v.substring(0, v.length() - 1).trim();
-        try {
-            return LocalDateTime.parse(v, MYSQL_DATETIME).toInstant(ZoneOffset.UTC).toEpochMilli();
-        } catch (DateTimeParseException e) {
-            return null;
-        }
+        return DateTimes.epochMillis(s);
     }
 }
