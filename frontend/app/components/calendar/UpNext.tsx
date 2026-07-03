@@ -6,7 +6,7 @@ import { ChevronRightIcon } from '@heroicons/react/24/outline';
 
 import { cn } from '@/lib/utils';
 import Rise from '@/app/components/motion/Rise';
-import { dayKeyOf, type CalendarEvent } from '@/app/lib/calendar';
+import { addDays, dayKeyOf, type CalendarEvent } from '@/app/lib/calendar';
 import { KIND_CHIP_CLASS, KIND_ICON } from './constants';
 
 /**
@@ -45,9 +45,14 @@ export default function UpNext({
     const next = useMemo(() => {
         if (now == null) return null;
         let best: CalendarEvent | null = null;
+        let bestEff = Infinity;
         for (const e of events) {
-            if (e.startMs < now) continue;
-            if (!best || e.startMs < best.startMs) best = e;
+            const eff = e.allDay ? e.startMs + 86_399_999 : e.startMs;
+            if (eff < now) continue;
+            if (eff < bestEff) {
+                best = e;
+                bestEff = eff;
+            }
         }
         return best;
     }, [events, now]);
@@ -62,8 +67,9 @@ export default function UpNext({
             return rtf.format(Math.round(diffMin / 60), 'hour');
         }
         const key = dayKeyOf(new Date(next.startMs));
-        const todayKey = dayKeyOf(new Date(now));
-        const tomorrowKey = dayKeyOf(new Date(now + 86_400_000));
+        const nowDate = new Date(now);
+        const todayKey = dayKeyOf(nowDate);
+        const tomorrowKey = dayKeyOf(addDays(nowDate, 1));
         const day = key === todayKey ? t('today') : key === tomorrowKey ? t('tomorrow') : null;
         if (next.allDay) return day ?? dayFmt.format(next.startMs);
         const time = new Intl.DateTimeFormat(locale, { hour: 'numeric', minute: '2-digit' }).format(next.startMs);
@@ -88,7 +94,10 @@ export default function UpNext({
                 </span>
                 <span className="block truncate text-sm font-semibold text-foreground">{next.title}</span>
             </span>
-            <ChevronRightIcon className="size-4 shrink-0 text-muted-foreground/60 transition-colors group-hover:text-muted-foreground" />
+            <ChevronRightIcon
+                className="size-4 shrink-0 text-muted-foreground/60 transition-colors group-hover:text-muted-foreground"
+                aria-hidden
+            />
         </button>
         </Rise>
     );
