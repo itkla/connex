@@ -147,10 +147,28 @@ public class AuthService {
         }
         loginRateLimiter.recordSuccess(request.getUsername());
         User user = (User) authentication.getPrincipal();
+        User refreshedUser = establishAuthenticatedSession(user, httpRequest, httpResponse);
+        auditService.record("auth.login", "user", refreshedUser.getId(), refreshedUser.getDisplayName(),
+                refreshedUser.getDisplayName() + " logged in", null);
+        return refreshedUser;
+    }
+
+    /**
+     * Establishes an authenticated servlet session for an already-verified principal.
+     * Rotates any existing session id (fixation defense), persists a fresh security context,
+     * registers the session so a password reset can later enumerate and expire it, records the
+     * login timestamp, and pins the account's default workspace. Every authentication method
+     * (password login today, passkey/SSO login next) must route through this single ceremony so
+     * they cannot diverge from the tenant-scoping and session-kill invariants it enforces.
+     * @param user the verified principal
+     * @param httpRequest the current request
+     * @param httpResponse the current response
+     * @return the principal reloaded after the login timestamp update
+     */
+    public User establishAuthenticatedSession(User user, HttpServletRequest httpRequest, HttpServletResponse httpResponse) {
         userMapper.updateLastLoginAt(user.getId());
         User refreshedUser = userMapper.getUserById(user.getId());
 
-        // Rotate any pre-existing session id on login to defend against session fixation.
         if (httpRequest.getSession(false) != null) {
             httpRequest.changeSessionId();
         }
@@ -158,27 +176,22 @@ public class AuthService {
         SecurityContext context = SecurityContextHolder.createEmptyContext();
         context.setAuthentication(new UsernamePasswordAuthenticationToken(
             refreshedUser,
-            authentication.getCredentials(),
-            authentication.getAuthorities()
+            null,
+            refreshedUser.getAuthorities()
         ));
         SecurityContextHolder.setContext(context);
         securityContextRepository.saveContext(context, httpRequest, httpResponse);
 
-        // Register the session so a password reset can later enumerate and expire it.
         String sessionId = httpRequest.getSession().getId();
         if (sessionRegistry.getSessionInformation(sessionId) == null) {
             sessionRegistry.registerNewSession(sessionId, refreshedUser);
         }
 
-        // Pin the active workspace for the new session so SSR and the first requests are scoped.
         Integer activeWorkspaceId = workspaceService.defaultWorkspaceIdFor(refreshedUser.getId());
         if (activeWorkspaceId != null) {
             workspaceService.rememberActive(refreshedUser.getId(), activeWorkspaceId);
             WorkspaceCookie.set(httpResponse, activeWorkspaceId);
         }
-
-        auditService.record("auth.login", "user", refreshedUser.getId(), refreshedUser.getDisplayName(),
-                refreshedUser.getDisplayName() + " logged in", null);
         return refreshedUser;
     }
 
