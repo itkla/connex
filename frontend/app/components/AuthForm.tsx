@@ -9,10 +9,19 @@ import {
     ArrowRightIcon,
     EyeIcon,
     EyeSlashIcon,
+    FingerPrintIcon,
 } from "@heroicons/react/24/outline";
 import { LoaderCircle } from "lucide-react";
+import { startAuthentication, WebAuthnError } from "@simplewebauthn/browser";
 
-import { ApiError, login, register as registerUser } from "@/app/lib/api";
+import {
+    ApiError,
+    beginPasskeyAuthentication,
+    finishPasskeyAuthentication,
+    login,
+    register as registerUser,
+} from "@/app/lib/api";
+import { usePasskeySupport } from "@/app/hooks/usePasskeySupport";
 import AuthBrandPanel from "@/app/components/auth/AuthBrandPanel";
 
 type AuthMode = "login" | "register";
@@ -78,6 +87,47 @@ export function AuthForm({ mode, redirectUrl }: { mode: AuthMode; redirectUrl: s
     const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
     const [submitting, setSubmitting] = useState(false);
     const [showPassword, setShowPassword] = useState(false);
+    const [passkeySubmitting, setPasskeySubmitting] = useState(false);
+    const passkeySupported = usePasskeySupport();
+
+    function routeAfterAuth() {
+        const hasWorkspace = /(?:^|;\s*)connex_workspace=/.test(document.cookie);
+        const safeRedirect = redirectUrl && /^\/(?![/\\])/.test(redirectUrl) ? redirectUrl : null;
+        if (safeRedirect) {
+            router.push(safeRedirect);
+        } else if (!hasWorkspace) {
+            router.replace("/onboarding");
+        } else {
+            router.replace("/dashboard");
+        }
+        router.refresh();
+    }
+
+    async function signInWithPasskey() {
+        setError(null);
+        setFieldErrors({});
+        setPasskeySubmitting(true);
+        try {
+            const optionsJSON = await beginPasskeyAuthentication();
+            const credential = await startAuthentication({ optionsJSON });
+            await finishPasskeyAuthentication(credential);
+            toastSuccess(tLogin("successMessage"));
+            routeAfterAuth();
+        } catch (err) {
+            const canceled =
+                (err instanceof WebAuthnError && err.cause instanceof Error && err.cause.name === "NotAllowedError") ||
+                (err instanceof Error && err.name === "NotAllowedError");
+            if (canceled) {
+                return;
+            }
+            const message =
+                err instanceof ApiError && err.status === 401 ? tLogin("passkeyFailed") : tForm("genericError");
+            setError(message);
+            toastError(message);
+        } finally {
+            setPasskeySubmitting(false);
+        }
+    }
 
     function setField(key: FieldKey, value: string) {
         setValues((prev) => ({ ...prev, [key]: value }));
@@ -132,17 +182,7 @@ export function AuthForm({ mode, redirectUrl }: { mode: AuthMode; redirectUrl: s
             }
 
             toastSuccess(tMode("successMessage"));
-            // The backend sets connex_workspace when the account has a workspace; otherwise onboard.
-            const hasWorkspace = /(?:^|;\s*)connex_workspace=/.test(document.cookie);
-            const safeRedirect = redirectUrl && /^\/(?![/\\])/.test(redirectUrl) ? redirectUrl : null;
-            if (safeRedirect) {
-                router.push(safeRedirect);
-            } else if (!hasWorkspace) {
-                router.replace("/onboarding");
-            } else {
-                router.replace("/dashboard");
-            }
-            router.refresh();
+            routeAfterAuth();
         } catch (err) {
             const nextFieldErrors = err instanceof ApiError ? pickFieldErrors(err.fieldErrors) : {};
             const hasFieldErrors = Object.keys(nextFieldErrors).length > 0;
@@ -312,6 +352,35 @@ export function AuthForm({ mode, redirectUrl }: { mode: AuthMode; redirectUrl: s
                                 )}
                             </button>
                         </form>
+
+                        {mode === "login" && passkeySupported && (
+                            <div
+                                className="connex-rise mt-5"
+                                style={{ animationDelay: `${180 + fields.length * 60}ms` }}
+                            >
+                                <div className="flex items-center gap-3" aria-hidden="true">
+                                    <span className="h-px flex-1 bg-border" />
+                                    <span className="text-xs font-medium text-muted-foreground">
+                                        {tLogin("orDivider")}
+                                    </span>
+                                    <span className="h-px flex-1 bg-border" />
+                                </div>
+                                <button
+                                    type="button"
+                                    onClick={signInWithPasskey}
+                                    disabled={passkeySubmitting}
+                                    aria-busy={passkeySubmitting}
+                                    className="mt-4 flex w-full items-center justify-center gap-2 rounded-full border border-input bg-background px-6 py-3.5 text-base font-semibold text-foreground transition-[transform,background-color,border-color] duration-150 ease-out hover:bg-input focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-70"
+                                >
+                                    {passkeySubmitting ? (
+                                        <LoaderCircle className="size-4 animate-spin" />
+                                    ) : (
+                                        <FingerPrintIcon className="size-5" />
+                                    )}
+                                    {passkeySubmitting ? tLogin("passkeySigningIn") : tLogin("passkeyButton")}
+                                </button>
+                            </div>
+                        )}
 
                         <p
                             className="connex-rise mt-7 text-center text-sm text-muted-foreground"

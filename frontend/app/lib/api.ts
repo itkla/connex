@@ -3,6 +3,13 @@ const API_BASE =
         ? process.env.API_URL ?? process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080"
         : "";
 
+import type {
+    AuthenticationResponseJSON,
+    PublicKeyCredentialCreationOptionsJSON,
+    PublicKeyCredentialRequestOptionsJSON,
+    RegistrationResponseJSON,
+} from '@simplewebauthn/browser';
+
 import * as Types from '@/app/lib/types';
 // Types
 
@@ -305,6 +312,40 @@ export function validateResetToken(token: string, init: RequestInit = {}) {
  */
 export function resetPassword(payload: Types.ResetPasswordPayload) {
     return postJson<Types.AuthResponse>("/api/auth/reset-password", payload);
+}
+
+export function getPasskeys(init: RequestInit = {}) {
+    return getJson<Types.Passkey[]>("/api/auth/webauthn/credentials", { cache: "no-store", ...init });
+}
+
+export function beginPasskeyRegistration() {
+    return postJson<PublicKeyCredentialCreationOptionsJSON>("/api/auth/webauthn/register/options");
+}
+
+export function finishPasskeyRegistration(label: string, credential: RegistrationResponseJSON) {
+    return postJson<{ credentialId: string }>(
+        `/api/auth/webauthn/register?label=${encodeURIComponent(label)}`,
+        credential,
+    );
+}
+
+export function beginPasskeyAuthentication() {
+    return postJson<PublicKeyCredentialRequestOptionsJSON>("/api/auth/webauthn/authenticate/options");
+}
+
+export function finishPasskeyAuthentication(credential: AuthenticationResponseJSON) {
+    return postJson<Types.AuthResponse>("/api/auth/webauthn/authenticate", credential);
+}
+
+export function renamePasskey(credentialId: string, label: string) {
+    return patchJson<Types.AuthResponse>(
+        `/api/auth/webauthn/credentials/${encodeURIComponent(credentialId)}`,
+        { label },
+    );
+}
+
+export function deletePasskey(credentialId: string) {
+    return deleteJson<void>(`/api/auth/webauthn/credentials/${encodeURIComponent(credentialId)}`);
 }
 
 /*

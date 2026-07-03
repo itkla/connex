@@ -17,6 +17,7 @@
     "@dnd-kit/sortable": "^10.0.0",
     "@dnd-kit/utilities": "^3.2.2",
     "@heroicons/react": "^2.2.0",
+    "@simplewebauthn/browser": "^13.3.0",
     "@stomp/stompjs": "^7.3.0",
     "@xyflow/react": "^12.11.0",
     "class-variance-authority": "^0.7.1",
