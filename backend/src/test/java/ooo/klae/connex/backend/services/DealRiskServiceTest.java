@@ -21,6 +21,8 @@ import ooo.klae.connex.backend.dto.DealRiskFactor;
 import ooo.klae.connex.backend.dto.RelationshipTemperatureDto;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.anySet;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.when;
 
 /**
@@ -42,6 +44,7 @@ class DealRiskServiceTest extends AbstractServiceTest {
     void setUpService() {
         scoring = Mockito.mock(ScoringService.class);
         when(scoring.scoreContacts(workspace.getId())).thenReturn(List.of());
+        when(scoring.scoreContacts(eq(workspace.getId()), anySet())).thenReturn(List.of());
         service = new DealRiskService(dealMapper, activityMapper, noteMapper, taskMapper, scoring, CLOCK);
     }
 
@@ -81,6 +84,7 @@ class DealRiskServiceTest extends AbstractServiceTest {
 
     private void warmthList(RelationshipTemperatureDto... temps) {
         when(scoring.scoreContacts(workspace.getId())).thenReturn(List.of(temps));
+        when(scoring.scoreContacts(eq(workspace.getId()), anySet())).thenReturn(List.of(temps));
     }
 
     private Workspace newWorkspace() {

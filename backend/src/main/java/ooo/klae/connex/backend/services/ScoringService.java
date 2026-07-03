@@ -99,6 +99,42 @@ public class ScoringService {
         return computeContactScores(workspaceId, t, t);
     }
 
+    /**
+     * Scores only the given contacts as of now, gathering each one's touches directly rather than
+     * scanning the whole workspace. Used by callers that need warmth for a handful of known people
+     * (e.g. a single deal's stakeholders) without paying the cost of scoring every contact.
+     * @param workspaceId the workspace
+     * @param personIds the contact ids to score
+     * @return warmth for the requested contacts (unknown/quiet ids yield a cold score)
+     */
+    public List<RelationshipTemperatureDto> scoreContacts(int workspaceId, Set<Integer> personIds) {
+        long reference = Instant.now(clock).toEpochMilli();
+        List<RelationshipTemperatureDto> out = new ArrayList<>(personIds.size());
+        for (Integer personId : personIds) {
+            if (personId != null) {
+                out.add(temperature(personId, touchesForPerson(workspaceId, personId), reference, Long.MAX_VALUE));
+            }
+        }
+        return out;
+    }
+
+    private List<Touch> touchesForPerson(int workspaceId, int personId) {
+        List<Touch> touches = new ArrayList<>();
+        for (Activity a : activityMapper.getActivitiesByPersonId(workspaceId, personId)) {
+            Long ts = epoch(a.getTimestamp());
+            if (ts != null) touches.add(new Touch(ts, activityWeight(a.getType())));
+        }
+        for (Note n : noteMapper.getNotesByPersonId(workspaceId, personId)) {
+            Long ts = epoch(n.getCreatedAt());
+            if (ts != null) touches.add(new Touch(ts, NOTE_WEIGHT));
+        }
+        for (Task t : taskMapper.getTasksByPersonId(workspaceId, personId)) {
+            Long ts = epoch(t.getCreatedAt());
+            if (ts != null) touches.add(new Touch(ts, TASK_WEIGHT));
+        }
+        return touches;
+    }
+
     private List<RelationshipTemperatureDto> computeContactScores(int workspaceId, long reference, long cutoff) {
         Map<Integer, List<Touch>> byPerson = collectContactTouches(workspaceId);
         List<Person> persons = personMapper.getAllPersons(workspaceId);

@@ -69,6 +69,11 @@ public interface DealMapper {
     );
     /** Every deal stakeholder in the workspace as {@code (dealId, personId, name, role)} rows; for deal-risk scoring. */
     List<DealStakeholder> getAllDealStakeholders(int workspaceId);
+    /** Stakeholders for a single deal; the single-deal risk path scopes to this rather than the whole workspace. */
+    List<DealStakeholder> getDealStakeholdersByDealId(
+        @Param("workspaceId") int workspaceId,
+        @Param("dealId") int dealId
+    );
     int addPerson(
         @Param("workspaceId") int workspaceId,
         @Param("dealId") int dealId,

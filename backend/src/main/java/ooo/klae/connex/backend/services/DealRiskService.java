@@ -11,6 +11,7 @@ import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -130,10 +131,43 @@ public class DealRiskService {
         if (deal == null || !isOpen(deal)) {
             return new DealRiskDto(dealId, NONE, 0, List.of(), assessedAt);
         }
-        Map<Integer, Long> lastTouch = dealLastTouch(workspaceId, List.of(deal), now.toEpochMilli());
-        Map<Integer, List<DealStakeholder>> stakeholders = stakeholdersByDeal(workspaceId);
-        Map<Integer, RelationshipTemperatureDto> warmth = warmthByPerson(workspaceId);
+        List<DealStakeholder> dealStakeholders = dealMapper.getDealStakeholdersByDealId(workspaceId, dealId);
+        Map<Integer, List<DealStakeholder>> stakeholders = Map.of(dealId, dealStakeholders);
+        Map<Integer, Long> lastTouch = dealTouch(workspaceId, deal, now.toEpochMilli());
+        Set<Integer> personIds = new HashSet<>();
+        for (DealStakeholder person : dealStakeholders) {
+            personIds.add(person.getPersonId());
+        }
+        Map<Integer, RelationshipTemperatureDto> warmth = warmthFor(workspaceId, personIds);
         return assess(deal, now, lastTouch, stakeholders, warmth, assessedAt);
+    }
+
+    /**
+     * Most recent touch for a single deal, in epoch millis, seeded with its creation time. Scopes
+     * the interaction scan to the deal rather than loading every activity/note/task in the workspace.
+     */
+    private Map<Integer, Long> dealTouch(int workspaceId, Deal deal, long nowMs) {
+        Map<Integer, Long> last = new HashMap<>();
+        int id = deal.getId();
+        merge(last, id, notFuture(epoch(deal.getCreatedAt()), nowMs));
+        for (Activity activity : activityMapper.getActivitiesByDealId(workspaceId, id)) {
+            merge(last, id, notFuture(epoch(activity.getTimestamp()), nowMs));
+        }
+        for (Note note : noteMapper.getNotesByDealId(workspaceId, id)) {
+            merge(last, id, notFuture(epoch(note.getCreatedAt()), nowMs));
+        }
+        for (Task task : taskMapper.getTasksByDealId(workspaceId, id)) {
+            merge(last, id, notFuture(epoch(task.getCreatedAt()), nowMs));
+        }
+        return last;
+    }
+
+    private Map<Integer, RelationshipTemperatureDto> warmthFor(int workspaceId, Set<Integer> personIds) {
+        Map<Integer, RelationshipTemperatureDto> map = new HashMap<>();
+        for (RelationshipTemperatureDto temperature : scoringService.scoreContacts(workspaceId, personIds)) {
+            map.put(temperature.getId(), temperature);
+        }
+        return map;
     }
 
     private DealRiskDto assess(

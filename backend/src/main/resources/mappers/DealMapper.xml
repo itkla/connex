@@ -88,6 +88,18 @@
     ORDER BY dp.deal_id, p.name
   </select>
 
+  <select id="getDealStakeholdersByDealId" resultMap="DealStakeholderResult">
+    SELECT dp.deal_id AS deal_id,
+           p.id AS person_id,
+           p.name AS person_label,
+           dp.role AS role
+    FROM deal_person dp
+    JOIN deal d ON d.id = dp.deal_id AND d.workspace_id = #{workspaceId}
+    JOIN person p ON p.id = dp.person_id AND p.workspace_id = d.workspace_id
+    WHERE d.workspace_id = #{workspaceId} AND dp.deal_id = #{dealId}
+    ORDER BY p.name
+  </select>
+
   <select id="getAllDeals" resultMap="DealResult">
     SELECT <include refid="dealColumns"/>
     FROM deal
