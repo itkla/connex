@@ -80,6 +80,14 @@ connex:
         max-failures-per-ip: ${CONNEX_LOGIN_MAX_FAILURES_PER_IP:50}
         max-failures-per-user: ${CONNEX_LOGIN_MAX_FAILURES_PER_USER:10}
         window-seconds: ${CONNEX_LOGIN_WINDOW_SECONDS:900}
+    webauthn:
+        # Passkey / WebAuthn relying-party config (#295). rp-id is the site's registrable domain
+        # (no scheme/port); allowed-origins (CSV) must list every origin the SPA is served from.
+        # These differ per environment (localhost in dev, the staging/production hostnames
+        # otherwise), so always override them in any deployed instance.
+        rp-id: ${CONNEX_WEBAUTHN_RP_ID:localhost}
+        rp-name: ${CONNEX_WEBAUTHN_RP_NAME:Connex}
+        allowed-origins: ${CONNEX_WEBAUTHN_ALLOWED_ORIGINS:http://localhost:3000}
     sharing:
         # Gates the cross-workspace share/unshare API. The owned-or-shared read predicate is always
         # applied (harmless when no shares exist).
