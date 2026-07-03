@@ -59,6 +59,24 @@ class LoginRateLimiterTest {
     }
 
     @Test
+    void skipsPerIpThrottleForNonPublicAddress() {
+        LoginRateLimiter limiter = new LoginRateLimiter(1, 100, 900);
+        long now = 1_000L;
+
+        for (int i = 0; i < 5; i++) {
+            limiter.recordFailure("127.0.0.1", "u" + i, now);
+        }
+        assertFalse(limiter.isBlocked("127.0.0.1", "bystander", now),
+            "a loopback proxy address must not per-IP-lock the whole instance");
+
+        for (int i = 0; i < 5; i++) {
+            limiter.recordFailure("10.0.0.5", "v" + i, now);
+        }
+        assertFalse(limiter.isBlocked("10.0.0.5", "bystander", now),
+            "a private proxy address must not per-IP-lock the whole instance");
+    }
+
+    @Test
     void ignoresUnattributableKeys() {
         LoginRateLimiter limiter = new LoginRateLimiter(1, 1, 900);
         limiter.recordFailure(null, null, 1_000L);

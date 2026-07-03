@@ -1,5 +1,7 @@
 package ooo.klae.connex.backend.services;
 
+import java.net.InetAddress;
+import java.net.UnknownHostException;
 import java.util.Locale;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -100,7 +102,29 @@ public class LoginRateLimiter {
     }
 
     private static String ipKey(String ip) {
-        return ip == null || ip.isBlank() ? null : "ip:" + ip;
+        return isThrottleableIp(ip) ? "ip:" + ip : null;
+    }
+
+    /**
+     * Whether a per-IP failure bucket is meaningful for this address. A loopback/private
+     * address means the resolver could not determine a real public client IP — typically an
+     * un-configured reverse proxy or tunnel whose single address fronts every client — so
+     * throttling on it would lock out the whole instance. In that case per-IP throttling is
+     * skipped and only the per-username bucket applies. Configure
+     * {@code connex.security.trusted-proxies} so the resolver yields the real public client IP.
+     */
+    private static boolean isThrottleableIp(String ip) {
+        if (ip == null || ip.isBlank()) {
+            return false;
+        }
+        try {
+            InetAddress address = InetAddress.getByName(ip);
+            return !(address.isLoopbackAddress() || address.isAnyLocalAddress()
+                    || address.isSiteLocalAddress() || address.isLinkLocalAddress()
+                    || address.isMulticastAddress());
+        } catch (UnknownHostException e) {
+            return false;
+        }
     }
 
     private static String userKey(String username) {
@@ -111,7 +135,7 @@ public class LoginRateLimiter {
 
     private static final class Window {
         private final long start;
-        private int count;
+        private volatile int count;
 
         private Window(long start, int count) {
             this.start = start;
