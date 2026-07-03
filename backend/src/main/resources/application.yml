@@ -93,6 +93,12 @@ connex:
         rp-id: ${CONNEX_WEBAUTHN_RP_ID:localhost}
         rp-name: ${CONNEX_WEBAUTHN_RP_NAME:Connex}
         allowed-origins: ${CONNEX_WEBAUTHN_ALLOWED_ORIGINS:http://localhost:3000}
+    sso:
+        # Per-organization enterprise SSO/IdP (#296). secret-key is a Base64 AES key
+        # (16/24/32 bytes) that encrypts each org's OIDC client secret at rest; it is
+        # required only once an org stores a client secret, and rotating it invalidates
+        # previously stored secrets.
+        secret-key: ${CONNEX_SSO_SECRET_KEY:}
     sharing:
         # Gates the cross-workspace share/unshare API. The owned-or-shared read predicate is always
         # applied (harmless when no shares exist).

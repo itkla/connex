@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="ooo.klae.connex.backend.mappers.FederatedIdentityMapper">
+
+  <select id="findByProviderIssuerSubject" resultType="FederatedIdentity">
+    SELECT id, user_id, org_id, provider, issuer, external_subject, created_at, last_login_at
+    FROM federated_identity
+    WHERE provider = #{provider} AND issuer = #{issuer} AND external_subject = #{subject}
+  </select>
+
+  <insert id="insert" useGeneratedKeys="true" keyProperty="id">
+    INSERT INTO federated_identity
+      (user_id, org_id, provider, issuer, external_subject)
+    VALUES
+      (#{userId}, #{orgId}, #{provider}, #{issuer}, #{externalSubject})
+  </insert>
+
+  <update id="touchLogin">
+    UPDATE federated_identity SET last_login_at = CURRENT_TIMESTAMP WHERE id = #{id}
+  </update>
+</mapper>
