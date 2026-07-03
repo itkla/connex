@@ -196,7 +196,84 @@
             "quickstart": {
                 "title": "Quickstart",
                 "description": "Go from an empty workspace to your first tracked relationship in about five minutes.",
-                "blocks": []
+                "blocks": [
+                    {
+                        "type": "prose",
+                        "text": "This is your first five minutes with Connex. In a few quick steps you will sign in, add your first company and contact, log one interaction, and watch a warmth reading appear on the relationship. By the end you will have a living record instead of an empty workspace, and you will know the loop that keeps every relationship warm."
+                    },
+                    {
+                        "type": "illustration",
+                        "name": "contact-card",
+                        "caption": "A contact in Connex: their details, work history, and warmth reading all in one place."
+                    },
+                    {
+                        "type": "steps",
+                        "title": "Your first five minutes",
+                        "items": [
+                            {
+                                "title": "Sign in and land on your dashboard",
+                                "description": "Sign in and Connex drops you on your dashboard, your home base. It is quiet at first, which is exactly what we are about to fix. If you belong to more than one workspace, check that the right one is selected up top."
+                            },
+                            {
+                                "title": "Add your first company",
+                                "description": "Head to Records and create a company, the organization you do business with. Give it a name to start. A company gathers its people, deals, and a history of your interactions all in one place."
+                            },
+                            {
+                                "title": "Add a contact and link it to the company",
+                                "description": "Now add a contact, a real person you know, and connect them to the company you just made. Their name and email are plenty to begin. Everything else can come later."
+                            },
+                            {
+                                "title": "Log one interaction",
+                                "description": "Open your new contact and jot a quick note about your last conversation, or log an activity like a call or a meeting. This is the signal Connex learns from, so even a short line counts."
+                            },
+                            {
+                                "title": "See the warmth appear",
+                                "description": "That single interaction gives the relationship a warmth reading, shown as one of four bands from hot to cold. You never set it by hand. Keep logging as you work and it stays current on its own."
+                            }
+                        ]
+                    },
+                    {
+                        "type": "callout",
+                        "variant": "tip",
+                        "title": "The habit that makes Connex shine",
+                        "body": "The more of your real interactions you log, notes, calls, meetings, the smarter Connex gets about which relationships are thriving and which are cooling off. You do not have to score anything yourself. Just keep working normally and let the warmth keep itself up to date."
+                    },
+                    {
+                        "type": "faq",
+                        "title": "Good to know",
+                        "items": [
+                            {
+                                "question": "Do I have to set the warmth score myself?",
+                                "answer": "No. Connex works out the temperature for you from the notes, activities, and meetings you already log. There is nothing to fill in by hand."
+                            },
+                            {
+                                "question": "Where does everything I add live?",
+                                "answer": "Inside your workspace, and it stays private to it. What you can view and edit follows your role on the team."
+                            }
+                        ]
+                    },
+                    {
+                        "type": "cards",
+                        "title": "Keep going",
+                        "items": [
+                            {
+                                "title": "Add your first company",
+                                "description": "A deeper, step-by-step walkthrough of creating your first company and its people.",
+                                "href": "/docs/tutorials/add-your-first-company"
+                            },
+                            {
+                                "title": "Log activity and warmth",
+                                "description": "See how the interactions you log turn into a warmth reading you can act on.",
+                                "href": "/docs/tutorials/log-activity-and-warmth"
+                            },
+                            {
+                                "title": "All about contacts",
+                                "description": "Everything a contact holds: work history, warmth, and connections into your network.",
+                                "href": "/docs/records/contacts"
+                            }
+                        ]
+                    }
+                ]
             }
         }
     },
@@ -3591,27 +3668,437 @@
             "add-your-first-company": {
                 "title": "Add your first company and contact",
                 "description": "Create a company, add a person who works there, and open their profile.",
-                "blocks": []
+                "blocks": [
+                    {
+                        "type": "prose",
+                        "text": "This tutorial gets you from an empty workspace to your first real relationship in a few minutes. You will create a company, add a person who works there, and open their profile to see everything Connex starts tracking for you. It is the foundation everything else builds on, so it is the perfect place to begin."
+                    },
+                    {
+                        "type": "illustration",
+                        "name": "contact-card",
+                        "caption": "A contact card, ready with their name, title, company, and warmth at a glance."
+                    },
+                    {
+                        "type": "steps",
+                        "title": "Create the company",
+                        "items": [
+                            {
+                                "title": "Open the new company form",
+                                "description": "Head to your Companies list and choose to add a company. A clean form opens, ready for you to fill in."
+                            },
+                            {
+                                "title": "Enter the name and website",
+                                "description": "Type the company name and its website. The website field tidies up the address format for you, and the industry field suggests values you already use."
+                            },
+                            {
+                                "title": "Save",
+                                "description": "The company is created right away. If you do not add a logo, Connex shows a friendly lettered avatar in its place."
+                            }
+                        ]
+                    },
+                    {
+                        "type": "callout",
+                        "variant": "tip",
+                        "title": "Add the person at the same time",
+                        "body": "The new company form lets you line up its people while you are there. You can add a contact with a name, title, email, and photo, and Connex creates the company first, then the person. If you would rather do it as a separate step, follow the next section."
+                    },
+                    {
+                        "type": "steps",
+                        "title": "Add someone who works there",
+                        "items": [
+                            {
+                                "title": "Start with a name",
+                                "description": "Open the company you just created and add a contact from its people section. The name is all you truly need to get started."
+                            },
+                            {
+                                "title": "Fill in email and title",
+                                "description": "Add their work email and job title so you can reach them and remember who they are. These are optional, but they make the profile far more useful."
+                            },
+                            {
+                                "title": "Save",
+                                "description": "A quick success animation confirms it and the form closes. The person is now linked to the company, and their current role is recorded in their work history automatically."
+                            }
+                        ]
+                    },
+                    {
+                        "type": "featureList",
+                        "title": "Open the profile and see what you get",
+                        "columns": 2,
+                        "items": [
+                            {
+                                "title": "Their details",
+                                "description": "Name, title, company, email, and phone laid out in a clean, easy-to-read profile you can edit anytime."
+                            },
+                            {
+                                "title": "Tags",
+                                "description": "Add color-coded labels like prospect or champion to keep people organized and easy to filter later."
+                            },
+                            {
+                                "title": "Warmth",
+                                "description": "A color-coded temperature pill shows how warm the relationship is and how many days before it starts to cool."
+                            },
+                            {
+                                "title": "Timeline",
+                                "description": "A dated feed where every call, email, meeting, note, and task you log will appear from now on."
+                            }
+                        ]
+                    },
+                    {
+                        "type": "faq",
+                        "title": "First-steps questions",
+                        "items": [
+                            {
+                                "question": "Do I have to fill in every field?",
+                                "answer": "No. A company needs only a name, and a person needs only a name. You can always come back and add the website, email, title, and more whenever you like."
+                            },
+                            {
+                                "question": "Does the work history update itself?",
+                                "answer": "Yes. When you add a person to a company or move them later, Connex records the change for you and marks their current role, so their history stays accurate on its own."
+                            }
+                        ]
+                    },
+                    {
+                        "type": "cards",
+                        "title": "Keep exploring",
+                        "items": [
+                            {
+                                "title": "Contacts",
+                                "description": "Everything a person's profile holds, from work history to connections.",
+                                "href": "/docs/records/contacts"
+                            },
+                            {
+                                "title": "Log a meeting and watch warmth rise",
+                                "description": "Record your first interaction and see the relationship warm up.",
+                                "href": "/docs/tutorials/log-activity-and-warmth"
+                            }
+                        ]
+                    }
+                ]
             },
             "log-activity-and-warmth": {
                 "title": "Log a meeting and watch warmth rise",
                 "description": "Record an interaction and see how it lifts a relationship's temperature.",
-                "blocks": []
+                "blocks": [
+                    {
+                        "type": "prose",
+                        "text": "Just had a good meeting or a great call? Log it in Connex and you get two things at once: a tidy record of what happened, and a relationship that stays warm. This tutorial walks you through logging one interaction on a contact, then shows you where that shows up in their warmth score."
+                    },
+                    {
+                        "type": "steps",
+                        "title": "Log your meeting or call",
+                        "items": [
+                            {
+                                "title": "Open the contact",
+                                "description": "Go to Records, find the person you just spoke with, and click their name to open their profile."
+                            },
+                            {
+                                "title": "Start a new activity",
+                                "description": "Choose Log activity on their profile. This is how you record a real touchpoint against them."
+                            },
+                            {
+                                "title": "Pick the type",
+                                "description": "Select Meeting or Call. Each type carries its own color and icon, so your timeline stays easy to scan later."
+                            },
+                            {
+                                "title": "Add a subject, time, and note",
+                                "description": "Give it a short title, set when it happened, and write a quick note with what was said or what to do next. The detail is what makes it worth looking back on."
+                            },
+                            {
+                                "title": "Link it and save",
+                                "description": "The activity is already tied to this contact. Attach a deal too if it belongs to one, then save. It lands right on their history."
+                            }
+                        ]
+                    },
+                    {
+                        "type": "heading",
+                        "text": "Watch the warmth respond",
+                        "level": 2
+                    },
+                    {
+                        "type": "prose",
+                        "text": "You never set warmth by hand. Connex reads it from the things you log: your calls, meetings, notes, and follow-ups. The moment your activity is saved, it counts as recent, meaningful contact, and the relationship's warmth ticks upward. You will see it on the contact's profile as a color-coded temperature pill with a score and the days left before it starts to cool."
+                    },
+                    {
+                        "type": "illustration",
+                        "name": "warmth-scale",
+                        "caption": "The four warmth bands, from thriving Hot down to quiet Cold."
+                    },
+                    {
+                        "type": "callout",
+                        "variant": "tip",
+                        "title": "Log while it is fresh",
+                        "body": "Jot the activity down right after the meeting, while the details are still in your head. A one-line note today is far more useful than a perfect memory you never get around to writing. And every touchpoint you log keeps that relationship from cooling off."
+                    },
+                    {
+                        "type": "cards",
+                        "title": "Keep going",
+                        "items": [
+                            {
+                                "title": "Warmth & temperature",
+                                "description": "What each band means and how the score keeps itself current.",
+                                "href": "/docs/relationship-intelligence/warmth-and-temperature"
+                            },
+                            {
+                                "title": "Activities",
+                                "description": "All your calls, meetings, and touchpoints in one timeline.",
+                                "href": "/docs/activity/activities"
+                            }
+                        ]
+                    }
+                ]
             },
             "build-your-pipeline": {
                 "title": "Build a pipeline and move a deal",
                 "description": "Set up stages and move a deal from first contact to won.",
-                "blocks": []
+                "blocks": [
+                    {
+                        "type": "prose",
+                        "text": "In this tutorial you will set up a pipeline with a few stages, add a deal to one of your companies, and walk it all the way from first contact to won. By the end you will have a clear, visual way to see every opportunity you are working and know exactly what to do next."
+                    },
+                    {
+                        "type": "illustration",
+                        "name": "pipeline-board",
+                        "caption": "Your stages laid out left to right, with each deal sitting in the stage it has reached."
+                    },
+                    {
+                        "type": "steps",
+                        "title": "Set up your pipeline",
+                        "items": [
+                            {
+                                "title": "Create a new pipeline",
+                                "description": "Open Records, go to your pipelines, and create one. Give it a name that matches how you sell, like New Business or Renewals."
+                            },
+                            {
+                                "title": "Add your stages",
+                                "description": "Stages are the steps a deal moves through, in order. A simple set works great to start: Lead, Meeting, Proposal, then Negotiation. You can rename, reorder, or remove them anytime."
+                            },
+                            {
+                                "title": "Mark a winning and a losing stage",
+                                "description": "Choose one stage as your winning stage and one as your losing stage. When a deal reaches either one, Connex closes it with that outcome for you. Each pipeline gets one of each."
+                            }
+                        ]
+                    },
+                    {
+                        "type": "steps",
+                        "title": "Add a deal and move it forward",
+                        "items": [
+                            {
+                                "title": "Create a deal on a company",
+                                "description": "Add a new deal and link it to the company it belongs to. Give it a name so you can spot it at a glance."
+                            },
+                            {
+                                "title": "Set the value and currency",
+                                "description": "The value is what the opportunity is worth to you. Enter the amount and pick its currency, so your forecasts and totals add up correctly."
+                            },
+                            {
+                                "title": "Move it through your stages",
+                                "description": "As things progress, move the deal into its next stage. The deal's page shows a timeline of its stages, with the current one highlighted, so you always know where it stands."
+                            },
+                            {
+                                "title": "Mark it won",
+                                "description": "When you land it, move the deal into your winning stage. It closes as won on its own, the close date fills in for you, and you can record the value you actually landed."
+                            }
+                        ]
+                    },
+                    {
+                        "type": "callout",
+                        "variant": "tip",
+                        "title": "Let the winning stage do the work",
+                        "body": "You do not have to close a deal by hand. Just drag it into the stage you marked as winning and Connex records the win, fills in the close date, and updates your forecast. The same goes for your losing stage when a deal does not work out."
+                    },
+                    {
+                        "type": "faq",
+                        "title": "Common questions",
+                        "items": [
+                            {
+                                "question": "What is the difference between a stage and the value?",
+                                "answer": "A stage is where a deal is in your process, like Proposal or Negotiation. The value is how much money the deal is worth. Stages tell you what to do next, and value tells you what is at stake."
+                            },
+                            {
+                                "question": "Can I reopen a deal I closed by mistake?",
+                                "answer": "Yes. Reopen it and the deal slides back to the last open stage, with its close date and outcome tidied up for you."
+                            }
+                        ]
+                    },
+                    {
+                        "type": "cards",
+                        "title": "Keep going",
+                        "items": [
+                            {
+                                "title": "Deals & pipelines",
+                                "description": "A fuller tour of stages, currencies, collaborators, and the deals dashboard.",
+                                "href": "/docs/records/deals-and-pipelines"
+                            },
+                            {
+                                "title": "Companies",
+                                "description": "Organize the organizations your deals belong to, with their people and history.",
+                                "href": "/docs/records/companies"
+                            }
+                        ]
+                    }
+                ]
             },
             "request-a-warm-intro": {
                 "title": "Find and request a warm introduction",
                 "description": "See who can introduce you to someone, and ask for the intro.",
-                "blocks": []
+                "blocks": [
+                    {
+                        "type": "prose",
+                        "text": "The warmest way to reach someone new is through a person you both trust. In this tutorial you will open the Introductions tool, find a warm path between two people in your network, and make the introduction. By the end you will know how to spot the strongest connector for any pairing and record the intro so it becomes part of your history."
+                    },
+                    {
+                        "type": "illustration",
+                        "name": "warm-intro-path",
+                        "caption": "A warm path from you to the person you want to reach, through someone you both know."
+                    },
+                    {
+                        "type": "prose",
+                        "text": "A warm path is simply the chain of trust that gets you to someone. Instead of a cold message to a stranger, Connex looks at the people you already know and finds pairs you are perfectly placed to introduce, because you know both of them but they do not yet know each other. Each suggested pair comes with a match strength and a short reason, so you can see at a glance why it is a good introduction to make."
+                    },
+                    {
+                        "type": "steps",
+                        "title": "Find and make the introduction",
+                        "items": [
+                            {
+                                "title": "Open the Introductions page",
+                                "description": "Head to Introductions in your overview area. You can also jump there from the top opportunity shown on your dashboard, which surfaces the single best pairing waiting for you."
+                            },
+                            {
+                                "title": "Review your intros to make",
+                                "description": "Under Intros to make you will see pairs of people you are well placed to connect. Each one is someone your team has actually engaged with, so every suggestion is a person you can credibly introduce."
+                            },
+                            {
+                                "title": "Read the warm path",
+                                "description": "Every suggestion shows a match strength, either Strong, Good, or Fair, along with a short reason such as shared connections or a shared employer. That reason is the warm path itself, the honest answer to why these two belong together."
+                            },
+                            {
+                                "title": "Search for a specific person",
+                                "description": "Looking to connect two people who were not suggested? Choose Log an intro, then search your contacts to pick the first person and the second person by name."
+                            },
+                            {
+                                "title": "Make the introduction and record it",
+                                "description": "Once you have made the intro, select Record intro. Connex connects the two people, adds the introduction to your history, and lets you attach an optional note about how or why you introduced them."
+                            }
+                        ]
+                    },
+                    {
+                        "type": "callout",
+                        "variant": "tip",
+                        "title": "Dismiss the pairs that do not fit",
+                        "body": "If a suggested pair is not right, choose Dismiss. It sets the pair aside without recording anything and quietly steers future suggestions toward better matches. Dismissing only affects pairs you have not introduced yet, so your history stays accurate and is never rewritten."
+                    },
+                    {
+                        "type": "faq",
+                        "title": "Common questions",
+                        "items": [
+                            {
+                                "question": "Where do these suggestions come from?",
+                                "answer": "They are drawn from people you actually stay in touch with, matched on things like shared connections or a shared employer. Pairs who already know each other, or that you have recorded or dismissed before, are left out."
+                            },
+                            {
+                                "question": "Can I introduce two people who were not suggested?",
+                                "answer": "Yes. Use Log an intro to record an introduction between any two contacts, even one Connex never surfaced, with an optional note."
+                            },
+                            {
+                                "question": "What if I introduce the same two people twice?",
+                                "answer": "Nothing gets duplicated. Recording the same pairing again just updates the existing entry, and once an intro is recorded it stays recorded, so your history stays tidy."
+                            }
+                        ]
+                    },
+                    {
+                        "type": "cards",
+                        "title": "Keep exploring",
+                        "items": [
+                            {
+                                "title": "Warm-intro paths",
+                                "description": "A deeper look at how Connex finds the strongest path to any person.",
+                                "href": "/docs/overview-suite/warm-intro-paths"
+                            },
+                            {
+                                "title": "Relationship map",
+                                "description": "See the connection map these suggestions are drawn from, laid out for you to explore.",
+                                "href": "/docs/overview-suite/relationship-map"
+                            }
+                        ]
+                    }
+                ]
             },
             "import-your-contacts": {
                 "title": "Import your existing contacts",
                 "description": "Bring contacts in from a spreadsheet in a few guided steps.",
-                "blocks": []
+                "blocks": [
+                    {
+                        "type": "prose",
+                        "text": "Already have your contacts in a spreadsheet? This tutorial walks you through bringing them into Connex in a few guided steps. You line up your columns, look over a preview of exactly what will happen, and only then confirm, so nothing gets created or changed until you say so."
+                    },
+                    {
+                        "type": "illustration",
+                        "name": "import-wizard",
+                        "caption": "Matching your spreadsheet columns to Connex fields"
+                    },
+                    {
+                        "type": "steps",
+                        "title": "Import your contacts step by step",
+                        "items": [
+                            {
+                                "title": "Start the import",
+                                "description": "Open your Contacts and select Import. A friendly step-by-step wizard opens and walks you the rest of the way."
+                            },
+                            {
+                                "title": "Choose your CSV file",
+                                "description": "Drop your spreadsheet onto the upload area, or click to browse for it. Save your file as CSV first, and keep it under 5,000 rows and 5MB. Connex reads it right away and shows you what it found."
+                            },
+                            {
+                                "title": "Match your columns",
+                                "description": "Line up each column in your file with a field in Connex, like Name, Email, Phone, Title, or Company. Name is required. You can create a new field on the spot for anything that doesn't fit, or set a column to Ignore if you don't need it."
+                            },
+                            {
+                                "title": "Review the preview",
+                                "description": "See exactly what will happen for every row before anything is saved. Each row is marked New, Match, Skip, or Invalid, so you can spot people you already have and catch any rows that need a fix."
+                            },
+                            {
+                                "title": "Confirm the import",
+                                "description": "When the preview looks right, select Import. Connex creates and updates your contacts, then shows you how many were created, updated, and skipped."
+                            }
+                        ]
+                    },
+                    {
+                        "type": "callout",
+                        "variant": "tip",
+                        "title": "Bring your tags and companies along",
+                        "body": "Add a column named 'tags' with several tags separated by commas, and any that don't exist yet are created for you. Add a 'company' column and Connex links each person to their company, creating the company if it's new. One tidy spreadsheet can set up a lot in a single pass."
+                    },
+                    {
+                        "type": "faq",
+                        "title": "Common questions",
+                        "items": [
+                            {
+                                "question": "Will importing overwrite my existing contacts?",
+                                "answer": "Only if you choose to. When a row matches someone you already have, you decide what happens: fill in just the blanks, skip the row, or overwrite with the new details. Nothing changes until you confirm."
+                            },
+                            {
+                                "question": "What if some rows have errors?",
+                                "answer": "Rows marked Invalid in the preview aren't imported. The final step offers a download of just those rows with a note on what went wrong, so you can fix them and import again."
+                            }
+                        ]
+                    },
+                    {
+                        "type": "cards",
+                        "title": "Keep going",
+                        "items": [
+                            {
+                                "title": "Import & export",
+                                "description": "The full guide to bringing records in from CSV and taking your data back out.",
+                                "href": "/docs/data/import-and-export"
+                            },
+                            {
+                                "title": "Contacts",
+                                "description": "See how the people you just imported come to life on their profiles.",
+                                "href": "/docs/records/contacts"
+                            }
+                        ]
+                    }
+                ]
             }
         }
     }
