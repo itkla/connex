@@ -14,6 +14,8 @@ public interface AttachmentMapper {
     List<Attachment> getByEntity(@Param("workspaceId") int workspaceId, @Param("entityType") String entityType, @Param("entityId") int entityId);
     List<Attachment> getAll(int workspaceId);
     Attachment getById(@Param("workspaceId") int workspaceId, @Param("id") int id);
+    Attachment getByUrl(@Param("workspaceId") int workspaceId, @Param("url") String url);
+    int countUrlInOtherWorkspaces(@Param("workspaceId") int workspaceId, @Param("url") String url);
     List<Attachment> search(@Param("workspaceId") int workspaceId, @Param("query") String query);
     int insert(Attachment attachment);
     int delete(@Param("workspaceId") int workspaceId, @Param("id") int id);

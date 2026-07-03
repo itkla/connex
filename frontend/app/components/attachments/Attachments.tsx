@@ -109,8 +109,8 @@ export default function Attachments({ entityType, entityId, initialAttachments, 
     async function handleDelete(attachment: Attachment) {
         setBusyId(attachment.id);
         try {
-            await deleteAttachment(attachment.id);
             await deleteUploadedFile(attachment.url);
+            await deleteAttachment(attachment.id);
             setItems((prev) => prev.filter((a) => a.id !== attachment.id));
             toastSuccess(t('deleted'));
         } catch {

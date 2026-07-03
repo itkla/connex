@@ -98,6 +98,16 @@ public class AttachmentController {
     }
 
     /**
+     * GET endpoint that resolves an attachment by its blob URL within the caller's
+     * workspace (404 when the workspace owns no attachment at that URL). The upload
+     * route calls this to authorize a blob deletion before unlinking the file.
+     */
+    @GetMapping("/by-url")
+    public AttachmentDto getAttachmentByUrl(@RequestParam String url) {
+        return AttachmentDto.from(attachmentService.getByUrl(url));
+    }
+
+    /**
      * POST endpoint to record a new attachment. The binary is uploaded to the
      * Next.js filesystem first; this only persists the resulting URL + metadata.
      */

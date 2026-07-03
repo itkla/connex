@@ -166,6 +166,22 @@ public class AttachmentService {
     }
 
     /**
+     * Resolves the attachment record for a blob URL within the caller's workspace.
+     * Backs the upload route's delete-authorization check so a session alone cannot
+     * unlink another tenant's blob. Requires {@code ATTACHMENT_DELETE} so it authorizes
+     * exactly what the blob unlink it precedes will do — a member who may not delete
+     * attachments cannot use it to destroy the file out from under the record.
+     * @param url the stored attachment url
+     * @return the attachment owned by the current workspace
+     */
+    @RequirePermission(Permission.ATTACHMENT_DELETE)
+    public Attachment getByUrl(String url) {
+        Attachment attachment = attachmentMapper.getByUrl(workspaceService.getCurrentWorkspaceId(), url);
+        if (attachment == null) throw new ResourceNotFoundException("Attachment not found for url");
+        return attachment;
+    }
+
+    /**
      * Creates a new attachment.
      * @param attachment
      * @return
@@ -176,6 +192,9 @@ public class AttachmentService {
         attachment.setWorkspaceId(workspaceId);
         attachment.setEntityType(normalizeType(attachment.getEntityType()));
         validateUrl(attachment.getUrl());
+        if (attachmentMapper.countUrlInOtherWorkspaces(workspaceId, attachment.getUrl()) > 0) {
+            throw new BadRequestException("That attachment url is already in use");
+        }
         attachmentMapper.insert(attachment);
         // Audit from the inserted bean (id populated by the key generator) so a failed
         // re-fetch can never NPE and break the create it is only meant to observe.

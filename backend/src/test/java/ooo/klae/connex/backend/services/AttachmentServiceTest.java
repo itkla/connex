@@ -1,6 +1,8 @@
 package ooo.klae.connex.backend.services;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import java.util.List;
@@ -10,10 +12,13 @@ import org.springframework.beans.factory.annotation.Autowired;
 
 import ooo.klae.connex.backend.beans.Attachment;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
+import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
+import ooo.klae.connex.backend.mappers.AttachmentMapper;
 
 class AttachmentServiceTest extends AbstractServiceTest {
 
     @Autowired AttachmentService attachmentService;
+    @Autowired AttachmentMapper attachmentMapper;
 
     private Attachment attachmentWithUrl(String url) {
         Attachment attachment = new Attachment();
@@ -49,5 +54,28 @@ class AttachmentServiceTest extends AbstractServiceTest {
         for (String url : safe) {
             assertDoesNotThrow(() -> attachmentService.create(attachmentWithUrl(url)), url);
         }
+    }
+
+    @Test
+    void getByUrl_resolvesWithinWorkspaceOnly() {
+        String url = "/attachments/company/1-" + unique() + ".png";
+        Attachment created = attachmentService.create(attachmentWithUrl(url));
+
+        assertEquals(created.getId(), attachmentService.getByUrl(url).getId());
+        assertThrows(ResourceNotFoundException.class,
+            () -> attachmentService.getByUrl("/attachments/company/missing-" + unique() + ".png"));
+        assertNull(attachmentMapper.getByUrl(workspace.getId() + 100_000, url),
+            "another workspace must not resolve this blob url");
+    }
+
+    @Test
+    void create_rejectsUrlClaimedByAnotherWorkspace() {
+        String url = "/attachments/company/1-" + unique() + ".png";
+        attachmentService.create(attachmentWithUrl(url));
+
+        assertEquals(0, attachmentMapper.countUrlInOtherWorkspaces(workspace.getId(), url),
+            "the owning workspace is not counted as another");
+        assertEquals(1, attachmentMapper.countUrlInOtherWorkspaces(workspace.getId() + 100_000, url),
+            "a different workspace sees the url as foreign, so re-claiming it is rejected on create");
     }
 }

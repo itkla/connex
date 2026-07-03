@@ -268,6 +268,57 @@ export async function getCurrentUserFromCookie(cookie: string | null) {
     }
 }
 
+// The attachment entity types (see the <Attachments> usages) mapped to their
+// workspace-scoped backend GET, used to authorize a blob write against the caller's
+// tenant. Types absent here are denied (fail closed).
+const ATTACHMENT_ENTITY_ENDPOINTS: Record<string, string> = {
+    company: "/api/companies",
+    person: "/api/persons",
+    deal: "/api/deals",
+    user: "/api/users",
+};
+
+/**
+ * Server-side (route-handler) probe: performs a workspace-scoped backend GET with the
+ * caller's forwarded cookie and reports whether it resolves (HTTP 2xx). Used by the
+ * upload blob routes to authorize the target before writing/deleting a file, so a valid
+ * session alone cannot touch another tenant's entity.
+ * @param cookie the forwarded request cookie header (session + workspace)
+ * @param path the backend path to probe (e.g. `/api/companies/12`)
+ * @returns true when the backend resolves the resource for the caller's workspace
+ */
+export async function backendResolves(cookie: string | null, path: string): Promise<boolean> {
+    if (!cookie) {
+        return false;
+    }
+    try {
+        const res = await fetch(`${API_BASE}${path}`, { headers: { cookie }, cache: "no-store" });
+        return res.ok;
+    } catch {
+        return false;
+    }
+}
+
+/**
+ * Whether the caller's active workspace may access the given attachment entity,
+ * checked against the backend. Unknown entity types or non-integer ids are denied.
+ * @param cookie the forwarded request cookie header
+ * @param entityType the owning entity type (company/person/deal/user)
+ * @param entityId the owning entity id
+ * @returns true when the caller's workspace owns the entity
+ */
+export async function workspaceCanAccessEntity(
+    cookie: string | null,
+    entityType: string,
+    entityId: number,
+): Promise<boolean> {
+    const base = ATTACHMENT_ENTITY_ENDPOINTS[entityType.trim().toLowerCase()];
+    if (!base || !Number.isInteger(entityId)) {
+        return false;
+    }
+    return backendResolves(cookie, `${base}/${entityId}`);
+}
+
 export function logout() {
     return postJson<void>("/api/auth/logout");
 }

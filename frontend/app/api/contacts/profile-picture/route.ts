@@ -1,14 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { headers } from "next/headers";
-import { getCurrentUserFromCookie } from "@/app/lib/api";
+import { getCurrentUserFromCookie, workspaceCanAccessEntity } from "@/app/lib/api";
 import { rejectInvalidImage, resolveContained, safeFileName } from "@/app/lib/uploads";
 import path from "path";
 import fs from "fs/promises";
 
 /**
  * Stores an uploaded contact picture under the public uploads directory and
- * returns its public URL. This route does not call the backend; the caller is
- * responsible for persisting the returned URL.
+ * returns its public URL. The caller must belong to the workspace that owns the
+ * contact; persisting the returned URL is still done via the backend by the caller.
  */
 export async function PUT(request: NextRequest) {
     const contactId = request.nextUrl.searchParams.get("contactId");
@@ -19,6 +19,9 @@ export async function PUT(request: NextRequest) {
     }
     if (!contactId || !/^\d+$/.test(contactId)) {
         return NextResponse.json({ error: "contactId is required" }, { status: 400 });
+    }
+    if (!(await workspaceCanAccessEntity(cookie, "person", Number(contactId)))) {
+        return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
     const formData = await request.formData();
