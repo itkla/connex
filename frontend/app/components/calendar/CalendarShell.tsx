@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
 import { useLocale, useTranslations } from 'next-intl';
 import { useRouter } from 'next/navigation';
@@ -8,7 +8,7 @@ import { toast } from 'sonner';
 import { ChevronLeftIcon, ChevronRightIcon } from '@heroicons/react/24/outline';
 
 import Rise from '@/app/components/motion/Rise';
-import { rescheduleDeal, rescheduleTask } from '@/app/lib/api';
+import { completeTask, rescheduleDeal, rescheduleTask } from '@/app/lib/api';
 import { parseCalendarDate } from '@/app/lib/utils';
 import type { Activity, Contact, Deal, Note, Task } from '@/app/lib/types';
 import {
@@ -32,6 +32,8 @@ import DayView from './DayView';
 import AgendaView from './AgendaView';
 import EventDetailSheet from './EventDetailSheet';
 import QuickCreateHost from './QuickCreateHost';
+import GoToDateDialog from './GoToDateDialog';
+import CalendarShortcuts from './CalendarShortcuts';
 
 const SWIPE_OFFSET = 40;
 
@@ -83,6 +85,9 @@ export default function CalendarShell({
     const [openEventId, setOpenEventId] = useState<string | null>(null);
     const [overrides, setOverrides] = useState<Map<string, string>>(() => new Map());
     const [pendingIds, setPendingIds] = useState<Set<string>>(() => new Set());
+    const [helpOpen, setHelpOpen] = useState(false);
+    const [goToOpen, setGoToOpen] = useState(false);
+    const [createOpen, setCreateOpen] = useState(false);
 
     const personById = useMemo(() => {
         const map = new Map<number, Contact>();
@@ -129,29 +134,26 @@ export default function CalendarShell({
         [events, cal.visibleKinds],
     );
 
-    const handleReschedule = useCallback(
-        async (event: CalendarEvent, newDayKey: string) => {
-            if (!event.draggable || newDayKey === event.dayKey || Number.isNaN(parseCalendarDate(newDayKey))) {
-                return;
-            }
-            setOverrides((prev) => new Map(prev).set(event.id, newDayKey));
+    const applyReschedule = useCallback(
+        async (event: CalendarEvent, key: string): Promise<boolean> => {
+            setOverrides((prev) => new Map(prev).set(event.id, key));
             setPendingIds((prev) => new Set(prev).add(event.id));
             try {
                 if (event.kind === 'task') {
-                    await rescheduleTask(event.entityId, newDayKey);
+                    await rescheduleTask(event.entityId, key);
                 } else if (event.kind === 'deal') {
-                    await rescheduleDeal(event.entityId, newDayKey);
+                    await rescheduleDeal(event.entityId, key);
                 }
-                toast.success(t('rescheduled'));
                 router.refresh();
+                return true;
             } catch {
                 setOverrides((prev) => {
-                    if (prev.get(event.id) !== newDayKey) return prev;
+                    if (prev.get(event.id) !== key) return prev;
                     const next = new Map(prev);
                     next.delete(event.id);
                     return next;
                 });
-                toast.error(t('rescheduleFailed'));
+                return false;
             } finally {
                 setPendingIds((prev) => {
                     if (!prev.has(event.id)) return prev;
@@ -159,6 +161,39 @@ export default function CalendarShell({
                     next.delete(event.id);
                     return next;
                 });
+            }
+        },
+        [router],
+    );
+
+    const handleReschedule = useCallback(
+        async (event: CalendarEvent, newDayKey: string) => {
+            if (!event.draggable || newDayKey === event.dayKey || Number.isNaN(parseCalendarDate(newDayKey))) {
+                return;
+            }
+            const originalKey = event.dayKey;
+            const ok = await applyReschedule(event, newDayKey);
+            if (ok) {
+                toast.success(t('rescheduled'), {
+                    action: { label: t('undo'), onClick: () => void applyReschedule(event, originalKey) },
+                });
+            } else {
+                toast.error(t('rescheduleFailed'));
+            }
+        },
+        [applyReschedule, t],
+    );
+
+    const handleComplete = useCallback(
+        async (event: CalendarEvent) => {
+            if (event.kind !== 'task') return;
+            try {
+                await completeTask(event.entityId);
+                toast.success(t('taskCompleted'));
+                setOpenEventId(null);
+                router.refresh();
+            } catch {
+                toast.error(t('completeFailed'));
             }
         },
         [router, t],
@@ -203,6 +238,37 @@ export default function CalendarShell({
         if (isWide) cal.selectDay(day);
         else cal.openDay(day);
     };
+
+    useEffect(() => {
+        const onKey = (e: KeyboardEvent) => {
+            if (e.metaKey || e.ctrlKey || e.altKey) return;
+            const el = e.target as HTMLElement | null;
+            if (el && (el.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(el.tagName))) return;
+            if (
+                document.querySelector(
+                    '[data-state="open"][role="dialog"],[data-state="open"][role="alertdialog"],[data-state="open"][role="menu"]',
+                )
+            ) {
+                return;
+            }
+            switch (e.key) {
+                case 't': case 'T': cal.goToday(); break;
+                case 'm': case 'M': cal.setView('month'); break;
+                case 'w': case 'W': cal.setView('week'); break;
+                case 'd': case 'D': cal.setView('day'); break;
+                case 'a': case 'A': cal.setView('agenda'); break;
+                case 'g': case 'G': setGoToOpen(true); break;
+                case 'c': case 'C': setCreateOpen(true); break;
+                case '?': setHelpOpen(true); break;
+                case 'ArrowLeft': if (cal.view !== 'agenda') cal.goPrev(); else return; break;
+                case 'ArrowRight': if (cal.view !== 'agenda') cal.goNext(); else return; break;
+                default: return;
+            }
+            e.preventDefault();
+        };
+        window.addEventListener('keydown', onKey);
+        return () => window.removeEventListener('keydown', onKey);
+    }, [cal]);
 
     const periodKey = useMemo(() => {
         switch (cal.view) {
@@ -298,7 +364,14 @@ export default function CalendarShell({
                             <div>
                                 <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">{t('title')}</h1>
                                 {periodLabel && (
-                                    <p className="mt-1 text-sm text-muted-foreground tabular-nums">{periodLabel}</p>
+                                    <button
+                                        type="button"
+                                        onClick={() => setGoToOpen(true)}
+                                        aria-label={t('goToDate')}
+                                        className="mt-1 rounded text-sm text-muted-foreground tabular-nums outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-brand/40"
+                                    >
+                                        {periodLabel}
+                                    </button>
                                 )}
                             </div>
                             <div className="flex shrink-0 items-center gap-1.5">
@@ -376,6 +449,7 @@ export default function CalendarShell({
                 personById={personById}
                 dealById={dealById}
                 onReschedule={handleReschedule}
+                onComplete={handleComplete}
                 rescheduling={openEvent != null && pendingIds.has(openEvent.id)}
             />
 
@@ -384,7 +458,17 @@ export default function CalendarShell({
                 persons={persons ?? []}
                 deals={deals ?? []}
                 currentUserId={currentUserId}
+                menuOpen={createOpen}
+                onMenuOpenChange={setCreateOpen}
             />
+
+            <GoToDateDialog
+                open={goToOpen}
+                onOpenChange={setGoToOpen}
+                initialDate={cal.anchor}
+                onPick={cal.goToDate}
+            />
+            <CalendarShortcuts open={helpOpen} onOpenChange={setHelpOpen} />
         </div>
     );
 }
