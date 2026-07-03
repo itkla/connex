@@ -1,4 +1,5 @@
 import {
+    AcademicCapIcon,
     AdjustmentsHorizontalIcon,
     ArrowDownTrayIcon,
     ArrowsRightLeftIcon,
@@ -31,6 +32,7 @@ import {
     PresentationChartLineIcon,
     RectangleGroupIcon,
     RectangleStackIcon,
+    RocketLaunchIcon,
     ShareIcon,
     SparklesIcon,
     SwatchIcon,
@@ -76,10 +78,23 @@ export const docsCategories: DocCategory[] = [
         namespace: "DocsGettingStarted",
         icon: BookOpenIcon,
         articles: [
+            { slug: "quickstart", icon: RocketLaunchIcon },
             { slug: "what-is-connex", icon: SparklesIcon },
             { slug: "workspaces-and-tenancy", icon: BuildingOffice2Icon },
             { slug: "navigating-connex", icon: MapIcon },
             { slug: "core-concepts", icon: LightBulbIcon },
+        ],
+    },
+    {
+        slug: "tutorials",
+        namespace: "DocsTutorials",
+        icon: AcademicCapIcon,
+        articles: [
+            { slug: "add-your-first-company", icon: BuildingOffice2Icon },
+            { slug: "log-activity-and-warmth", icon: FireIcon },
+            { slug: "build-your-pipeline", icon: FunnelIcon },
+            { slug: "request-a-warm-intro", icon: ArrowsRightLeftIcon },
+            { slug: "import-your-contacts", icon: ArrowDownTrayIcon },
         ],
     },
     {

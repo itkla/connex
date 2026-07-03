@@ -1,10 +1,12 @@
 import { getTranslations } from "next-intl/server";
 import {
     DOC_BLOCK_TYPES,
+    ILLUSTRATION_NAMES,
     type CardEntry,
     type DocBlock,
     type FaqEntry,
     type FeatureEntry,
+    type IllustrationName,
     type ShortcutEntry,
     type StepEntry,
     type WarmthBand,
@@ -174,6 +176,17 @@ function validateBlock(raw: unknown): DocBlock | null {
             ).filter((row) => row.length === columns.length);
             if (columns.length === 0 || rows.length === 0) return null;
             return { type: "table", title: asString(raw.title) ?? undefined, columns, rows };
+        }
+        case "illustration": {
+            const name = raw.name;
+            if (typeof name !== "string" || !(ILLUSTRATION_NAMES as readonly string[]).includes(name)) {
+                return null;
+            }
+            return {
+                type: "illustration",
+                name: name as IllustrationName,
+                caption: asString(raw.caption) ?? undefined,
+            };
         }
         default:
             return null;

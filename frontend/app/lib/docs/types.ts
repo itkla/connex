@@ -121,6 +121,35 @@ export type TableBlock = {
     rows: string[][];
 };
 
+/**
+ * The fixed set of on-brand UI illustrations the reader can render. Each name
+ * maps to a static, theme-aware component in
+ * {@link ../../components/docs/illustrations}. Keeping this a closed list means
+ * content can only reference illustrations that actually exist.
+ */
+export const ILLUSTRATION_NAMES = [
+    "warmth-scale",
+    "contact-card",
+    "pipeline-board",
+    "relationship-map",
+    "dashboard-overview",
+    "activity-timeline",
+    "import-wizard",
+    "warm-intro-path",
+    "notification-inbox",
+    "global-search",
+] as const;
+
+/** A renderable illustration identifier. */
+export type IllustrationName = (typeof ILLUSTRATION_NAMES)[number];
+
+/** An on-brand illustration of a Connex screen or concept, framed like a snapshot. */
+export type IllustrationBlock = {
+    type: "illustration";
+    name: IllustrationName;
+    caption?: string;
+};
+
 /** Any renderable docs content block. */
 export type DocBlock =
     | ProseBlock
@@ -132,7 +161,8 @@ export type DocBlock =
     | FaqBlock
     | CardsBlock
     | WarmthLegendBlock
-    | TableBlock;
+    | TableBlock
+    | IllustrationBlock;
 
 /** The set of literal `type` discriminants a {@link DocBlock} can carry. */
 export const DOC_BLOCK_TYPES: ReadonlySet<DocBlock["type"]> = new Set([
@@ -146,4 +176,5 @@ export const DOC_BLOCK_TYPES: ReadonlySet<DocBlock["type"]> = new Set([
     "cards",
     "warmthLegend",
     "table",
+    "illustration",
 ]);

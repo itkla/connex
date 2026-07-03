@@ -8,12 +8,14 @@ import {
 } from "@heroicons/react/24/outline";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { headingId } from "@/app/lib/docs/headings";
+import { ILLUSTRATIONS } from "@/app/components/docs/illustrations";
 import type {
     CalloutBlock,
     CardsBlock,
     DocBlock,
     FaqBlock,
     FeatureListBlock,
+    IllustrationBlock,
     ProseBlock,
     ShortcutsBlock,
     StepsBlock,
@@ -314,6 +316,29 @@ function Heading({ text, level, id }: { text: string; level: 2 | 3; id: string }
     );
 }
 
+function Illustration({ block }: { block: IllustrationBlock }) {
+    const Component = ILLUSTRATIONS[block.name];
+    return (
+        <figure>
+            <div className="overflow-hidden rounded-2xl border border-border bg-card">
+                <div className="flex items-center gap-1.5 border-b border-border bg-muted/40 px-4 py-2.5">
+                    <span className="size-2 rounded-full bg-muted-foreground/30" aria-hidden="true" />
+                    <span className="size-2 rounded-full bg-muted-foreground/30" aria-hidden="true" />
+                    <span className="size-2 rounded-full bg-muted-foreground/30" aria-hidden="true" />
+                </div>
+                <div className="p-5 sm:p-6">
+                    <Component />
+                </div>
+            </div>
+            {block.caption ? (
+                <figcaption className="mt-2.5 text-center text-xs text-muted-foreground">
+                    {block.caption}
+                </figcaption>
+            ) : null}
+        </figure>
+    );
+}
+
 /**
  * Render a validated {@link DocBlock} array as the body of a docs article.
  * Switches on each block's discriminated `type`; heading anchors are computed
@@ -351,6 +376,8 @@ export default function DocBlocks({ blocks }: { blocks: DocBlock[] }) {
                         return <WarmthLegend key={index} block={block} />;
                     case "table":
                         return <DataTable key={index} block={block} />;
+                    case "illustration":
+                        return <Illustration key={index} block={block} />;
                     default:
                         return null;
                 }
