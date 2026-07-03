@@ -25,6 +25,11 @@ spring:
 connex:
     cors:
         allowed-origins: ${CONNEX_CORS_ALLOWED_ORIGINS:http://localhost:3000}
+    websocket:
+        # Max concurrent realtime WebSocket connections per authenticated user on /api/ws.
+        # Bounds an authenticated connection-flood on the shared single-JVM broker without
+        # limiting normal multi-tab / multi-device use; excess sockets are closed on connect.
+        max-sessions-per-user: ${CONNEX_WS_MAX_SESSIONS_PER_USER:10}
     workspaces:
         # When false, new registrations and the create endpoint cannot make workspaces
         # (invite-only mode); users onboard by accepting an invite instead.

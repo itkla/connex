@@ -18,6 +18,7 @@ import org.springframework.web.socket.handler.WebSocketHandlerDecorator;
 import org.springframework.web.socket.server.support.HttpSessionHandshakeInterceptor;
 
 import lombok.RequiredArgsConstructor;
+import ooo.klae.connex.backend.notifications.WebSocketConnectionLimiter;
 import ooo.klae.connex.backend.notifications.WebSocketSessionExpiryInterceptor;
 import ooo.klae.connex.backend.notifications.WebSocketSessionRegistry;
 
@@ -34,7 +35,8 @@ import ooo.klae.connex.backend.notifications.WebSocketSessionRegistry;
  * <p>The handshake records the authenticating HTTP session id so
  * {@link WebSocketSessionRegistry} can force-close sockets when that session
  * ends, and {@link WebSocketSessionExpiryInterceptor} enforces lazy
- * ({@code expireNow()}) session kills per inbound frame.
+ * ({@code expireNow()}) session kills per inbound frame. {@link WebSocketConnectionLimiter}
+ * caps concurrent sockets per principal so one account cannot flood the shared broker.
  */
 @Configuration
 @EnableWebSocketMessageBroker
@@ -42,12 +44,15 @@ import ooo.klae.connex.backend.notifications.WebSocketSessionRegistry;
 public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
 
     private static final long[] HEARTBEAT_MILLIS = {10_000, 10_000};
+    private static final CloseStatus CONNECTION_LIMIT_CLOSE_STATUS =
+            new CloseStatus(4029, "connection limit exceeded");
 
     @Value("${connex.cors.allowed-origins}")
     private String[] allowedOrigins;
 
     private final WebSocketSessionRegistry sessionRegistry;
     private final WebSocketSessionExpiryInterceptor sessionExpiryInterceptor;
+    private final WebSocketConnectionLimiter connectionLimiter;
 
     @Override
     public void registerStompEndpoints(StompEndpointRegistry registry) {
@@ -75,17 +80,22 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
         registry.addDecoratorFactory(handler -> new WebSocketHandlerDecorator(handler) {
             @Override
             public void afterConnectionEstablished(WebSocketSession session) throws Exception {
-                if (session.getAttributes()
+                boolean admitted = connectionLimiter.tryRegister(session);
+                if (admitted && session.getAttributes()
                         .get(HttpSessionHandshakeInterceptor.HTTP_SESSION_ID_ATTR_NAME)
                         instanceof String httpSessionId) {
                     sessionRegistry.register(httpSessionId, session);
                 }
                 super.afterConnectionEstablished(session);
+                if (!admitted) {
+                    session.close(CONNECTION_LIMIT_CLOSE_STATUS);
+                }
             }
 
             @Override
             public void afterConnectionClosed(WebSocketSession session, CloseStatus closeStatus)
                     throws Exception {
+                connectionLimiter.remove(session);
                 if (session.getAttributes()
                         .get(HttpSessionHandshakeInterceptor.HTTP_SESSION_ID_ATTR_NAME)
                         instanceof String httpSessionId) {

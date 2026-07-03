@@ -7,6 +7,13 @@ const NOTIFICATIONS_QUEUE = "/user/queue/notifications";
 const RECONNECT_DELAY_MS = 5_000;
 const HEARTBEAT_MS = 10_000;
 
+/**
+ * Close code the backend sends when rejecting a socket that exceeds the per-user
+ * connection cap. The client stops reconnecting on it rather than looping every
+ * few seconds against a limit it cannot clear (see backend `WebSocketConfig`).
+ */
+const CONNECTION_LIMIT_CLOSE_CODE = 4029;
+
 /** Connection state of the realtime notification socket. */
 export type RealtimeStatus = "connecting" | "connected" | "disconnected";
 
@@ -99,7 +106,12 @@ export function createNotificationSocket(handlers: NotificationSocketHandlers): 
             });
             handlers.onStatusChange?.("connected");
         },
-        onWebSocketClose: () => handlers.onStatusChange?.("disconnected"),
+        onWebSocketClose: (event: CloseEvent) => {
+            handlers.onStatusChange?.("disconnected");
+            if (event.code === CONNECTION_LIMIT_CLOSE_CODE) {
+                void client.deactivate();
+            }
+        },
         onStompError: () => handlers.onStatusChange?.("disconnected"),
     });
 
