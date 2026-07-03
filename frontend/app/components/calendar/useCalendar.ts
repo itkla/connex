@@ -77,6 +77,8 @@ export interface UseCalendar {
     selectDay: (day: Date) => void;
     /** Drills into a day: anchors it and switches to the day view — the narrow-screen day tap. */
     openDay: (day: Date) => void;
+    /** Jumps the calendar to a date, keeping the current view — powers go-to-date. */
+    goToDate: (date: Date) => void;
     goPrev: () => void;
     goNext: () => void;
     goToday: () => void;
@@ -138,6 +140,18 @@ export function useCalendar(): UseCalendar {
         setAnchor(normalized);
         setViewState('day');
     }, []);
+
+    const goToDate = useCallback(
+        (date: Date) => {
+            const normalized = startOfDay(date);
+            setNavDirection(
+                normalized.getTime() === anchor.getTime() ? 0 : normalized > anchor ? 1 : -1,
+            );
+            setSelectedDayState(normalized);
+            setAnchor(normalized);
+        },
+        [anchor],
+    );
 
     const setView = useCallback(
         (next: CalendarView) => {
@@ -208,6 +222,7 @@ export function useCalendar(): UseCalendar {
             setSelectedDay,
             selectDay,
             openDay,
+            goToDate,
             goPrev,
             goNext,
             goToday,
@@ -225,6 +240,7 @@ export function useCalendar(): UseCalendar {
             setSelectedDay,
             selectDay,
             openDay,
+            goToDate,
             goPrev,
             goNext,
             goToday,

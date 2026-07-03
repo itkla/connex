@@ -34,11 +34,15 @@ export default function QuickCreateHost({
     persons,
     deals,
     currentUserId,
+    menuOpen,
+    onMenuOpenChange,
 }: {
     selectedDay: Date;
     persons: Contact[];
     deals: Deal[];
     currentUserId: number;
+    menuOpen?: boolean;
+    onMenuOpenChange?: (open: boolean) => void;
 }) {
     const t = useTranslations('Calendar');
     const [openKind, setOpenKind] = useState<CreateKind>(null);
@@ -64,7 +68,7 @@ export default function QuickCreateHost({
 
     return (
         <>
-            <DropdownMenu>
+            <DropdownMenu open={menuOpen} onOpenChange={onMenuOpenChange}>
                 <DropdownMenuTrigger asChild>
                     <button
                         type="button"
