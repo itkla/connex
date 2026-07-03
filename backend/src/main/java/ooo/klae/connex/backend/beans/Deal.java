@@ -1,5 +1,7 @@
 package ooo.klae.connex.backend.beans;
 
+import java.util.List;
+
 import com.fasterxml.jackson.annotation.JsonIdentityInfo;
 import com.fasterxml.jackson.annotation.ObjectIdGenerators;
 
@@ -40,6 +42,7 @@ public class Deal {
     private Boolean won; // outcome when closed: TRUE=won, FALSE=lost, NULL=open. closed_at follows this.
     private String createdAt;
     private String updatedAt;
+    private List<EntityReference> references; // @/# references resolved from closedReason
 
     public int getId() {
         return id;
