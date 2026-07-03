@@ -126,4 +126,32 @@ class DealMentionTest extends AbstractServiceTest {
         assertEquals(1, fetched.getReferences().size());
         assertEquals(mentioned.getId(), fetched.getReferences().get(0).getRefId());
     }
+
+    /**
+     * Creating an already-closed deal with a mention in the reason syncs + notifies too.
+     */
+    @Test
+    void create_closedDealWithMentionInReason_notifiesAndHydrates() {
+        Company company = newCompany();
+        Pipeline pipeline = newPipeline();
+        Stage stage = newStage(pipeline, 0);
+        User mentioned = newUser();
+
+        Deal deal = new Deal();
+        deal.setName("Deal " + unique());
+        deal.setValue(1000.0);
+        deal.setCurrency("JPY");
+        deal.setPipelineId(pipeline.getId());
+        deal.setStageId(stage.getId());
+        deal.setCompanyId(company.getId());
+        deal.setWon(false);
+        deal.setClosedReason("Lost — " + mention("Mentioned", mentioned));
+
+        Deal created = dealService.create(deal);
+
+        assertNotNull(created.getReferences());
+        assertEquals(1, created.getReferences().size());
+        assertEquals(mentioned.getId(), created.getReferences().get(0).getRefId());
+        assertEquals(1, mentions(mentioned.getId()).size());
+    }
 }

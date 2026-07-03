@@ -298,6 +298,7 @@ public class DealService {
      * @param deal
      * @return
      */
+    @Transactional
     @RequirePermission(Permission.DEAL_CREATE)
     public Deal create(Deal deal) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
@@ -313,7 +314,8 @@ public class DealService {
             auditService.diff(null, deal, AUDIT_FIELDS));
         notificationChanges.publish(workspaceId, "deal", deal.getId());
         ruleTriggers.publish(workspaceId, "deal", deal.getId(), "deal.created");
-        return deal;
+        syncClosedReasonMentions(workspaceId, deal);
+        return hydrateReferences(workspaceId, deal);
     }
 
     /**
@@ -322,6 +324,7 @@ public class DealService {
      * @param deal
      * @return
      */
+    @Transactional
     @RequirePermission(Permission.DEAL_UPDATE)
     public Deal update(int id, Deal deal) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();

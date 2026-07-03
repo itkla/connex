@@ -66,7 +66,7 @@ public class DealDto {
     @Size(max = 32)
     private String closedAt;
 
-    @Size(max = 255)
+    @Size(max = 1000)
     private String closedReason;
 
     // Explicit outcome: TRUE=won, FALSE=lost, NULL=open. Client-settable; the server
