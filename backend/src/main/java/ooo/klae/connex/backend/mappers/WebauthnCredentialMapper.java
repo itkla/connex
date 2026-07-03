@@ -2,6 +2,8 @@ package ooo.klae.connex.backend.mappers;
 
 import java.util.List;
 
+import org.apache.ibatis.annotations.Param;
+
 import ooo.klae.connex.backend.webauthn.WebauthnCredentialRow;
 
 /**
@@ -14,5 +16,6 @@ public interface WebauthnCredentialMapper {
     int insert(WebauthnCredentialRow row);
     /** Updates the mutable fields written on each successful assertion (counter, backup/uv state, last used, label). */
     int updateMutable(WebauthnCredentialRow row);
+    int updateLabel(@Param("credentialId") byte[] credentialId, @Param("label") String label);
     int delete(byte[] credentialId);
 }
