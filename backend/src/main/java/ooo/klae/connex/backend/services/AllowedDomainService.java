@@ -57,6 +57,17 @@ public class AllowedDomainService {
         return allowedDomainMapper.isAllowed(workspaceId, domainOf(email));
     }
 
+    /**
+     * Whether the workspace restricts self-serve joins to an email-domain allowlist. When it does,
+     * the domain gate is only meaningful if the joiner's email is verified, so callers pair this
+     * with an email-verification check.
+     * @param workspaceId the workspace to check
+     * @return true when the workspace has at least one allowed domain configured
+     */
+    public boolean hasRestrictions(int workspaceId) {
+        return allowedDomainMapper.countByWorkspace(workspaceId) > 0;
+    }
+
     private static String normalizeDomain(String domainRaw) {
         if (domainRaw == null || domainRaw.isBlank()) {
             throw new BadRequestException("Domain is required");

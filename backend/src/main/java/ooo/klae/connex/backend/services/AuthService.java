@@ -46,6 +46,7 @@ public class AuthService {
     private final SessionRegistry sessionRegistry;
     private final LoginRateLimiter loginRateLimiter;
     private final ClientIpResolver clientIpResolver;
+    private final RegistrationVerificationService registrationVerificationService;
     private final SecurityContextRepository securityContextRepository = new HttpSessionSecurityContextRepository();
 
     @Value("${connex.signup.mode:open}")
@@ -58,11 +59,13 @@ public class AuthService {
      * ({@code UserController.createUser}) calls {@link #register} directly and is unaffected.
      */
     @Transactional
-    public User registerSelfService(RegisterDto request) {
+    public User registerSelfService(RegisterDto request, String requestIp) {
         if (signupMode == null || !"open".equalsIgnoreCase(signupMode.trim())) {
             throw new ForbiddenException("Self-service registration is disabled on this instance");
         }
-        return register(request);
+        User user = register(request);
+        registrationVerificationService.issue(user, requestIp);
+        return user;
     }
 
     /**

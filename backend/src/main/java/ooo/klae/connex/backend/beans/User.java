@@ -32,6 +32,7 @@ public class User implements org.springframework.security.core.userdetails.UserD
     private String username;
     private String displayName;
     private String email;
+    private boolean emailVerified;
     private String timezone;
     @JsonIgnore
     private String passwordHash; // can be null
