@@ -56,12 +56,14 @@ export function proxy(request: NextRequest) {
         return NextResponse.next();
     }
 
-    // A logged-in user may legitimately follow a reset link (e.g. from another device),
-    // so let /auth/reset-password through instead of bouncing them to the dashboard.
+    // A logged-in user may legitimately follow a reset or email-verification link (e.g. right
+    // after registering, or from another device), so let those through instead of bouncing them
+    // to the dashboard.
     if (
         hasSession &&
         pathname.startsWith('/auth/') &&
         pathname !== '/auth/reset-password' &&
+        pathname !== '/auth/confirm-email' &&
         !searchParams.has('redirect')
     ) {
         return NextResponse.redirect(new URL('/dashboard', request.url));
