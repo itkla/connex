@@ -163,6 +163,26 @@ connex:
         scheduling-enabled: ${CONNEX_EMAIL_CHANGE_SCHEDULING_ENABLED:true}
         cleanup-delay-ms: ${CONNEX_EMAIL_CHANGE_CLEANUP_DELAY_MS:3600000}
         initial-delay-ms: ${CONNEX_EMAIL_CHANGE_INITIAL_DELAY_MS:3600000}
+    registration-verification:
+        # Registration email verification. When enabled, new self-service registrations start
+        # unverified and are emailed a link to prove they control their address; joining a
+        # domain-restricted workspace via a shareable invite link then requires a verified email,
+        # so the workspace domain allow-list can no longer be satisfied by an unverified (spoofable)
+        # registration address. Off by default (fully non-breaking): no tokens are issued and the
+        # redeem gate does not apply. email-enabled=true sends real mail over connex.mail.*; false
+        # keeps the dev fallback that only logs the link. base-url is the frontend origin used to
+        # build the link (never derived from a request header).
+        enabled: ${CONNEX_REGISTRATION_VERIFICATION_ENABLED:false}
+        token-expiry-minutes: ${CONNEX_REGISTRATION_VERIFICATION_TOKEN_EXPIRY_MINUTES:1440}
+        email-enabled: ${CONNEX_REGISTRATION_VERIFICATION_EMAIL_ENABLED:false}
+        # Dev-only: log the raw verification link. Never enable where logs are accessible.
+        log-link: ${CONNEX_REGISTRATION_VERIFICATION_LOG_LINK:false}
+        base-url: ${CONNEX_REGISTRATION_VERIFICATION_BASE_URL:http://localhost:3000}
+        request-window-seconds: ${CONNEX_REGISTRATION_VERIFICATION_REQUEST_WINDOW_SECONDS:900}
+        max-requests: ${CONNEX_REGISTRATION_VERIFICATION_MAX_REQUESTS:5}
+        scheduling-enabled: ${CONNEX_REGISTRATION_VERIFICATION_SCHEDULING_ENABLED:true}
+        cleanup-delay-ms: ${CONNEX_REGISTRATION_VERIFICATION_CLEANUP_DELAY_MS:3600000}
+        initial-delay-ms: ${CONNEX_REGISTRATION_VERIFICATION_INITIAL_DELAY_MS:3600000}
 
 mybatis:
     mapper-locations: classpath:mappers/*.xml

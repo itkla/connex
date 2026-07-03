@@ -2,6 +2,7 @@ package ooo.klae.connex.backend.services;
 
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -29,14 +30,15 @@ class SignupModeTest {
     @Test
     void selfServiceRegister_refusedWhenSignupModeNotOpen() {
         assertThrows(ForbiddenException.class,
-            () -> authService.registerSelfService(dto("nope_user", "nope@example.com")));
+            () -> authService.registerSelfService(dto("nope_user", "nope@example.com"), "127.0.0.1"));
     }
 
     @Test
     void adminCreatePath_isExemptWhenSignupModeNotOpen() {
-        User created = authService.register(dto("admin_made", "admin.made@example.com"));
+        User created = authService.register(dto("admin_made", "admin.made@example.com"), true);
 
         assertNotNull(created.getId());
+        assertTrue(created.isEmailVerified(), "admin-created accounts are trusted and start verified");
     }
 
     private static RegisterDto dto(String username, String email) {

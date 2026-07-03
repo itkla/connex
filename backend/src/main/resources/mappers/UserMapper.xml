@@ -4,7 +4,7 @@
 <mapper namespace="ooo.klae.connex.backend.mappers.UserMapper">
 
   <sql id="userColumns">
-    id, username, display_name, email, password_hash, timezone, last_login_at, profile_picture_url, created_at, updated_at
+    id, username, display_name, email, email_verified, password_hash, timezone, last_login_at, profile_picture_url, created_at, updated_at
   </sql>
 
   <select id="getAllUsers" resultType="User">
@@ -42,8 +42,8 @@
   </select>
 
   <insert id="insert" useGeneratedKeys="true" keyProperty="id">
-    INSERT INTO app_user (username, display_name, email, password_hash, timezone, profile_picture_url)
-    VALUES (#{username}, #{displayName}, #{email}, #{passwordHash}, COALESCE(#{timezone}, 'UTC'), #{profilePictureUrl})
+    INSERT INTO app_user (username, display_name, email, email_verified, password_hash, timezone, profile_picture_url)
+    VALUES (#{username}, #{displayName}, #{email}, #{emailVerified}, #{passwordHash}, COALESCE(#{timezone}, 'UTC'), #{profilePictureUrl})
   </insert>
 
   <update id="update">
@@ -74,6 +74,12 @@
   <update id="updateEmail">
     UPDATE app_user
     SET email = #{email}
+    WHERE id = #{id}
+  </update>
+
+  <update id="markEmailVerified">
+    UPDATE app_user
+    SET email_verified = TRUE
     WHERE id = #{id}
   </update>
 

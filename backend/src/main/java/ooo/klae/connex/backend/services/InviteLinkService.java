@@ -17,6 +17,7 @@ import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.InviteLinkMapper;
+import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
 import ooo.klae.connex.backend.tenant.Permission;
 
@@ -36,9 +37,11 @@ public class InviteLinkService {
 
     private final InviteLinkMapper inviteLinkMapper;
     private final WorkspaceMapper workspaceMapper;
+    private final UserMapper userMapper;
     private final AuditService auditService;
     private final WorkspaceService workspaceService;
     private final AllowedDomainService allowedDomainService;
+    private final RegistrationVerificationService registrationVerificationService;
 
     /** Creates a shareable link. Defaults: member role, 14-day expiry, unlimited uses. */
     public InviteLinkDto createLink(int workspaceId, User actor, String roleRaw,
@@ -101,6 +104,16 @@ public class InviteLinkService {
         // domain allowed. A past redemption record is history, not a standing grant.
         if (!allowedDomainService.isJoinAllowed(workspaceId, user.getEmail())) {
             throw new ForbiddenException("Your email domain isn't permitted to join this workspace");
+        }
+
+        // A domain allowlist is only trustworthy if the joiner's email is verified — otherwise
+        // an unverified account could register with an allowed-domain address it doesn't own and
+        // slip past the domain gate. Enforced only when registration verification is enabled.
+        if (registrationVerificationService.isEnabled() && allowedDomainService.hasRestrictions(workspaceId)) {
+            User fresh = userMapper.getUserById(user.getId());
+            if (fresh == null || !fresh.isEmailVerified()) {
+                throw new ForbiddenException("Verify your email address before joining this workspace");
+            }
         }
 
         // Atomically claim a use, rejecting revoked / expired / exhausted links.

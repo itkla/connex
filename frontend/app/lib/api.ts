@@ -358,6 +358,27 @@ export function resetPassword(payload: Types.ResetPasswordPayload) {
     return postJson<Types.AuthResponse>("/api/auth/reset-password", payload);
 }
 
+/**
+ * Checks whether a registration email-verification token is still valid.
+ * @param token - The raw token from the verification link
+ * @returns A promise resolving to the validation result
+ */
+export function validateEmailVerificationToken(token: string, init: RequestInit = {}) {
+    return getJson<Types.ResetTokenValidation>(
+        `/api/auth/verify-email/validate?token=${encodeURIComponent(token)}`,
+        init,
+    );
+}
+
+/**
+ * Marks the account behind a valid verification token as email-verified.
+ * @param token - The raw token from the verification link
+ * @returns A promise resolving to the confirmation message
+ */
+export function confirmEmailVerification(token: string) {
+    return postJson<Types.AuthResponse>("/api/auth/verify-email/confirm", { token });
+}
+
 /*
 * == User profile management
 */

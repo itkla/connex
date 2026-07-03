@@ -27,6 +27,7 @@ public interface UserMapper {
     int updateProfilePictureUrl(@Param("id") int id, @Param("profilePictureUrl") String profilePictureUrl);
     int updateDisplayName(@Param("id") int id, @Param("displayName") String displayName);
     int updateEmail(@Param("id") int id, @Param("email") String email);
+    int markEmailVerified(int id);
     int updateUsername(@Param("id") int id, @Param("username") String username);
     int updatePasswordHash(@Param("id") int id, @Param("passwordHash") String passwordHash);
     int updateTimezone(@Param("id") int id, @Param("timezone") String timezone);

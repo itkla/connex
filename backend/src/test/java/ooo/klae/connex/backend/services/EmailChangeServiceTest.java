@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -73,6 +74,8 @@ class EmailChangeServiceTest extends AbstractServiceTest {
         emailChangeService.confirmChange(email.lastToken);
 
         assertEquals(newEmail, userMapper.getUserById(currentUser.getId()).getEmail());
+        assertTrue(userMapper.getUserById(currentUser.getId()).isEmailVerified(),
+            "redeeming the change token proves control of the new address, so the account is verified");
         assertFalse(emailChangeService.validateToken(email.lastToken), "a consumed token must not be reusable");
     }
 
