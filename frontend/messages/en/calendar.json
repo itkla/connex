@@ -51,6 +51,7 @@
     "a11yCancelled": "Reschedule of {name} cancelled.",
     "openRecord": "Open record",
     "quickCreate": "Create",
+    "createAtTime": "Add at this time",
     "newTask": "New task",
     "newActivity": "New activity",
     "newDeal": "New deal",
