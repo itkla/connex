@@ -244,6 +244,11 @@ public class WorkspaceService {
         if (role == null) {
             return EnumSet.noneOf(Permission.class);
         }
+        return builtInPermissions(role);
+    }
+
+    /** The fixed permission bundle backing a built-in role. */
+    private static Set<Permission> builtInPermissions(Role role) {
         return switch (role) {
             case OWNER -> OWNER_PERMISSIONS;
             case ADMIN -> ADMIN_PERMISSIONS;
@@ -371,7 +376,10 @@ public class WorkspaceService {
 
     /**
      * Changes a member's role. Admins manage member/admin; only an owner may grant
-     * ownership, and the last owner cannot be demoted.
+     * ownership, and the last owner cannot be demoted. The actor may only assign a
+     * built-in role whose entire permission bundle they themselves hold, so a
+     * delegate holding {@code MEMBER_MANAGE} alone cannot promote anyone (including
+     * themselves) to a role that confers permissions they lack.
      */
     public MemberDto changeMemberRole(int workspaceId, int actorId, int targetUserId, String roleRaw) {
         requirePermission(workspaceId, actorId, Permission.MEMBER_MANAGE);
@@ -389,6 +397,7 @@ public class WorkspaceService {
                 throw new BadRequestException("A workspace must keep at least one owner");
             }
         }
+        requireGrantable(workspaceId, actorId, builtInPermissions(newRole));
         workspaceMapper.updateMemberRole(workspaceId, targetUserId, newRole.name().toLowerCase());
         auditService.record("workspace.member.role", "workspace", workspaceId, target.getDisplayName(),
                 "Changed " + target.getDisplayName() + " to " + newRole.name().toLowerCase(), null);

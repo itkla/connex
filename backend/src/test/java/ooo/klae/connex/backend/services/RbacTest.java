@@ -129,4 +129,19 @@ class RbacTest extends AbstractServiceTest {
         assertThrows(ForbiddenException.class,
             () -> workspaceService.assignCustomRole(ws.getId(), delegate.getId(), delegate.getId(), superRole.getId()));
     }
+
+    @Test
+    void memberManageDelegateCannotPromoteToBuiltInAdmin() {
+        WorkspaceMembershipDto ws = workspaceService.createWorkspace("Promote Ceiling WS", currentUser.getId());
+        User delegate = newUser();
+        workspaceMapper.addMember(ws.getId(), delegate.getId(), "member");
+        WorkspaceRole hrRole = roleService.createRole(ws.getId(), currentUser.getId(), "HR",
+            List.of("MEMBER_MANAGE"));
+        workspaceService.assignCustomRole(ws.getId(), currentUser.getId(), delegate.getId(), hrRole.getId());
+
+        assertThrows(ForbiddenException.class,
+            () -> workspaceService.changeMemberRole(ws.getId(), delegate.getId(), delegate.getId(), "admin"));
+
+        assertFalse(workspaceService.permissionsFor(ws.getId(), delegate.getId()).contains(Permission.WORKSPACE_SETTINGS));
+    }
 }
