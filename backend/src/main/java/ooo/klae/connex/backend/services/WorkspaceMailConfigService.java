@@ -3,6 +3,7 @@ package ooo.klae.connex.backend.services;
 import java.net.InetAddress;
 import java.net.UnknownHostException;
 import java.util.Map;
+import java.util.Set;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -37,6 +38,8 @@ import ooo.klae.connex.backend.tenant.Permission;
 public class WorkspaceMailConfigService {
 
     private static final Logger log = LoggerFactory.getLogger(WorkspaceMailConfigService.class);
+
+    private static final Set<Integer> ALLOWED_SMTP_PORTS = Set.of(25, 465, 587, 2525);
 
     private final MailConfigMapper mailConfigMapper;
     private final WorkspaceService workspaceService;
@@ -77,7 +80,7 @@ public class WorkspaceMailConfigService {
             if (isBlank(request.getFromAddress())) {
                 throw new BadRequestException("A from address is required to enable workspace email");
             }
-            validateHost(request.getHost());
+            validateTransport(request.getHost(), request.getPort());
         }
 
         WorkspaceMailConfig existing = mailConfigMapper.findByWorkspace(workspaceId);
@@ -131,11 +134,12 @@ public class WorkspaceMailConfigService {
         if (actor == null || isBlank(actor.getEmail())) {
             return MailTestResult.failure("Your account has no email address to send a test to");
         }
+        ResolvedMailConfig config = mailConfigResolver.resolveWorkspaceOnly(workspaceId);
+        if (config == null || !config.usable()) {
+            return MailTestResult.failure("Save an enabled SMTP configuration for this workspace first");
+        }
+        validateTransport(config.host(), config.port());
         try {
-            ResolvedMailConfig config = mailConfigResolver.resolveWorkspaceOnly(workspaceId);
-            if (config == null || !config.usable()) {
-                return MailTestResult.failure("Save an enabled SMTP configuration for this workspace first");
-            }
             String body = templateRenderer.render("test", "en", Map.of("recipient", actor.getEmail()));
             mailService.sendNow(config, MailMessage.html(actor.getEmail(), "Connex email test", body));
             auditService.record("workspace.mail_config.test", "workspace", workspaceId, actor.getEmail(),
@@ -147,21 +151,34 @@ public class WorkspaceMailConfigService {
         }
     }
 
-    private void validateHost(String host) {
+    /**
+     * Guards the SMTP transport against being pointed at internal infrastructure (SSRF).
+     * Restricts the port to standard SMTP submission ports and rejects the host if <em>any</em>
+     * of its resolved addresses is private/loopback/link-local/multicast. Re-run at send time
+     * (not only at save) so a hostname re-pointed at an internal address after saving — DNS
+     * rebinding — is caught before the connection is opened. Skipped when internal hosts are
+     * explicitly allowed for on-prem relays.
+     */
+    private void validateTransport(String host, int port) {
         if (mailProperties.isAllowInternalHosts()) {
             return;
         }
-        InetAddress address;
+        if (!ALLOWED_SMTP_PORTS.contains(port)) {
+            throw new BadRequestException("SMTP port must be one of 25, 465, 587, or 2525");
+        }
+        InetAddress[] addresses;
         try {
-            address = InetAddress.getByName(host.trim());
+            addresses = InetAddress.getAllByName(host.trim());
         } catch (UnknownHostException e) {
             throw new BadRequestException("The SMTP host could not be resolved");
         }
-        if (address.isLoopbackAddress() || address.isAnyLocalAddress()
-                || address.isSiteLocalAddress() || address.isLinkLocalAddress()
-                || address.isMulticastAddress()) {
-            throw new BadRequestException(
-                    "The SMTP host must be a public server; private and loopback addresses are not allowed");
+        for (InetAddress address : addresses) {
+            if (address.isLoopbackAddress() || address.isAnyLocalAddress()
+                    || address.isSiteLocalAddress() || address.isLinkLocalAddress()
+                    || address.isMulticastAddress()) {
+                throw new BadRequestException(
+                        "The SMTP host must be a public server; private and loopback addresses are not allowed");
+            }
         }
     }
 
