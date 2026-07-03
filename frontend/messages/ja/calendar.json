@@ -59,6 +59,17 @@
     "noUpcoming": "今後の予定はありません",
     "past": "過去",
     "emptyPeriod": "予定はありません",
-    "emptyPeriodHint": "追加したタスク・打ち合わせ・案件がここに表示されます。"
+    "emptyPeriodHint": "追加したタスク・打ち合わせ・案件がここに表示されます。",
+    "warmthHot": "活発",
+    "warmthWarm": "良好",
+    "warmthCool": "停滞",
+    "warmthCold": "疎遠",
+    "trendRising": "上昇中",
+    "trendSteady": "安定",
+    "trendCooling": "低下中",
+    "lastTouch": "{count, plural, =0 {今日連絡} =1 {昨日連絡} other {#日前に連絡}}",
+    "neverTouched": "未接触",
+    "alreadyCold": "疎遠 — 再接触を",
+    "goesColdIn": "{count, plural, =0 {今日疎遠に} =1 {明日疎遠に} other {#日後に疎遠に}}"
   }
 }

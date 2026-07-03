@@ -6,7 +6,9 @@ import { ChevronDownIcon, CalendarDaysIcon } from '@heroicons/react/24/outline';
 
 import { cn } from '@/lib/utils';
 import { dayKeyOf, groupByDay, type CalendarEvent } from '@/app/lib/calendar';
+import type { RelationshipTemperature } from '@/app/lib/types';
 import EventChip from './EventChip';
+import { WARMTH_LABEL_KEY, isAtRisk, warmthContactId } from './warmth';
 
 interface DayGroup {
     key: string;
@@ -30,11 +32,13 @@ export default function AgendaView({
     events,
     today,
     locale,
+    temperatureByContact,
     onOpenEvent,
 }: {
     events: CalendarEvent[];
     today: Date;
     locale: string;
+    temperatureByContact: Map<number, RelationshipTemperature>;
     onOpenEvent: (event: CalendarEvent) => void;
 }) {
     const t = useTranslations('Calendar');
@@ -71,16 +75,23 @@ export default function AgendaView({
                 )}
             </header>
             <ul className="flex flex-col gap-0.5 pb-2">
-                {group.events.map((event) => (
-                    <li key={event.id}>
-                        <EventChip
-                            event={event}
-                            variant="row"
-                            timeLabel={event.allDay ? undefined : timeFmt.format(event.startMs)}
-                            onClick={() => onOpenEvent(event)}
-                        />
-                    </li>
-                ))}
+                {group.events.map((event) => {
+                    const contactId = warmthContactId(event);
+                    const temp = contactId != null ? temperatureByContact.get(contactId) : undefined;
+                    const atRisk = temp && isAtRisk(temp.band) ? temp.band : undefined;
+                    return (
+                        <li key={event.id}>
+                            <EventChip
+                                event={event}
+                                variant="row"
+                                timeLabel={event.allDay ? undefined : timeFmt.format(event.startMs)}
+                                warmthBand={atRisk}
+                                warmthLabel={atRisk ? t(WARMTH_LABEL_KEY[atRisk]) : undefined}
+                                onClick={() => onOpenEvent(event)}
+                            />
+                        </li>
+                    );
+                })}
             </ul>
         </section>
     );
