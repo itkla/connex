@@ -3,6 +3,9 @@
     "title": "Calendar",
     "goToToday": "Today",
     "today": "Today",
+    "tomorrow": "Tomorrow",
+    "now": "Now",
+    "upNext": "Up next",
     "prevPeriod": "Previous",
     "nextPeriod": "Next",
     "viewSwitcherLabel": "Calendar view",
@@ -55,6 +58,7 @@
     "createFailed": "Could not create",
     "noUpcoming": "Nothing coming up",
     "past": "Past",
-    "emptyPeriod": "Nothing scheduled"
+    "emptyPeriod": "You're all clear",
+    "emptyPeriodHint": "New tasks, meetings and deals will show up here."
   }
 }

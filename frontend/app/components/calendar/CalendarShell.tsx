@@ -34,6 +34,7 @@ import EventDetailSheet from './EventDetailSheet';
 import QuickCreateHost from './QuickCreateHost';
 import GoToDateDialog from './GoToDateDialog';
 import CalendarShortcuts from './CalendarShortcuts';
+import UpNext from './UpNext';
 
 const SWIPE_OFFSET = 40;
 
@@ -418,6 +419,8 @@ export default function CalendarShell({
                         </div>
                     </header>
                 </Rise>
+
+                <UpNext events={visibleEvents} locale={locale} onOpenEvent={onOpenEvent} />
 
                 <Rise delay={0.06}>
                     <div ref={swipeRef} className="relative">
