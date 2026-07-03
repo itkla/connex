@@ -354,6 +354,8 @@
     "activityMentionDescription": "When a teammate @-mentions you in an activity.",
     "introductionMentionTitle": "Introduction mentions",
     "introductionMentionDescription": "When a teammate @-mentions you in an introduction.",
+    "dealMentionTitle": "Deal mentions",
+    "dealMentionDescription": "When a teammate @-mentions you in a deal's close reason.",
     "loadFailed": "Your notification preferences couldn't be loaded.",
     "saveFailed": "Your change couldn't be saved. Try again.",
     "retry": "Try again"

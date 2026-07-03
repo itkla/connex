@@ -2,7 +2,8 @@ import { Fragment, type CSSProperties } from 'react';
 import { CheckIcon, XMarkIcon, CheckCircleIcon, XCircleIcon } from '@heroicons/react/24/solid';
 import { getLocale, getTranslations } from 'next-intl/server';
 
-import { type Stage } from '@/app/lib/types';
+import { type Stage, type NoteReference } from '@/app/lib/types';
+import NoteContent from '@/app/components/activity/notes/NoteContent';
 import { formatDate, parseMysqlDateTime, startOfLocalDay } from '@/app/lib/utils';
 import { classifyStage, type DealOutcome } from '@/app/components/records/deals/dealOutcome';
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
@@ -19,6 +20,7 @@ export default async function DealLifecycleProgress({
     expectedCloseDate,
     closedAt,
     closedReason,
+    references,
 }: {
     stages: Stage[];
     currentStageId: number | null;
@@ -27,6 +29,7 @@ export default async function DealLifecycleProgress({
     expectedCloseDate?: string;
     closedAt?: string;
     closedReason?: string;
+    references?: NoteReference[];
 }) {
     const t = await getTranslations('DealsLifecycleProgress');
     const locale = await getLocale();
@@ -284,7 +287,7 @@ export default async function DealLifecycleProgress({
                         >
                             {isWon ? t('closedReasonWonTitle') : t('closedReasonLostTitle')}
                         </span>
-                        <p className="text-sm leading-snug">{closedReason}</p>
+                        <p className="text-sm leading-snug"><NoteContent content={closedReason} references={references} /></p>
                     </div>
                 </div>
             ) : null}

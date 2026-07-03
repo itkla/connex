@@ -40,6 +40,8 @@
     "activityMentionBody": "{actor} さんがアクティビティであなたにメンションしました。",
     "introductionMentionTitle": "新しいメンション",
     "introductionMentionBody": "{actor} さんが紹介であなたにメンションしました。",
+    "dealMentionTitle": "新しいメンション",
+    "dealMentionBody": "{actor} さんが取引であなたにメンションしました。",
     "taskDueTitle": "期限が近いタスク",
     "taskDueBody": "{task} の期限は {date} です。",
     "taskOverdueTitle": "期限切れのタスク",

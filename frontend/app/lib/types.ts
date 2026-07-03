@@ -575,6 +575,8 @@ export type Deal = {
     expectedCloseDate?: string;
     closedAt?: string;
     closedReason?: string;
+    /** Server-resolved @/# references parsed from `closedReason`; read-only, drives chip rendering. */
+    references?: NoteReference[];
     /** Outcome when closed: true = won, false = lost, null/undefined = open. closedAt follows this. */
     won?: boolean | null;
     createdAt: string;
