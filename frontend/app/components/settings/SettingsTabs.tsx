@@ -15,6 +15,7 @@ const TABS = [
     { key: "tabNotifications", href: "/settings/notifications" },
     { key: "tabEmail", href: "/settings/email" },
     { key: "tabMembership", href: "/settings/membership" },
+    { key: "tabSecurity", href: "/settings/security" },
 ] as const;
 
 export default function SettingsTabs() {

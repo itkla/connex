@@ -329,6 +329,14 @@ export type AuthResponse = {
     message: string;
 };
 
+export type Passkey = {
+    credentialId: string;
+    label: string;
+    transports: string[];
+    createdAt: string;
+    lastUsedAt: string | null;
+};
+
 export type ForgotPasswordPayload = {
     email: string;
 };

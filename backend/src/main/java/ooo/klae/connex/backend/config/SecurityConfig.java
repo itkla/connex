@@ -71,12 +71,17 @@ public class SecurityConfig {
             // cache it. The auth handshake is exempt since there is no session to protect pre-login.
             http.csrf(csrf -> csrf
                 .csrfTokenRequestHandler(new CsrfTokenRequestAttributeHandler())
-                .ignoringRequestMatchers("/api/auth/**"));
+                .ignoringRequestMatchers(
+                    "/api/auth/login", "/api/auth/register", "/api/auth/logout",
+                    "/api/auth/forgot-password", "/api/auth/reset-password",
+                    "/api/auth/webauthn/authenticate/**"));
         } else {
             http.csrf(AbstractHttpConfigurer::disable);
         }
         http
             .authorizeHttpRequests(auth -> auth
+                .requestMatchers("/api/auth/webauthn/authenticate/**").permitAll()
+                .requestMatchers("/api/auth/webauthn/**").authenticated()
                 .requestMatchers("/api/auth/**").permitAll()
                 .anyRequest().authenticated()
             )
