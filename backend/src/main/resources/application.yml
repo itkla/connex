@@ -19,6 +19,11 @@ spring:
         enabled: true
         baseline-on-migrate: true
         baseline-version: 0
+    session:
+        # Sessions are stored in MySQL via Spring Session JDBC. Flyway owns the schema
+        # (V38), so Spring Session must not try to create it.
+        jdbc:
+            initialize-schema: never
     jackson:
         default-property-inclusion: non_null
 
@@ -202,6 +207,9 @@ server:
     servlet:
         session:
             cookie:
+                # Keep the JSESSIONID name after moving to Spring Session (which otherwise defaults
+                # the cookie to SESSION); frontend/proxy.ts gates protected routes on JSESSIONID.
+                name: JSESSIONID
                 http-only: true
                 same-site: lax
                 # Fail closed: the session cookie carries the Secure attribute by default, so an

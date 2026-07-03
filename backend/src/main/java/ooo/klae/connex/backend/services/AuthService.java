@@ -7,7 +7,6 @@ import org.springframework.security.core.Authentication;
 import org.springframework.security.core.AuthenticationException;
 import org.springframework.security.core.context.SecurityContext;
 import org.springframework.security.core.context.SecurityContextHolder;
-import org.springframework.security.core.session.SessionRegistry;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.context.HttpSessionSecurityContextRepository;
 import org.springframework.security.web.context.SecurityContextRepository;
@@ -43,7 +42,6 @@ public class AuthService {
     private final AuthenticationManager authenticationManager;
     private final AuditService auditService;
     private final WorkspaceService workspaceService;
-    private final SessionRegistry sessionRegistry;
     private final LoginRateLimiter loginRateLimiter;
     private final ClientIpResolver clientIpResolver;
     private final RegistrationVerificationService registrationVerificationService;
@@ -194,11 +192,6 @@ public class AuthService {
         ));
         SecurityContextHolder.setContext(context);
         securityContextRepository.saveContext(context, httpRequest, httpResponse);
-
-        String sessionId = httpRequest.getSession().getId();
-        if (sessionRegistry.getSessionInformation(sessionId) == null) {
-            sessionRegistry.registerNewSession(sessionId, refreshedUser);
-        }
 
         Integer activeWorkspaceId = workspaceService.defaultWorkspaceIdFor(refreshedUser.getId());
         if (activeWorkspaceId != null) {
