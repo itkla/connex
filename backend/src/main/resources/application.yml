@@ -168,5 +168,7 @@ server:
             cookie:
                 http-only: true
                 same-site: lax
-                # Secure should be true wherever the app is served over HTTPS.
-                secure: ${CONNEX_SESSION_COOKIE_SECURE:false}
+                # Fail closed: the session cookie carries the Secure attribute by default, so an
+                # HTTPS deployment that forgets to configure this still never emits JSESSIONID over
+                # plaintext HTTP. Local HTTP dev opts out via the `dev` profile (application-dev.yml).
+                secure: ${CONNEX_SESSION_COOKIE_SECURE:true}
