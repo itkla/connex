@@ -110,6 +110,7 @@ export default function DayTimeline({
                     {onSlotCreate && (
                         <button
                             type="button"
+                            tabIndex={-1}
                             aria-label={t('createAtTime')}
                             onClick={(e) => {
                                 const rect = e.currentTarget.getBoundingClientRect();
