@@ -73,6 +73,10 @@ export interface UseCalendar {
     anchor: Date;
     selectedDay: Date;
     setSelectedDay: (day: Date, direction?: NavDirection) => void;
+    /** Highlights a day without moving the anchor or changing view — for the static desktop side pane. */
+    selectDay: (day: Date) => void;
+    /** Drills into a day: anchors it and switches to the day view — the narrow-screen day tap. */
+    openDay: (day: Date) => void;
     goPrev: () => void;
     goNext: () => void;
     goToday: () => void;
@@ -121,6 +125,18 @@ export function useCalendar(): UseCalendar {
         setNavDirection(direction);
         setSelectedDayState(normalized);
         setAnchor(normalized);
+    }, []);
+
+    const selectDay = useCallback((day: Date) => {
+        setSelectedDayState(startOfDay(day));
+    }, []);
+
+    const openDay = useCallback((day: Date) => {
+        const normalized = startOfDay(day);
+        setNavDirection(0);
+        setSelectedDayState(normalized);
+        setAnchor(normalized);
+        setViewState('day');
     }, []);
 
     const setView = useCallback(
@@ -190,6 +206,8 @@ export function useCalendar(): UseCalendar {
             anchor,
             selectedDay,
             setSelectedDay,
+            selectDay,
+            openDay,
             goPrev,
             goNext,
             goToday,
@@ -205,6 +223,8 @@ export function useCalendar(): UseCalendar {
             anchor,
             selectedDay,
             setSelectedDay,
+            selectDay,
+            openDay,
             goPrev,
             goNext,
             goToday,

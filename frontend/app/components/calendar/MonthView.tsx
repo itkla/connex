@@ -1,7 +1,7 @@
 'use client';
 
 import { useMemo, useState } from 'react';
-import { motion, useReducedMotion } from 'motion/react';
+import { useReducedMotion } from 'motion/react';
 import { useTranslations } from 'next-intl';
 import {
     DndContext,
@@ -33,9 +33,8 @@ import {
 import { WEEK_STARTS_ON } from './useCalendar';
 import { KIND_DOT_CLASS } from './constants';
 import EventChip from './EventChip';
-import DayAgendaList from './DayAgendaList';
+import DayTimeline from './DayTimeline';
 
-const SELECTED_LAYOUT_ID = 'calendar-selected-day';
 const DESKTOP_CHIP_LIMIT = 3;
 const DAY_DROP_PREFIX = 'day:';
 
@@ -170,7 +169,6 @@ export default function MonthView({
                                 events={eventsByDay.get(dayKeyOf(day)) ?? []}
                                 pendingIds={pendingIds}
                                 dragEnabled={dragEnabled}
-                                reduce={reduce}
                                 onSelectDay={onSelectDay}
                                 onOpenEvent={onOpenEvent}
                             />
@@ -178,18 +176,18 @@ export default function MonthView({
                     </div>
                 </div>
 
-                <aside className="rounded-2xl border border-border bg-card lg:sticky lg:top-2 lg:self-start">
+                <aside className="hidden overflow-hidden rounded-2xl border border-border bg-card lg:sticky lg:top-2 lg:block lg:self-start">
                     <header className="border-b border-border px-4 py-3">
                         <h2 className="text-sm font-semibold text-foreground">{selectedTitle}</h2>
                     </header>
-                    <div className="p-2">
-                        <DayAgendaList
-                            dayKey={selectedKey}
-                            events={selectedEvents}
-                            locale={locale}
-                            onOpenEvent={onOpenEvent}
-                        />
-                    </div>
+                    <DayTimeline
+                        day={selectedDay}
+                        events={selectedEvents}
+                        today={today}
+                        locale={locale}
+                        onOpenEvent={onOpenEvent}
+                        className="rounded-none border-0 bg-transparent"
+                    />
                 </aside>
             </div>
 
@@ -212,7 +210,6 @@ interface MonthCellProps {
     events: CalendarEvent[];
     pendingIds: Set<string>;
     dragEnabled: boolean;
-    reduce: boolean;
     onSelectDay: (day: Date) => void;
     onOpenEvent: (event: CalendarEvent) => void;
 }
@@ -225,7 +222,6 @@ function MonthCell({
     events,
     pendingIds,
     dragEnabled,
-    reduce,
     onSelectDay,
     onOpenEvent,
 }: MonthCellProps) {
@@ -255,19 +251,14 @@ function MonthCell({
                 type="button"
                 aria-label={t('selectDay', { date: key })}
                 onClick={() => onSelectDay(day)}
-                className="absolute inset-0 z-0 outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand/40"
+                className="absolute inset-0 z-0 outline-none transition-colors active:bg-brand/5 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand/40"
             />
 
             <div className="pointer-events-none relative z-10 flex flex-col gap-1">
                 <div className="flex items-center justify-between md:justify-end">
                     <span className="relative grid size-6 place-items-center">
                         {isSelected && (
-                            <motion.span
-                                layoutId={SELECTED_LAYOUT_ID}
-                                aria-hidden
-                                className="absolute inset-0 rounded-full bg-brand"
-                                transition={reduce ? { duration: 0 } : { type: 'spring', stiffness: 520, damping: 42 }}
-                            />
+                            <span aria-hidden className="absolute inset-0 rounded-full bg-brand" />
                         )}
                         {isToday && !isSelected && (
                             <span aria-hidden className="absolute inset-0 rounded-full ring-1 ring-inset ring-brand" />
