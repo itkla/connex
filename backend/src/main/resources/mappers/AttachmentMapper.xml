@@ -62,6 +62,11 @@
     LIMIT 1
   </select>
 
+  <select id="countUrlInOtherWorkspaces" resultType="int">
+    SELECT COUNT(*) FROM attachment
+    WHERE url = #{url} AND workspace_id != #{workspaceId}
+  </select>
+
   <select id="search" resultMap="AttachmentResult">
     SELECT <include refid="attachmentColumns"/>
     FROM attachment a

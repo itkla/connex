@@ -67,4 +67,15 @@ class AttachmentServiceTest extends AbstractServiceTest {
         assertNull(attachmentMapper.getByUrl(workspace.getId() + 100_000, url),
             "another workspace must not resolve this blob url");
     }
+
+    @Test
+    void create_rejectsUrlClaimedByAnotherWorkspace() {
+        String url = "/attachments/company/1-" + unique() + ".png";
+        attachmentService.create(attachmentWithUrl(url));
+
+        assertEquals(0, attachmentMapper.countUrlInOtherWorkspaces(workspace.getId(), url),
+            "the owning workspace is not counted as another");
+        assertEquals(1, attachmentMapper.countUrlInOtherWorkspaces(workspace.getId() + 100_000, url),
+            "a different workspace sees the url as foreign, so re-claiming it is rejected on create");
+    }
 }
