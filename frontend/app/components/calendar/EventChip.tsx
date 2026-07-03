@@ -5,7 +5,9 @@ import { ChevronRightIcon } from '@heroicons/react/24/outline';
 
 import { cn } from '@/lib/utils';
 import type { CalendarEvent } from '@/app/lib/calendar';
+import type { TemperatureBand } from '@/app/lib/types';
 import { KIND_CHIP_CLASS, KIND_DOT_CLASS } from './constants';
+import { WARMTH_DOT_CLASS } from './warmth';
 
 /**
  * `chip` — compact tinted pill for month desktop cells.
@@ -21,6 +23,10 @@ interface EventChipProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
     timeLabel?: string;
     /** Visual lift while this chip is the active drag source. */
     dragging?: boolean;
+    /** Warmth band of the linked contact — shows a small at-risk dot on the agenda row when set. */
+    warmthBand?: TemperatureBand;
+    /** Accessible label for the warmth dot (parent owns the locale). */
+    warmthLabel?: string;
 }
 
 /**
@@ -29,7 +35,7 @@ interface EventChipProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
  * @dnd-kit draggable listeners.
  */
 const EventChip = forwardRef<HTMLButtonElement, EventChipProps>(function EventChip(
-    { event, variant = 'chip', timeLabel, dragging = false, className, ...rest },
+    { event, variant = 'chip', timeLabel, dragging = false, warmthBand, warmthLabel, className, ...rest },
     ref,
 ) {
     if (variant === 'row') {
@@ -49,6 +55,16 @@ const EventChip = forwardRef<HTMLButtonElement, EventChipProps>(function EventCh
                 {timeLabel ? (
                     <span className="shrink-0 text-xs tabular-nums text-muted-foreground">{timeLabel}</span>
                 ) : null}
+                {warmthBand && (
+                    <>
+                        {warmthLabel && <span className="sr-only">{warmthLabel}</span>}
+                        <span
+                            className={cn('size-2 shrink-0 rounded-full', WARMTH_DOT_CLASS[warmthBand])}
+                            title={warmthLabel}
+                            aria-hidden
+                        />
+                    </>
+                )}
                 <ChevronRightIcon className="size-4 shrink-0 text-muted-foreground/60 transition-colors group-hover:text-muted-foreground" />
             </button>
         );

@@ -59,6 +59,17 @@
     "noUpcoming": "Nothing coming up",
     "past": "Past",
     "emptyPeriod": "You're all clear",
-    "emptyPeriodHint": "New tasks, meetings and deals will show up here."
+    "emptyPeriodHint": "New tasks, meetings and deals will show up here.",
+    "warmthHot": "Hot",
+    "warmthWarm": "Warm",
+    "warmthCool": "Cool",
+    "warmthCold": "Cold",
+    "trendRising": "Rising",
+    "trendSteady": "Steady",
+    "trendCooling": "Cooling",
+    "lastTouch": "{count, plural, =0 {Contacted today} =1 {Contacted yesterday} other {Contacted # days ago}}",
+    "neverTouched": "No contact yet",
+    "alreadyCold": "Cold — time to reconnect",
+    "goesColdIn": "{count, plural, =0 {Goes cold today} =1 {Goes cold tomorrow} other {Goes cold in # days}}"
   }
 }

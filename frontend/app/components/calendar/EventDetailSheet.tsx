@@ -14,11 +14,13 @@ import {
     SheetDescription,
     SheetFooter,
 } from '@/components/ui/sheet';
+import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import type { Contact, Deal } from '@/app/lib/types';
+import type { Contact, Deal, RelationshipTemperature } from '@/app/lib/types';
 import { addDays, dayKeyOf, startOfDay, type CalendarEvent } from '@/app/lib/calendar';
 import { KIND_ICON, KIND_LABEL_KEY } from './constants';
+import { WARMTH_CHIP_CLASS, WARMTH_DOT_CLASS, WARMTH_LABEL_KEY, WARMTH_TREND_KEY } from './warmth';
 
 function linkedIds(event: CalendarEvent): { personId: number | null; dealId: number | null } {
     switch (event.kind) {
@@ -34,9 +36,10 @@ function linkedIds(event: CalendarEvent): { personId: number | null; dealId: num
 
 /**
  * Bottom-sheet detail for a tapped event. Shows kind, localized date/time, linked
- * contact/deal, and quick actions: complete (tasks), reschedule chips + a date picker
- * (tasks, open deals) wired to the same optimistic reschedule path as drag-and-drop, and
- * an "open record" link.
+ * contact/deal, a relationship-warmth card (band, trend, last touch, decay) when the
+ * linked contact has a temperature, and quick actions: complete (tasks), reschedule chips
+ * + a date picker (tasks, open deals) wired to the optimistic reschedule path, and an
+ * "open record" link.
  */
 export default function EventDetailSheet({
     event,
@@ -45,6 +48,7 @@ export default function EventDetailSheet({
     locale,
     personById,
     dealById,
+    temperatureByContact,
     currentUserId,
     onReschedule,
     onComplete,
@@ -56,6 +60,7 @@ export default function EventDetailSheet({
     locale: string;
     personById: Map<number, Contact>;
     dealById: Map<number, Deal>;
+    temperatureByContact: Map<number, RelationshipTemperature>;
     currentUserId: number;
     onReschedule?: (event: CalendarEvent, dayKey: string) => void;
     onComplete?: (event: CalendarEvent) => void;
@@ -78,6 +83,20 @@ export default function EventDetailSheet({
     const { personId, dealId } = linkedIds(event);
     const person = personId != null ? personById.get(personId) : undefined;
     const deal = dealId != null ? dealById.get(dealId) : undefined;
+    const temperature = personId != null ? temperatureByContact.get(personId) : undefined;
+
+    const lastTouchLabel = (() => {
+        if (!temperature) return null;
+        const days = temperature.daysSinceTouch;
+        if (days == null) return t('neverTouched');
+        return t('lastTouch', { count: days });
+    })();
+    const coldLabel = (() => {
+        if (!temperature) return null;
+        if (temperature.band === 'cold') return t('alreadyCold');
+        if (temperature.daysUntilCold == null) return null;
+        return t('goesColdIn', { count: temperature.daysUntilCold });
+    })();
 
     const now = startOfDay(new Date());
     const rescheduleChips = [
@@ -117,6 +136,35 @@ export default function EventDetailSheet({
                             <div className="flex items-center gap-2 text-sm text-foreground">
                                 <BriefcaseIcon className="size-4 shrink-0 text-muted-foreground" />
                                 <span className="truncate">{deal.name}</span>
+                            </div>
+                        )}
+                    </div>
+                )}
+
+                {temperature && person && (
+                    <div className="mx-4 mb-1 flex flex-col gap-1.5 rounded-xl bg-muted/40 p-3">
+                        <div className="flex items-center justify-between gap-2">
+                            <span
+                                className={cn(
+                                    'inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-medium',
+                                    WARMTH_CHIP_CLASS[temperature.band],
+                                )}
+                            >
+                                <span
+                                    className={cn('size-1.5 rounded-full', WARMTH_DOT_CLASS[temperature.band])}
+                                    aria-hidden
+                                />
+                                {t(WARMTH_LABEL_KEY[temperature.band])}
+                            </span>
+                            <span className="text-xs text-muted-foreground">
+                                {t(WARMTH_TREND_KEY[temperature.trend])}
+                            </span>
+                        </div>
+                        {(lastTouchLabel || coldLabel) && (
+                            <div className="flex flex-wrap items-center gap-x-2 text-xs text-muted-foreground">
+                                {lastTouchLabel && <span>{lastTouchLabel}</span>}
+                                {lastTouchLabel && coldLabel && <span aria-hidden>·</span>}
+                                {coldLabel && <span>{coldLabel}</span>}
                             </div>
                         )}
                     </div>

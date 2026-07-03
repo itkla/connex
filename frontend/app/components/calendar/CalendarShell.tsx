@@ -10,7 +10,7 @@ import { ChevronLeftIcon, ChevronRightIcon } from '@heroicons/react/24/outline';
 import Rise from '@/app/components/motion/Rise';
 import { completeTask, rescheduleDeal, rescheduleTask } from '@/app/lib/api';
 import { parseCalendarDate } from '@/app/lib/utils';
-import type { Activity, Contact, Deal, Note, Task } from '@/app/lib/types';
+import type { Activity, Contact, Deal, Note, RelationshipTemperature, Task } from '@/app/lib/types';
 import {
     buildEvents,
     dayKeyOf,
@@ -35,6 +35,7 @@ import QuickCreateHost from './QuickCreateHost';
 import GoToDateDialog from './GoToDateDialog';
 import CalendarShortcuts from './CalendarShortcuts';
 import UpNext from './UpNext';
+import { temperatureIndex } from './warmth';
 
 const SWIPE_OFFSET = 40;
 
@@ -63,6 +64,7 @@ export interface CalendarShellProps {
     persons?: Contact[];
     deals?: Deal[];
     notes?: Note[];
+    temperatures?: RelationshipTemperature[];
     currentUserId: number;
 }
 
@@ -72,6 +74,7 @@ export default function CalendarShell({
     persons,
     deals,
     notes,
+    temperatures,
     currentUserId,
 }: CalendarShellProps) {
     const t = useTranslations('Calendar');
@@ -95,6 +98,8 @@ export default function CalendarShell({
         for (const p of persons ?? []) map.set(p.id, p);
         return map;
     }, [persons]);
+
+    const temperatureByContact = useMemo(() => temperatureIndex(temperatures ?? []), [temperatures]);
 
     const dealById = useMemo(() => {
         const map = new Map<number, Deal>();
@@ -358,6 +363,7 @@ export default function CalendarShell({
                         events={visibleEvents}
                         today={today}
                         locale={locale}
+                        temperatureByContact={temperatureByContact}
                         onOpenEvent={onOpenEvent}
                     />
                 );
@@ -459,6 +465,7 @@ export default function CalendarShell({
                 locale={locale}
                 personById={personById}
                 dealById={dealById}
+                temperatureByContact={temperatureByContact}
                 currentUserId={currentUserId}
                 onReschedule={handleReschedule}
                 onComplete={handleComplete}
