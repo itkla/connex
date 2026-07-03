@@ -217,6 +217,11 @@
                         ]
                     },
                     {
+                        "type": "illustration",
+                        "name": "dashboard-overview",
+                        "caption": "Your workspace at a glance"
+                    },
+                    {
                         "type": "featureList",
                         "title": "Your numbers at a glance",
                         "columns": 2,
@@ -538,6 +543,11 @@
                         "text": "A contact is a person you know. Each one has a profile with their name, email, phone, title, company, tags, and photo, plus the relationship context Connex is built around: their work history, a warmth score, their connections into your network, and a full activity timeline."
                     },
                     {
+                        "type": "illustration",
+                        "name": "contact-card",
+                        "caption": "A contact profile, with warmth and tags"
+                    },
+                    {
                         "type": "steps",
                         "title": "Add a contact",
                         "items": [
@@ -678,6 +688,11 @@
                     {
                         "type": "prose",
                         "text": "A deal is an opportunity moving through a pipeline. It has a name, value, currency, company, owner, and stage, and ends as either won or lost. A pipeline is the set of stages a deal moves through. Both live in your workspace, and roles decide who can change them."
+                    },
+                    {
+                        "type": "illustration",
+                        "name": "pipeline-board",
+                        "caption": "Deals moving through pipeline stages"
                     },
                     {
                         "type": "featureList",
@@ -948,6 +963,11 @@
                         "text": "Ever wish you could glance at your contacts and instantly know which relationships are thriving and which need a little love? That is exactly what temperature does. Every relationship in Connex carries a warmth reading that goes up when you are in regular, meaningful contact and drifts down when things go quiet. It rolls up into four simple bands, so you can scan a whole list and know where you stand at a glance."
                     },
                     {
+                        "type": "illustration",
+                        "name": "warmth-scale",
+                        "caption": "The four warmth bands, from hot to cold"
+                    },
+                    {
                         "type": "warmthLegend",
                         "title": "What the bands mean",
                         "items": [
@@ -1192,6 +1212,11 @@
                     {
                         "type": "prose",
                         "text": "The relationship map is an interactive picture of your world: your company at the centre, your team around it, the companies you work with, and the people at those companies, with lines showing how everyone connects. Start at the centre and expand the parts you care about to explore deals, revenue, and how warm each relationship is."
+                    },
+                    {
+                        "type": "illustration",
+                        "name": "relationship-map",
+                        "caption": "People and companies, and how they connect"
                     },
                     {
                         "type": "featureList",
@@ -1451,6 +1476,11 @@
                     {
                         "type": "prose",
                         "text": "Warm-intro paths flip the usual question around. Instead of asking who can reach someone, Connex looks at the people your team already knows and finds pairs you're perfectly placed to introduce, because you know both of them but they don't yet know each other. Each pair comes with a score and a short reason. You'll find them on the introductions page, and as a quick set of top opportunities on your dashboard."
+                    },
+                    {
+                        "type": "illustration",
+                        "name": "warm-intro-path",
+                        "caption": "A warm path from you to the person you want to meet"
                     },
                     {
                         "type": "featureList",
@@ -1724,6 +1754,11 @@
                     {
                         "type": "prose",
                         "text": "Activities are your record of what actually happened. A call, an email, a meeting, a quick note, anything worth remembering. Give each one a type, a subject, and the time it happened, then link it to a contact or deal. These are the touchpoints that keep your relationships warm."
+                    },
+                    {
+                        "type": "illustration",
+                        "name": "activity-timeline",
+                        "caption": "A timeline of your recent interactions"
                     },
                     {
                         "type": "steps",
@@ -2150,6 +2185,11 @@
                         "text": "One search bar finds everything in your workspace. Start typing and Connex looks through your people, companies, deals, pipelines, tags, notes, tasks, activities, and files all at once. Two letters is enough to get going, and results update as you type."
                     },
                     {
+                        "type": "illustration",
+                        "name": "global-search",
+                        "caption": "Search across everything in your workspace"
+                    },
+                    {
                         "type": "featureList",
                         "title": "What you can find",
                         "columns": 2,
@@ -2271,6 +2311,11 @@
                     {
                         "type": "prose",
                         "text": "Importing brings records into Connex from a spreadsheet (CSV) file, and exporting takes your data back out as a clean file you can open in Excel or Google Sheets. The import runs as a friendly step-by-step wizard, and you always see a preview of exactly what will happen before anything is created or changed."
+                    },
+                    {
+                        "type": "illustration",
+                        "name": "import-wizard",
+                        "caption": "Matching spreadsheet columns to Connex fields"
                     },
                     {
                         "type": "steps",
@@ -2661,6 +2706,11 @@
                             "Connex keeps an eye on your data and raises notifications so you do not have to remember everything. Tasks that are due, deals that are closing, relationships that are cooling, and people worth introducing all surface on their own.",
                             "Everything from every workspace you belong to lands in one inbox, so switching workspaces never changes what you see. When a teammate mentions you on a record, that shows up here too."
                         ]
+                    },
+                    {
+                        "type": "illustration",
+                        "name": "notification-inbox",
+                        "caption": "Your notification inbox"
                     },
                     {
                         "type": "featureList",
