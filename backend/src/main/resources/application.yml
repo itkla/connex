@@ -60,6 +60,26 @@ connex:
         # CSRF protection for state-changing requests. The SPA fetches the token from
         # GET /api/auth/csrf and echoes it in the X-XSRF-TOKEN header. Kill-switch for cutover.
         csrf-enabled: ${CONNEX_SECURITY_CSRF_ENABLED:true}
+        # Comma-separated trusted reverse-proxy IPs / CIDR ranges. X-Forwarded-For is
+        # only honored when the direct peer matches one of these; empty (the default)
+        # means the header is never trusted, so a client cannot spoof its source IP for
+        # rate-limiting or audit attribution. IMPORTANT: set this to your proxy/CDN/tunnel
+        # egress ranges in any proxied deployment — otherwise every request appears to come
+        # from the proxy's own address and per-IP attribution is worthless. (The login
+        # per-IP throttle already self-disables when the resolved IP is loopback/private,
+        # so a mis-config degrades to per-username throttling rather than a global lockout,
+        # but per-IP protection and accurate audit IPs both require this to be set.)
+        trusted-proxies: ${CONNEX_SECURITY_TRUSTED_PROXIES:}
+    login:
+        # Fixed-window failed-attempt throttle on POST /api/auth/login. Once either the
+        # per-IP or per-username failure cap is hit within the window, further attempts are
+        # rejected until the window elapses. In-memory / single-JVM, matching the session model.
+        # The per-username cap is a deliberate temporary lockout that bounds targeted brute
+        # force; it self-heals after window-seconds and a successful login clears the bucket.
+        # The per-IP cap only engages for a real public client IP (see trusted-proxies above).
+        max-failures-per-ip: ${CONNEX_LOGIN_MAX_FAILURES_PER_IP:50}
+        max-failures-per-user: ${CONNEX_LOGIN_MAX_FAILURES_PER_USER:10}
+        window-seconds: ${CONNEX_LOGIN_WINDOW_SECONDS:900}
     sharing:
         # Gates the cross-workspace share/unshare API. The owned-or-shared read predicate is always
         # applied (harmless when no shares exist).
@@ -156,5 +176,7 @@ server:
             cookie:
                 http-only: true
                 same-site: lax
-                # Secure should be true wherever the app is served over HTTPS.
-                secure: ${CONNEX_SESSION_COOKIE_SECURE:false}
+                # Fail closed: the session cookie carries the Secure attribute by default, so an
+                # HTTPS deployment that forgets to configure this still never emits JSESSIONID over
+                # plaintext HTTP. Local HTTP dev opts out via the `dev` profile (application-dev.yml).
+                secure: ${CONNEX_SESSION_COOKIE_SECURE:true}

@@ -3,11 +3,8 @@ package ooo.klae.connex.backend.services;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDate;
-import java.time.LocalDateTime;
 import java.time.Period;
 import java.time.ZoneOffset;
-import java.time.format.DateTimeFormatter;
-import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -31,6 +28,7 @@ import ooo.klae.connex.backend.mappers.CompanyMapper;
 import ooo.klae.connex.backend.mappers.DealMapper;
 import ooo.klae.connex.backend.mappers.PersonEmploymentMapper;
 import ooo.klae.connex.backend.mappers.PersonMapper;
+import ooo.klae.connex.backend.util.DateTimes;
 
 /**
  * Assembles the time-travel replay (#48): a chronological series of frames reconstructing the
@@ -55,9 +53,6 @@ public class MapReplayService {
     private final DealMapper dealMapper;
     private final PersonEmploymentMapper personEmploymentMapper;
     private final Clock clock;
-
-    private static final DateTimeFormatter MYSQL_DATETIME =
-        DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
     /** Upper bound on emitted entries (frames x nodes) so a huge workspace can't produce a giant payload. */
     private static final long MAX_ENTRIES = 2_000_000L;
@@ -200,17 +195,7 @@ public class MapReplayService {
         return value == null ? Long.MAX_VALUE : value;
     }
 
-    /** Parses a UTC {@code yyyy-MM-dd HH:mm:ss} (or ISO-ish) datetime to epoch millis, tolerantly. */
     private static Long epoch(String s) {
-        if (s == null || s.isBlank()) return null;
-        String v = s.trim().replace('T', ' ');
-        int dot = v.indexOf('.');
-        if (dot > 0) v = v.substring(0, dot);
-        if (v.endsWith("Z")) v = v.substring(0, v.length() - 1).trim();
-        try {
-            return LocalDateTime.parse(v, MYSQL_DATETIME).toInstant(ZoneOffset.UTC).toEpochMilli();
-        } catch (DateTimeParseException e) {
-            return null;
-        }
+        return DateTimes.epochMillis(s);
     }
 }

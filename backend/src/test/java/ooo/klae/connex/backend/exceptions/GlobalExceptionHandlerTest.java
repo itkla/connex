@@ -63,4 +63,22 @@ class GlobalExceptionHandlerTest {
         assertFalse(body.containsKey("email"));
         assertEquals("Registration could not be completed", body.get("message"));
     }
+
+    @Test
+    void illegalState_returnsGenericBody_notRawMessage() {
+        ResponseEntity<String> response = handler.illegalState(
+            new IllegalStateException("Failed to decrypt secret: bad AES key length"));
+
+        assertEquals(HttpStatus.CONFLICT, response.getStatusCode());
+        assertEquals("The request conflicts with the current state", response.getBody());
+    }
+
+    @Test
+    void tooManyRequests_mapsTo429() {
+        ResponseEntity<String> response = handler.tooManyRequests(
+            new TooManyRequestsException("slow down"));
+
+        assertEquals(HttpStatus.TOO_MANY_REQUESTS, response.getStatusCode());
+        assertEquals("slow down", response.getBody());
+    }
 }

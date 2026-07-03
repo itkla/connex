@@ -20,7 +20,7 @@ The product centers on relationship signals — temperature/warmth scoring, deca
 The verify loops require a running stack. **Prerequisites:** Node 20+, Java 26 (the backend toolchain), and Docker. Bring it up in this order:
 
 1. **Database** — from `backend/`: `docker compose up -d db` (MySQL on `:3306`, Adminer UI on `:9001`). Credentials in `docker-compose.yml` are **dev-only**.
-2. **Backend** — from `backend/`: `./gradlew bootRun` (serves on **`:8080`**, endpoints under `/api`). Flyway runs migrations on start.
+2. **Backend** — from `backend/`: `SPRING_PROFILES_ACTIVE=dev ./gradlew bootRun` (serves on **`:8080`**, endpoints under `/api`). Flyway runs migrations on start. The `dev` profile disables the session cookie's `Secure` flag so login works over plain-HTTP `localhost`; production runs without it (fail-closed `Secure=true`).
 3. **Frontend** — from `frontend/`: `pnpm dev` (Next.js on **`:3000`**). `next.config.ts` rewrites `/api/*` to the backend on `:8080`, so the backend must be up. This repo uses **pnpm** — not npm.
 
 Auth is cookie/session based; workspace selection drives tenant context. See `frontend/proxy.ts` for the route-protection rules.

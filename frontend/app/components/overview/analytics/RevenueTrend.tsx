@@ -62,8 +62,7 @@ function buildBuckets(deals: Deal[], now: number, locale: string, range: RangeKe
 
         // add won value to the bucket
         if (isClosed) {
-            const bucketTime = Number.isFinite(expected) ? expected : closed;
-            const d = new Date(bucketTime);
+            const d = new Date(closed);
             const idx = keyToIndex.get(`${d.getFullYear()}-${d.getMonth()}`);
             if (idx !== undefined) buckets[idx].won += deal.actualValue ?? 0;
         }

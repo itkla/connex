@@ -3,6 +3,7 @@ package ooo.klae.connex.backend.services;
 import java.net.InetAddress;
 import java.net.UnknownHostException;
 import java.util.Map;
+import java.util.Set;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -37,6 +38,8 @@ import ooo.klae.connex.backend.tenant.Permission;
 public class WorkspaceMailConfigService {
 
     private static final Logger log = LoggerFactory.getLogger(WorkspaceMailConfigService.class);
+
+    private static final Set<Integer> ALLOWED_SMTP_PORTS = Set.of(25, 465, 587, 2525);
 
     private final MailConfigMapper mailConfigMapper;
     private final WorkspaceService workspaceService;
@@ -77,7 +80,7 @@ public class WorkspaceMailConfigService {
             if (isBlank(request.getFromAddress())) {
                 throw new BadRequestException("A from address is required to enable workspace email");
             }
-            validateHost(request.getHost());
+            validateTransport(request.getHost(), request.getPort());
         }
 
         WorkspaceMailConfig existing = mailConfigMapper.findByWorkspace(workspaceId);
@@ -136,33 +139,70 @@ public class WorkspaceMailConfigService {
             if (config == null || !config.usable()) {
                 return MailTestResult.failure("Save an enabled SMTP configuration for this workspace first");
             }
+            validateTransport(config.host(), config.port());
             String body = templateRenderer.render("test", "en", Map.of("recipient", actor.getEmail()));
             mailService.sendNow(config, MailMessage.html(actor.getEmail(), "Connex email test", body));
             auditService.record("workspace.mail_config.test", "workspace", workspaceId, actor.getEmail(),
                     "Sent a test email", null);
             return MailTestResult.ok();
+        } catch (BadRequestException e) {
+            return MailTestResult.failure(e.getMessage());
         } catch (Exception e) {
             log.warn("Test email for workspace {} failed: {}", workspaceId, e.getMessage());
             return MailTestResult.failure("Could not send the test email. Check the host, port, and credentials.");
         }
     }
 
-    private void validateHost(String host) {
+    /**
+     * Guards the SMTP transport against being pointed at internal infrastructure (SSRF).
+     * Restricts the port to standard SMTP submission ports and rejects the host if <em>any</em>
+     * of its resolved addresses is private/loopback/link-local/multicast. Re-run at send time
+     * (not only at save) so a hostname re-pointed at an internal address after saving — DNS
+     * rebinding — is caught before the connection is opened. Skipped when internal hosts are
+     * explicitly allowed for on-prem relays.
+     */
+    private void validateTransport(String host, int port) {
         if (mailProperties.isAllowInternalHosts()) {
             return;
         }
-        InetAddress address;
+        if (!ALLOWED_SMTP_PORTS.contains(port)) {
+            throw new BadRequestException("SMTP port must be one of 25, 465, 587, or 2525");
+        }
+        InetAddress[] addresses;
         try {
-            address = InetAddress.getByName(host.trim());
+            addresses = InetAddress.getAllByName(host.trim());
         } catch (UnknownHostException e) {
             throw new BadRequestException("The SMTP host could not be resolved");
         }
+        for (InetAddress address : addresses) {
+            if (isInternalAddress(address)) {
+                throw new BadRequestException(
+                        "The SMTP host must be a public server; private and loopback addresses are not allowed");
+            }
+        }
+    }
+
+    /**
+     * Whether an address is not safely routable to a public SMTP server: the JDK's
+     * loopback/any/site-local/link-local/multicast predicates plus the ranges those predicates
+     * miss — IPv6 unique-local {@code fc00::/7} and IPv4 carrier-grade NAT {@code 100.64.0.0/10}.
+     */
+    private static boolean isInternalAddress(InetAddress address) {
         if (address.isLoopbackAddress() || address.isAnyLocalAddress()
                 || address.isSiteLocalAddress() || address.isLinkLocalAddress()
                 || address.isMulticastAddress()) {
-            throw new BadRequestException(
-                    "The SMTP host must be a public server; private and loopback addresses are not allowed");
+            return true;
         }
+        byte[] bytes = address.getAddress();
+        if (bytes.length == 16) {
+            return (bytes[0] & 0xFE) == 0xFC;
+        }
+        if (bytes.length == 4) {
+            int first = bytes[0] & 0xFF;
+            int second = bytes[1] & 0xFF;
+            return first == 100 && second >= 64 && second <= 127;
+        }
+        return false;
     }
 
     private static boolean isBlank(String value) {

@@ -19,6 +19,7 @@ import ooo.klae.connex.backend.beans.AuditLog;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.mappers.AuditLogMapper;
 import ooo.klae.connex.backend.tenant.TenantContext;
+import ooo.klae.connex.backend.util.ClientIpResolver;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -53,6 +54,7 @@ public class AuditService {
     private final AuditLogMapper auditLogMapper;
     private final ObjectMapper objectMapper;
     private final TenantContext tenantContext;
+    private final ClientIpResolver clientIpResolver;
 
     /**
      * Records a single successful audit event. Never throws.
@@ -220,11 +222,7 @@ public class AuditService {
      * @return
      */
     private String clientIp(HttpServletRequest req) {
-        String xff = req.getHeader("X-Forwarded-For");
-        if (xff != null && !xff.isBlank()) {
-            return truncate(xff.split(",")[0].trim(), IP_MAX);
-        }
-        return truncate(req.getRemoteAddr(), IP_MAX);
+        return truncate(clientIpResolver.resolve(req), IP_MAX);
     }
 
     /**

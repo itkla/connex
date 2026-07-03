@@ -11,6 +11,7 @@ import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -33,6 +34,7 @@ import ooo.klae.connex.backend.mappers.ActivityMapper;
 import ooo.klae.connex.backend.mappers.DealMapper;
 import ooo.klae.connex.backend.mappers.NoteMapper;
 import ooo.klae.connex.backend.mappers.TaskMapper;
+import ooo.klae.connex.backend.util.DateTimes;
 
 /**
  * Assesses deal risk on read, layering a small set of deterministic signals over the deal timeline,
@@ -130,10 +132,43 @@ public class DealRiskService {
         if (deal == null || !isOpen(deal)) {
             return new DealRiskDto(dealId, NONE, 0, List.of(), assessedAt);
         }
-        Map<Integer, Long> lastTouch = dealLastTouch(workspaceId, List.of(deal), now.toEpochMilli());
-        Map<Integer, List<DealStakeholder>> stakeholders = stakeholdersByDeal(workspaceId);
-        Map<Integer, RelationshipTemperatureDto> warmth = warmthByPerson(workspaceId);
+        List<DealStakeholder> dealStakeholders = dealMapper.getDealStakeholdersByDealId(workspaceId, dealId);
+        Map<Integer, List<DealStakeholder>> stakeholders = Map.of(dealId, dealStakeholders);
+        Map<Integer, Long> lastTouch = dealTouch(workspaceId, deal, now.toEpochMilli());
+        Set<Integer> personIds = new HashSet<>();
+        for (DealStakeholder person : dealStakeholders) {
+            personIds.add(person.getPersonId());
+        }
+        Map<Integer, RelationshipTemperatureDto> warmth = warmthFor(workspaceId, personIds);
         return assess(deal, now, lastTouch, stakeholders, warmth, assessedAt);
+    }
+
+    /**
+     * Most recent touch for a single deal, in epoch millis, seeded with its creation time. Scopes
+     * the interaction scan to the deal rather than loading every activity/note/task in the workspace.
+     */
+    private Map<Integer, Long> dealTouch(int workspaceId, Deal deal, long nowMs) {
+        Map<Integer, Long> last = new HashMap<>();
+        int id = deal.getId();
+        merge(last, id, notFuture(epoch(deal.getCreatedAt()), nowMs));
+        for (Activity activity : activityMapper.getActivitiesByDealId(workspaceId, id)) {
+            merge(last, id, notFuture(epoch(activity.getTimestamp()), nowMs));
+        }
+        for (Note note : noteMapper.getNotesByDealId(workspaceId, id)) {
+            merge(last, id, notFuture(epoch(note.getCreatedAt()), nowMs));
+        }
+        for (Task task : taskMapper.getTasksByDealId(workspaceId, id)) {
+            merge(last, id, notFuture(epoch(task.getCreatedAt()), nowMs));
+        }
+        return last;
+    }
+
+    private Map<Integer, RelationshipTemperatureDto> warmthFor(int workspaceId, Set<Integer> personIds) {
+        Map<Integer, RelationshipTemperatureDto> map = new HashMap<>();
+        for (RelationshipTemperatureDto temperature : scoringService.scoreContacts(workspaceId, personIds)) {
+            map.put(temperature.getId(), temperature);
+        }
+        return map;
     }
 
     private DealRiskDto assess(
@@ -352,29 +387,8 @@ public class DealRiskService {
         }
     }
 
-    /** Parses a UTC {@code yyyy-MM-dd HH:mm:ss} (or ISO-ish) datetime to epoch millis, tolerantly. */
     private static Long epoch(String value) {
-        if (value == null || value.isBlank()) {
-            return null;
-        }
-        String normalized = value.trim().replace('T', ' ');
-        int dot = normalized.indexOf('.');
-        if (dot > 0) {
-            normalized = normalized.substring(0, dot);
-        }
-        if (normalized.endsWith("Z")) {
-            normalized = normalized.substring(0, normalized.length() - 1).trim();
-        }
-        if (normalized.length() == 10) {
-            normalized = normalized + " 00:00:00";
-        } else if (normalized.length() == 16) {
-            normalized = normalized + ":00";
-        }
-        try {
-            return LocalDateTime.parse(normalized, MYSQL_DATETIME).toInstant(ZoneOffset.UTC).toEpochMilli();
-        } catch (DateTimeParseException exception) {
-            return null;
-        }
+        return DateTimes.epochMillis(value);
     }
 
     private static String utc(Instant instant) {

@@ -5,7 +5,6 @@ import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
-import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -30,6 +29,7 @@ import ooo.klae.connex.backend.mappers.DealMapper;
 import ooo.klae.connex.backend.mappers.NoteMapper;
 import ooo.klae.connex.backend.mappers.PersonMapper;
 import ooo.klae.connex.backend.mappers.TaskMapper;
+import ooo.klae.connex.backend.util.DateTimes;
 
 /**
  * Computes relationship "temperature" (warmth) for contacts and companies on read.
@@ -97,6 +97,42 @@ public class ScoringService {
     public List<RelationshipTemperatureDto> scoreContacts(int workspaceId, Instant asOf) {
         long t = asOf.toEpochMilli();
         return computeContactScores(workspaceId, t, t);
+    }
+
+    /**
+     * Scores only the given contacts as of now, gathering each one's touches directly rather than
+     * scanning the whole workspace. Used by callers that need warmth for a handful of known people
+     * (e.g. a single deal's stakeholders) without paying the cost of scoring every contact.
+     * @param workspaceId the workspace
+     * @param personIds the contact ids to score
+     * @return warmth for the requested contacts (unknown/quiet ids yield a cold score)
+     */
+    public List<RelationshipTemperatureDto> scoreContacts(int workspaceId, Set<Integer> personIds) {
+        long reference = Instant.now(clock).toEpochMilli();
+        List<RelationshipTemperatureDto> out = new ArrayList<>(personIds.size());
+        for (Integer personId : personIds) {
+            if (personId != null) {
+                out.add(temperature(personId, touchesForPerson(workspaceId, personId), reference, Long.MAX_VALUE));
+            }
+        }
+        return out;
+    }
+
+    private List<Touch> touchesForPerson(int workspaceId, int personId) {
+        List<Touch> touches = new ArrayList<>();
+        for (Activity a : activityMapper.getActivitiesByPersonId(workspaceId, personId)) {
+            Long ts = epoch(a.getTimestamp());
+            if (ts != null) touches.add(new Touch(ts, activityWeight(a.getType())));
+        }
+        for (Note n : noteMapper.getNotesByPersonId(workspaceId, personId)) {
+            Long ts = epoch(n.getCreatedAt());
+            if (ts != null) touches.add(new Touch(ts, NOTE_WEIGHT));
+        }
+        for (Task t : taskMapper.getTasksByPersonId(workspaceId, personId)) {
+            Long ts = epoch(t.getCreatedAt());
+            if (ts != null) touches.add(new Touch(ts, TASK_WEIGHT));
+        }
+        return touches;
     }
 
     private List<RelationshipTemperatureDto> computeContactScores(int workspaceId, long reference, long cutoff) {
@@ -401,17 +437,7 @@ public class ScoringService {
         return (d == null || d.getId() == 0) ? null : d.getId();
     }
 
-    /** Parses a UTC {@code yyyy-MM-dd HH:mm:ss} (or ISO-ish) datetime to epoch millis, tolerantly. */
     private static Long epoch(String s) {
-        if (s == null || s.isBlank()) return null;
-        String v = s.trim().replace('T', ' ');
-        int dot = v.indexOf('.');
-        if (dot > 0) v = v.substring(0, dot);
-        if (v.endsWith("Z")) v = v.substring(0, v.length() - 1).trim();
-        try {
-            return LocalDateTime.parse(v, MYSQL_DATETIME).toInstant(ZoneOffset.UTC).toEpochMilli();
-        } catch (DateTimeParseException e) {
-            return null;
-        }
+        return DateTimes.epochMillis(s);
     }
 }

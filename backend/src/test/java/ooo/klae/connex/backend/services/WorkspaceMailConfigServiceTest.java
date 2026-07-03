@@ -26,6 +26,7 @@ import ooo.klae.connex.backend.mail.EmailTemplateRenderer;
 import ooo.klae.connex.backend.mail.MailConfigResolver;
 import ooo.klae.connex.backend.mail.MailProperties;
 import ooo.klae.connex.backend.mail.MailService;
+import ooo.klae.connex.backend.mail.ResolvedMailConfig;
 import ooo.klae.connex.backend.mail.SecretCipher;
 import ooo.klae.connex.backend.mappers.MailConfigMapper;
 import ooo.klae.connex.backend.mappers.UserMapper;
@@ -64,6 +65,7 @@ class WorkspaceMailConfigServiceTest {
         MailConfigRequest req = new MailConfigRequest();
         req.setEnabled(true);
         req.setHost("smtp.test");
+        req.setPort(587);
         req.setFromAddress("no-reply@test");
         return req;
     }
@@ -161,12 +163,45 @@ class WorkspaceMailConfigServiceTest {
     }
 
     @Test
+    void saveConfig_disallowedPort_rejectedWhenInternalHostsBlocked() {
+        mailProperties.setAllowInternalHosts(false);
+        MailConfigRequest req = enabledRequest();
+        req.setHost("8.8.8.8");
+        req.setPort(8080);
+        assertThrows(BadRequestException.class, () -> service().saveConfig(3, 9, req));
+        verify(mailConfigMapper, never()).upsert(any());
+    }
+
+    @Test
     void sendTest_noWorkspaceConfig_returnsFailure() {
         User actor = new User();
         actor.setEmail("owner@test");
         when(userMapper.getUserById(9)).thenReturn(actor);
         when(mailConfigResolver.resolveWorkspaceOnly(3)).thenReturn(null);
         assertFalse(service().sendTest(3, 9).success());
+    }
+
+    @Test
+    void sendTest_revalidatesResolvedHost_rejectsInternalTarget() {
+        mailProperties.setAllowInternalHosts(false);
+        User actor = new User();
+        actor.setEmail("owner@test");
+        when(userMapper.getUserById(9)).thenReturn(actor);
+        ResolvedMailConfig internal = new ResolvedMailConfig("127.0.0.1", 587, null, null,
+                "no-reply@test", "Connex", true, false, false, 10000, 10000, 10000);
+        when(mailConfigResolver.resolveWorkspaceOnly(3)).thenReturn(internal);
+
+        assertFalse(service().sendTest(3, 9).success());
+        verify(mailService, never()).sendNow(any(), any());
+    }
+
+    @Test
+    void saveConfig_carrierGradeNatHost_rejectedWhenInternalHostsBlocked() {
+        mailProperties.setAllowInternalHosts(false);
+        MailConfigRequest req = enabledRequest();
+        req.setHost("100.64.1.1");
+        assertThrows(BadRequestException.class, () -> service().saveConfig(3, 9, req));
+        verify(mailConfigMapper, never()).upsert(any());
     }
 
     @Test

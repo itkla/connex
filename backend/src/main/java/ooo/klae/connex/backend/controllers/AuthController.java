@@ -15,6 +15,7 @@ import ooo.klae.connex.backend.dto.RegisterDto;
 import ooo.klae.connex.backend.dto.ResetPasswordRequest;
 import ooo.klae.connex.backend.services.AuthService;
 import ooo.klae.connex.backend.services.PasswordResetService;
+import ooo.klae.connex.backend.util.ClientIpResolver;
 
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
@@ -36,6 +37,7 @@ import lombok.RequiredArgsConstructor;
 public class AuthController {
     private final AuthService authService;
     private final PasswordResetService passwordResetService;
+    private final ClientIpResolver clientIpResolver;
 
     /**
      * POST endpoint for user registration.
@@ -83,7 +85,7 @@ public class AuthController {
      */
     @PostMapping("/forgot-password")
     public Map<String, String> forgotPassword(@Valid @RequestBody ForgotPasswordRequest request, HttpServletRequest httpRequest) {
-        passwordResetService.requestReset(request.getEmail(), clientIp(httpRequest));
+        passwordResetService.requestReset(request.getEmail(), clientIpResolver.resolve(httpRequest));
         return Map.of("message", "If an account exists for that email, a reset link has been sent");
     }
 
@@ -104,16 +106,5 @@ public class AuthController {
     public Map<String, String> resetPassword(@Valid @RequestBody ResetPasswordRequest request) {
         passwordResetService.resetPassword(request.getToken(), request.getNewPassword());
         return Map.of("message", "Your password has been reset");
-    }
-
-    /**
-     * Resolves the originating client IP, honouring a forwarding proxy header.
-     */
-    private static String clientIp(HttpServletRequest request) {
-        String forwarded = request.getHeader("X-Forwarded-For");
-        if (forwarded != null && !forwarded.isBlank()) {
-            return forwarded.split(",")[0].trim();
-        }
-        return request.getRemoteAddr();
     }
 }

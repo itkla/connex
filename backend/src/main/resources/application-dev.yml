@@ -1,0 +1,10 @@
+# Local development profile. Activate with SPRING_PROFILES_ACTIVE=dev (or
+# ./gradlew bootRun --args='--spring.profiles.active=dev'). Loosens the fail-closed
+# defaults that would otherwise break the plain-HTTP localhost workflow.
+server:
+    servlet:
+        session:
+            cookie:
+                # The frontend proxies the session cookie over http://localhost, where a
+                # Secure cookie would be dropped by the browser. Never enable dev in prod.
+                secure: false

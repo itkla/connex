@@ -52,8 +52,7 @@ function buildBuckets(deals: Deal[], now: number, locale: string) {
         const expected = parseMysqlDateTime(deal.expectedCloseDate);
 
         if (Number.isFinite(closedAt)) {
-            const bucketTime = Number.isFinite(expected) ? expected : closedAt;
-            const d = new Date(bucketTime);
+            const d = new Date(closedAt);
             const idx = keyToIndex.get(`${d.getFullYear()}-${d.getMonth()}`);
             if (idx !== undefined) buckets[idx].closed += deal.actualValue ?? 0;
         }
@@ -70,7 +69,7 @@ function buildBuckets(deals: Deal[], now: number, locale: string) {
 export default function DealsRevenueChart({ deals }: { deals: Deal[] }) {
     const t = useTranslations('DealsRevenueChart');
     const locale = useLocale();
-    const now = React.useMemo(() => Date.now(), []);
+    const [now] = React.useState(() => Date.now());
     const { data, todayLabel, currency } = React.useMemo(() => buildBuckets(deals, now, locale), [deals, now, locale]);
     const chartConfig = React.useMemo(
         () =>

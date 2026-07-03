@@ -7,6 +7,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -35,6 +37,9 @@ import lombok.RequiredArgsConstructor;
 @Service
 @RequiredArgsConstructor
 public class NoteService {
+
+    private static final Logger log = LoggerFactory.getLogger(NoteService.class);
+
     private final NoteMapper noteMapper;
     private final DealMapper dealMapper;
     private final PersonMapper personMapper;
@@ -182,7 +187,9 @@ public class NoteService {
                 notification.setTriggeredAt(triggeredAt);
                 notification.setData(json(Map.of("noteId", note.getId())));
                 notificationDelivery.deliver(notification);
-            } catch (RuntimeException ignored) {
+            } catch (RuntimeException e) {
+                log.warn("Failed to deliver mention notification for note {} to recipient {}: {}",
+                        note.getId(), recipientId, e.toString());
             }
         }
     }
