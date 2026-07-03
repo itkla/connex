@@ -115,23 +115,23 @@
                 "blocks": [
                     {
                         "type": "prose",
-                        "text": "The sidebar on the left splits Connex into a few clear areas: Overview, Records, Activity, Library, and Team. The bar across the top holds search and shows which workspace you are in. On most detail pages a back button takes you straight to the list you came from."
+                        "text": "The sidebar on the left splits Connex into a few clear areas: Overview, Records, Activity, Library, and Team. The bar across the top holds search, along with a button to hide or show the sidebar. The workspace you are in is shown at the top of the sidebar itself. On most detail pages a back button takes you straight to the list you came from."
                     },
                     {
                         "type": "shortcuts",
                         "title": "Handy shortcuts",
                         "items": [
                             {
-                                "keys": "/",
-                                "action": "Jump straight to search"
-                            },
-                            {
-                                "keys": "Esc",
-                                "action": "Close the open menu or dialog"
+                                "keys": "↑ ↓",
+                                "action": "Move through the search results"
                             },
                             {
                                 "keys": "Enter",
                                 "action": "Open the highlighted search result"
+                            },
+                            {
+                                "keys": "Esc",
+                                "action": "Close the open menu or dialog"
                             }
                         ]
                     },
@@ -212,7 +212,7 @@
                         "items": [
                             {
                                 "title": "Sign in and land on your dashboard",
-                                "description": "Sign in and Connex drops you on your dashboard, your home base. It is quiet at first, which is exactly what we are about to fix. If you belong to more than one workspace, check that the right one is selected up top."
+                                "description": "Sign in and Connex drops you on your dashboard, your home base. It is quiet at first, which is exactly what we are about to fix. If you belong to more than one workspace, check that the right one is selected in the workspace switcher at the top of the sidebar."
                             },
                             {
                                 "title": "Add your first company",
@@ -365,7 +365,7 @@
                     },
                     {
                         "type": "featureList",
-                        "title": "Files, activity, and quick create",
+                        "title": "Files and activity",
                         "columns": 2,
                         "items": [
                             {
@@ -375,14 +375,6 @@
                             {
                                 "title": "A feed of what's happened",
                                 "description": "Recent tasks, activities, and notes gathered into one timeline, so you can see who did what and which records were involved."
-                            },
-                            {
-                                "title": "Create anything, anywhere",
-                                "description": "The New button in the sidebar follows you around the app. Add a task or a note without leaving the page you are on."
-                            },
-                            {
-                                "title": "Quick task or note",
-                                "description": "Jot a task with an optional due date, or capture a quick note. Each one saves in seconds and offers a link to view it right away."
                             }
                         ]
                     },
@@ -536,7 +528,7 @@
                             },
                             {
                                 "title": "Let the helpers do the work",
-                                "description": "The industry field suggests values you already use, and the website field tidies up the address format for you."
+                                "description": "The industry field suggests values you already use, and the website field tidies up the web address for you."
                             },
                             {
                                 "title": "Line up its people",
@@ -544,7 +536,7 @@
                             },
                             {
                                 "title": "Save",
-                                "description": "The company is created, then its people. If a contact can't be added, Connex tells you exactly which one."
+                                "description": "The company is created first, then its people. If some people can't be added, Connex tells you how many went through."
                             }
                         ]
                     },
@@ -605,7 +597,7 @@
                             },
                             {
                                 "question": "Does Connex remember how I like to view things?",
-                                "answer": "Yes. Your card-or-table choice, sort order, and search stick around after a refresh. You can also save full filter setups as named views to reuse anytime."
+                                "answer": "Yes. Your card-or-table choice is remembered after a refresh, and you can save full filter setups as named views to reuse anytime."
                             }
                         ]
                     }
@@ -710,7 +702,7 @@
                     },
                     {
                         "type": "table",
-                        "title": "Quick actions on a contact card",
+                        "title": "Quick actions on a contact",
                         "columns": [
                             "Action",
                             "What it does"
@@ -748,7 +740,7 @@
                             },
                             {
                                 "question": "Can I find people who just changed jobs?",
-                                "answer": "Yes. Connex keeps a 'recently moved' feed of contacts who changed companies in the last 90 days, so you can reach out at the right moment."
+                                "answer": "Yes. Connex keeps a 'recently moved' feed of contacts who changed companies recently, so you can reach out at the right moment."
                             },
                             {
                                 "question": "What does the warm-intro path show?",
@@ -782,7 +774,7 @@
                             },
                             {
                                 "title": "Create and adjust",
-                                "description": "Name a pipeline, give it stages, and rename, reorder, or remove them anytime."
+                                "description": "Name a pipeline, give it stages, and rename, add, or remove them anytime."
                             },
                             {
                                 "title": "Winning and losing stages",
@@ -800,7 +792,6 @@
                         "title": "A few stage rules Connex looks after",
                         "body": [
                             "Each pipeline can have one winning stage and one losing stage.",
-                            "Stage names have to be unique within a pipeline.",
                             "A deal can only move between stages in its own pipeline.",
                             "Reopen a closed deal and it slides back to the last open stage, with its close date and outcome tidied up for you."
                         ]
@@ -820,7 +811,7 @@
                             },
                             {
                                 "title": "People",
-                                "description": "Link the contacts involved, each with a role like Decision Maker."
+                                "description": "Link the contacts involved, each with the role they play in the deal."
                             },
                             {
                                 "title": "Tags & custom fields",
@@ -854,12 +845,12 @@
                                 "description": "See how your deals and revenue spread across stages and pipelines at a glance."
                             },
                             {
-                                "title": "Top deals",
-                                "description": "Your biggest open deals, surfaced right on the main dashboard."
+                                "title": "Key totals",
+                                "description": "Summary tiles for your open pipeline value, the number of open deals, closed forecast, and closed revenue."
                             },
                             {
-                                "title": "Momentum",
-                                "description": "A 12-week activity view on each deal so you can tell which ones are heating up."
+                                "title": "Forecast accuracy",
+                                "description": "See how your actual closed revenue compared with what you forecast, shown as a percentage."
                             }
                         ]
                     },
@@ -906,11 +897,11 @@
                             },
                             {
                                 "title": "Always in view",
-                                "description": "The header stays put as you scroll down, and names stay fixed as you scroll sideways, so you never lose your place."
+                                "description": "The name columns stay fixed as you scroll sideways, so you never lose track of which record you're looking at."
                             },
                             {
                                 "title": "Your choice sticks",
-                                "description": "Your card-or-table preference, sort order, and search stay put across reloads."
+                                "description": "Your card-or-table preference is remembered across reloads."
                             }
                         ]
                     },
@@ -951,11 +942,7 @@
                         "items": [
                             {
                                 "title": "Select rows",
-                                "description": "Tick individual checkboxes, or the one in the header to select the whole page."
-                            },
-                            {
-                                "title": "Extend to everything matching",
-                                "description": "Once the page is selected, Connex offers to select every record that matches your current filters and search, across all pages."
+                                "description": "Tick individual checkboxes, or the one in the header to select every record in the current list, across all its pages."
                             },
                             {
                                 "title": "Use the selection bar",
@@ -990,7 +977,7 @@
                             },
                             {
                                 "title": "Import and export",
-                                "description": "Bring records in from CSV or Excel, and export the current view to CSV."
+                                "description": "Bring records in from a CSV file, and export the current view to CSV."
                             },
                             {
                                 "title": "Open a record",
@@ -1010,7 +997,7 @@
                         "items": [
                             {
                                 "question": "How many records show per page?",
-                                "answer": "25 by default, and you can switch to 10, 25, 50, or 100. A 'Showing X to Y of Z' line keeps you oriented, and changing filters, sort, or search brings you back to the first page."
+                                "answer": "25 by default, and you can switch to 10, 25, 50, or 100. A 'Showing X to Y of Z' line keeps you oriented."
                             },
                             {
                                 "question": "Do my edits show up right away?",
@@ -1074,13 +1061,13 @@
                         "type": "callout",
                         "variant": "note",
                         "title": "You never set this by hand",
-                        "body": "There is nothing to fill in. Connex works out the temperature for you from the things you already track: your notes, activities, meetings, and messages. Just keep working normally and the score keeps itself current."
+                        "body": "There is nothing to fill in. Connex works out the temperature for you from the things you already track: your notes, activities, meetings, and tasks. Just keep working normally and the score keeps itself current."
                     },
                     {
                         "type": "callout",
                         "variant": "tip",
                         "title": "Use it to plan your day",
-                        "body": "Sort your people by temperature and start with the ones cooling off. A quick check-in at the right moment is often all it takes to keep a good relationship warm."
+                        "body": "Sort your people by warmth and start with the ones cooling off. A quick check-in at the right moment is often all it takes to keep a good relationship warm."
                     }
                 ]
             },
@@ -1177,7 +1164,7 @@
                 "blocks": [
                     {
                         "type": "prose",
-                        "text": "The analytics dashboard brings your deals, pipelines, and team activity together on one screen, so you can see how the business is doing at a glance: revenue, pipeline health, win rates, and where deals are getting stuck. It's one of the four tabs in the overview suite, alongside the map, calendar, and introductions."
+                        "text": "The analytics dashboard brings your deals, pipelines, and team activity together on one screen, so you can see how the business is doing at a glance: revenue, pipeline health, win rates, and where deals are getting stuck. It's one of the overview pages in Connex, reached from the sidebar, alongside the map, calendar, and introductions."
                     },
                     {
                         "type": "featureList",
@@ -1272,7 +1259,7 @@
                             },
                             {
                                 "question": "What if we don't have any deals yet?",
-                                "answer": "You'll see a friendly starting screen with links to create your first deal or set up a pipeline. Nothing breaks, and each chart simply says 'No data' until there's something to show."
+                                "answer": "You'll see a friendly starting screen with links to create your first deal or set up a pipeline. Nothing breaks, and each chart simply shows a short 'nothing to show yet' note until there's something to display."
                             },
                             {
                                 "question": "Can I dig into the detail?",
@@ -1356,7 +1343,7 @@
                             },
                             {
                                 "title": "What the lines mean",
-                                "description": "Different lines show different ties: who works where, which relationships carry deals, and known connections without deals. Deal lines shade green for won, red for lost, and blue for open."
+                                "description": "Different lines show different ties: who works where, which relationships carry deals, and known connections without deals. Each deal is marked with its status: green for won, red for lost, and blue for open."
                             },
                             {
                                 "title": "Hover a line",
@@ -1394,7 +1381,7 @@
                 "blocks": [
                     {
                         "type": "prose",
-                        "text": "The calendar gathers everything happening across your workspace, tasks, activities, deals, and notes, onto the days they belong to, in a clean month view. It's a simple way to see what's coming and what just happened, all in one place."
+                        "text": "The calendar gathers everything happening across your workspace, tasks, activities, deals, and notes, onto the days they belong to. You can view it by month, week, or day, or as a simple list. It's a clean way to see what's coming and what just happened, all in one place."
                     },
                     {
                         "type": "featureList",
@@ -1403,19 +1390,19 @@
                         "items": [
                             {
                                 "title": "Tasks",
-                                "description": "In your brand colour. Click to jump to your tasks."
+                                "description": "In your brand colour."
                             },
                             {
                                 "title": "Activities",
-                                "description": "In blue. Click to open your activity feed."
+                                "description": "In blue."
                             },
                             {
                                 "title": "Deals",
-                                "description": "In amber. Click to open the deal itself."
+                                "description": "In amber."
                             },
                             {
                                 "title": "Notes",
-                                "description": "In muted grey. Click to open the note."
+                                "description": "In muted grey."
                             }
                         ]
                     },
@@ -1425,12 +1412,12 @@
                         "columns": 2,
                         "items": [
                             {
-                                "title": "Move by month",
-                                "description": "Step back and forward a month with the arrows at the top."
+                                "title": "Move back and forward",
+                                "description": "Step back and forward through time with the arrows at the top."
                             },
                             {
                                 "title": "Jump to today",
-                                "description": "The Today button brings you back to this month, with today marked by a blue dot."
+                                "description": "The Today button brings you back to the current day, and today's date is marked with a circle."
                             }
                         ]
                     },
@@ -1444,12 +1431,12 @@
                                 "description": "Within a day, deals sit at the top, then tasks, activities, and notes, so the big items are easy to spot."
                             },
                             {
-                                "title": "Hover for the full detail",
-                                "description": "Hover any item to read its full content without leaving the calendar."
+                                "title": "See the full detail",
+                                "description": "Click any item to open a panel with its full detail, right beside the calendar."
                             },
                             {
-                                "title": "Click to open",
-                                "description": "Every item is a link straight to the deal, task, activity, or note behind it."
+                                "title": "Jump to the record",
+                                "description": "From that panel, 'Open record' takes you to the full deal, task, activity, or note behind it."
                             }
                         ]
                     },
@@ -1457,7 +1444,7 @@
                         "type": "callout",
                         "variant": "tip",
                         "title": "Packed days stay tidy",
-                        "body": "Every item always lands on the right day. When a day holds more than fits, its entries simply scroll inside their own cell, so even a busy week never throws off the layout."
+                        "body": "Every item always lands on the right day. When a day holds more than fits, it shows the first few with a '+ more' link; open the day to see everything, so even a busy week never throws off the layout."
                     }
                 ]
             },
@@ -1522,7 +1509,7 @@
                             },
                             {
                                 "title": "Add a note",
-                                "description": "Optionally jot down how or why you connected them, up to 500 characters."
+                                "description": "Optionally jot down how or why you connected them."
                             },
                             {
                                 "title": "Record it",
@@ -1790,7 +1777,7 @@
                             },
                             {
                                 "title": "Today at a glance",
-                                "description": "A small dashboard widget shows how many of today's tasks are done, what's overdue, and how much you wrapped up this week."
+                                "description": "A summary at the top of your task list shows how many of today's tasks are done, what's overdue, and how much you wrapped up this week."
                             },
                             {
                                 "title": "See who's on it",
@@ -1801,8 +1788,8 @@
                     {
                         "type": "callout",
                         "variant": "note",
-                        "title": "Only the owner ticks it off",
-                        "body": "You complete a task with the round checkbox on its row. Anyone can see a task, but only the person it's assigned to can mark it done. The finish line stays with whoever owns the work."
+                        "title": "Tick it off when it's done",
+                        "body": "You complete a task with the round checkbox on its row. Tick it and it's marked done for everyone right away, wherever the task appears."
                     },
                     {
                         "type": "faq",
@@ -1814,11 +1801,11 @@
                             },
                             {
                                 "question": "Does anyone get told about tasks?",
-                                "answer": "Yes. Creating, updating, completing, or deleting a task sends a heads-up to the people involved, in real time. Notes and activities don't send notifications."
+                                "answer": "Yes. Creating, updating, and completing a task keeps the people involved in the loop in real time."
                             },
                             {
-                                "question": "How do I edit or delete a task?",
-                                "answer": "Open it to change the description, due date, owner, or links, or to mark it done. Deleting asks you to confirm first."
+                                "question": "How do I edit a task?",
+                                "answer": "Open it to change the description, due date, owner, or links, or to mark it done with the completed checkbox."
                             }
                         ]
                     }
@@ -1908,7 +1895,7 @@
                             },
                             {
                                 "title": "Reset",
-                                "description": "Clear every filter and get back to the full timeline in one click."
+                                "description": "Clear your search and filters and get back to the full timeline in one click."
                             }
                         ]
                     },
@@ -1941,31 +1928,86 @@
                 "blocks": [
                     {
                         "type": "prose",
-                        "text": "In Connex, a meeting is just an activity with the Meeting type, linked to the people and companies who were there. Logging it this way keeps it on the same timeline as your calls, emails, and notes, and it counts toward keeping those relationships warm like everything else."
+                        "text": "Connex has a Calendar that lays your work out by date, so you can see what's coming and what just happened at a glance. It gathers the records you already keep and shows them in one place: tasks on their due date, activities like calls, emails, and meetings on the day they happened, deals on their expected close date, and your notes. There's nothing extra to maintain, it's the same records on a calendar."
+                    },
+                    {
+                        "type": "featureList",
+                        "title": "Four ways to look at it",
+                        "columns": 2,
+                        "items": [
+                            {
+                                "title": "Month",
+                                "description": "See the whole month at a glance, with each day's items in place."
+                            },
+                            {
+                                "title": "Week",
+                                "description": "Take in a single week, day by day."
+                            },
+                            {
+                                "title": "Day",
+                                "description": "Zoom in on one day and everything on it."
+                            },
+                            {
+                                "title": "Agenda",
+                                "description": "A simple running list of what's ahead."
+                            }
+                        ]
+                    },
+                    {
+                        "type": "table",
+                        "title": "What appears on your calendar",
+                        "columns": [
+                            "Item",
+                            "When it lands"
+                        ],
+                        "rows": [
+                            [
+                                "Tasks",
+                                "On their due date."
+                            ],
+                            [
+                                "Activities",
+                                "Calls, emails, meetings, and more, on the day they happened."
+                            ],
+                            [
+                                "Deals",
+                                "On their expected close date."
+                            ],
+                            [
+                                "Notes",
+                                "The notes you've written."
+                            ]
+                        ]
+                    },
+                    {
+                        "type": "callout",
+                        "variant": "tip",
+                        "title": "Show only what you need",
+                        "body": "Use the Tasks, Activities, Deals, and Notes toggles to focus on one kind or a few. Your choice is remembered for next time, and at least one kind always stays on so the calendar is never blank."
                     },
                     {
                         "type": "steps",
-                        "title": "Log a meeting",
+                        "title": "Add to your calendar",
                         "items": [
                             {
-                                "title": "Start an activity and pick Meeting",
-                                "description": "It's the type with the violet people icon."
+                                "title": "Pick the day",
+                                "description": "Select a day on the calendar so anything you add lands on the right date."
                             },
                             {
-                                "title": "Set the time",
-                                "description": "Record when the meeting happened, and add a subject and any notes."
+                                "title": "Open the Create button",
+                                "description": "The round Create button in the bottom corner opens a short menu."
                             },
                             {
-                                "title": "Link the people",
-                                "description": "Attach it to the contact or deal involved so it shows up in their history."
+                                "title": "Choose what to add",
+                                "description": "Pick a new task, activity, or deal and fill in the details. The day you picked is filled in for you."
                             }
                         ]
                     },
                     {
                         "type": "callout",
                         "variant": "note",
-                        "title": "Meetings count too",
-                        "body": "A logged meeting sits in your timeline alongside everything else and helps keep the linked relationships warm, just like a call or a note."
+                        "title": "Open it, or move it to another day",
+                        "body": "Tap any item to see its details, including the linked contact or deal, and open the full record. Need it on a different day? Change the date right there, or on a computer drag a task or deal to another day on the month grid. Its record updates to match."
                     },
                     {
                         "type": "cards",
@@ -1983,7 +2025,7 @@
                             },
                             {
                                 "title": "Tasks",
-                                "description": "Turn a meeting outcome into a follow-up.",
+                                "description": "Follow-ups with due dates and assignment.",
                                 "href": "/docs/activity/tasks"
                             }
                         ]
@@ -2024,7 +2066,7 @@
                             },
                             {
                                 "title": "Tag in bulk",
-                                "description": "Select several records at once and add or remove a tag on all of them in one go. Files work the same way."
+                                "description": "Select several records at once to add or remove a tag on all of them in one go. You can also tag files in bulk from the files library."
                             }
                         ]
                     },
@@ -2032,7 +2074,7 @@
                         "type": "callout",
                         "variant": "tip",
                         "title": "Copy a color",
-                        "body": "Click a tag's color to copy its color code, handy when you want to match it in another tool."
+                        "body": "Click a tag's color code to copy it, handy when you want to match it in another tool."
                     },
                     {
                         "type": "callout",
@@ -2069,7 +2111,7 @@
                             },
                             {
                                 "title": "Filter",
-                                "description": "Narrow the list by file type, by the kind of record it's attached to, or by tag. You can also surface files that aren't linked to any record yet."
+                                "description": "Narrow the list by file type, by the kind of record it's attached to, or by tag. You can also surface unlinked files, whose owning record was deleted."
                             }
                         ]
                     },
@@ -2122,7 +2164,7 @@
                         "type": "callout",
                         "variant": "note",
                         "title": "Nothing here yet",
-                        "body": "When your workspace has no files, you'll see a friendly prompt to upload your first one or create a record to attach files to."
+                        "body": "When your workspace has no files, you'll see a friendly prompt pointing you to a record where you can open it and attach your first file."
                     }
                 ]
             },
@@ -2294,10 +2336,6 @@
                         "title": "Handy keyboard shortcuts",
                         "items": [
                             {
-                                "keys": "/",
-                                "action": "Jump to the search bar from anywhere on the page"
-                            },
-                            {
                                 "keys": "↑ / ↓",
                                 "action": "Move up and down through the results"
                             },
@@ -2315,7 +2353,7 @@
                         "type": "callout",
                         "variant": "tip",
                         "title": "Not finding it?",
-                        "body": "Search needs at least two letters to start, so a single letter just shows a prompt. If a name looks cut off, open the result to see the whole thing."
+                        "body": "Search needs at least two letters to start, so a single letter won't pull up results yet. If a name looks cut off, open the result to see the whole thing."
                     }
                 ]
             },
@@ -2334,7 +2372,7 @@
                         "items": [
                             {
                                 "title": "Pick several values",
-                                "description": "Choose more than one company, job title, or tag at a time. Each option shows how many records match."
+                                "description": "Choose more than one company, job title, or tag at a time to match any of several values."
                             },
                             {
                                 "title": "Single-choice controls",
@@ -2342,11 +2380,11 @@
                             },
                             {
                                 "title": "Contact-specific filters",
-                                "description": "The contacts list adds company and job-title filters, plus a 'no company' toggle to find people who aren't linked to one yet."
+                                "description": "The contacts list adds company and job-title filters, plus a 'No company' option to find people who aren't linked to one yet."
                             },
                             {
                                 "title": "See what's active",
-                                "description": "Applied filters show up as coloured pills with counts, so you can tell at a glance what's narrowing your list. Clear one at a time, or reset them all."
+                                "description": "Applied filters appear as removable pills, and each active filter turns colored with a count of how many values you've picked, so you can tell at a glance what's narrowing your list. Clear one at a time, or reset them all."
                             }
                         ]
                     },
@@ -2592,15 +2630,15 @@
                         "items": [
                             {
                                 "title": "Invite by email",
-                                "description": "Enter someone's email and Connex sends them an invitation. They show up as pending until they accept. If they do not have a Connex account yet, they get a link to sign up and join."
+                                "description": "Enter someone's email address and choose a role. Connex creates an invitation, and they show up as pending until they accept. If they do not have a Connex account yet, they get a link to sign up and join."
                             },
                             {
                                 "title": "Add an existing user",
-                                "description": "Already know they are on Connex? Search for them and add them right away. They get a friendly heads-up in the app and join once they accept."
+                                "description": "Already on Connex? When you invite their email address, they are added right away as pending and get a heads-up in their notifications. They join once they accept."
                             },
                             {
                                 "title": "Share a link",
-                                "description": "Create a link and send it to a whole group. Anyone who opens it can join, until it expires or you turn it off. Sharing the same link twice never adds someone twice, so it is safe to pass around."
+                                "description": "Create a link and send it to a whole group. Anyone who opens it can join with the role you chose, until it expires or you turn it off."
                             },
                             {
                                 "title": "One invite at a time",
@@ -2614,7 +2652,7 @@
                         "items": [
                             {
                                 "title": "Open the invitation",
-                                "description": "Find it under Workspace Invitations in your settings, or click the link you were sent. Either one opens a preview."
+                                "description": "Find it under Pending invitations in your settings, or click the link you were sent. Either one opens a preview."
                             },
                             {
                                 "title": "Check the details",
@@ -2646,7 +2684,7 @@
                             ],
                             [
                                 "Expiry",
-                                "How long the link stays active. If you do not set one, it works for two weeks."
+                                "How long the link stays active, in days. Leave it empty to use the default."
                             ],
                             [
                                 "Max uses",
@@ -2654,7 +2692,7 @@
                             ],
                             [
                                 "Allowed domains",
-                                "Limit joining to people with certain email domains, like your company's. Leave it empty to let anyone in."
+                                "Set separately as a workspace-wide list, allowed domains limit invite links to people whose email matches one of them. Leave the list empty to let anyone in."
                             ]
                         ]
                     },
@@ -2690,7 +2728,7 @@
                         "type": "prose",
                         "text": [
                             "Two things control who can see and do what. Roles set what each person can do inside your workspace. Sharing lets you show a single record to another workspace you also belong to.",
-                            "Admins and owners manage both, and every change is saved to a complete, unchangeable history you can look back on."
+                            "Admins and owners manage roles and membership, and every change is recorded."
                         ]
                     },
                     {
@@ -2727,17 +2765,17 @@
                             },
                             {
                                 "title": "Change roles",
-                                "description": "Promote or demote between member and admin, assign a custom role, or hand over ownership. You can only change the role of someone who has already joined."
+                                "description": "Promote or demote between member and admin, assign a custom role, or hand ownership to someone else."
                             },
                             {
                                 "title": "Remove members",
-                                "description": "Remove any active member other than yourself, and it takes effect right away. A workspace always needs one owner, so pass ownership on before you step down."
+                                "description": "Remove anyone but yourself, and it takes effect right away. A workspace always needs one owner, so pass ownership on before you step down."
                             }
                         ]
                     },
                     {
                         "type": "prose",
-                        "text": "Sometimes a company, contact, or pipeline needs to be visible to another team you work with. An admin can share one of these records with another workspace the same person belongs to. Your workspace stays the owner, and the other workspace gets to view it, plus edit it if you allow that."
+                        "text": "Sometimes a company, contact, or pipeline needs to be visible to another team you work with. You can share one your workspace owns with another workspace you belong to. Your workspace stays the owner, and the other workspace gets to view it."
                     },
                     {
                         "type": "table",
@@ -2748,12 +2786,12 @@
                         ],
                         "rows": [
                             [
-                                "View by default",
-                                "Shared records are view-only. Turn on edit access if you want the other team to make changes too."
+                                "View only",
+                                "Shared records are view-only for the other workspace."
                             ],
                             [
-                                "Same organization only",
-                                "You can share with other workspaces in your organization. Anything outside it is not allowed."
+                                "Only workspaces you belong to",
+                                "You can share with the other workspaces you are a member of. You cannot share somewhere you do not belong."
                             ],
                             [
                                 "Not with yourself",
@@ -2761,7 +2799,7 @@
                             ],
                             [
                                 "Review and undo anytime",
-                                "See every workspace a record is shared with, when it was shared, and whether they can edit. Unshare whenever you like, and it disappears from the other team right away."
+                                "See every workspace a record is shared with, and unshare any of them whenever you like. It disappears from the other team right away."
                             ]
                         ]
                     },
@@ -2769,7 +2807,7 @@
                         "type": "callout",
                         "variant": "note",
                         "title": "Everything is recorded",
-                        "body": "Invites, links, shares, and member changes are all saved to a complete, unchangeable history that shows who did what and when. If you ever need to check back, it is all there."
+                        "body": "Invites, links, shares, and member changes are all recorded, so there is a clear account of who did what and when."
                     }
                 ]
             },
@@ -2804,11 +2842,11 @@
                             },
                             {
                                 "title": "Relationship cooling nudges",
-                                "description": "A gentle reminder when you have not been in touch with someone for a while. Each one offers a Log touch button to warm things back up."
+                                "description": "A gentle reminder when you have not been in touch with someone for a while. Each one offers a Log a touch button to warm things back up."
                             },
                             {
                                 "title": "Introduction opportunities",
-                                "description": "A short list of people worth connecting, shared with your whole team as a helpful suggestion."
+                                "description": "A suggestion when two people in your network are worth introducing to each other, shared with your team."
                             }
                         ]
                     },
@@ -2840,7 +2878,7 @@
                     },
                     {
                         "type": "prose",
-                        "text": "The bell at the top shows how many unread notifications you have, and it keeps itself up to date. Click it for a quick peek at your latest unread items, or open the full inbox to see everything with clear timestamps and an icon for each type. Notifications from your other workspaces carry a small tag so you always know where they came from."
+                        "text": "The bell at the top of the sidebar shows how many unread notifications you have, and it keeps itself up to date. Click it for a quick peek at your latest unread items, or open the full inbox to see everything with clear timestamps and an icon for each type. Notifications from your other workspaces carry a small tag so you always know where they came from."
                     },
                     {
                         "type": "featureList",
@@ -2861,7 +2899,7 @@
                             },
                             {
                                 "title": "Act right away",
-                                "description": "Complete a task, log a touch, or open the record without leaving the notification. The same alerts also appear on the matching contact, deal, or task."
+                                "description": "Tick a task complete right from the notification, open a cooling relationship to reach out, or jump to the record behind any alert. The same alerts also appear on the matching contact, deal, or task."
                             }
                         ]
                     },
@@ -2972,7 +3010,7 @@
                         "items": [
                             {
                                 "title": "Invite by email",
-                                "description": "Enter someone's email and they get an invitation. If they already use Connex, they'll see it right away in the app. Otherwise they get a link that's good for 14 days."
+                                "description": "Enter someone's email and they get an invitation. If they already use Connex, they'll see it right away in the app. Otherwise they get an invite link that's good for a limited time."
                             },
                             {
                                 "title": "Share an invite link",
@@ -3158,8 +3196,8 @@
                                 "answer": "Yes. Pick any mix of events you like. Leave it blank and the rule reacts to every change."
                             },
                             {
-                                "question": "Can I see whether a rule is actually working?",
-                                "answer": "Yes. Each rule keeps a history of its recent runs, with the time, the result, and any errors, so you can confirm it's doing what you expect."
+                                "question": "Can I tell what a rule does at a glance?",
+                                "answer": "Yes. Each rule shows a plain-language summary of its trigger and actions, with a badge when it's paused or set to run as the workspace."
                             }
                         ]
                     }
@@ -3173,7 +3211,7 @@
                         "type": "prose",
                         "text": [
                             "Notifications bring what needs your attention to you, so you're not digging around to find it. A task coming due, a deal that just closed, a relationship that's starting to cool, they all land in one place, each with a link to the record behind it.",
-                            "The bell in the top bar shows your unread count and updates the moment something new arrives."
+                            "Connex keeps a running count of what's unread and updates the moment something new arrives."
                         ]
                     },
                     {
@@ -3183,11 +3221,11 @@
                         "items": [
                             {
                                 "title": "See what's unread",
-                                "description": "The bell shows your unread count at a glance and keeps itself up to date."
+                                "description": "Connex keeps a running count of what you haven't read yet and keeps it up to date."
                             },
                             {
                                 "title": "Filter and browse",
-                                "description": "Sort through your notifications by status, category, or the record they relate to."
+                                "description": "Sort through your notifications to find the ones you need."
                             },
                             {
                                 "title": "Jump to the source",
@@ -3195,7 +3233,7 @@
                             },
                             {
                                 "title": "Mark all as read",
-                                "description": "Clear your unread count in one tap when you're all caught up."
+                                "description": "Clear your unread count all at once when you're caught up."
                             }
                         ]
                     },
@@ -3226,7 +3264,7 @@
                         "type": "callout",
                         "variant": "tip",
                         "title": "Snooze buys you time",
-                        "body": "Snoozing tucks a notification away for 1, 4, 8, or 24 hours, then brings it back to your inbox. It's a way to say not now, remind me later, rather than making it disappear."
+                        "body": "Snoozing tucks a notification away for a while, then brings it back to your inbox. It's a way to say not now, remind me later, rather than making it disappear."
                     },
                     {
                         "type": "table",
@@ -3247,6 +3285,10 @@
                             [
                                 "Relationship cooling",
                                 "A company or person you're connected to is starting to cool off."
+                            ],
+                            [
+                                "You're mentioned",
+                                "Someone mentions you in a note, task, activity, introduction, or deal."
                             ]
                         ]
                     },
@@ -3254,7 +3296,7 @@
                         "type": "callout",
                         "variant": "note",
                         "title": "You're in control of what reaches you",
-                        "body": "You can turn each kind of notification on or off. Everything's on by default, so you'll stay in the loop until you decide to quiet something down."
+                        "body": "Each kind of notification can reach you in the app, by email, or both. In-app alerts are on by default and email is off, so you'll see updates in Connex right away and can add email whenever you like."
                     }
                 ]
             },
@@ -3335,8 +3377,8 @@
                                 "description": "If an action failed, the reason shows right at the top."
                             },
                             {
-                                "title": "Related events",
-                                "description": "One action that changed several things is grouped together, so you can follow the whole story."
+                                "title": "The finer details",
+                                "description": "The expanded entry also shows technical context, like the address and device the action came from."
                             }
                         ]
                     },
@@ -3347,10 +3389,6 @@
                             {
                                 "question": "How is everything organized?",
                                 "answer": "Events are grouped by day, with today and yesterday called out and a count for each day, so you can scan a period quickly."
-                            },
-                            {
-                                "question": "Can I see the history of just one record?",
-                                "answer": "Yes. Alongside the workspace-wide log, every record keeps its own change history."
                             },
                             {
                                 "question": "How do I spot problems fast?",
@@ -3388,7 +3426,7 @@
                         "items": [
                             {
                                 "title": "Open the theme menu",
-                                "description": "It sits in the sidebar, near your account controls."
+                                "description": "Open your account menu at the bottom of the sidebar, then choose Theme."
                             },
                             {
                                 "title": "Pick Light, Dark, or System",
@@ -3458,7 +3496,7 @@
                             },
                             {
                                 "title": "Choose a language",
-                                "description": "A check mark shows what's active. The screen dims for a moment while it refreshes."
+                                "description": "A check mark shows what's active. The page refreshes for a moment while it applies."
                             },
                             {
                                 "title": "Carry on",
@@ -3503,10 +3541,6 @@
                         "type": "shortcuts",
                         "title": "Everyday keys",
                         "items": [
-                            {
-                                "keys": "/",
-                                "action": "Jump to search"
-                            },
                             {
                                 "keys": "Arrow up / down",
                                 "action": "Move through search results or a menu"
@@ -3628,7 +3662,7 @@
                         "items": [
                             {
                                 "title": "Show or hide the sidebar",
-                                "description": "Collapse the sidebar to focus, and Connex remembers your choice. On mobile it slides over and closes when you move on."
+                                "description": "Collapse the sidebar to focus. On mobile it slides over and closes when you move on."
                             },
                             {
                                 "title": "Collapsible sections",
@@ -3870,11 +3904,11 @@
                             },
                             {
                                 "title": "Add your stages",
-                                "description": "Stages are the steps a deal moves through, in order. A simple set works great to start: Lead, Meeting, Proposal, then Negotiation. You can rename, reorder, or remove them anytime."
+                                "description": "Stages are the steps a deal moves through, in order. A simple set works great to start: Lead, Meeting, Proposal, then Negotiation. You can rename or remove them anytime."
                             },
                             {
                                 "title": "Mark a winning and a losing stage",
-                                "description": "Choose one stage as your winning stage and one as your losing stage. When a deal reaches either one, Connex closes it with that outcome for you. Each pipeline gets one of each."
+                                "description": "Choose one stage as your winning stage and one as your losing stage. When a deal reaches either one, Connex closes it with that outcome for you."
                             }
                         ]
                     },
@@ -3888,7 +3922,7 @@
                             },
                             {
                                 "title": "Set the value and currency",
-                                "description": "The value is what the opportunity is worth to you. Enter the amount and pick its currency, so your forecasts and totals add up correctly."
+                                "description": "The value is what the opportunity is worth to you. Enter the amount and its currency, so your forecasts and totals add up correctly."
                             },
                             {
                                 "title": "Move it through your stages",
@@ -3916,7 +3950,7 @@
                             },
                             {
                                 "question": "Can I reopen a deal I closed by mistake?",
-                                "answer": "Yes. Reopen it and the deal slides back to the last open stage, with its close date and outcome tidied up for you."
+                                "answer": "Yes. Reopen it and Connex clears the close date and outcome and moves it off the closing stage, so the deal is active again."
                             }
                         ]
                     },
@@ -3961,7 +3995,7 @@
                         "items": [
                             {
                                 "title": "Open the Introductions page",
-                                "description": "Head to Introductions in your overview area. You can also jump there from the top opportunity shown on your dashboard, which surfaces the single best pairing waiting for you."
+                                "description": "Head to Introductions in your overview area. You can also open it from the introduction opportunities shown on your dashboard, which link straight through to this page."
                             },
                             {
                                 "title": "Review your intros to make",
@@ -3977,7 +4011,7 @@
                             },
                             {
                                 "title": "Make the introduction and record it",
-                                "description": "Once you have made the intro, select Record intro. Connex connects the two people, adds the introduction to your history, and lets you attach an optional note about how or why you introduced them."
+                                "description": "Once you have made the intro, select Record intro. Connex connects the two people and adds the introduction to your history."
                             }
                         ]
                     },
