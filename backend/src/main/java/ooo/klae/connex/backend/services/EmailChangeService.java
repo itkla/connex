@@ -129,6 +129,9 @@ public class EmailChangeService {
         }
 
         userMapper.updateEmail(user.getId(), token.getNewEmail());
+        // Redeeming this token proved control of the new address, so the account is email-verified
+        // — the same trust signal registration verification records, shared across both flows.
+        userMapper.markEmailVerified(user.getId());
         emailChangeTokenMapper.invalidateForUser(user.getId());
 
         auditService.record("user.email_change_completed", "user", user.getId(), user.getDisplayName(),

@@ -16,6 +16,7 @@ import org.springframework.context.annotation.Primary;
 import org.springframework.test.context.TestPropertySource;
 
 import ooo.klae.connex.backend.beans.User;
+import ooo.klae.connex.backend.dto.RegisterDto;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 
 /**
@@ -28,6 +29,7 @@ import ooo.klae.connex.backend.exceptions.BadRequestException;
 class RegistrationVerificationServiceTest extends AbstractServiceTest {
 
     @Autowired private RegistrationVerificationService service;
+    @Autowired private AuthService authService;
     @Autowired private CapturingEmail email;
 
     @BeforeEach
@@ -65,6 +67,22 @@ class RegistrationVerificationServiceTest extends AbstractServiceTest {
     void confirm_invalidToken_rejected() {
         assertThrows(BadRequestException.class, () -> service.confirm("not-a-real-token"));
         assertFalse(service.validateToken("not-a-real-token"));
+    }
+
+    @Test
+    void selfServiceRegistration_startsUnverifiedAndIssuesToken() {
+        RegisterDto dto = new RegisterDto();
+        dto.setUsername("ss_" + unique());
+        dto.setDisplayName("Self Serve");
+        dto.setEmail(unique() + "@example.com");
+        dto.setPassword("Str0ngPw1!");
+        dto.setTimezone("UTC");
+
+        User user = authService.registerSelfService(dto, "1.2.3.4");
+
+        assertFalse(userMapper.getUserById(user.getId()).isEmailVerified(),
+            "self-serve accounts start unverified when verification is enabled");
+        assertNotNull(email.lastToken, "registration issues a verification link");
     }
 
     @TestConfiguration

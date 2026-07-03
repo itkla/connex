@@ -66,7 +66,7 @@ public class UserController {
     @PostMapping
     public UserDto createUser(@Valid @RequestBody RegisterDto dto) {
         workspaceService.requirePermission(Permission.MEMBER_MANAGE);
-        return UserDto.from(authService.register(dto));
+        return UserDto.from(authService.register(dto, true));
     }
 
     /**

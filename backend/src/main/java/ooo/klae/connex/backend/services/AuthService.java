@@ -63,18 +63,26 @@ public class AuthService {
         if (signupMode == null || !"open".equalsIgnoreCase(signupMode.trim())) {
             throw new ForbiddenException("Self-service registration is disabled on this instance");
         }
-        User user = register(request);
-        registrationVerificationService.issue(user, requestIp);
+        // When verification is on, self-serve accounts start unverified and must prove control of
+        // their address; when it is off they are verified by fiat, so turning the feature on later
+        // never retroactively gates accounts created while it was off.
+        boolean verificationEnabled = registrationVerificationService.isEnabled();
+        User user = register(request, !verificationEnabled);
+        if (verificationEnabled) {
+            registrationVerificationService.issue(user, requestIp);
+        }
         return user;
     }
 
     /**
      * Registers a new user with the provided registration data.
-     * @param request
-     * @return
+     * @param request the registration details
+     * @param emailVerified whether the account starts email-verified — true for trusted callers
+     *     (admin create), false for self-serve accounts that must prove control of their address
+     * @return the created user
      */
     @Transactional
-    public User register(RegisterDto request) {
+    public User register(RegisterDto request, boolean emailVerified) {
         try {
             if (userMapper.getUserByUsername(request.getUsername()) != null
                     || userMapper.getUserByEmail(request.getEmail()) != null) {
@@ -85,6 +93,7 @@ public class AuthService {
             user.setUsername(request.getUsername());
             user.setDisplayName(request.getDisplayName());
             user.setEmail(request.getEmail());
+            user.setEmailVerified(emailVerified);
             user.setTimezone(TimezoneSupport.validate(request.getTimezone(), "UTC"));
             user.setPasswordHash(passwordEncoder.encode(request.getPassword()));
             userMapper.insert(user);
@@ -113,6 +122,7 @@ public class AuthService {
         user.setUsername(request.getUsername());
         user.setDisplayName(request.getDisplayName());
         user.setEmail(request.getEmail());
+        user.setEmailVerified(true);
         user.setTimezone(TimezoneSupport.validate(request.getTimezone(), "UTC"));
         user.setPasswordHash(passwordEncoder.encode(request.getPassword()));
         userMapper.insert(user);

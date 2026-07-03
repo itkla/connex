@@ -42,8 +42,8 @@
   </select>
 
   <insert id="insert" useGeneratedKeys="true" keyProperty="id">
-    INSERT INTO app_user (username, display_name, email, password_hash, timezone, profile_picture_url)
-    VALUES (#{username}, #{displayName}, #{email}, #{passwordHash}, COALESCE(#{timezone}, 'UTC'), #{profilePictureUrl})
+    INSERT INTO app_user (username, display_name, email, email_verified, password_hash, timezone, profile_picture_url)
+    VALUES (#{username}, #{displayName}, #{email}, #{emailVerified}, #{passwordHash}, COALESCE(#{timezone}, 'UTC'), #{profilePictureUrl})
   </insert>
 
   <update id="update">

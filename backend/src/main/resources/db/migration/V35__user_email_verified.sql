@@ -7,8 +7,10 @@
 -- allow-list cannot be satisfied by an unverified (spoofable) registration email.
 --
 -- Existing accounts predate verification and are backfilled to TRUE so nothing they
--- can already do is revoked; the column defaults FALSE so new inserts are unverified
--- unless a trusted path (admin create / bootstrap) marks them verified.
+-- can already do is revoked. The column defaults FALSE, but the application sets it
+-- explicitly on insert: TRUE for trusted paths (admin create, bootstrap owner) and for
+-- self-serve signups when verification is disabled, FALSE only for self-serve signups
+-- when verification is enabled (they then earn TRUE by redeeming their token).
 -- ============================================================================
 
 ALTER TABLE app_user
