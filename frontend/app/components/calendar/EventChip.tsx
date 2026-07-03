@@ -56,11 +56,14 @@ const EventChip = forwardRef<HTMLButtonElement, EventChipProps>(function EventCh
                     <span className="shrink-0 text-xs tabular-nums text-muted-foreground">{timeLabel}</span>
                 ) : null}
                 {warmthBand && (
-                    <span
-                        className={cn('size-2 shrink-0 rounded-full', WARMTH_DOT_CLASS[warmthBand])}
-                        title={warmthLabel}
-                        aria-hidden
-                    />
+                    <>
+                        {warmthLabel && <span className="sr-only">{warmthLabel}</span>}
+                        <span
+                            className={cn('size-2 shrink-0 rounded-full', WARMTH_DOT_CLASS[warmthBand])}
+                            title={warmthLabel}
+                            aria-hidden
+                        />
+                    </>
                 )}
                 <ChevronRightIcon className="size-4 shrink-0 text-muted-foreground/60 transition-colors group-hover:text-muted-foreground" />
             </button>
