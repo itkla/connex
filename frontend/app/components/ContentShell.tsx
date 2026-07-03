@@ -73,9 +73,9 @@ export default function ContentShell({
 
             <div
                 id="app-sidebar"
-                className={`fixed inset-y-0 left-0 z-50 transition-transform duration-300 ease-out motion-reduce:transition-none md:static md:z-auto md:translate-x-0 md:transition-none ${
+                className={`fixed inset-y-0 left-0 z-50 transition-[margin,transform] duration-300 ease-out motion-reduce:transition-none md:static md:z-auto md:translate-x-0 ${
                     mobileOpen ? "translate-x-0" : "-translate-x-full"
-                } ${open ? "md:block" : "md:hidden"}`}
+                } ${open ? "md:ml-0" : "md:-ml-68"}`}
             >
                 {sidebar}
             </div>
