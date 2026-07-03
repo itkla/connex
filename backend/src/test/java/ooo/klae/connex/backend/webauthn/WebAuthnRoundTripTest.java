@@ -144,6 +144,10 @@ class WebAuthnRoundTripTest {
         userCredentials.save(stored);
         CredentialRecord persisted = userCredentials.findByCredentialId(stored.getCredentialId());
         assertNotNull(persisted, "credential persisted");
+        assertNotNull(persisted.getCreated(), "created timestamp persisted");
+        assertTrue(
+            java.time.Duration.between(persisted.getCreated(), java.time.Instant.now()).abs().toHours() < 1,
+            "created timestamp is app-written (no timezone skew from a DB default)");
         long countAfterRegister = persisted.getSignatureCount();
 
         PublicKeyCredentialRequestOptions request = ops.createCredentialRequestOptions(() -> null);
