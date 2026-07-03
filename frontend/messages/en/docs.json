@@ -27,7 +27,7 @@
     },
     "DocsGettingStarted": {
         "title": "Getting started",
-        "description": "What Connex is, how workspaces and tenancy work, and how to find your way around.",
+        "description": "What Connex is, how workspaces work, and how to find your way around.",
         "lead": "Start here. These pages cover the mental model behind Connex and the fundamentals every other section builds on.",
         "articles": {
             "what-is-connex": {
@@ -76,8 +76,8 @@
                 ]
             },
             "workspaces-and-tenancy": {
-                "title": "Workspaces and tenancy",
-                "description": "How multi-tenant isolation, workspace switching, and membership work.",
+                "title": "Workspaces and teams",
+                "description": "How workspaces keep each team's data separate, and how to switch between them.",
                 "blocks": [
                     {
                         "type": "prose",
@@ -2956,7 +2956,7 @@
     "DocsCollaboration": {
         "title": "Collaboration",
         "description": "Invites, invite links, record sharing, permissions, notifications, and mentions.",
-        "lead": "Connex is multiplayer. These pages cover how you bring people in and work together without crossing tenant lines.",
+        "lead": "Connex works best with your whole team. These pages cover how you bring people in and work together, while keeping each workspace private.",
         "articles": {
             "invites-and-links": {
                 "title": "Invites & invite links",
@@ -3363,7 +3363,7 @@
     },
     "DocsSettings": {
         "title": "Settings & administration",
-        "description": "Members, roles and RBAC, rules and automation, notification settings, and audit logs.",
+        "description": "Members, roles and permissions, rules and automation, notification settings, and audit logs.",
         "lead": "Administration controls who can do what, automates routine work, and keeps a record of every change.",
         "articles": {
             "members-and-roles": {

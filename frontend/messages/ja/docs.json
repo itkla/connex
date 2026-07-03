@@ -27,7 +27,7 @@
     },
     "DocsGettingStarted": {
         "title": "はじめに",
-        "description": "Connex とは何か、ワークスペースとテナントの仕組み、そして画面の歩き方。",
+        "description": "Connex とは何か、ワークスペースの仕組み、そして画面の歩き方。",
         "lead": "まずはここから。Connex の考え方と、他のすべてのセクションの土台となる基礎を解説します。",
         "articles": {
             "what-is-connex": {
@@ -76,8 +76,8 @@
                 ]
             },
             "workspaces-and-tenancy": {
-                "title": "ワークスペースとテナント",
-                "description": "マルチテナントの分離、ワークスペースの切り替え、メンバーシップの仕組み。",
+                "title": "ワークスペースとチーム",
+                "description": "ワークスペースがチームごとにデータを分けて保つ仕組みと、切り替え方。",
                 "blocks": [
                     {
                         "type": "prose",
@@ -2956,7 +2956,7 @@
     "DocsCollaboration": {
         "title": "コラボレーション",
         "description": "招待、招待リンク、レコード共有、権限、通知、メンション。",
-        "lead": "Connex は複数人で使うものです。テナントの境界を越えずに人を招き、協働する方法を解説します。",
+        "lead": "Connex はチーム全員で使うと最も力を発揮します。ここでは、各ワークスペースを非公開に保ちながら、人を招いて一緒に働く方法を解説します。",
         "articles": {
             "invites-and-links": {
                 "title": "招待と招待リンク",
@@ -3363,7 +3363,7 @@
     },
     "DocsSettings": {
         "title": "設定と管理",
-        "description": "メンバー、ロールと RBAC、ルールと自動化、通知設定、監査ログ。",
+        "description": "メンバー、ロールと権限、ルールと自動化、通知設定、監査ログ。",
         "lead": "管理は、誰が何をできるかを制御し、定型作業を自動化し、あらゆる変更の記録を残します。",
         "articles": {
             "members-and-roles": {
