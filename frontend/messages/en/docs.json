@@ -3027,54 +3027,6 @@
                         ]
                     },
                     {
-                        "type": "prose",
-                        "text": "Custom fields let you track the details that matter to your business, the ones Connex doesn't ask for out of the box. Add a field once and it shows up on every record of that type."
-                    },
-                    {
-                        "type": "table",
-                        "title": "Custom field types",
-                        "columns": [
-                            "Type",
-                            "Use"
-                        ],
-                        "rows": [
-                            [
-                                "Text",
-                                "A short single line."
-                            ],
-                            [
-                                "Long text",
-                                "Multi-line free text."
-                            ],
-                            [
-                                "Number",
-                                "A numeric value."
-                            ],
-                            [
-                                "Date",
-                                "A date you pick from a calendar."
-                            ],
-                            [
-                                "Yes / no",
-                                "A simple on-or-off toggle."
-                            ],
-                            [
-                                "Select",
-                                "A dropdown of options you define."
-                            ],
-                            [
-                                "URL",
-                                "A checked web link."
-                            ]
-                        ]
-                    },
-                    {
-                        "type": "callout",
-                        "variant": "tip",
-                        "title": "A field's type is permanent",
-                        "body": "Pick the right type when you create a field, since you can't change it afterward. This keeps everything you've already saved safe and consistent. If your needs change, just add a new field."
-                    },
-                    {
                         "type": "faq",
                         "title": "Good to know",
                         "items": [
