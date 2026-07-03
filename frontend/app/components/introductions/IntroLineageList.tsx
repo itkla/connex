@@ -6,6 +6,7 @@ import { ArrowLongRightIcon, CheckIcon } from '@heroicons/react/24/outline';
 
 import { formatRelativeTime } from '@/app/lib/utils';
 import type { IntroductionRecord } from '@/app/lib/types';
+import NoteContent from '@/app/components/activity/notes/NoteContent';
 
 import PartyAvatar from './PartyAvatar';
 
@@ -32,12 +33,7 @@ export default function IntroLineageList({ items }: { items: IntroductionRecord[
     return (
         <ol className="overflow-hidden rounded-2xl border border-border bg-card">
             {items.map((item, index) => {
-                const meta = [
-                    item.introducerName ? t('byIntroducer', { name: item.introducerName }) : null,
-                    item.note,
-                ]
-                    .filter(Boolean)
-                    .join(' · ');
+                const byline = item.introducerName ? t('byIntroducer', { name: item.introducerName }) : null;
                 return (
                     <li
                         key={item.id}
@@ -80,8 +76,13 @@ export default function IntroLineageList({ items }: { items: IntroductionRecord[
                                     {formatRelativeTime(item.introducedAt, locale)}
                                 </span>
                             </div>
-                            {meta ? (
-                                <p className="mt-1 truncate text-xs text-muted-foreground">{meta}</p>
+                            {byline ? (
+                                <p className="mt-1 truncate text-xs text-muted-foreground">{byline}</p>
+                            ) : null}
+                            {item.note ? (
+                                <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">
+                                    <NoteContent content={item.note} references={item.references} />
+                                </p>
                             ) : null}
                         </div>
                     </li>

@@ -154,7 +154,7 @@ export function buildEvents(data: CalendarData): CalendarEvent[] {
             id: `task-${task.id}`,
             kind: 'task',
             entityId: task.id,
-            title: task.description,
+            title: noteContentToPlainText(task.description),
             startMs: ms,
             allDay: true,
             dayKey: dayKeyFromMs(ms),

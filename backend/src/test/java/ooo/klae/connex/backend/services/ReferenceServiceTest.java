@@ -10,19 +10,19 @@ import org.springframework.beans.factory.annotation.Autowired;
 
 import ooo.klae.connex.backend.beans.Company;
 import ooo.klae.connex.backend.beans.Deal;
+import ooo.klae.connex.backend.beans.EntityReference;
 import ooo.klae.connex.backend.beans.Note;
-import ooo.klae.connex.backend.beans.NoteReference;
 import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.beans.Pipeline;
 import ooo.klae.connex.backend.beans.Stage;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.beans.Workspace;
-import ooo.klae.connex.backend.mappers.NoteReferenceMapper;
+import ooo.klae.connex.backend.mappers.EntityReferenceMapper;
 
 class ReferenceServiceTest extends AbstractServiceTest {
 
     @Autowired ReferenceService referenceService;
-    @Autowired NoteReferenceMapper noteReferenceMapper;
+    @Autowired EntityReferenceMapper entityReferenceMapper;
 
     private String mention(String label, User user) {
         return "[" + label + "](user:" + user.getId() + ")";
@@ -40,8 +40,8 @@ class ReferenceServiceTest extends AbstractServiceTest {
         return user;
     }
 
-    private List<NoteReference> stored(Note note) {
-        return noteReferenceMapper.findByNote(workspace.getId(), note.getId());
+    private List<EntityReference> stored(Note note) {
+        return entityReferenceMapper.findBySource(workspace.getId(), ReferenceService.SOURCE_NOTE, note.getId());
     }
 
     /**
@@ -188,7 +188,7 @@ class ReferenceServiceTest extends AbstractServiceTest {
             "see [Jane](person:" + person.getId() + ")");
 
         assertTrue(added.isEmpty());
-        List<NoteReference> refs = stored(note);
+        List<EntityReference> refs = stored(note);
         assertEquals(1, refs.size());
         assertEquals("person", refs.get(0).getRefType());
         assertEquals(person.getId(), refs.get(0).getRefId());
@@ -208,7 +208,7 @@ class ReferenceServiceTest extends AbstractServiceTest {
         referenceService.syncReferences(workspace.getId(), note.getId(),
             "[Acme](company:" + company.getId() + ") and [Q3](deal:" + deal.getId() + ")");
 
-        List<NoteReference> refs = stored(note);
+        List<EntityReference> refs = stored(note);
         assertEquals(2, refs.size());
         assertTrue(refs.stream().anyMatch(r -> "company".equals(r.getRefType()) && r.getRefId() == company.getId()));
         assertTrue(refs.stream().anyMatch(r -> "deal".equals(r.getRefType()) && r.getRefId() == deal.getId()));

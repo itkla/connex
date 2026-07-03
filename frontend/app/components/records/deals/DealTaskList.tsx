@@ -11,6 +11,7 @@ import { useRouter } from "next/navigation";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useState } from "react";
 import EditTaskSheet from "@/app/components/activity/tasks/EditTaskSheet";
+import NoteContent from "@/app/components/activity/notes/NoteContent";
 import { useLocale, useTranslations } from "next-intl";
 
 export default function DealTaskList({ dealId, companyId, tasks, deals }: { dealId: number, companyId?: number | null, tasks: Task[], deals: Deal[] }) {
@@ -84,7 +85,7 @@ export default function DealTaskList({ dealId, companyId, tasks, deals }: { deal
                             {openTasks.map((task) => (
                                 <li key={task.id} className="px-6 py-3 flex items-center justify-between">
                                     <div className="">
-                                        <p className="text-sm text-foreground">{task.description}</p>
+                                        <p className="text-sm text-foreground"><NoteContent content={task.description} references={task.references} /></p>
                                         {task.dueDate ? (
                                             <p className="mt-0.5 text-xs text-muted-foreground">
                                                 {t('due', { date: formatDate(task.dueDate, locale) })}

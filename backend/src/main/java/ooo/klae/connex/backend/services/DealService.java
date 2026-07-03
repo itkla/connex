@@ -614,7 +614,7 @@ public class DealService {
     public List<Activity> getActivitiesByDealId(int dealId) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         if (dealMapper.getDealById(workspaceId, dealId) == null) throw new ResourceNotFoundException("Deal not found with id: " + dealId);
-        return activityMapper.getActivitiesByDealId(workspaceId, dealId);
+        return referenceService.hydrateActivities(workspaceId, activityMapper.getActivitiesByDealId(workspaceId, dealId));
     }
 
     /**
@@ -636,7 +636,7 @@ public class DealService {
     public List<Task> getTasksByDealId(int dealId) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         if (dealMapper.getDealById(workspaceId, dealId) == null) throw new ResourceNotFoundException("Deal not found with id: " + dealId);
-        return taskMapper.getTasksByDealId(workspaceId, dealId);
+        return referenceService.hydrateTasks(workspaceId, taskMapper.getTasksByDealId(workspaceId, dealId));
     }
 
     /**

@@ -18,6 +18,7 @@ import CompanyAvatar from "@/app/components/records/companies/CompanyAvatar";
 import UserAvatar from "@/app/components/records/users/UserAvatar";
 import Rise from "@/app/components/motion/Rise";
 import SectionHeader from "@/app/components/dashboard/SectionHeader";
+import { noteContentToPlainText } from "@/app/lib/references";
 import type { SearchResults } from "@/app/lib/types";
 import { formatFileSize } from "@/app/lib/utils";
 
@@ -128,7 +129,7 @@ export default function SearchResultsView({
         key: `task-${task.id}`,
         href: "/activity/tasks",
         icon: CheckCircleIcon,
-        label: truncate(task.description),
+        label: truncate(noteContentToPlainText(task.description)),
     }));
     add("attachments", t("groupAttachments"), results.attachments, (a) => ({
         key: `attachment-${a.id}`,

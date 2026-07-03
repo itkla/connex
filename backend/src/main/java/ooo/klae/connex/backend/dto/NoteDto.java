@@ -44,7 +44,7 @@ public class NoteDto {
     private String updatedAt;
 
     @JsonProperty(access = JsonProperty.Access.READ_ONLY)
-    private List<NoteReferenceDto> references;
+    private List<ReferenceDto> references;
 
     public static NoteDto from(Note n) {
         if (n == null) return null;
@@ -58,7 +58,7 @@ public class NoteDto {
         dto.updatedAt = n.getUpdatedAt();
         dto.references = n.getReferences() == null
             ? List.of()
-            : n.getReferences().stream().map(NoteReferenceDto::from).toList();
+            : n.getReferences().stream().map(ReferenceDto::from).toList();
         return dto;
     }
 

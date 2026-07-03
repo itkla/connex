@@ -24,7 +24,6 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
-import { Textarea } from '@/components/ui/textarea';
 import MentionEditor from '@/app/components/activity/notes/MentionEditor';
 import { createNote, createTask } from '@/app/lib/api';
 import { toastError, toastSuccess } from '@/app/lib/toast';
@@ -142,13 +141,13 @@ export default function QuickCreate({ currentUserId }: { currentUserId: number }
                     <form onSubmit={submitTask} className="grid gap-4">
                         <div className="grid gap-2">
                             <Label htmlFor="qc-task-desc">{t('descriptionField')}</Label>
-                            <Textarea
+                            <MentionEditor
                                 id="qc-task-desc"
                                 value={description}
-                                onChange={(e) => setDescription(e.target.value)}
+                                onChange={setDescription}
                                 placeholder={t('descriptionPlaceholder')}
                                 autoFocus
-                                required
+                                className="min-h-32 rounded-lg bg-muted px-3 py-2 text-sm ring-1 ring-border focus:ring-2 focus:ring-brand"
                             />
                         </div>
                         <div className="grid gap-2">

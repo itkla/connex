@@ -1,5 +1,7 @@
 package ooo.klae.connex.backend.dto;
 
+import java.util.List;
+
 import com.fasterxml.jackson.annotation.JsonProperty;
 
 import jakarta.validation.constraints.NotBlank;
@@ -56,6 +58,9 @@ public class TaskDto {
     private String createdAt;
     private String updatedAt;
 
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
+    private List<ReferenceDto> references;
+
     public static TaskDto from(Task t) {
         if (t == null) return null;
         TaskDto dto = new TaskDto();
@@ -73,6 +78,9 @@ public class TaskDto {
         dto.dealId = t.getDeal() == null ? null : t.getDeal().getId();
         dto.createdAt = t.getCreatedAt();
         dto.updatedAt = t.getUpdatedAt();
+        dto.references = t.getReferences() == null
+            ? List.of()
+            : t.getReferences().stream().map(ReferenceDto::from).toList();
         return dto;
     }
 

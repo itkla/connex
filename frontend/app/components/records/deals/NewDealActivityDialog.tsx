@@ -17,7 +17,7 @@ import {
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
-import { Textarea } from '@/components/ui/textarea';
+import MentionEditor from '@/app/components/activity/notes/MentionEditor';
 import RecordSelect from '@/app/components/records/RecordSelect';
 
 import { addDealPerson, ApiError, createActivity, getCompanyPeople } from '@/app/lib/api';
@@ -202,12 +202,12 @@ export default function NewDealActivityDialog({
                         <Label htmlFor="deal-activity-notes">{t('notes')}</Label>
                         <div className="group relative">
                             <Bars3BottomLeftIcon className="pointer-events-none absolute left-3 top-3 size-4 text-muted-foreground transition-colors group-focus-within:text-brand" />
-                            <Textarea
+                            <MentionEditor
                                 id="deal-activity-notes"
                                 value={notes}
-                                onChange={(e) => setNotes(e.target.value)}
+                                onChange={setNotes}
                                 placeholder={t('notesPlaceholder')}
-                                className={cn(fieldInputClass, 'min-h-24 pl-9 pr-3')}
+                                className={cn(fieldInputClass, 'min-h-24 pl-9 pr-3 py-2')}
                             />
                         </div>
                     </div>

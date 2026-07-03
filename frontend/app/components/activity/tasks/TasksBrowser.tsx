@@ -29,6 +29,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import EditTaskSheet from '@/app/components/activity/tasks/EditTaskSheet';
 import TaskDialog from '@/app/components/activity/tasks/TaskDialog';
 import TasksKanban from '@/app/components/activity/tasks/TasksKanban';
+import NoteContent from '@/app/components/activity/notes/NoteContent';
 import { type DueTone, DUE_CHIP, formatDue } from '@/app/components/activity/tasks/taskDue';
 import Rise from '@/app/components/motion/Rise';
 import { updateTask } from '@/app/lib/api';
@@ -877,7 +878,7 @@ function TaskRow({
                     checked || isCompletedRow ? 'text-muted-foreground line-through' : 'text-foreground',
                 )}
             >
-                {task.description}
+                <NoteContent content={task.description} references={task.references} />
             </span>
 
             <div className="hidden shrink-0 items-center gap-1.5 sm:flex">

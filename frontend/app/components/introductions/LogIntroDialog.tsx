@@ -22,10 +22,8 @@ import {
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
-import { Textarea } from '@/components/ui/textarea';
+import MentionEditor from '@/app/components/activity/notes/MentionEditor';
 import type { Contact } from '@/app/lib/types';
-
-const NOTE_MAX = 500;
 
 function ContactPicker({
     id,
@@ -153,13 +151,12 @@ export default function LogIntroDialog({
                     />
                     <div className="flex flex-col gap-2">
                         <Label htmlFor="intro-note">{t('noteLabel')}</Label>
-                        <Textarea
+                        <MentionEditor
                             id="intro-note"
                             value={note}
-                            onChange={(e) => setNote(e.target.value)}
-                            maxLength={NOTE_MAX}
-                            rows={3}
+                            onChange={setNote}
                             placeholder={t('notePlaceholder')}
+                            className="min-h-[6rem] rounded-lg bg-muted px-3 py-2 text-sm ring-1 ring-border focus:ring-2 focus:ring-brand"
                         />
                     </div>
                 </div>

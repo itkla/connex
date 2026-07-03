@@ -30,7 +30,7 @@ public class Note {
     private Deal deal;
     private String createdAt;
     private String updatedAt;
-    private List<NoteReference> references;
+    private List<EntityReference> references;
 
     public int getId() {
         return id;

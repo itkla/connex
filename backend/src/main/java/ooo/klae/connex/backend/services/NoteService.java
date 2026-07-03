@@ -18,7 +18,6 @@ import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.DealMapper;
 import ooo.klae.connex.backend.mappers.NoteMapper;
-import ooo.klae.connex.backend.mappers.NoteReferenceMapper;
 import ooo.klae.connex.backend.notifications.NotificationDelivery;
 import ooo.klae.connex.backend.mappers.PersonMapper;
 import ooo.klae.connex.backend.tenant.Permission;
@@ -37,7 +36,6 @@ import lombok.RequiredArgsConstructor;
 @RequiredArgsConstructor
 public class NoteService {
     private final NoteMapper noteMapper;
-    private final NoteReferenceMapper noteReferenceMapper;
     private final DealMapper dealMapper;
     private final PersonMapper personMapper;
     private final AuditService auditService;
@@ -123,12 +121,14 @@ public class NoteService {
         return hydrateReferences(workspaceId, note);
     }
 
+    @Transactional
     @RequirePermission(Permission.NOTE_DELETE)
     public void delete(int id) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         Note before = noteMapper.getNoteById(workspaceId, id);
         if (before == null) throw new ResourceNotFoundException("Note not found with id: " + id);
         noteMapper.delete(workspaceId, id);
+        referenceService.deleteReferences(workspaceId, ReferenceService.SOURCE_NOTE, id);
         auditService.record("note.delete", "note", id, before.getContent(),
             "Deleted note",
             auditService.diff(before, null, AUDIT_FIELDS));
@@ -199,7 +199,7 @@ public class NoteService {
     }
 
     private Note hydrateReferences(int workspaceId, Note note) {
-        note.setReferences(noteReferenceMapper.findByNote(workspaceId, note.getId()));
+        note.setReferences(referenceService.referencesFor(workspaceId, ReferenceService.SOURCE_NOTE, note.getId()));
         return note;
     }
 

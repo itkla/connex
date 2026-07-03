@@ -19,7 +19,7 @@ import {
 } from '@/components/ui/sheet';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
-import { Textarea } from '@/components/ui/textarea';
+import MentionEditor from '@/app/components/activity/notes/MentionEditor';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
 import { ApiError, updateActivity } from '@/app/lib/api';
@@ -214,10 +214,11 @@ export default function EditActivitySheet({
 
                         <div className="grid gap-1.5">
                             <Label htmlFor="activity-notes">{t('notesLabel')}</Label>
-                            <Textarea
+                            <MentionEditor
                                 id="activity-notes"
                                 value={draft.notes}
-                                onChange={(e) => setDraft((d) => ({ ...d, notes: e.target.value }))}
+                                onChange={(value) => setDraft((d) => ({ ...d, notes: value }))}
+                                className={`${inputClass} min-h-24`}
                             />
                         </div>
                     </div>

@@ -12,32 +12,41 @@ import java.util.regex.Pattern;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import ooo.klae.connex.backend.beans.Activity;
+import ooo.klae.connex.backend.beans.EntityReference;
 import ooo.klae.connex.backend.beans.Note;
-import ooo.klae.connex.backend.beans.NoteReference;
+import ooo.klae.connex.backend.beans.Task;
 import ooo.klae.connex.backend.mappers.CompanyMapper;
 import ooo.klae.connex.backend.mappers.DealMapper;
-import ooo.klae.connex.backend.mappers.NoteReferenceMapper;
+import ooo.klae.connex.backend.mappers.EntityReferenceMapper;
 import ooo.klae.connex.backend.mappers.PersonMapper;
 
 import lombok.RequiredArgsConstructor;
 
 /**
- * Derives the structured @-references for a note from its content tokens
- * ({@code [Label](type:id)}) and persists them, replacing the previous set.
- * Every token is validated against the active workspace before it is stored, so
- * a client can never inject a reference to an entity outside the current tenant.
- * Members ({@code user}) drive mention notifications; contacts ({@code person}),
- * deals, and companies are stored as inline record references (no notification).
+ * Derives the structured @/# references for an entity's prose field from its
+ * content tokens ({@code [Label](type:id)}) and persists them, replacing the
+ * previous set. Every token is validated against the active workspace before it
+ * is stored, so a client can never inject a reference to an entity outside the
+ * current tenant. Members ({@code user}) drive mention notifications; contacts
+ * ({@code person}), deals, and companies are stored as inline record references
+ * (no notification). The source entity is polymorphic ({@code sourceType} /
+ * {@code sourceId}): notes, tasks, activities, and introductions share this machinery.
  */
 @Service
 @RequiredArgsConstructor
 public class ReferenceService {
 
-    private final NoteReferenceMapper noteReferenceMapper;
+    private final EntityReferenceMapper entityReferenceMapper;
     private final WorkspaceService workspaceService;
     private final PersonMapper personMapper;
     private final DealMapper dealMapper;
     private final CompanyMapper companyMapper;
+
+    public static final String SOURCE_NOTE = "note";
+    public static final String SOURCE_TASK = "task";
+    public static final String SOURCE_ACTIVITY = "activity";
+    public static final String SOURCE_INTRODUCTION = "introduction";
 
     static final String TYPE_USER = "user";
     static final String TYPE_PERSON = "person";
@@ -49,13 +58,38 @@ public class ReferenceService {
         Pattern.compile("\\[([^\\]]+)\\]\\((user|person|deal|company):(\\d+)\\)");
 
     /**
-     * Re-derives and persists a note's @-references from its content, replacing
-     * any previous set. Every valid member reference is stored (so the mention
-     * chip renders regardless of who edits the note); returns the IDs of members
-     * referenced for the first time (present now but not before this call), so
-     * the caller can notify only newly-added mentions. Excluding the acting
-     * author from notification is the caller's responsibility. Scoped to
+     * Re-derives and persists a source entity's @/# references from its content,
+     * replacing any previous set. Every valid member reference is stored (so the
+     * mention chip renders regardless of who edits the source); returns the IDs of
+     * members referenced for the first time (present now but not before this
+     * call), so the caller can notify only newly-added mentions. Excluding the
+     * acting author from notification is the caller's responsibility. Scoped to
      * {@code workspaceId}.
+     *
+     * @param workspaceId the owning workspace
+     * @param sourceType  the entity type the references belong to ({@code note}, {@code task})
+     * @param sourceId    the entity whose references are being synced
+     * @param content     the entity's current prose content
+     * @return the user IDs newly referenced by this sync
+     */
+    @Transactional
+    public List<Integer> syncReferences(int workspaceId, String sourceType, int sourceId, String content) {
+        Set<Integer> before = mentionedMemberIds(entityReferenceMapper.findBySource(workspaceId, sourceType, sourceId));
+        List<EntityReference> resolved = resolve(workspaceId, sourceType, sourceId, content);
+
+        entityReferenceMapper.deleteBySource(workspaceId, sourceType, sourceId);
+        for (EntityReference reference : resolved) {
+            entityReferenceMapper.insert(reference);
+        }
+
+        Set<Integer> added = mentionedMemberIds(resolved);
+        added.removeAll(before);
+        return new ArrayList<>(added);
+    }
+
+    /**
+     * Note-scoped overload of {@link #syncReferences(int, String, int, String)},
+     * preserved so existing note callers are unaffected by the generalization.
      *
      * @param workspaceId the owning workspace
      * @param noteId      the note whose references are being synced
@@ -64,17 +98,32 @@ public class ReferenceService {
      */
     @Transactional
     public List<Integer> syncReferences(int workspaceId, int noteId, String content) {
-        Set<Integer> before = mentionedMemberIds(noteReferenceMapper.findByNote(workspaceId, noteId));
-        List<NoteReference> resolved = resolve(workspaceId, noteId, content);
+        return syncReferences(workspaceId, SOURCE_NOTE, noteId, content);
+    }
 
-        noteReferenceMapper.deleteByNote(workspaceId, noteId);
-        for (NoteReference reference : resolved) {
-            noteReferenceMapper.insert(reference);
-        }
+    /**
+     * The resolved references for a single source entity, in stored order.
+     *
+     * @param workspaceId the owning workspace
+     * @param sourceType  the source entity type
+     * @param sourceId    the source entity
+     * @return the entity's references (never null)
+     */
+    public List<EntityReference> referencesFor(int workspaceId, String sourceType, int sourceId) {
+        return entityReferenceMapper.findBySource(workspaceId, sourceType, sourceId);
+    }
 
-        Set<Integer> added = mentionedMemberIds(resolved);
-        added.removeAll(before);
-        return new ArrayList<>(added);
+    /**
+     * Removes every reference belonging to a source entity. Callers invoke this
+     * when the source is deleted — {@code entity_reference} is polymorphic and so
+     * carries no FK cascade to rely on.
+     *
+     * @param workspaceId the owning workspace
+     * @param sourceType  the source entity type
+     * @param sourceId    the source entity
+     */
+    public void deleteReferences(int workspaceId, String sourceType, int sourceId) {
+        entityReferenceMapper.deleteBySource(workspaceId, sourceType, sourceId);
     }
 
     /**
@@ -91,22 +140,83 @@ public class ReferenceService {
         if (notes == null || notes.isEmpty()) {
             return notes;
         }
-        List<Integer> noteIds = notes.stream().map(Note::getId).toList();
-        Map<Integer, List<NoteReference>> byNote = new LinkedHashMap<>();
-        for (NoteReference reference : noteReferenceMapper.findByNotes(workspaceId, noteIds)) {
-            byNote.computeIfAbsent(reference.getNoteId(), key -> new ArrayList<>()).add(reference);
-        }
+        Map<Integer, List<EntityReference>> bySource =
+            referencesBySource(workspaceId, SOURCE_NOTE, notes.stream().map(Note::getId).toList());
         for (Note note : notes) {
-            note.setReferences(byNote.getOrDefault(note.getId(), List.of()));
+            note.setReferences(bySource.getOrDefault(note.getId(), List.of()));
         }
         return notes;
     }
 
-    private List<NoteReference> resolve(int workspaceId, int noteId, String content) {
+    /**
+     * Attaches each task's resolved references in a single batch query, so any
+     * read path returns tasks the frontend can render as chips. Mutates the tasks
+     * in place and returns them. Scoped to {@code workspaceId}.
+     *
+     * @param workspaceId the owning workspace
+     * @param tasks the tasks to hydrate
+     * @return the same tasks, each with its references populated
+     */
+    public List<Task> hydrateTasks(int workspaceId, List<Task> tasks) {
+        if (tasks == null || tasks.isEmpty()) {
+            return tasks;
+        }
+        Map<Integer, List<EntityReference>> bySource =
+            referencesBySource(workspaceId, SOURCE_TASK, tasks.stream().map(Task::getId).toList());
+        for (Task task : tasks) {
+            task.setReferences(bySource.getOrDefault(task.getId(), List.of()));
+        }
+        return tasks;
+    }
+
+    /**
+     * Attaches each activity's resolved references in a single batch query, so any
+     * read path returns activities the frontend can render as chips. Mutates the
+     * activities in place and returns them. Scoped to {@code workspaceId}.
+     *
+     * @param workspaceId the owning workspace
+     * @param activities the activities to hydrate
+     * @return the same activities, each with its references populated
+     */
+    public List<Activity> hydrateActivities(int workspaceId, List<Activity> activities) {
+        if (activities == null || activities.isEmpty()) {
+            return activities;
+        }
+        Map<Integer, List<EntityReference>> bySource =
+            referencesBySource(workspaceId, SOURCE_ACTIVITY, activities.stream().map(Activity::getId).toList());
+        for (Activity activity : activities) {
+            activity.setReferences(bySource.getOrDefault(activity.getId(), List.of()));
+        }
+        return activities;
+    }
+
+    /**
+     * Groups a set of source entities' references by {@code sourceId} in a single
+     * batch query, for callers that hydrate a projection DTO (which has no bean to
+     * mutate). Returns an empty map for an empty id list. Scoped to {@code workspaceId}.
+     *
+     * @param workspaceId the owning workspace
+     * @param sourceType the source entity type
+     * @param sourceIds the source entity ids
+     * @return references grouped by source id
+     */
+    public Map<Integer, List<EntityReference>> referencesBySource(
+            int workspaceId, String sourceType, List<Integer> sourceIds) {
+        Map<Integer, List<EntityReference>> bySource = new LinkedHashMap<>();
+        if (sourceIds == null || sourceIds.isEmpty()) {
+            return bySource;
+        }
+        for (EntityReference reference : entityReferenceMapper.findBySources(workspaceId, sourceType, sourceIds)) {
+            bySource.computeIfAbsent(reference.getSourceId(), key -> new ArrayList<>()).add(reference);
+        }
+        return bySource;
+    }
+
+    private List<EntityReference> resolve(int workspaceId, String sourceType, int sourceId, String content) {
         if (content == null || content.isBlank()) {
             return List.of();
         }
-        Map<String, NoteReference> unique = new LinkedHashMap<>();
+        Map<String, EntityReference> unique = new LinkedHashMap<>();
         Matcher matcher = TOKEN.matcher(content);
         while (matcher.find() && unique.size() < MAX_REFERENCES) {
             String type = matcher.group(2);
@@ -123,7 +233,7 @@ public class ReferenceService {
             if (unique.containsKey(key)) {
                 continue;
             }
-            unique.put(key, build(workspaceId, noteId, type, refId, matcher.group(1)));
+            unique.put(key, build(workspaceId, sourceType, sourceId, type, refId, matcher.group(1)));
         }
         return new ArrayList<>(unique.values());
     }
@@ -138,19 +248,21 @@ public class ReferenceService {
         };
     }
 
-    private NoteReference build(int workspaceId, int noteId, String type, int refId, String label) {
-        NoteReference reference = new NoteReference();
+    private EntityReference build(
+            int workspaceId, String sourceType, int sourceId, String type, int refId, String label) {
+        EntityReference reference = new EntityReference();
         reference.setWorkspaceId(workspaceId);
-        reference.setNoteId(noteId);
+        reference.setSourceType(sourceType);
+        reference.setSourceId(sourceId);
         reference.setRefType(type);
         reference.setRefId(refId);
         reference.setLabel(label.length() > MAX_LABEL_LENGTH ? label.substring(0, MAX_LABEL_LENGTH) : label);
         return reference;
     }
 
-    private Set<Integer> mentionedMemberIds(List<NoteReference> references) {
+    private Set<Integer> mentionedMemberIds(List<EntityReference> references) {
         Set<Integer> ids = new HashSet<>();
-        for (NoteReference reference : references) {
+        for (EntityReference reference : references) {
             if (TYPE_USER.equals(reference.getRefType())) {
                 ids.add(reference.getRefId());
             }
@@ -159,10 +271,10 @@ public class ReferenceService {
     }
 
     /**
-     * Renders note content for plain-text contexts (e.g. notification snippets)
+     * Renders prose content for plain-text contexts (e.g. notification snippets)
      * by replacing each {@code [Label](type:id)} token with {@code @Label}.
      *
-     * @param content the raw note content
+     * @param content the raw content
      * @return the content with reference tokens flattened to their labels
      */
     public static String toPlainText(String content) {
