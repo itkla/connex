@@ -166,6 +166,19 @@ public class AttachmentService {
     }
 
     /**
+     * Resolves the attachment record for a blob URL within the caller's workspace.
+     * Backs the upload route's delete-authorization check so a session alone cannot
+     * unlink another tenant's blob.
+     * @param url the stored attachment url
+     * @return the attachment owned by the current workspace
+     */
+    public Attachment getByUrl(String url) {
+        Attachment attachment = attachmentMapper.getByUrl(workspaceService.getCurrentWorkspaceId(), url);
+        if (attachment == null) throw new ResourceNotFoundException("Attachment not found for url");
+        return attachment;
+    }
+
+    /**
      * Creates a new attachment.
      * @param attachment
      * @return

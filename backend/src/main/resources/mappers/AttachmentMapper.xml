@@ -54,6 +54,14 @@
     WHERE a.workspace_id = #{workspaceId} AND a.id = #{id}
   </select>
 
+  <select id="getByUrl" resultMap="AttachmentWithTagsResult">
+    SELECT <include refid="attachmentColumns"/>,
+      COALESCE(c.name, p.name, d.name, eu.display_name) AS entity_label
+    <include refid="attachJoins"/>
+    WHERE a.workspace_id = #{workspaceId} AND a.url = #{url}
+    LIMIT 1
+  </select>
+
   <select id="search" resultMap="AttachmentResult">
     SELECT <include refid="attachmentColumns"/>
     FROM attachment a
