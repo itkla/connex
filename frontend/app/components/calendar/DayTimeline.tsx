@@ -9,12 +9,15 @@ import {
     layoutTimedEvents,
     minutesSinceMidnight,
     sameDay,
+    startOfDay,
     type CalendarEvent,
 } from '@/app/lib/calendar';
 import EventChip from './EventChip';
 
 const HOUR_PX = 56;
 const HOURS = Array.from({ length: 24 }, (_, i) => i);
+const SLOT_MIN = 30;
+const MAX_SLOT_MIN = 23 * 60 + 30;
 
 /**
  * A single day's hour timeline: a pinned all-day row for date-only records, and an
@@ -28,6 +31,7 @@ export default function DayTimeline({
     today,
     locale,
     onOpenEvent,
+    onSlotCreate,
     className,
 }: {
     day: Date;
@@ -35,6 +39,8 @@ export default function DayTimeline({
     today: Date;
     locale: string;
     onOpenEvent: (event: CalendarEvent) => void;
+    /** Fine-pointer create: click an empty slot to add something at that time (ms). Omitted on touch. */
+    onSlotCreate?: (startMs: number) => void;
     className?: string;
 }) {
     const t = useTranslations('Calendar');
@@ -101,10 +107,32 @@ export default function DayTimeline({
 
             <div ref={scrollRef} className="max-h-[65vh] overflow-y-auto overscroll-contain">
                 <div className="relative" style={{ height: HOURS.length * HOUR_PX }}>
+                    {onSlotCreate && (
+                        <button
+                            type="button"
+                            tabIndex={-1}
+                            aria-label={t('createAtTime')}
+                            onClick={(e) => {
+                                if (e.detail === 0) return;
+                                const rect = e.currentTarget.getBoundingClientRect();
+                                const min = Math.max(
+                                    0,
+                                    Math.min(
+                                        MAX_SLOT_MIN,
+                                        Math.round(((e.clientY - rect.top) / HOUR_PX) * 60 / SLOT_MIN) * SLOT_MIN,
+                                    ),
+                                );
+                                const at = startOfDay(day);
+                                at.setHours(0, min, 0, 0);
+                                onSlotCreate(at.getTime());
+                            }}
+                            className="absolute inset-0 z-0 cursor-copy rounded-none outline-none transition-colors hover:bg-brand/[0.03] focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand/40"
+                        />
+                    )}
                     {HOURS.map((hour, i) => (
                         <div
                             key={hour}
-                            className="absolute inset-x-0 border-t border-border/60"
+                            className="pointer-events-none absolute inset-x-0 border-t border-border/60"
                             style={{ top: hour * HOUR_PX }}
                         >
                             <span className="absolute -top-2 left-2 text-[10px] tabular-nums text-muted-foreground">
@@ -113,14 +141,14 @@ export default function DayTimeline({
                         </div>
                     ))}
 
-                    <div className="absolute inset-y-0 left-14 right-2">
+                    <div className="pointer-events-none absolute inset-y-0 left-14 right-2 z-10">
                         {placements.map(({ event, startMin, lane, laneCount }) => {
                             const top = (startMin / 60) * HOUR_PX;
                             const widthPct = 100 / laneCount;
                             return (
                                 <div
                                     key={event.id}
-                                    className="absolute px-0.5"
+                                    className="pointer-events-auto absolute px-0.5"
                                     style={{
                                         top,
                                         height: HOUR_PX - 6,

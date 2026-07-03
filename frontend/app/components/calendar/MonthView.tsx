@@ -56,6 +56,8 @@ interface MonthViewProps {
     onSelectDay: (day: Date) => void;
     onOpenEvent: (event: CalendarEvent) => void;
     onReschedule: (event: CalendarEvent, dayKey: string) => void;
+    /** Fine-pointer create in the desktop day pane: click an empty slot to add at that time. */
+    onSlotCreate?: (startMs: number) => void;
 }
 
 export default function MonthView({
@@ -69,6 +71,7 @@ export default function MonthView({
     onSelectDay,
     onOpenEvent,
     onReschedule,
+    onSlotCreate,
 }: MonthViewProps) {
     const t = useTranslations('Calendar');
     const reduce = useReducedMotion() ?? false;
@@ -186,6 +189,7 @@ export default function MonthView({
                         today={today}
                         locale={locale}
                         onOpenEvent={onOpenEvent}
+                        onSlotCreate={onSlotCreate}
                         className="rounded-none border-0 bg-transparent"
                     />
                 </aside>

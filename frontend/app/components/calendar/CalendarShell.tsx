@@ -36,6 +36,7 @@ import GoToDateDialog from './GoToDateDialog';
 import CalendarShortcuts from './CalendarShortcuts';
 import UpNext from './UpNext';
 import { temperatureIndex } from './warmth';
+import ActivityDialog from '@/app/components/activity/activities/ActivityDialog';
 
 const SWIPE_OFFSET = 40;
 
@@ -89,6 +90,7 @@ export default function CalendarShell({
     const [openEventId, setOpenEventId] = useState<string | null>(null);
     const [overrides, setOverrides] = useState<Map<string, string>>(() => new Map());
     const [pendingIds, setPendingIds] = useState<Set<string>>(() => new Set());
+    const [slotAt, setSlotAt] = useState<string | null>(null);
     const [helpOpen, setHelpOpen] = useState(false);
     const [goToOpen, setGoToOpen] = useState(false);
     const [createOpen, setCreateOpen] = useState(false);
@@ -253,6 +255,14 @@ export default function CalendarShell({
         else cal.openDay(day);
     };
 
+    const onSlotCreate = (startMs: number) => {
+        const d = new Date(startMs);
+        const pad = (n: number) => String(n).padStart(2, '0');
+        setSlotAt(
+            `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`,
+        );
+    };
+
     useEffect(() => {
         const onKey = (e: KeyboardEvent) => {
             if (e.metaKey || e.ctrlKey || e.altKey) return;
@@ -333,6 +343,7 @@ export default function CalendarShell({
                         onSelectDay={onSelectDay}
                         onOpenEvent={onOpenEvent}
                         onReschedule={handleReschedule}
+                        onSlotCreate={coarse ? undefined : onSlotCreate}
                     />
                 );
             case 'week':
@@ -355,6 +366,7 @@ export default function CalendarShell({
                         eventsByDay={eventsByDay}
                         locale={locale}
                         onOpenEvent={onOpenEvent}
+                        onSlotCreate={coarse ? undefined : onSlotCreate}
                     />
                 );
             case 'agenda':
@@ -479,6 +491,17 @@ export default function CalendarShell({
                 currentUserId={currentUserId}
                 menuOpen={createOpen}
                 onMenuOpenChange={setCreateOpen}
+            />
+
+            <ActivityDialog
+                open={slotAt != null}
+                onOpenChange={(next) => {
+                    if (!next) setSlotAt(null);
+                }}
+                persons={persons ?? []}
+                deals={deals ?? []}
+                currentUserId={currentUserId}
+                defaultTimestamp={slotAt ?? undefined}
             />
 
             <GoToDateDialog

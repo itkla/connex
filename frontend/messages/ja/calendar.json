@@ -51,6 +51,7 @@
     "a11yCancelled": "{name}の日付変更をキャンセルしました。",
     "openRecord": "レコードを開く",
     "quickCreate": "作成",
+    "createAtTime": "この時間に追加",
     "newTask": "新しいタスク",
     "newActivity": "新しいアクティビティ",
     "newDeal": "新しい案件",

@@ -12,15 +12,24 @@ export default function DayView({
     eventsByDay,
     locale,
     onOpenEvent,
+    onSlotCreate,
 }: {
     day: Date;
     today: Date;
     eventsByDay: Map<string, CalendarEvent[]>;
     locale: string;
     onOpenEvent: (event: CalendarEvent) => void;
+    onSlotCreate?: (startMs: number) => void;
 }) {
     const events = useMemo(() => eventsByDay.get(dayKeyOf(day)) ?? [], [eventsByDay, day]);
     return (
-        <DayTimeline day={day} events={events} today={today} locale={locale} onOpenEvent={onOpenEvent} />
+        <DayTimeline
+            day={day}
+            events={events}
+            today={today}
+            locale={locale}
+            onOpenEvent={onOpenEvent}
+            onSlotCreate={onSlotCreate}
+        />
     );
 }
