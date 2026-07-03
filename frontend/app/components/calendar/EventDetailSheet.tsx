@@ -79,6 +79,10 @@ export default function EventDetailSheet({
         <Sheet open={open} onOpenChange={onOpenChange}>
             <SheetContent
                 side="bottom"
+                onOpenAutoFocus={(e) => {
+                    e.preventDefault();
+                    (e.currentTarget as HTMLElement | null)?.focus();
+                }}
                 className="mx-auto max-h-[85vh] gap-0 rounded-t-2xl pb-[max(1rem,env(safe-area-inset-bottom))] sm:max-w-lg"
             >
                 <SheetHeader className="gap-2">
