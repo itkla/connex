@@ -475,7 +475,7 @@ export default function ContactsBrowser({ savedViews }: { savedViews: SavedView[
 
     return (
         <div className="min-h-full bg-background px-2 pt-8 pb-12">
-            <div className={`mx-auto flex w-full max-w-7xl flex-col gap-10${displayMode === 'table' ? ' md:max-w-none' : ''}`}>
+            <div className="mx-auto flex w-full max-w-7xl flex-col gap-10">
                 <Rise>
                     <div className="flex items-center justify-between">
                         <h1 className="text-4xl font-extrabold">{t('heading')}</h1>
