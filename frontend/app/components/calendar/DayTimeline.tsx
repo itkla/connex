@@ -113,6 +113,7 @@ export default function DayTimeline({
                             tabIndex={-1}
                             aria-label={t('createAtTime')}
                             onClick={(e) => {
+                                if (e.detail === 0) return;
                                 const rect = e.currentTarget.getBoundingClientRect();
                                 const min = Math.max(
                                     0,
@@ -121,7 +122,9 @@ export default function DayTimeline({
                                         Math.round(((e.clientY - rect.top) / HOUR_PX) * 60 / SLOT_MIN) * SLOT_MIN,
                                     ),
                                 );
-                                onSlotCreate(startOfDay(day).getTime() + min * 60_000);
+                                const at = startOfDay(day);
+                                at.setHours(0, min, 0, 0);
+                                onSlotCreate(at.getTime());
                             }}
                             className="absolute inset-0 z-0 cursor-copy rounded-none outline-none transition-colors hover:bg-brand/[0.03] focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand/40"
                         />
