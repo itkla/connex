@@ -45,6 +45,7 @@ export default function EventDetailSheet({
     locale,
     personById,
     dealById,
+    currentUserId,
     onReschedule,
     onComplete,
     rescheduling = false,
@@ -55,6 +56,7 @@ export default function EventDetailSheet({
     locale: string;
     personById: Map<number, Contact>;
     dealById: Map<number, Deal>;
+    currentUserId: number;
     onReschedule?: (event: CalendarEvent, dayKey: string) => void;
     onComplete?: (event: CalendarEvent) => void;
     rescheduling?: boolean;
@@ -159,7 +161,7 @@ export default function EventDetailSheet({
                 )}
 
                 <SheetFooter className="flex-row gap-2">
-                    {event.kind === 'task' && onComplete && (
+                    {event.kind === 'task' && onComplete && event.raw.assignedToId === currentUserId && (
                         <Button
                             variant="secondary"
                             className="flex-1"

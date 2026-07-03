@@ -175,7 +175,15 @@ export default function CalendarShell({
             const ok = await applyReschedule(event, newDayKey);
             if (ok) {
                 toast.success(t('rescheduled'), {
-                    action: { label: t('undo'), onClick: () => void applyReschedule(event, originalKey) },
+                    id: `reschedule-${event.id}`,
+                    action: {
+                        label: t('undo'),
+                        onClick: () => {
+                            void applyReschedule(event, originalKey).then((undone) => {
+                                if (!undone) toast.error(t('rescheduleFailed'));
+                            });
+                        },
+                    },
                 });
             } else {
                 toast.error(t('rescheduleFailed'));
@@ -448,6 +456,7 @@ export default function CalendarShell({
                 locale={locale}
                 personById={personById}
                 dealById={dealById}
+                currentUserId={currentUserId}
                 onReschedule={handleReschedule}
                 onComplete={handleComplete}
                 rescheduling={openEvent != null && pendingIds.has(openEvent.id)}

@@ -2,7 +2,7 @@
 
 import { useTranslations } from 'next-intl';
 
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 
 /** One key + what it does, rendered as a row in the shortcuts dialog. */
 interface Shortcut {
@@ -37,6 +37,7 @@ export default function CalendarShortcuts({
             <DialogContent className="max-w-sm gap-4">
                 <DialogHeader>
                     <DialogTitle className="text-base">{t('shortcutsTitle')}</DialogTitle>
+                    <DialogDescription className="sr-only">{t('shortcutsHint')}</DialogDescription>
                 </DialogHeader>
                 <dl className="flex flex-col gap-1.5">
                     {SHORTCUTS.map((s) => (

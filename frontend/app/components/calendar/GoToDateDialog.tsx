@@ -3,7 +3,7 @@
 import { useRef } from 'react';
 import { useTranslations } from 'next-intl';
 
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { dayKeyOf } from '@/app/lib/calendar';
 import { parseCalendarDate } from '@/app/lib/utils';
@@ -39,6 +39,7 @@ export default function GoToDateDialog({
             <DialogContent className="max-w-xs gap-4">
                 <DialogHeader>
                     <DialogTitle className="text-base">{t('goToDate')}</DialogTitle>
+                    <DialogDescription className="sr-only">{t('goToDateHint')}</DialogDescription>
                 </DialogHeader>
                 <form
                     onSubmit={(e) => {
