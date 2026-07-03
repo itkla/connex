@@ -9,13 +9,16 @@ import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
 import org.springframework.security.config.http.SessionCreationPolicy;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.security.core.session.SessionRegistry;
 import org.springframework.security.core.session.SessionRegistryImpl;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.csrf.CsrfTokenRequestAttributeHandler;
-import org.springframework.security.web.session.HttpSessionEventPublisher;
+import org.springframework.session.FindByIndexNameSessionRepository;
+import org.springframework.session.Session;
+import org.springframework.session.security.SpringSessionBackedSessionRegistry;
 
 import jakarta.servlet.http.HttpServletResponse;
 
@@ -43,22 +46,18 @@ public class SecurityConfig {
     }
 
     /**
-     * Tracks live sessions per principal so a password reset can expire every
-     * session a user holds. In-memory and single-JVM, matching the current
-     * Tomcat session model; sessions are registered explicitly at login.
+     * Tracks live sessions per principal against the shared Spring Session store, so a
+     * password reset can expire every session a user holds across all instances. Backed
+     * by the JDBC session repository (V38); {@code registerNewSession} is a no-op here
+     * because Spring Session owns session lifecycle.
      */
     @Bean
-    public SessionRegistry sessionRegistry() {
-        return new SessionRegistryImpl();
-    }
-
-    /**
-     * Publishes servlet session lifecycle events so {@link SessionRegistry}
-     * drops entries when a session is destroyed or expires.
-     */
-    @Bean
-    public HttpSessionEventPublisher httpSessionEventPublisher() {
-        return new HttpSessionEventPublisher();
+    public <S extends Session> SessionRegistry sessionRegistry(
+            ObjectProvider<FindByIndexNameSessionRepository<S>> sessionRepository) {
+        FindByIndexNameSessionRepository<S> repository = sessionRepository.getIfAvailable();
+        return repository != null
+            ? new SpringSessionBackedSessionRegistry<>(repository)
+            : new SessionRegistryImpl();
     }
 
     @Bean

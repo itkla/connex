@@ -125,23 +125,22 @@ public class PasswordResetService {
 
         userMapper.updatePasswordHash(user.getId(), passwordEncoder.encode(newPassword));
         passwordResetTokenMapper.invalidateForUser(user.getId());
-        expireSessions(user.getId());
+        expireSessions(user);
 
         auditService.record("auth.password_reset_completed", "user", user.getId(), user.getDisplayName(),
                 "Password reset completed", null);
     }
 
     /**
-     * Expires every registered session belonging to the given user id.
-     * @param userId the user whose sessions should be invalidated
+     * Expires every session the user holds across the shared session store, forcing
+     * re-authentication everywhere after a password reset. The Spring Session-backed
+     * registry resolves sessions by principal name (the username), so the {@code User}
+     * (a {@code UserDetails}) is looked up directly rather than by scanning all principals.
+     * @param user the user whose sessions should be invalidated
      */
-    private void expireSessions(int userId) {
-        for (Object principal : sessionRegistry.getAllPrincipals()) {
-            if (principal instanceof User sessionUser && sessionUser.getId() == userId) {
-                for (SessionInformation session : sessionRegistry.getAllSessions(principal, false)) {
-                    session.expireNow();
-                }
-            }
+    private void expireSessions(User user) {
+        for (SessionInformation session : sessionRegistry.getAllSessions(user, false)) {
+            session.expireNow();
         }
     }
 
