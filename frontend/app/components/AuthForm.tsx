@@ -71,7 +71,7 @@ export function AuthForm({ mode, redirectUrl }: { mode: AuthMode; redirectUrl: s
     const altHref = ALT_HREF[mode];
 
     const fieldLabels: Record<FieldKey, string> = {
-        username: tForm("labelUsername"),
+        username: mode === "login" ? tForm("labelLoginIdentifier") : tForm("labelUsername"),
         email: tForm("labelEmail"),
         displayName: tForm("labelDisplayName"),
         password: tForm("labelPassword"),
