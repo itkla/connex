@@ -15,6 +15,7 @@ import tools.jackson.databind.ObjectMapper;
 
 import ooo.klae.connex.backend.mappers.AuditLogMapper;
 import ooo.klae.connex.backend.tenant.TenantContext;
+import ooo.klae.connex.backend.util.ClientIpResolver;
 
 @ExtendWith(MockitoExtension.class)
 class AuditServiceTest {
@@ -26,7 +27,7 @@ class AuditServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new AuditService(auditLogMapper, objectMapper, tenantContext);
+        service = new AuditService(auditLogMapper, objectMapper, tenantContext, new ClientIpResolver(""));
         when(tenantContext.getWorkspaceId()).thenReturn(7);
     }
 

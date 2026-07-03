@@ -15,6 +15,7 @@ import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.dto.EmailChangeConfirmDto;
 import ooo.klae.connex.backend.dto.EmailChangeRequestDto;
 import ooo.klae.connex.backend.services.EmailChangeService;
+import ooo.klae.connex.backend.util.ClientIpResolver;
 
 /**
  * Verified account email-change endpoints. Initiation is authenticated and
@@ -28,11 +29,13 @@ import ooo.klae.connex.backend.services.EmailChangeService;
 public class EmailChangeController {
 
     private final EmailChangeService emailChangeService;
+    private final ClientIpResolver clientIpResolver;
 
     @PostMapping("/api/users/me/email-change")
     public Map<String, String> request(@Valid @RequestBody EmailChangeRequestDto dto,
             HttpServletRequest httpRequest) {
-        emailChangeService.requestChange(dto.getNewEmail(), dto.getCurrentPassword(), clientIp(httpRequest));
+        emailChangeService.requestChange(dto.getNewEmail(), dto.getCurrentPassword(),
+                clientIpResolver.resolve(httpRequest));
         return Map.of("message", "Check your new email address for a verification link");
     }
 
@@ -45,13 +48,5 @@ public class EmailChangeController {
     public Map<String, String> confirm(@Valid @RequestBody EmailChangeConfirmDto dto) {
         emailChangeService.confirmChange(dto.getToken());
         return Map.of("message", "Your email address has been updated");
-    }
-
-    private static String clientIp(HttpServletRequest request) {
-        String forwarded = request.getHeader("X-Forwarded-For");
-        if (forwarded != null && !forwarded.isBlank()) {
-            return forwarded.split(",")[0].trim();
-        }
-        return request.getRemoteAddr();
     }
 }

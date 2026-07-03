@@ -20,8 +20,10 @@ import ooo.klae.connex.backend.dto.RegisterDto;
 import ooo.klae.connex.backend.exceptions.DuplicateResourceException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
+import ooo.klae.connex.backend.exceptions.TooManyRequestsException;
 import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.tenant.WorkspaceCookie;
+import ooo.klae.connex.backend.util.ClientIpResolver;
 
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
@@ -42,6 +44,8 @@ public class AuthService {
     private final AuditService auditService;
     private final WorkspaceService workspaceService;
     private final SessionRegistry sessionRegistry;
+    private final LoginRateLimiter loginRateLimiter;
+    private final ClientIpResolver clientIpResolver;
     private final SecurityContextRepository securityContextRepository = new HttpSessionSecurityContextRepository();
 
     @Value("${connex.signup.mode:open}")
@@ -123,16 +127,25 @@ public class AuthService {
      * @return
      */
     public User login(LoginDto request, HttpServletRequest httpRequest, HttpServletResponse httpResponse) {
+        String clientIp = clientIpResolver.resolve(httpRequest);
+        long now = System.currentTimeMillis();
+        if (loginRateLimiter.isBlocked(clientIp, request.getUsername(), now)) {
+            auditService.recordFailure("auth.login_throttled", "user", null, request.getUsername(),
+                    "Login attempts throttled for " + request.getUsername(), null);
+            throw new TooManyRequestsException("Too many login attempts. Please try again later.");
+        }
         Authentication authentication;
         try {
             authentication = authenticationManager.authenticate(
                 new UsernamePasswordAuthenticationToken(request.getUsername(), request.getPassword())
             );
         } catch (AuthenticationException e) {
+            loginRateLimiter.recordFailure(clientIp, request.getUsername(), now);
             auditService.recordFailure("auth.login", "user", null, request.getUsername(),
                     "Failed login attempt for " + request.getUsername(), e.getMessage());
             throw e;
         }
+        loginRateLimiter.recordSuccess(request.getUsername());
         User user = (User) authentication.getPrincipal();
         userMapper.updateLastLoginAt(user.getId());
         User refreshedUser = userMapper.getUserById(user.getId());
