@@ -29,7 +29,7 @@ class SignupModeTest {
     @Test
     void selfServiceRegister_refusedWhenSignupModeNotOpen() {
         assertThrows(ForbiddenException.class,
-            () -> authService.registerSelfService(dto("nope_user", "nope@example.com")));
+            () -> authService.registerSelfService(dto("nope_user", "nope@example.com"), "127.0.0.1"));
     }
 
     @Test
