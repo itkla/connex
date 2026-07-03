@@ -192,6 +192,11 @@
                         ]
                     }
                 ]
+            },
+            "quickstart": {
+                "title": "Quickstart",
+                "description": "Go from an empty workspace to your first tracked relationship in about five minutes.",
+                "blocks": []
             }
         }
     },
@@ -3525,6 +3530,38 @@
                         ]
                     }
                 ]
+            }
+        }
+    },
+    "DocsTutorials": {
+        "title": "Tutorials",
+        "description": "Short, hands-on walkthroughs that take you through common tasks from start to finish.",
+        "lead": "Learn by doing. Each tutorial walks you through one real task step by step, so you can follow along in your own workspace.",
+        "articles": {
+            "add-your-first-company": {
+                "title": "Add your first company and contact",
+                "description": "Create a company, add a person who works there, and open their profile.",
+                "blocks": []
+            },
+            "log-activity-and-warmth": {
+                "title": "Log a meeting and watch warmth rise",
+                "description": "Record an interaction and see how it lifts a relationship's temperature.",
+                "blocks": []
+            },
+            "build-your-pipeline": {
+                "title": "Build a pipeline and move a deal",
+                "description": "Set up stages and move a deal from first contact to won.",
+                "blocks": []
+            },
+            "request-a-warm-intro": {
+                "title": "Find and request a warm introduction",
+                "description": "See who can introduce you to someone, and ask for the intro.",
+                "blocks": []
+            },
+            "import-your-contacts": {
+                "title": "Import your existing contacts",
+                "description": "Bring contacts in from a spreadsheet in a few guided steps.",
+                "blocks": []
             }
         }
     }
