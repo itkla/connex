@@ -432,7 +432,7 @@ public class DealService {
                 ? dealMapper.getLastNormalStageId(workspaceId, deal.getPipelineId())
                 : null;
             if (normalStage == null) {
-                throw new IllegalStateException(
+                throw new BadRequestException(
                     "Cannot reopen deal \"" + deal.getName() + "\": its pipeline has no open stage to return to.");
             }
             deal.setStageId(normalStage);
