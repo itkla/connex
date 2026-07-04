@@ -3,6 +3,7 @@ package ooo.klae.connex.backend.services;
 import java.util.List;
 
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.beans.User;
@@ -73,6 +74,7 @@ public class OrgMemberService {
      * to be an org owner; the target must be a real user; and the organization must
      * always keep at least one owner (a sole owner cannot be demoted to admin).
      */
+    @Transactional
     public void setMember(int orgId, int actorId, int targetUserId, String roleRaw) {
         requireOrgOwner(orgId, actorId);
         OrgRole role = parseRole(roleRaw);
@@ -92,6 +94,7 @@ public class OrgMemberService {
      * Removes a user's org membership. Requires the actor to be an org owner; the
      * organization must always keep at least one owner.
      */
+    @Transactional
     public void removeMember(int orgId, int actorId, int targetUserId) {
         requireOrgOwner(orgId, actorId);
         if (isSoleOwner(orgId, targetUserId)) {
@@ -104,18 +107,23 @@ public class OrgMemberService {
                 "Removed org member " + targetUserId, null);
     }
 
+    /**
+     * Whether {@code userId} is the organization's only owner. Reads the owner rows
+     * under a row lock (so it must run inside a transaction), making the last-owner
+     * check and the subsequent mutation a single serialized step rather than a racy
+     * check-then-act.
+     */
     private boolean isSoleOwner(int orgId, int userId) {
-        return OrgRole.of(orgMemberMapper.getRole(orgId, userId)) == OrgRole.OWNER
-                && orgMemberMapper.countOwners(orgId) <= 1;
+        List<Integer> owners = orgMemberMapper.lockOwnerIds(orgId);
+        return owners.size() <= 1 && owners.contains(userId);
     }
 
     private OrgRole parseRole(String raw) {
+        if (raw == null || raw.isBlank()) {
+            throw new BadRequestException("Org role is required");
+        }
         try {
-            OrgRole role = OrgRole.of(raw);
-            if (role == null) {
-                throw new BadRequestException("Org role is required");
-            }
-            return role;
+            return OrgRole.of(raw);
         } catch (IllegalArgumentException e) {
             throw new BadRequestException("Unknown org role: " + raw);
         }

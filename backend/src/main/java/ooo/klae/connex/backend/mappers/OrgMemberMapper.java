@@ -19,6 +19,7 @@ public interface OrgMemberMapper {
     int updateRole(@Param("orgId") int orgId, @Param("userId") int userId, @Param("orgRole") String orgRole);
     int removeMember(@Param("orgId") int orgId, @Param("userId") int userId);
     int countOwners(@Param("orgId") int orgId);
+    List<Integer> lockOwnerIds(@Param("orgId") int orgId);
     List<OrgMemberDto> getMembers(@Param("orgId") int orgId);
     List<OrgMembershipDto> getMembershipsForUser(@Param("userId") int userId);
 }

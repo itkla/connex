@@ -9,9 +9,21 @@
 -- membership. Org-scoped operations (SSO configuration today; billing, domains,
 -- provisioning later) authorize against this table, not workspace permissions.
 --
--- Backfill: existing organizations are 1:1 with a workspace (or the seeded
--- default org), so every active workspace owner becomes an org owner of the
--- organization that workspace belongs to. Idempotent via the composite PK.
+-- Backfill: seed exactly ONE founding owner per organization — the owner of the
+-- org's earliest workspace — rather than sweeping in every workspace owner.
+-- Workspace ownership is deliberately NOT org authority (a workspace can have
+-- several owners, and post-#318 an org can span several workspaces owned by
+-- different people), so promoting all of them would re-open the very escalation
+-- this closes. The founding owner adds further org admins explicitly via the
+-- org API. The seeded default organization (id 1) is a shared catch-all for
+-- legacy / bare-insert workspaces belonging to unrelated tenants, so it is
+-- excluded entirely — granting anyone ownership of it would be cross-tenant.
+-- Such workspaces are re-homed into their own orgs by a later migration.
+--
+-- Consequences (acceptable pre-launch, tracked as follow-ups): an org whose only
+-- workspace owner is inactive gets no owner (operator-recoverable), and a
+-- customer who delegated SSO via a custom `SSO_MANAGE` role must have that person
+-- re-designated an org admin by the founding owner.
 -- ----------------------------------------------------------------------------
 
 CREATE TABLE org_member (
@@ -26,7 +38,15 @@ CREATE TABLE org_member (
 ) DEFAULT CHARSET=utf8mb4 COMMENT='Organization memberships (org-level administrators)';
 
 INSERT INTO org_member (org_id, user_id, org_role)
-SELECT DISTINCT w.org_id, wm.user_id, 'owner'
-FROM workspace w
-JOIN workspace_member wm ON wm.workspace_id = w.id
-WHERE wm.role = 'owner' AND wm.status = 'active';
+SELECT ranked.org_id, ranked.user_id, 'owner'
+FROM (
+    SELECT w.org_id AS org_id, wm.user_id AS user_id,
+           ROW_NUMBER() OVER (
+               PARTITION BY w.org_id
+               ORDER BY w.created_at, w.id, wm.created_at, wm.user_id
+           ) AS rn
+    FROM workspace w
+    JOIN workspace_member wm ON wm.workspace_id = w.id
+    WHERE wm.role = 'owner' AND wm.status = 'active' AND w.org_id <> 1
+) ranked
+WHERE ranked.rn = 1;

@@ -132,4 +132,13 @@ class SsoConnectionServiceTest extends AbstractServiceTest {
         assertThrows(ForbiddenException.class,
                 () -> ssoConnectionService.save(workspace.getId(), member.getId(), oidcRequest()));
     }
+
+    @Test
+    void unknownWorkspace_isForbiddenNotFound() {
+        assertThrows(ForbiddenException.class,
+                () -> ssoConnectionService.getForWorkspace(999_999, currentUser.getId()),
+                "an unknown workspace must not be distinguishable from an unauthorized one");
+        assertThrows(ForbiddenException.class,
+                () -> ssoConnectionService.save(999_999, currentUser.getId(), oidcRequest()));
+    }
 }

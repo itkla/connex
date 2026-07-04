@@ -13,6 +13,7 @@ import ooo.klae.connex.backend.dto.SsoConnectionDto;
 import ooo.klae.connex.backend.dto.SsoConnectionRequest;
 import ooo.klae.connex.backend.dto.SsoDiscoveryDto;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
+import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.mappers.SsoConnectionMapper;
 import ooo.klae.connex.backend.mappers.SsoDomainMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
@@ -63,9 +64,23 @@ public class SsoConnectionService {
      * @return the connection view (unconfigured default when none exists)
      */
     public SsoConnectionDto getForWorkspace(int workspaceId, int actorId) {
-        int orgId = workspaceService.getOrgId(workspaceId);
-        orgMemberService.requireOrgAdmin(orgId, actorId);
+        int orgId = requireAdministrableOrg(workspaceId, actorId);
         return SsoConnectionDto.from(ssoConnectionMapper.findByOrg(orgId), ssoDomainMapper.listByOrg(orgId));
+    }
+
+    /**
+     * Resolves the workspace's organization and requires the actor to administer it.
+     * A workspace the actor cannot administer and a workspace that does not exist
+     * both yield {@link ForbiddenException}, so the endpoint is not a workspace-id
+     * existence oracle for an authenticated non-member.
+     */
+    private int requireAdministrableOrg(int workspaceId, int actorId) {
+        Integer orgId = workspaceMapper.getOrgId(workspaceId);
+        if (orgId == null) {
+            throw new ForbiddenException("Requires an organization administrator role");
+        }
+        orgMemberService.requireOrgAdmin(orgId, actorId);
+        return orgId;
     }
 
     /**
@@ -80,8 +95,7 @@ public class SsoConnectionService {
      */
     @Transactional
     public SsoConnectionDto save(int workspaceId, int actorId, SsoConnectionRequest request) {
-        int orgId = workspaceService.getOrgId(workspaceId);
-        orgMemberService.requireOrgAdmin(orgId, actorId);
+        int orgId = requireAdministrableOrg(workspaceId, actorId);
         if (!ssoProperties.isEnabled()) {
             throw new BadRequestException("Single sign-on is not enabled on this instance");
         }

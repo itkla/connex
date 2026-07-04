@@ -29,6 +29,12 @@
     SELECT COUNT(*) FROM org_member WHERE org_id = #{orgId} AND org_role = 'owner'
   </select>
 
+  <!-- Locks every owner row of the org for the duration of the transaction so the
+       last-owner guard is a serialized read-then-mutate, not a racy check-then-act. -->
+  <select id="lockOwnerIds" resultType="int">
+    SELECT user_id FROM org_member WHERE org_id = #{orgId} AND org_role = 'owner' FOR UPDATE
+  </select>
+
   <select id="getMembers" resultType="ooo.klae.connex.backend.dto.OrgMemberDto">
     SELECT u.id, u.username, u.display_name AS displayName, u.email,
            u.profile_picture_url AS profilePictureUrl, om.org_role AS orgRole
