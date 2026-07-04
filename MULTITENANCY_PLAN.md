@@ -159,8 +159,15 @@ control plane, distinct from workspace membership. Decisions locked 2026-07-04:
   on the acting workspace's org, not the workspace-level `SSO_MANAGE` permission (now inert; its removal
   from the workspace permission catalog / RolesPanel is a frontend follow-up).
 - **Founding owner:** whenever a fresh org is minted (registration, bootstrap, a workspace created outside
-  an admin context), the creator is recorded as its org `owner`. V44 backfills existing orgs by promoting
-  each active workspace owner to org owner. An org always keeps ≥1 owner (last-owner guard).
+  an admin context), the creator is recorded as its org `owner`, atomically with the org+workspace inserts
+  (`provisionWorkspace` is transactional). V44 backfills exactly **one** founding owner per org — the owner
+  of the org's earliest workspace — **not** every workspace owner (a workspace can have several owners and
+  an org can span several workspaces owned by different people; promoting all would re-open the escalation).
+  The shared default org (id 1), a legacy catch-all for unrelated tenants, is excluded entirely. An org
+  always keeps ≥1 owner: the last-owner guard reads the owner rows under a row lock inside a transaction, so
+  it holds under concurrent removals/demotions.
+- **No existence oracle:** the SSO endpoints return the same `403` for an unknown workspace and for one the
+  caller cannot administer, so an authenticated non-member cannot enumerate workspace ids.
 - **Backend-only in this phase:** `OrgMemberController` (`/api/orgs`) lets an org owner manage admins;
   the org-settings UI, org-level billing/domains, and org-scoped SSO step-up (#296) are follow-ups.
 
