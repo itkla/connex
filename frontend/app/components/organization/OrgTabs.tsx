@@ -8,18 +8,17 @@ import { motion, useReducedMotion } from "motion/react";
 import { cn } from "@/lib/utils";
 
 const TABS = [
-    { key: "tabMembers", href: "/settings/members" },
-    { key: "tabRoles", href: "/settings/roles" },
-    { key: "tabRules", href: "/settings/rules" },
-    { key: "tabCustomFields", href: "/settings/custom-fields" },
-    { key: "tabEmail", href: "/settings/email" },
+    { key: "tabMembers", href: "/organization/members" },
+    { key: "tabDomains", href: "/organization/allowed-domains" },
+    { key: "tabSso", href: "/organization/sso" },
+    { key: "tabAudit", href: "/organization/audit" },
 ] as const;
 
-export default function SettingsTabs() {
+export default function OrgTabs({ ssoEnabled = false }: { ssoEnabled?: boolean }) {
     const pathname = usePathname() ?? "";
-    const t = useTranslations("WorkspaceSettings");
+    const t = useTranslations("Organization");
     const reduce = useReducedMotion() ?? false;
-    const tabs = TABS;
+    const tabs = TABS.filter((tab) => tab.key !== "tabSso" || ssoEnabled);
 
     return (
         <nav className="flex gap-1 border-b border-border" aria-label={t("title")}>
@@ -38,7 +37,7 @@ export default function SettingsTabs() {
                         {t(tab.key)}
                         {active && (
                             <motion.span
-                                layoutId="settings-tab-underline"
+                                layoutId="org-tab-underline"
                                 aria-hidden
                                 className="absolute inset-x-2 -bottom-px h-0.5 rounded-full bg-brand"
                                 transition={

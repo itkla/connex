@@ -1,0 +1,60 @@
+{
+  "Organization": {
+    "title": "組織",
+    "subtitle": "ワークスペースの上位にあるアカウント、組織を管理します。これらの設定は組織内のすべてのワークスペースに適用されます。",
+    "tabMembers": "管理者",
+    "tabDomains": "許可ドメイン",
+    "tabSso": "シングルサインオン",
+    "tabAudit": "監査ログ",
+    "noAccessTitle": "組織管理者のみ",
+    "noAccessBody": "これらの設定を管理するには、組織のオーナーまたは管理者の権限が必要です。"
+  },
+  "OrgMembers": {
+    "title": "管理者",
+    "subtitle": "この組織を管理できるメンバー。SSO、許可ドメインの設定や管理者の管理を行います。ワークスペースのメンバーシップとは別です。",
+    "roleOwner": "オーナー",
+    "roleAdmin": "管理者",
+    "roleOwnerHint": "管理者やオーナー権限の管理を含む、すべての操作が可能です。",
+    "roleAdminHint": "組織設定は管理できますが、管理者の管理はできません。",
+    "you": "あなた",
+    "changeRole": "権限を変更",
+    "remove": "削除",
+    "cancel": "キャンセル",
+    "removeConfirmTitle": "管理者を削除しますか？",
+    "removeConfirmBody": "{name} は組織管理者権限を失います。ワークスペースのメンバーシップには影響しません。",
+    "lastOwnerTooltip": "組織には少なくとも1人のオーナーが必要です。先に別のオーナーを指定してください。",
+    "empty": "まだ管理者がいません。",
+    "addTitle": "管理者を追加",
+    "addSubtitle": "既存のConnexアカウントにメールアドレスで組織アクセスを付与します。オーナーは管理者を管理でき、管理者は設定を構成できます。",
+    "addEmailPlaceholder": "name@company.com",
+    "addEmailLabel": "メールアドレス",
+    "addRoleLabel": "権限",
+    "addButton": "管理者を追加",
+    "addedToast": "管理者を追加しました",
+    "roleUpdatedToast": "権限を更新しました",
+    "removedToast": "管理者を削除しました"
+  },
+  "OrgDomains": {
+    "title": "許可ドメイン",
+    "subtitle": "この組織のワークスペースに招待できる相手を制限します。設定すると、リンク・メール招待・SSOを含むすべての招待と参加が、これらのメールドメインのいずれかに一致する必要があります。空欄の場合はすべてのドメインを許可します。",
+    "placeholder": "company.com",
+    "label": "メールドメイン",
+    "addButton": "ドメインを追加",
+    "removeDomain": "ドメインを削除",
+    "empty": "ドメイン制限はありません。任意のメールドメインからメンバーを招待できます。ドメインを追加すると、この組織のワークスペースに参加できる相手を制限できます。",
+    "loadError": "許可ドメインを読み込めませんでした。再読み込みしてください。",
+    "addedToast": "ドメインを追加しました",
+    "removedToast": "ドメインを削除しました"
+  },
+  "OrgAudit": {
+    "title": "監査ログ",
+    "subtitle": "組織レベルのガバナンスイベント（SSO設定、管理者、許可ドメインの変更）。ワークスペースのレコード変更は各ワークスペースの監査ログに表示されます。",
+    "empty": "組織イベントはまだありません。",
+    "loadMore": "さらに読み込む",
+    "loadError": "監査ログを読み込めませんでした。",
+    "actorSystem": "システム",
+    "colEvent": "イベント",
+    "colActor": "実行者",
+    "colWhen": "日時"
+  }
+}

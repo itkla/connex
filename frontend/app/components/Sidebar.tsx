@@ -29,6 +29,7 @@ import {
     ComputerDesktopIcon,
     CheckIcon,
     Cog6ToothIcon,
+    BuildingLibraryIcon,
 } from "@heroicons/react/24/outline";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
@@ -43,6 +44,7 @@ import { DropdownMenuItem, DropdownMenuPortal, DropdownMenuSub, DropdownMenuSubC
 import UserAvatar from '@/app/components/records/users/UserAvatar';
 import NotificationBell from '@/app/components/notifications/NotificationBell';
 import WorkspaceSwitcher from '@/app/components/WorkspaceSwitcher';
+import { useWorkspace } from '@/app/hooks/useWorkspace';
 
 type NavItem = {
     label: string;
@@ -58,6 +60,16 @@ type NavSection = {
 
 function useSections(): NavSection[] {
     const t = useTranslations("CommonSidebar");
+    const { activeWorkspace } = useWorkspace();
+    const isOrgAdmin = activeWorkspace?.orgRole != null;
+    const workspaceItems: NavItem[] = [
+        { label: t("navUsers"), href: "/users", icon: UserGroupIcon },
+        { label: t("navSettings"), href: "/settings/members", icon: Cog6ToothIcon },
+        ...(isOrgAdmin
+            ? [{ label: t("navOrganization"), href: "/organization/members", icon: BuildingLibraryIcon }]
+            : []),
+        { label: t("navAuditLog"), href: "/admin/logs", icon: ClipboardDocumentListIcon },
+    ];
     return [
         {
             label: t("sectionOverview"),
@@ -97,11 +109,7 @@ function useSections(): NavSection[] {
         },
         {
             label: t("sectionWorkspace"),
-            items: [
-                { label: t("navUsers"), href: "/users", icon: UserGroupIcon },
-                { label: t("navSettings"), href: "/settings/members", icon: Cog6ToothIcon },
-                { label: t("navAuditLog"), href: "/admin/logs", icon: ClipboardDocumentListIcon },
-            ],
+            items: workspaceItems,
         },
         {
             label: t("sectionHelp"),

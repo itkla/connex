@@ -67,8 +67,7 @@
     "tabRoles": "ロール",
     "tabRules": "ルール",
     "tabCustomFields": "カスタムフィールド",
-    "tabEmail": "メール",
-    "tabSso": "SSO"
+    "tabEmail": "メール"
   },
   "WorkspaceMembers": {
     "title": "メンバー",
