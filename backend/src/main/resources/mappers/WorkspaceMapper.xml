@@ -125,6 +125,14 @@
     SELECT org_id FROM workspace WHERE id = #{workspaceId}
   </select>
 
+  <select id="countEnforcingSsoMemberships" resultType="int">
+    SELECT COUNT(*)
+    FROM workspace_member wm
+    JOIN workspace w ON w.id = wm.workspace_id
+    JOIN sso_connection s ON s.org_id = w.org_id AND s.enabled = 1 AND s.enforce_sso = 1
+    WHERE wm.user_id = #{userId} AND wm.status = 'active'
+  </select>
+
   <insert id="addMember">
     INSERT INTO workspace_member (workspace_id, user_id, role)
     VALUES (#{workspaceId}, #{userId}, #{role})

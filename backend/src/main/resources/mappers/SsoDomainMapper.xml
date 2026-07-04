@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="ooo.klae.connex.backend.mappers.SsoDomainMapper">
+
+  <select id="findOrgByDomain" resultType="int">
+    SELECT org_id FROM sso_domain WHERE domain = #{domain}
+  </select>
+
+  <select id="listByOrg" resultType="string">
+    SELECT domain FROM sso_domain
+    WHERE org_id = #{orgId}
+    ORDER BY domain
+  </select>
+
+  <insert id="insert">
+    INSERT INTO sso_domain (domain, org_id)
+    VALUES (#{domain}, #{orgId})
+  </insert>
+
+  <delete id="delete">
+    DELETE FROM sso_domain WHERE domain = #{domain}
+  </delete>
+</mapper>

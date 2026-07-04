@@ -18,6 +18,7 @@ import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.beans.PasswordResetToken;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
+import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.mappers.PasswordResetTokenMapper;
 import ooo.klae.connex.backend.mappers.UserMapper;
 
@@ -41,6 +42,7 @@ public class PasswordResetService {
     private final PasswordResetRateLimiter rateLimiter;
     private final AuditService auditService;
     private final SessionRegistry sessionRegistry;
+    private final SsoConnectionService ssoConnectionService;
 
     @Value("${connex.password-reset.token-expiry-minutes:30}")
     private int tokenExpiryMinutes;
@@ -68,6 +70,11 @@ public class PasswordResetService {
 
         User user = userMapper.getUserByEmail(email);
         if (user == null) {
+            return;
+        }
+        if (ssoConnectionService.isSsoEnforcedForUser(user.getId())) {
+            auditService.record("auth.password_reset_sso_enforced", "user", user.getId(), user.getDisplayName(),
+                    "Password reset suppressed; SSO enforced", null);
             return;
         }
         if (passwordResetTokenMapper.countRecentByUser(user.getId(), requestWindowSeconds) >= maxRequests) {
@@ -121,6 +128,9 @@ public class PasswordResetService {
         User user = userMapper.getUserById(token.getUserId());
         if (user == null) {
             throw new BadRequestException("This reset link is invalid or has expired");
+        }
+        if (ssoConnectionService.isSsoEnforcedForUser(user.getId())) {
+            throw new ForbiddenException("This account must sign in with SSO");
         }
 
         userMapper.updatePasswordHash(user.getId(), passwordEncoder.encode(newPassword));

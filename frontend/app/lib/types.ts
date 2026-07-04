@@ -1166,3 +1166,49 @@ export type MailTestResult = {
     success: boolean;
     error: string | null;
 };
+
+export type SsoProtocol = "oidc" | "saml";
+
+export type SsoDiscovery = {
+    available: boolean;
+    registrationId: string | null;
+    protocol: SsoProtocol | null;
+    enforced: boolean;
+};
+
+export type SsoConnectionDto = {
+    configured: boolean;
+    protocol: SsoProtocol | null;
+    enabled: boolean;
+    enforceSso: boolean;
+    jitWorkspaceId: number | null;
+    defaultRole: string;
+    oidcIssuer: string | null;
+    oidcClientId: string | null;
+    hasClientSecret: boolean;
+    oidcScopes: string | null;
+    samlIdpEntityId: string | null;
+    samlSsoUrl: string | null;
+    samlIdpMetadataXml: string | null;
+    samlIdpX509: string | null;
+    samlSpCertificate: string | null;
+    domains: string[];
+    updatedAt: string | null;
+};
+
+export type SsoConnectionRequest = {
+    protocol: SsoProtocol;
+    enabled: boolean;
+    enforceSso: boolean;
+    jitWorkspaceId: number;
+    defaultRole: string;
+    oidcIssuer?: string | null;
+    oidcClientId?: string | null;
+    oidcClientSecret?: string | null;
+    oidcScopes?: string | null;
+    samlIdpEntityId?: string | null;
+    samlSsoUrl?: string | null;
+    samlIdpMetadataXml?: string | null;
+    samlIdpX509?: string | null;
+    domains: string[];
+};

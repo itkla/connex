@@ -1,0 +1,218 @@
+"use client";
+
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { useState } from "react";
+import { useTranslations } from "next-intl";
+import {
+    ArrowLeftIcon,
+    ArrowRightIcon,
+    EyeIcon,
+    EyeSlashIcon,
+    ExclamationTriangleIcon,
+    ShieldCheckIcon,
+} from "@heroicons/react/24/outline";
+import { LoaderCircle } from "lucide-react";
+
+import { ApiError, confirmSsoLink } from "@/app/lib/api";
+import { toastError, toastSuccess } from "@/app/lib/toast";
+import AuthBrandPanel from "@/app/components/auth/AuthBrandPanel";
+
+type Status = "ready" | "invalid";
+
+/**
+ * Confirms an SSO account link by proving ownership of the existing password account once.
+ * Reached only via the backend redirect after an IdP login whose verified email collides
+ * with a password account; the single-use token travels in the query string and the user
+ * re-enters their password here. On success the backend links the identity and establishes
+ * a session, so the user is routed straight into the app.
+ */
+export function SsoLinkForm({ token }: { token: string | null }) {
+    const router = useRouter();
+    const tForm = useTranslations("AuthForm");
+    const t = useTranslations("SsoLink");
+
+    const [status, setStatus] = useState<Status>(token ? "ready" : "invalid");
+    const [password, setPassword] = useState("");
+    const [showPassword, setShowPassword] = useState(false);
+    const [submitting, setSubmitting] = useState(false);
+    const [fieldError, setFieldError] = useState<string | null>(null);
+
+    function routeAfterLink() {
+        const hasWorkspace = /(?:^|;\s*)connex_workspace=/.test(document.cookie);
+        router.replace(hasWorkspace ? "/dashboard" : "/onboarding");
+        router.refresh();
+    }
+
+    async function onSubmit(e: React.SubmitEvent<HTMLFormElement>) {
+        e.preventDefault();
+        if (!token) {
+            return;
+        }
+        setFieldError(null);
+        setSubmitting(true);
+        try {
+            await confirmSsoLink(token, password);
+            toastSuccess(t("successMessage"));
+            routeAfterLink();
+        } catch (err) {
+            if (err instanceof ApiError) {
+                if (err.status === 404) {
+                    setStatus("invalid");
+                    return;
+                }
+                if (err.status === 429) {
+                    setFieldError(t("tooManyAttempts"));
+                    return;
+                }
+                if (err.status === 401) {
+                    setFieldError(t("incorrectPassword"));
+                    return;
+                }
+            }
+            toastError(t("genericError"));
+        } finally {
+            setSubmitting(false);
+        }
+    }
+
+    return (
+        <div className="min-h-[100dvh] w-full bg-background lg:grid lg:h-[100dvh] lg:grid-cols-[1fr_1.05fr] lg:grid-rows-[100dvh] lg:overflow-hidden">
+            <div className="relative flex min-h-[100dvh] flex-col px-6 py-10 sm:px-10 lg:h-full lg:min-h-0 lg:overflow-y-auto lg:px-14 lg:py-12">
+                <Link
+                    href="/"
+                    className="flex w-fit items-center gap-2.5 rounded-lg transition-opacity duration-150 ease-out hover:opacity-70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand lg:hidden"
+                >
+                    <span className="size-3 rounded-[5px] bg-brand" aria-hidden="true" />
+                    <span className="text-lg font-bold tracking-tight text-foreground">{tForm("brand")}</span>
+                </Link>
+
+                <div className="flex flex-1 items-center justify-center">
+                    <div className="w-full max-w-[400px] py-10 lg:py-0">
+                        {status === "invalid" ? (
+                            <div className="connex-rise">
+                                <ExclamationTriangleIcon className="size-11 text-destructive" aria-hidden="true" />
+                                <h1 className="mt-5 font-display font-black text-[clamp(2rem,4vw,2.75rem)] leading-[1.1] tracking-[-0.01em] text-balance text-foreground">
+                                    {t("invalidTitle")}
+                                </h1>
+                                <p className="mt-3 text-base leading-relaxed text-muted-foreground text-pretty">
+                                    {t("invalidBody")}
+                                </p>
+                                <Link
+                                    href="/auth/login"
+                                    className="mt-8 inline-flex items-center justify-center gap-2 rounded-full bg-brand px-6 py-3.5 text-base font-semibold text-neutral-950 transition-[transform,background-color] duration-150 ease-out hover:bg-brand-hover active:scale-[0.98]"
+                                >
+                                    {t("backToLogin")}
+                                    <ArrowRightIcon className="size-4" />
+                                </Link>
+                            </div>
+                        ) : (
+                            <>
+                                <ShieldCheckIcon
+                                    className="connex-rise size-11 text-brand"
+                                    aria-hidden="true"
+                                />
+                                <h1
+                                    className="connex-rise mt-5 font-display font-black text-[clamp(2rem,4vw,2.75rem)] leading-[1.1] tracking-[-0.01em] text-balance text-foreground"
+                                    style={{ animationDelay: "60ms" }}
+                                >
+                                    {t("title")}
+                                </h1>
+                                <p
+                                    className="connex-rise mt-3 text-base leading-relaxed text-muted-foreground text-pretty"
+                                    style={{ animationDelay: "120ms" }}
+                                >
+                                    {t("subtitle")}
+                                </p>
+
+                                <form className="mt-9 space-y-3" onSubmit={onSubmit} noValidate>
+                                    <div className="connex-rise" style={{ animationDelay: "180ms" }}>
+                                        <div className="relative">
+                                            <input
+                                                id="sso-link-password"
+                                                type={showPassword ? "text" : "password"}
+                                                value={password}
+                                                onChange={(e) => {
+                                                    setPassword(e.target.value);
+                                                    setFieldError(null);
+                                                }}
+                                                placeholder=" "
+                                                autoComplete="current-password"
+                                                required
+                                                aria-invalid={Boolean(fieldError)}
+                                                aria-describedby={fieldError ? "sso-link-password-error" : undefined}
+                                                className={`peer h-14 w-full rounded-xl border bg-input px-4 pr-12 pt-5 pb-1.5 text-base text-foreground outline-none transition-[border-color,box-shadow,background-color] duration-150 ease-out placeholder:text-transparent focus:bg-background focus:ring-4 ${
+                                                    fieldError
+                                                        ? "border-destructive focus:border-destructive focus:ring-destructive/15"
+                                                        : "border-input focus:border-brand focus:ring-brand/20"
+                                                }`}
+                                            />
+                                            <label
+                                                htmlFor="sso-link-password"
+                                                className={`pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-base transition-all duration-150 ease-out peer-focus:top-2.5 peer-focus:translate-y-0 peer-focus:text-xs peer-[:not(:placeholder-shown)]:top-2.5 peer-[:not(:placeholder-shown)]:translate-y-0 peer-[:not(:placeholder-shown)]:text-xs ${
+                                                    fieldError
+                                                        ? "text-destructive"
+                                                        : "text-muted-foreground peer-focus:text-foreground"
+                                                }`}
+                                            >
+                                                {t("labelPassword")}
+                                            </label>
+                                            <button
+                                                type="button"
+                                                onClick={() => setShowPassword((s) => !s)}
+                                                aria-label={showPassword ? tForm("hidePassword") : tForm("showPassword")}
+                                                aria-pressed={showPassword}
+                                                className="absolute right-2 top-1/2 inline-flex size-9 -translate-y-1/2 items-center justify-center rounded-lg text-muted-foreground transition-[color,transform] duration-150 ease-out hover:text-foreground focus-visible:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand active:scale-[0.94]"
+                                            >
+                                                {showPassword ? <EyeSlashIcon className="size-5" /> : <EyeIcon className="size-5" />}
+                                            </button>
+                                        </div>
+                                        {fieldError && (
+                                            <p id="sso-link-password-error" className="mt-1.5 px-1 text-sm text-destructive">
+                                                {fieldError}
+                                            </p>
+                                        )}
+                                    </div>
+
+                                    <button
+                                        type="submit"
+                                        disabled={submitting}
+                                        style={{ animationDelay: "240ms" }}
+                                        className="connex-rise mt-2 flex w-full items-center justify-center gap-2 rounded-full bg-brand px-6 py-3.5 text-base font-semibold text-neutral-950 transition-[transform,background-color,opacity] duration-150 ease-out hover:bg-brand-hover active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-70"
+                                    >
+                                        {submitting ? (
+                                            <>
+                                                <LoaderCircle className="size-4 animate-spin" />
+                                                {t("submittingLabel")}
+                                            </>
+                                        ) : (
+                                            <>
+                                                {t("submitLabel")}
+                                                <ArrowRightIcon className="size-4" />
+                                            </>
+                                        )}
+                                    </button>
+                                </form>
+
+                                <p
+                                    className="connex-rise mt-7 text-center text-sm text-muted-foreground"
+                                    style={{ animationDelay: "300ms" }}
+                                >
+                                    <Link
+                                        href="/auth/login"
+                                        className="inline-flex items-center gap-1.5 font-semibold text-foreground underline decoration-brand decoration-2 underline-offset-4 transition-colors duration-150 ease-out hover:decoration-brand-hover"
+                                    >
+                                        <ArrowLeftIcon className="size-4" />
+                                        {t("backToLogin")}
+                                    </Link>
+                                </p>
+                            </>
+                        )}
+                    </div>
+                </div>
+            </div>
+
+            <AuthBrandPanel className="hidden lg:block lg:h-full" />
+        </div>
+    );
+}

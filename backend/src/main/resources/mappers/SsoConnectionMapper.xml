@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="ooo.klae.connex.backend.mappers.SsoConnectionMapper">
+
+  <sql id="columns">
+    id, org_id, protocol, enabled, enforce_sso, jit_workspace_id, default_role,
+    oidc_issuer, oidc_client_id, oidc_client_secret_enc, oidc_scopes,
+    saml_idp_entity_id, saml_sso_url, saml_idp_metadata_xml, saml_idp_x509,
+    saml_sp_private_key_enc, saml_sp_certificate,
+    created_at, updated_at
+</sql>
+
+  <select id="findByOrg" resultType="SsoConnection">
+    SELECT <include refid="columns"/>
+    FROM sso_connection
+    WHERE org_id = #{orgId}
+  </select>
+
+  <select id="findById" resultType="SsoConnection">
+    SELECT <include refid="columns"/>
+    FROM sso_connection
+    WHERE id = #{id}
+  </select>
+
+  <insert id="upsert">
+    INSERT INTO sso_connection
+      (org_id, protocol, enabled, enforce_sso, jit_workspace_id, default_role,
+       oidc_issuer, oidc_client_id, oidc_client_secret_enc, oidc_scopes,
+       saml_idp_entity_id, saml_sso_url, saml_idp_metadata_xml, saml_idp_x509,
+       saml_sp_private_key_enc, saml_sp_certificate)
+    VALUES
+      (#{orgId}, #{protocol}, #{enabled}, #{enforceSso}, #{jitWorkspaceId}, #{defaultRole},
+       #{oidcIssuer}, #{oidcClientId}, #{oidcClientSecretEnc}, #{oidcScopes},
+       #{samlIdpEntityId}, #{samlSsoUrl}, #{samlIdpMetadataXml}, #{samlIdpX509},
+       #{samlSpPrivateKeyEnc}, #{samlSpCertificate})
+    ON DUPLICATE KEY UPDATE
+      protocol = VALUES(protocol),
+      enabled = VALUES(enabled),
+      enforce_sso = VALUES(enforce_sso),
+      jit_workspace_id = VALUES(jit_workspace_id),
+      default_role = VALUES(default_role),
+      oidc_issuer = VALUES(oidc_issuer),
+      oidc_client_id = VALUES(oidc_client_id),
+      oidc_client_secret_enc = COALESCE(#{oidcClientSecretEnc}, oidc_client_secret_enc),
+      oidc_scopes = VALUES(oidc_scopes),
+      saml_idp_entity_id = VALUES(saml_idp_entity_id),
+      saml_sso_url = VALUES(saml_sso_url),
+      saml_idp_metadata_xml = VALUES(saml_idp_metadata_xml),
+      saml_idp_x509 = VALUES(saml_idp_x509),
+      saml_sp_private_key_enc = COALESCE(#{samlSpPrivateKeyEnc}, saml_sp_private_key_enc),
+      saml_sp_certificate = COALESCE(#{samlSpCertificate}, saml_sp_certificate)
+  </insert>
+
+  <delete id="deleteByOrg">
+    DELETE FROM sso_connection WHERE org_id = #{orgId}
+  </delete>
+</mapper>

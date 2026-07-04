@@ -93,6 +93,19 @@ connex:
         rp-id: ${CONNEX_WEBAUTHN_RP_ID:localhost}
         rp-name: ${CONNEX_WEBAUTHN_RP_NAME:Connex}
         allowed-origins: ${CONNEX_WEBAUTHN_ALLOWED_ORIGINS:http://localhost:3000}
+    sso:
+        # Instance-level kill switch for the whole SSO subsystem (#296). Default false so a
+        # deployment ships with OIDC/SAML dormant; set true only where enterprise SSO is offered.
+        enabled: ${CONNEX_SSO_ENABLED:false}
+        # Per-organization enterprise SSO/IdP (#296). secret-key is a Base64 AES key
+        # (16/24/32 bytes) that encrypts each org's OIDC client secret at rest; it is
+        # required only once an org stores a client secret, and rotating it invalidates
+        # previously stored secrets.
+        secret-key: ${CONNEX_SSO_SECRET_KEY:}
+        # Whether an OIDC issuer may resolve to a loopback/private address. Defaults false so the
+        # server-side discovery fetch cannot be aimed at internal services or the cloud metadata
+        # endpoint (SSRF). Set true only when the IdP is genuinely on-premises on a private network.
+        allow-private-issuer-hosts: ${CONNEX_SSO_ALLOW_PRIVATE_ISSUER_HOSTS:false}
     sharing:
         # Gates the cross-workspace share/unshare API. The owned-or-shared read predicate is always
         # applied (harmless when no shares exist).

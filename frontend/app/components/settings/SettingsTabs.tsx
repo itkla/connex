@@ -14,18 +14,20 @@ const TABS = [
     { key: "tabCustomFields", href: "/settings/custom-fields" },
     { key: "tabNotifications", href: "/settings/notifications" },
     { key: "tabEmail", href: "/settings/email" },
+    { key: "tabSso", href: "/settings/sso" },
     { key: "tabMembership", href: "/settings/membership" },
     { key: "tabSecurity", href: "/settings/security" },
 ] as const;
 
-export default function SettingsTabs() {
+export default function SettingsTabs({ ssoEnabled = false }: { ssoEnabled?: boolean }) {
     const pathname = usePathname() ?? "";
     const t = useTranslations("WorkspaceSettings");
     const reduce = useReducedMotion() ?? false;
+    const tabs = TABS.filter((tab) => tab.key !== "tabSso" || ssoEnabled);
 
     return (
         <nav className="flex gap-1 border-b border-border" aria-label={t("title")}>
-            {TABS.map((tab) => {
+            {tabs.map((tab) => {
                 const active = pathname === tab.href || pathname.startsWith(`${tab.href}/`);
                 return (
                     <Link

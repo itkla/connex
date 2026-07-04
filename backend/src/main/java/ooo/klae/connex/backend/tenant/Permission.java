@@ -36,5 +36,6 @@ public enum Permission {
     AUDIT_READ,
     WORKSPACE_SETTINGS,
     RULE_MANAGE,
+    SSO_MANAGE,
     WORKSPACE_DELETE
 }

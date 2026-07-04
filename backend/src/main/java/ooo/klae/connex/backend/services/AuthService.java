@@ -45,6 +45,7 @@ public class AuthService {
     private final LoginRateLimiter loginRateLimiter;
     private final ClientIpResolver clientIpResolver;
     private final RegistrationVerificationService registrationVerificationService;
+    private final SsoConnectionService ssoConnectionService;
     private final SecurityContextRepository securityContextRepository = new HttpSessionSecurityContextRepository();
 
     @Value("${connex.signup.mode:open}")
@@ -144,6 +145,15 @@ public class AuthService {
             auditService.recordFailure("auth.login_throttled", "user", null, request.getUsername(),
                     "Login attempts throttled for " + request.getUsername(), null);
             throw new TooManyRequestsException("Too many login attempts. Please try again later.");
+        }
+        User candidate = request.getUsername() != null && request.getUsername().contains("@")
+                ? userMapper.getUserByEmail(request.getUsername())
+                : userMapper.getUserByUsername(request.getUsername());
+        if (candidate != null && ssoConnectionService.isSsoEnforcedForUser(candidate.getId())) {
+            loginRateLimiter.recordFailure(clientIp, request.getUsername(), now);
+            auditService.recordFailure("auth.login_sso_enforced", "user", candidate.getId(), request.getUsername(),
+                    "Password login refused; SSO enforced for " + request.getUsername(), null);
+            throw new ForbiddenException("This account must sign in with SSO");
         }
         Authentication authentication;
         try {
