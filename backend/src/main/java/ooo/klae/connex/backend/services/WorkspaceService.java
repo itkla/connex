@@ -263,7 +263,7 @@ public class WorkspaceService {
         }
         Integer roleId = workspaceMapper.getMemberRoleId(workspaceId, userId);
         if (roleId != null) {
-            return parsePermissions(roleMapper.findPermissions(roleId));
+            return parsePermissions(roleMapper.findPermissions(workspaceId, roleId));
         }
         Role role = Role.of(workspaceMapper.getRole(workspaceId, userId));
         if (role == null) {
@@ -363,7 +363,7 @@ public class WorkspaceService {
         if (!roleMapper.roleExists(workspaceId, roleId)) {
             throw new ResourceNotFoundException("Role not found in this workspace");
         }
-        requireGrantable(workspaceId, actorId, parsePermissions(roleMapper.findPermissions(roleId)));
+        requireGrantable(workspaceId, actorId, parsePermissions(roleMapper.findPermissions(workspaceId, roleId)));
         workspaceMapper.setMemberCustomRole(workspaceId, targetUserId, roleId);
         auditService.record("workspace.member.role", "workspace", workspaceId, target.getDisplayName(),
                 "Assigned a custom role to " + target.getDisplayName(), null);

@@ -9,7 +9,7 @@
     <result property="name" column="name"/>
     <result property="createdAt" column="created_at"/>
     <result property="updatedAt" column="updated_at"/>
-    <collection property="permissions" ofType="string" column="id" select="findPermissions"/>
+    <collection property="permissions" ofType="string" column="{workspaceId=workspace_id,roleId=id}" select="findPermissions"/>
   </resultMap>
 
   <insert id="insertRole" useGeneratedKeys="true" keyProperty="id">
@@ -40,21 +40,29 @@
     WHERE workspace_id = #{workspaceId} AND id = #{id}
   </delete>
 
+  <!-- Permission rows carry no workspace_id of their own; every statement anchors
+       through the parent workspace_role so a role id from another workspace can
+       never read or mutate grants. -->
   <select id="findPermissions" resultType="string">
-    SELECT permission FROM workspace_role_permission
-    WHERE workspace_role_id = #{roleId}
+    SELECT wrp.permission FROM workspace_role_permission wrp
+    JOIN workspace_role wr ON wr.id = wrp.workspace_role_id AND wr.workspace_id = #{workspaceId}
+    WHERE wrp.workspace_role_id = #{roleId}
   </select>
 
   <delete id="clearPermissions">
-    DELETE FROM workspace_role_permission WHERE workspace_role_id = #{roleId}
+    DELETE wrp FROM workspace_role_permission wrp
+    JOIN workspace_role wr ON wr.id = wrp.workspace_role_id AND wr.workspace_id = #{workspaceId}
+    WHERE wrp.workspace_role_id = #{roleId}
   </delete>
 
   <insert id="insertPermissions">
     INSERT INTO workspace_role_permission (workspace_role_id, permission)
-    VALUES
-    <foreach collection="permissions" item="permission" separator=",">
-      (#{roleId}, #{permission})
-    </foreach>
+    SELECT wr.id, vals.permission
+    FROM workspace_role wr
+    JOIN (
+      <foreach collection="permissions" item="permission" separator=" UNION ALL ">SELECT #{permission} AS permission</foreach>
+    ) vals
+    WHERE wr.id = #{roleId} AND wr.workspace_id = #{workspaceId}
   </insert>
 
   <select id="roleExists" resultType="boolean">
