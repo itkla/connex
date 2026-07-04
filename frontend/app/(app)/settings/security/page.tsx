@@ -1,5 +1,5 @@
-import SecurityPanel from "@/app/components/settings/SecurityPanel";
+import { redirect } from "next/navigation";
 
 export default function SecuritySettingsPage() {
-    return <SecurityPanel />;
+    redirect("/account/security");
 }

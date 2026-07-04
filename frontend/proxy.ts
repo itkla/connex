@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 
 const PROTECTED_PREFIXES = [
+    '/account',
     '/activity',
     '/admin',
     '/dashboard',
@@ -83,6 +84,7 @@ export function proxy(request: NextRequest) {
 export const config = {
     matcher: [
         '/auth/:path*',
+        '/account/:path*',
         '/activity/:path*',
         '/admin/:path*',
         '/dashboard/:path*',

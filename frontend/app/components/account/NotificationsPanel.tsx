@@ -47,7 +47,7 @@ function resolve(
 }
 
 export default function NotificationsPanel() {
-    const t = useTranslations("WorkspaceNotifications");
+    const t = useTranslations("AccountNotifications");
     const [prefs, setPrefs] = useState<Record<string, Channels>>({});
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(false);

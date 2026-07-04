@@ -1,6 +1,6 @@
 import { Skeleton } from "@/components/ui/skeleton";
 
-export default function SecuritySettingsLoading() {
+export default function AccountSecurityLoading() {
     return (
         <div className="space-y-3">
             <Skeleton className="h-3 w-32" />

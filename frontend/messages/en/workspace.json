@@ -67,41 +67,8 @@
     "tabRoles": "Roles",
     "tabRules": "Rules",
     "tabCustomFields": "Custom fields",
-    "tabNotifications": "Notifications",
     "tabEmail": "Email",
-    "tabSso": "SSO",
-    "tabMembership": "Membership",
-    "tabSecurity": "Security"
-  },
-  "WorkspaceSecurity": {
-    "title": "Passkeys",
-    "subtitle": "Passkeys let you sign in with your fingerprint, face, or a security key instead of a password. These are tied to your account, not this workspace.",
-    "add": "Add a passkey",
-    "adding": "Waiting for passkey…",
-    "unsupported": "This browser doesn't support passkeys. Try a recent version of Chrome, Safari, Edge, or Firefox.",
-    "emptyTitle": "No passkeys yet",
-    "emptyBody": "Add a passkey to sign in without a password using your device or a security key.",
-    "addedOn": "Added {date}",
-    "lastUsed": "last used {date}",
-    "neverUsed": "never used",
-    "rename": "Rename",
-    "remove": "Remove",
-    "passkeyActions": "Actions for {label}",
-    "renameTitle": "Rename passkey",
-    "renameDescription": "Give this passkey a name you'll recognize, like the device it's on.",
-    "labelField": "Name",
-    "save": "Save",
-    "cancel": "Cancel",
-    "passkeyEntityLabel": "passkey",
-    "added": "Passkey added",
-    "addFailed": "Couldn't add that passkey. Please try again.",
-    "canceled": "Passkey setup was canceled.",
-    "renamed": "Passkey renamed",
-    "renameFailed": "Couldn't rename that passkey. Please try again.",
-    "removed": "Passkey removed",
-    "removeFailed": "Couldn't remove that passkey. Please try again.",
-    "loadFailed": "Couldn't load your passkeys.",
-    "retry": "Try again"
+    "tabSso": "SSO"
   },
   "WorkspaceMembers": {
     "title": "Members",
@@ -268,16 +235,43 @@
     "actionTitleRequired": "Add a title for each action",
     "actionActivityTypeRequired": "Add an activity type",
     "actionTagRequired": "Choose a tag for the tag action",
-    "record": { "deal": "deal", "company": "company" },
-    "cadence": { "hourly": "hour", "daily": "day", "weekly": "week" },
-    "event": {
-      "deal": { "created": "created", "stage_changed": "stage changed", "won": "won", "lost": "lost", "updated": "updated" },
-      "company": { "created": "created", "updated": "updated" }
+    "record": {
+      "deal": "deal",
+      "company": "company"
     },
-    "action": { "create_task": "create a task", "log_activity": "log an activity", "add_tag": "add a tag", "notify": "send a notification" },
+    "cadence": {
+      "hourly": "hour",
+      "daily": "day",
+      "weekly": "week"
+    },
+    "event": {
+      "deal": {
+        "created": "created",
+        "stage_changed": "stage changed",
+        "won": "won",
+        "lost": "lost",
+        "updated": "updated"
+      },
+      "company": {
+        "created": "created",
+        "updated": "updated"
+      }
+    },
+    "action": {
+      "create_task": "create a task",
+      "log_activity": "log an activity",
+      "add_tag": "add a tag",
+      "notify": "send a notification"
+    },
     "runAs": {
-      "user": { "title": "Me", "hint": "Runs with your permissions" },
-      "system": { "title": "Automation", "hint": "Runs as the workspace (admin only)" }
+      "user": {
+        "title": "Me",
+        "hint": "Runs with your permissions"
+      },
+      "system": {
+        "title": "Automation",
+        "hint": "Runs as the workspace (admin only)"
+      }
     },
     "summaryEntity": "When a {record} — {events}",
     "summarySchedule": "Every {cadence}",
@@ -346,51 +340,6 @@
       "sensitive": "Sensitive",
       "special_care": "要配慮"
     }
-  },
-  "WorkspaceMembership": {
-    "pendingTitle": "Pending invitations",
-    "pendingSubtitle": "Workspaces you've been invited to. Accept to join.",
-    "pendingEmpty": "No pending invitations.",
-    "accept": "Accept",
-    "decline": "Decline",
-    "accepted": "Joined {workspace}",
-    "acceptFailed": "Could not accept the invitation.",
-    "declined": "Invitation declined",
-    "declineFailed": "Could not decline the invitation.",
-    "loadFailed": "Could not load invitations.",
-    "leaveTitle": "Leave workspace",
-    "leaveSubtitle": "Leave {workspace} and lose access to its data.",
-    "leave": "Leave workspace",
-    "leaveConfirmTitle": "Leave {workspace}?",
-    "leaveConfirmBody": "You'll lose access to this workspace. Your assigned tasks become unassigned and deals you own lose their owner.",
-    "cancel": "Cancel",
-    "left": "You left the workspace",
-    "leaveFailed": "Could not leave the workspace."
-  },
-  "WorkspaceNotifications": {
-    "title": "Notifications",
-    "subtitle": "Choose how you're notified. These settings apply to you, not the whole workspace. Email needs a configured SMTP server (Settings → Email).",
-    "columnInApp": "In app",
-    "columnEmail": "Email",
-    "taskTitle": "Task reminders",
-    "taskDescription": "When a task you're assigned is due or overdue.",
-    "dealTitle": "Deal reminders",
-    "dealDescription": "When a deal you own or collaborate on is closing soon or overdue.",
-    "relationshipTitle": "Relationship nudges",
-    "relationshipDescription": "When a contact on one of your open deals goes quiet.",
-    "mentionTitle": "Mentions",
-    "mentionDescription": "When a teammate @-mentions you in a note.",
-    "taskMentionTitle": "Task mentions",
-    "taskMentionDescription": "When a teammate @-mentions you in a task.",
-    "activityMentionTitle": "Activity mentions",
-    "activityMentionDescription": "When a teammate @-mentions you in an activity.",
-    "introductionMentionTitle": "Introduction mentions",
-    "introductionMentionDescription": "When a teammate @-mentions you in an introduction.",
-    "dealMentionTitle": "Deal mentions",
-    "dealMentionDescription": "When a teammate @-mentions you in a deal's close reason.",
-    "loadFailed": "Your notification preferences couldn't be loaded.",
-    "saveFailed": "Your change couldn't be saved. Try again.",
-    "retry": "Try again"
   },
   "WorkspaceEmail": {
     "title": "Email",

@@ -270,6 +270,15 @@ function UserMenu({ user, onLogout }: { user: User; onLogout: () => void }) {
                         </Link>
                     </DropdownMenu.Item>
                     <DropdownMenu.Item asChild>
+                        <Link
+                            href="/account"
+                            className="flex cursor-pointer items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-none data-[highlighted]:bg-brand-light data-[highlighted]:text-brand-dark"
+                        >
+                            <Cog6ToothIcon className="size-4" />
+                            {t("accountSettings")}
+                        </Link>
+                    </DropdownMenu.Item>
+                    <DropdownMenu.Item asChild>
                         <DropdownMenuSub>
                             <DropdownMenuSubTrigger onClick={() => {
                             }}>

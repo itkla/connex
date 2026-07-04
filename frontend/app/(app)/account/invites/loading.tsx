@@ -1,6 +1,6 @@
 import { Skeleton } from "@/components/ui/skeleton";
 
-export default function MembershipLoading() {
+export default function AccountInvitesLoading() {
     return (
         <div className="space-y-10">
             <section className="space-y-3">

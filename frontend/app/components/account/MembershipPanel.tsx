@@ -38,7 +38,7 @@ function writeWorkspaceCookie(id: number | null) {
 }
 
 export default function MembershipPanel() {
-    const t = useTranslations("WorkspaceMembership");
+    const t = useTranslations("AccountInvites");
     const router = useRouter();
     const { workspaces, activeWorkspaceId, activeWorkspace } = useWorkspace();
 

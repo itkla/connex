@@ -1,5 +1,5 @@
-import MembershipPanel from "@/app/components/settings/MembershipPanel";
+import { redirect } from "next/navigation";
 
 export default function MembershipSettingsPage() {
-    return <MembershipPanel />;
+    redirect("/account/invites");
 }
