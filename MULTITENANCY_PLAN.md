@@ -198,7 +198,24 @@ first policy landed is the email-domain ceiling — **`org_allowed_domain`** (V4
   (`sso_domain`, V39) AND, when set, the `org_allowed_domain` ceiling. So SSO cannot provision a member the
   org's own policy forbids (decided 2026-07-04).
 - **By design:** exact-domain match — an apex domain does not cover subdomains (fail-closed, matching the
-  per-workspace list).
+  per-workspace list). Domains are stored and matched as ASCII (IDNA punycode via `DomainUtil`), so a
+  Unicode address matches its stored form and collation cannot make distinct internationalized domains equal.
+
+### 0.8 Org-plane hardening (#316)
+
+Closing the loose ends the org tenancy work opened:
+
+- **No orphaning on account deletion:** both `workspace_member` and `org_member` are `ON DELETE CASCADE`, so a
+  self-delete would rip out the owner row and bypass the last-owner guards on the member operations.
+  `UserService.delete` now refuses (transactionally) when the user is the sole owner of any workspace or org —
+  they must transfer ownership first. (Separate, larger pre-existing gap: account deletion still can't complete
+  for a user who authored activities/notes/introductions, since those FKs are `ON DELETE RESTRICT` — a
+  reassignment/anonymization job, tracked apart from ownership.)
+- **Org audit trail (V46):** an immutable `org_id` on `audit_log`, stamped at write time (the target org for
+  org-entity actions, else the active workspace's org), with an org-admin-gated `/api/orgs/{orgId}/audit` read.
+  Org-level actions are no longer filed under whichever workspace the actor had active; each org has its own
+  audit surface. Nullable and forward-looking (auth/system events have no org; the append-only log isn't
+  backfilled).
 
 ---
 
