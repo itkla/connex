@@ -5,8 +5,8 @@ import java.util.List;
 import org.springframework.stereotype.Service;
 
 import lombok.RequiredArgsConstructor;
-import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.mappers.OrgAllowedDomainMapper;
+import ooo.klae.connex.backend.util.DomainUtil;
 
 /**
  * The per-organization email-domain allowlist that constrains workspace invites (#316, Option B):
@@ -30,7 +30,7 @@ public class OrgAllowedDomainService {
 
     public List<String> addDomain(int orgId, int actorId, String domainRaw) {
         orgMemberService.requireOrgAdmin(orgId, actorId);
-        String domain = normalizeDomain(domainRaw);
+        String domain = DomainUtil.normalize(domainRaw);
         orgAllowedDomainMapper.add(orgId, domain);
         auditService.record("org.allowed_domain.add", "organization", orgId, domain,
                 "Allowed domain " + domain, null);
@@ -39,7 +39,7 @@ public class OrgAllowedDomainService {
 
     public void removeDomain(int orgId, int actorId, String domainRaw) {
         orgMemberService.requireOrgAdmin(orgId, actorId);
-        String domain = normalizeDomain(domainRaw);
+        String domain = DomainUtil.normalize(domainRaw);
         orgAllowedDomainMapper.remove(orgId, domain);
         auditService.record("org.allowed_domain.remove", "organization", orgId, domain,
                 "Removed allowed domain " + domain, null);
@@ -58,7 +58,7 @@ public class OrgAllowedDomainService {
         if (orgAllowedDomainMapper.countByOrg(orgId) == 0) {
             return true;
         }
-        return orgAllowedDomainMapper.isAllowed(orgId, domainOf(email));
+        return orgAllowedDomainMapper.isAllowed(orgId, DomainUtil.of(email));
     }
 
     /**
@@ -70,24 +70,5 @@ public class OrgAllowedDomainService {
      */
     public boolean hasRestrictions(int orgId) {
         return orgAllowedDomainMapper.countByOrg(orgId) > 0;
-    }
-
-    private static String normalizeDomain(String domainRaw) {
-        if (domainRaw == null || domainRaw.isBlank()) {
-            throw new BadRequestException("Domain is required");
-        }
-        String domain = domainRaw.trim().toLowerCase();
-        if (domain.startsWith("@")) {
-            domain = domain.substring(1);
-        }
-        if (domain.isEmpty() || domain.contains("@") || domain.contains(" ") || !domain.contains(".")) {
-            throw new BadRequestException("Enter a valid domain such as example.com");
-        }
-        return domain;
-    }
-
-    private static String domainOf(String email) {
-        int at = email.lastIndexOf('@');
-        return at >= 0 ? email.substring(at + 1).trim().toLowerCase() : "";
     }
 }

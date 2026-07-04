@@ -101,6 +101,18 @@ class OrgInviteDomainGateTest extends AbstractServiceTest {
     }
 
     @Test
+    void approveMembership_reAppliesTheOrgCeilingAtActivation() {
+        User outsider = register("pending-" + unique() + "@other.com");
+        inviteService.addExistingMember(workspaceId, currentUser.getId(), outsider.getEmail(), "member");
+
+        orgAllowedDomainService.addDomain(orgId, currentUser.getId(), "acme.com");
+
+        assertThrows(ForbiddenException.class,
+            () -> workspaceService.approveMembership(workspaceId, outsider.getId()),
+            "a pending member whose domain the org disallowed after the invite cannot activate");
+    }
+
+    @Test
     void redeemLink_isUnrestrictedWhenBothListsEmpty() {
         InviteLinkDto link = inviteLinkService.createLink(workspaceId, currentUser, "member", null, null);
         User user = register("anyone-" + unique() + "@anywhere.com");
