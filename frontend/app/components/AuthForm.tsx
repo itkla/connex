@@ -7,6 +7,7 @@ import { toastError, toastSuccess } from "@/app/lib/toast";
 import { useTranslations } from "next-intl";
 import {
     ArrowRightIcon,
+    BuildingOffice2Icon,
     EyeIcon,
     EyeSlashIcon,
     FingerPrintIcon,
@@ -17,9 +18,11 @@ import { startAuthentication, WebAuthnError } from "@simplewebauthn/browser";
 import {
     ApiError,
     beginPasskeyAuthentication,
+    discoverSso,
     finishPasskeyAuthentication,
     login,
     register as registerUser,
+    ssoStartPath,
 } from "@/app/lib/api";
 import { usePasskeySupport } from "@/app/hooks/usePasskeySupport";
 import AuthBrandPanel from "@/app/components/auth/AuthBrandPanel";
@@ -61,7 +64,15 @@ function pickFieldErrors(errors?: Record<string, string>): FieldErrors {
     }, {});
 }
 
-export function AuthForm({ mode, redirectUrl }: { mode: AuthMode; redirectUrl: string | null }) {
+export function AuthForm({
+    mode,
+    redirectUrl,
+    ssoError = false,
+}: {
+    mode: AuthMode;
+    redirectUrl: string | null;
+    ssoError?: boolean;
+}) {
     const router = useRouter();
     const tForm = useTranslations("AuthForm");
     const tMode = useTranslations(mode === "login" ? "AuthLogin" : "AuthRegister");
@@ -83,11 +94,14 @@ export function AuthForm({ mode, redirectUrl }: { mode: AuthMode; redirectUrl: s
         displayName: "",
         password: "",
     });
-    const [error, setError] = useState<string | null>(null);
+    const [error, setError] = useState<string | null>(
+        ssoError && mode === "login" ? tLogin("ssoError") : null,
+    );
     const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
     const [submitting, setSubmitting] = useState(false);
     const [showPassword, setShowPassword] = useState(false);
     const [passkeySubmitting, setPasskeySubmitting] = useState(false);
+    const [ssoSubmitting, setSsoSubmitting] = useState(false);
     const passkeySupported = usePasskeySupport();
 
     function routeAfterAuth() {
@@ -129,6 +143,35 @@ export function AuthForm({ mode, redirectUrl }: { mode: AuthMode; redirectUrl: s
         }
     }
 
+    async function continueWithSso() {
+        const identifier = values.username.trim();
+        setError(null);
+        setFieldErrors({});
+        if (!identifier.includes("@")) {
+            const message = tLogin("ssoNeedsEmail");
+            setError(message);
+            document.getElementById(`${mode}-username`)?.focus();
+            return;
+        }
+        setSsoSubmitting(true);
+        try {
+            const discovery = await discoverSso(identifier);
+            if (discovery.available && discovery.registrationId && discovery.protocol) {
+                window.location.assign(ssoStartPath(discovery.registrationId, discovery.protocol));
+                return;
+            }
+            const message = tLogin("ssoUnavailable");
+            setError(message);
+            toastError(message);
+        } catch {
+            const message = tForm("genericError");
+            setError(message);
+            toastError(message);
+        } finally {
+            setSsoSubmitting(false);
+        }
+    }
+
     function setField(key: FieldKey, value: string) {
         setValues((prev) => ({ ...prev, [key]: value }));
         setError(null);
@@ -146,6 +189,10 @@ export function AuthForm({ mode, redirectUrl }: { mode: AuthMode; redirectUrl: s
     function getAuthErrorMessage(err: ApiError, hasFieldErrors: boolean) {
         if (mode === "login" && err.status === 401) {
             return tLogin("invalidCredentials");
+        }
+
+        if (mode === "login" && err.status === 403) {
+            return tLogin("ssoEnforced");
         }
 
         if (hasFieldErrors) {
@@ -353,7 +400,7 @@ export function AuthForm({ mode, redirectUrl }: { mode: AuthMode; redirectUrl: s
                             </button>
                         </form>
 
-                        {mode === "login" && passkeySupported && (
+                        {mode === "login" && (
                             <div
                                 className="connex-rise mt-5"
                                 style={{ animationDelay: `${180 + fields.length * 60}ms` }}
@@ -365,20 +412,38 @@ export function AuthForm({ mode, redirectUrl }: { mode: AuthMode; redirectUrl: s
                                     </span>
                                     <span className="h-px flex-1 bg-border" />
                                 </div>
-                                <button
-                                    type="button"
-                                    onClick={signInWithPasskey}
-                                    disabled={passkeySubmitting}
-                                    aria-busy={passkeySubmitting}
-                                    className="mt-4 flex w-full items-center justify-center gap-2 rounded-full border border-input bg-background px-6 py-3.5 text-base font-semibold text-foreground transition-[transform,background-color,border-color] duration-150 ease-out hover:bg-input focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-70"
-                                >
-                                    {passkeySubmitting ? (
-                                        <LoaderCircle className="size-4 animate-spin" />
-                                    ) : (
-                                        <FingerPrintIcon className="size-5" />
+                                <div className="mt-4 space-y-3">
+                                    {passkeySupported && (
+                                        <button
+                                            type="button"
+                                            onClick={signInWithPasskey}
+                                            disabled={passkeySubmitting || ssoSubmitting}
+                                            aria-busy={passkeySubmitting}
+                                            className="flex w-full items-center justify-center gap-2 rounded-full border border-input bg-background px-6 py-3.5 text-base font-semibold text-foreground transition-[transform,background-color,border-color] duration-150 ease-out hover:bg-input focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-70"
+                                        >
+                                            {passkeySubmitting ? (
+                                                <LoaderCircle className="size-4 animate-spin" />
+                                            ) : (
+                                                <FingerPrintIcon className="size-5" />
+                                            )}
+                                            {passkeySubmitting ? tLogin("passkeySigningIn") : tLogin("passkeyButton")}
+                                        </button>
                                     )}
-                                    {passkeySubmitting ? tLogin("passkeySigningIn") : tLogin("passkeyButton")}
-                                </button>
+                                    <button
+                                        type="button"
+                                        onClick={continueWithSso}
+                                        disabled={ssoSubmitting || passkeySubmitting}
+                                        aria-busy={ssoSubmitting}
+                                        className="flex w-full items-center justify-center gap-2 rounded-full border border-input bg-background px-6 py-3.5 text-base font-semibold text-foreground transition-[transform,background-color,border-color] duration-150 ease-out hover:bg-input focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-70"
+                                    >
+                                        {ssoSubmitting ? (
+                                            <LoaderCircle className="size-4 animate-spin" />
+                                        ) : (
+                                            <BuildingOffice2Icon className="size-5" />
+                                        )}
+                                        {ssoSubmitting ? tLogin("ssoSigningIn") : tLogin("ssoButton")}
+                                    </button>
+                                </div>
                             </div>
                         )}
 

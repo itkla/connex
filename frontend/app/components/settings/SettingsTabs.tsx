@@ -14,6 +14,7 @@ const TABS = [
     { key: "tabCustomFields", href: "/settings/custom-fields" },
     { key: "tabNotifications", href: "/settings/notifications" },
     { key: "tabEmail", href: "/settings/email" },
+    { key: "tabSso", href: "/settings/sso" },
     { key: "tabMembership", href: "/settings/membership" },
     { key: "tabSecurity", href: "/settings/security" },
 ] as const;

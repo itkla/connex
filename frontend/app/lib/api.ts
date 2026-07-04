@@ -421,6 +421,52 @@ export function deletePasskey(credentialId: string) {
 }
 
 /*
+* == Enterprise SSO
+*/
+
+/**
+ * Looks up, pre-login, whether an email's domain signs in through an IdP. Returns the
+ * registration to start and whether password login is disabled for that organization.
+ * @param email the identifier typed on the login screen
+ * @param init optional fetch overrides
+ * @returns the discovery result (unavailable when the domain has no enabled connection)
+ */
+export function discoverSso(email: string, init: RequestInit = {}) {
+    return getJson<Types.SsoDiscovery>(
+        `/api/auth/sso/discover?email=${encodeURIComponent(email)}`,
+        { cache: "no-store", ...init },
+    );
+}
+
+export function getSsoConfig(workspaceId: number, init: RequestInit = {}) {
+    return getJson<Types.SsoConnectionDto>(`/api/auth/sso/config?workspaceId=${workspaceId}`, {
+        cache: "no-store",
+        ...init,
+    });
+}
+
+export function saveSsoConfig(workspaceId: number, request: Types.SsoConnectionRequest) {
+    return putJson<Types.SsoConnectionDto>(`/api/auth/sso/config?workspaceId=${workspaceId}`, request);
+}
+
+export function confirmSsoLink(token: string, password: string) {
+    return postJson<Types.AuthResponse>("/api/auth/sso/link/confirm", { token, password });
+}
+
+/**
+ * The backend entry point a browser must fully navigate to (not fetch) to begin an
+ * SP-initiated SSO login. OIDC starts under the proxied {@code /api} prefix; SAML uses
+ * Spring's {@code /saml2} authenticate endpoint (rewritten to the backend in next.config).
+ * @param registrationId the {@code org-<id>} registration from discovery
+ * @param protocol the connection protocol
+ * @returns the absolute path to navigate the browser to
+ */
+export function ssoStartPath(registrationId: string, protocol: Types.SsoProtocol) {
+    const id = encodeURIComponent(registrationId);
+    return protocol === "saml" ? `/saml2/authenticate/${id}` : `/api/oauth2/authorization/${id}`;
+}
+
+/*
 * == User profile management
 */
 
