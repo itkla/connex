@@ -36,9 +36,9 @@ public class ShareService {
         workspaceService.requirePermission(workspaceId, actorId, Permission.SHARE_MANAGE);
         requireOwned(type, workspaceId, entityId);
         return switch (type) {
-            case COMPANY -> shareMapper.listCompanyShares(entityId);
-            case PERSON -> shareMapper.listPersonShares(entityId);
-            case PIPELINE -> shareMapper.listPipelineShares(entityId);
+            case COMPANY -> shareMapper.listCompanyShares(workspaceId, entityId);
+            case PERSON -> shareMapper.listPersonShares(workspaceId, entityId);
+            case PIPELINE -> shareMapper.listPipelineShares(workspaceId, entityId);
         };
     }
 
@@ -56,9 +56,9 @@ public class ShareService {
             throw new ForbiddenException("A record cannot be shared across organizations");
         }
         switch (type) {
-            case COMPANY -> shareMapper.shareCompany(entityId, targetWorkspaceId, actorId, canEdit);
-            case PERSON -> shareMapper.sharePerson(entityId, targetWorkspaceId, actorId, canEdit);
-            case PIPELINE -> shareMapper.sharePipeline(entityId, targetWorkspaceId, actorId, canEdit);
+            case COMPANY -> shareMapper.shareCompany(entityId, workspaceId, targetWorkspaceId, actorId, canEdit);
+            case PERSON -> shareMapper.sharePerson(entityId, workspaceId, targetWorkspaceId, actorId, canEdit);
+            case PIPELINE -> shareMapper.sharePipeline(entityId, workspaceId, targetWorkspaceId, actorId, canEdit);
         }
         auditService.record("workspace.share", type.name().toLowerCase(), entityId, null,
                 "Shared with workspace " + targetWorkspaceId, null);
@@ -71,9 +71,9 @@ public class ShareService {
         workspaceService.requirePermission(workspaceId, actorId, Permission.SHARE_MANAGE);
         requireOwned(type, workspaceId, entityId);
         switch (type) {
-            case COMPANY -> shareMapper.unshareCompany(entityId, targetWorkspaceId);
-            case PERSON -> shareMapper.unsharePerson(entityId, targetWorkspaceId);
-            case PIPELINE -> shareMapper.unsharePipeline(entityId, targetWorkspaceId);
+            case COMPANY -> shareMapper.unshareCompany(entityId, workspaceId, targetWorkspaceId);
+            case PERSON -> shareMapper.unsharePerson(entityId, workspaceId, targetWorkspaceId);
+            case PIPELINE -> shareMapper.unsharePipeline(entityId, workspaceId, targetWorkspaceId);
         }
         auditService.record("workspace.unshare", type.name().toLowerCase(), entityId, null,
                 "Stopped sharing with workspace " + targetWorkspaceId, null);
