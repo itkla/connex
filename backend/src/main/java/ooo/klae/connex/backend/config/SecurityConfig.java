@@ -10,6 +10,8 @@ import org.springframework.security.config.annotation.web.configuration.EnableWe
 import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.http.HttpStatus;
+import org.springframework.security.web.authentication.HttpStatusEntryPoint;
 import org.springframework.security.core.session.SessionRegistry;
 import org.springframework.security.core.session.SessionRegistryImpl;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
@@ -21,6 +23,9 @@ import org.springframework.session.Session;
 import org.springframework.session.security.SpringSessionBackedSessionRegistry;
 
 import jakarta.servlet.http.HttpServletResponse;
+
+import ooo.klae.connex.backend.sso.DbClientRegistrationRepository;
+import ooo.klae.connex.backend.sso.SsoAuthenticationSuccessHandler;
 
 /**
  * Spring Security configuration.
@@ -63,6 +68,8 @@ public class SecurityConfig {
     @Bean
     SecurityFilterChain chain(HttpSecurity http,
             SessionRegistry sessionRegistry,
+            DbClientRegistrationRepository dbClientRegistrationRepository,
+            SsoAuthenticationSuccessHandler ssoAuthenticationSuccessHandler,
             @Value("${connex.security.csrf-enabled:true}") boolean csrfEnabled) throws Exception {
         if (csrfEnabled) {
             // Session-stored token (default repo), echoed by the SPA in a header it fetches from
@@ -82,7 +89,19 @@ public class SecurityConfig {
                 .requestMatchers("/api/auth/webauthn/authenticate/**").permitAll()
                 .requestMatchers("/api/auth/webauthn/**").authenticated()
                 .requestMatchers("/api/auth/**").permitAll()
+                .requestMatchers("/api/oauth2/authorization/**").permitAll()
+                .requestMatchers("/api/login/oauth2/code/**").permitAll()
                 .anyRequest().authenticated()
+            )
+            .oauth2Login(o -> o
+                .clientRegistrationRepository(dbClientRegistrationRepository)
+                .authorizationEndpoint(a -> a.baseUri("/api/oauth2/authorization"))
+                .redirectionEndpoint(r -> r.baseUri("/api/login/oauth2/code/*"))
+                .successHandler(ssoAuthenticationSuccessHandler)
+                .failureHandler((rq, rs, ex) -> rs.sendRedirect("/auth/login?sso_error=1"))
+            )
+            .exceptionHandling(ex -> ex
+                .authenticationEntryPoint(new HttpStatusEntryPoint(HttpStatus.UNAUTHORIZED))
             )
             .sessionManagement(session -> session
                 .sessionCreationPolicy(SessionCreationPolicy.IF_REQUIRED)

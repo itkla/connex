@@ -438,6 +438,24 @@ public class WorkspaceService {
         return workspaceMapper.getMember(workspaceId, target.getId());
     }
 
+    /**
+     * Ensures {@code userId} is an active member of {@code workspaceId} with {@code role},
+     * adding an active membership when they are not already one. Idempotent: an existing
+     * member is left untouched (their current role is not changed). Used by JIT SSO
+     * provisioning to place a freshly federated user into their organization's workspace.
+     * @param workspaceId the workspace to join
+     * @param userId the user to add
+     * @param role the role to grant on a fresh join
+     */
+    public void ensureActiveMember(int workspaceId, int userId, String role) {
+        if (isMember(workspaceId, userId)) {
+            return;
+        }
+        workspaceMapper.addMember(workspaceId, userId, role);
+        auditService.record("workspace.member.sso_provision", "workspace", workspaceId, null,
+                "Provisioned an SSO member into the workspace", null);
+    }
+
     /** Workspaces the user has been added to but not yet accepted. */
     public List<WorkspaceMembershipDto> pendingMemberships(int userId) {
         return workspaceMapper.getPendingMemberships(userId);
