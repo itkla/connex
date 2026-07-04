@@ -108,6 +108,7 @@
   <select id="workspaceIdsOwnedBy" resultType="int">
     SELECT workspace_id FROM workspace_member
     WHERE user_id = #{userId} AND role = 'owner' AND status = 'active'
+    ORDER BY workspace_id
   </select>
 
   <select id="lockOwnerIds" resultType="int">
