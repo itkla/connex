@@ -111,10 +111,14 @@ public class TenantScopeInterceptor implements Interceptor {
      * backs {@code WorkspaceService.permissionsFor}, which any auth-plane request
      * ({@code /api/auth/**} is excluded from tenant resolution) may reach with an
      * explicit membership-validated workspace id; the statement itself anchors
-     * {@code workspace_id} in SQL, so it is safe without a resolved context.
+     * {@code workspace_id} in SQL, so it is safe without a resolved context. The
+     * org-scoped audit read is org-filtered ({@code org_id}) and gated by org
+     * membership (an org admin needn't have any active workspace), so it too may
+     * run without a resolved workspace context.
      */
     private static final Set<String> EXEMPT_STATEMENTS = Set.of(
         MAPPERS + "AuditLogMapper.insert",
+        MAPPERS + "AuditLogMapper.findRecentByOrg",
         MAPPERS + "RoleMapper.findPermissions"
     );
 

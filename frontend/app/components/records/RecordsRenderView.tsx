@@ -276,7 +276,7 @@ export default function RecordsRenderView<T extends { id: SelectionId; name?: st
     );
 
     const pager = (
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex items-center gap-3 text-sm text-muted-foreground">
                 <span className="tabular-nums">{t('showing', { from: showingFrom, to: showingTo, total })}</span>
                 <span className="hidden h-4 w-px bg-border sm:block" />

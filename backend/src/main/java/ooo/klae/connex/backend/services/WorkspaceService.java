@@ -313,6 +313,21 @@ public class WorkspaceService {
         }
     }
 
+    /**
+     * Refuses when the user is the only active owner of any workspace — deleting the account would
+     * leave that workspace ownerless (workspace_member is {@code ON DELETE CASCADE}, bypassing the
+     * last-owner safeguards on the member operations). Each owned workspace's owner rows are read
+     * under a lock so concurrent co-owner deletions serialize; must run in a transaction. They must
+     * transfer ownership first.
+     */
+    public void assertNotSoleOwnerOfAnyWorkspace(int userId) {
+        for (int workspaceId : workspaceMapper.workspaceIdsOwnedBy(userId)) {
+            if (workspaceMapper.lockOwnerIds(workspaceId).size() <= 1) {
+                throw new BadRequestException("Transfer workspace ownership before deleting your account");
+            }
+        }
+    }
+
     /** The built-in roles and their fixed permission bundles, shown read-only in the role editor. */
     public List<WorkspaceRole> builtInRoles() {
         return List.of(
@@ -414,6 +429,7 @@ public class WorkspaceService {
      * delegate holding {@code MEMBER_MANAGE} alone cannot promote anyone (including
      * themselves) to a role that confers permissions they lack.
      */
+    @Transactional
     public MemberDto changeMemberRole(int workspaceId, int actorId, int targetUserId, String roleRaw) {
         requirePermission(workspaceId, actorId, Permission.MEMBER_MANAGE);
         Role newRole = parseAssignableRole(roleRaw);
@@ -426,7 +442,7 @@ public class WorkspaceService {
         }
         if ("owner".equals(target.getRole()) && newRole != Role.OWNER) {
             requireRole(workspaceId, actorId, Role.OWNER);
-            if (workspaceMapper.countOwners(workspaceId) <= 1) {
+            if (workspaceMapper.lockOwnerIds(workspaceId).size() <= 1) {
                 throw new BadRequestException("A workspace must keep at least one owner");
             }
         }
@@ -442,6 +458,7 @@ public class WorkspaceService {
      * first so authored history survives. Only an owner may remove an owner, and
      * never the last one.
      */
+    @Transactional
     public void removeMember(int workspaceId, int actorId, int targetUserId) {
         requirePermission(workspaceId, actorId, Permission.MEMBER_MANAGE);
         MemberDto target = workspaceMapper.getMember(workspaceId, targetUserId);
@@ -450,7 +467,7 @@ public class WorkspaceService {
         }
         if ("owner".equals(target.getRole())) {
             requireRole(workspaceId, actorId, Role.OWNER);
-            if (workspaceMapper.countOwners(workspaceId) <= 1) {
+            if (workspaceMapper.lockOwnerIds(workspaceId).size() <= 1) {
                 throw new BadRequestException("A workspace must keep at least one owner");
             }
         }
@@ -524,12 +541,13 @@ public class WorkspaceService {
     }
 
     /** The user leaves a workspace they belong to, unassigning their tasks and clearing deal ownership. */
+    @Transactional
     public void leaveWorkspace(int workspaceId, int userId) {
         String role = workspaceMapper.getRole(workspaceId, userId);
         if (role == null) {
             throw new ResourceNotFoundException("You are not a member of this workspace");
         }
-        if ("owner".equals(role) && workspaceMapper.countOwners(workspaceId) <= 1) {
+        if ("owner".equals(role) && workspaceMapper.lockOwnerIds(workspaceId).size() <= 1) {
             throw new BadRequestException("Transfer ownership before leaving; a workspace must keep an owner");
         }
         workspaceMapper.unassignMemberTasks(workspaceId, userId);

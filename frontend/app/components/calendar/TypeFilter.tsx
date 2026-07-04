@@ -26,7 +26,7 @@ export default function TypeFilter({
             role="group"
             aria-label={t('filters')}
             data-no-swipe
-            className="flex items-center gap-1.5 overflow-x-auto pb-0.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+            className="flex items-center gap-1.5 overflow-x-auto py-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
         >
             {EVENT_KINDS.map((kind) => {
                 const active = visibleKinds.has(kind);

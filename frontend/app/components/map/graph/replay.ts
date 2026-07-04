@@ -89,14 +89,17 @@ export function frameAvgBand(frame: ReplayFrame): TemperatureBand {
 
 /**
  * Resolves each replay frame against the master graph into the per-frame presence, warmth, and
- * edge-colour maps the renderer applies. The org node and team members are present in every frame;
- * companies, contacts, and deals follow the backend's as-of membership, and each present contact has
- * exactly one employment edge (to its as-of employer, or the org node when unaffiliated).
+ * edge-colour maps the renderer applies. The org node is present in every frame; users pop in as of
+ * their creation date, and companies, contacts, and deals follow the backend's as-of membership. Each
+ * present contact has exactly one employment edge (to its as-of employer, or the org node when
+ * unaffiliated), and a user's connector edge appears only once the user itself is present.
  */
 export function toComputedFrames(frames: ReplayFrame[], master: Graph): ComputedFrame[] {
-    const alwaysPresent = new Set(
-        master.nodes.filter((n) => n.data.kind === 'uc' || n.data.kind === 'user').map((n) => n.id),
-    );
+    const alwaysPresent = new Set(master.nodes.filter((n) => n.data.kind === 'uc').map((n) => n.id));
+    const userCreatedOn = new Map<string, string>();
+    for (const n of master.nodes) {
+        if (n.data.kind === 'user') userCreatedOn.set(n.id, n.data.user.createdAt.slice(0, 10));
+    }
     const companyNodeIds = new Set(master.nodes.filter((n) => n.data.kind === 'company').map((n) => n.id));
 
     const dealsByCompanyNode = new Map<string, DealSummary[]>();
@@ -106,6 +109,9 @@ export function toComputedFrames(frames: ReplayFrame[], master: Graph): Computed
 
     return frames.map((frame) => {
         const presentNodeIds = new Set(alwaysPresent);
+        for (const [id, createdOn] of userCreatedOn) {
+            if (createdOn <= frame.asOf) presentNodeIds.add(id);
+        }
         const nodeWarmth = new Map<string, TemperatureBand>();
         for (const c of frame.companies) {
             const id = companyNodeId(c.id);
@@ -128,8 +134,8 @@ export function toComputedFrames(frames: ReplayFrame[], master: Graph): Computed
         for (const e of master.edges) {
             if (!e.data) continue;
             if (e.data.variant === 'uc-user') {
-                presentEdgeIds.add(e.id);
-            } else if (e.data.variant === 'rel-cc' && presentNodeIds.has(e.target)) {
+                if (presentNodeIds.has(e.target)) presentEdgeIds.add(e.id);
+            } else if (e.data.variant === 'rel-cc' && presentNodeIds.has(e.source) && presentNodeIds.has(e.target)) {
                 presentEdgeIds.add(e.id);
                 const deals = dealsByCompanyNode.get(e.target);
                 if (deals) edgeCcColor.set(e.id, ccColorForFrame(deals, resolution));

@@ -6,14 +6,14 @@ import { Loader2Icon } from 'lucide-react';
 import { CameraIcon } from '@heroicons/react/24/outline';
 
 import {
-    Sheet,
-    SheetClose,
-    SheetContent,
-    SheetDescription,
-    SheetFooter,
-    SheetHeader,
-    SheetTitle,
-} from '@/components/ui/sheet';
+    Drawer,
+    DrawerClose,
+    DrawerContent,
+    DrawerDescription,
+    DrawerFooter,
+    DrawerHeader,
+    DrawerTitle,
+} from '@/components/ui/drawer';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Label } from '@/components/ui/label';
@@ -54,31 +54,29 @@ export function QuickEditSheetShell({
     children,
 }: QuickEditSheetShellProps) {
     return (
-        <Sheet open={open} onOpenChange={onOpenChange}>
-            <SheetContent side="right" className="flex w-full flex-col gap-0 sm:max-w-lg">
-                <SheetHeader className="border-b pr-12">
+        <Drawer open={open} onOpenChange={onOpenChange} disablePointerDismissal>
+            <DrawerContent className="flex w-full flex-col gap-0 sm:max-w-lg">
+                <DrawerHeader className="border-b pr-12">
                     <div className="flex items-center gap-3">
                         <span className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-muted text-muted-foreground ring-1 ring-border [&_svg]:size-5">
                             {icon}
                         </span>
-                        <SheetTitle className="min-w-0 flex-1 truncate text-base">{title}</SheetTitle>
+                        <DrawerTitle className="min-w-0 flex-1 truncate text-base">{title}</DrawerTitle>
                         {count > 1 ? (
                             <Badge variant="secondary" className="tabular-nums">
                                 {count}
                             </Badge>
                         ) : null}
                     </div>
-                    {description ? <SheetDescription>{description}</SheetDescription> : null}
-                </SheetHeader>
+                    {description ? <DrawerDescription>{description}</DrawerDescription> : null}
+                </DrawerHeader>
 
                 <div className="flex flex-1 flex-col gap-4 overflow-y-auto p-4">{children}</div>
 
-                <SheetFooter className="flex-row justify-end gap-2 border-t">
-                    <SheetClose asChild>
-                        <Button variant="outline" disabled={isSaving}>
-                            {cancelLabel}
-                        </Button>
-                    </SheetClose>
+                <DrawerFooter className="flex-row justify-end gap-2 border-t">
+                    <DrawerClose render={<Button variant="outline" disabled={isSaving} />}>
+                        {cancelLabel}
+                    </DrawerClose>
                     <Button
                         onClick={onSave}
                         disabled={isSaving}
@@ -87,9 +85,9 @@ export function QuickEditSheetShell({
                         {isSaving ? <Loader2Icon className="size-4 animate-spin" /> : null}
                         {saveLabel}
                     </Button>
-                </SheetFooter>
-            </SheetContent>
-        </Sheet>
+                </DrawerFooter>
+            </DrawerContent>
+        </Drawer>
     );
 }
 

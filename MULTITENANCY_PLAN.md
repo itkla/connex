@@ -198,7 +198,29 @@ first policy landed is the email-domain ceiling — **`org_allowed_domain`** (V4
   (`sso_domain`, V39) AND, when set, the `org_allowed_domain` ceiling. So SSO cannot provision a member the
   org's own policy forbids (decided 2026-07-04).
 - **By design:** exact-domain match — an apex domain does not cover subdomains (fail-closed, matching the
-  per-workspace list).
+  per-workspace list). Domains are stored and matched as ASCII (IDNA punycode via `DomainUtil`), so a
+  Unicode address matches its stored form and collation cannot make distinct internationalized domains equal.
+
+### 0.8 Org-plane hardening (#316)
+
+Closing the loose ends the org tenancy work opened:
+
+- **No orphaning on account deletion:** both `workspace_member` and `org_member` are `ON DELETE CASCADE`, so a
+  self-delete would rip out the owner row and bypass the last-owner guards on the member operations.
+  `UserService.delete` now refuses (transactionally) when the user is the sole owner of any workspace or org —
+  they must transfer ownership first. (Separate, larger pre-existing gap: account deletion still can't complete
+  for a user who authored activities/notes/introductions, since those FKs are `ON DELETE RESTRICT` — a
+  reassignment/anonymization job, tracked apart from ownership.)
+- **Org audit trail (V46):** an immutable `org_id` on `audit_log`, stamped at write time — the target org for
+  org-entity actions (with a **null** `workspace_id`, so they surface only in the org trail, never leaking
+  into a workspace's audit view), else the active workspace's org. Org-admin-gated `/api/orgs/{orgId}/audit`
+  read. Nullable and forward-looking (auth/system events have no org; the append-only log isn't backfilled).
+- **Deletion guard is race-safe:** the sole-owner check reads each owned workspace/org's owner rows under a
+  `FOR UPDATE` lock inside the deletion transaction, so two co-owners deleting concurrently serialize on the
+  shared rows and cannot both pass to leave a resource ownerless.
+- **IDNA caveat:** `DomainUtil` uses the JDK's `IDN.toASCII` (IDNA2003), which applies compatibility mapping
+  (e.g. `faß.de` → `fass.de`). This fixes utf8mb4 collation ambiguity but means an allowlist entry can match a
+  compatibility-equivalent domain. Strict IDNA2008 handling would need ICU4J — deferred (follow-up on #316).
 
 ---
 

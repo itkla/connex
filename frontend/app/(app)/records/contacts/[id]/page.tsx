@@ -1,5 +1,6 @@
 import { getAttachmentsFromCookie, getCompanies, getContactById, getContactConnections, getContactEmployment, getContactIntroPath, getContacts, getContextNotifications, getCurrentUserFromCookie, getDeals, getEntityCustomFieldsFromCookie, getTags, getUserById } from "@/app/lib/api";
 import { notFound, redirect } from "next/navigation";
+import { CrumbLabel } from "@/app/hooks/useNavTrail";
 import { type Company, type Deal, type Tag, type Contact, type IntroPath, type PersonConnection, type PersonEmployment, type User } from "@/app/lib/types";
 import { cookies } from "next/headers";
 import Link from "next/link";
@@ -82,6 +83,7 @@ export default async function ContactPage({ params }: { params: { id: number } }
                         </Link>
                     </div>
 
+                    <CrumbLabel value={contact.name} />
                     <header className="mt-8 flex flex-wrap items-center justify-between gap-6">
                         <div className="flex items-center gap-6 py-8">
                             <ContactAvatar contact={contact} type="xlarge" />

@@ -5,6 +5,7 @@ import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { NotificationProvider } from "@/app/hooks/useNotifications";
 import { WorkspaceProvider } from "@/app/hooks/useWorkspace";
+import { NavTrailProvider } from "@/app/hooks/useNavTrail";
 
 export default async function AppLayout({
     children,
@@ -29,16 +30,18 @@ export default async function AppLayout({
     return (
         <WorkspaceProvider initialWorkspaces={workspaces} initialActiveId={activeWorkspaceId}>
             <NotificationProvider>
-                <ContentShell
-                    sidebar={
-                        <Sidebar
-                            user={user}
-                            className="w-64 bg-sidebar h-full p-6 rounded-xl border border-sidebar-border shadow-xl"
-                        />
-                    }
-                >
-                    {children}
-                </ContentShell>
+                <NavTrailProvider>
+                    <ContentShell
+                        sidebar={
+                            <Sidebar
+                                user={user}
+                                className="w-64 bg-sidebar h-full p-6 rounded-xl border border-sidebar-border shadow-xl"
+                            />
+                        }
+                    >
+                        {children}
+                    </ContentShell>
+                </NavTrailProvider>
             </NotificationProvider>
         </WorkspaceProvider>
     );
