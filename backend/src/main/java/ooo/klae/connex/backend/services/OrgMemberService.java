@@ -47,11 +47,14 @@ public class OrgMemberService {
     /**
      * Refuses when the user is the only owner of any organization — deleting the account would
      * leave that org ownerless (org_member is {@code ON DELETE CASCADE}, bypassing the last-owner
-     * guard on the org-member API). They must transfer ownership first.
+     * guard on the org-member API). Each owned org's owner rows are read under a lock so concurrent
+     * co-owner deletions serialize; must run in a transaction. They must transfer ownership first.
      */
     public void assertNotSoleOwnerOfAnyOrg(int userId) {
-        if (!orgMemberMapper.orgIdsSolelyOwnedBy(userId).isEmpty()) {
-            throw new BadRequestException("Transfer organization ownership before deleting your account");
+        for (int orgId : orgMemberMapper.orgIdsOwnedBy(userId)) {
+            if (orgMemberMapper.lockOwnerIds(orgId).size() <= 1) {
+                throw new BadRequestException("Transfer organization ownership before deleting your account");
+            }
         }
     }
 

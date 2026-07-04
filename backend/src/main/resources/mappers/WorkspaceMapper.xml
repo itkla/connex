@@ -101,13 +101,18 @@
     WHERE workspace_id = #{workspaceId} AND role = 'owner' AND status = 'active'
   </select>
 
-  <!-- Workspaces where this user is the ONLY active owner — deleting the account would leave them
-       ownerless (workspace_member is ON DELETE CASCADE), bypassing the workspace last-owner guard. -->
-  <select id="workspaceIdsSolelyOwnedBy" resultType="int">
-    SELECT wm.workspace_id FROM workspace_member wm
-    WHERE wm.user_id = #{userId} AND wm.role = 'owner' AND wm.status = 'active'
-      AND (SELECT COUNT(*) FROM workspace_member w2
-           WHERE w2.workspace_id = wm.workspace_id AND w2.role = 'owner' AND w2.status = 'active') = 1
+  <!-- Workspaces this user actively owns, and a locking read of a workspace's active owner rows.
+       The account-deletion guard iterates the owned set and locks each owner set FOR UPDATE, so two
+       co-owners deleting concurrently serialize on the shared rows and cannot both pass to leave a
+       workspace ownerless (workspace_member is ON DELETE CASCADE). -->
+  <select id="workspaceIdsOwnedBy" resultType="int">
+    SELECT workspace_id FROM workspace_member
+    WHERE user_id = #{userId} AND role = 'owner' AND status = 'active'
+  </select>
+
+  <select id="lockOwnerIds" resultType="int">
+    SELECT user_id FROM workspace_member
+    WHERE workspace_id = #{workspaceId} AND role = 'owner' AND status = 'active' FOR UPDATE
   </select>
 
   <delete id="removeMember">

@@ -32,8 +32,8 @@ class OrgAuditViewTest extends AbstractServiceTest {
 
         List<AuditLog> events = auditService.recentForOrg(orgId, 50, 0);
         assertTrue(events.stream().anyMatch(e -> "org.allowed_domain.add".equals(e.getAction())
-                && Integer.valueOf(orgId).equals(e.getOrgId())),
-            "an org-level action must be attributed to its org and appear in the org audit trail");
+                && Integer.valueOf(orgId).equals(e.getOrgId()) && e.getWorkspaceId() == null),
+            "an org-level action must be attributed to its org (and no workspace) and appear in the org audit trail");
     }
 
     @Test

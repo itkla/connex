@@ -115,8 +115,9 @@ public class AuditService {
             entry.setChanges(toJson(changes));
             entry.setContext(toJson(context));
 
-            entry.setWorkspaceId(tenantContext.getWorkspaceId());
-            entry.setOrgId("organization".equals(entityType) ? entityId : tenantContext.getOrgId());
+            boolean orgLevel = "organization".equals(entityType);
+            entry.setWorkspaceId(orgLevel ? null : tenantContext.getWorkspaceId());
+            entry.setOrgId(orgLevel ? entityId : tenantContext.getOrgId());
             resolveActor(entry);
             resolveRequest(entry);
 

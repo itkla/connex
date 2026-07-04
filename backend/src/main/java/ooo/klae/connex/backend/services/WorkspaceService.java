@@ -316,11 +316,15 @@ public class WorkspaceService {
     /**
      * Refuses when the user is the only active owner of any workspace — deleting the account would
      * leave that workspace ownerless (workspace_member is {@code ON DELETE CASCADE}, bypassing the
-     * last-owner safeguards on the member operations). They must transfer ownership first.
+     * last-owner safeguards on the member operations). Each owned workspace's owner rows are read
+     * under a lock so concurrent co-owner deletions serialize; must run in a transaction. They must
+     * transfer ownership first.
      */
     public void assertNotSoleOwnerOfAnyWorkspace(int userId) {
-        if (!workspaceMapper.workspaceIdsSolelyOwnedBy(userId).isEmpty()) {
-            throw new BadRequestException("Transfer workspace ownership before deleting your account");
+        for (int workspaceId : workspaceMapper.workspaceIdsOwnedBy(userId)) {
+            if (workspaceMapper.lockOwnerIds(workspaceId).size() <= 1) {
+                throw new BadRequestException("Transfer workspace ownership before deleting your account");
+            }
         }
     }
 
