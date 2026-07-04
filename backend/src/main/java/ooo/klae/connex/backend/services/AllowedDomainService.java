@@ -5,9 +5,9 @@ import java.util.List;
 import org.springframework.stereotype.Service;
 
 import lombok.RequiredArgsConstructor;
-import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.mappers.AllowedDomainMapper;
 import ooo.klae.connex.backend.tenant.Permission;
+import ooo.klae.connex.backend.util.DomainUtil;
 
 /**
  * The per-workspace email-domain allowlist that gates the broad self-serve join channels (invite
@@ -30,7 +30,7 @@ public class AllowedDomainService {
 
     public List<String> addDomain(int workspaceId, int actorId, String domainRaw) {
         workspaceService.requirePermission(workspaceId, actorId, Permission.WORKSPACE_SETTINGS);
-        String domain = normalizeDomain(domainRaw);
+        String domain = DomainUtil.normalize(domainRaw);
         allowedDomainMapper.add(workspaceId, domain);
         auditService.record("workspace.allowed_domain.add", "workspace", workspaceId, domain,
                 "Allowed domain " + domain, null);
@@ -39,7 +39,7 @@ public class AllowedDomainService {
 
     public void removeDomain(int workspaceId, int actorId, String domainRaw) {
         workspaceService.requirePermission(workspaceId, actorId, Permission.WORKSPACE_SETTINGS);
-        String domain = normalizeDomain(domainRaw);
+        String domain = DomainUtil.normalize(domainRaw);
         allowedDomainMapper.remove(workspaceId, domain);
         auditService.record("workspace.allowed_domain.remove", "workspace", workspaceId, domain,
                 "Removed allowed domain " + domain, null);
@@ -54,7 +54,7 @@ public class AllowedDomainService {
         if (allowedDomainMapper.countByWorkspace(workspaceId) == 0) {
             return true;
         }
-        return allowedDomainMapper.isAllowed(workspaceId, domainOf(email));
+        return allowedDomainMapper.isAllowed(workspaceId, DomainUtil.of(email));
     }
 
     /**
@@ -66,24 +66,5 @@ public class AllowedDomainService {
      */
     public boolean hasRestrictions(int workspaceId) {
         return allowedDomainMapper.countByWorkspace(workspaceId) > 0;
-    }
-
-    private static String normalizeDomain(String domainRaw) {
-        if (domainRaw == null || domainRaw.isBlank()) {
-            throw new BadRequestException("Domain is required");
-        }
-        String domain = domainRaw.trim().toLowerCase();
-        if (domain.startsWith("@")) {
-            domain = domain.substring(1);
-        }
-        if (domain.isEmpty() || domain.contains("@") || domain.contains(" ") || !domain.contains(".")) {
-            throw new BadRequestException("Enter a valid domain such as example.com");
-        }
-        return domain;
-    }
-
-    private static String domainOf(String email) {
-        int at = email.lastIndexOf('@');
-        return at >= 0 ? email.substring(at + 1).trim().toLowerCase() : "";
     }
 }

@@ -169,7 +169,36 @@ control plane, distinct from workspace membership. Decisions locked 2026-07-04:
 - **No existence oracle:** the SSO endpoints return the same `403` for an unknown workspace and for one the
   caller cannot administer, so an authenticated non-member cannot enumerate workspace ids.
 - **Backend-only in this phase:** `OrgMemberController` (`/api/orgs`) lets an org owner manage admins;
-  the org-settings UI, org-level billing/domains, and org-scoped SSO step-up (#296) are follow-ups.
+  the org-settings UI, org-level billing, and org-scoped SSO step-up (#296) are follow-ups.
+
+### 0.7 Org allowed-domains constrain workspace invites (#316, Option B)
+
+The layering decision (2026-07-04): **the org governs org-wide policy; workspaces execute within it.** The
+first policy landed is the email-domain ceiling — **`org_allowed_domain`** (V45):
+
+- **Org policy is a ceiling on membership.** When an org sets an allowlist, **every** workspace invite/join
+  path in the org is constrained to those domains — link redemption, email-token create/accept, and
+  admin-adds-existing — AND-ed with any per-workspace `workspace_allowed_domain` (V25). This is a deliberate
+  override of workspace-owner discretion (V25's "explicit invites are not gated" no longer holds once an org
+  sets a policy). Enforced in `InviteService` (create/accept/add-existing) and `InviteLinkService.redeem`.
+- **Empty org allowlist = unrestricted** (the non-breaking default), so existing orgs and workspaces keep
+  operating exactly as before until an org sets a policy.
+- **Distinct from `sso_domain`** (V39): that routes SSO logins for a globally-unique domain and carries login
+  side effects; `org_allowed_domain` is a plain invite ceiling every org can use whether or not SSO is on.
+  Managed by org admin/owner via `/api/orgs/{orgId}/allowed-domains`.
+- **Verified-email pairing** on the self-serve link path: when the org (or workspace) restricts domains and
+  registration verification is enabled, the joiner's email must be verified. The domain ceiling is only as
+  strong as email ownership, so an instance that relies on it should enable registration verification —
+  the token/admin paths (accept, create, add-existing) prove the address by possession or admin action, but
+  the unbound link channel does not.
+- **Re-checked at activation:** `approveMembership` re-applies the org ceiling before flipping a pending
+  member active, so a row that predates a later-tightened policy (or the feature deploy) cannot slip in.
+- **Ceiling on ALL membership:** the org allowlist caps every path, including **SSO JIT provisioning**
+  (`SsoLoginService.resolve`) — SSO requires a verified email whose domain the org proved it owns
+  (`sso_domain`, V39) AND, when set, the `org_allowed_domain` ceiling. So SSO cannot provision a member the
+  org's own policy forbids (decided 2026-07-04).
+- **By design:** exact-domain match — an apex domain does not cover subdomains (fail-closed, matching the
+  per-workspace list).
 
 ---
 

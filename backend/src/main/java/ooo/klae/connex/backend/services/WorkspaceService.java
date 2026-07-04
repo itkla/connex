@@ -44,6 +44,7 @@ public class WorkspaceService {
     private final WorkspaceMapper workspaceMapper;
     private final OrganizationMapper organizationMapper;
     private final OrgMemberService orgMemberService;
+    private final OrgAllowedDomainService orgAllowedDomainService;
     private final RoleMapper roleMapper;
     private final NotificationDelivery notificationDelivery;
     private final TenantContext tenantContext;
@@ -492,8 +493,16 @@ public class WorkspaceService {
         return workspaceMapper.getPendingMemberships(userId);
     }
 
-    /** The user accepts a pending invitation, becoming an active member. */
+    /**
+     * The user accepts a pending invitation, becoming an active member. The organization's
+     * email-domain ceiling (#316) is re-applied at activation, so a pending row that predates a
+     * later-tightened org policy cannot slip an out-of-policy member into the workspace.
+     */
     public WorkspaceMembershipDto approveMembership(int workspaceId, int userId) {
+        MemberDto pending = workspaceMapper.getMember(workspaceId, userId);
+        if (pending != null && !orgAllowedDomainService.isJoinAllowed(getOrgId(workspaceId), pending.getEmail())) {
+            throw new ForbiddenException("This organization only allows members from approved email domains");
+        }
         if (workspaceMapper.activateMember(workspaceId, userId) == 0) {
             throw new ResourceNotFoundException("No pending invitation for this workspace");
         }

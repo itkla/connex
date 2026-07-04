@@ -39,6 +39,7 @@ public class InviteService {
     private final WorkspaceMapper workspaceMapper;
     private final UserMapper userMapper;
     private final WorkspaceService workspaceService;
+    private final OrgAllowedDomainService orgAllowedDomainService;
     private final AuditService auditService;
     private final InviteEmailService inviteEmailService;
 
@@ -53,6 +54,7 @@ public class InviteService {
         workspaceService.requirePermission(workspaceId, actor.getId(), Permission.MEMBER_MANAGE);
         String email = normalizeEmail(emailRaw);
         String role = normalizeRole(roleRaw);
+        requireOrgDomainAllowed(workspaceId, email);
 
         User existing = userMapper.getUserByEmail(email);
         if (existing != null) {
@@ -135,6 +137,7 @@ public class InviteService {
         }
 
         int workspaceId = invite.getWorkspaceId();
+        requireOrgDomainAllowed(workspaceId, user.getEmail());
         if (!workspaceMapper.isMember(workspaceId, user.getId())) {
             workspaceMapper.addMember(workspaceId, user.getId(), invite.getRole());
         }
@@ -150,6 +153,7 @@ public class InviteService {
         workspaceService.requirePermission(workspaceId, actorId, Permission.MEMBER_MANAGE);
         String email = normalizeEmail(emailRaw);
         String role = normalizeRole(roleRaw);
+        requireOrgDomainAllowed(workspaceId, email);
 
         User user = userMapper.getUserByEmail(email);
         if (user == null) {
@@ -160,6 +164,18 @@ public class InviteService {
         }
         User actor = userMapper.getUserById(actorId);
         return workspaceService.addPendingMember(workspaceId, actor, user, role);
+    }
+
+    /**
+     * Enforces the organization's email-domain ceiling (#316, Option B) before a workspace roster
+     * change. When the workspace's org restricts invite domains, {@code email} must be on the org
+     * allowlist; an org with no allowlist is unrestricted, so existing workspaces are unaffected.
+     */
+    private void requireOrgDomainAllowed(int workspaceId, String email) {
+        int orgId = workspaceService.getOrgId(workspaceId);
+        if (!orgAllowedDomainService.isJoinAllowed(orgId, email)) {
+            throw new ForbiddenException("This organization only allows members from approved email domains");
+        }
     }
 
     private String workspaceNameFor(User actor, int workspaceId) {

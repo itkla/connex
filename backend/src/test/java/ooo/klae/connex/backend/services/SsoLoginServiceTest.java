@@ -17,6 +17,7 @@ import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.dto.WorkspaceMembershipDto;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.mappers.FederatedIdentityMapper;
+import ooo.klae.connex.backend.mappers.OrgAllowedDomainMapper;
 import ooo.klae.connex.backend.mappers.SsoConnectionMapper;
 import ooo.klae.connex.backend.mappers.SsoDomainMapper;
 
@@ -38,6 +39,7 @@ class SsoLoginServiceTest extends AbstractServiceTest {
     @Autowired private SsoConnectionMapper ssoConnectionMapper;
     @Autowired private FederatedIdentityMapper federatedIdentityMapper;
     @Autowired private SsoDomainMapper ssoDomainMapper;
+    @Autowired private OrgAllowedDomainMapper orgAllowedDomainMapper;
     @Autowired private WorkspaceService workspaceService;
 
     private int orgId;
@@ -69,6 +71,31 @@ class SsoLoginServiceTest extends AbstractServiceTest {
         user.setPasswordHash(null);
         userMapper.insert(user);
         return user;
+    }
+
+    @Test
+    void resolve_isBlockedByTheOrgAllowedDomainCeiling() {
+        orgAllowedDomainMapper.add(orgId, "acme.com");
+
+        assertThrows(ForbiddenException.class,
+                () -> ssoLoginService.resolve(PROVIDER, ISSUER, "sub-ceiling",
+                        "newcomer@" + OWNED_DOMAIN, true, orgId, "Newcomer"),
+                "SSO must not provision a member the org's own domain ceiling forbids, "
+                        + "even though the domain is in the sso_domain routing list");
+        assertNull(userMapper.getUserByEmail("newcomer@" + OWNED_DOMAIN),
+                "a refused SSO login must write nothing");
+    }
+
+    @Test
+    void resolve_provisionsWhenTheOrgCeilingAllowsTheDomain() {
+        orgAllowedDomainMapper.add(orgId, OWNED_DOMAIN);
+
+        SsoLoginResult result = ssoLoginService.resolve(PROVIDER, ISSUER, "sub-allowed",
+                "welcome@" + OWNED_DOMAIN, true, orgId, "Welcome");
+
+        assertInstanceOf(SsoLoginResult.Login.class, result);
+        assertTrue(workspaceMapper.isMember(workspace.getId(),
+                userMapper.getUserByEmail("welcome@" + OWNED_DOMAIN).getId()));
     }
 
     @Test

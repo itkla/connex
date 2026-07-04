@@ -41,6 +41,7 @@ public class InviteLinkService {
     private final AuditService auditService;
     private final WorkspaceService workspaceService;
     private final AllowedDomainService allowedDomainService;
+    private final OrgAllowedDomainService orgAllowedDomainService;
     private final RegistrationVerificationService registrationVerificationService;
 
     /** Creates a shareable link. Defaults: member role, 14-day expiry, unlimited uses. */
@@ -100,16 +101,20 @@ public class InviteLinkService {
             return membership(user.getId(), workspaceId);
         }
 
-        // Joining (or re-joining after removal): the link must currently be valid and the
-        // domain allowed. A past redemption record is history, not a standing grant.
-        if (!allowedDomainService.isJoinAllowed(workspaceId, user.getEmail())) {
+        // Joining (or re-joining after removal): the link must currently be valid and the domain
+        // allowed by both the org ceiling (#316) and the per-workspace list. A past redemption
+        // record is history, not a standing grant.
+        int orgId = workspaceService.getOrgId(workspaceId);
+        if (!orgAllowedDomainService.isJoinAllowed(orgId, user.getEmail())
+                || !allowedDomainService.isJoinAllowed(workspaceId, user.getEmail())) {
             throw new ForbiddenException("Your email domain isn't permitted to join this workspace");
         }
 
         // A domain allowlist is only trustworthy if the joiner's email is verified — otherwise
         // an unverified account could register with an allowed-domain address it doesn't own and
         // slip past the domain gate. Enforced only when registration verification is enabled.
-        if (registrationVerificationService.isEnabled() && allowedDomainService.hasRestrictions(workspaceId)) {
+        if (registrationVerificationService.isEnabled()
+                && (orgAllowedDomainService.hasRestrictions(orgId) || allowedDomainService.hasRestrictions(workspaceId))) {
             User fresh = userMapper.getUserById(user.getId());
             if (fresh == null || !fresh.isEmailVerified()) {
                 throw new ForbiddenException("Verify your email address before joining this workspace");
