@@ -32,6 +32,7 @@ CREATE TABLE org_member (
     org_role    VARCHAR(16) NOT NULL DEFAULT 'admin' COMMENT 'Org role: owner | admin',
     created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT 'Membership creation timestamp',
     PRIMARY KEY (org_id, user_id),
+    CONSTRAINT ck_org_member_role CHECK (org_role IN ('owner', 'admin')),
     CONSTRAINT fk_org_member_org FOREIGN KEY (org_id) REFERENCES organization(id) ON DELETE CASCADE,
     CONSTRAINT fk_org_member_user FOREIGN KEY (user_id) REFERENCES app_user(id) ON DELETE CASCADE,
     INDEX idx_org_member_user (user_id, org_id)
