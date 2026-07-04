@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { type ReactNode, useCallback, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
-import { useReducedMotion } from 'motion/react';
+import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
 import { ArrowPathIcon, PlusIcon, Squares2X2Icon } from '@heroicons/react/24/outline';
 import {
     DndContext,
@@ -45,6 +45,7 @@ import WidgetShell from './WidgetShell';
 import { ALL_WIDGET_TYPES, WIDGET_META, defaultWidgets, newWidgetId } from './dashboardWidgets';
 
 const PERSIST_DEBOUNCE_MS = 400;
+const EASE_OUT: [number, number, number, number] = [0.23, 1, 0.32, 1];
 
 type WidgetNodes = Partial<Record<DashboardWidgetType, ReactNode>>;
 
@@ -183,23 +184,31 @@ export default function DashboardGrid({
     return (
         <div className="flex flex-col gap-4">
             <div className="flex items-center justify-end gap-2 px-1">
-                {editMode && (
-                    <>
-                        <Button variant="ghost" size="sm" onClick={resetLayout}>
-                            <ArrowPathIcon />
-                            {t('reset')}
-                        </Button>
-                        <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => setTrayOpen(true)}
-                            disabled={availableTypes.length === 0}
+                <AnimatePresence>
+                    {editMode && (
+                        <motion.div
+                            className="flex items-center gap-2"
+                            initial={reduce ? false : { opacity: 0, x: 8 }}
+                            animate={reduce ? undefined : { opacity: 1, x: 0 }}
+                            exit={reduce ? { opacity: 0 } : { opacity: 0, x: 8 }}
+                            transition={{ duration: 0.2, ease: EASE_OUT }}
                         >
-                            <PlusIcon />
-                            {t('addWidget')}
-                        </Button>
-                    </>
-                )}
+                            <Button variant="ghost" size="sm" onClick={resetLayout}>
+                                <ArrowPathIcon />
+                                {t('reset')}
+                            </Button>
+                            <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => setTrayOpen(true)}
+                                disabled={availableTypes.length === 0}
+                            >
+                                <PlusIcon />
+                                {t('addWidget')}
+                            </Button>
+                        </motion.div>
+                    )}
+                </AnimatePresence>
                 <Button
                     variant={editMode ? 'default' : 'outline'}
                     size="sm"

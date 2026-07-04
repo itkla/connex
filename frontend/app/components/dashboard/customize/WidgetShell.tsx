@@ -47,9 +47,8 @@ export default function WidgetShell({
     return (
         <div
             className={cn(
-                'flex h-full flex-col rounded-2xl transition-[outline-color,opacity] duration-200',
-                editMode &&
-                    'outline-1 outline-dashed outline-offset-4 outline-border hover:outline-brand/40',
+                'flex h-full flex-col rounded-2xl outline-1 outline-dashed outline-offset-4 outline-transparent transition-[outline-color,opacity] duration-200 motion-reduce:transition-none',
+                editMode && 'outline-border hover:outline-brand/40',
                 isDragging && 'opacity-40',
             )}
         >
@@ -69,7 +68,7 @@ export default function WidgetShell({
                                     onClick={onToggleWidth}
                                     aria-label={widthLabel}
                                     title={widthLabel}
-                                    className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                                    className="rounded-md p-1.5 text-muted-foreground transition-[background-color,color,transform] duration-150 hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring active:translate-y-px motion-reduce:transition-none"
                                 >
                                     {span === 2 ? (
                                         <ArrowsPointingInIcon className="size-4" />
@@ -83,7 +82,7 @@ export default function WidgetShell({
                                 onClick={onRemove}
                                 aria-label={removeLabel}
                                 title={removeLabel}
-                                className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                                className="rounded-md p-1.5 text-muted-foreground transition-[background-color,color,transform] duration-150 hover:bg-destructive/10 hover:text-destructive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring active:translate-y-px motion-reduce:transition-none"
                             >
                                 <XMarkIcon className="size-4" />
                             </button>
