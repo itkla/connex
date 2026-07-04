@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.List;
 
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 
@@ -18,13 +19,16 @@ import ooo.klae.connex.backend.dto.SsoConnectionDto;
 import ooo.klae.connex.backend.dto.SsoConnectionRequest;
 import ooo.klae.connex.backend.dto.SsoDiscoveryDto;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
+import ooo.klae.connex.backend.mappers.OrgMemberMapper;
 import ooo.klae.connex.backend.mappers.SsoConnectionMapper;
 import ooo.klae.connex.backend.sso.SsoSecretCipher;
 
 /**
- * Verifies SSO connection management: owner save/read round-trip, that the OIDC
- * client secret is encrypted at rest and never surfaced in the DTO, that a blank
- * secret preserves the stored one, and that a non-admin member is denied.
+ * Verifies SSO connection management: org-admin save/read round-trip, that the
+ * OIDC client secret is encrypted at rest and never surfaced in the DTO, that a
+ * blank secret preserves the stored one, and that a user without org membership
+ * is denied. SSO configuration is gated on org membership (#316), so the acting
+ * user is enrolled as an org owner of the workspace's organization.
  */
 class SsoConnectionServiceTest extends AbstractServiceTest {
 
@@ -33,6 +37,12 @@ class SsoConnectionServiceTest extends AbstractServiceTest {
     @Autowired private SsoConnectionService ssoConnectionService;
     @Autowired private SsoConnectionMapper ssoConnectionMapper;
     @Autowired private SsoSecretCipher ssoSecretCipher;
+    @Autowired private OrgMemberMapper orgMemberMapper;
+
+    @BeforeEach
+    void enrollActingUserAsOrgOwner() {
+        orgMemberMapper.addMember(workspaceMapper.getOrgId(workspace.getId()), currentUser.getId(), "owner");
+    }
 
     private SsoConnectionRequest oidcRequest() {
         SsoConnectionRequest req = new SsoConnectionRequest();
