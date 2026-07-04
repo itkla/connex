@@ -27,6 +27,8 @@ import {
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 
+import { useDragScroll } from '@/app/hooks/useDragScroll';
+
 const COL_PREFIX = 'col:';
 
 export interface KanbanColumnDef {
@@ -179,6 +181,11 @@ export default function KanbanBoard<T>(props: KanbanBoardProps<T>) {
 
     const activeItem = activeId != null ? itemsById.get(activeId) : undefined;
 
+    const { ref: scrollRef, edges } = useDragScroll<HTMLDivElement>({
+        leftDragSelector: '[data-kanban-board]',
+        excludeDragSelector: '[data-kanban-card]',
+    });
+
     return (
         <DndContext
             sensors={sensors}
@@ -189,19 +196,33 @@ export default function KanbanBoard<T>(props: KanbanBoardProps<T>) {
             onDragCancel={() => { setActiveId(null); commit(snapshotRef.current); }}
             accessibility={accessibility}
         >
-            <div className="flex gap-4 overflow-x-auto pb-2">
-                {columns.map((col) => (
-                    <KanbanColumn
-                        key={col.id}
-                        col={col}
-                        ids={columnItems[col.id] ?? []}
-                        itemsById={itemsById}
-                        renderCard={renderCard}
-                        reduce={reduce}
-                        emptyHint={emptyHint}
-                        countLabel={countLabel}
-                    />
-                ))}
+            <div className="relative">
+                <div
+                    ref={scrollRef}
+                    data-kanban-board
+                    className="flex gap-4 overflow-x-auto pb-2 data-[dragging=true]:cursor-grabbing data-[dragging=true]:select-none"
+                >
+                    {columns.map((col) => (
+                        <KanbanColumn
+                            key={col.id}
+                            col={col}
+                            ids={columnItems[col.id] ?? []}
+                            itemsById={itemsById}
+                            renderCard={renderCard}
+                            reduce={reduce}
+                            emptyHint={emptyHint}
+                            countLabel={countLabel}
+                        />
+                    ))}
+                </div>
+                <div
+                    aria-hidden
+                    className={`pointer-events-none absolute inset-y-0 left-0 w-10 bg-gradient-to-r from-background to-transparent transition-opacity duration-200 ${edges.left ? 'opacity-100' : 'opacity-0'}`}
+                />
+                <div
+                    aria-hidden
+                    className={`pointer-events-none absolute inset-y-0 right-0 w-10 bg-gradient-to-l from-background to-transparent transition-opacity duration-200 ${edges.right ? 'opacity-100' : 'opacity-0'}`}
+                />
             </div>
             <DragOverlay>
                 {activeItem ? (
@@ -277,6 +298,7 @@ function SortableCard({ id, reduce, children }: { id: number; reduce: boolean; c
         <li
             ref={setNodeRef}
             style={style}
+            data-kanban-card
             {...attributes}
             {...listeners}
             className={`list-none touch-none outline-none ${isDragging ? 'opacity-40' : ''}`}

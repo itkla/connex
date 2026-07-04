@@ -7,7 +7,7 @@ import { ChevronDownIcon } from '@heroicons/react/24/outline';
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from '@/components/ui/dropdown-menu';
 import KanbanBoard, { type KanbanColumnDef } from '@/app/components/kanban/KanbanBoard';
 import { kanbanAccessibility } from '@/app/components/kanban/kanbanAccessibility';
-import DealCard from '@/app/components/records/deals/DealCard';
+import DealKanbanCard from '@/app/components/records/deals/DealKanbanCard';
 import { classifyStage } from './dealOutcome';
 import { moveDeal } from '@/app/lib/api';
 import { toastError } from '@/app/lib/toast';
@@ -86,17 +86,15 @@ export default function DealsKanban({
 
     const renderCard = useCallback(
         (deal: Deal) => (
-            <DealCard
+            <DealKanbanCard
                 deal={deal}
                 company={deal.company != null ? companyById.get(deal.company) : undefined}
-                pipeline={deal.pipeline != null ? pipelineById.get(deal.pipeline) : undefined}
-                stage={deal.stage != null ? stageById.get(deal.stage) : undefined}
                 risk={riskByDealId.get(deal.id)}
                 onQuickEdit={() => onQuickEdit(deal)}
                 onDelete={() => onDelete(deal)}
             />
         ),
-        [companyById, pipelineById, stageById, riskByDealId, onQuickEdit, onDelete],
+        [companyById, riskByDealId, onQuickEdit, onDelete],
     );
 
     const onMove = useCallback(
