@@ -206,7 +206,7 @@ function RuleForm({
                 <DialogDescription>{t("createDescription")}</DialogDescription>
             </DialogHeader>
 
-            <div className="flex max-h-[62vh] flex-col gap-5 overflow-y-auto px-1">
+            <div className="flex max-h-[62vh] flex-col gap-5 overflow-y-auto px-1 py-1">
                 <div className="space-y-1.5">
                     <Label htmlFor="rule-name">{t("ruleName")}</Label>
                     <Input
