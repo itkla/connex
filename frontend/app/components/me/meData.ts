@@ -87,9 +87,11 @@ export function riskItems(dealRisks: DealRisk[], myDeals: Deal[], cap: number): 
         });
 }
 
-function dayKey(input: string | Date): string {
-    const s = typeof input === "string" ? input : input.toISOString();
-    return s.slice(0, 10);
+const DAY_MS = 86_400_000;
+
+/** UTC calendar day (YYYY-MM-DD). Timestamps are stored/serialized in UTC, so cells key by UTC too. */
+function utcDayKey(ts: string): string {
+    return ts.slice(0, 10);
 }
 
 /** Per-day personal activity over the last `dayCount` days, plus streak + total. */
@@ -102,7 +104,7 @@ export function activityPulse(
     const counts = new Map<string, number>();
     const bump = (ts?: string | null) => {
         if (!ts) return;
-        const key = dayKey(ts.replace(" ", "T"));
+        const key = utcDayKey(ts);
         counts.set(key, (counts.get(key) ?? 0) + 1);
     };
     for (const a of activities) bump(a.timestamp);
@@ -110,12 +112,10 @@ export function activityPulse(
     for (const t of tasks) if (t.completed) bump(t.updatedAt);
 
     const days: PulseDay[] = [];
-    const cursor = new Date();
-    cursor.setHours(12, 0, 0, 0);
+    const now = new Date();
+    const todayUtc = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
     for (let i = dayCount - 1; i >= 0; i -= 1) {
-        const d = new Date(cursor);
-        d.setDate(cursor.getDate() - i);
-        const key = dayKey(d);
+        const key = new Date(todayUtc - i * DAY_MS).toISOString().slice(0, 10);
         days.push({ date: key, count: counts.get(key) ?? 0 });
     }
 
@@ -136,10 +136,16 @@ export function activityPulse(
 export function greetingKey(timezone: string | undefined): "morning" | "afternoon" | "evening" | "night" {
     let hour = new Date().getHours();
     if (timezone) {
-        const parsed = Number(
-            new Intl.DateTimeFormat("en-US", { hour: "2-digit", hour12: false, timeZone: timezone }).format(new Date()),
-        );
-        if (Number.isFinite(parsed)) hour = parsed % 24;
+        try {
+            const parsed = Number(
+                new Intl.DateTimeFormat("en-US", { hour: "2-digit", hour12: false, timeZone: timezone }).format(
+                    new Date(),
+                ),
+            );
+            if (Number.isFinite(parsed)) hour = parsed % 24;
+        } catch {
+            /* Unrecognized IANA zone (e.g. a legacy DB value) — fall back to the server-local hour. */
+        }
     }
     if (hour < 5) return "night";
     if (hour < 12) return "morning";

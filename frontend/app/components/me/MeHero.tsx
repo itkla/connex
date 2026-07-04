@@ -246,7 +246,7 @@ export default function MeHero({ user, greeting, nodes, distribution, coolingCou
                                 <span
                                     aria-hidden
                                     className={cn(
-                                        "grid place-items-center overflow-hidden rounded-full text-[0.6rem] font-semibold ring-2 ring-background/80 transition-transform duration-200 ease-out group-hover:scale-110",
+                                        "grid place-items-center overflow-hidden rounded-full text-[0.6rem] font-semibold ring-2 ring-background/80 transition-transform duration-200 ease-out [text-shadow:0_1px_1.5px_rgba(0,0,0,0.28)] group-hover:scale-110",
                                         warmthDotClass(n.band),
                                         NODE_TEXT[n.band],
                                         n.trend === "cooling" && "outline outline-2 outline-offset-1 outline-warmth-cool/60",
@@ -259,7 +259,10 @@ export default function MeHero({ user, greeting, nodes, distribution, coolingCou
                                         initialsOf(n.name)
                                     )}
                                 </span>
-                                <span className="pointer-events-none absolute bottom-[calc(100%+6px)] left-1/2 z-30 w-max max-w-[12rem] -translate-x-1/2 scale-95 rounded-lg border border-border bg-popover px-2.5 py-1.5 text-left opacity-0 shadow-lg transition-all duration-150 ease-out group-hover:scale-100 group-hover:opacity-100 group-focus-within:scale-100 group-focus-within:opacity-100">
+                                <span
+                                    aria-hidden
+                                    className="pointer-events-none absolute bottom-[calc(100%+6px)] left-1/2 z-30 w-max max-w-[12rem] -translate-x-1/2 scale-95 rounded-lg border border-border bg-popover px-2.5 py-1.5 text-left opacity-0 shadow-lg transition-all duration-150 ease-out group-hover:scale-100 group-hover:opacity-100"
+                                >
                                     <span className="block truncate text-xs font-medium text-popover-foreground">{n.name}</span>
                                     <span className="block truncate text-[0.7rem] text-muted-foreground">
                                         {n.company ? `${t(n.band)} · ${n.company}` : t(n.band)}

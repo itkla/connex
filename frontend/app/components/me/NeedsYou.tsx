@@ -28,9 +28,15 @@ export type RiskItem = {
 };
 
 const RISK_TONE: Record<Exclude<DealRiskLevel, "none">, string> = {
-    high: "bg-risk-high/12 text-risk-high ring-risk-high/25",
-    medium: "bg-risk-medium/12 text-risk-medium ring-risk-medium/30",
-    low: "bg-risk-low/12 text-risk-low ring-risk-low/30",
+    high: "bg-risk-high/12 text-foreground ring-risk-high/40",
+    medium: "bg-risk-medium/12 text-foreground ring-risk-medium/40",
+    low: "bg-risk-low/12 text-foreground ring-risk-low/40",
+};
+
+const RISK_DOT: Record<Exclude<DealRiskLevel, "none">, string> = {
+    high: "bg-risk-high",
+    medium: "bg-risk-medium",
+    low: "bg-risk-low",
 };
 
 function initials(name: string): string {
@@ -107,7 +113,7 @@ export default function NeedsYou({ cooling, risks }: { cooling: CoolingItem[]; r
                                             className={cn(
                                                 "shrink-0 rounded-full px-2 py-0.5 text-xs font-medium tabular-nums ring-1",
                                                 c.temp.daysUntilCold <= 14
-                                                    ? "bg-warmth-cool/12 text-warmth-cool ring-warmth-cool/30"
+                                                    ? "bg-warmth-cool/15 font-semibold text-foreground ring-warmth-cool/40"
                                                     : "bg-muted text-muted-foreground ring-border",
                                             )}
                                         >
@@ -146,10 +152,11 @@ export default function NeedsYou({ cooling, risks }: { cooling: CoolingItem[]; r
                                     {d.level !== "none" && (
                                         <span
                                             className={cn(
-                                                "shrink-0 rounded-full px-2 py-0.5 text-xs font-medium capitalize ring-1",
+                                                "inline-flex shrink-0 items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-medium capitalize ring-1",
                                                 RISK_TONE[d.level],
                                             )}
                                         >
+                                            <span className={cn("size-1.5 rounded-full", RISK_DOT[d.level])} />
                                             {t(`riskLevel_${d.level}`)}
                                         </span>
                                     )}

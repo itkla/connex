@@ -302,16 +302,6 @@
     }
   }
 
-  .me-spin-slow {
-    animation: meSpin 90s linear infinite;
-  }
-
-  @keyframes meSpin {
-    to {
-      transform: rotate(360deg);
-    }
-  }
-
   .ncd-skeleton::after {
     content: "";
     position: absolute;
