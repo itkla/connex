@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { type ReactNode, useCallback, useRef, useState } from 'react';
+import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
 import { ArrowPathIcon, PlusIcon, Squares2X2Icon } from '@heroicons/react/24/outline';
@@ -47,7 +47,8 @@ import { ALL_WIDGET_TYPES, WIDGET_META, defaultWidgets, newWidgetId } from './da
 const PERSIST_DEBOUNCE_MS = 400;
 const EASE_OUT: [number, number, number, number] = [0.23, 1, 0.32, 1];
 
-type WidgetNodes = Partial<Record<DashboardWidgetType, ReactNode>>;
+type WidgetNodes = Record<DashboardWidgetType, ReactNode>;
+type SaveJob = { kind: 'save'; widgets: DashboardWidgetInstance[] } | { kind: 'reset' };
 
 /**
  * The customizable dashboard: renders the user's widgets in a draggable 2-column grid and, in edit
@@ -59,9 +60,11 @@ type WidgetNodes = Partial<Record<DashboardWidgetType, ReactNode>>;
 export default function DashboardGrid({
     initialWidgets,
     nodes,
+    layoutErrored = false,
 }: {
     initialWidgets: DashboardWidgetInstance[];
     nodes: WidgetNodes;
+    layoutErrored?: boolean;
 }) {
     const t = useTranslations('DashboardCustomize');
     const tp = useTranslations('DashboardPage');
@@ -74,37 +77,66 @@ export default function DashboardGrid({
 
     const incomingKey = JSON.stringify(initialWidgets);
     const [syncedKey, setSyncedKey] = useState(incomingKey);
-    if (syncedKey !== incomingKey && activeId == null) {
+    if (syncedKey !== incomingKey && activeId == null && !layoutErrored) {
         setSyncedKey(incomingKey);
         setWidgets(initialWidgets);
     }
 
     const lastSavedRef = useRef<DashboardWidgetInstance[]>(initialWidgets);
+    const desiredRef = useRef<SaveJob | null>(null);
+    const savingRef = useRef(false);
     const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const customizeButtonRef = useRef<HTMLButtonElement>(null);
 
-    const persist = useCallback(
-        (next: DashboardWidgetInstance[]) => {
-            if (saveTimer.current) clearTimeout(saveTimer.current);
-            saveTimer.current = setTimeout(() => {
-                void saveDashboardLayout({ version: 1, widgets: next })
-                    .then(() => {
-                        lastSavedRef.current = next;
-                    })
-                    .catch(() => {
+    const runQueue = useCallback(async () => {
+        if (savingRef.current) return;
+        savingRef.current = true;
+        try {
+            while (desiredRef.current) {
+                const job = desiredRef.current;
+                desiredRef.current = null;
+                try {
+                    if (job.kind === 'reset') {
+                        await resetDashboardLayout();
+                        lastSavedRef.current = defaultWidgets();
+                    } else {
+                        await saveDashboardLayout({ version: 1, widgets: job.widgets });
+                        lastSavedRef.current = job.widgets;
+                    }
+                } catch {
+                    if (!desiredRef.current) {
                         setWidgets(lastSavedRef.current);
                         toastError(t('saveFailed'));
-                    });
-            }, PERSIST_DEBOUNCE_MS);
+                    }
+                }
+            }
+        } finally {
+            savingRef.current = false;
+        }
+    }, [t]);
+
+    const schedule = useCallback(
+        (job: SaveJob) => {
+            desiredRef.current = job;
+            if (saveTimer.current) clearTimeout(saveTimer.current);
+            saveTimer.current = setTimeout(() => void runQueue(), PERSIST_DEBOUNCE_MS);
         },
-        [t],
+        [runQueue],
     );
 
     const mutate = useCallback(
         (next: DashboardWidgetInstance[]) => {
             setWidgets(next);
-            persist(next);
+            schedule({ kind: 'save', widgets: next });
         },
-        [persist],
+        [schedule],
+    );
+
+    useEffect(
+        () => () => {
+            if (saveTimer.current) clearTimeout(saveTimer.current);
+        },
+        [],
     );
 
     const sensors = useSensors(
@@ -144,16 +176,16 @@ export default function DashboardGrid({
             }),
         );
     };
-    const removeWidget = (id: string) => mutate(widgets.filter((w) => w.id !== id));
+    const removeWidget = (id: string) => {
+        mutate(widgets.filter((w) => w.id !== id));
+        customizeButtonRef.current?.focus();
+    };
     const addWidget = (type: DashboardWidgetType) =>
         mutate([...widgets, { id: newWidgetId(type), type, span: WIDGET_META[type].defaultSpan }]);
 
     const resetLayout = () => {
-        const next = defaultWidgets();
-        setWidgets(next);
-        lastSavedRef.current = next;
-        if (saveTimer.current) clearTimeout(saveTimer.current);
-        void resetDashboardLayout().catch(() => toastError(t('saveFailed')));
+        setWidgets(defaultWidgets());
+        schedule({ kind: 'reset' });
     };
 
     const presentTypes = new Set(widgets.map((w) => w.type));
@@ -210,6 +242,7 @@ export default function DashboardGrid({
                     )}
                 </AnimatePresence>
                 <Button
+                    ref={customizeButtonRef}
                     variant={editMode ? 'default' : 'outline'}
                     size="sm"
                     onClick={() => setEditMode((v) => !v)}
@@ -361,7 +394,7 @@ function SortableWidget({
             type="button"
             ref={setActivatorNodeRef}
             aria-label={dragHandleLabel}
-            className="cursor-grab touch-none rounded-md p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring active:cursor-grabbing"
+            className="cursor-grab touch-none rounded-md p-1 text-muted-foreground transition-colors motion-reduce:transition-none hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring active:cursor-grabbing"
             {...attributes}
             {...listeners}
         >

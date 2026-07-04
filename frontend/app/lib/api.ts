@@ -1651,12 +1651,12 @@ export function getDashboardLayout(init: RequestInit = {}) {
  */
 export async function getDashboardLayoutFromCookie(
     cookie: string | null,
-): Promise<Types.DashboardLayoutResponse | null> {
-    if (!cookie) return null;
+): Promise<{ response: Types.DashboardLayoutResponse | null; errored: boolean }> {
+    if (!cookie) return { response: null, errored: false };
     try {
-        return await getDashboardLayout({ headers: { cookie }, cache: "no-store" });
+        return { response: await getDashboardLayout({ headers: { cookie }, cache: "no-store" }), errored: false };
     } catch {
-        return null;
+        return { response: null, errored: true };
     }
 }
 

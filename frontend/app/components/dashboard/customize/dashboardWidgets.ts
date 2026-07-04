@@ -121,9 +121,12 @@ export function normalizeLayout(raw: unknown): DashboardWidgetInstance[] {
         const type = (entry as { type?: unknown } | null)?.type;
         if (!isKnownType(type)) continue;
         const rawId = (entry as { id?: unknown }).id;
-        const id = typeof rawId === 'string' && rawId.length > 0 && !seen.has(rawId)
-            ? rawId
-            : `${type}-${result.length}`;
+        let id = typeof rawId === 'string' && rawId.length > 0 ? rawId : `${type}-${result.length}`;
+        let suffix = 0;
+        while (seen.has(id)) {
+            id = `${type}-${result.length}-${suffix}`;
+            suffix += 1;
+        }
         seen.add(id);
         result.push({ id, type, span: normalizeSpan(type, (entry as { span?: unknown }).span) });
     }

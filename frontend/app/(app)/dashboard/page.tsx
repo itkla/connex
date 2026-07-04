@@ -120,7 +120,7 @@ export default async function Dashboard() {
         return ts > now && ts - now <= 7 * DAY;
     }).length;
 
-    const widgetNodes: Partial<Record<DashboardWidgetType, ReactNode>> = {
+    const widgetNodes: Record<DashboardWidgetType, ReactNode> = {
         overview: (
             <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
                 <OverviewCard index={0} label={t('companies')} value={companies.length} icon={BuildingOffice2Icon} href="/records/companies" description={t('companiesDescription')} />
@@ -143,7 +143,7 @@ export default async function Dashboard() {
         ),
     };
 
-    const initialWidgets = normalizeLayout(layoutResponse?.layout);
+    const initialWidgets = normalizeLayout(layoutResponse.response?.layout);
 
     return (
         <div className="min-h-full bg-background px-2 pt-8 pb-12">
@@ -158,7 +158,11 @@ export default async function Dashboard() {
                     />
                 </Rise>
                 <Rise delay={0.18}>
-                    <DashboardGrid initialWidgets={initialWidgets} nodes={widgetNodes} />
+                    <DashboardGrid
+                        initialWidgets={initialWidgets}
+                        nodes={widgetNodes}
+                        layoutErrored={layoutResponse.errored}
+                    />
                 </Rise>
             </div>
         </div>

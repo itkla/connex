@@ -66,6 +66,7 @@ export default function WidgetShell({
                                 <button
                                     type="button"
                                     onClick={onToggleWidth}
+                                    aria-pressed={span === 2}
                                     aria-label={widthLabel}
                                     title={widthLabel}
                                     className="rounded-md p-1.5 text-muted-foreground transition-[background-color,color,transform] duration-150 hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring active:translate-y-px motion-reduce:transition-none"
