@@ -14,6 +14,7 @@ import {
     getAttachmentFacets,
     getAttachmentsPage,
     getCompaniesFromCookie,
+    getCompanyTemperaturesFromCookie,
     getContactsFromCookie,
     getContactTemperaturesFromCookie,
     getCurrentUserFromCookie,
@@ -22,13 +23,15 @@ import {
     getDealsFromCookie,
     getIntroSuggestionsFromCookie,
     getNotesFromCookie,
+    getNotifications,
     getPipelinesFromCookie,
     getRecentMovesFromCookie,
+    getStagesByPipelineId,
     getTasksFromCookie,
     getUsers,
 } from '@/app/lib/api';
-import type { Attachment, AttachmentFacets, DashboardWidgetType, Page, User } from '@/app/lib/types';
-import { startOfLocalDay, timeOf } from '@/app/lib/utils';
+import type { Attachment, AttachmentFacets, DashboardWidgetType, Notification, Page, Stage, User } from '@/app/lib/types';
+import { pickDominantCurrency, startOfLocalDay, timeOf } from '@/app/lib/utils';
 
 import AtRiskDeals, { type AtRiskItem } from '@/app/components/dashboard/AtRiskDeals';
 import CoolingRelationships, { type CoolingItem } from '@/app/components/dashboard/CoolingRelationships';
@@ -43,6 +46,22 @@ import TaskSummary from '@/app/components/dashboard/TaskSummary';
 import Timeline from '@/app/components/me/Timeline';
 import DashboardGrid from '@/app/components/dashboard/customize/DashboardGrid';
 import { normalizeLayout } from '@/app/components/dashboard/customize/dashboardWidgets';
+import CompanyWarmth, { type CompanyWarmthItem } from '@/app/components/dashboard/CompanyWarmth';
+import WarmthDistribution from '@/app/components/dashboard/WarmthDistribution';
+import ClosingSoonDeals, { type ClosingSoonItem } from '@/app/components/dashboard/ClosingSoonDeals';
+import NotificationsCard from '@/app/components/dashboard/NotificationsCard';
+import AnalyticsKpisWidget from '@/app/components/dashboard/AnalyticsKpisWidget';
+import QuickCreate from '@/app/components/dashboard/QuickCreate';
+import NoteList from '@/app/components/me/NoteList';
+import RevenueTrend from '@/app/components/overview/analytics/RevenueTrend';
+import WinRateDonut from '@/app/components/overview/analytics/WinRateDonut';
+import PipelineValue from '@/app/components/overview/analytics/PipelineValue';
+import StageFunnel from '@/app/components/overview/analytics/StageFunnel';
+import ActivityVolume from '@/app/components/overview/analytics/ActivityVolume';
+import TeamLeaderboard from '@/app/components/overview/analytics/TeamLeaderboard';
+import type { RangeKey } from '@/app/components/overview/analytics/metrics';
+
+const DASHBOARD_RANGE: RangeKey = '90d';
 
 const DAY = 1000 * 60 * 60 * 24;
 
@@ -58,7 +77,7 @@ export default async function Dashboard() {
 
     const init = { headers: { cookie: cookie ?? '' } } as const;
     const emptyFacets: AttachmentFacets = { sources: [], kinds: [], tags: [], orphaned: 0, total: 0, totalSize: 0 };
-    const [companies, contacts, deals, pipelines, tasks, activities, notes, users, recentFiles, fileFacets, contactTemps, recentMoves, introSuggestions, dealRisks, layoutResponse] =
+    const [companies, contacts, deals, pipelines, tasks, activities, notes, users, recentFiles, fileFacets, contactTemps, recentMoves, introSuggestions, dealRisks, layoutResponse, companyTemps, notifications] =
         await Promise.all([
             getCompaniesFromCookie(cookie),
             getContactsFromCookie(cookie),
@@ -77,7 +96,15 @@ export default async function Dashboard() {
             getIntroSuggestionsFromCookie(cookie, 4),
             getDealRisksFromCookie(cookie),
             getDashboardLayoutFromCookie(cookie),
+            getCompanyTemperaturesFromCookie(cookie),
+            getNotifications({ state: 'unread', page: 1, size: 6 }, init).catch(
+                () => ({ items: [], total: 0 }) as Page<Notification>,
+            ),
         ]);
+
+    const stages = (
+        await Promise.all(pipelines.map((pipeline) => getStagesByPipelineId(pipeline.id, init).catch(() => [] as Stage[])))
+    ).flat();
 
     const companyById = new Map(companies.map((company) => [company.id, company]));
     const dealById = new Map(deals.map((deal) => [deal.id, deal]));
@@ -120,6 +147,30 @@ export default async function Dashboard() {
         return ts > now && ts - now <= 7 * DAY;
     }).length;
 
+    const currency = pickDominantCurrency(deals);
+    const currencyDeals = deals.filter((deal) => (deal.currency ?? 'USD') === currency);
+
+    const tempByCompanyId = new Map(companyTemps.map((temp) => [temp.id, temp]));
+    const companyWarmthItems: CompanyWarmthItem[] = companies
+        .map((company) => ({ company, temp: tempByCompanyId.get(company.id) }))
+        .filter((item): item is CompanyWarmthItem => item.temp != null && item.temp.trend === 'cooling')
+        .sort((a, b) => (b.temp.daysSinceTouch ?? 0) - (a.temp.daysSinceTouch ?? 0))
+        .slice(0, 6);
+
+    const closingSoonItems: ClosingSoonItem[] = deals
+        .filter((deal) => {
+            if (deal.closedAt) return false;
+            const close = timeOf(deal.expectedCloseDate);
+            return close >= todayStart && close - todayStart <= 7 * DAY;
+        })
+        .sort((a, b) => timeOf(a.expectedCloseDate) - timeOf(b.expectedCloseDate))
+        .slice(0, 6)
+        .map((deal) => ({ deal, company: deal.company != null ? companyById.get(deal.company) : undefined }));
+
+    const chartCard = (child: ReactNode) => (
+        <div className="h-full rounded-2xl border border-border bg-card p-6">{child}</div>
+    );
+
     const widgetNodes: Record<DashboardWidgetType, ReactNode> = {
         overview: (
             <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
@@ -140,6 +191,33 @@ export default async function Dashboard() {
             <div className="overflow-hidden rounded-2xl border border-border bg-card">
                 <Timeline tasks={tasks} activities={activities} notes={notes} users={users} persons={contacts} deals={deals} currentUserId={user.id} limit={8} />
             </div>
+        ),
+        companyWarmth: <CompanyWarmth items={companyWarmthItems} />,
+        warmthDistribution: <WarmthDistribution temps={contactTemps} />,
+        closingSoon: <ClosingSoonDeals items={closingSoonItems} />,
+        recentNotes: (
+            <div className="overflow-hidden rounded-2xl border border-border bg-card">
+                <NoteList notes={notes} />
+            </div>
+        ),
+        notifications: <NotificationsCard items={notifications.items} />,
+        quickActions: (
+            <div className="flex h-full items-center justify-center rounded-2xl border border-border bg-card p-6">
+                <QuickCreate currentUserId={user.id} />
+            </div>
+        ),
+        analyticsKpis: <AnalyticsKpisWidget deals={currencyDeals} currency={currency} range={DASHBOARD_RANGE} />,
+        revenueTrend: chartCard(<RevenueTrend deals={currencyDeals} currency={currency} range={DASHBOARD_RANGE} />),
+        winRate: chartCard(<WinRateDonut deals={currencyDeals} range={DASHBOARD_RANGE} currency={currency} />),
+        pipelineValue: chartCard(
+            <PipelineValue deals={currencyDeals} pipelines={pipelines} range={DASHBOARD_RANGE} currency={currency} />,
+        ),
+        stageFunnel: chartCard(
+            <StageFunnel deals={currencyDeals} pipelines={pipelines} stages={stages} currency={currency} />,
+        ),
+        activityVolume: chartCard(<ActivityVolume activities={activities} range={DASHBOARD_RANGE} />),
+        teamLeaderboard: chartCard(
+            <TeamLeaderboard users={users} activities={activities} tasks={tasks} notes={notes} range={DASHBOARD_RANGE} />,
         ),
     };
 

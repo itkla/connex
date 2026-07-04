@@ -19,7 +19,29 @@
     "recentlyMoved": "Recently moved",
     "files": "Files",
     "storageUsed": "{count, plural, =1 {# file} other {# files}} · {size}",
-    "noFiles": "No files yet"
+    "noFiles": "No files yet",
+    "companyWarmth": "Company warmth",
+    "warmthDistribution": "Warmth distribution",
+    "closingSoon": "Closing soon",
+    "recentNotes": "Recent notes",
+    "notifications": "Notifications",
+    "quickActions": "Quick actions",
+    "analyticsKpis": "Key metrics",
+    "revenueTrend": "Revenue trend",
+    "winRate": "Win rate",
+    "pipelineValue": "Pipeline value",
+    "stageFunnel": "Stage funnel",
+    "activityVolume": "Activity volume",
+    "teamLeaderboard": "Team leaderboard"
+  },
+  "CompanyWarmth": {
+    "empty": "Every company relationship is warm."
+  },
+  "WarmthDistribution": {
+    "empty": "No warmth data yet"
+  },
+  "ClosingSoonDeals": {
+    "empty": "No deals closing this week."
   },
   "AtRiskDeals": {
     "empty": "No deals need attention right now."

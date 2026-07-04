@@ -66,6 +66,37 @@ export const WIDGET_META: Record<DashboardWidgetType, WidgetMeta> = {
         actionHref: '/activity/all',
         actionLabelKey: 'viewAll',
     },
+    companyWarmth: {
+        titleKey: 'companyWarmth',
+        defaultSpan: 1,
+        allowedSpans: [1, 2],
+        actionHref: '/records/companies',
+        actionLabelKey: 'viewAll',
+    },
+    warmthDistribution: { titleKey: 'warmthDistribution', defaultSpan: 1, allowedSpans: [1, 2] },
+    closingSoon: {
+        titleKey: 'closingSoon',
+        defaultSpan: 1,
+        allowedSpans: [1, 2],
+        actionHref: '/records/deals',
+        actionLabelKey: 'viewDeals',
+    },
+    recentNotes: {
+        titleKey: 'recentNotes',
+        defaultSpan: 1,
+        allowedSpans: [1, 2],
+        actionHref: '/activity/all',
+        actionLabelKey: 'viewAll',
+    },
+    notifications: { titleKey: 'notifications', defaultSpan: 1, allowedSpans: [1, 2] },
+    quickActions: { titleKey: 'quickActions', defaultSpan: 1, allowedSpans: [1, 2] },
+    analyticsKpis: { titleKey: 'analyticsKpis', defaultSpan: 2, allowedSpans: [2] },
+    revenueTrend: { titleKey: 'revenueTrend', defaultSpan: 1, allowedSpans: [1, 2] },
+    winRate: { titleKey: 'winRate', defaultSpan: 1, allowedSpans: [1, 2] },
+    pipelineValue: { titleKey: 'pipelineValue', defaultSpan: 1, allowedSpans: [1, 2] },
+    stageFunnel: { titleKey: 'stageFunnel', defaultSpan: 1, allowedSpans: [1, 2] },
+    activityVolume: { titleKey: 'activityVolume', defaultSpan: 1, allowedSpans: [1, 2] },
+    teamLeaderboard: { titleKey: 'teamLeaderboard', defaultSpan: 1, allowedSpans: [1, 2] },
 };
 
 /** Widget types in catalog order. */

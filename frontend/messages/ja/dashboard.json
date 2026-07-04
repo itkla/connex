@@ -19,7 +19,29 @@
     "recentlyMoved": "最近の転職",
     "files": "ファイル",
     "storageUsed": "{count}件のファイル · {size}",
-    "noFiles": "ファイルはまだありません"
+    "noFiles": "ファイルはまだありません",
+    "companyWarmth": "取引先の温度感",
+    "warmthDistribution": "温度感の分布",
+    "closingSoon": "まもなくクローズ",
+    "recentNotes": "最近のノート",
+    "notifications": "通知",
+    "quickActions": "クイックアクション",
+    "analyticsKpis": "主要指標",
+    "revenueTrend": "売上トレンド",
+    "winRate": "受注率",
+    "pipelineValue": "パイプライン価値",
+    "stageFunnel": "ステージファネル",
+    "activityVolume": "活動量",
+    "teamLeaderboard": "チームランキング"
+  },
+  "CompanyWarmth": {
+    "empty": "すべての取引先との関係が良好です。"
+  },
+  "WarmthDistribution": {
+    "empty": "温度データがまだありません"
+  },
+  "ClosingSoonDeals": {
+    "empty": "今週クローズ予定の取引はありません。"
   },
   "AtRiskDeals": {
     "empty": "現在、対応が必要な商談はありません。"

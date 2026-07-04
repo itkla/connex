@@ -827,7 +827,20 @@ export type DashboardWidgetType =
     | "recentMoves"
     | "introOpportunities"
     | "recentFiles"
-    | "recentActivity";
+    | "recentActivity"
+    | "companyWarmth"
+    | "warmthDistribution"
+    | "closingSoon"
+    | "recentNotes"
+    | "notifications"
+    | "quickActions"
+    | "analyticsKpis"
+    | "revenueTrend"
+    | "winRate"
+    | "pipelineValue"
+    | "stageFunnel"
+    | "activityVolume"
+    | "teamLeaderboard";
 
 export type DashboardWidgetSpan = 1 | 2;
 
