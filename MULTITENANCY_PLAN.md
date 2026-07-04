@@ -187,7 +187,15 @@ first policy landed is the email-domain ceiling — **`org_allowed_domain`** (V4
   side effects; `org_allowed_domain` is a plain invite ceiling every org can use whether or not SSO is on.
   Managed by org admin/owner via `/api/orgs/{orgId}/allowed-domains`.
 - **Verified-email pairing** on the self-serve link path: when the org (or workspace) restricts domains and
-  registration verification is enabled, the joiner's email must be verified.
+  registration verification is enabled, the joiner's email must be verified. The domain ceiling is only as
+  strong as email ownership, so an instance that relies on it should enable registration verification —
+  the token/admin paths (accept, create, add-existing) prove the address by possession or admin action, but
+  the unbound link channel does not.
+- **Re-checked at activation:** `approveMembership` re-applies the org ceiling before flipping a pending
+  member active, so a row that predates a later-tightened policy (or the feature deploy) cannot slip in.
+- **By design:** exact-domain match (an apex domain does not cover subdomains — fail-closed, matching the
+  per-workspace list); and SSO JIT provisioning is constrained by the org's verified `sso_domain` (V39), a
+  separate and stronger org↔domain binding, not by `org_allowed_domain`.
 
 ---
 
