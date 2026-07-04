@@ -2,12 +2,12 @@
 
 import { useMemo } from "react";
 import Link from "next/link";
-import { useLocale, useTranslations } from "next-intl";
+import { useTranslations } from "next-intl";
 import { ArrowUpRightIcon } from "@heroicons/react/24/outline";
 
 import type { TemperatureBand, TemperatureTrend, User } from "@/app/lib/types";
 import { cn } from "@/lib/utils";
-import { formatRelativeTime, warmthDotClass } from "@/app/lib/utils";
+import { warmthDotClass } from "@/app/lib/utils";
 
 /** A single relationship rendered as a node in the warmth constellation. */
 export type ConstellationNode = {
@@ -18,7 +18,6 @@ export type ConstellationNode = {
     band: TemperatureBand;
     score: number;
     daysSinceTouch?: number | null;
-    lastTouchAt?: string | null;
     trend: TemperatureTrend;
 };
 
@@ -100,7 +99,6 @@ function initialsOf(name: string): string {
 
 export default function MeHero({ user, greeting, nodes, distribution, coolingCount }: Props) {
     const t = useTranslations("MePage");
-    const locale = useLocale();
     const placed = useMemo(() => placeNodes(nodes), [nodes]);
 
     const total = BANDS.reduce((sum, b) => sum + distribution[b], 0);
@@ -267,8 +265,8 @@ export default function MeHero({ user, greeting, nodes, distribution, coolingCou
                                         {n.company ? `${t(n.band)} · ${n.company}` : t(n.band)}
                                     </span>
                                     <span className="block text-[0.7rem] text-muted-foreground">
-                                        {n.lastTouchAt
-                                            ? t("lastTouch", { when: formatRelativeTime(n.lastTouchAt, locale) })
+                                        {n.daysSinceTouch != null
+                                            ? t("touchDaysAgo", { count: n.daysSinceTouch })
                                             : t("neverTouched")}
                                     </span>
                                 </span>

@@ -42,7 +42,6 @@ export function constellationNodes(
                 band: temp.band,
                 score: temp.score,
                 daysSinceTouch: temp.daysSinceTouch ?? null,
-                lastTouchAt: temp.lastTouchAt ?? null,
                 trend: temp.trend,
             };
         })

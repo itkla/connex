@@ -13,7 +13,6 @@
     "signal_cool_steady": "Your network is running cool. A few well-timed touches would warm it up.",
     "exploreNetwork": "Explore your network",
     "neverTouched": "No interactions yet",
-    "lastTouch": "Last touch {when}",
     "hot": "Hot",
     "warm": "Warm",
     "cool": "Cool",
@@ -49,7 +48,8 @@
     "recentWork": "Recent work",
     "memberSince": "Member since {date}",
     "lastActive": "Last active {date}",
-    "accountSettings": "Account settings"
+    "accountSettings": "Account settings",
+    "touchDaysAgo": "{count, plural, =0 {touched today} one {last touch # day ago} other {last touch # days ago}}"
   },
   "MeActivityList": {
     "empty": "No activities logged yet."

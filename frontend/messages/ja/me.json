@@ -13,7 +13,6 @@
     "signal_cool_steady": "あなたの人脈はやや冷めています。タイミングの良い連絡で温め直しましょう。",
     "exploreNetwork": "ネットワークを見る",
     "neverTouched": "やり取りはまだありません",
-    "lastTouch": "最終接触 {when}",
     "hot": "ホット",
     "warm": "ウォーム",
     "cool": "クール",
@@ -49,7 +48,8 @@
     "recentWork": "最近の活動",
     "memberSince": "登録日 {date}",
     "lastActive": "最終ログイン {date}",
-    "accountSettings": "アカウント設定"
+    "accountSettings": "アカウント設定",
+    "touchDaysAgo": "{count, plural, =0 {本日接触} other {# 日前に接触}}"
   },
   "MeActivityList": {
     "empty": "アクティビティはまだ記録されていません。"
