@@ -40,10 +40,22 @@ class ShareServiceTest extends AbstractServiceTest {
         return company;
     }
 
+    /**
+     * Creates a second workspace inside {@code first}'s organization the way a real
+     * owner does: from an administrative tenant context (the placement rule only
+     * reuses the active org for owner/admin creators).
+     */
+    private WorkspaceMembershipDto createSiblingWorkspace(WorkspaceMembershipDto first, String name) {
+        tenantContext.set(first.getId(), workspaceService.getOrgId(first.getId()), currentUser.getId(), "owner");
+        WorkspaceMembershipDto sibling = workspaceService.createWorkspace(name, currentUser.getId());
+        tenantContext.clear();
+        return sibling;
+    }
+
     @Test
     void sharingMakesACompanyVisibleToTheGrantee() {
         WorkspaceMembershipDto a = workspaceService.createWorkspace("Owner WS", currentUser.getId());
-        WorkspaceMembershipDto b = workspaceService.createWorkspace("Grantee WS", currentUser.getId());
+        WorkspaceMembershipDto b = createSiblingWorkspace(a, "Grantee WS");
         Company company = companyIn(a.getId());
 
         assertNull(companyMapper.getCompanyById(b.getId(), company.getId()));
@@ -62,7 +74,7 @@ class ShareServiceTest extends AbstractServiceTest {
     @Test
     void unshareRemovesVisibility() {
         WorkspaceMembershipDto a = workspaceService.createWorkspace("Owner2 WS", currentUser.getId());
-        WorkspaceMembershipDto b = workspaceService.createWorkspace("Grantee2 WS", currentUser.getId());
+        WorkspaceMembershipDto b = createSiblingWorkspace(a, "Grantee2 WS");
         Company company = companyIn(a.getId());
 
         tenantContext.set(a.getId(), workspaceService.getOrgId(a.getId()), currentUser.getId(), "owner");

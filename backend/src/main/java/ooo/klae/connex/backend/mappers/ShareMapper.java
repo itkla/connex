@@ -11,8 +11,10 @@ import ooo.klae.connex.backend.dto.ShareDto;
  * Every statement anchors on the owning workspace in SQL, and share grants
  * additionally enforce the same-organization ceiling structurally: a grant whose
  * record is not owned by {@code workspaceId} or whose target workspace belongs to
- * a different organization inserts nothing. ShareService remains the layer that
- * turns those refusals into errors and checks target membership.
+ * a different organization inserts nothing and returns 0 (under the driver's
+ * found-rows semantics an unchanged re-grant still returns 1, so 0 is
+ * unambiguous refusal). ShareService turns refusals into errors and checks
+ * target membership.
  */
 public interface ShareMapper {
     boolean ownsCompany(@Param("workspaceId") int workspaceId, @Param("id") int id);

@@ -44,11 +44,19 @@ class WorkspaceServiceTest extends AbstractServiceTest {
         assertEquals(workspace.getId(), workspaceService.getCurrentWorkspaceId());
     }
 
+    /** Placement branches are covered exhaustively in {@link WorkspaceOrgPlacementTest}. */
     @Test
-    void createWorkspace_reusesTheOwnersOrganization() {
+    void createWorkspace_reusesTheActiveOrgOnlyUnderAnAdministrativeContext() {
         WorkspaceMembershipDto first = workspaceService.createWorkspace("Org A", currentUser.getId());
-        WorkspaceMembershipDto second = workspaceService.createWorkspace("Org B", currentUser.getId());
-        assertEquals(workspaceService.getOrgId(first.getId()), workspaceService.getOrgId(second.getId()));
+        tenantContext.set(first.getId(), workspaceService.getOrgId(first.getId()), currentUser.getId(), "owner");
+        try {
+            WorkspaceMembershipDto second = workspaceService.createWorkspace("Org B", currentUser.getId());
+            assertEquals(workspaceService.getOrgId(first.getId()), workspaceService.getOrgId(second.getId()));
+        } finally {
+            tenantContext.clear();
+        }
+        WorkspaceMembershipDto third = workspaceService.createWorkspace("Org C", currentUser.getId());
+        assertNotEquals(workspaceService.getOrgId(first.getId()), workspaceService.getOrgId(third.getId()));
     }
 
     @Test

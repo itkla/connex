@@ -17,9 +17,10 @@
        invariants (defense-in-depth below ShareService): the record must be owned by
        the acting workspace, and the target workspace must be in the SAME organization
        (cross-org sharing is structurally forbidden, MULTITENANCY_PLAN §0.5). A grant
-       violating either inserts nothing (0 affected rows) rather than leaking; an
-       idempotent re-grant with unchanged values also reports 0, so callers must not
-       treat 0 as an error. -->
+       violating either inserts nothing and returns 0. Under Connector/J's default
+       found-rows semantics an idempotent unchanged re-grant still returns 1, so a
+       zero return unambiguously means the ceiling refused (ShareMapperTest locks
+       this) and ShareService treats it as forbidden. -->
   <insert id="shareCompany">
     INSERT INTO company_share (company_id, workspace_id, granted_by, can_edit)
     SELECT c.id, tw.id, #{grantedBy}, #{canEdit}

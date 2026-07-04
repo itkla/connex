@@ -55,10 +55,13 @@ public class ShareService {
         if (workspaceService.getOrgId(targetWorkspaceId) != workspaceService.getOrgId(workspaceId)) {
             throw new ForbiddenException("A record cannot be shared across organizations");
         }
-        switch (type) {
+        int granted = switch (type) {
             case COMPANY -> shareMapper.shareCompany(entityId, workspaceId, targetWorkspaceId, actorId, canEdit);
             case PERSON -> shareMapper.sharePerson(entityId, workspaceId, targetWorkspaceId, actorId, canEdit);
             case PIPELINE -> shareMapper.sharePipeline(entityId, workspaceId, targetWorkspaceId, actorId, canEdit);
+        };
+        if (granted == 0) {
+            throw new ForbiddenException("A record can only be shared by its owning workspace within its organization");
         }
         auditService.record("workspace.share", type.name().toLowerCase(), entityId, null,
                 "Shared with workspace " + targetWorkspaceId, null);
