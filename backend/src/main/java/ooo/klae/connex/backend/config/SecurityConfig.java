@@ -25,6 +25,7 @@ import org.springframework.session.security.SpringSessionBackedSessionRegistry;
 import jakarta.servlet.http.HttpServletResponse;
 
 import ooo.klae.connex.backend.sso.DbClientRegistrationRepository;
+import ooo.klae.connex.backend.sso.DbRelyingPartyRegistrationRepository;
 import ooo.klae.connex.backend.sso.SsoAuthenticationSuccessHandler;
 
 /**
@@ -32,7 +33,16 @@ import ooo.klae.connex.backend.sso.SsoAuthenticationSuccessHandler;
  * Defines the security filter chain: endpoint access rules,
  * CSRF policy, and session management.
  * Depends on {@code UserService} (as a {@code UserDetailsService}) and {@code AuthService}.
- * 
+ *
+ * <p>SAML note: the assertion-consumer URL ({@code /api/login/saml2/sso/{registrationId}}) is
+ * exempt from CSRF because it is an unauthenticated cross-site POST from the IdP carrying no CSRF
+ * token — the SAML signature and {@code InResponseTo} are its defense. That same cross-site
+ * top-level POST also means the session cookie must be {@code SameSite=None} for the stashed
+ * AuthnRequest to be matched; the global cookie stays {@code SameSite=Lax} (for OIDC/password/dev
+ * over plain HTTP), so a SAML-enabled deployment must additionally set
+ * {@code server.servlet.session.cookie.same-site: none} with {@code CONNEX_SESSION_COOKIE_SECURE=true}
+ * and end-to-end HTTPS. This is a per-environment deploy setting, not a global code change.
+ *
  * Some code inspired by Springboot development tutorial videos
  */
 
@@ -69,6 +79,7 @@ public class SecurityConfig {
     SecurityFilterChain chain(HttpSecurity http,
             SessionRegistry sessionRegistry,
             DbClientRegistrationRepository dbClientRegistrationRepository,
+            DbRelyingPartyRegistrationRepository dbRelyingPartyRegistrationRepository,
             SsoAuthenticationSuccessHandler ssoAuthenticationSuccessHandler,
             @Value("${connex.security.csrf-enabled:true}") boolean csrfEnabled) throws Exception {
         if (csrfEnabled) {
@@ -81,7 +92,8 @@ public class SecurityConfig {
                     "/api/auth/login", "/api/auth/register", "/api/auth/logout",
                     "/api/auth/forgot-password", "/api/auth/reset-password",
                     "/api/auth/sso/link/confirm",
-                    "/api/auth/webauthn/authenticate/**"));
+                    "/api/auth/webauthn/authenticate/**",
+                    "/api/login/saml2/sso/**"));
         } else {
             http.csrf(AbstractHttpConfigurer::disable);
         }
@@ -92,12 +104,20 @@ public class SecurityConfig {
                 .requestMatchers("/api/auth/**").permitAll()
                 .requestMatchers("/api/oauth2/authorization/**").permitAll()
                 .requestMatchers("/api/login/oauth2/code/**").permitAll()
+                .requestMatchers("/api/login/saml2/**").permitAll()
+                .requestMatchers("/saml2/**").permitAll()
                 .anyRequest().authenticated()
             )
             .oauth2Login(o -> o
                 .clientRegistrationRepository(dbClientRegistrationRepository)
                 .authorizationEndpoint(a -> a.baseUri("/api/oauth2/authorization"))
                 .redirectionEndpoint(r -> r.baseUri("/api/login/oauth2/code/*"))
+                .successHandler(ssoAuthenticationSuccessHandler)
+                .failureHandler((rq, rs, ex) -> rs.sendRedirect("/auth/login?sso_error=1"))
+            )
+            .saml2Login(s -> s
+                .relyingPartyRegistrationRepository(dbRelyingPartyRegistrationRepository)
+                .loginProcessingUrl("/api/login/saml2/sso/{registrationId}")
                 .successHandler(ssoAuthenticationSuccessHandler)
                 .failureHandler((rq, rs, ex) -> rs.sendRedirect("/auth/login?sso_error=1"))
             )

@@ -15,6 +15,8 @@ import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.mappers.SsoConnectionMapper;
 import ooo.klae.connex.backend.mappers.SsoDomainMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
+import ooo.klae.connex.backend.sso.DbClientRegistrationRepository;
+import ooo.klae.connex.backend.sso.DbRelyingPartyRegistrationRepository;
 import ooo.klae.connex.backend.sso.SsoSecretCipher;
 import ooo.klae.connex.backend.tenant.Permission;
 
@@ -39,6 +41,8 @@ public class SsoConnectionService {
     private final WorkspaceService workspaceService;
     private final SsoSecretCipher ssoSecretCipher;
     private final AuditService auditService;
+    private final DbClientRegistrationRepository dbClientRegistrationRepository;
+    private final DbRelyingPartyRegistrationRepository dbRelyingPartyRegistrationRepository;
 
     /**
      * Returns the SSO connection for the acting workspace's organization, with the
@@ -97,6 +101,8 @@ public class SsoConnectionService {
 
         ssoConnectionMapper.upsert(connection);
         replaceDomains(orgId, request.getDomains());
+        dbClientRegistrationRepository.evict(orgId);
+        dbRelyingPartyRegistrationRepository.evict(orgId);
         auditService.record("org.sso_config.save", "organization", orgId, protocol,
                 "Updated SSO configuration", null);
         return getForWorkspace(workspaceId, actorId);
