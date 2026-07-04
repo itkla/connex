@@ -26,6 +26,7 @@ import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.notifications.NotificationDelivery;
 import ooo.klae.connex.backend.mappers.OrganizationMapper;
+import ooo.klae.connex.backend.mappers.OrgMemberMapper;
 import ooo.klae.connex.backend.mappers.RoleMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
 import ooo.klae.connex.backend.tenant.Permission;
@@ -42,6 +43,7 @@ import ooo.klae.connex.backend.tenant.TenantContext;
 public class WorkspaceService {
     private final WorkspaceMapper workspaceMapper;
     private final OrganizationMapper organizationMapper;
+    private final OrgMemberMapper orgMemberMapper;
     private final RoleMapper roleMapper;
     private final NotificationDelivery notificationDelivery;
     private final TenantContext tenantContext;
@@ -203,6 +205,7 @@ public class WorkspaceService {
         organization.setName(name.trim());
         organization.setSlug(generateSlug(name));
         organizationMapper.insert(organization);
+        orgMemberMapper.addMember(organization.getId(), ownerUserId, "owner");
         return organization.getId();
     }
 
