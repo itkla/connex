@@ -20,6 +20,7 @@ public interface OrgMemberMapper {
     int removeMember(@Param("orgId") int orgId, @Param("userId") int userId);
     int countOwners(@Param("orgId") int orgId);
     List<Integer> lockOwnerIds(@Param("orgId") int orgId);
+    List<Integer> orgIdsSolelyOwnedBy(@Param("userId") int userId);
     List<OrgMemberDto> getMembers(@Param("orgId") int orgId);
     List<OrgMembershipDto> getMembershipsForUser(@Param("userId") int userId);
 }

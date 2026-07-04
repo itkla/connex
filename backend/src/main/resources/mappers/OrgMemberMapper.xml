@@ -35,6 +35,14 @@
     SELECT user_id FROM org_member WHERE org_id = #{orgId} AND org_role = 'owner' FOR UPDATE
   </select>
 
+  <!-- Organizations where this user is the ONLY owner — deleting the account would leave them
+       ownerless (org_member is ON DELETE CASCADE), bypassing the org last-owner guard. -->
+  <select id="orgIdsSolelyOwnedBy" resultType="int">
+    SELECT om.org_id FROM org_member om
+    WHERE om.user_id = #{userId} AND om.org_role = 'owner'
+      AND (SELECT COUNT(*) FROM org_member o2 WHERE o2.org_id = om.org_id AND o2.org_role = 'owner') = 1
+  </select>
+
   <select id="getMembers" resultType="ooo.klae.connex.backend.dto.OrgMemberDto">
     SELECT u.id, u.username, u.display_name AS displayName, u.email,
            u.profile_picture_url AS profilePictureUrl, om.org_role AS orgRole

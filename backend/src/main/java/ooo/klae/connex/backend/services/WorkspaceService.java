@@ -313,6 +313,17 @@ public class WorkspaceService {
         }
     }
 
+    /**
+     * Refuses when the user is the only active owner of any workspace — deleting the account would
+     * leave that workspace ownerless (workspace_member is {@code ON DELETE CASCADE}, bypassing the
+     * last-owner safeguards on the member operations). They must transfer ownership first.
+     */
+    public void assertNotSoleOwnerOfAnyWorkspace(int userId) {
+        if (!workspaceMapper.workspaceIdsSolelyOwnedBy(userId).isEmpty()) {
+            throw new BadRequestException("Transfer workspace ownership before deleting your account");
+        }
+    }
+
     /** The built-in roles and their fixed permission bundles, shown read-only in the role editor. */
     public List<WorkspaceRole> builtInRoles() {
         return List.of(

@@ -44,6 +44,17 @@ public class OrgMemberService {
         orgMemberMapper.addMember(orgId, userId, OrgRole.OWNER.name().toLowerCase());
     }
 
+    /**
+     * Refuses when the user is the only owner of any organization — deleting the account would
+     * leave that org ownerless (org_member is {@code ON DELETE CASCADE}, bypassing the last-owner
+     * guard on the org-member API). They must transfer ownership first.
+     */
+    public void assertNotSoleOwnerOfAnyOrg(int userId) {
+        if (!orgMemberMapper.orgIdsSolelyOwnedBy(userId).isEmpty()) {
+            throw new BadRequestException("Transfer organization ownership before deleting your account");
+        }
+    }
+
     /** Requires the user to hold org {@code admin} or {@code owner} in the organization. */
     public void requireOrgAdmin(int orgId, int userId) {
         if (OrgRole.of(orgMemberMapper.getRole(orgId, userId)) == null) {
