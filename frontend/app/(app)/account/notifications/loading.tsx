@@ -1,6 +1,6 @@
 import { Skeleton } from "@/components/ui/skeleton";
 
-export default function NotificationsSettingsLoading() {
+export default function AccountNotificationsLoading() {
     return (
         <div className="space-y-3">
             <Skeleton className="h-3 w-32" />

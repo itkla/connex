@@ -102,7 +102,7 @@ function isCancellation(err: unknown): boolean {
 }
 
 export default function SecurityPanel() {
-    const t = useTranslations("WorkspaceSecurity");
+    const t = useTranslations("AccountSecurity");
     const locale = useLocale();
 
     const [passkeys, setPasskeys] = useState<Passkey[]>([]);

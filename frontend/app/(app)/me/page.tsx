@@ -1,7 +1,7 @@
 import { headers } from 'next/headers';
 import { redirect } from 'next/navigation';
 import Link from 'next/link';
-import { ArrowLeftIcon } from '@heroicons/react/24/outline';
+import { ArrowLeftIcon, PencilSquareIcon } from '@heroicons/react/24/outline';
 import { getLocale, getTranslations } from 'next-intl/server';
 
 import {
@@ -17,10 +17,10 @@ import {
 import type { Contact, Deal, User } from '@/app/lib/types';
 import { formatDate, formatDateTime } from '@/app/lib/utils';
 
+import { Button } from '@/components/ui/button';
 import InfoRow from '@/app/components/me/InfoRow';
 import StatCard from '@/app/components/me/StatCard';
 import Timeline from '@/app/components/me/Timeline';
-import EditSelfModal from '@/app/components/me/EditSelfModal';
 import UserAvatar from '@/app/components/records/users/UserAvatar';
 import Attachments from '@/app/components/attachments/Attachments';
 import Rise from '@/app/components/motion/Rise';
@@ -94,7 +94,20 @@ export default async function MePage() {
                         <aside>
                             <SectionHeader
                                 title={t('profile')}
-                                action={<EditSelfModal user={user} />}
+                                action={
+                                    <Button
+                                        asChild
+                                        variant="ghost"
+                                        size="icon-sm"
+                                        title={t('editProfile')}
+                                        className="text-muted-foreground hover:text-foreground"
+                                    >
+                                        <Link href="/account/profile">
+                                            <PencilSquareIcon className="size-5" />
+                                            <span className="sr-only">{t('editProfile')}</span>
+                                        </Link>
+                                    </Button>
+                                }
                             />
                             <dl className="divide-y divide-border overflow-hidden rounded-2xl border border-border bg-card">
                                 <InfoRow

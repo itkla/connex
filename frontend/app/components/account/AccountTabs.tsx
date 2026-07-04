@@ -8,23 +8,20 @@ import { motion, useReducedMotion } from "motion/react";
 import { cn } from "@/lib/utils";
 
 const TABS = [
-    { key: "tabMembers", href: "/settings/members" },
-    { key: "tabRoles", href: "/settings/roles" },
-    { key: "tabRules", href: "/settings/rules" },
-    { key: "tabCustomFields", href: "/settings/custom-fields" },
-    { key: "tabEmail", href: "/settings/email" },
-    { key: "tabSso", href: "/settings/sso" },
+    { key: "tabProfile", href: "/account/profile" },
+    { key: "tabSecurity", href: "/account/security" },
+    { key: "tabNotifications", href: "/account/notifications" },
+    { key: "tabInvites", href: "/account/invites" },
 ] as const;
 
-export default function SettingsTabs({ ssoEnabled = false }: { ssoEnabled?: boolean }) {
+export default function AccountTabs() {
     const pathname = usePathname() ?? "";
-    const t = useTranslations("WorkspaceSettings");
+    const t = useTranslations("Account");
     const reduce = useReducedMotion() ?? false;
-    const tabs = TABS.filter((tab) => tab.key !== "tabSso" || ssoEnabled);
 
     return (
         <nav className="flex gap-1 border-b border-border" aria-label={t("title")}>
-            {tabs.map((tab) => {
+            {TABS.map((tab) => {
                 const active = pathname === tab.href || pathname.startsWith(`${tab.href}/`);
                 return (
                     <Link
@@ -39,7 +36,7 @@ export default function SettingsTabs({ ssoEnabled = false }: { ssoEnabled?: bool
                         {t(tab.key)}
                         {active && (
                             <motion.span
-                                layoutId="settings-tab-underline"
+                                layoutId="account-tab-underline"
                                 aria-hidden
                                 className="absolute inset-x-2 -bottom-px h-0.5 rounded-full bg-brand"
                                 transition={
