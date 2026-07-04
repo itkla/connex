@@ -19,7 +19,29 @@
     "recentlyMoved": "Recently moved",
     "files": "Files",
     "storageUsed": "{count, plural, =1 {# file} other {# files}} · {size}",
-    "noFiles": "No files yet"
+    "noFiles": "No files yet",
+    "companyWarmth": "Company warmth",
+    "warmthDistribution": "Warmth distribution",
+    "closingSoon": "Closing soon",
+    "recentNotes": "Recent notes",
+    "notifications": "Notifications",
+    "quickActions": "Quick actions",
+    "analyticsKpis": "Key metrics",
+    "revenueTrend": "Revenue trend",
+    "winRate": "Win rate",
+    "pipelineValue": "Pipeline value",
+    "stageFunnel": "Stage funnel",
+    "activityVolume": "Activity volume",
+    "teamLeaderboard": "Team leaderboard"
+  },
+  "CompanyWarmth": {
+    "empty": "Every company relationship is warm."
+  },
+  "WarmthDistribution": {
+    "empty": "No warmth data yet"
+  },
+  "ClosingSoonDeals": {
+    "empty": "No deals closing this week."
   },
   "AtRiskDeals": {
     "empty": "No deals need attention right now."
@@ -98,5 +120,27 @@
     "descriptionRequired": "Add a description first.",
     "contentRequired": "Write something first.",
     "failed": "Something went wrong."
+  },
+  "DashboardCustomize": {
+    "customize": "Customize",
+    "done": "Done",
+    "addWidget": "Add widget",
+    "add": "Add",
+    "reset": "Reset",
+    "remove": "Remove {name}",
+    "expand": "Make full width",
+    "collapse": "Make half width",
+    "emptyTitle": "Your dashboard is empty",
+    "emptyBody": "Add widgets to bring it back to life.",
+    "trayTitle": "Add a widget",
+    "trayDescription": "Choose a widget to add to your dashboard.",
+    "trayEmpty": "All widgets are already on your dashboard.",
+    "dragHandle": "Drag to reorder {name}",
+    "saveFailed": "Couldn't save your dashboard layout.",
+    "a11yLifted": "Picked up {name}.",
+    "a11yOver": "{name} is over {target}.",
+    "a11yDropped": "Dropped {name} onto {target}.",
+    "a11yCancelled": "Reordering {name} was cancelled.",
+    "a11yInstructions": "To reorder a widget, press space or enter to pick it up, use the arrow keys to move it, and press space or enter again to drop it."
   }
 }
