@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="ooo.klae.connex.backend.mappers.UserDashboardMapper">
+
+  <sql id="columns">
+    id, workspace_id, user_id, layout_json, created_at, updated_at
+  </sql>
+
+  <select id="getByWorkspaceAndUser" resultType="UserDashboard">
+    SELECT <include refid="columns"/> FROM user_dashboard
+    WHERE workspace_id = #{workspaceId} AND user_id = #{userId}
+  </select>
+
+  <insert id="upsert" useGeneratedKeys="true" keyProperty="id">
+    INSERT INTO user_dashboard (workspace_id, user_id, layout_json)
+    VALUES (#{workspaceId}, #{userId}, #{layoutJson})
+    AS incoming
+    ON DUPLICATE KEY UPDATE layout_json = incoming.layout_json
+  </insert>
+
+  <delete id="deleteByWorkspaceAndUser">
+    DELETE FROM user_dashboard
+    WHERE workspace_id = #{workspaceId} AND user_id = #{userId}
+  </delete>
+</mapper>
