@@ -8,6 +8,7 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.messaging.simp.config.ChannelRegistration;
 import org.springframework.messaging.simp.config.MessageBrokerRegistry;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler;
+import org.springframework.security.messaging.web.socket.server.CsrfTokenHandshakeInterceptor;
 import org.springframework.web.socket.CloseStatus;
 import org.springframework.web.socket.WebSocketSession;
 import org.springframework.web.socket.config.annotation.EnableWebSocketMessageBroker;
@@ -37,6 +38,12 @@ import ooo.klae.connex.backend.notifications.WebSocketSessionRegistry;
  * ends, and {@link WebSocketSessionExpiryInterceptor} enforces lazy
  * ({@code expireNow()}) session kills per inbound frame. {@link WebSocketConnectionLimiter}
  * caps concurrent sockets per principal so one account cannot flood the shared broker.
+ *
+ * <p>The handshake also seeds the expected {@code CsrfToken} into the WebSocket
+ * session attributes via {@code CsrfTokenHandshakeInterceptor}, which the secured
+ * inbound channel's {@code CsrfChannelInterceptor} reads to validate the STOMP
+ * {@code CONNECT} frame. Without it every {@code CONNECT} fails
+ * {@code MissingCsrfTokenException} and no client can subscribe — do not remove it.
  */
 @Configuration
 @EnableWebSocketMessageBroker
@@ -58,7 +65,9 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
     public void registerStompEndpoints(StompEndpointRegistry registry) {
         registry.addEndpoint("/api/ws")
                 .setAllowedOrigins(allowedOrigins)
-                .addInterceptors(new HttpSessionHandshakeInterceptor(List.of()));
+                .addInterceptors(
+                        new HttpSessionHandshakeInterceptor(List.of()),
+                        new CsrfTokenHandshakeInterceptor());
     }
 
     @Override
