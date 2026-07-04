@@ -9,14 +9,14 @@ import { Loader2Icon } from 'lucide-react';
 import { ChatBubbleLeftRightIcon } from '@heroicons/react/24/outline';
 
 import {
-    Sheet,
-    SheetContent,
-    SheetHeader,
-    SheetTitle,
-    SheetDescription,
-    SheetFooter,
-    SheetClose,
-} from '@/components/ui/sheet';
+    Drawer,
+    DrawerContent,
+    DrawerHeader,
+    DrawerTitle,
+    DrawerDescription,
+    DrawerFooter,
+    DrawerClose,
+} from '@/components/ui/drawer';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import MentionEditor from '@/app/components/activity/notes/MentionEditor';
@@ -119,19 +119,19 @@ export default function EditActivitySheet({
     };
 
     return (
-        <Sheet open={open} onOpenChange={handleOpenChange}>
-            <SheetContent side="right" className="flex w-full flex-col sm:max-w-lg">
-                <SheetHeader className="border-b">
+        <Drawer open={open} onOpenChange={handleOpenChange} disablePointerDismissal>
+            <DrawerContent className="flex w-full flex-col sm:max-w-lg">
+                <DrawerHeader className="border-b pr-12">
                     <div className="flex items-start gap-3">
                         <span className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-brand-light text-brand-dark">
                             <ChatBubbleLeftRightIcon className="size-5" />
                         </span>
                         <div className="space-y-1">
-                            <SheetTitle>{t('title')}</SheetTitle>
-                            <SheetDescription>{t('description')}</SheetDescription>
+                            <DrawerTitle>{t('title')}</DrawerTitle>
+                            <DrawerDescription>{t('description')}</DrawerDescription>
                         </div>
                     </div>
-                </SheetHeader>
+                </DrawerHeader>
 
                 <div className="flex-1 overflow-y-auto px-4 py-2">
                     <div className="grid gap-4 pt-6">
@@ -224,12 +224,10 @@ export default function EditActivitySheet({
                     </div>
                 </div>
 
-                <SheetFooter className="border-t">
-                    <SheetClose asChild>
-                        <Button variant="outline" disabled={isSaving}>
-                            {t('cancel')}
-                        </Button>
-                    </SheetClose>
+                <DrawerFooter className="border-t">
+                    <DrawerClose render={<Button variant="outline" disabled={isSaving} />}>
+                        {t('cancel')}
+                    </DrawerClose>
                     <Button
                         onClick={saveUpdates}
                         disabled={isSaving}
@@ -237,8 +235,8 @@ export default function EditActivitySheet({
                     >
                         {isSaving ? <Loader2Icon className="size-4 animate-spin" /> : t('save')}
                     </Button>
-                </SheetFooter>
-            </SheetContent>
-        </Sheet>
+                </DrawerFooter>
+            </DrawerContent>
+        </Drawer>
     );
 }
