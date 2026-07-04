@@ -116,6 +116,32 @@ interceptor enforces the owned-or-shared visibility predicate.
 > with an unresolved `TenantContext`, and stays out of the way of background jobs (off the request thread)
 > and the nullable-workspace audit insert. Toggle with `connex.tenancy.enforce-scope`.
 
+### 0.5 Organization boundary — seam enforcement, not per-row denormalization (#97, #313)
+
+The **organization** (V22) is the customer / billing / breach boundary above workspaces; workspaces are
+sub-partitions inside an org. Decisions locked 2026-07-03 (recorded on #313):
+
+- **Cross-org membership is allowed** — one global `app_user` may belong to workspaces in different orgs
+  (consultant/SES case). The org wall applies to **data**, not identity: the inbox deliberately spans a
+  user's orgs (workspace-labeled), while sharing, mentions, and intro paths never cross orgs.
+- **No `org_id` denormalization onto business tables.** Org isolation reduces to workspace isolation
+  (already enforced in four layers) **plus org-gated seams**; a per-row `org_id` would be a driftable
+  second source of truth adding no enforced invariant, and the dedicated-DB SaaS tier (#313 Phase 3/4)
+  makes it moot. #97's original "org_id on every table" mechanism is superseded accordingly.
+- **Enforced seams:** (1) share grants are `INSERT..SELECT` with an ownership + same-org ceiling in SQL —
+  0 affected rows means structurally refused (`ShareMapperTest`), and `ShareService` additionally throws;
+  (2) **workspace→org placement**: a new workspace joins the active workspace's org only when its creator
+  is owner/admin there, otherwise it mints a fresh org — a guest membership can never pull a personal
+  workspace (and org-wide reach like `SSO_MANAGE`) into the host org (`WorkspaceOrgPlacementTest`);
+  (3) `TenantResolutionInterceptor` derives `TenantContext.orgId` from validated membership, never from
+  the client.
+- **Registry completeness:** every mapper XML must be classified in `TenantScopeInterceptor` as
+  `SCOPED_NAMESPACES` or `CONTROL_PLANE_NAMESPACES`; `TenantRegistryCompletenessArchTest` fails the build
+  on an unclassified mapper, so new mappers cannot silently bypass the fail-closed backstop.
+- **Cross-org isolation suite:** `OrgIsolationIntegrationTest` proves over real HTTP that the org wall
+  holds even for dual-org members, same-org sharing still works, foreign-org workspaces cannot be pinned,
+  and the multi-org inbox behavior is locked as decided.
+
 ---
 
 ## 1. Diagnosis
