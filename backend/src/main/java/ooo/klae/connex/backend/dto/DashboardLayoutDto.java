@@ -9,10 +9,10 @@ import lombok.NoArgsConstructor;
 import ooo.klae.connex.backend.beans.UserDashboard;
 
 /**
- * API representation of a {@code UserDashboard}. {@code layout} is an opaque JSON object owned
+ * API representation of a {@code UserDashboard}. {@code layout} is an opaque JSON value owned
  * by the client (widget order, spans, visibility); it is stored and returned verbatim. A GET for
- * a user who has never customized their dashboard returns {@code layout = null} so the client
- * falls back to its default layout.
+ * a user who has never customized their dashboard omits {@code layout} entirely (the app-wide
+ * {@code non_null} inclusion drops the null field), so the client falls back to its default layout.
  */
 @Data
 @NoArgsConstructor

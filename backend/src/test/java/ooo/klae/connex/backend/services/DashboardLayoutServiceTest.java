@@ -4,6 +4,7 @@ import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -57,6 +58,18 @@ class DashboardLayoutServiceTest extends AbstractServiceTest {
     void saveLayout_tooLarge_throws() {
         assertThrows(BadRequestException.class,
             () -> service.saveLayout(Map.of("blob", "y".repeat(20000))));
+    }
+
+    @Test
+    void saveLayout_exactlyAtByteLimit_isAccepted() {
+        service.saveLayout(Map.of("k", "x".repeat(16376)));
+        assertNotNull(service.getLayout());
+    }
+
+    @Test
+    void saveLayout_oneByteOverLimit_throws() {
+        assertThrows(BadRequestException.class,
+            () -> service.saveLayout(Map.of("k", "x".repeat(16377))));
     }
 
     @Test

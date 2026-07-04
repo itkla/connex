@@ -41,7 +41,11 @@ public class DashboardLayoutService {
     }
 
     /**
-     * Stores the current user's layout for the active workspace, replacing any existing one.
+     * Stores the current user's layout for the active workspace, replacing any existing one, and
+     * returns the persisted row. The stored row is deliberately re-read rather than returning the
+     * upserted bean: on the {@code ON DUPLICATE KEY UPDATE} path the generated key and timestamps
+     * are not reliably populated on the bean, so the re-query is what yields a correct
+     * {@code updatedAt} — do not replace it with {@code return dashboard}.
      */
     @Transactional
     public UserDashboard saveLayout(Object layout) {
