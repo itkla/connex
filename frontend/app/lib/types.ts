@@ -818,6 +818,40 @@ export type SavedViewInput = {
     position?: number;
 };
 
+export type DashboardWidgetType =
+    | "overview"
+    | "pipeline"
+    | "tasks"
+    | "atRiskDeals"
+    | "coolingRelationships"
+    | "recentMoves"
+    | "introOpportunities"
+    | "recentFiles"
+    | "recentActivity";
+
+export type DashboardWidgetSpan = 1 | 2;
+
+export type DashboardWidgetInstance = {
+    id: string;
+    type: DashboardWidgetType;
+    span: DashboardWidgetSpan;
+};
+
+export type DashboardLayout = {
+    version: 1;
+    widgets: DashboardWidgetInstance[];
+};
+
+/**
+ * Response from `GET/PUT /api/dashboard-layout`. `layout` is absent when the current user has
+ * never customized their dashboard (the client then falls back to the default layout). The raw
+ * `layout` is untrusted opaque JSON and must be normalized before use.
+ */
+export type DashboardLayoutResponse = {
+    layout?: DashboardLayout | null;
+    updatedAt?: string | null;
+};
+
 export type UpdateContactPayload = {
     name?: string;
     email?: string;

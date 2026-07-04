@@ -1638,6 +1638,37 @@ export function deleteSavedView(id: number, init: RequestInit = {}) {
 }
 
 /*
+* == Dashboard layout (per-user, per-workspace)
+*/
+
+export function getDashboardLayout(init: RequestInit = {}) {
+    return getJson<Types.DashboardLayoutResponse>(`/api/dashboard-layout`, { cache: "no-store", ...init });
+}
+
+/**
+ * SSR-safe fetch of the current user's dashboard layout, forwarding the request cookie.
+ * Returns `null` on any failure or missing cookie so the caller falls back to the default layout.
+ */
+export async function getDashboardLayoutFromCookie(
+    cookie: string | null,
+): Promise<Types.DashboardLayoutResponse | null> {
+    if (!cookie) return null;
+    try {
+        return await getDashboardLayout({ headers: { cookie }, cache: "no-store" });
+    } catch {
+        return null;
+    }
+}
+
+export function saveDashboardLayout(layout: Types.DashboardLayout) {
+    return putJson<Types.DashboardLayoutResponse>(`/api/dashboard-layout`, { layout });
+}
+
+export function resetDashboardLayout(init: RequestInit = {}) {
+    return deleteJson<void>(`/api/dashboard-layout`, init);
+}
+
+/*
 * == Smart segments
 */
 

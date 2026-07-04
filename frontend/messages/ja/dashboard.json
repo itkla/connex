@@ -98,5 +98,27 @@
     "descriptionRequired": "説明を入力してください。",
     "contentRequired": "内容を入力してください。",
     "failed": "問題が発生しました。"
+  },
+  "DashboardCustomize": {
+    "customize": "カスタマイズ",
+    "done": "完了",
+    "addWidget": "ウィジェットを追加",
+    "add": "追加",
+    "reset": "リセット",
+    "remove": "{name}を削除",
+    "expand": "全幅にする",
+    "collapse": "半幅にする",
+    "emptyTitle": "ダッシュボードが空です",
+    "emptyBody": "ウィジェットを追加して再構成しましょう。",
+    "trayTitle": "ウィジェットを追加",
+    "trayDescription": "ダッシュボードに追加するウィジェットを選択してください。",
+    "trayEmpty": "すべてのウィジェットがすでにダッシュボードにあります。",
+    "dragHandle": "{name}をドラッグして並べ替え",
+    "saveFailed": "ダッシュボードのレイアウトを保存できませんでした。",
+    "a11yLifted": "{name}を持ち上げました。",
+    "a11yOver": "{name}は{target}の上にあります。",
+    "a11yDropped": "{name}を{target}にドロップしました。",
+    "a11yCancelled": "{name}の並べ替えをキャンセルしました。",
+    "a11yInstructions": "ウィジェットを並べ替えるには、スペースまたはEnterキーで持ち上げ、矢印キーで移動し、もう一度スペースまたはEnterキーでドロップします。"
   }
 }
