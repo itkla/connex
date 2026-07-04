@@ -27,6 +27,7 @@ interface NavTrailContextValue {
 const NavTrailContext = createContext<NavTrailContextValue | null>(null);
 
 const STORAGE_KEY = 'connex:nav-trail';
+const MAX_TRAIL = 12;
 
 const ROUTE_LABELS: readonly { prefix: string; key: string }[] = [
     { prefix: '/dashboard', key: 'navDashboard' },
@@ -97,7 +98,8 @@ function advance(prev: Crumb[], pathname: string, labelFor: (p: string) => strin
     if (route && route.prefix === pathname) return [{ pathname, label }];
     const existing = prev.findIndex((c) => c.pathname === pathname);
     if (existing >= 0) return prev.slice(0, existing + 1);
-    return [...prev, { pathname, label }];
+    const next = [...prev, { pathname, label }];
+    return next.length > MAX_TRAIL ? next.slice(next.length - MAX_TRAIL) : next;
 }
 
 /**
