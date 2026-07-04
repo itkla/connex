@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 
 export const metadata: Metadata = {
     title: "Me",
-    description: "Your profile and settings",
+    description: "Your relationships and work at a glance",
 };
 
 export default function MeLayout({

@@ -273,6 +273,45 @@
     }
   }
 
+  .me-drift {
+    animation: meDrift var(--drift-dur, 8s) ease-in-out var(--drift-delay, 0s) infinite alternate;
+  }
+
+  @keyframes meDrift {
+    from {
+      transform: translate3d(0, 0, 0);
+    }
+    to {
+      transform: translate3d(var(--drift-x, 6px), var(--drift-y, -8px), 0);
+    }
+  }
+
+  .me-halo {
+    animation: meHalo 5s ease-in-out infinite;
+  }
+
+  @keyframes meHalo {
+    0%,
+    100% {
+      opacity: 0.45;
+      transform: scale(1);
+    }
+    50% {
+      opacity: 0.85;
+      transform: scale(1.07);
+    }
+  }
+
+  .me-spin-slow {
+    animation: meSpin 90s linear infinite;
+  }
+
+  @keyframes meSpin {
+    to {
+      transform: rotate(360deg);
+    }
+  }
+
   .ncd-skeleton::after {
     content: "";
     position: absolute;
