@@ -25,7 +25,10 @@ import ooo.klae.connex.backend.mappers.UserMapper;
  *       the lookup is scoped to the organization, so one org's IdP cannot match another's identity;</li>
  *   <li>otherwise the IdP email must be <em>verified</em> and its domain must be one this
  *       organization owns in its {@code sso_domain} routing list (globally unique), binding the
- *       asserted email to the org so no IdP can assert or claim an address belonging to another org;</li>
+ *       asserted email to the org so no IdP can assert or claim an address belonging to another org,
+ *       and — when the org has set an {@code org_allowed_domain} membership ceiling (#316) — the
+ *       domain must also satisfy that ceiling, so SSO cannot provision a member the org's own policy
+ *       forbids;</li>
  *   <li>a matching existing password account never auto-links — it returns
  *       {@link SsoLoginResult.LinkRequired} so ownership is proven first, and a passwordless account
  *       already federated to a different organization is refused;</li>
@@ -43,6 +46,7 @@ public class SsoLoginService {
     private final SsoConnectionMapper ssoConnectionMapper;
     private final SsoDomainMapper ssoDomainMapper;
     private final WorkspaceService workspaceService;
+    private final OrgAllowedDomainService orgAllowedDomainService;
     private final SsoUserProvisioner ssoUserProvisioner;
 
     /**
@@ -74,6 +78,10 @@ public class SsoLoginService {
                     "Your identity provider did not assert a verified email address");
         }
         if (!isDomainAuthorizedForOrg(email, orgId)) {
+            throw new ForbiddenException(
+                    "Your email domain is not permitted to sign in to this organization");
+        }
+        if (!orgAllowedDomainService.isJoinAllowed(orgId, email)) {
             throw new ForbiddenException(
                     "Your email domain is not permitted to sign in to this organization");
         }

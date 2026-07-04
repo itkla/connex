@@ -193,9 +193,12 @@ first policy landed is the email-domain ceiling — **`org_allowed_domain`** (V4
   the unbound link channel does not.
 - **Re-checked at activation:** `approveMembership` re-applies the org ceiling before flipping a pending
   member active, so a row that predates a later-tightened policy (or the feature deploy) cannot slip in.
-- **By design:** exact-domain match (an apex domain does not cover subdomains — fail-closed, matching the
-  per-workspace list); and SSO JIT provisioning is constrained by the org's verified `sso_domain` (V39), a
-  separate and stronger org↔domain binding, not by `org_allowed_domain`.
+- **Ceiling on ALL membership:** the org allowlist caps every path, including **SSO JIT provisioning**
+  (`SsoLoginService.resolve`) — SSO requires a verified email whose domain the org proved it owns
+  (`sso_domain`, V39) AND, when set, the `org_allowed_domain` ceiling. So SSO cannot provision a member the
+  org's own policy forbids (decided 2026-07-04).
+- **By design:** exact-domain match — an apex domain does not cover subdomains (fail-closed, matching the
+  per-workspace list).
 
 ---
 
