@@ -69,10 +69,12 @@ function DrawerContent({
           )}
           {...props}
         >
-          {children}
+          <div data-base-ui-swipe-ignore className="contents">
+            {children}
+          </div>
           {showCloseButton && (
             <DrawerPrimitive.Close
-              data-slot="drawer-close"
+              data-slot="drawer-close-button"
               render={<Button variant="ghost" size="icon-sm" className="absolute top-4 right-4" />}
             >
               <XIcon />
