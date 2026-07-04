@@ -38,14 +38,12 @@ import ooo.klae.connex.backend.mappers.UserMapper;
 @RequiredArgsConstructor
 public class SsoLoginService {
 
-    private static final String FALLBACK_USERNAME = "user";
-    private static final int MAX_USERNAME_LENGTH = 64;
-
     private final FederatedIdentityMapper federatedIdentityMapper;
     private final UserMapper userMapper;
     private final SsoConnectionMapper ssoConnectionMapper;
     private final SsoDomainMapper ssoDomainMapper;
     private final WorkspaceService workspaceService;
+    private final SsoUserProvisioner ssoUserProvisioner;
 
     /**
      * Resolves an authenticated IdP identity to a Connex login outcome.
@@ -94,7 +92,7 @@ public class SsoLoginService {
                 throw new ForbiddenException("This account is managed by a different organization");
             }
         } else {
-            user = provisionUser(email, true, displayName);
+            user = ssoUserProvisioner.provision(email, displayName, true);
         }
 
         workspaceService.ensureActiveMember(connection.getJitWorkspaceId(), user.getId(),
@@ -125,41 +123,5 @@ public class SsoLoginService {
         }
         Integer owner = ssoDomainMapper.findOrgByDomain(domain);
         return owner != null && owner == orgId;
-    }
-
-    private User provisionUser(String email, boolean emailVerified, String displayName) {
-        User user = new User();
-        user.setUsername(deriveUsername(email));
-        user.setDisplayName(resolveDisplayName(displayName, email));
-        user.setEmail(email);
-        user.setEmailVerified(emailVerified);
-        user.setTimezone("UTC");
-        user.setPasswordHash(null);
-        userMapper.insert(user);
-        return user;
-    }
-
-    private static String resolveDisplayName(String displayName, String email) {
-        return displayName != null && !displayName.isBlank() ? displayName.trim() : email;
-    }
-
-    private String deriveUsername(String email) {
-        int at = email.indexOf('@');
-        String local = at > 0 ? email.substring(0, at) : email;
-        String base = local.toLowerCase().replaceAll("[^a-z0-9._-]", "");
-        if (base.isEmpty()) {
-            base = FALLBACK_USERNAME;
-        }
-        if (base.length() > MAX_USERNAME_LENGTH) {
-            base = base.substring(0, MAX_USERNAME_LENGTH);
-        }
-        String candidate = base;
-        int suffix = 1;
-        while (userMapper.getUserByUsername(candidate) != null) {
-            String tag = Integer.toString(suffix++);
-            int keep = MAX_USERNAME_LENGTH - tag.length();
-            candidate = (base.length() > keep ? base.substring(0, keep) : base) + tag;
-        }
-        return candidate;
     }
 }

@@ -22,7 +22,7 @@ public sealed interface SsoLoginResult permits SsoLoginResult.Login, SsoLoginRes
      * {@code subject} within {@code orgId}) is linked. No session is established and no
      * identity row is written.
      */
-    record LinkRequired(int existingUserId, String provider, String issuer, String subject, int orgId)
+    record LinkRequired(int existingUserId, String provider, String issuer, String subject, Integer orgId)
             implements SsoLoginResult {
     }
 
@@ -41,10 +41,11 @@ public sealed interface SsoLoginResult permits SsoLoginResult.Login, SsoLoginRes
      * @param provider the IdP protocol
      * @param issuer the IdP issuer
      * @param subject the stable IdP subject
-     * @param orgId the organization whose connection minted the identity
+     * @param orgId the organization whose connection minted the identity, or null for social login
      * @return a link-required outcome
      */
-    static SsoLoginResult linkRequired(int existingUserId, String provider, String issuer, String subject, int orgId) {
+    static SsoLoginResult linkRequired(int existingUserId, String provider, String issuer, String subject,
+            Integer orgId) {
         return new LinkRequired(existingUserId, provider, issuer, subject, orgId);
     }
 }

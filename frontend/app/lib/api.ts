@@ -471,6 +471,34 @@ export function ssoStartPath(registrationId: string, protocol: Types.SsoProtocol
 }
 
 /*
+* == Consumer social login
+*/
+
+/**
+ * Reports which consumer social login providers are enabled and configured on this instance,
+ * so the login screen only offers the ones that will actually complete.
+ * @param init optional fetch overrides
+ * @returns whether Google and Microsoft sign-in are available
+ */
+export function getSocialLoginProviders(init: RequestInit = {}) {
+    return getJson<{ google: boolean; microsoft: boolean }>("/api/auth/social-login/providers", {
+        cache: "no-store",
+        ...init,
+    });
+}
+
+/**
+ * The backend entry point a browser must fully navigate to (not fetch) to begin a consumer
+ * social login. Mirrors {@link ssoStartPath}; the provider's OAuth2 flow starts under the
+ * proxied {@code /api} prefix.
+ * @param provider the social provider to authenticate with
+ * @returns the absolute path to navigate the browser to
+ */
+export function socialLoginStartPath(provider: "google" | "microsoft") {
+    return `/api/oauth2/authorization/${provider}`;
+}
+
+/*
 * == User profile management
 */
 

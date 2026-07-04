@@ -7,9 +7,17 @@ import org.springframework.core.convert.converter.Converter;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.ProviderManager;
 import org.springframework.security.config.annotation.authentication.configuration.AuthenticationConfiguration;
+import org.springframework.security.oauth2.client.oidc.authentication.OidcIdTokenDecoderFactory;
+import org.springframework.security.oauth2.client.oidc.authentication.OidcIdTokenValidator;
+import org.springframework.security.oauth2.core.DelegatingOAuth2TokenValidator;
+import org.springframework.security.oauth2.jwt.JwtClaimNames;
+import org.springframework.security.oauth2.jwt.JwtClaimValidator;
+import org.springframework.security.oauth2.jwt.JwtTimestampValidator;
 import org.springframework.security.saml2.core.Saml2Error;
 import org.springframework.security.saml2.core.Saml2ResponseValidatorResult;
 import org.springframework.security.saml2.provider.service.authentication.OpenSaml5AuthenticationProvider;
+import ooo.klae.connex.backend.sso.CompositeClientRegistrationRepository;
+import ooo.klae.connex.backend.sso.SocialLoginClientRegistrations;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
@@ -29,7 +37,6 @@ import org.springframework.session.security.SpringSessionBackedSessionRegistry;
 
 import jakarta.servlet.http.HttpServletResponse;
 
-import ooo.klae.connex.backend.sso.DbClientRegistrationRepository;
 import ooo.klae.connex.backend.sso.DbRelyingPartyRegistrationRepository;
 import ooo.klae.connex.backend.sso.SsoAuthenticationSuccessHandler;
 
@@ -83,11 +90,13 @@ public class SecurityConfig {
     @Bean
     SecurityFilterChain chain(HttpSecurity http,
             SessionRegistry sessionRegistry,
-            DbClientRegistrationRepository dbClientRegistrationRepository,
+            CompositeClientRegistrationRepository compositeClientRegistrationRepository,
+            SocialLoginClientRegistrations socialLoginClientRegistrations,
             DbRelyingPartyRegistrationRepository dbRelyingPartyRegistrationRepository,
             SsoAuthenticationSuccessHandler ssoAuthenticationSuccessHandler,
             @Value("${connex.security.csrf-enabled:true}") boolean csrfEnabled,
             @Value("${connex.sso.enabled:false}") boolean ssoEnabled) throws Exception {
+        boolean oauthEnabled = ssoEnabled || socialLoginClientRegistrations.anyEnabled();
         if (csrfEnabled) {
             // Session-stored token (default repo), echoed by the SPA in a header it fetches from
             // GET /api/auth/csrf. A plain (non-XOR) handler keeps the token stable so the client can
@@ -98,8 +107,11 @@ public class SecurityConfig {
                         "/api/auth/login", "/api/auth/register", "/api/auth/logout",
                         "/api/auth/forgot-password", "/api/auth/reset-password",
                         "/api/auth/webauthn/authenticate/**");
+                if (oauthEnabled) {
+                    csrf.ignoringRequestMatchers("/api/auth/sso/link/confirm");
+                }
                 if (ssoEnabled) {
-                    csrf.ignoringRequestMatchers("/api/auth/sso/link/confirm", "/api/login/saml2/sso/**");
+                    csrf.ignoringRequestMatchers("/api/login/saml2/sso/**");
                 }
             });
         } else {
@@ -110,10 +122,12 @@ public class SecurityConfig {
                 auth.requestMatchers("/api/auth/webauthn/authenticate/**").permitAll()
                     .requestMatchers("/api/auth/webauthn/**").authenticated()
                     .requestMatchers("/api/auth/**").permitAll();
-                if (ssoEnabled) {
+                if (oauthEnabled) {
                     auth.requestMatchers("/api/oauth2/authorization/**").permitAll()
-                        .requestMatchers("/api/login/oauth2/code/**").permitAll()
-                        .requestMatchers("/api/login/saml2/**").permitAll()
+                        .requestMatchers("/api/login/oauth2/code/**").permitAll();
+                }
+                if (ssoEnabled) {
+                    auth.requestMatchers("/api/login/saml2/**").permitAll()
                         .requestMatchers("/saml2/**").permitAll();
                 }
                 auth.anyRequest().authenticated();
@@ -140,25 +154,27 @@ public class SecurityConfig {
                 .deleteCookies("JSESSIONID")
                 .logoutSuccessHandler((req, res, auth) -> res.setStatus(200))
             );
-        if (ssoEnabled) {
+        if (oauthEnabled) {
             http
                 .oauth2Login(o -> o
-                    .clientRegistrationRepository(dbClientRegistrationRepository)
+                    .clientRegistrationRepository(compositeClientRegistrationRepository)
                     .authorizationEndpoint(a -> a.baseUri("/api/oauth2/authorization"))
                     .redirectionEndpoint(r -> r.baseUri("/api/login/oauth2/code/*"))
-                    .successHandler(ssoAuthenticationSuccessHandler)
-                    .failureHandler((rq, rs, ex) -> rs.sendRedirect("/auth/login?sso_error=1"))
-                )
-                .saml2Login(s -> s
-                    .relyingPartyRegistrationRepository(dbRelyingPartyRegistrationRepository)
-                    .loginProcessingUrl("/api/login/saml2/sso/{registrationId}")
-                    .authenticationManager(samlAuthenticationManager())
                     .successHandler(ssoAuthenticationSuccessHandler)
                     .failureHandler((rq, rs, ex) -> rs.sendRedirect("/auth/login?sso_error=1"))
                 )
                 .exceptionHandling(ex -> ex
                     .authenticationEntryPoint(new HttpStatusEntryPoint(HttpStatus.UNAUTHORIZED))
                 );
+        }
+        if (ssoEnabled) {
+            http.saml2Login(s -> s
+                .relyingPartyRegistrationRepository(dbRelyingPartyRegistrationRepository)
+                .loginProcessingUrl("/api/login/saml2/sso/{registrationId}")
+                .authenticationManager(samlAuthenticationManager())
+                .successHandler(ssoAuthenticationSuccessHandler)
+                .failureHandler((rq, rs, ex) -> rs.sendRedirect("/auth/login?sso_error=1"))
+            );
         }
         return http.build();
     }
@@ -186,5 +202,43 @@ public class SecurityConfig {
             return result;
         });
         return new ProviderManager(provider);
+    }
+
+    /**
+     * Customizes OIDC id-token validation so Microsoft's multi-tenant {@code common} endpoint is
+     * accepted: its tokens carry a per-tenant issuer ({@code .../{tenantId}/v2.0}) that the default
+     * fixed-issuer validator would reject. Microsoft id-tokens are still validated for signature
+     * (via the configured JWK set), expiry, a genuine Microsoft issuer, and our own audience; every
+     * other registration keeps the default strict OIDC validator.
+     * @return the id-token decoder factory
+     */
+    @Bean
+    OidcIdTokenDecoderFactory idTokenDecoderFactory() {
+        OidcIdTokenDecoderFactory factory = new OidcIdTokenDecoderFactory();
+        factory.setJwtValidatorFactory(registration -> {
+            if (SocialLoginClientRegistrations.MICROSOFT.equals(registration.getRegistrationId())) {
+                return new DelegatingOAuth2TokenValidator<>(
+                        new JwtTimestampValidator(),
+                        new JwtClaimValidator<String>(JwtClaimNames.ISS, SecurityConfig::isMicrosoftIssuer),
+                        new JwtClaimValidator<Object>(JwtClaimNames.AUD,
+                                aud -> audienceContains(aud, registration.getClientId())),
+                        new JwtClaimValidator<String>("azp",
+                                azp -> azp == null || azp.equals(registration.getClientId())));
+            }
+            return new OidcIdTokenValidator(registration);
+        });
+        return factory;
+    }
+
+    private static boolean isMicrosoftIssuer(String issuer) {
+        return issuer != null && issuer.startsWith("https://login.microsoftonline.com/")
+                && issuer.endsWith("/v2.0");
+    }
+
+    private static boolean audienceContains(Object audience, String clientId) {
+        if (audience instanceof java.util.Collection<?> values) {
+            return values.contains(clientId);
+        }
+        return clientId.equals(audience);
     }
 }

@@ -18,9 +18,12 @@ import jakarta.servlet.http.HttpServletResponse;
 
 import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.beans.SsoConnection;
+import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.mail.MailProperties;
 import ooo.klae.connex.backend.mappers.SsoConnectionMapper;
+import ooo.klae.connex.backend.mappers.WorkspaceMapper;
 import ooo.klae.connex.backend.services.AuthService;
+import ooo.klae.connex.backend.services.SocialLoginService;
 import ooo.klae.connex.backend.services.SsoLinkService;
 import ooo.klae.connex.backend.services.SsoLoginResult;
 import ooo.klae.connex.backend.services.SsoLoginService;
@@ -53,10 +56,12 @@ public class SsoAuthenticationSuccessHandler implements AuthenticationSuccessHan
             "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/surname");
 
     private final SsoLoginService ssoLoginService;
+    private final SocialLoginService socialLoginService;
     private final SsoLinkService ssoLinkService;
     private final AuthService authService;
     private final MailProperties mailProperties;
     private final SsoConnectionMapper ssoConnectionMapper;
+    private final WorkspaceMapper workspaceMapper;
 
     @Override
     public void onAuthenticationSuccess(HttpServletRequest request, HttpServletResponse response,
@@ -76,7 +81,13 @@ public class SsoAuthenticationSuccessHandler implements AuthenticationSuccessHan
 
     private void handleOidc(OAuth2AuthenticationToken token, OidcUser user, HttpServletRequest request,
             HttpServletResponse response, String frontendBase) throws IOException {
-        Integer orgId = parseOrgId(token.getAuthorizedClientRegistrationId());
+        String registrationId = token.getAuthorizedClientRegistrationId();
+        if (SocialLoginClientRegistrations.GOOGLE.equals(registrationId)
+                || SocialLoginClientRegistrations.MICROSOFT.equals(registrationId)) {
+            handleSocial(registrationId, user, request, response, frontendBase);
+            return;
+        }
+        Integer orgId = parseOrgId(registrationId);
         if (orgId == null) {
             response.sendRedirect(frontendBase + "/auth/login?sso_error=1");
             return;
@@ -85,6 +96,47 @@ public class SsoAuthenticationSuccessHandler implements AuthenticationSuccessHan
         SsoLoginResult result = ssoLoginService.resolve("oidc", user.getIssuer().toString(), user.getSubject(),
                 user.getEmail(), emailVerified, orgId, user.getFullName());
         completeResolution(result, request, response, frontendBase);
+    }
+
+    private void handleSocial(String provider, OidcUser user, HttpServletRequest request,
+            HttpServletResponse response, String frontendBase) throws IOException {
+        String email = socialEmail(user);
+        if (email == null) {
+            response.sendRedirect(frontendBase + "/auth/login?sso_error=1");
+            return;
+        }
+        boolean emailVerified = SocialLoginClientRegistrations.MICROSOFT.equals(provider)
+                ? isMicrosoftEmailVerified(user)
+                : Boolean.TRUE.equals(user.getEmailVerified());
+        SsoLoginResult result = socialLoginService.resolve(provider, user.getIssuer().toString(),
+                user.getSubject(), email, emailVerified, user.getFullName());
+        completeResolution(result, request, response, frontendBase);
+    }
+
+    /**
+     * Whether Microsoft has verified the account owns its email. Microsoft's {@code email} and
+     * {@code preferred_username} claims are attacker-mutable — an admin of any tenant can set them
+     * to an address they do not own (the nOAuth attack) — so only {@code xms_edov} ("email domain
+     * owner verified") proves ownership, and a tenant can assert it only for domains it truly owns.
+     * @param user the authenticated Microsoft user
+     * @return true when the asserted email is verifiably owned
+     */
+    private static boolean isMicrosoftEmailVerified(OidcUser user) {
+        Object emailDomainOwnerVerified = user.getAttribute("xms_edov");
+        return Boolean.TRUE.equals(emailDomainOwnerVerified)
+                || "true".equalsIgnoreCase(String.valueOf(emailDomainOwnerVerified));
+    }
+
+    private static String socialEmail(OidcUser user) {
+        String email = user.getEmail();
+        if (email != null && !email.isBlank()) {
+            return email.trim();
+        }
+        Object preferredUsername = user.getAttribute("preferred_username");
+        if (preferredUsername instanceof String value && value.contains("@")) {
+            return value.trim();
+        }
+        return null;
     }
 
     private void handleSaml(Saml2AssertionAuthentication saml, HttpServletRequest request,
@@ -115,8 +167,9 @@ public class SsoAuthenticationSuccessHandler implements AuthenticationSuccessHan
             HttpServletResponse response, String frontendBase) throws IOException {
         switch (result) {
             case SsoLoginResult.Login login -> {
-                authService.establishAuthenticatedSession(login.user(), request, response);
-                response.sendRedirect(frontendBase + "/dashboard");
+                User user = authService.establishAuthenticatedSession(login.user(), request, response);
+                boolean hasWorkspace = !workspaceMapper.getWorkspacesForUser(user.getId()).isEmpty();
+                response.sendRedirect(frontendBase + (hasWorkspace ? "/dashboard" : "/onboarding"));
             }
             case SsoLoginResult.LinkRequired linkRequired -> {
                 String linkToken = ssoLinkService.createChallenge(linkRequired);
