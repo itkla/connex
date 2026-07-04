@@ -94,6 +94,9 @@ connex:
         rp-name: ${CONNEX_WEBAUTHN_RP_NAME:Connex}
         allowed-origins: ${CONNEX_WEBAUTHN_ALLOWED_ORIGINS:http://localhost:3000}
     sso:
+        # Instance-level kill switch for the whole SSO subsystem (#296). Default false so a
+        # deployment ships with OIDC/SAML dormant; set true only where enterprise SSO is offered.
+        enabled: ${CONNEX_SSO_ENABLED:false}
         # Per-organization enterprise SSO/IdP (#296). secret-key is a Base64 AES key
         # (16/24/32 bytes) that encrypts each org's OIDC client secret at rest; it is
         # required only once an org stores a client secret, and rotating it invalidates

@@ -20,6 +20,7 @@ import ooo.klae.connex.backend.sso.DbClientRegistrationRepository;
 import ooo.klae.connex.backend.sso.DbRelyingPartyRegistrationRepository;
 import ooo.klae.connex.backend.sso.SamlSpCredentialFactory;
 import ooo.klae.connex.backend.sso.SamlSpKeyMaterial;
+import ooo.klae.connex.backend.sso.SsoProperties;
 import ooo.klae.connex.backend.sso.SsoSecretCipher;
 import ooo.klae.connex.backend.sso.SsoUrlSafety;
 import ooo.klae.connex.backend.tenant.Permission;
@@ -46,6 +47,7 @@ public class SsoConnectionService {
     private final WorkspaceService workspaceService;
     private final SsoSecretCipher ssoSecretCipher;
     private final SamlSpCredentialFactory samlSpCredentialFactory;
+    private final SsoProperties ssoProperties;
     private final AuditService auditService;
     private final DbClientRegistrationRepository dbClientRegistrationRepository;
     private final DbRelyingPartyRegistrationRepository dbRelyingPartyRegistrationRepository;
@@ -76,6 +78,9 @@ public class SsoConnectionService {
     @Transactional
     public SsoConnectionDto save(int workspaceId, int actorId, SsoConnectionRequest request) {
         workspaceService.requirePermission(workspaceId, actorId, Permission.SSO_MANAGE);
+        if (!ssoProperties.isEnabled()) {
+            throw new BadRequestException("Single sign-on is not enabled on this instance");
+        }
         int orgId = workspaceService.getOrgId(workspaceId);
 
         String protocol = request.getProtocol().trim().toLowerCase();
@@ -150,7 +155,16 @@ public class SsoConnectionService {
      * @return true when at least one active membership sits in an enforcing organization
      */
     public boolean isSsoEnforcedForUser(int userId) {
-        return workspaceMapper.countEnforcingSsoMemberships(userId) > 0;
+        return ssoProperties.isEnabled() && workspaceMapper.countEnforcingSsoMemberships(userId) > 0;
+    }
+
+    /**
+     * Whether the SSO subsystem is enabled on this instance. Public and unauthenticated so the
+     * login screen can decide whether to offer an SSO affordance at all.
+     * @return true when {@code connex.sso.enabled} is set
+     */
+    public boolean isInstanceEnabled() {
+        return ssoProperties.isEnabled();
     }
 
     /**
@@ -164,6 +178,9 @@ public class SsoConnectionService {
      * @return the discovery result, unavailable when the domain has no enabled connection
      */
     public SsoDiscoveryDto discoverByEmail(String email) {
+        if (!ssoProperties.isEnabled()) {
+            return SsoDiscoveryDto.unavailable();
+        }
         Integer orgId = findOrgByDomain(email);
         if (orgId == null) {
             return SsoDiscoveryDto.unavailable();

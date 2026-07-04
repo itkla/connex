@@ -1,5 +1,7 @@
 package ooo.klae.connex.backend.controllers;
 
+import java.util.Map;
+
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -29,6 +31,11 @@ public class SsoConnectionController {
 
     private final SsoConnectionService ssoConnectionService;
     private final AuthService authService;
+
+    @GetMapping("/enabled")
+    public Map<String, Boolean> enabled() {
+        return Map.of("enabled", ssoConnectionService.isInstanceEnabled());
+    }
 
     @GetMapping("/discover")
     public SsoDiscoveryDto discover(@RequestParam("email") String email) {

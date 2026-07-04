@@ -68,10 +68,12 @@ export function AuthForm({
     mode,
     redirectUrl,
     ssoError = false,
+    ssoEnabled = false,
 }: {
     mode: AuthMode;
     redirectUrl: string | null;
     ssoError?: boolean;
+    ssoEnabled?: boolean;
 }) {
     const router = useRouter();
     const tForm = useTranslations("AuthForm");
@@ -400,7 +402,7 @@ export function AuthForm({
                             </button>
                         </form>
 
-                        {mode === "login" && (
+                        {mode === "login" && (passkeySupported || ssoEnabled) && (
                             <div
                                 className="connex-rise mt-5"
                                 style={{ animationDelay: `${180 + fields.length * 60}ms` }}
@@ -429,20 +431,22 @@ export function AuthForm({
                                             {passkeySubmitting ? tLogin("passkeySigningIn") : tLogin("passkeyButton")}
                                         </button>
                                     )}
-                                    <button
-                                        type="button"
-                                        onClick={continueWithSso}
-                                        disabled={ssoSubmitting || passkeySubmitting}
-                                        aria-busy={ssoSubmitting}
-                                        className="flex w-full items-center justify-center gap-2 rounded-full border border-input bg-background px-6 py-3.5 text-base font-semibold text-foreground transition-[transform,background-color,border-color] duration-150 ease-out hover:bg-input focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-70"
-                                    >
-                                        {ssoSubmitting ? (
-                                            <LoaderCircle className="size-4 animate-spin" />
-                                        ) : (
-                                            <BuildingOffice2Icon className="size-5" />
-                                        )}
-                                        {ssoSubmitting ? tLogin("ssoSigningIn") : tLogin("ssoButton")}
-                                    </button>
+                                    {ssoEnabled && (
+                                        <button
+                                            type="button"
+                                            onClick={continueWithSso}
+                                            disabled={ssoSubmitting || passkeySubmitting}
+                                            aria-busy={ssoSubmitting}
+                                            className="flex w-full items-center justify-center gap-2 rounded-full border border-input bg-background px-6 py-3.5 text-base font-semibold text-foreground transition-[transform,background-color,border-color] duration-150 ease-out hover:bg-input focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-70"
+                                        >
+                                            {ssoSubmitting ? (
+                                                <LoaderCircle className="size-4 animate-spin" />
+                                            ) : (
+                                                <BuildingOffice2Icon className="size-5" />
+                                            )}
+                                            {ssoSubmitting ? tLogin("ssoSigningIn") : tLogin("ssoButton")}
+                                        </button>
+                                    )}
                                 </div>
                             </div>
                         )}

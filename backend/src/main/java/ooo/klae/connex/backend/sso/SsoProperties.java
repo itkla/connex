@@ -19,6 +19,14 @@ import lombok.ToString;
 public class SsoProperties {
 
     /**
+     * Instance-level kill switch for the entire SSO subsystem. Defaults to false so a
+     * deployment ships with OIDC/SAML dormant — the login filter chain skips the SSO
+     * endpoints, discovery reports unavailable, config saves are refused, and no user is
+     * treated as SSO-enforced. Set true only on deployments that offer enterprise SSO.
+     */
+    private boolean enabled = false;
+
+    /**
      * Base64-encoded AES key (128/192/256-bit) used to encrypt per-organization
      * OIDC client secrets at rest.
      */

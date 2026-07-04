@@ -86,50 +86,38 @@ public class SecurityConfig {
             DbClientRegistrationRepository dbClientRegistrationRepository,
             DbRelyingPartyRegistrationRepository dbRelyingPartyRegistrationRepository,
             SsoAuthenticationSuccessHandler ssoAuthenticationSuccessHandler,
-            @Value("${connex.security.csrf-enabled:true}") boolean csrfEnabled) throws Exception {
+            @Value("${connex.security.csrf-enabled:true}") boolean csrfEnabled,
+            @Value("${connex.sso.enabled:false}") boolean ssoEnabled) throws Exception {
         if (csrfEnabled) {
             // Session-stored token (default repo), echoed by the SPA in a header it fetches from
             // GET /api/auth/csrf. A plain (non-XOR) handler keeps the token stable so the client can
             // cache it. The auth handshake is exempt since there is no session to protect pre-login.
-            http.csrf(csrf -> csrf
-                .csrfTokenRequestHandler(new CsrfTokenRequestAttributeHandler())
-                .ignoringRequestMatchers(
-                    "/api/auth/login", "/api/auth/register", "/api/auth/logout",
-                    "/api/auth/forgot-password", "/api/auth/reset-password",
-                    "/api/auth/sso/link/confirm",
-                    "/api/auth/webauthn/authenticate/**",
-                    "/api/login/saml2/sso/**"));
+            http.csrf(csrf -> {
+                csrf.csrfTokenRequestHandler(new CsrfTokenRequestAttributeHandler())
+                    .ignoringRequestMatchers(
+                        "/api/auth/login", "/api/auth/register", "/api/auth/logout",
+                        "/api/auth/forgot-password", "/api/auth/reset-password",
+                        "/api/auth/webauthn/authenticate/**");
+                if (ssoEnabled) {
+                    csrf.ignoringRequestMatchers("/api/auth/sso/link/confirm", "/api/login/saml2/sso/**");
+                }
+            });
         } else {
             http.csrf(AbstractHttpConfigurer::disable);
         }
         http
-            .authorizeHttpRequests(auth -> auth
-                .requestMatchers("/api/auth/webauthn/authenticate/**").permitAll()
-                .requestMatchers("/api/auth/webauthn/**").authenticated()
-                .requestMatchers("/api/auth/**").permitAll()
-                .requestMatchers("/api/oauth2/authorization/**").permitAll()
-                .requestMatchers("/api/login/oauth2/code/**").permitAll()
-                .requestMatchers("/api/login/saml2/**").permitAll()
-                .requestMatchers("/saml2/**").permitAll()
-                .anyRequest().authenticated()
-            )
-            .oauth2Login(o -> o
-                .clientRegistrationRepository(dbClientRegistrationRepository)
-                .authorizationEndpoint(a -> a.baseUri("/api/oauth2/authorization"))
-                .redirectionEndpoint(r -> r.baseUri("/api/login/oauth2/code/*"))
-                .successHandler(ssoAuthenticationSuccessHandler)
-                .failureHandler((rq, rs, ex) -> rs.sendRedirect("/auth/login?sso_error=1"))
-            )
-            .saml2Login(s -> s
-                .relyingPartyRegistrationRepository(dbRelyingPartyRegistrationRepository)
-                .loginProcessingUrl("/api/login/saml2/sso/{registrationId}")
-                .authenticationManager(samlAuthenticationManager())
-                .successHandler(ssoAuthenticationSuccessHandler)
-                .failureHandler((rq, rs, ex) -> rs.sendRedirect("/auth/login?sso_error=1"))
-            )
-            .exceptionHandling(ex -> ex
-                .authenticationEntryPoint(new HttpStatusEntryPoint(HttpStatus.UNAUTHORIZED))
-            )
+            .authorizeHttpRequests(auth -> {
+                auth.requestMatchers("/api/auth/webauthn/authenticate/**").permitAll()
+                    .requestMatchers("/api/auth/webauthn/**").authenticated()
+                    .requestMatchers("/api/auth/**").permitAll();
+                if (ssoEnabled) {
+                    auth.requestMatchers("/api/oauth2/authorization/**").permitAll()
+                        .requestMatchers("/api/login/oauth2/code/**").permitAll()
+                        .requestMatchers("/api/login/saml2/**").permitAll()
+                        .requestMatchers("/saml2/**").permitAll();
+                }
+                auth.anyRequest().authenticated();
+            })
             .sessionManagement(session -> session
                 .sessionCreationPolicy(SessionCreationPolicy.IF_REQUIRED)
                 .maximumSessions(-1)
@@ -152,6 +140,26 @@ public class SecurityConfig {
                 .deleteCookies("JSESSIONID")
                 .logoutSuccessHandler((req, res, auth) -> res.setStatus(200))
             );
+        if (ssoEnabled) {
+            http
+                .oauth2Login(o -> o
+                    .clientRegistrationRepository(dbClientRegistrationRepository)
+                    .authorizationEndpoint(a -> a.baseUri("/api/oauth2/authorization"))
+                    .redirectionEndpoint(r -> r.baseUri("/api/login/oauth2/code/*"))
+                    .successHandler(ssoAuthenticationSuccessHandler)
+                    .failureHandler((rq, rs, ex) -> rs.sendRedirect("/auth/login?sso_error=1"))
+                )
+                .saml2Login(s -> s
+                    .relyingPartyRegistrationRepository(dbRelyingPartyRegistrationRepository)
+                    .loginProcessingUrl("/api/login/saml2/sso/{registrationId}")
+                    .authenticationManager(samlAuthenticationManager())
+                    .successHandler(ssoAuthenticationSuccessHandler)
+                    .failureHandler((rq, rs, ex) -> rs.sendRedirect("/auth/login?sso_error=1"))
+                )
+                .exceptionHandling(ex -> ex
+                    .authenticationEntryPoint(new HttpStatusEntryPoint(HttpStatus.UNAUTHORIZED))
+                );
+        }
         return http.build();
     }
 

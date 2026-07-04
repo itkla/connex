@@ -431,6 +431,10 @@ export function deletePasskey(credentialId: string) {
  * @param init optional fetch overrides
  * @returns the discovery result (unavailable when the domain has no enabled connection)
  */
+export function getSsoInstanceEnabled(init: RequestInit = {}) {
+    return getJson<{ enabled: boolean }>("/api/auth/sso/enabled", { cache: "no-store", ...init });
+}
+
 export function discoverSso(email: string, init: RequestInit = {}) {
     return getJson<Types.SsoDiscovery>(
         `/api/auth/sso/discover?email=${encodeURIComponent(email)}`,
