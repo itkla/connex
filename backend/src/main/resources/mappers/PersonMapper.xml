@@ -39,10 +39,16 @@
   </sql>
 
   <!-- Owned-or-shared visibility: a person is visible to its owning workspace and any workspace it
-       has been shared with (person_share). Writes stay owned-only. Requires the table aliased `p`. -->
+       has been shared with (person_share). The share branch carries the same-org ceiling the write
+       path enforces (owner and grantee workspaces must share an organization), so a share row that
+       ever crossed an org boundary grants no read visibility. Writes stay owned-only. Requires the
+       table aliased `p`. -->
   <sql id="visible">
     (p.workspace_id = #{workspaceId}
-     OR EXISTS (SELECT 1 FROM person_share ps WHERE ps.person_id = p.id AND ps.workspace_id = #{workspaceId}))
+     OR EXISTS (SELECT 1 FROM person_share ps
+        JOIN workspace vws ON vws.id = ps.workspace_id
+        JOIN workspace ows ON ows.id = p.workspace_id AND ows.org_id = vws.org_id
+        WHERE ps.person_id = p.id AND ps.workspace_id = #{workspaceId}))
   </sql>
 
   <select id="getAllPersons" resultMap="PersonResult">
@@ -89,7 +95,10 @@
     SELECT EXISTS(
       SELECT 1 FROM person
       WHERE (person.workspace_id = #{workspaceId}
-             OR EXISTS (SELECT 1 FROM person_share ps WHERE ps.person_id = person.id AND ps.workspace_id = #{workspaceId}))
+             OR EXISTS (SELECT 1 FROM person_share ps
+                JOIN workspace vws ON vws.id = ps.workspace_id
+                JOIN workspace ows ON ows.id = person.workspace_id AND ows.org_id = vws.org_id
+                WHERE ps.person_id = person.id AND ps.workspace_id = #{workspaceId}))
         AND id = #{id}
     )
   </select>
