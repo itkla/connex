@@ -10,10 +10,8 @@
   "AccountProfile": {
     "title": "Profile",
     "subtitle": "Your personal details. This is how you appear to teammates across every workspace.",
-    "photoLabel": "Photo",
     "photoHint": "A square PNG, JPG, or GIF looks best.",
     "changePhoto": "Change photo",
-    "removePhoto": "Remove",
     "photoAlt": "Your profile photo",
     "changePhotoAria": "Change your profile photo",
     "photoUploadFailed": "Couldn't upload that photo. Please try again.",

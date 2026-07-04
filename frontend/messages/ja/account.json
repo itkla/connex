@@ -10,10 +10,8 @@
   "AccountProfile": {
     "title": "プロフィール",
     "subtitle": "あなたの個人情報です。すべてのワークスペースで、チームメンバーにこの情報が表示されます。",
-    "photoLabel": "写真",
     "photoHint": "正方形の PNG・JPG・GIF がおすすめです。",
     "changePhoto": "写真を変更",
-    "removePhoto": "削除",
     "photoAlt": "あなたのプロフィール写真",
     "changePhotoAria": "プロフィール写真を変更",
     "photoUploadFailed": "写真をアップロードできませんでした。もう一度お試しください。",

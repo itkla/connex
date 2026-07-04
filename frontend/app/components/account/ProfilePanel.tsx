@@ -62,6 +62,8 @@ export default function ProfilePanel({ user }: Props) {
     const [timezone, setTimezone] = useState(user.timezone);
     const [photo, setPhoto] = useState<File | null>(null);
     const [photoPreview, setPhotoPreview] = useState<string | null>(null);
+    const [uploadedPhotoUrl, setUploadedPhotoUrl] = useState<string | null>(null);
+    const previewUrlRef = useRef<string | null>(null);
     const [submitting, setSubmitting] = useState(false);
     const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
 
@@ -75,9 +77,9 @@ export default function ProfilePanel({ user }: Props) {
 
     useEffect(() => {
         return () => {
-            if (photoPreview) URL.revokeObjectURL(photoPreview);
+            if (previewUrlRef.current) URL.revokeObjectURL(previewUrlRef.current);
         };
-    }, [photoPreview]);
+    }, []);
 
     const dirty =
         displayName.trim() !== user.displayName ||
@@ -86,11 +88,12 @@ export default function ProfilePanel({ user }: Props) {
         photo !== null;
 
     const selectPhoto = (file: File | null) => {
-        setPhotoPreview((prev) => {
-            if (prev) URL.revokeObjectURL(prev);
-            return file ? URL.createObjectURL(file) : null;
-        });
+        if (previewUrlRef.current) URL.revokeObjectURL(previewUrlRef.current);
+        const nextPreview = file ? URL.createObjectURL(file) : null;
+        previewUrlRef.current = nextPreview;
+        setPhotoPreview(nextPreview);
         setPhoto(file);
+        setUploadedPhotoUrl(null);
     };
 
     const reset = () => {
@@ -110,7 +113,8 @@ export default function ProfilePanel({ user }: Props) {
         try {
             let profilePictureUrl = user.profilePictureUrl;
             if (photo) {
-                profilePictureUrl = await uploadProfilePicture(photo);
+                profilePictureUrl = uploadedPhotoUrl ?? (await uploadProfilePicture(photo));
+                if (!uploadedPhotoUrl) setUploadedPhotoUrl(profilePictureUrl);
             }
 
             const profileChanged =
