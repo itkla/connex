@@ -148,7 +148,7 @@ export default async function Dashboard() {
     }).length;
 
     const currency = pickDominantCurrency(deals);
-    const currencyDeals = deals.filter((deal) => (deal.currency ?? 'USD') === currency);
+    const currencyDeals = deals.filter((deal) => (deal.currency || 'USD') === currency);
 
     const tempByCompanyId = new Map(companyTemps.map((temp) => [temp.id, temp]));
     const companyWarmthItems: CompanyWarmthItem[] = companies

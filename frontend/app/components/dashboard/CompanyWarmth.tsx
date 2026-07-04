@@ -17,9 +17,9 @@ export default function CompanyWarmth({ items }: { items: CompanyWarmthItem[] })
     return (
         <div className="flex h-full flex-col overflow-hidden rounded-2xl border border-border bg-card">
             {items.length === 0 ? (
-                <div className="flex flex-1 items-center justify-center px-4 py-10 text-center text-sm text-muted-foreground">
+                <p className="flex flex-1 items-center justify-center px-4 py-10 text-center text-sm text-muted-foreground">
                     {t('empty')}
-                </div>
+                </p>
             ) : (
                 <ul className="flex-1 divide-y divide-border">
                     {items.map(({ company, temp }) => (

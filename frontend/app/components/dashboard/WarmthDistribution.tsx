@@ -27,9 +27,9 @@ export default function WarmthDistribution({ temps }: WarmthDistributionProps) {
     return (
         <div className="flex h-full flex-col overflow-hidden rounded-2xl border border-border bg-card">
             {total === 0 ? (
-                <div className="flex flex-1 items-center justify-center px-4 py-10 text-center text-sm text-muted-foreground">
+                <p className="flex flex-1 items-center justify-center px-4 py-10 text-center text-sm text-muted-foreground">
                     {t('empty')}
-                </div>
+                </p>
             ) : (
                 <>
                     <div className="px-4 pt-4 pb-3">
