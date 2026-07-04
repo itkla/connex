@@ -89,6 +89,7 @@ public class TenantScopeInterceptor implements Interceptor {
         MAPPERS + "InviteMapper",
         MAPPERS + "MailConfigMapper",
         MAPPERS + "OrganizationMapper",
+        MAPPERS + "OrgMemberMapper",
         MAPPERS + "PasswordResetTokenMapper",
         MAPPERS + "PreferenceMapper",
         MAPPERS + "RegistrationVerificationTokenMapper",
@@ -105,10 +106,10 @@ public class TenantScopeInterceptor implements Interceptor {
      * Scoped statements that legitimately run with an unresolved context. Audit
      * writes happen during auth flows (before a workspace is pinned) and carry a
      * nullable {@code workspace_id} for system events. The role-permission read
-     * backs {@code WorkspaceService.permissionsFor} on auth-plane requests
-     * ({@code /api/auth/**} is excluded from tenant resolution — e.g. the SSO
-     * admin endpoints), where callers pass an explicit membership-validated
-     * workspace id and the statement itself anchors {@code workspace_id} in SQL.
+     * backs {@code WorkspaceService.permissionsFor}, which any auth-plane request
+     * ({@code /api/auth/**} is excluded from tenant resolution) may reach with an
+     * explicit membership-validated workspace id; the statement itself anchors
+     * {@code workspace_id} in SQL, so it is safe without a resolved context.
      */
     private static final Set<String> EXEMPT_STATEMENTS = Set.of(
         MAPPERS + "AuditLogMapper.insert",

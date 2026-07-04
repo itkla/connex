@@ -36,6 +36,13 @@ public enum Permission {
     AUDIT_READ,
     WORKSPACE_SETTINGS,
     RULE_MANAGE,
+    /**
+     * Inert. SSO is org-scoped configuration, authorized against org membership
+     * (see {@code OrgMemberService.requireOrgAdmin}), not this workspace-level
+     * permission. Retained only so stored custom-role rows referencing it still
+     * parse; it is excluded from the grantable catalog and must never gate an
+     * endpoint again — doing so re-opens the #316 escalation.
+     */
     SSO_MANAGE,
     WORKSPACE_DELETE
 }

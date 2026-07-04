@@ -13,6 +13,7 @@ import ooo.klae.connex.backend.dto.SsoConnectionDto;
 import ooo.klae.connex.backend.dto.SsoConnectionRequest;
 import ooo.klae.connex.backend.dto.SsoDiscoveryDto;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
+import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.mappers.SsoConnectionMapper;
 import ooo.klae.connex.backend.mappers.SsoDomainMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
@@ -23,14 +24,16 @@ import ooo.klae.connex.backend.sso.SamlSpKeyMaterial;
 import ooo.klae.connex.backend.sso.SsoProperties;
 import ooo.klae.connex.backend.sso.SsoSecretCipher;
 import ooo.klae.connex.backend.sso.SsoUrlSafety;
-import ooo.klae.connex.backend.tenant.Permission;
 
 /**
- * Owner/admin management of an organization's SSO/IdP connection ({@code SSO_MANAGE}).
- * One connection per organization, resolved from the acting workspace's org. The
- * OIDC client secret is encrypted at rest and never returned; a blank secret on save
- * keeps the stored one. Email-domain routing is replaced wholesale on each save.
- * The org-scoped accessors and domain lookup back the login flow added in a later phase.
+ * Org-administrator management of an organization's SSO/IdP connection. SSO is
+ * org-scoped configuration, so read and upsert require org admin/owner
+ * ({@code OrgMemberService}) on the acting workspace's organization — not a
+ * workspace-level permission, which a workspace owner could otherwise obtain by
+ * creating a workspace inside the org (#316). One connection per organization.
+ * The OIDC client secret is encrypted at rest and never returned; a blank secret
+ * on save keeps the stored one. Email-domain routing is replaced wholesale on each
+ * save. The org-scoped accessors and domain lookup back the login flow.
  */
 @Service
 @RequiredArgsConstructor
@@ -45,6 +48,7 @@ public class SsoConnectionService {
     private final SsoDomainMapper ssoDomainMapper;
     private final WorkspaceMapper workspaceMapper;
     private final WorkspaceService workspaceService;
+    private final OrgMemberService orgMemberService;
     private final SsoSecretCipher ssoSecretCipher;
     private final SamlSpCredentialFactory samlSpCredentialFactory;
     private final SsoProperties ssoProperties;
@@ -60,9 +64,23 @@ public class SsoConnectionService {
      * @return the connection view (unconfigured default when none exists)
      */
     public SsoConnectionDto getForWorkspace(int workspaceId, int actorId) {
-        workspaceService.requirePermission(workspaceId, actorId, Permission.SSO_MANAGE);
-        int orgId = workspaceService.getOrgId(workspaceId);
+        int orgId = requireAdministrableOrg(workspaceId, actorId);
         return SsoConnectionDto.from(ssoConnectionMapper.findByOrg(orgId), ssoDomainMapper.listByOrg(orgId));
+    }
+
+    /**
+     * Resolves the workspace's organization and requires the actor to administer it.
+     * A workspace the actor cannot administer and a workspace that does not exist
+     * both yield {@link ForbiddenException}, so the endpoint is not a workspace-id
+     * existence oracle for an authenticated non-member.
+     */
+    private int requireAdministrableOrg(int workspaceId, int actorId) {
+        Integer orgId = workspaceMapper.getOrgId(workspaceId);
+        if (orgId == null) {
+            throw new ForbiddenException("Requires an organization administrator role");
+        }
+        orgMemberService.requireOrgAdmin(orgId, actorId);
+        return orgId;
     }
 
     /**
@@ -77,11 +95,10 @@ public class SsoConnectionService {
      */
     @Transactional
     public SsoConnectionDto save(int workspaceId, int actorId, SsoConnectionRequest request) {
-        workspaceService.requirePermission(workspaceId, actorId, Permission.SSO_MANAGE);
+        int orgId = requireAdministrableOrg(workspaceId, actorId);
         if (!ssoProperties.isEnabled()) {
             throw new BadRequestException("Single sign-on is not enabled on this instance");
         }
-        int orgId = workspaceService.getOrgId(workspaceId);
 
         String protocol = request.getProtocol().trim().toLowerCase();
         String role = resolveRole(request.getDefaultRole());

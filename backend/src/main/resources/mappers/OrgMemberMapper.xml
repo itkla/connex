@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="ooo.klae.connex.backend.mappers.OrgMemberMapper">
+
+  <select id="getRole" resultType="string">
+    SELECT org_role FROM org_member WHERE org_id = #{orgId} AND user_id = #{userId}
+  </select>
+
+  <select id="isMember" resultType="boolean">
+    SELECT EXISTS(SELECT 1 FROM org_member WHERE org_id = #{orgId} AND user_id = #{userId})
+  </select>
+
+  <insert id="addMember">
+    INSERT INTO org_member (org_id, user_id, org_role)
+    VALUES (#{orgId}, #{userId}, #{orgRole})
+    ON DUPLICATE KEY UPDATE org_role = #{orgRole}
+  </insert>
+
+  <update id="updateRole">
+    UPDATE org_member SET org_role = #{orgRole} WHERE org_id = #{orgId} AND user_id = #{userId}
+  </update>
+
+  <delete id="removeMember">
+    DELETE FROM org_member WHERE org_id = #{orgId} AND user_id = #{userId}
+  </delete>
+
+  <select id="countOwners" resultType="int">
+    SELECT COUNT(*) FROM org_member WHERE org_id = #{orgId} AND org_role = 'owner'
+  </select>
+
+  <!-- Locks every owner row of the org for the duration of the transaction so the
+       last-owner guard is a serialized read-then-mutate, not a racy check-then-act. -->
+  <select id="lockOwnerIds" resultType="int">
+    SELECT user_id FROM org_member WHERE org_id = #{orgId} AND org_role = 'owner' FOR UPDATE
+  </select>
+
+  <select id="getMembers" resultType="ooo.klae.connex.backend.dto.OrgMemberDto">
+    SELECT u.id, u.username, u.display_name AS displayName, u.email,
+           u.profile_picture_url AS profilePictureUrl, om.org_role AS orgRole
+    FROM app_user u
+    JOIN org_member om ON om.user_id = u.id
+    WHERE om.org_id = #{orgId}
+    ORDER BY FIELD(om.org_role, 'owner', 'admin'), u.display_name, u.id
+  </select>
+
+  <select id="getMembershipsForUser" resultType="ooo.klae.connex.backend.dto.OrgMembershipDto">
+    SELECT o.id, o.name, o.slug, om.org_role AS orgRole
+    FROM organization o
+    JOIN org_member om ON om.org_id = o.id
+    WHERE om.user_id = #{userId}
+    ORDER BY o.name, o.id
+  </select>
+</mapper>

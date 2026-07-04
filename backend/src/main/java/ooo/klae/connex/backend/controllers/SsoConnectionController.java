@@ -19,10 +19,10 @@ import ooo.klae.connex.backend.services.SsoConnectionService;
 
 /**
  * SSO connection endpoints for an organization: the pre-login domain discovery the login
- * screen uses to route to an IdP, plus owner/admin read and upsert of the connection,
+ * screen uses to route to an IdP, plus org-administrator read and upsert of the connection,
  * addressed by the acting workspace. Discovery is unauthenticated and returns only
- * domain-level routing; {@code SSO_MANAGE} is enforced in the service for read/upsert,
- * which resolves the workspace's organization.
+ * domain-level routing; read/upsert require org admin/owner on the workspace's organization,
+ * enforced in the service.
  */
 @RestController
 @RequestMapping("/api/auth/sso")

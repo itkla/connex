@@ -12,6 +12,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.beans.Notification;
@@ -42,6 +43,7 @@ import ooo.klae.connex.backend.tenant.TenantContext;
 public class WorkspaceService {
     private final WorkspaceMapper workspaceMapper;
     private final OrganizationMapper organizationMapper;
+    private final OrgMemberService orgMemberService;
     private final RoleMapper roleMapper;
     private final NotificationDelivery notificationDelivery;
     private final TenantContext tenantContext;
@@ -173,7 +175,8 @@ public class WorkspaceService {
         return provisionWorkspace(name, ownerUserId);
     }
 
-    private WorkspaceMembershipDto provisionWorkspace(String name, int ownerUserId) {
+    @Transactional
+    WorkspaceMembershipDto provisionWorkspace(String name, int ownerUserId) {
         Workspace workspace = new Workspace();
         workspace.setOrgId(orgIdForOwner(ownerUserId, name));
         workspace.setName(name.trim());
@@ -203,6 +206,7 @@ public class WorkspaceService {
         organization.setName(name.trim());
         organization.setSlug(generateSlug(name));
         organizationMapper.insert(organization);
+        orgMemberService.addFoundingOwner(organization.getId(), ownerUserId);
         return organization.getId();
     }
 
