@@ -131,7 +131,8 @@ sub-partitions inside an org. Decisions locked 2026-07-03 (recorded on #313):
 - **Enforced seams:** (1) share grants are `INSERT..SELECT` with an ownership + same-org ceiling in SQL —
   0 affected rows means structurally refused (`ShareMapperTest`), and `ShareService` additionally throws;
   (2) **workspace→org placement**: a new workspace joins the active workspace's org only when its creator
-  is owner/admin there, otherwise it mints a fresh org — a guest membership can never pull a personal
+  holds `WORKSPACE_SETTINGS` there (built-in owner/admin, or a custom role granting it — checked live via
+  the permission catalog), otherwise it mints a fresh org — a guest membership can never pull a personal
   workspace (and org-wide reach like `SSO_MANAGE`) into the host org (`WorkspaceOrgPlacementTest`);
   (3) `TenantResolutionInterceptor` derives `TenantContext.orgId` from validated membership, never from
   the client.

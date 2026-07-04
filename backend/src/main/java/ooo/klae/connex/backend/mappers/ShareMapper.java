@@ -11,10 +11,10 @@ import ooo.klae.connex.backend.dto.ShareDto;
  * Every statement anchors on the owning workspace in SQL, and share grants
  * additionally enforce the same-organization ceiling structurally: a grant whose
  * record is not owned by {@code workspaceId} or whose target workspace belongs to
- * a different organization inserts nothing and returns 0 (under the driver's
- * found-rows semantics an unchanged re-grant still returns 1, so 0 is
- * unambiguous refusal). ShareService turns refusals into errors and checks
- * target membership.
+ * a different organization inserts nothing and returns 0. Because upsert row
+ * counts are driver-dependent, the {@code *ShareExists} probes let ShareService
+ * distinguish an idempotent re-grant from a refusal before erroring; it also
+ * checks target membership.
  */
 public interface ShareMapper {
     boolean ownsCompany(@Param("workspaceId") int workspaceId, @Param("id") int id);
@@ -30,6 +30,13 @@ public interface ShareMapper {
     int sharePipeline(@Param("id") int id, @Param("workspaceId") int workspaceId,
             @Param("targetWorkspaceId") int targetWorkspaceId,
             @Param("grantedBy") int grantedBy, @Param("canEdit") boolean canEdit);
+
+    boolean companyShareExists(@Param("id") int id, @Param("workspaceId") int workspaceId,
+            @Param("targetWorkspaceId") int targetWorkspaceId);
+    boolean personShareExists(@Param("id") int id, @Param("workspaceId") int workspaceId,
+            @Param("targetWorkspaceId") int targetWorkspaceId);
+    boolean pipelineShareExists(@Param("id") int id, @Param("workspaceId") int workspaceId,
+            @Param("targetWorkspaceId") int targetWorkspaceId);
 
     int unshareCompany(@Param("id") int id, @Param("workspaceId") int workspaceId,
             @Param("targetWorkspaceId") int targetWorkspaceId);

@@ -60,7 +60,7 @@ public class ShareService {
             case PERSON -> shareMapper.sharePerson(entityId, workspaceId, targetWorkspaceId, actorId, canEdit);
             case PIPELINE -> shareMapper.sharePipeline(entityId, workspaceId, targetWorkspaceId, actorId, canEdit);
         };
-        if (granted == 0) {
+        if (granted == 0 && !shareExists(type, entityId, workspaceId, targetWorkspaceId)) {
             throw new ForbiddenException("A record can only be shared by its owning workspace within its organization");
         }
         auditService.record("workspace.share", type.name().toLowerCase(), entityId, null,
@@ -80,6 +80,19 @@ public class ShareService {
         }
         auditService.record("workspace.unshare", type.name().toLowerCase(), entityId, null,
                 "Stopped sharing with workspace " + targetWorkspaceId, null);
+    }
+
+    /**
+     * Whether the grant row exists, distinguishing an idempotent re-grant (some
+     * drivers report 0 affected rows for an unchanged upsert) from a grant the
+     * SQL ceiling refused.
+     */
+    private boolean shareExists(Type type, int entityId, int workspaceId, int targetWorkspaceId) {
+        return switch (type) {
+            case COMPANY -> shareMapper.companyShareExists(entityId, workspaceId, targetWorkspaceId);
+            case PERSON -> shareMapper.personShareExists(entityId, workspaceId, targetWorkspaceId);
+            case PIPELINE -> shareMapper.pipelineShareExists(entityId, workspaceId, targetWorkspaceId);
+        };
     }
 
     private void requireOwned(Type type, int workspaceId, int entityId) {

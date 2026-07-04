@@ -185,8 +185,9 @@ public class WorkspaceService {
 
     /**
      * The organization a new workspace for {@code ownerUserId} joins. The active
-     * workspace's organization is reused only when the creator holds the owner or
-     * admin built-in role there — the org is the customer boundary, and expanding
+     * workspace's organization is reused only when the creator holds
+     * {@link Permission#WORKSPACE_SETTINGS} there (built-in owner/admin, or a
+     * custom role granting it) — the org is the customer boundary, and expanding
      * it is an administrative act. In every other case (registration, bootstrap,
      * or a creator who is merely a member of the active workspace, e.g. an external
      * collaborator inside a client's org) the workspace gets a freshly created
@@ -207,8 +208,9 @@ public class WorkspaceService {
 
     /**
      * The active workspace's organization when the resolved tenant context belongs
-     * to {@code creatorUserId} and carries the owner or admin built-in role, or
-     * null when no such administrative context applies.
+     * to {@code creatorUserId} and their effective permissions there include
+     * {@link Permission#WORKSPACE_SETTINGS}, or null when no such administrative
+     * context applies.
      */
     private Integer activeOrgIdIfAdministrator(int creatorUserId) {
         if (!tenantContext.isResolved()) {
@@ -218,8 +220,9 @@ public class WorkspaceService {
         if (contextUserId == null || contextUserId != creatorUserId) {
             return null;
         }
-        Role role = Role.of(tenantContext.getRole());
-        if (role != Role.OWNER && role != Role.ADMIN) {
+        Integer workspaceId = tenantContext.getWorkspaceId();
+        if (workspaceId == null
+                || !permissionsFor(workspaceId, creatorUserId).contains(Permission.WORKSPACE_SETTINGS)) {
             return null;
         }
         return tenantContext.getOrgId();

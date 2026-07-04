@@ -17,10 +17,10 @@
        invariants (defense-in-depth below ShareService): the record must be owned by
        the acting workspace, and the target workspace must be in the SAME organization
        (cross-org sharing is structurally forbidden, MULTITENANCY_PLAN §0.5). A grant
-       violating either inserts nothing and returns 0. Under Connector/J's default
-       found-rows semantics an idempotent unchanged re-grant still returns 1, so a
-       zero return unambiguously means the ceiling refused (ShareMapperTest locks
-       this) and ShareService treats it as forbidden. -->
+       violating either inserts nothing and returns 0. Row counts are driver-
+       dependent (an unchanged re-grant reports 1 under found-rows semantics but 0
+       under affected-rows), so ShareService confirms via the *ShareExists probes
+       before treating 0 as a refusal — the contract holds under either setting. -->
   <insert id="shareCompany">
     INSERT INTO company_share (company_id, workspace_id, granted_by, can_edit)
     SELECT c.id, tw.id, #{grantedBy}, #{canEdit}
@@ -48,6 +48,28 @@
     WHERE pl.id = #{id} AND pl.workspace_id = #{workspaceId}
     ON DUPLICATE KEY UPDATE can_edit = #{canEdit}, granted_by = #{grantedBy}
   </insert>
+
+  <!-- Existence probes (owner-anchored) let ShareService distinguish an idempotent
+       re-grant from a refused grant without depending on driver affected-rows
+       semantics. -->
+  <select id="companyShareExists" resultType="boolean">
+    SELECT EXISTS(
+      SELECT 1 FROM company_share s
+      JOIN company c ON c.id = s.company_id AND c.workspace_id = #{workspaceId}
+      WHERE s.company_id = #{id} AND s.workspace_id = #{targetWorkspaceId})
+  </select>
+  <select id="personShareExists" resultType="boolean">
+    SELECT EXISTS(
+      SELECT 1 FROM person_share s
+      JOIN person p ON p.id = s.person_id AND p.workspace_id = #{workspaceId}
+      WHERE s.person_id = #{id} AND s.workspace_id = #{targetWorkspaceId})
+  </select>
+  <select id="pipelineShareExists" resultType="boolean">
+    SELECT EXISTS(
+      SELECT 1 FROM pipeline_share s
+      JOIN pipeline pl ON pl.id = s.pipeline_id AND pl.workspace_id = #{workspaceId}
+      WHERE s.pipeline_id = #{id} AND s.workspace_id = #{targetWorkspaceId})
+  </select>
 
   <!-- Revocation and listing anchor on the owning workspace in SQL, so a share row
        is only ever touched or read through the workspace that owns the record. -->

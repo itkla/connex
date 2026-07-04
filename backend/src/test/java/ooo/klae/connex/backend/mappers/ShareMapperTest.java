@@ -105,7 +105,8 @@ class ShareMapperTest extends AbstractMapperTest {
 
         assertEquals(1, again,
             "under the driver's found-rows semantics an unchanged re-grant still reports the matched "
-                + "row, so a zero return unambiguously means the SQL ceiling refused the grant");
+                + "row; ShareService additionally probes existence so the refusal contract survives "
+                + "an affected-rows driver setting");
         assertTrue(companyMapper.exists(sibling.getId(), company.getId()),
             "the grant survives the idempotent re-grant");
     }

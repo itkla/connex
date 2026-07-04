@@ -88,7 +88,10 @@ public class RoleService {
         List<String> valid = new ArrayList<>();
         for (String value : raw) {
             try {
-                valid.add(Permission.valueOf(value).name());
+                String name = Permission.valueOf(value).name();
+                if (!valid.contains(name)) {
+                    valid.add(name);
+                }
             } catch (IllegalArgumentException e) {
                 throw new BadRequestException("Unknown permission: " + value);
             }
