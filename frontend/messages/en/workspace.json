@@ -447,6 +447,8 @@
     "samlMetadata": "IdP metadata XML",
     "samlMetadataHint": "Paste the IdP metadata, or provide the entity ID, sign-on URL, and certificate below.",
     "samlX509": "IdP signing certificate",
+    "samlSpCert": "Connex SP certificate",
+    "samlSpCertHint": "Give this certificate to your IdP so it can verify Connex's signed requests. Generated automatically when you save.",
     "domains": "Email domains",
     "domainsHint": "One domain per line. Members with these email domains are routed to this IdP.",
     "save": "Save",

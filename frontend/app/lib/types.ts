@@ -1191,6 +1191,7 @@ export type SsoConnectionDto = {
     samlSsoUrl: string | null;
     samlIdpMetadataXml: string | null;
     samlIdpX509: string | null;
+    samlSpCertificate: string | null;
     domains: string[];
     updatedAt: string | null;
 };

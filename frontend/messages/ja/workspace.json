@@ -447,6 +447,8 @@
     "samlMetadata": "IdP メタデータ XML",
     "samlMetadataHint": "IdP のメタデータを貼り付けるか、下にエンティティ ID・サインオン URL・証明書を入力してください。",
     "samlX509": "IdP 署名証明書",
+    "samlSpCert": "Connex SP 証明書",
+    "samlSpCertHint": "IdP が Connex の署名付きリクエストを検証できるよう、この証明書を IdP に登録してください。保存時に自動生成されます。",
     "domains": "メールドメイン",
     "domainsHint": "1 行に 1 ドメイン。これらのメールドメインのメンバーがこの IdP にルーティングされます。",
     "save": "保存",

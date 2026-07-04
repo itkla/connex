@@ -70,6 +70,7 @@ export default function SsoPanel() {
 
     const [form, setForm] = useState<FormState | null>(null);
     const [hasClientSecret, setHasClientSecret] = useState(false);
+    const [spCertificate, setSpCertificate] = useState<string | null>(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(false);
     const [accessDenied, setAccessDenied] = useState(false);
@@ -88,6 +89,7 @@ export default function SsoPanel() {
                 if (cancelled) return;
                 setForm(toForm(config, activeWorkspaceId));
                 setHasClientSecret(config.hasClientSecret);
+                setSpCertificate(config.samlSpCertificate);
             } catch (err) {
                 if (cancelled) return;
                 if (err instanceof Error && "status" in err && (err as { status?: number }).status === 403) {
@@ -138,6 +140,7 @@ export default function SsoPanel() {
             const saved = await saveSsoConfig(activeWorkspaceId, buildRequest(form));
             setForm(toForm(saved, activeWorkspaceId));
             setHasClientSecret(saved.hasClientSecret);
+            setSpCertificate(saved.samlSpCertificate);
             toastSuccess(t("saved"));
         } catch (err) {
             toastError(err instanceof Error ? err.message : t("saveFailed"));
@@ -337,6 +340,19 @@ export default function SsoPanel() {
                                         onChange={(e) => set("samlIdpX509", e.target.value)}
                                     />
                                 </div>
+                                {spCertificate && (
+                                    <div className="space-y-1.5">
+                                        <Label htmlFor="sso-sp-cert">{t("samlSpCert")}</Label>
+                                        <Textarea
+                                            id="sso-sp-cert"
+                                            readOnly
+                                            rows={4}
+                                            className="font-mono text-xs"
+                                            value={spCertificate}
+                                        />
+                                        <p className="text-xs text-muted-foreground">{t("samlSpCertHint")}</p>
+                                    </div>
+                                )}
                             </div>
                         )}
 
