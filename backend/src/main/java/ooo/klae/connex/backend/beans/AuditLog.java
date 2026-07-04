@@ -10,6 +10,7 @@ import lombok.NoArgsConstructor;
 public class AuditLog {
     private int id;
     private Integer workspaceId;
+    private Integer orgId;
     private String action;
     private String entityType;
     private Integer entityId;
@@ -41,6 +42,14 @@ public class AuditLog {
 
     public void setWorkspaceId(Integer workspaceId) {
         this.workspaceId = workspaceId;
+    }
+
+    public Integer getOrgId() {
+        return orgId;
+    }
+
+    public void setOrgId(Integer orgId) {
+        this.orgId = orgId;
     }
 
     public String getAction() {
