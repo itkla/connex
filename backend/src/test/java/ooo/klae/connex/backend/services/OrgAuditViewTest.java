@@ -11,6 +11,7 @@ import ooo.klae.connex.backend.beans.AuditLog;
 import ooo.klae.connex.backend.beans.Organization;
 import ooo.klae.connex.backend.mappers.OrgMemberMapper;
 import ooo.klae.connex.backend.mappers.OrganizationMapper;
+import ooo.klae.connex.backend.tenant.TenantContext;
 
 /**
  * The org audit trail (#316): an org-level action is attributed to its organization ({@code org_id})
@@ -22,6 +23,7 @@ class OrgAuditViewTest extends AbstractServiceTest {
     @Autowired private OrgAllowedDomainService orgAllowedDomainService;
     @Autowired private OrgMemberMapper orgMemberMapper;
     @Autowired private OrganizationMapper organizationMapper;
+    @Autowired private TenantContext tenantContext;
 
     @Test
     void orgActionIsAttributedToItsOrgAndVisibleInTheTrail() {
@@ -34,6 +36,22 @@ class OrgAuditViewTest extends AbstractServiceTest {
         assertTrue(events.stream().anyMatch(e -> "org.allowed_domain.add".equals(e.getAction())
                 && Integer.valueOf(orgId).equals(e.getOrgId()) && e.getWorkspaceId() == null),
             "an org-level action must be attributed to its org (and no workspace) and appear in the org audit trail");
+    }
+
+    @Test
+    void workspaceRecordActionsDoNotLeakIntoTheOrgTrail() {
+        int orgId = workspaceMapper.getOrgId(workspace.getId());
+        orgMemberMapper.addMember(orgId, currentUser.getId(), "owner");
+        tenantContext.set(workspace.getId(), orgId, currentUser.getId(), "owner");
+        try {
+            auditService.record("company.update", "company", 123, "Acme", "Changed a workspace record", null);
+        } finally {
+            tenantContext.clear();
+        }
+
+        assertTrue(auditService.recentForOrg(orgId, 50, 0).stream()
+                .noneMatch(e -> "company.update".equals(e.getAction())),
+            "a workspace record action (org_id set, workspace_id set) must not leak into the org-plane trail");
     }
 
     @Test

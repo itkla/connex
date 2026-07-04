@@ -59,14 +59,17 @@
     LIMIT #{limit} OFFSET #{offset}
   </select>
 
-  <!-- Org-scoped audit read: filters on org_id (not workspace_id), gated by org membership in the
-       service; exempt from the workspace-predicate arch scan and the fail-closed workspace-context
-       requirement for exactly that reason. -->
+  <!-- Org-scoped audit read: ORG-PLANE governance events only (SSO, org membership, allowed domains
+       — org-entity actions carry org_id and a null workspace_id). Workspace record events are NOT
+       surfaced here; they stay in the per-workspace audit gated by AUDIT_READ, so an org admin
+       cannot read workspace record diffs they have no workspace role for. Filters on org_id (not
+       workspace_id), gated by org membership in the service; exempt from the workspace-predicate arch
+       scan and the fail-closed workspace-context requirement for exactly that reason. -->
   <select id="findRecentByOrg" resultMap="AuditLogResult">
     SELECT <include refid="auditColumns"/>
     FROM audit_log al
     LEFT JOIN app_user u ON u.id = al.actor_id
-    WHERE al.org_id = #{orgId}
+    WHERE al.org_id = #{orgId} AND al.workspace_id IS NULL
     ORDER BY al.created_at DESC, al.id DESC
     LIMIT #{limit} OFFSET #{offset}
   </select>

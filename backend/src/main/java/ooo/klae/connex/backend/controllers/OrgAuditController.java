@@ -15,9 +15,10 @@ import ooo.klae.connex.backend.services.AuthService;
 import ooo.klae.connex.backend.services.OrgMemberService;
 
 /**
- * The organization's audit trail (#316): org-scoped events (SSO config, org membership, allowed
- * domains, and every workspace action's org attribution), gated on org admin/owner. Distinct from
- * the workspace audit log ({@code /api/audit}), which is workspace-scoped.
+ * The organization's audit trail (#316): org-plane governance events — SSO config, org membership,
+ * and allowed domains — gated on org admin/owner. Workspace record events are NOT included; they
+ * stay in the per-workspace audit ({@code /api/audit}) gated by {@code AUDIT_READ}, so org-plane
+ * administration cannot read workspace content it has no workspace role for.
  */
 @RestController
 @RequestMapping("/api/orgs/{orgId}/audit")
