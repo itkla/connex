@@ -3,6 +3,8 @@ package ooo.klae.connex.backend.sso;
 import java.util.Arrays;
 import java.util.concurrent.ConcurrentHashMap;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.security.oauth2.client.registration.ClientRegistration;
 import org.springframework.security.oauth2.client.registration.ClientRegistrationRepository;
 import org.springframework.security.oauth2.client.registration.ClientRegistrations;
@@ -27,11 +29,14 @@ import ooo.klae.connex.backend.mappers.SsoConnectionMapper;
 @RequiredArgsConstructor
 public class DbClientRegistrationRepository implements ClientRegistrationRepository {
 
+    private static final Logger log = LoggerFactory.getLogger(DbClientRegistrationRepository.class);
+
     private static final String REGISTRATION_PREFIX = "org-";
     private static final String[] DEFAULT_SCOPES = { "openid", "email", "profile" };
 
     private final SsoConnectionMapper ssoConnectionMapper;
     private final SsoSecretCipher ssoSecretCipher;
+    private final SsoProperties ssoProperties;
 
     private final ConcurrentHashMap<String, ClientRegistration> cache = new ConcurrentHashMap<>();
 
@@ -47,6 +52,10 @@ public class DbClientRegistrationRepository implements ClientRegistrationReposit
         }
         SsoConnection connection = ssoConnectionMapper.findByOrg(orgId);
         if (connection == null || !connection.isEnabled() || !"oidc".equals(connection.getProtocol())) {
+            return null;
+        }
+        if (!SsoUrlSafety.isFetchableHttpUrl(connection.getOidcIssuer(), ssoProperties.isAllowPrivateIssuerHosts())) {
+            log.warn("OIDC issuer for org {} is not a permitted public URL; skipping", orgId);
             return null;
         }
         ClientRegistration registration = build(registrationId, connection);

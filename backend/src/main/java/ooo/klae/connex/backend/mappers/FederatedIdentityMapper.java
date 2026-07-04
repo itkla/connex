@@ -16,6 +16,12 @@ public interface FederatedIdentityMapper {
     FederatedIdentity findByProviderIssuerSubject(@Param("provider") String provider,
             @Param("issuer") String issuer, @Param("subject") String subject);
 
+    FederatedIdentity findByOrgProviderIssuerSubject(@Param("orgId") int orgId,
+            @Param("provider") String provider, @Param("issuer") String issuer,
+            @Param("subject") String subject);
+
+    int countByUserIdExcludingOrg(@Param("userId") int userId, @Param("orgId") int orgId);
+
     int insert(FederatedIdentity identity);
 
     int touchLogin(int id);

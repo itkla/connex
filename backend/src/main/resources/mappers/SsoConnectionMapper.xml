@@ -7,8 +7,9 @@
     id, org_id, protocol, enabled, enforce_sso, jit_workspace_id, default_role,
     oidc_issuer, oidc_client_id, oidc_client_secret_enc, oidc_scopes,
     saml_idp_entity_id, saml_sso_url, saml_idp_metadata_xml, saml_idp_x509,
+    saml_sp_private_key_enc, saml_sp_certificate,
     created_at, updated_at
-  </sql>
+</sql>
 
   <select id="findByOrg" resultType="SsoConnection">
     SELECT <include refid="columns"/>
@@ -26,11 +27,13 @@
     INSERT INTO sso_connection
       (org_id, protocol, enabled, enforce_sso, jit_workspace_id, default_role,
        oidc_issuer, oidc_client_id, oidc_client_secret_enc, oidc_scopes,
-       saml_idp_entity_id, saml_sso_url, saml_idp_metadata_xml, saml_idp_x509)
+       saml_idp_entity_id, saml_sso_url, saml_idp_metadata_xml, saml_idp_x509,
+       saml_sp_private_key_enc, saml_sp_certificate)
     VALUES
       (#{orgId}, #{protocol}, #{enabled}, #{enforceSso}, #{jitWorkspaceId}, #{defaultRole},
        #{oidcIssuer}, #{oidcClientId}, #{oidcClientSecretEnc}, #{oidcScopes},
-       #{samlIdpEntityId}, #{samlSsoUrl}, #{samlIdpMetadataXml}, #{samlIdpX509})
+       #{samlIdpEntityId}, #{samlSsoUrl}, #{samlIdpMetadataXml}, #{samlIdpX509},
+       #{samlSpPrivateKeyEnc}, #{samlSpCertificate})
     ON DUPLICATE KEY UPDATE
       protocol = VALUES(protocol),
       enabled = VALUES(enabled),
@@ -44,7 +47,9 @@
       saml_idp_entity_id = VALUES(saml_idp_entity_id),
       saml_sso_url = VALUES(saml_sso_url),
       saml_idp_metadata_xml = VALUES(saml_idp_metadata_xml),
-      saml_idp_x509 = VALUES(saml_idp_x509)
+      saml_idp_x509 = VALUES(saml_idp_x509),
+      saml_sp_private_key_enc = COALESCE(#{samlSpPrivateKeyEnc}, saml_sp_private_key_enc),
+      saml_sp_certificate = COALESCE(#{samlSpCertificate}, saml_sp_certificate)
   </insert>
 
   <delete id="deleteByOrg">

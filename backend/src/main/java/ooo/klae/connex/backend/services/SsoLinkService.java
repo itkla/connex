@@ -77,8 +77,9 @@ public class SsoLinkService {
 
     /**
      * Confirms ownership of the challenged account by verifying the supplied password, then
-     * links the IdP identity and establishes a session. IP-rate-limited first because it is an
-     * online password oracle. Nothing is written and no session is established on any failure:
+     * links the IdP identity and establishes a session. Rate-limited per client IP and per
+     * challenged account because it is an online password oracle. Nothing is written and no
+     * session is established on any failure:
      * a missing/consumed/expired challenge is a non-enumerating 404, a wrong password records a
      * limiter failure and is a 401 that leaves the challenge redeemable.
      * @param rawToken the raw token from the linking redirect
@@ -105,9 +106,15 @@ public class SsoLinkService {
         }
 
         User user = userMapper.getUserById(challenge.getUserId());
-        if (user == null || user.getPassword() == null
-                || !passwordEncoder.matches(password, user.getPassword())) {
-            loginRateLimiter.recordFailure(clientIp, null, now);
+        if (user == null) {
+            throw new ResourceNotFoundException("This link is invalid or has expired");
+        }
+        String username = user.getUsername();
+        if (loginRateLimiter.isBlocked(clientIp, username, now)) {
+            throw new TooManyRequestsException("Too many attempts. Please try again later.");
+        }
+        if (user.getPassword() == null || !passwordEncoder.matches(password, user.getPassword())) {
+            loginRateLimiter.recordFailure(clientIp, username, now);
             throw new BadCredentialsException("Incorrect password");
         }
 
@@ -115,6 +122,7 @@ public class SsoLinkService {
             throw new ResourceNotFoundException("This link is invalid or has expired");
         }
 
+        loginRateLimiter.recordSuccess(username);
         linkIdentity(challenge, user.getId());
         return authService.establishAuthenticatedSession(user, httpRequest, httpResponse);
     }

@@ -14,27 +14,31 @@ import org.springframework.beans.factory.annotation.Autowired;
 import ooo.klae.connex.backend.beans.FederatedIdentity;
 import ooo.klae.connex.backend.beans.SsoConnection;
 import ooo.klae.connex.backend.beans.User;
+import ooo.klae.connex.backend.dto.WorkspaceMembershipDto;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
-import ooo.klae.connex.backend.mappers.AllowedDomainMapper;
 import ooo.klae.connex.backend.mappers.FederatedIdentityMapper;
 import ooo.klae.connex.backend.mappers.SsoConnectionMapper;
+import ooo.klae.connex.backend.mappers.SsoDomainMapper;
 
 /**
- * Exercises the SSO federation core against real mappers: a returning identity signs in,
- * a verified email colliding with a password account demands explicit linking, a new
- * allowed-domain email is provisioned and JIT-joined, and a disallowed domain is refused
+ * Exercises the SSO federation core against real mappers, with emphasis on the tenant-isolation
+ * invariants: identity matching is org-scoped, every email-based resolution requires a verified
+ * email whose domain the organization owns in its {@code sso_domain} list, an existing password
+ * account demands explicit linking, and an account federated to another organization is never
+ * claimed. New allowed-domain emails are provisioned and JIT-joined; everything else is refused
  * with nothing written.
  */
 class SsoLoginServiceTest extends AbstractServiceTest {
 
     private static final String PROVIDER = "oidc";
     private static final String ISSUER = "https://idp.example.com";
-    private static final String ALLOWED_DOMAIN = "allowed.example.com";
+    private static final String OWNED_DOMAIN = "example.com";
 
     @Autowired private SsoLoginService ssoLoginService;
     @Autowired private SsoConnectionMapper ssoConnectionMapper;
     @Autowired private FederatedIdentityMapper federatedIdentityMapper;
-    @Autowired private AllowedDomainMapper allowedDomainMapper;
+    @Autowired private SsoDomainMapper ssoDomainMapper;
+    @Autowired private WorkspaceService workspaceService;
 
     private int orgId;
 
@@ -52,7 +56,19 @@ class SsoLoginServiceTest extends AbstractServiceTest {
         connection.setOidcClientId("client-abc");
         connection.setOidcScopes("openid,email,profile");
         ssoConnectionMapper.upsert(connection);
-        allowedDomainMapper.add(workspace.getId(), ALLOWED_DOMAIN);
+        ssoDomainMapper.insert(OWNED_DOMAIN, orgId);
+    }
+
+    private User provisionlessUser(String email) {
+        User user = new User();
+        user.setUsername("sso-" + email.replaceAll("[^a-z0-9]", ""));
+        user.setDisplayName(email);
+        user.setEmail(email);
+        user.setEmailVerified(true);
+        user.setTimezone("UTC");
+        user.setPasswordHash(null);
+        userMapper.insert(user);
+        return user;
     }
 
     @Test
@@ -77,6 +93,26 @@ class SsoLoginServiceTest extends AbstractServiceTest {
     }
 
     @Test
+    void identityFromAnotherOrg_isNotMatched() {
+        User otherOwner = provisionlessUser("owner-" + unique() + "@other.example");
+        WorkspaceMembershipDto other = workspaceService.createWorkspace("Other Org", otherOwner.getId());
+        int otherOrgId = workspaceMapper.getOrgId(other.getId());
+        User foreign = newUser();
+        FederatedIdentity seed = new FederatedIdentity();
+        seed.setUserId(foreign.getId());
+        seed.setOrgId(otherOrgId);
+        seed.setProvider(PROVIDER);
+        seed.setIssuer(ISSUER);
+        seed.setExternalSubject("sub-foreign");
+        federatedIdentityMapper.insert(seed);
+
+        assertThrows(ForbiddenException.class, () -> ssoLoginService.resolve(PROVIDER, ISSUER, "sub-foreign",
+                "outsider@notowned.example.org", true, orgId, "Outsider"),
+                "an identity minted for another org must not sign in through this org, and the "
+                        + "foreign email domain is refused");
+    }
+
+    @Test
     void verifiedEmailMatchingPasswordAccount_requiresLinkAndWritesNothing() {
         User password = newUser();
         assertNotNull(password.getPassword(), "the fixture account must have a password");
@@ -91,8 +127,8 @@ class SsoLoginServiceTest extends AbstractServiceTest {
     }
 
     @Test
-    void newVerifiedEmailInAllowedDomain_provisionsMemberAndIdentity() {
-        String email = "newcomer@" + ALLOWED_DOMAIN;
+    void newVerifiedEmailInOwnedDomain_provisionsMemberAndIdentity() {
+        String email = "newcomer@" + OWNED_DOMAIN;
 
         SsoLoginResult result = ssoLoginService.resolve(PROVIDER, ISSUER, "sub-newcomer",
                 email, true, orgId, "New Comer");
@@ -112,15 +148,49 @@ class SsoLoginServiceTest extends AbstractServiceTest {
     }
 
     @Test
-    void newEmailInDisallowedDomain_isRefusedWithNothingWritten() {
+    void emailDomainNotOwnedByOrg_isRefusedWithNothingWritten() {
         String email = "intruder@blocked.example.com";
 
         assertThrows(ForbiddenException.class, () ->
                 ssoLoginService.resolve(PROVIDER, ISSUER, "sub-intruder", email, true, orgId, "Intruder"));
 
         assertNull(userMapper.getUserByEmail(email),
-                "a disallowed domain must not provision an account");
+                "a domain the org does not own must not provision an account");
         assertNull(federatedIdentityMapper.findByProviderIssuerSubject(PROVIDER, ISSUER, "sub-intruder"),
-                "a disallowed domain must not mint an identity");
+                "a domain the org does not own must not mint an identity");
+    }
+
+    @Test
+    void unverifiedEmail_isRefusedWithNothingWritten() {
+        String email = "unverified@" + OWNED_DOMAIN;
+
+        assertThrows(ForbiddenException.class, () ->
+                ssoLoginService.resolve(PROVIDER, ISSUER, "sub-unverified", email, false, orgId, "Unverified"));
+
+        assertNull(userMapper.getUserByEmail(email),
+                "an unverified IdP email must never provision an account");
+        assertNull(federatedIdentityMapper.findByProviderIssuerSubject(PROVIDER, ISSUER, "sub-unverified"),
+                "an unverified IdP email must never mint an identity");
+    }
+
+    @Test
+    void passwordlessAccountFederatedToAnotherOrg_isRefused() {
+        User otherOwner = provisionlessUser("owner-" + unique() + "@other.example");
+        WorkspaceMembershipDto other = workspaceService.createWorkspace("Other Org", otherOwner.getId());
+        int otherOrgId = workspaceMapper.getOrgId(other.getId());
+        User victim = provisionlessUser("victim-xorg@" + OWNED_DOMAIN);
+        FederatedIdentity foreignLink = new FederatedIdentity();
+        foreignLink.setUserId(victim.getId());
+        foreignLink.setOrgId(otherOrgId);
+        foreignLink.setProvider(PROVIDER);
+        foreignLink.setIssuer(ISSUER);
+        foreignLink.setExternalSubject("sub-victim-home");
+        federatedIdentityMapper.insert(foreignLink);
+
+        assertThrows(ForbiddenException.class, () -> ssoLoginService.resolve(PROVIDER, ISSUER, "sub-victim-claim",
+                victim.getEmail(), true, orgId, "Victim"),
+                "a passwordless account already federated to another organization must not be claimed");
+        assertNull(federatedIdentityMapper.findByProviderIssuerSubject(PROVIDER, ISSUER, "sub-victim-claim"),
+                "no identity may be minted when refusing a cross-org claim");
     }
 }

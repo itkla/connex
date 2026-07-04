@@ -150,6 +150,7 @@ public class AuthService {
                 ? userMapper.getUserByEmail(request.getUsername())
                 : userMapper.getUserByUsername(request.getUsername());
         if (candidate != null && ssoConnectionService.isSsoEnforcedForUser(candidate.getId())) {
+            loginRateLimiter.recordFailure(clientIp, request.getUsername(), now);
             auditService.recordFailure("auth.login_sso_enforced", "user", candidate.getId(), request.getUsername(),
                     "Password login refused; SSO enforced for " + request.getUsername(), null);
             throw new ForbiddenException("This account must sign in with SSO");

@@ -18,7 +18,10 @@ import ooo.klae.connex.backend.mappers.SsoDomainMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
 import ooo.klae.connex.backend.sso.DbClientRegistrationRepository;
 import ooo.klae.connex.backend.sso.DbRelyingPartyRegistrationRepository;
+import ooo.klae.connex.backend.sso.SamlSpCredentialFactory;
+import ooo.klae.connex.backend.sso.SamlSpKeyMaterial;
 import ooo.klae.connex.backend.sso.SsoSecretCipher;
+import ooo.klae.connex.backend.sso.SsoUrlSafety;
 import ooo.klae.connex.backend.tenant.Permission;
 
 /**
@@ -42,6 +45,7 @@ public class SsoConnectionService {
     private final WorkspaceMapper workspaceMapper;
     private final WorkspaceService workspaceService;
     private final SsoSecretCipher ssoSecretCipher;
+    private final SamlSpCredentialFactory samlSpCredentialFactory;
     private final AuditService auditService;
     private final DbClientRegistrationRepository dbClientRegistrationRepository;
     private final DbRelyingPartyRegistrationRepository dbRelyingPartyRegistrationRepository;
@@ -99,6 +103,9 @@ public class SsoConnectionService {
         connection.setSamlIdpX509(trimToNull(request.getSamlIdpX509()));
         if (!isBlank(request.getOidcClientSecret())) {
             connection.setOidcClientSecretEnc(ssoSecretCipher.encrypt(request.getOidcClientSecret().trim()));
+        }
+        if ("saml".equals(protocol)) {
+            ensureSamlSpCredential(connection, existing, orgId);
         }
 
         ssoConnectionMapper.upsert(connection);
@@ -208,6 +215,17 @@ public class SsoConnectionService {
         }
     }
 
+    private void ensureSamlSpCredential(SsoConnection connection, SsoConnection existing, int orgId) {
+        if (existing != null && existing.getSamlSpPrivateKeyEnc() != null) {
+            connection.setSamlSpPrivateKeyEnc(existing.getSamlSpPrivateKeyEnc());
+            connection.setSamlSpCertificate(existing.getSamlSpCertificate());
+            return;
+        }
+        SamlSpKeyMaterial material = samlSpCredentialFactory.generate(REGISTRATION_PREFIX + orgId);
+        connection.setSamlSpPrivateKeyEnc(ssoSecretCipher.encrypt(material.privateKeyBase64()));
+        connection.setSamlSpCertificate(material.certificatePem());
+    }
+
     private void requireSameOrgWorkspace(int jitWorkspaceId, int orgId) {
         if (workspaceService.getOrgId(jitWorkspaceId) != orgId) {
             throw new BadRequestException(
@@ -220,6 +238,7 @@ public class SsoConnectionService {
             if (isBlank(request.getOidcIssuer()) || isBlank(request.getOidcClientId())) {
                 throw new BadRequestException("An OIDC issuer and client id are required to enable SSO");
             }
+            SsoUrlSafety.requireValidHttpUrl(request.getOidcIssuer());
             boolean hasSecret = !isBlank(request.getOidcClientSecret())
                     || (existing != null && existing.getOidcClientSecretEnc() != null);
             if (!hasSecret) {

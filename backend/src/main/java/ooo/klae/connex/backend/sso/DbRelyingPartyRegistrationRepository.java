@@ -2,9 +2,13 @@ package ooo.klae.connex.backend.sso;
 
 import java.io.ByteArrayInputStream;
 import java.nio.charset.StandardCharsets;
+import java.security.KeyFactory;
+import java.security.PrivateKey;
 import java.security.cert.CertificateException;
 import java.security.cert.CertificateFactory;
 import java.security.cert.X509Certificate;
+import java.security.spec.PKCS8EncodedKeySpec;
+import java.util.Base64;
 import java.util.concurrent.ConcurrentHashMap;
 
 import org.slf4j.Logger;
@@ -55,6 +59,7 @@ public class DbRelyingPartyRegistrationRepository implements RelyingPartyRegistr
             "{baseUrl}/api/login/saml2/sso/{registrationId}";
 
     private final SsoConnectionMapper ssoConnectionMapper;
+    private final SsoSecretCipher ssoSecretCipher;
 
     private final ConcurrentHashMap<String, RelyingPartyRegistration> cache = new ConcurrentHashMap<>();
 
@@ -91,33 +96,63 @@ public class DbRelyingPartyRegistrationRepository implements RelyingPartyRegistr
 
     private RelyingPartyRegistration build(String registrationId, SsoConnection connection) {
         try {
+            Saml2X509Credential spSigning = resolveSpSigningCredential(connection);
             String metadataXml = connection.getSamlIdpMetadataXml();
             if (metadataXml != null && !metadataXml.isBlank()) {
-                return RelyingPartyRegistrations
+                RelyingPartyRegistration.Builder builder = RelyingPartyRegistrations
                         .fromMetadata(new ByteArrayInputStream(metadataXml.getBytes(StandardCharsets.UTF_8)))
                         .registrationId(registrationId)
                         .entityId(SP_ENTITY_ID_TEMPLATE)
                         .assertionConsumerServiceLocation(SP_ACS_LOCATION_TEMPLATE)
-                        .build();
+                        .assertingPartyMetadata(ap -> ap
+                                .singleSignOnServiceBinding(Saml2MessageBinding.REDIRECT));
+                if (spSigning != null) {
+                    builder.signingX509Credentials(c -> c.add(spSigning));
+                }
+                return builder.build();
             }
             X509Certificate certificate = parseCertificate(connection.getSamlIdpX509());
             if (certificate == null) {
                 log.warn("SAML connection for org {} has no valid IdP certificate; skipping", connection.getOrgId());
                 return null;
             }
-            return RelyingPartyRegistration.withRegistrationId(registrationId)
+            RelyingPartyRegistration.Builder builder = RelyingPartyRegistration.withRegistrationId(registrationId)
                     .entityId(SP_ENTITY_ID_TEMPLATE)
                     .assertionConsumerServiceLocation(SP_ACS_LOCATION_TEMPLATE)
                     .assertingPartyMetadata(ap -> ap
                             .entityId(connection.getSamlIdpEntityId())
                             .singleSignOnServiceLocation(connection.getSamlSsoUrl())
                             .singleSignOnServiceBinding(Saml2MessageBinding.REDIRECT)
-                            .wantAuthnRequestsSigned(false)
-                            .verificationX509Credentials(c -> c.add(Saml2X509Credential.verification(certificate))))
-                    .build();
+                            .wantAuthnRequestsSigned(spSigning != null)
+                            .verificationX509Credentials(c -> c.add(Saml2X509Credential.verification(certificate))));
+            if (spSigning != null) {
+                builder.signingX509Credentials(c -> c.add(spSigning));
+            }
+            return builder.build();
         } catch (RuntimeException e) {
             log.warn("Failed to build SAML relying-party registration for org {}: {}",
                     connection.getOrgId(), e.getMessage());
+            return null;
+        }
+    }
+
+    private Saml2X509Credential resolveSpSigningCredential(SsoConnection connection) {
+        if (connection.getSamlSpPrivateKeyEnc() == null || connection.getSamlSpCertificate() == null) {
+            return null;
+        }
+        X509Certificate certificate = parseCertificate(connection.getSamlSpCertificate());
+        PrivateKey privateKey = parsePrivateKey(ssoSecretCipher.decrypt(connection.getSamlSpPrivateKeyEnc()));
+        if (certificate == null || privateKey == null) {
+            return null;
+        }
+        return Saml2X509Credential.signing(privateKey, certificate);
+    }
+
+    private static PrivateKey parsePrivateKey(String base64Pkcs8) {
+        try {
+            byte[] der = Base64.getDecoder().decode(base64Pkcs8);
+            return KeyFactory.getInstance("RSA").generatePrivate(new PKCS8EncodedKeySpec(der));
+        } catch (RuntimeException | java.security.GeneralSecurityException e) {
             return null;
         }
     }

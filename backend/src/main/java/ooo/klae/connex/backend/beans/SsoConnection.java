@@ -25,6 +25,8 @@ public class SsoConnection {
     private String samlSsoUrl;
     private String samlIdpMetadataXml;
     private String samlIdpX509;
+    private String samlSpPrivateKeyEnc;
+    private String samlSpCertificate;
     private String createdAt;
     private String updatedAt;
 }

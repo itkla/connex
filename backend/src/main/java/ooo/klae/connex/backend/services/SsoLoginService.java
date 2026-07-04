@@ -11,6 +11,7 @@ import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.mappers.FederatedIdentityMapper;
 import ooo.klae.connex.backend.mappers.SsoConnectionMapper;
+import ooo.klae.connex.backend.mappers.SsoDomainMapper;
 import ooo.klae.connex.backend.mappers.UserMapper;
 
 /**
@@ -18,14 +19,17 @@ import ooo.klae.connex.backend.mappers.UserMapper;
  * and provisions one when appropriate. Called from the OAuth2 success handler once the
  * IdP has authenticated the user.
  *
- * <p>The resolution is security-critical and follows a strict order:
+ * <p>The resolution is security-critical and org-scoped throughout:
  * <ol>
- *   <li>a known {@code (provider, issuer, subject)} link signs the linked user straight in;</li>
- *   <li>a <em>verified</em> IdP email that matches an existing password account never
- *       auto-links — it returns {@link SsoLoginResult.LinkRequired} so ownership can be
- *       proven first;</li>
- *   <li>otherwise the user is found (an existing SSO account) or provisioned fresh, JIT-joined
- *       to the connection's workspace behind the domain allow-list, and the identity is recorded.</li>
+ *   <li>a known {@code (org, provider, issuer, subject)} link signs the linked user straight in —
+ *       the lookup is scoped to the organization, so one org's IdP cannot match another's identity;</li>
+ *   <li>otherwise the IdP email must be <em>verified</em> and its domain must be one this
+ *       organization owns in its {@code sso_domain} routing list (globally unique), binding the
+ *       asserted email to the org so no IdP can assert or claim an address belonging to another org;</li>
+ *   <li>a matching existing password account never auto-links — it returns
+ *       {@link SsoLoginResult.LinkRequired} so ownership is proven first, and a passwordless account
+ *       already federated to a different organization is refused;</li>
+ *   <li>a new email is JIT-provisioned into the connection's workspace and the identity recorded.</li>
  * </ol>
  * The target workspace, organization, and default role are read only from the stored
  * {@link SsoConnection}; nothing about the destination is taken from the caller.
@@ -40,7 +44,7 @@ public class SsoLoginService {
     private final FederatedIdentityMapper federatedIdentityMapper;
     private final UserMapper userMapper;
     private final SsoConnectionMapper ssoConnectionMapper;
-    private final AllowedDomainService allowedDomainService;
+    private final SsoDomainMapper ssoDomainMapper;
     private final WorkspaceService workspaceService;
 
     /**
@@ -53,43 +57,48 @@ public class SsoLoginService {
      * @param orgId the organization whose connection minted this login
      * @param displayName the IdP-asserted display name, used when provisioning
      * @return a login outcome, or a link-required outcome when the email collides with a password account
-     * @throws ForbiddenException when the email's domain is not permitted to join the connection's workspace
+     * @throws ForbiddenException when the email is unverified, its domain is not owned by this
+     *         organization, or the account is already federated to a different organization
      * @throws BadRequestException when the organization has no SSO connection
      */
     @Transactional
     public SsoLoginResult resolve(String provider, String issuer, String subject, String email,
             boolean emailVerified, int orgId, String displayName) {
-        FederatedIdentity identity = federatedIdentityMapper.findByProviderIssuerSubject(provider, issuer, subject);
+        FederatedIdentity identity = federatedIdentityMapper.findByOrgProviderIssuerSubject(
+                orgId, provider, issuer, subject);
         if (identity != null) {
             federatedIdentityMapper.touchLogin(identity.getId());
             return SsoLoginResult.login(userMapper.getUserById(identity.getUserId()));
         }
 
-        if (emailVerified) {
-            User byEmail = userMapper.getUserByEmail(email);
-            if (byEmail != null && byEmail.getPassword() != null) {
-                return SsoLoginResult.linkRequired(byEmail.getId(), provider, issuer, subject, orgId);
-            }
+        if (!emailVerified) {
+            throw new ForbiddenException(
+                    "Your identity provider did not assert a verified email address");
+        }
+        if (!isDomainAuthorizedForOrg(email, orgId)) {
+            throw new ForbiddenException(
+                    "Your email domain is not permitted to sign in to this organization");
         }
 
         SsoConnection connection = ssoConnectionMapper.findByOrg(orgId);
         if (connection == null) {
             throw new BadRequestException("SSO is not configured for this organization");
         }
-        int jitWorkspaceId = connection.getJitWorkspaceId();
-
-        if (!allowedDomainService.isJoinAllowed(jitWorkspaceId, email)) {
-            throw new ForbiddenException("Your email domain is not permitted to sign in to this organization");
-        }
 
         User user = userMapper.getUserByEmail(email);
-        if (user == null) {
-            user = provisionUser(email, emailVerified, displayName);
-        } else if (user.getPassword() != null) {
-            return SsoLoginResult.linkRequired(user.getId(), provider, issuer, subject, orgId);
+        if (user != null) {
+            if (user.getPassword() != null) {
+                return SsoLoginResult.linkRequired(user.getId(), provider, issuer, subject, orgId);
+            }
+            if (federatedIdentityMapper.countByUserIdExcludingOrg(user.getId(), orgId) > 0) {
+                throw new ForbiddenException("This account is managed by a different organization");
+            }
+        } else {
+            user = provisionUser(email, true, displayName);
         }
 
-        workspaceService.ensureActiveMember(jitWorkspaceId, user.getId(), connection.getDefaultRole());
+        workspaceService.ensureActiveMember(connection.getJitWorkspaceId(), user.getId(),
+                connection.getDefaultRole());
 
         FederatedIdentity link = new FederatedIdentity();
         link.setUserId(user.getId());
@@ -100,6 +109,22 @@ public class SsoLoginService {
         federatedIdentityMapper.insert(link);
 
         return SsoLoginResult.login(user);
+    }
+
+    private boolean isDomainAuthorizedForOrg(String email, int orgId) {
+        if (email == null) {
+            return false;
+        }
+        int at = email.lastIndexOf('@');
+        if (at < 0 || at == email.length() - 1) {
+            return false;
+        }
+        String domain = email.substring(at + 1).trim().toLowerCase();
+        if (domain.isEmpty()) {
+            return false;
+        }
+        Integer owner = ssoDomainMapper.findOrgByDomain(domain);
+        return owner != null && owner == orgId;
     }
 
     private User provisionUser(String email, boolean emailVerified, String displayName) {

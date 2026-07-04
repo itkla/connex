@@ -8,6 +8,7 @@ import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 
 import lombok.Data;
+import lombok.ToString;
 
 /**
  * Upsert of an organization's SSO connection. Structural constraints only; the
@@ -16,6 +17,7 @@ import lombok.Data;
  * stored client secret unchanged; a blank string is never persisted as the secret.
  */
 @Data
+@ToString(exclude = "oidcClientSecret")
 public class SsoConnectionRequest {
 
     @NotBlank

@@ -4,6 +4,7 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.stereotype.Component;
 
 import lombok.Data;
+import lombok.ToString;
 
 /**
  * Instance-wide SSO configuration, bound from {@code connex.sso.*} /
@@ -12,6 +13,7 @@ import lombok.Data;
  * stores an OIDC client secret; rotating it invalidates previously stored secrets.
  */
 @Data
+@ToString(exclude = "secretKey")
 @Component
 @ConfigurationProperties(prefix = "connex.sso")
 public class SsoProperties {
@@ -21,4 +23,12 @@ public class SsoProperties {
      * OIDC client secrets at rest.
      */
     private String secretKey;
+
+    /**
+     * Whether an OIDC issuer may resolve to a loopback or private (RFC1918/CGNAT/ULA/link-local)
+     * address. Defaults to false so the server-side discovery fetch cannot be pointed at internal
+     * services or the cloud metadata endpoint (SSRF). Enable only on trusted deployments whose IdP
+     * is genuinely on-premises on a private network.
+     */
+    private boolean allowPrivateIssuerHosts = false;
 }

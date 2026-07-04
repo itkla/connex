@@ -99,6 +99,10 @@ connex:
         # required only once an org stores a client secret, and rotating it invalidates
         # previously stored secrets.
         secret-key: ${CONNEX_SSO_SECRET_KEY:}
+        # Whether an OIDC issuer may resolve to a loopback/private address. Defaults false so the
+        # server-side discovery fetch cannot be aimed at internal services or the cloud metadata
+        # endpoint (SSRF). Set true only when the IdP is genuinely on-premises on a private network.
+        allow-private-issuer-hosts: ${CONNEX_SSO_ALLOW_PRIVATE_ISSUER_HOSTS:false}
     sharing:
         # Gates the cross-workspace share/unshare API. The owned-or-shared read predicate is always
         # applied (harmless when no shares exist).

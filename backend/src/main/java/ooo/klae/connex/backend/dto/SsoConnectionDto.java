@@ -27,6 +27,7 @@ public class SsoConnectionDto {
     private String samlSsoUrl;
     private String samlIdpMetadataXml;
     private String samlIdpX509;
+    private String samlSpCertificate;
     private List<String> domains;
     private String updatedAt;
 
@@ -60,6 +61,7 @@ public class SsoConnectionDto {
         dto.setSamlSsoUrl(connection.getSamlSsoUrl());
         dto.setSamlIdpMetadataXml(connection.getSamlIdpMetadataXml());
         dto.setSamlIdpX509(connection.getSamlIdpX509());
+        dto.setSamlSpCertificate(connection.getSamlSpCertificate());
         dto.setUpdatedAt(connection.getUpdatedAt());
         return dto;
     }

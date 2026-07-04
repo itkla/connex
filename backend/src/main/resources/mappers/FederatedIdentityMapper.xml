@@ -9,6 +9,18 @@
     WHERE provider = #{provider} AND issuer = #{issuer} AND external_subject = #{subject}
   </select>
 
+  <select id="findByOrgProviderIssuerSubject" resultType="FederatedIdentity">
+    SELECT id, user_id, org_id, provider, issuer, external_subject, created_at, last_login_at
+    FROM federated_identity
+    WHERE org_id = #{orgId} AND provider = #{provider}
+      AND issuer = #{issuer} AND external_subject = #{subject}
+  </select>
+
+  <select id="countByUserIdExcludingOrg" resultType="int">
+    SELECT COUNT(*) FROM federated_identity
+    WHERE user_id = #{userId} AND org_id &lt;&gt; #{orgId}
+  </select>
+
   <insert id="insert" useGeneratedKeys="true" keyProperty="id">
     INSERT INTO federated_identity
       (user_id, org_id, provider, issuer, external_subject)

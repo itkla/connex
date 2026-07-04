@@ -3,8 +3,13 @@ package ooo.klae.connex.backend.config;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.core.convert.converter.Converter;
 import org.springframework.security.authentication.AuthenticationManager;
+import org.springframework.security.authentication.ProviderManager;
 import org.springframework.security.config.annotation.authentication.configuration.AuthenticationConfiguration;
+import org.springframework.security.saml2.core.Saml2Error;
+import org.springframework.security.saml2.core.Saml2ResponseValidatorResult;
+import org.springframework.security.saml2.provider.service.authentication.OpenSaml5AuthenticationProvider;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
@@ -118,6 +123,7 @@ public class SecurityConfig {
             .saml2Login(s -> s
                 .relyingPartyRegistrationRepository(dbRelyingPartyRegistrationRepository)
                 .loginProcessingUrl("/api/login/saml2/sso/{registrationId}")
+                .authenticationManager(samlAuthenticationManager())
                 .successHandler(ssoAuthenticationSuccessHandler)
                 .failureHandler((rq, rs, ex) -> rs.sendRedirect("/auth/login?sso_error=1"))
             )
@@ -147,5 +153,30 @@ public class SecurityConfig {
                 .logoutSuccessHandler((req, res, auth) -> res.setStatus(200))
             );
         return http.build();
+    }
+
+    /**
+     * SAML authentication manager that rejects unsolicited (IdP-initiated) responses. The default
+     * SAML response validator treats a {@code Response} with no {@code InResponseTo} as valid, which
+     * would allow a captured, validly-signed assertion to be replayed into a victim's browser
+     * (SAML login-CSRF). Requiring {@code InResponseTo} binds every accepted response to an
+     * AuthnRequest this SP actually initiated.
+     * @return an authentication manager over an {@link OpenSaml5AuthenticationProvider} that requires solicited responses
+     */
+    private AuthenticationManager samlAuthenticationManager() {
+        OpenSaml5AuthenticationProvider provider = new OpenSaml5AuthenticationProvider();
+        Converter<OpenSaml5AuthenticationProvider.ResponseToken, Saml2ResponseValidatorResult> defaultValidator =
+                OpenSaml5AuthenticationProvider.createDefaultResponseValidator();
+        provider.setResponseValidator(token -> {
+            Saml2ResponseValidatorResult result = defaultValidator.convert(token);
+            String inResponseTo = token.getResponse().getInResponseTo();
+            if (inResponseTo == null || inResponseTo.isBlank()) {
+                Saml2Error error = new Saml2Error("unsolicited_response",
+                        "Unsolicited SAML responses are not accepted");
+                return result == null ? Saml2ResponseValidatorResult.failure(error) : result.concat(error);
+            }
+            return result;
+        });
+        return new ProviderManager(provider);
     }
 }
