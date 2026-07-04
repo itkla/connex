@@ -18,4 +18,8 @@ public interface AuditLogMapper {
         @Param("entityId") int entityId,
         @Param("limit") int limit,
         @Param("offset") int offset);
+
+    List<AuditLog> findRecentByOrg(@Param("orgId") int orgId,
+        @Param("limit") int limit,
+        @Param("offset") int offset);
 }

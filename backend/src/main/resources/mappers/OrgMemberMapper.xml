@@ -35,6 +35,13 @@
     SELECT user_id FROM org_member WHERE org_id = #{orgId} AND org_role = 'owner' FOR UPDATE
   </select>
 
+  <!-- Organizations this user owns. The account-deletion guard iterates this set and locks each
+       org's owner rows (lockOwnerIds, FOR UPDATE), so two co-owners deleting concurrently serialize
+       on the shared rows and cannot both pass to leave an org ownerless (org_member CASCADEs). -->
+  <select id="orgIdsOwnedBy" resultType="int">
+    SELECT org_id FROM org_member WHERE user_id = #{userId} AND org_role = 'owner' ORDER BY org_id
+  </select>
+
   <select id="getMembers" resultType="ooo.klae.connex.backend.dto.OrgMemberDto">
     SELECT u.id, u.username, u.display_name AS displayName, u.email,
            u.profile_picture_url AS profilePictureUrl, om.org_role AS orgRole

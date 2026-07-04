@@ -4,6 +4,7 @@ import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.security.core.userdetails.UsernameNotFoundException;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import ooo.klae.connex.backend.mappers.ActivityMapper;
 import ooo.klae.connex.backend.mappers.NoteMapper;
@@ -36,6 +37,7 @@ public class UserService implements UserDetailsService {
     private final TaskMapper taskMapper;
     private final AuditService auditService;
     private final WorkspaceService workspaceService;
+    private final OrgMemberService orgMemberService;
     private final NotificationChangePublisher notificationChanges;
     private final ReferenceService referenceService;
 
@@ -114,8 +116,11 @@ public class UserService implements UserDetailsService {
         return user;
     }
 
+    @Transactional
     public void delete(int id) {
         workspaceService.requireSelf(id);
+        workspaceService.assertNotSoleOwnerOfAnyWorkspace(id);
+        orgMemberService.assertNotSoleOwnerOfAnyOrg(id);
         User before = getUserById(id);
         userMapper.delete(id);
         auditService.record("user.delete", "user", id, before.getUsername(),

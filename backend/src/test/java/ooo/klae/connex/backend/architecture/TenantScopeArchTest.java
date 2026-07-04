@@ -49,8 +49,10 @@ class TenantScopeArchTest {
      * Scoped-mapper selects that legitimately do not bind {@code #{workspaceId}}.
      * Each is provably tenant-safe without it: the notification inbox is
      * recipient-scoped across every membership by design (MULTITENANCY_PLAN §0.3 —
-     * it binds {@code #{recipientId}}), and the two scheduler helpers only enumerate
-     * workspace ids for per-workspace background fan-out (they return no tenant rows).
+     * it binds {@code #{recipientId}}), the two scheduler helpers only enumerate
+     * workspace ids for per-workspace background fan-out (they return no tenant rows),
+     * and the org-scoped audit read is org-filtered ({@code #{orgId}}) and gated by
+     * org membership (MULTITENANCY_PLAN §0.6).
      */
     private static final Set<String> EXEMPT_SELECTS = Set.of(
         "ooo.klae.connex.backend.mappers.NotificationMapper.findPage",
@@ -58,7 +60,8 @@ class TenantScopeArchTest {
         "ooo.klae.connex.backend.mappers.NotificationMapper.getUnreadCounts",
         "ooo.klae.connex.backend.mappers.NotificationMapper.findById",
         "ooo.klae.connex.backend.mappers.NotificationMapper.findWorkspaceIds",
-        "ooo.klae.connex.backend.mappers.RuleMapper.workspaceIdsWithEnabledScheduleRules"
+        "ooo.klae.connex.backend.mappers.RuleMapper.workspaceIdsWithEnabledScheduleRules",
+        "ooo.klae.connex.backend.mappers.AuditLogMapper.findRecentByOrg"
     );
 
     /**

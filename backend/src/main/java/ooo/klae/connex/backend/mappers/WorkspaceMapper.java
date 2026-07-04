@@ -25,6 +25,8 @@ public interface WorkspaceMapper {
     Integer getMemberRoleId(@Param("workspaceId") int workspaceId, @Param("userId") int userId);
     int setMemberCustomRole(@Param("workspaceId") int workspaceId, @Param("userId") int userId, @Param("roleId") int roleId);
     int countOwners(int workspaceId);
+    java.util.List<Integer> workspaceIdsOwnedBy(@Param("userId") int userId);
+    java.util.List<Integer> lockOwnerIds(@Param("workspaceId") int workspaceId);
     int removeMember(@Param("workspaceId") int workspaceId, @Param("userId") int userId);
     int unassignMemberTasks(@Param("workspaceId") int workspaceId, @Param("userId") int userId);
     int clearMemberDealOwnership(@Param("workspaceId") int workspaceId, @Param("userId") int userId);

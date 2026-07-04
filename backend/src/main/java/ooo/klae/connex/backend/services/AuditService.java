@@ -115,7 +115,9 @@ public class AuditService {
             entry.setChanges(toJson(changes));
             entry.setContext(toJson(context));
 
-            entry.setWorkspaceId(tenantContext.getWorkspaceId());
+            boolean orgLevel = "organization".equals(entityType);
+            entry.setWorkspaceId(orgLevel ? null : tenantContext.getWorkspaceId());
+            entry.setOrgId(orgLevel ? entityId : tenantContext.getOrgId());
             resolveActor(entry);
             resolveRequest(entry);
 
@@ -187,6 +189,18 @@ public class AuditService {
      */
     public List<AuditLog> forEntity(String entityType, int entityId, int limit, int offset) {
         return auditLogMapper.findByEntity(tenantContext.getWorkspaceId(), entityType, entityId, cap(limit), offset(offset));
+    }
+
+    /**
+     * The most recent events for an organization, newest first. Org-scoped (not the active
+     * workspace); the caller must have gated on org membership.
+     * @param orgId the organization to scope to
+     * @param limit the maximum number of events to return, capped per request
+     * @param offset the number of events to skip
+     * @return the page of events
+     */
+    public List<AuditLog> recentForOrg(int orgId, int limit, int offset) {
+        return auditLogMapper.findRecentByOrg(orgId, cap(limit), offset(offset));
     }
 
     /**
