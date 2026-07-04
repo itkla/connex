@@ -113,10 +113,14 @@ export function minutesSinceMidnight(ms: number): number {
     return d.getHours() * 60 + d.getMinutes();
 }
 
-/** The 42 day cells (6 weeks) of a month grid, starting at {@link startOfGrid}. */
+/** The day cells of a month grid (4–6 week rows as the month requires), starting at {@link startOfGrid}. */
 export function monthGridCells(monthStart: Date, weekStartsOn = 0): Date[] {
     const start = startOfGrid(monthStart, weekStartsOn);
-    return Array.from({ length: 42 }, (_, i) => addDays(start, i));
+    const firstOfMonth = new Date(monthStart.getFullYear(), monthStart.getMonth(), 1);
+    const leading = (firstOfMonth.getDay() - weekStartsOn + 7) % 7;
+    const daysInMonth = new Date(monthStart.getFullYear(), monthStart.getMonth() + 1, 0).getDate();
+    const weeks = Math.ceil((leading + daysInMonth) / 7);
+    return Array.from({ length: weeks * 7 }, (_, i) => addDays(start, i));
 }
 
 /** The 7 days of the week containing `anchor`. */

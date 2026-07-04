@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { useReducedMotion } from 'motion/react';
 import { useTranslations } from 'next-intl';
 import {
@@ -140,6 +140,16 @@ export default function MonthView({
     const selectedKey = dayKeyOf(selectedDay);
     const selectedEvents = eventsByDay.get(selectedKey) ?? [];
 
+    const [asideHeight, setAsideHeight] = useState<number | null>(null);
+    const monthGridRef = useCallback((el: HTMLDivElement | null) => {
+        if (!el) return;
+        const measure = () => setAsideHeight(el.offsetHeight);
+        const observer = new ResizeObserver(measure);
+        observer.observe(el);
+        measure();
+        return () => observer.disconnect();
+    }, []);
+
     return (
         <DndContext
             sensors={sensors}
@@ -150,7 +160,7 @@ export default function MonthView({
             onDragCancel={() => setActiveId(null)}
         >
             <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_20rem]">
-                <div className="overflow-hidden rounded-2xl border border-border bg-card">
+                <div ref={monthGridRef} className="overflow-hidden rounded-2xl border border-border bg-card lg:self-start">
                     <div className="grid grid-cols-7 border-b border-border">
                         {weekdayLabels.map((label, i) => (
                             <div
@@ -179,7 +189,10 @@ export default function MonthView({
                     </div>
                 </div>
 
-                <aside className="hidden overflow-hidden rounded-2xl border border-border bg-card lg:sticky lg:top-2 lg:block lg:self-start">
+                <aside
+                    className="hidden overflow-hidden rounded-2xl border border-border bg-card lg:flex lg:flex-col lg:self-start"
+                    style={asideHeight != null ? { height: asideHeight } : undefined}
+                >
                     <header className="border-b border-border px-4 py-3">
                         <h2 className="text-sm font-semibold text-foreground">{selectedTitle}</h2>
                     </header>
@@ -190,7 +203,8 @@ export default function MonthView({
                         locale={locale}
                         onOpenEvent={onOpenEvent}
                         onSlotCreate={onSlotCreate}
-                        className="rounded-none border-0 bg-transparent"
+                        className="rounded-none border-0 bg-transparent lg:min-h-0 lg:flex-1"
+                        scrollClassName={asideHeight != null ? 'min-h-0 flex-1' : 'max-h-[65vh]'}
                     />
                 </aside>
             </div>

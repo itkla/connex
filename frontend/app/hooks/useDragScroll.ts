@@ -9,11 +9,14 @@ export interface ScrollEdges {
 
 interface DragScrollOptions {
     leftDragSelector?: string;
+    /** When a left-button pointerdown lands inside this selector, panning is suppressed so the element keeps its own drag (e.g. dnd-kit cards). */
+    excludeDragSelector?: string;
 }
 const LEFT_DRAG_THRESHOLD = 5;
 
 export function useDragScroll<T extends HTMLElement = HTMLElement>(options?: DragScrollOptions) {
     const leftDragSelector = options?.leftDragSelector;
+    const excludeDragSelector = options?.excludeDragSelector;
     const cleanupRef = useRef<(() => void) | null>(null);
     const [edges, setEdges] = useState<ScrollEdges>({ left: false, right: false });
 
@@ -62,7 +65,12 @@ export function useDragScroll<T extends HTMLElement = HTMLElement>(options?: Dra
                 e.preventDefault();
                 return;
             }
-            if (e.button === 0 && leftDragSelector && (e.target as Element | null)?.closest(leftDragSelector)) {
+            if (
+                e.button === 0 &&
+                leftDragSelector &&
+                (e.target as Element | null)?.closest(leftDragSelector) &&
+                !(excludeDragSelector && (e.target as Element | null)?.closest(excludeDragSelector))
+            ) {
                 pendingLeft = true;
                 startX = e.clientX;
                 startY = e.clientY;
@@ -126,7 +134,7 @@ export function useDragScroll<T extends HTMLElement = HTMLElement>(options?: Dra
             el.removeEventListener('mousedown', suppressAutoScroll);
             el.removeEventListener('auxclick', suppressAutoScroll);
         };
-    }, [leftDragSelector]);
+    }, [leftDragSelector, excludeDragSelector]);
 
     return { ref, edges };
 }

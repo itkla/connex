@@ -33,6 +33,7 @@ export default function DayTimeline({
     onOpenEvent,
     onSlotCreate,
     className,
+    scrollClassName,
 }: {
     day: Date;
     events: CalendarEvent[];
@@ -42,6 +43,8 @@ export default function DayTimeline({
     /** Fine-pointer create: click an empty slot to add something at that time (ms). Omitted on touch. */
     onSlotCreate?: (startMs: number) => void;
     className?: string;
+    /** Overrides the scroll region's height constraint; defaults to {@code max-h-[65vh]} so the timeline caps itself. */
+    scrollClassName?: string;
 }) {
     const t = useTranslations('Calendar');
     const scrollRef = useRef<HTMLDivElement>(null);
@@ -105,7 +108,7 @@ export default function DayTimeline({
                 </div>
             )}
 
-            <div ref={scrollRef} className="max-h-[65vh] overflow-y-auto overscroll-contain">
+            <div ref={scrollRef} className={cn('overflow-y-auto overscroll-contain', scrollClassName ?? 'max-h-[65vh]')}>
                 <div className="relative" style={{ height: HOURS.length * HOUR_PX }}>
                     {onSlotCreate && (
                         <button

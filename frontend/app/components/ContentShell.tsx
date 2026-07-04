@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import { MenuIcon, PanelLeftCloseIcon, PanelLeftOpenIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import SearchBar from "@/app/components/SearchBar";
+import NavBreadcrumb from "@/app/components/NavBreadcrumb";
 import { useTranslations } from "next-intl";
 
 export default function ContentShell({
@@ -115,7 +116,10 @@ export default function ContentShell({
                     </div>
                 </div>
 
-                <main className="flex-1 overflow-x-hidden overflow-y-auto p-6">{children}</main>
+                <main className="flex-1 overflow-x-hidden overflow-y-auto p-6">
+                    <NavBreadcrumb />
+                    {children}
+                </main>
             </div>
         </div>
     );
