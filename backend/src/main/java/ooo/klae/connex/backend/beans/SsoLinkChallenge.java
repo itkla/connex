@@ -19,7 +19,7 @@ public class SsoLinkChallenge {
     private String provider;
     private String issuer;
     private String externalSubject;
-    private int orgId;
+    private Integer orgId;
     private String expiresAt;
     private String consumedAt;
     private String createdAt;

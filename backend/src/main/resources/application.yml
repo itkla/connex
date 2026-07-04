@@ -106,6 +106,19 @@ connex:
         # server-side discovery fetch cannot be aimed at internal services or the cloud metadata
         # endpoint (SSRF). Set true only when the IdP is genuinely on-premises on a private network.
         allow-private-issuer-hosts: ${CONNEX_SSO_ALLOW_PRIVATE_ISSUER_HOSTS:false}
+    social-login:
+        # Consumer social login (#314) — "Sign in with Google/Microsoft", a single instance-wide
+        # OAuth client per provider, independent of the per-org enterprise SSO above. Each provider
+        # is off until enabled with its client id/secret; new social users get a fresh personal
+        # account and go through onboarding.
+        google:
+            enabled: ${CONNEX_SOCIAL_LOGIN_GOOGLE_ENABLED:false}
+            client-id: ${CONNEX_SOCIAL_LOGIN_GOOGLE_CLIENT_ID:}
+            client-secret: ${CONNEX_SOCIAL_LOGIN_GOOGLE_CLIENT_SECRET:}
+        microsoft:
+            enabled: ${CONNEX_SOCIAL_LOGIN_MICROSOFT_ENABLED:false}
+            client-id: ${CONNEX_SOCIAL_LOGIN_MICROSOFT_CLIENT_ID:}
+            client-secret: ${CONNEX_SOCIAL_LOGIN_MICROSOFT_CLIENT_SECRET:}
     sharing:
         # Gates the cross-workspace share/unshare API. The owned-or-shared read predicate is always
         # applied (harmless when no shares exist).
