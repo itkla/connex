@@ -211,11 +211,16 @@ Closing the loose ends the org tenancy work opened:
   they must transfer ownership first. (Separate, larger pre-existing gap: account deletion still can't complete
   for a user who authored activities/notes/introductions, since those FKs are `ON DELETE RESTRICT` — a
   reassignment/anonymization job, tracked apart from ownership.)
-- **Org audit trail (V46):** an immutable `org_id` on `audit_log`, stamped at write time (the target org for
-  org-entity actions, else the active workspace's org), with an org-admin-gated `/api/orgs/{orgId}/audit` read.
-  Org-level actions are no longer filed under whichever workspace the actor had active; each org has its own
-  audit surface. Nullable and forward-looking (auth/system events have no org; the append-only log isn't
-  backfilled).
+- **Org audit trail (V46):** an immutable `org_id` on `audit_log`, stamped at write time — the target org for
+  org-entity actions (with a **null** `workspace_id`, so they surface only in the org trail, never leaking
+  into a workspace's audit view), else the active workspace's org. Org-admin-gated `/api/orgs/{orgId}/audit`
+  read. Nullable and forward-looking (auth/system events have no org; the append-only log isn't backfilled).
+- **Deletion guard is race-safe:** the sole-owner check reads each owned workspace/org's owner rows under a
+  `FOR UPDATE` lock inside the deletion transaction, so two co-owners deleting concurrently serialize on the
+  shared rows and cannot both pass to leave a resource ownerless.
+- **IDNA caveat:** `DomainUtil` uses the JDK's `IDN.toASCII` (IDNA2003), which applies compatibility mapping
+  (e.g. `faß.de` → `fass.de`). This fixes utf8mb4 collation ambiguity but means an allowlist entry can match a
+  compatibility-equivalent domain. Strict IDNA2008 handling would need ICU4J — deferred (follow-up on #316).
 
 ---
 
