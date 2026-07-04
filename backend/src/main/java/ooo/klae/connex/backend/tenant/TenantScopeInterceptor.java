@@ -64,16 +64,55 @@ public class TenantScopeInterceptor implements Interceptor {
         MAPPERS + "TaskMapper",
         MAPPERS + "NotificationMapper",
         MAPPERS + "IntroductionMapper",
-        MAPPERS + "AuditLogMapper"
+        MAPPERS + "AuditLogMapper",
+        MAPPERS + "PersonEdgeMapper",
+        MAPPERS + "RoleMapper",
+        MAPPERS + "ShareMapper"
+    );
+
+    /**
+     * Mapper interfaces that are deliberately NOT workspace-scoped: identity and
+     * auth-token planes ({@code app_user}, password/email/registration tokens,
+     * WebAuthn, federated/SSO identity), membership and capability-token flows
+     * that run before a tenant is resolvable (workspace, invites, allowed
+     * domains), per-user preferences, per-workspace mail config used by
+     * background senders, and the organization root itself. Every mapper XML
+     * must appear either here or in {@link #SCOPED_NAMESPACES} — the
+     * registry-completeness architecture test enforces the partition so a new
+     * mapper cannot silently bypass the fail-closed backstop.
+     */
+    public static final Set<String> CONTROL_PLANE_NAMESPACES = Set.of(
+        MAPPERS + "AllowedDomainMapper",
+        MAPPERS + "EmailChangeTokenMapper",
+        MAPPERS + "FederatedIdentityMapper",
+        MAPPERS + "InviteLinkMapper",
+        MAPPERS + "InviteMapper",
+        MAPPERS + "MailConfigMapper",
+        MAPPERS + "OrganizationMapper",
+        MAPPERS + "PasswordResetTokenMapper",
+        MAPPERS + "PreferenceMapper",
+        MAPPERS + "RegistrationVerificationTokenMapper",
+        MAPPERS + "SsoConnectionMapper",
+        MAPPERS + "SsoDomainMapper",
+        MAPPERS + "SsoLinkChallengeMapper",
+        MAPPERS + "UserMapper",
+        MAPPERS + "WebauthnCredentialMapper",
+        MAPPERS + "WebauthnUserEntityMapper",
+        MAPPERS + "WorkspaceMapper"
     );
 
     /**
      * Scoped statements that legitimately run with an unresolved context. Audit
      * writes happen during auth flows (before a workspace is pinned) and carry a
-     * nullable {@code workspace_id} for system events.
+     * nullable {@code workspace_id} for system events. The role-permission read
+     * backs {@code WorkspaceService.permissionsFor} on auth-plane requests
+     * ({@code /api/auth/**} is excluded from tenant resolution — e.g. the SSO
+     * admin endpoints), where callers pass an explicit membership-validated
+     * workspace id and the statement itself anchors {@code workspace_id} in SQL.
      */
     private static final Set<String> EXEMPT_STATEMENTS = Set.of(
-        MAPPERS + "AuditLogMapper.insert"
+        MAPPERS + "AuditLogMapper.insert",
+        MAPPERS + "RoleMapper.findPermissions"
     );
 
     private final TenantContext tenantContext;

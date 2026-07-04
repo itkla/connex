@@ -44,12 +44,6 @@ class WorkspaceServiceTest extends AbstractServiceTest {
         assertEquals(workspace.getId(), workspaceService.getCurrentWorkspaceId());
     }
 
-    @Test
-    void createWorkspace_reusesTheOwnersOrganization() {
-        WorkspaceMembershipDto first = workspaceService.createWorkspace("Org A", currentUser.getId());
-        WorkspaceMembershipDto second = workspaceService.createWorkspace("Org B", currentUser.getId());
-        assertEquals(workspaceService.getOrgId(first.getId()), workspaceService.getOrgId(second.getId()));
-    }
 
     @Test
     void getCurrentOrgId_readsResolvedContext() {

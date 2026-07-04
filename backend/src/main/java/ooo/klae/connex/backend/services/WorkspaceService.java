@@ -184,20 +184,48 @@ public class WorkspaceService {
     }
 
     /**
-     * The organization a new workspace for {@code ownerUserId} joins: the org of a
-     * workspace they already belong to (so a user's own workspaces stay in one org),
-     * or a freshly created organization for a first-time owner.
+     * The organization a new workspace for {@code ownerUserId} joins. The active
+     * workspace's organization is reused only when the creator holds
+     * {@link Permission#WORKSPACE_SETTINGS} there (built-in owner/admin, or a
+     * custom role granting it) — the org is the customer boundary, and expanding
+     * it is an administrative act. In every other case (registration, bootstrap,
+     * or a creator who is merely a member of the active workspace, e.g. an external
+     * collaborator inside a client's org) the workspace gets a freshly created
+     * organization, so a guest membership can never pull a personal workspace into
+     * the host organization.
      */
     private int orgIdForOwner(int ownerUserId, String name) {
-        List<Workspace> existing = workspaceMapper.getWorkspacesForUser(ownerUserId);
-        if (!existing.isEmpty()) {
-            return getOrgId(existing.getFirst().getId());
+        Integer activeOrgId = activeOrgIdIfAdministrator(ownerUserId);
+        if (activeOrgId != null) {
+            return activeOrgId;
         }
         Organization organization = new Organization();
         organization.setName(name.trim());
         organization.setSlug(generateSlug(name));
         organizationMapper.insert(organization);
         return organization.getId();
+    }
+
+    /**
+     * The active workspace's organization when the resolved tenant context belongs
+     * to {@code creatorUserId} and their effective permissions there include
+     * {@link Permission#WORKSPACE_SETTINGS}, or null when no such administrative
+     * context applies.
+     */
+    private Integer activeOrgIdIfAdministrator(int creatorUserId) {
+        if (!tenantContext.isResolved()) {
+            return null;
+        }
+        Integer contextUserId = tenantContext.getUserId();
+        if (contextUserId == null || contextUserId != creatorUserId) {
+            return null;
+        }
+        Integer workspaceId = tenantContext.getWorkspaceId();
+        if (workspaceId == null
+                || !permissionsFor(workspaceId, creatorUserId).contains(Permission.WORKSPACE_SETTINGS)) {
+            return null;
+        }
+        return tenantContext.getOrgId();
     }
 
     private String generateSlug(String name) {
@@ -238,7 +266,7 @@ public class WorkspaceService {
         }
         Integer roleId = workspaceMapper.getMemberRoleId(workspaceId, userId);
         if (roleId != null) {
-            return parsePermissions(roleMapper.findPermissions(roleId));
+            return parsePermissions(roleMapper.findPermissions(workspaceId, roleId));
         }
         Role role = Role.of(workspaceMapper.getRole(workspaceId, userId));
         if (role == null) {
@@ -338,7 +366,7 @@ public class WorkspaceService {
         if (!roleMapper.roleExists(workspaceId, roleId)) {
             throw new ResourceNotFoundException("Role not found in this workspace");
         }
-        requireGrantable(workspaceId, actorId, parsePermissions(roleMapper.findPermissions(roleId)));
+        requireGrantable(workspaceId, actorId, parsePermissions(roleMapper.findPermissions(workspaceId, roleId)));
         workspaceMapper.setMemberCustomRole(workspaceId, targetUserId, roleId);
         auditService.record("workspace.member.role", "workspace", workspaceId, target.getDisplayName(),
                 "Assigned a custom role to " + target.getDisplayName(), null);

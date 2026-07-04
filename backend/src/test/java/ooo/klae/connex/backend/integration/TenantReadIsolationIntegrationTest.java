@@ -113,7 +113,7 @@ class TenantReadIsolationIntegrationTest {
                 .session(bobSession))
             .andExpect(status().isNotFound());
 
-        shareMapper.shareCompany(companyA.getId(), wsB.getId(), alice.getId(), false);
+        shareMapper.shareCompany(companyA.getId(), wsA.getId(), wsB.getId(), alice.getId(), false);
 
         mockMvc.perform(get("/api/companies/" + companyA.getId())
                 .header("X-Workspace-Id", wsB.getId())
@@ -131,7 +131,7 @@ class TenantReadIsolationIntegrationTest {
         Company companyA = newCompany(wsA);
         Person contactA = newPerson(wsA, companyA);
 
-        shareMapper.shareCompany(companyA.getId(), wsB.getId(), alice.getId(), false);
+        shareMapper.shareCompany(companyA.getId(), wsA.getId(), wsB.getId(), alice.getId(), false);
 
         MockHttpSession aliceSession = login(alice.getUsername());
         mockMvc.perform(get("/api/companies/" + companyA.getId())

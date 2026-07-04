@@ -45,7 +45,7 @@ public class RoleService {
         role.setWorkspaceId(workspaceId);
         role.setName(name.trim());
         roleMapper.insertRole(role);
-        applyPermissions(role.getId(), valid);
+        applyPermissions(workspaceId, role.getId(), valid);
         auditService.record("workspace.role.create", "workspace", workspaceId, name,
                 "Created role " + name, null);
         return roleMapper.findRole(workspaceId, role.getId());
@@ -59,7 +59,7 @@ public class RoleService {
         if (roleMapper.updateRoleName(workspaceId, roleId, name.trim()) == 0) {
             throw new ResourceNotFoundException("Role not found");
         }
-        applyPermissions(roleId, valid);
+        applyPermissions(workspaceId, roleId, valid);
         auditService.record("workspace.role.update", "workspace", workspaceId, name,
                 "Updated role " + name, null);
         return roleMapper.findRole(workspaceId, roleId);
@@ -74,10 +74,10 @@ public class RoleService {
                 "Deleted role " + roleId, null);
     }
 
-    private void applyPermissions(int roleId, List<String> validPermissions) {
-        roleMapper.clearPermissions(roleId);
+    private void applyPermissions(int workspaceId, int roleId, List<String> validPermissions) {
+        roleMapper.clearPermissions(workspaceId, roleId);
         if (!validPermissions.isEmpty()) {
-            roleMapper.insertPermissions(roleId, validPermissions);
+            roleMapper.insertPermissions(workspaceId, roleId, validPermissions);
         }
     }
 
@@ -88,7 +88,10 @@ public class RoleService {
         List<String> valid = new ArrayList<>();
         for (String value : raw) {
             try {
-                valid.add(Permission.valueOf(value).name());
+                String name = Permission.valueOf(value).name();
+                if (!valid.contains(name)) {
+                    valid.add(name);
+                }
             } catch (IllegalArgumentException e) {
                 throw new BadRequestException("Unknown permission: " + value);
             }
