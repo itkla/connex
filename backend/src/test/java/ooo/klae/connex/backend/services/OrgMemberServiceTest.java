@@ -84,6 +84,32 @@ class OrgMemberServiceTest extends AbstractServiceTest {
     }
 
     @Test
+    void setMemberByEmail_ownerAddsByEmail_caseInsensitive_unknownRejected() {
+        int orgId = newOrgOwnedBy(currentUser.getId());
+        User target = newUser();
+
+        orgMemberService.setMemberByEmail(orgId, currentUser.getId(), target.getEmail().toUpperCase(), "admin");
+        assertEquals("admin", orgMemberMapper.getRole(orgId, target.getId()),
+            "an existing account is matched by email case-insensitively and granted the role");
+
+        assertThrows(BadRequestException.class,
+            () -> orgMemberService.setMemberByEmail(orgId, currentUser.getId(), "nobody-" + unique() + "@example.com", "admin"));
+    }
+
+    @Test
+    void setMemberByEmail_enforcesOwnerGateAndLastOwnerGuard() {
+        int orgId = newOrgOwnedBy(currentUser.getId());
+        User admin = newUser();
+        orgMemberMapper.addMember(orgId, admin.getId(), "admin");
+
+        assertThrows(ForbiddenException.class,
+            () -> orgMemberService.setMemberByEmail(orgId, admin.getId(), newUser().getEmail(), "admin"));
+        assertThrows(BadRequestException.class,
+            () -> orgMemberService.setMemberByEmail(orgId, currentUser.getId(), currentUser.getEmail(), "admin"));
+        assertEquals("owner", orgMemberMapper.getRole(orgId, currentUser.getId()));
+    }
+
+    @Test
     void soleOwnerCannotBeDemotedOrRemoved() {
         int orgId = newOrgOwnedBy(currentUser.getId());
 
@@ -119,5 +145,11 @@ class OrgMemberServiceTest extends AbstractServiceTest {
         int orgId = workspaceService.getOrgId(created.getId());
         assertEquals("owner", orgMemberMapper.getRole(orgId, currentUser.getId()),
             "an unresolved-context creator mints a fresh org and becomes its owner");
+        assertEquals(orgId, created.getOrgId(),
+            "the returned membership carries the minted org id so the client can resolve the org area");
+        assertEquals("owner", created.getOrgRole(),
+            "the founding creator's org role is populated on the create response, not left null");
+        assertTrue(created.getOrgName() != null && !created.getOrgName().isBlank(),
+            "the org name is populated on the create response");
     }
 }

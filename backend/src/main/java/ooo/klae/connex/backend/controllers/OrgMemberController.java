@@ -8,6 +8,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -15,6 +16,7 @@ import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
 import lombok.RequiredArgsConstructor;
+import ooo.klae.connex.backend.dto.AddOrgMemberRequest;
 import ooo.klae.connex.backend.dto.OrgMemberDto;
 import ooo.klae.connex.backend.dto.OrgMemberRequest;
 import ooo.klae.connex.backend.dto.OrgMembershipDto;
@@ -42,6 +44,13 @@ public class OrgMemberController {
     @GetMapping("/{orgId}/members")
     public List<OrgMemberDto> members(@PathVariable int orgId) {
         return orgMemberService.listMembers(orgId, authService.getCurrentUser().getId());
+    }
+
+    @PostMapping("/{orgId}/members")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void addMember(@PathVariable int orgId, @Valid @RequestBody AddOrgMemberRequest request) {
+        orgMemberService.setMemberByEmail(orgId, authService.getCurrentUser().getId(),
+                request.getEmail(), request.getOrgRole());
     }
 
     @PutMapping("/{orgId}/members/{userId}")

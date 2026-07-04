@@ -77,10 +77,32 @@ public class OrgMemberService {
         return orgMemberMapper.getMembershipsForUser(userId);
     }
 
+    /** The user's org role in the organization, or null when they hold none. */
+    public String orgRoleOf(int orgId, int userId) {
+        return orgMemberMapper.getRole(orgId, userId);
+    }
+
     /** The members of an organization. Requires the actor to be an org administrator. */
     public List<OrgMemberDto> listMembers(int orgId, int actorId) {
         requireOrgAdmin(orgId, actorId);
         return orgMemberMapper.getMembers(orgId);
+    }
+
+    /**
+     * Adds an org administrator by email, or changes their role if already a member. Owner-gated;
+     * the email must belong to an existing Connex account. Transactional so the delegated
+     * {@link #setMember} — reached by an internal call that bypasses the transactional proxy — still
+     * runs under this boundary, keeping its last-owner row lock and audit write atomic.
+     */
+    @Transactional
+    public void setMemberByEmail(int orgId, int actorId, String emailRaw, String roleRaw) {
+        requireOrgOwner(orgId, actorId);
+        String email = emailRaw == null ? "" : emailRaw.trim().toLowerCase();
+        User target = userMapper.getUserByEmail(email);
+        if (target == null) {
+            throw new BadRequestException("No Connex account uses that email address");
+        }
+        setMember(orgId, actorId, target.getId(), roleRaw);
     }
 
     /**
