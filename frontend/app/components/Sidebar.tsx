@@ -96,7 +96,7 @@ function useSections(): NavSection[] {
             ],
         },
         {
-            label: t("sectionTeam"),
+            label: t("sectionWorkspace"),
             items: [
                 { label: t("navUsers"), href: "/users", icon: UserGroupIcon },
                 { label: t("navSettings"), href: "/settings/members", icon: Cog6ToothIcon },
