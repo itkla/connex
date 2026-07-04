@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="ooo.klae.connex.backend.mappers.OrgAllowedDomainMapper">
+
+  <select id="findByOrg" resultType="string">
+    SELECT domain FROM org_allowed_domain
+    WHERE org_id = #{orgId}
+    ORDER BY domain
+  </select>
+
+  <insert id="add">
+    INSERT IGNORE INTO org_allowed_domain (org_id, domain)
+    VALUES (#{orgId}, #{domain})
+  </insert>
+
+  <delete id="remove">
+    DELETE FROM org_allowed_domain
+    WHERE org_id = #{orgId} AND domain = #{domain}
+  </delete>
+
+  <select id="isAllowed" resultType="boolean">
+    SELECT EXISTS(
+      SELECT 1 FROM org_allowed_domain
+      WHERE org_id = #{orgId} AND domain = #{domain}
+    )
+  </select>
+
+  <select id="countByOrg" resultType="int">
+    SELECT COUNT(*) FROM org_allowed_domain WHERE org_id = #{orgId}
+  </select>
+</mapper>
