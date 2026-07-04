@@ -25,7 +25,7 @@
   <!-- Visibility is owned-or-shared: a company is visible to its owning workspace and to any
        workspace it has been shared with (company_share). The share branch carries the same-org
        ceiling the write path enforces (owner and grantee workspaces must share an organization),
-       so a share row that ever crossed an org boundary grants no read visibility. Writes stay
+       so a share row that spans an org boundary grants no read visibility. Writes stay
        owned-only. -->
   <sql id="visible">
     (company.workspace_id = #{workspaceId}

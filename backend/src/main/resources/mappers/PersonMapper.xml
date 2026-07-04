@@ -41,7 +41,7 @@
   <!-- Owned-or-shared visibility: a person is visible to its owning workspace and any workspace it
        has been shared with (person_share). The share branch carries the same-org ceiling the write
        path enforces (owner and grantee workspaces must share an organization), so a share row that
-       ever crossed an org boundary grants no read visibility. Writes stay owned-only. Requires the
+       spans an org boundary grants no read visibility. Writes stay owned-only. Requires the
        table aliased `p`. -->
   <sql id="visible">
     (p.workspace_id = #{workspaceId}

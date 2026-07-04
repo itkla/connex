@@ -29,7 +29,7 @@
   <!-- Owned-or-shared visibility: a pipeline is visible to its owning workspace and any workspace it
        has been shared with (pipeline_share). The share branch carries the same-org ceiling the write
        path enforces (owner and grantee workspaces must share an organization), so a share row that
-       ever crossed an org boundary grants no read visibility. Writes stay owned-only. Requires
+       spans an org boundary grants no read visibility. Writes stay owned-only. Requires
        `FROM pipeline` unaliased. -->
   <sql id="visible">
     (pipeline.workspace_id = #{workspaceId}
