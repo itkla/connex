@@ -30,9 +30,11 @@ import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.dto.PasskeyDto;
 import ooo.klae.connex.backend.dto.RenamePasskeyRequest;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
+import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.TooManyRequestsException;
 import ooo.klae.connex.backend.services.AuthService;
 import ooo.klae.connex.backend.services.LoginRateLimiter;
+import ooo.klae.connex.backend.services.SsoConnectionService;
 import ooo.klae.connex.backend.util.ClientIpResolver;
 import ooo.klae.connex.backend.webauthn.WebAuthnJsonMapper;
 import ooo.klae.connex.backend.webauthn.WebAuthnService;
@@ -69,6 +71,7 @@ public class WebAuthnController {
     private final PublicKeyCredentialRequestOptionsRepository requestOptions;
     private final LoginRateLimiter loginRateLimiter;
     private final ClientIpResolver clientIpResolver;
+    private final SsoConnectionService ssoConnectionService;
 
     /**
      * Issues passkey registration options for the authenticated user and stashes them in the session.
@@ -145,6 +148,9 @@ public class WebAuthnController {
             throw new BadCredentialsException("Passkey authentication failed");
         } finally {
             requestOptions.save(req, res, null);
+        }
+        if (ssoConnectionService.isSsoEnforcedForUser(user.getId())) {
+            throw new ForbiddenException("This account must sign in with SSO");
         }
         authService.establishAuthenticatedSession(user, req, res);
         return Map.of("message", "You are now logged in");

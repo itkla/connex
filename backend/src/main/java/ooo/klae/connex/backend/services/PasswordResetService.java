@@ -41,6 +41,7 @@ public class PasswordResetService {
     private final PasswordResetRateLimiter rateLimiter;
     private final AuditService auditService;
     private final SessionRegistry sessionRegistry;
+    private final SsoConnectionService ssoConnectionService;
 
     @Value("${connex.password-reset.token-expiry-minutes:30}")
     private int tokenExpiryMinutes;
@@ -68,6 +69,11 @@ public class PasswordResetService {
 
         User user = userMapper.getUserByEmail(email);
         if (user == null) {
+            return;
+        }
+        if (ssoConnectionService.isSsoEnforcedForUser(user.getId())) {
+            auditService.record("auth.password_reset_sso_enforced", "user", user.getId(), user.getDisplayName(),
+                    "Password reset suppressed; SSO enforced", null);
             return;
         }
         if (passwordResetTokenMapper.countRecentByUser(user.getId(), requestWindowSeconds) >= maxRequests) {

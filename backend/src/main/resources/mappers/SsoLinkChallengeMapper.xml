@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="ooo.klae.connex.backend.mappers.SsoLinkChallengeMapper">
+
+  <insert id="insert">
+    INSERT INTO sso_link_challenge
+      (token_hash, user_id, provider, issuer, external_subject, org_id, expires_at)
+    VALUES
+      (#{challenge.tokenHash}, #{challenge.userId}, #{challenge.provider}, #{challenge.issuer},
+       #{challenge.externalSubject}, #{challenge.orgId},
+       DATE_ADD(UTC_TIMESTAMP(), INTERVAL #{expiryMinutes} MINUTE))
+  </insert>
+
+  <select id="findByTokenHash" resultType="SsoLinkChallenge">
+    SELECT id, token_hash, user_id, provider, issuer, external_subject, org_id,
+           expires_at, consumed_at, created_at
+    FROM sso_link_challenge
+    WHERE token_hash = #{tokenHash} AND consumed_at IS NULL AND expires_at > UTC_TIMESTAMP()
+  </select>
+
+  <update id="markConsumed">
+    UPDATE sso_link_challenge
+    SET consumed_at = UTC_TIMESTAMP()
+    WHERE id = #{id} AND consumed_at IS NULL AND expires_at > UTC_TIMESTAMP()
+  </update>
+
+  <update id="invalidateForUser">
+    UPDATE sso_link_challenge
+    SET consumed_at = UTC_TIMESTAMP()
+    WHERE user_id = #{userId} AND consumed_at IS NULL
+  </update>
+</mapper>

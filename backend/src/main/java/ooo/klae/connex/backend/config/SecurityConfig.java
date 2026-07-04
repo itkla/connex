@@ -80,6 +80,7 @@ public class SecurityConfig {
                 .ignoringRequestMatchers(
                     "/api/auth/login", "/api/auth/register", "/api/auth/logout",
                     "/api/auth/forgot-password", "/api/auth/reset-password",
+                    "/api/auth/sso/link/confirm",
                     "/api/auth/webauthn/authenticate/**"));
         } else {
             http.csrf(AbstractHttpConfigurer::disable);

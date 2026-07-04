@@ -1,6 +1,8 @@
 package ooo.klae.connex.backend.sso;
 
 import java.io.IOException;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 
 import org.springframework.security.core.Authentication;
 import org.springframework.security.oauth2.client.authentication.OAuth2AuthenticationToken;
@@ -14,6 +16,7 @@ import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.mail.MailProperties;
 import ooo.klae.connex.backend.services.AuthService;
+import ooo.klae.connex.backend.services.SsoLinkService;
 import ooo.klae.connex.backend.services.SsoLoginResult;
 import ooo.klae.connex.backend.services.SsoLoginService;
 
@@ -33,6 +36,7 @@ public class SsoAuthenticationSuccessHandler implements AuthenticationSuccessHan
     private static final String REGISTRATION_PREFIX = "org-";
 
     private final SsoLoginService ssoLoginService;
+    private final SsoLinkService ssoLinkService;
     private final AuthService authService;
     private final MailProperties mailProperties;
 
@@ -58,7 +62,11 @@ public class SsoAuthenticationSuccessHandler implements AuthenticationSuccessHan
                 authService.establishAuthenticatedSession(login.user(), request, response);
                 response.sendRedirect(frontendBase + "/dashboard");
             }
-            case SsoLoginResult.LinkRequired _ -> response.sendRedirect(frontendBase + "/sso/link?e=1");
+            case SsoLoginResult.LinkRequired linkRequired -> {
+                String linkToken = ssoLinkService.createChallenge(linkRequired);
+                response.sendRedirect(frontendBase + "/sso/link?token="
+                        + URLEncoder.encode(linkToken, StandardCharsets.UTF_8));
+            }
         }
     }
 

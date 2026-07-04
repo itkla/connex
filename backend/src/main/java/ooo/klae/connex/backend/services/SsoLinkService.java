@@ -1,0 +1,165 @@
+package ooo.klae.connex.backend.services;
+
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.SecureRandom;
+import java.util.Base64;
+
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.security.authentication.BadCredentialsException;
+import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
+
+import lombok.RequiredArgsConstructor;
+
+import ooo.klae.connex.backend.beans.FederatedIdentity;
+import ooo.klae.connex.backend.beans.SsoLinkChallenge;
+import ooo.klae.connex.backend.beans.User;
+import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
+import ooo.klae.connex.backend.exceptions.TooManyRequestsException;
+import ooo.klae.connex.backend.mappers.FederatedIdentityMapper;
+import ooo.klae.connex.backend.mappers.SsoLinkChallengeMapper;
+import ooo.klae.connex.backend.mappers.UserMapper;
+
+/**
+ * Drives the SSO account-linking flow: when a verified IdP email collides with an
+ * existing password account, the account is never auto-linked. Instead a single-use
+ * challenge is minted ({@link #createChallenge}) and the user must re-enter their
+ * password once ({@link #confirm}) to prove ownership before the federated identity
+ * is written and a session is established. Only the SHA-256 hash of the raw token is
+ * persisted; the raw token leaves only in the redirect to the linking screen, mirroring
+ * {@link PasswordResetService}. The confirm path is an online password oracle, so it is
+ * IP-rate-limited and never establishes a session on any failure path.
+ */
+@Service
+@Transactional
+@RequiredArgsConstructor
+public class SsoLinkService {
+
+    private static final SecureRandom RANDOM = new SecureRandom();
+    private static final int TOKEN_BYTES = 32;
+
+    private final SsoLinkChallengeMapper ssoLinkChallengeMapper;
+    private final FederatedIdentityMapper federatedIdentityMapper;
+    private final UserMapper userMapper;
+    private final PasswordEncoder passwordEncoder;
+    private final LoginRateLimiter loginRateLimiter;
+    private final AuthService authService;
+
+    @Value("${connex.sso.link-challenge-expiry-minutes:15}")
+    private int challengeExpiryMinutes;
+
+    /**
+     * Mints a single-use linking challenge for a link-required outcome, invalidating any
+     * prior outstanding challenges for the same account. Stores only the token hash; the
+     * returned raw token travels in the redirect to the linking screen and is never stored.
+     * @param request the link-required resolution carrying the account and IdP identity
+     * @return the raw, unhashed token to place in the linking redirect
+     */
+    public String createChallenge(SsoLoginResult.LinkRequired request) {
+        ssoLinkChallengeMapper.invalidateForUser(request.existingUserId());
+
+        String rawToken = generateToken();
+        SsoLinkChallenge challenge = new SsoLinkChallenge();
+        challenge.setTokenHash(hashToken(rawToken));
+        challenge.setUserId(request.existingUserId());
+        challenge.setProvider(request.provider());
+        challenge.setIssuer(request.issuer());
+        challenge.setExternalSubject(request.subject());
+        challenge.setOrgId(request.orgId());
+        ssoLinkChallengeMapper.insert(challenge, challengeExpiryMinutes);
+        return rawToken;
+    }
+
+    /**
+     * Confirms ownership of the challenged account by verifying the supplied password, then
+     * links the IdP identity and establishes a session. IP-rate-limited first because it is an
+     * online password oracle. Nothing is written and no session is established on any failure:
+     * a missing/consumed/expired challenge is a non-enumerating 404, a wrong password records a
+     * limiter failure and is a 401 that leaves the challenge redeemable.
+     * @param rawToken the raw token from the linking redirect
+     * @param password the account's current password, to prove ownership
+     * @param clientIp the resolved client IP, for rate limiting
+     * @param httpRequest the current request
+     * @param httpResponse the current response
+     * @return the now-linked, signed-in user
+     * @throws TooManyRequestsException when the client IP is over the failure cap
+     * @throws ResourceNotFoundException when the challenge is missing, consumed, or expired
+     * @throws BadCredentialsException when the account has no password or the password is wrong
+     */
+    public User confirm(String rawToken, String password, String clientIp,
+            HttpServletRequest httpRequest, HttpServletResponse httpResponse) {
+        long now = System.currentTimeMillis();
+        if (loginRateLimiter.isBlocked(clientIp, null, now)) {
+            throw new TooManyRequestsException("Too many attempts. Please try again later.");
+        }
+
+        SsoLinkChallenge challenge = rawToken == null ? null
+                : ssoLinkChallengeMapper.findByTokenHash(hashToken(rawToken));
+        if (challenge == null) {
+            throw new ResourceNotFoundException("This link is invalid or has expired");
+        }
+
+        User user = userMapper.getUserById(challenge.getUserId());
+        if (user == null || user.getPassword() == null
+                || !passwordEncoder.matches(password, user.getPassword())) {
+            loginRateLimiter.recordFailure(clientIp, null, now);
+            throw new BadCredentialsException("Incorrect password");
+        }
+
+        if (ssoLinkChallengeMapper.markConsumed(challenge.getId()) == 0) {
+            throw new ResourceNotFoundException("This link is invalid or has expired");
+        }
+
+        linkIdentity(challenge, user.getId());
+        return authService.establishAuthenticatedSession(user, httpRequest, httpResponse);
+    }
+
+    private void linkIdentity(SsoLinkChallenge challenge, int userId) {
+        FederatedIdentity existing = federatedIdentityMapper.findByProviderIssuerSubject(
+                challenge.getProvider(), challenge.getIssuer(), challenge.getExternalSubject());
+        if (existing != null) {
+            return;
+        }
+        FederatedIdentity link = new FederatedIdentity();
+        link.setUserId(userId);
+        link.setOrgId(challenge.getOrgId());
+        link.setProvider(challenge.getProvider());
+        link.setIssuer(challenge.getIssuer());
+        link.setExternalSubject(challenge.getExternalSubject());
+        federatedIdentityMapper.insert(link);
+    }
+
+    /**
+     * Generates a 256-bit URL-safe random token.
+     * @return the raw token
+     */
+    private static String generateToken() {
+        byte[] bytes = new byte[TOKEN_BYTES];
+        RANDOM.nextBytes(bytes);
+        return Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
+    }
+
+    /**
+     * Computes the SHA-256 hex digest used to store and look up a token.
+     * @param rawToken the unhashed token
+     * @return the lowercase hex digest
+     */
+    private static String hashToken(String rawToken) {
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            byte[] hash = digest.digest(rawToken.getBytes(StandardCharsets.UTF_8));
+            StringBuilder sb = new StringBuilder(hash.length * 2);
+            for (byte b : hash) {
+                sb.append(String.format("%02x", b));
+            }
+            return sb.toString();
+        } catch (Exception e) {
+            throw new IllegalStateException("SHA-256 unavailable", e);
+        }
+    }
+}

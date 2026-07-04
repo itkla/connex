@@ -14,6 +14,7 @@ import ooo.klae.connex.backend.dto.SsoConnectionRequest;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.mappers.SsoConnectionMapper;
 import ooo.klae.connex.backend.mappers.SsoDomainMapper;
+import ooo.klae.connex.backend.mappers.WorkspaceMapper;
 import ooo.klae.connex.backend.sso.SsoSecretCipher;
 import ooo.klae.connex.backend.tenant.Permission;
 
@@ -34,6 +35,7 @@ public class SsoConnectionService {
 
     private final SsoConnectionMapper ssoConnectionMapper;
     private final SsoDomainMapper ssoDomainMapper;
+    private final WorkspaceMapper workspaceMapper;
     private final WorkspaceService workspaceService;
     private final SsoSecretCipher ssoSecretCipher;
     private final AuditService auditService;
@@ -122,6 +124,18 @@ public class SsoConnectionService {
             throw new BadRequestException("SSO is not enabled for this organization");
         }
         return connection;
+    }
+
+    /**
+     * Whether SSO is mandatory for a user: true when the user is an active member of any
+     * workspace whose organization has an enabled connection with {@code enforce_sso}. Such
+     * a user must sign in through the IdP, so password login, passkey login, and forgot-password
+     * are all refused for them. Membership in even one enforcing organization is enough.
+     * @param userId the user to check
+     * @return true when at least one active membership sits in an enforcing organization
+     */
+    public boolean isSsoEnforcedForUser(int userId) {
+        return workspaceMapper.countEnforcingSsoMemberships(userId) > 0;
     }
 
     /**
