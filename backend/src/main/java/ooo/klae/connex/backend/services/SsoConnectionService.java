@@ -11,6 +11,7 @@ import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.beans.SsoConnection;
 import ooo.klae.connex.backend.dto.SsoConnectionDto;
 import ooo.klae.connex.backend.dto.SsoConnectionRequest;
+import ooo.klae.connex.backend.dto.SsoDiscoveryDto;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.mappers.SsoConnectionMapper;
 import ooo.klae.connex.backend.mappers.SsoDomainMapper;
@@ -33,6 +34,7 @@ public class SsoConnectionService {
 
     private static final String DEFAULT_SCOPES = "openid,email,profile";
     private static final String DEFAULT_ROLE = "member";
+    private static final String REGISTRATION_PREFIX = "org-";
     private static final Set<String> ALLOWED_ROLES = Set.of("member", "admin");
 
     private final SsoConnectionMapper ssoConnectionMapper;
@@ -142,6 +144,29 @@ public class SsoConnectionService {
      */
     public boolean isSsoEnforcedForUser(int userId) {
         return workspaceMapper.countEnforcingSsoMemberships(userId) > 0;
+    }
+
+    /**
+     * Pre-login IdP discovery for the login screen: maps an email's domain to its
+     * organization and reports whether that org has an <em>enabled</em> SSO connection the
+     * browser can start, along with the registration to navigate to and whether password
+     * login is disabled. Reveals only domain-level routing — never whether an account exists
+     * — and performs no network calls. An unmapped domain or a disabled connection is
+     * reported as unavailable.
+     * @param email the email typed on the login screen
+     * @return the discovery result, unavailable when the domain has no enabled connection
+     */
+    public SsoDiscoveryDto discoverByEmail(String email) {
+        Integer orgId = findOrgByDomain(email);
+        if (orgId == null) {
+            return SsoDiscoveryDto.unavailable();
+        }
+        SsoConnection connection = ssoConnectionMapper.findByOrg(orgId);
+        if (connection == null || !connection.isEnabled()) {
+            return SsoDiscoveryDto.unavailable();
+        }
+        return SsoDiscoveryDto.available(REGISTRATION_PREFIX + orgId,
+                connection.getProtocol(), connection.isEnforceSso());
     }
 
     /**

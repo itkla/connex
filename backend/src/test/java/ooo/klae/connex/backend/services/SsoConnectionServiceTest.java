@@ -16,6 +16,7 @@ import ooo.klae.connex.backend.beans.SsoConnection;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.dto.SsoConnectionDto;
 import ooo.klae.connex.backend.dto.SsoConnectionRequest;
+import ooo.klae.connex.backend.dto.SsoDiscoveryDto;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.mappers.SsoConnectionMapper;
 import ooo.klae.connex.backend.sso.SsoSecretCipher;
@@ -84,6 +85,33 @@ class SsoConnectionServiceTest extends AbstractServiceTest {
         assertEquals("client-xyz", saved.getOidcClientId());
         assertEquals(firstEnc, ssoConnectionMapper.findByOrg(orgId).getOidcClientSecretEnc(),
                 "a blank secret must keep the previously stored ciphertext");
+    }
+
+    @Test
+    void discoverByEmail_routesAnEnabledDomain_andHidesAccountExistence() {
+        ssoConnectionService.save(workspace.getId(), currentUser.getId(), oidcRequest());
+        int orgId = workspaceMapper.getOrgId(workspace.getId());
+
+        SsoDiscoveryDto routed = ssoConnectionService.discoverByEmail("alice@example.com");
+        assertTrue(routed.isAvailable());
+        assertEquals("org-" + orgId, routed.getRegistrationId());
+        assertEquals("oidc", routed.getProtocol());
+        assertFalse(routed.isEnforced());
+
+        assertFalse(ssoConnectionService.discoverByEmail("bob@unmapped.example.org").isAvailable(),
+                "an unmapped domain is unavailable");
+        assertFalse(ssoConnectionService.discoverByEmail(null).isAvailable());
+        assertFalse(ssoConnectionService.discoverByEmail("no-at-sign").isAvailable());
+    }
+
+    @Test
+    void discoverByEmail_disabledConnection_isUnavailable() {
+        SsoConnectionRequest disabled = oidcRequest();
+        disabled.setEnabled(false);
+        ssoConnectionService.save(workspace.getId(), currentUser.getId(), disabled);
+
+        assertFalse(ssoConnectionService.discoverByEmail("alice@example.com").isAvailable(),
+                "a domain routed to a disabled connection must not be startable");
     }
 
     @Test

@@ -11,13 +11,16 @@ import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.dto.SsoConnectionDto;
 import ooo.klae.connex.backend.dto.SsoConnectionRequest;
+import ooo.klae.connex.backend.dto.SsoDiscoveryDto;
 import ooo.klae.connex.backend.services.AuthService;
 import ooo.klae.connex.backend.services.SsoConnectionService;
 
 /**
- * Owner/admin SSO connection settings for an organization, addressed by the acting
- * workspace: read and upsert. Permission ({@code SSO_MANAGE}) is enforced in the
- * service, which resolves the workspace's organization.
+ * SSO connection endpoints for an organization: the pre-login domain discovery the login
+ * screen uses to route to an IdP, plus owner/admin read and upsert of the connection,
+ * addressed by the acting workspace. Discovery is unauthenticated and returns only
+ * domain-level routing; {@code SSO_MANAGE} is enforced in the service for read/upsert,
+ * which resolves the workspace's organization.
  */
 @RestController
 @RequestMapping("/api/auth/sso")
@@ -26,6 +29,11 @@ public class SsoConnectionController {
 
     private final SsoConnectionService ssoConnectionService;
     private final AuthService authService;
+
+    @GetMapping("/discover")
+    public SsoDiscoveryDto discover(@RequestParam("email") String email) {
+        return ssoConnectionService.discoverByEmail(email);
+    }
 
     @GetMapping("/config")
     public SsoConnectionDto get(@RequestParam("workspaceId") int workspaceId) {
