@@ -156,6 +156,25 @@ async function safeWithCookie<T>(
     }
 }
 
+export type CookieResult<T> = { ok: true; data: T } | { ok: false };
+
+/**
+ * As {@link safeWithCookie}, but reports a fetch failure distinctly from an empty result so the
+ * caller can render an error state instead of presenting a backend fault as an empty workspace.
+ * A missing cookie also reports {@code ok: false} — the data could not be loaded either way.
+ */
+async function resultWithCookie<T>(
+    fetcher: (init: RequestInit) => Promise<T>,
+    cookie: string | null,
+): Promise<CookieResult<T>> {
+    if (!cookie) return { ok: false };
+    try {
+        return { ok: true, data: await fetcher({ headers: { cookie }, cache: "no-store" }) };
+    } catch {
+        return { ok: false };
+    }
+}
+
 function buildQuery(params: Record<string, unknown>): string {
     const search = new URLSearchParams();
     for (const [key, value] of Object.entries(params)) {
@@ -917,6 +936,28 @@ export function getIntroSuggestions(init: RequestInit = {}, limit?: number) {
 
 export function getIntroSuggestionsFromCookie(cookie: string | null, limit?: number) {
     return safeWithCookie<Types.IntroSuggestion>((init) => getIntroSuggestions(init, limit), cookie);
+}
+
+/**
+ * As {@link getIntroSuggestionsFromCookie}, but failure-aware (see {@link resultWithCookie}), so
+ * the introductions page can distinguish a backend fault from a genuinely empty workspace.
+ */
+export function getIntroSuggestionsResultFromCookie(cookie: string | null, limit?: number) {
+    return resultWithCookie<Types.IntroSuggestion[]>((init) => getIntroSuggestions(init, limit), cookie);
+}
+
+/**
+ * Failure-aware variant of {@link getIntroductions} for the introductions page (see
+ * {@link resultWithCookie}), so a lineage fetch failure is not presented as zero intros made.
+ */
+export function getIntroductionsResultFromCookie(
+    cookie: string | null,
+    params: { page?: number; size?: number } = {},
+) {
+    return resultWithCookie<Types.Page<Types.IntroductionRecord>>(
+        (init) => getIntroductions(params, init),
+        cookie,
+    );
 }
 
 export function getIntroductions(params: { page?: number; size?: number } = {}, init: RequestInit = {}) {
