@@ -90,7 +90,17 @@
     "toastFailedSave": "Failed to save note",
     "toastNoteDeleted": "Note deleted",
     "toastNotesDeleted": "{count} notes deleted",
-    "toastFailedDelete": "Failed to delete note"
+    "toastFailedDelete": "Failed to delete note",
+    "groupRecord": "By record",
+    "sortBy": "Sort",
+    "sortByAria": "Sort notes",
+    "sortUpdated": "Last updated",
+    "sortCreated": "Date created",
+    "sortTitle": "Title",
+    "standalone": "Standalone",
+    "untitled": "Untitled",
+    "open": "Open",
+    "actionsAria": "Note actions"
   },
   "NotesQuickEditSheet": {
     "titleSingle": "Quick edit note",
@@ -320,6 +330,12 @@
     "orderedList": "Numbered list",
     "taskList": "Checklist",
     "blockquote": "Quote",
-    "codeBlock": "Code block"
+    "codeBlock": "Code block",
+    "back": "Back to notes",
+    "saving": "Saving…",
+    "saved": "Saved",
+    "saveError": "Couldn't save",
+    "untitled": "Untitled",
+    "titlePlaceholder": "Untitled note"
   }
 }

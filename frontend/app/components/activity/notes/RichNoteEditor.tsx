@@ -41,8 +41,11 @@ export default function RichNoteEditor({
 }: Props) {
     const t = useTranslations("ActivityNotesEditor");
     const onChangeRef = useRef(onChange);
-    onChangeRef.current = onChange;
     const loadingRef = useRef(false);
+
+    useEffect(() => {
+        onChangeRef.current = onChange;
+    }, [onChange]);
 
     const editor = useEditor({
         editable,

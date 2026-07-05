@@ -90,7 +90,17 @@
     "toastFailedSave": "メモを保存できませんでした",
     "toastNoteDeleted": "メモを削除しました",
     "toastNotesDeleted": "{count}件のメモを削除しました",
-    "toastFailedDelete": "メモを削除できませんでした"
+    "toastFailedDelete": "メモを削除できませんでした",
+    "groupRecord": "レコード別",
+    "sortBy": "並び替え",
+    "sortByAria": "ノートを並び替え",
+    "sortUpdated": "更新順",
+    "sortCreated": "作成順",
+    "sortTitle": "タイトル順",
+    "standalone": "スタンドアロン",
+    "untitled": "無題",
+    "open": "開く",
+    "actionsAria": "ノートの操作"
   },
   "NotesQuickEditSheet": {
     "titleSingle": "メモをクイック編集",
@@ -320,6 +330,12 @@
     "orderedList": "番号付きリスト",
     "taskList": "チェックリスト",
     "blockquote": "引用",
-    "codeBlock": "コードブロック"
+    "codeBlock": "コードブロック",
+    "back": "ノートに戻る",
+    "saving": "保存中…",
+    "saved": "保存しました",
+    "saveError": "保存できませんでした",
+    "untitled": "無題",
+    "titlePlaceholder": "無題のノート"
   }
 }
