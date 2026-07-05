@@ -292,7 +292,7 @@ export default function SearchBar() {
                     onFocus={() => setOpen(true)}
                     onKeyDown={onKeyDown}
                     placeholder={t("placeholder")}
-                    className="w-full rounded-full bg-muted px-4 py-2.5 pr-10 text-base text-foreground placeholder:text-muted-foreground outline-none ring-1 ring-border transition focus:ring-2 focus:ring-brand"
+                    className="w-full rounded-full bg-muted py-2.5 pr-4 pl-11 text-base text-foreground placeholder:text-muted-foreground outline-none ring-1 ring-border transition focus:ring-2 focus:ring-brand"
                     role="combobox"
                     aria-expanded={showDropdown}
                     aria-controls="search-results-listbox"
@@ -301,7 +301,7 @@ export default function SearchBar() {
                 />
                 <Button
                     type="submit"
-                    className="absolute right-2 top-1/2 -translate-y-1/2 p-0 bg-transparent border-none flex items-center justify-center hover:bg-transparent"
+                    className="absolute left-3 top-1/2 flex -translate-y-1/2 items-center justify-center border-none bg-transparent p-0 hover:bg-transparent"
                     tabIndex={-1}
                     aria-label={t("search")}
                 >
