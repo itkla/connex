@@ -139,6 +139,7 @@ function NoteDialogForm({
             if (isEdit && note) {
                 await updateNote(note.id, {
                     content: trimmed,
+                    title: note.title ?? null,
                     author: note.author,
                     person: selectedPerson?.id ?? null,
                     deal: selectedDeal?.id ?? null,

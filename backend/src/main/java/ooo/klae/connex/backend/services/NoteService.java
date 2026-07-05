@@ -51,7 +51,7 @@ public class NoteService {
     private final NotificationPreferenceService notificationPreferenceService;
     private final ObjectMapper objectMapper;
 
-    private static final Set<String> AUDIT_FIELDS = Set.of("content");
+    private static final Set<String> AUDIT_FIELDS = Set.of("content", "title");
     private static final String MENTION_TYPE = "note.mention";
     private static final String MENTION_CATEGORY = "note";
     private static final String MENTION_SEVERITY = "info";

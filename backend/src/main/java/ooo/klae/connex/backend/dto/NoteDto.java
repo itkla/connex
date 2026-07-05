@@ -30,8 +30,11 @@ public class NoteDto {
     private Integer id;
 
     @NotBlank
-    @Size(max = 4000)
+    @Size(max = 50000)
     private String content;
+
+    @Size(max = 255)
+    private String title;
 
     @JsonProperty(access = JsonProperty.Access.READ_ONLY)
     private Integer author;
@@ -51,6 +54,7 @@ public class NoteDto {
         NoteDto dto = new NoteDto();
         dto.id = n.getId();
         dto.content = n.getContent();
+        dto.title = n.getTitle();
         dto.author = n.getAuthor() != null ? n.getAuthor().getId() : null;
         dto.person = n.getPerson() != null ? n.getPerson().getId() : null;
         dto.deal = n.getDeal() != null ? n.getDeal().getId() : null;
@@ -66,6 +70,7 @@ public class NoteDto {
         Note n = new Note();
         if (id != null) n.setId(id);
         n.setContent(content);
+        n.setTitle(title);
         if (author != null) {
             User u = new User();
             u.setId(author);

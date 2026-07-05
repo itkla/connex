@@ -651,6 +651,10 @@ export function getNotesFromCookie(cookie: string | null) { // authenticate then
     return safeWithCookie<Types.Note>((init) => getNotes(init), cookie);
 }
 
+export function getNoteById(id: number, init: RequestInit = {}) {
+    return getJson<Types.Note>(`/api/notes/${id}`, init);
+}
+
 export function createNote(payload: Types.CreateNotePayload, init: RequestInit = {}) {
     return postJson<Types.Note>(`/api/notes`, payload, init);
 }
