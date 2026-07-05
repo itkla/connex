@@ -772,12 +772,15 @@ export type SegmentCondition = {
     field?: string;
     op?: string;
     value?: string;
+    values?: string[];
     negate?: boolean;
 };
 
 export type SegmentDefinition = {
     match: SegmentMatch;
     conditions: SegmentCondition[];
+    groups?: SegmentDefinition[];
+    negate?: boolean;
 };
 
 export type SavedViewConfig = {
@@ -1070,6 +1073,7 @@ export type RuleTrigger = {
     type: string;
     events?: string[];
     targetStageId?: number;
+    throttleMinutes?: number;
     cadence?: string;
 };
 
@@ -1081,6 +1085,36 @@ export type RuleAction = {
     tagId?: number;
     dueInDays?: number;
     severity?: string;
+    targetUserId?: number;
+    targetStageId?: number;
+};
+
+export type RuleNamedOption = {
+    id: number;
+    name: string;
+};
+
+export type RuleStageOption = {
+    id: number;
+    name: string;
+    pipeline: string;
+};
+
+/** Option data for the builder's id-typed value pickers (deal stage/owner, person company). */
+export type RuleBuilderOptions = {
+    stages: RuleStageOption[];
+    owners: RuleNamedOption[];
+    companies: RuleNamedOption[];
+};
+
+export type RuleRecordLabel = {
+    id: number;
+    label: string;
+};
+
+export type RulePreview = {
+    matchCount: number;
+    sample: RuleRecordLabel[];
 };
 
 export type Rule = {
