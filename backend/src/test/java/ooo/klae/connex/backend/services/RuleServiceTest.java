@@ -156,13 +156,32 @@ class RuleServiceTest extends AbstractServiceTest {
     }
 
     @Test
-    void create_conditionOnNonCompany_throws() {
+    void create_emptyConditionOnDealRule_throws() {
         RuleRequest request = req("deal", entityChange("deal.won"), "user", action("notify"));
         SegmentDefinition condition = new SegmentDefinition();
         condition.setMatch("all");
         condition.setConditions(List.of());
         request.setCondition(condition);
         assertThrows(BadRequestException.class, () -> ruleService.create(request));
+    }
+
+    @Test
+    void create_dealRuleWithFieldCondition_roundTrips() {
+        RuleRequest request = req("deal", entityChange("deal.won"), "user", action("notify"));
+        SegmentDefinition condition = new SegmentDefinition();
+        condition.setMatch("all");
+        SegmentCondition field = new SegmentCondition();
+        field.setType("field");
+        field.setField("value");
+        field.setOp("gte");
+        field.setValue("1000");
+        condition.setConditions(List.of(field));
+        request.setCondition(condition);
+
+        RuleDto created = ruleService.create(request);
+
+        assertEquals("value",
+            ruleService.getById(created.getId()).getCondition().getConditions().get(0).getField());
     }
 
     @Test

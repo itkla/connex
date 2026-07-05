@@ -47,6 +47,7 @@ public class RuleService {
     private static final Set<String> ACTION_TYPES = Set.of("create_task", "log_activity", "add_tag", "notify");
     private static final Set<String> CADENCES = Set.of("hourly", "daily", "weekly");
     private static final Set<String> ENTITY_CHANGE_RECORD_TYPES = Set.of("deal", "company");
+    private static final Set<String> SEGMENT_RECORD_TYPES = Set.of("company", "person", "deal");
     private static final Set<String> DEAL_EVENTS = Set.of("deal.created", "deal.stage_changed", "deal.updated", "deal.won", "deal.lost");
     private static final Set<String> COMPANY_EVENTS = Set.of("company.created", "company.updated");
     private static final Set<String> LINKED_ACTIONS = Set.of("create_task", "log_activity");
@@ -126,8 +127,11 @@ public class RuleService {
         if ("system".equals(mode)) {
             workspaceService.requireRole(Role.ADMIN);
         }
-        if (request.getCondition() != null && !"company".equals(recordType)) {
-            throw new BadRequestException("WHEN conditions are only supported for company rules");
+        if (request.getCondition() != null && !SEGMENT_RECORD_TYPES.contains(recordType)) {
+            throw new BadRequestException("WHEN conditions are not supported for record type: " + request.getRecordType());
+        }
+        if (request.getCondition() != null && !hasWhen(request.getCondition())) {
+            throw new BadRequestException("A WHEN condition must contain at least one condition");
         }
         validateTrigger(request.getTrigger(), recordType, request.getCondition());
         validateActions(request.getActions(), recordType);
@@ -176,13 +180,13 @@ public class RuleService {
                 }
             }
         } else {
-            if (!"company".equals(recordType)) {
-                throw new BadRequestException("Schedule rules are only supported for company records");
+            if (!SEGMENT_RECORD_TYPES.contains(recordType)) {
+                throw new BadRequestException("Schedule rules are not supported for record type: " + recordType);
             }
             if (trigger.getCadence() == null || !CADENCES.contains(normalize(trigger.getCadence()))) {
                 throw new BadRequestException("A schedule rule requires a valid cadence");
             }
-            if (condition == null || condition.getConditions() == null || condition.getConditions().isEmpty()) {
+            if (!hasWhen(condition)) {
                 throw new BadRequestException("A schedule rule requires a WHEN condition");
             }
         }
@@ -261,6 +265,15 @@ public class RuleService {
         } catch (Exception e) {
             throw new BadRequestException("Corrupt rule configuration");
         }
+    }
+
+    private static boolean hasWhen(SegmentDefinition condition) {
+        if (condition == null) {
+            return false;
+        }
+        boolean hasConditions = condition.getConditions() != null && !condition.getConditions().isEmpty();
+        boolean hasGroups = condition.getGroups() != null && !condition.getGroups().isEmpty();
+        return hasConditions || hasGroups;
     }
 
     private static void requireText(String value, String field) {

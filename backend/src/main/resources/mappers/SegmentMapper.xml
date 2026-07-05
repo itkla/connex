@@ -6,6 +6,14 @@
         SELECT id FROM company WHERE workspace_id = #{workspaceId}
     </select>
 
+    <select id="personIdsInWorkspace" resultType="int">
+        SELECT id FROM person WHERE workspace_id = #{workspaceId}
+    </select>
+
+    <select id="dealIdsInWorkspace" resultType="int">
+        SELECT id FROM deal WHERE workspace_id = #{workspaceId}
+    </select>
+
     <select id="companyIdsWithOpenDeal" resultType="int">
         SELECT DISTINCT company_id
         FROM deal
@@ -47,23 +55,88 @@
           )
     </select>
 
-    <select id="companyIdsByIndustry" resultType="int">
-        SELECT id FROM company WHERE workspace_id = #{workspaceId} AND industry = #{industry}
+    <sql id="stringOp">
+        <choose>
+            <when test="op == 'equals'">AND ${col} = #{value}</when>
+            <when test="op == 'contains' or op == 'starts_with'">AND ${col} LIKE #{pattern}</when>
+            <when test="op == 'is_set'">AND ${col} IS NOT NULL AND ${col} &lt;&gt; ''</when>
+            <otherwise>AND 1 = 0</otherwise>
+        </choose>
+    </sql>
+
+    <sql id="numberOp">
+        <choose>
+            <when test="op == 'equals'">AND ${col} = #{number}</when>
+            <when test="op == 'gt'">AND ${col} &gt; #{number}</when>
+            <when test="op == 'gte'">AND ${col} &gt;= #{number}</when>
+            <when test="op == 'lt'">AND ${col} &lt; #{number}</when>
+            <when test="op == 'lte'">AND ${col} &lt;= #{number}</when>
+            <otherwise>AND 1 = 0</otherwise>
+        </choose>
+    </sql>
+
+    <sql id="idOp">
+        <choose>
+            <when test="op == 'is'">AND ${col} = #{id}</when>
+            <when test="op == 'in'">
+                AND ${col} IN
+                <foreach item="v" collection="ids" open="(" separator="," close=")">#{v}</foreach>
+            </when>
+            <otherwise>AND 1 = 0</otherwise>
+        </choose>
+    </sql>
+
+    <sql id="dateOp">
+        <choose>
+            <when test="op == 'before'">AND ${col} IS NOT NULL AND ${col} &lt; #{value}</when>
+            <when test="op == 'after'">AND ${col} IS NOT NULL AND ${col} &gt; #{value}</when>
+            <when test="op == 'within_days'">AND ${col} IS NOT NULL AND ${col} &gt;= #{dateFrom} AND ${col} &lt;= #{dateTo}</when>
+            <when test="op == 'is_set'">AND ${col} IS NOT NULL AND ${col} &lt;&gt; ''</when>
+            <otherwise>AND 1 = 0</otherwise>
+        </choose>
+    </sql>
+
+    <select id="companyIdsMatching" resultType="int">
+        SELECT id FROM company WHERE workspace_id = #{workspaceId}
+        <choose>
+            <when test="field == 'industry'"><include refid="stringOp"><property name="col" value="industry"/></include></when>
+            <when test="field == 'name'"><include refid="stringOp"><property name="col" value="name"/></include></when>
+            <when test="field == 'tag'">AND id IN (SELECT company_id FROM company_tag WHERE tag_id = #{id})</when>
+            <otherwise>AND 1 = 0</otherwise>
+        </choose>
     </select>
 
-    <select id="companyIdsByIndustryContains" resultType="int">
-        SELECT id FROM company WHERE workspace_id = #{workspaceId} AND industry LIKE #{pattern}
+    <select id="personIdsMatching" resultType="int">
+        SELECT id FROM person WHERE workspace_id = #{workspaceId}
+        <choose>
+            <when test="field == 'name'"><include refid="stringOp"><property name="col" value="name"/></include></when>
+            <when test="field == 'title'"><include refid="stringOp"><property name="col" value="title"/></include></when>
+            <when test="field == 'email'"><include refid="stringOp"><property name="col" value="email"/></include></when>
+            <when test="field == 'company'"><include refid="idOp"><property name="col" value="company_id"/></include></when>
+            <when test="field == 'tag'">AND id IN (SELECT person_id FROM person_tag WHERE tag_id = #{id})</when>
+            <otherwise>AND 1 = 0</otherwise>
+        </choose>
     </select>
 
-    <select id="companyIdsByNameContains" resultType="int">
-        SELECT id FROM company WHERE workspace_id = #{workspaceId} AND name LIKE #{pattern}
-    </select>
-
-    <select id="companyIdsByTag" resultType="int">
-        SELECT DISTINCT c.id
-        FROM company c
-        JOIN company_tag ct ON ct.company_id = c.id
-        WHERE c.workspace_id = #{workspaceId} AND ct.tag_id = #{tagId}
+    <select id="dealIdsMatching" resultType="int">
+        SELECT id FROM deal WHERE workspace_id = #{workspaceId}
+        <choose>
+            <when test="field == 'name'"><include refid="stringOp"><property name="col" value="name"/></include></when>
+            <when test="field == 'value'"><include refid="numberOp"><property name="col" value="value"/></include></when>
+            <when test="field == 'stage'"><include refid="idOp"><property name="col" value="stage_id"/></include></when>
+            <when test="field == 'owner'"><include refid="idOp"><property name="col" value="owner_id"/></include></when>
+            <when test="field == 'status'">
+                <choose>
+                    <when test="value == 'won'">AND won = TRUE</when>
+                    <when test="value == 'lost'">AND won = FALSE</when>
+                    <when test="value == 'open'">AND won IS NULL</when>
+                    <otherwise>AND 1 = 0</otherwise>
+                </choose>
+            </when>
+            <when test="field == 'close_date'"><include refid="dateOp"><property name="col" value="expected_close_date"/></include></when>
+            <when test="field == 'tag'">AND id IN (SELECT deal_id FROM deal_tag WHERE tag_id = #{id})</when>
+            <otherwise>AND 1 = 0</otherwise>
+        </choose>
     </select>
 
     <select id="distinctIndustries" resultType="string">

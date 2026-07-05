@@ -319,7 +319,7 @@ class SegmentServiceTest extends AbstractServiceTest {
 
     @Test
     void tooManyConditions_throws() {
-        SegmentCondition[] many = new SegmentCondition[17];
+        SegmentCondition[] many = new SegmentCondition[33];
         for (int i = 0; i < many.length; i++) {
             many[i] = field("name", "contains", "x" + i);
         }

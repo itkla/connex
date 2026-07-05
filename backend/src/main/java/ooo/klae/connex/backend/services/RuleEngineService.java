@@ -102,19 +102,19 @@ public class RuleEngineService {
     }
 
     private boolean conditionMatches(Rule rule, int workspaceId, int entityId) {
-        if (rule.getConditionJson() == null || !"company".equals(rule.getRecordType())) {
+        if (rule.getConditionJson() == null) {
             return true;
         }
         SegmentDefinition definition = read(rule.getConditionJson(), SegmentDefinition.class);
-        return segmentService.evaluate(workspaceId, conditionActorId(rule), "company", definition).contains(entityId);
+        return segmentService.evaluate(workspaceId, conditionActorId(rule), rule.getRecordType(), definition).contains(entityId);
     }
 
     private List<Integer> scheduleMatches(Rule rule, int workspaceId) {
-        if (!"company".equals(rule.getRecordType()) || rule.getConditionJson() == null) {
+        if (rule.getConditionJson() == null) {
             return List.of();
         }
         SegmentDefinition definition = read(rule.getConditionJson(), SegmentDefinition.class);
-        return segmentService.evaluate(workspaceId, conditionActorId(rule), "company", definition);
+        return segmentService.evaluate(workspaceId, conditionActorId(rule), rule.getRecordType(), definition);
     }
 
     private int conditionActorId(Rule rule) {
