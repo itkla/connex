@@ -1,9 +1,10 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
 
 import RelationMap from '@/app/components/map/RelationMap';
+import MapSearch, { type MapSearchItem } from '@/app/components/map/MapSearch';
 import ReplayControl, { type ReplayPhase } from '@/app/components/map/replay/ReplayControl';
 import {
     augmentMasterGraph,
@@ -54,6 +55,17 @@ export default function MapView({ graph, focusId }: { graph: Graph; focusId?: st
     const [weeks, setWeeks] = useState(DEFAULT_WEEKS);
     const [data, setData] = useState<ReplayData | null>(null);
     const clock = useReplayClock(data?.computed.length ?? 0, 1);
+    const [searchId, setSearchId] = useState<string | null>(null);
+
+    const searchItems = useMemo<MapSearchItem[]>(() => {
+        const out: MapSearchItem[] = [];
+        for (const n of graph.nodes) {
+            if (n.type === 'company') out.push({ id: n.id, label: n.data.company.name, kind: 'company' });
+            else if (n.type === 'contact') out.push({ id: n.id, label: n.data.contact.name, kind: 'contact' });
+            else if (n.type === 'user') out.push({ id: n.id, label: n.data.user.displayName, kind: 'user' });
+        }
+        return out;
+    }, [graph.nodes]);
 
     const load = useCallback(
         async (w: number): Promise<ReplayData> => {
@@ -72,6 +84,7 @@ export default function MapView({ graph, focusId }: { graph: Graph; focusId?: st
 
     const enter = useCallback(
         async (w: number) => {
+            setSearchId(null);
             setWeeks(w);
             setPhase('loading');
             reflectUrl(true, w);
@@ -141,7 +154,18 @@ export default function MapView({ graph, focusId }: { graph: Graph; focusId?: st
                 focusId={focusId}
                 extraEdges={data?.extraEdges}
                 replay={active && data ? { frames: data.computed, frameIndex: clock.frameIndex } : undefined}
+                highlightId={active ? null : searchId}
             />
+            {!active && (
+                <div className="absolute top-4 right-4 z-10">
+                    <MapSearch
+                        items={searchItems}
+                        activeId={searchId}
+                        onSelect={setSearchId}
+                        onClear={() => setSearchId(null)}
+                    />
+                </div>
+            )}
             <div className="absolute bottom-4 left-4 z-10">
                 <ReplayControl
                     phase={phase}

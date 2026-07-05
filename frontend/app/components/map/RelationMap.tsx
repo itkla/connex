@@ -9,6 +9,7 @@ import {
     Controls,
     Panel,
     useStoreApi,
+    useReactFlow,
     type NodeChange,
     type EdgeChange,
 } from '@xyflow/react';
@@ -34,7 +35,7 @@ import type { ComputedFrame } from './graph/replay';
 import type { TemperatureBand } from '@/app/lib/types';
 
 type ReplayState = { frames: ComputedFrame[]; frameIndex: number };
-type FlowProps = { graph: Graph; focusId?: string; replay?: ReplayState; extraEdges?: RelationEdgeType[] };
+type FlowProps = { graph: Graph; focusId?: string; replay?: ReplayState; extraEdges?: RelationEdgeType[]; highlightId?: string | null };
 
 const nodeTypes = { uc: UCNode, user: UserNode, company: CompanyNode, contact: ContactNode };
 const edgeTypes = { relation: RelationEdge };
@@ -102,7 +103,7 @@ function LabelFade() {
     return null;
 }
 
-function Flow({ graph, focusId, replay, extraEdges }: FlowProps) {
+function Flow({ graph, focusId, replay, extraEdges, highlightId }: FlowProps) {
     const [nodes, setNodes] = useState<AppNode[]>(() => {
         const seeded = radialLayout(graph);
         if (!focusId) return seeded;
@@ -118,6 +119,7 @@ function Flow({ graph, focusId, replay, extraEdges }: FlowProps) {
 
     const { resolvedTheme } = useTheme();
     const reduceMotion = useReducedMotion() ?? false;
+    const { fitView } = useReactFlow();
 
     const companyCount = useMemo(
         () => graph.nodes.reduce((n, x) => (x.type === 'company' ? n + 1 : n), 0),
@@ -177,6 +179,7 @@ function Flow({ graph, focusId, replay, extraEdges }: FlowProps) {
     }, []);
 
     const activeRef = useRef<Set<string> | null>(null);
+    const pinnedRef = useRef<Set<string> | null>(null);
     const clearTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
     const onNodeMouseEnter = useCallback(
@@ -203,8 +206,8 @@ function Flow({ graph, focusId, replay, extraEdges }: FlowProps) {
     const onNodeMouseLeave = useCallback(() => {
         if (clearTimer.current) clearTimeout(clearTimer.current);
         clearTimer.current = setTimeout(() => {
-            activeRef.current = null;
-            applyHover(null);
+            activeRef.current = pinnedRef.current;
+            applyHover(pinnedRef.current);
             clearTimer.current = null;
         }, 60);
     }, [applyHover]);
@@ -212,6 +215,23 @@ function Flow({ graph, focusId, replay, extraEdges }: FlowProps) {
     useEffect(() => () => {
         if (clearTimer.current) clearTimeout(clearTimer.current);
     }, []);
+
+    useEffect(() => {
+        const raf = requestAnimationFrame(() => {
+            if (!highlightId) {
+                pinnedRef.current = null;
+                activeRef.current = null;
+                applyHover(null);
+                return;
+            }
+            const ids = activeTreeFor(highlightId, adjacency.children, adjacency.parents);
+            pinnedRef.current = ids;
+            activeRef.current = ids;
+            applyHover(ids);
+            fitView({ nodes: [{ id: highlightId }], duration: reduceMotion ? 0 : 600, maxZoom: 1.1, padding: 0.6 });
+        });
+        return () => cancelAnimationFrame(raf);
+    }, [highlightId, adjacency, applyHover, fitView, reduceMotion]);
 
     const onNodesChange = useCallback(
         (changes: NodeChange<AppNode>[]) =>
@@ -345,7 +365,7 @@ function Flow({ graph, focusId, replay, extraEdges }: FlowProps) {
                 <LabelFade />
                 <Background />
                 <Controls position="bottom-right" />
-                <Panel position="top-right">
+                <Panel position="top-left">
                     <Legend />
                 </Panel>
             </ReactFlow>
@@ -353,11 +373,11 @@ function Flow({ graph, focusId, replay, extraEdges }: FlowProps) {
     );
 }
 
-export default function RelationMap({ graph, focusId, replay, extraEdges }: FlowProps) {
+export default function RelationMap({ graph, focusId, replay, extraEdges, highlightId }: FlowProps) {
     return (
         <div className="w-full h-full">
             <ReactFlowProvider>
-                <Flow graph={graph} focusId={focusId} replay={replay} extraEdges={extraEdges} />
+                <Flow graph={graph} focusId={focusId} replay={replay} extraEdges={extraEdges} highlightId={highlightId} />
             </ReactFlowProvider>
         </div>
     );

@@ -60,5 +60,10 @@
         "empty": "Not enough history to replay yet. As your network grows, you'll be able to watch it evolve here.",
         "singleFrame": "This range has only one point in time. Widen it to replay.",
         "error": "Couldn't load the replay timeline."
+    },
+    "MapSearch": {
+        "open": "Search the map",
+        "placeholder": "Search people & companies…",
+        "close": "Close search"
     }
 }
