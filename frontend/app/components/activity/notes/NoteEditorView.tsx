@@ -9,9 +9,12 @@ import {
     BriefcaseIcon,
     CheckCircleIcon,
     ExclamationCircleIcon,
+    LockClosedIcon,
     UserIcon,
+    UsersIcon,
 } from "@heroicons/react/24/outline";
-import type { Contact, Deal, Note, User } from "@/app/lib/types";
+import type { Contact, Deal, Note, NoteVisibility, User } from "@/app/lib/types";
+import { SegmentedToggle } from "@/app/components/filters";
 import { createNote, updateNote } from "@/app/lib/api";
 import { toastError } from "@/app/lib/toast";
 import { deriveNoteTitle } from "@/app/lib/noteText";
@@ -39,15 +42,18 @@ export default function NoteEditorView({ note, currentUserId, persons, deals, us
     const [noteId, setNoteId] = useState<number | null>(note?.id ?? null);
     const [title, setTitle] = useState(note?.title ?? "");
     const [content, setContent] = useState(note?.content ?? "");
+    const [visibility, setVisibility] = useState<NoteVisibility>(
+        note?.visibility ?? (note?.person || note?.deal ? "workspace" : "private"),
+    );
     const [status, setStatus] = useState<SaveStatus>("idle");
     const dirtyRef = useRef(false);
     const savingRef = useRef(false);
     const saveRef = useRef<() => void>(() => {});
-    const stateRef = useRef({ noteId, title, content });
+    const stateRef = useRef({ noteId, title, content, visibility });
 
     useEffect(() => {
-        stateRef.current = { noteId, title, content };
-    }, [noteId, title, content]);
+        stateRef.current = { noteId, title, content, visibility };
+    }, [noteId, title, content, visibility]);
 
     const person = note?.person ? persons.find((item) => item.id === note.person) ?? null : null;
     const deal = note?.deal ? deals.find((item) => item.id === note.deal) ?? null : null;
@@ -68,8 +74,8 @@ export default function NoteEditorView({ note, currentUserId, persons, deals, us
         setStatus("saving");
         const request =
             snapshot.noteId == null
-                ? createNote({ content: body, title: nextTitle, author: currentUserId })
-                : updateNote(snapshot.noteId, { content: body, title: nextTitle });
+                ? createNote({ content: body, title: nextTitle, visibility: snapshot.visibility, author: currentUserId })
+                : updateNote(snapshot.noteId, { content: body, title: nextTitle, visibility: snapshot.visibility });
         request
             .then((saved) => {
                 if (snapshot.noteId == null && saved?.id) {
@@ -98,7 +104,7 @@ export default function NoteEditorView({ note, currentUserId, persons, deals, us
         if (!dirtyRef.current) return;
         const handle = setTimeout(() => save(), 900);
         return () => clearTimeout(handle);
-    }, [title, content, save]);
+    }, [title, content, visibility, save]);
 
     useEffect(() => {
         const flush = () => {
@@ -165,6 +171,27 @@ export default function NoteEditorView({ note, currentUserId, persons, deals, us
                                 </Link>
                             </>
                         ) : null}
+                        <SegmentedToggle<NoteVisibility>
+                            ariaLabel={t("visibilityAria")}
+                            className="ml-auto"
+                            value={visibility}
+                            onChange={(value) => {
+                                setVisibility(value);
+                                markDirty();
+                            }}
+                            options={[
+                                {
+                                    value: "private",
+                                    label: t("visibilityPrivate"),
+                                    icon: <LockClosedIcon className="h-3.5 w-3.5" />,
+                                },
+                                {
+                                    value: "workspace",
+                                    label: t("visibilityWorkspace"),
+                                    icon: <UsersIcon className="h-3.5 w-3.5" />,
+                                },
+                            ]}
+                        />
                     </div>
 
                     <div className="mt-6">

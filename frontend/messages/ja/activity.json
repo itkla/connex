@@ -336,6 +336,9 @@
     "saved": "保存しました",
     "saveError": "保存できませんでした",
     "untitled": "無題",
-    "titlePlaceholder": "無題のノート"
+    "titlePlaceholder": "無題のノート",
+    "visibilityPrivate": "非公開",
+    "visibilityWorkspace": "ワークスペース",
+    "visibilityAria": "ノートの公開範囲"
   }
 }

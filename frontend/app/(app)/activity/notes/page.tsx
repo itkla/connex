@@ -7,7 +7,7 @@ import {
     getDealsFromCookie,
     getUsers,
 } from "@/app/lib/api";
-import type { Note, User } from "@/app/lib/types";
+import type { User } from "@/app/lib/types";
 import NotesBrowser from "@/app/components/activity/notes/NotesBrowser";
 
 export default async function NotesPage() {
@@ -26,15 +26,9 @@ export default async function NotesPage() {
         (init ? getUsers(init) : Promise.resolve([])).catch(() => [] as User[]),
     ]);
 
-    // a note with no person or deal is private to its author
-    const visibleNotes: Note[] = allNotes.filter((n) => {
-        if (n.person || n.deal) return true;
-        return n.author === user.id;
-    });
-
     return (
         <NotesBrowser
-            notes={visibleNotes}
+            notes={allNotes}
             persons={persons}
             deals={deals}
             users={users}
