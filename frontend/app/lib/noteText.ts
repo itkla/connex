@@ -1,6 +1,6 @@
 import type { Note } from "@/app/lib/types";
 
-const TOKEN = /\[([^\]]+)\]\((user|person|deal|company):(\d+)\)/g;
+const TOKEN = /\[([^\]]+)\]\((user|person|deal|company|note|file):(\d+)\)/g;
 
 function collapseTokens(value: string): string {
     return value.replace(TOKEN, (_full, label: string, type: string) =>

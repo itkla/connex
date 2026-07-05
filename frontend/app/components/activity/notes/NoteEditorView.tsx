@@ -19,6 +19,7 @@ import { createNote, updateNote } from "@/app/lib/api";
 import { toastError } from "@/app/lib/toast";
 import { deriveNoteTitle } from "@/app/lib/noteText";
 import { CrumbLabel } from "@/app/hooks/useNavTrail";
+import BacklinksPanel from "./BacklinksPanel";
 
 const RichNoteEditor = dynamic(() => import("./RichNoteEditor"), { ssr: false });
 
@@ -205,6 +206,10 @@ export default function NoteEditorView({ note, currentUserId, persons, deals, us
                             autofocus={noteId == null}
                         />
                     </div>
+
+                    {noteId != null ? (
+                        <BacklinksPanel refType="note" refId={noteId} excludeNoteId={noteId} />
+                    ) : null}
                 </div>
             </div>
         </div>

@@ -655,6 +655,13 @@ export function getNoteById(id: number, init: RequestInit = {}) {
     return getJson<Types.Note>(`/api/notes/${id}`, init);
 }
 
+export function getNotesReferencing(refType: string, refId: number, init: RequestInit = {}) {
+    return getJson<Types.Note[]>(
+        `/api/notes/referencing?refType=${encodeURIComponent(refType)}&refId=${refId}`,
+        init,
+    );
+}
+
 export function createNote(payload: Types.CreateNotePayload, init: RequestInit = {}) {
     return postJson<Types.Note>(`/api/notes`, payload, init);
 }

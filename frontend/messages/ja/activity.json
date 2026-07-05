@@ -339,6 +339,7 @@
     "titlePlaceholder": "無題のノート",
     "visibilityPrivate": "非公開",
     "visibilityWorkspace": "ワークスペース",
-    "visibilityAria": "ノートの公開範囲"
+    "visibilityAria": "ノートの公開範囲",
+    "backlinksTitle": "参照元"
   }
 }
