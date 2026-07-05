@@ -147,4 +147,10 @@
     WHERE workspace_id = #{workspaceId} AND id = #{id}
   </update>
 
+  <select id="exists" resultType="boolean">
+    SELECT EXISTS(
+      SELECT 1 FROM task WHERE workspace_id = #{workspaceId} AND id = #{id}
+    )
+  </select>
+
 </mapper>

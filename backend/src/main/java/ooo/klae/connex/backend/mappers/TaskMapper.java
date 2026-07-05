@@ -21,6 +21,7 @@ public interface TaskMapper {
     List<Task> getTasksByPersonId(@Param("workspaceId") int workspaceId, @Param("personId") int personId);
     List<Task> getTasksByDealId(@Param("workspaceId") int workspaceId, @Param("dealId") int dealId);
     Task getTaskById(@Param("workspaceId") int workspaceId, @Param("id") int id);
+    boolean exists(@Param("workspaceId") int workspaceId, @Param("id") int id);
     List<Task> search(@Param("workspaceId") int workspaceId, @Param("query") String query);
     int insert(Task task);
     int update(Task task);

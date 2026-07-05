@@ -16,12 +16,14 @@ import ooo.klae.connex.backend.beans.Activity;
 import ooo.klae.connex.backend.beans.EntityReference;
 import ooo.klae.connex.backend.beans.Note;
 import ooo.klae.connex.backend.beans.Task;
+import ooo.klae.connex.backend.mappers.ActivityMapper;
 import ooo.klae.connex.backend.mappers.AttachmentMapper;
 import ooo.klae.connex.backend.mappers.CompanyMapper;
 import ooo.klae.connex.backend.mappers.DealMapper;
 import ooo.klae.connex.backend.mappers.EntityReferenceMapper;
 import ooo.klae.connex.backend.mappers.NoteMapper;
 import ooo.klae.connex.backend.mappers.PersonMapper;
+import ooo.klae.connex.backend.mappers.TaskMapper;
 
 import lombok.RequiredArgsConstructor;
 
@@ -46,6 +48,8 @@ public class ReferenceService {
     private final CompanyMapper companyMapper;
     private final NoteMapper noteMapper;
     private final AttachmentMapper attachmentMapper;
+    private final TaskMapper taskMapper;
+    private final ActivityMapper activityMapper;
 
     public static final String SOURCE_NOTE = "note";
     public static final String SOURCE_TASK = "task";
@@ -59,10 +63,12 @@ public class ReferenceService {
     static final String TYPE_COMPANY = "company";
     static final String TYPE_NOTE = "note";
     static final String TYPE_FILE = "file";
+    static final String TYPE_TASK = "task";
+    static final String TYPE_ACTIVITY = "activity";
     private static final int MAX_REFERENCES = 100;
     private static final int MAX_LABEL_LENGTH = 255;
     private static final Pattern TOKEN =
-        Pattern.compile("\\[([^\\]]+)\\]\\((user|person|deal|company|note|file):(\\d+)\\)");
+        Pattern.compile("\\[([^\\]]+)\\]\\((user|person|deal|company|note|file|task|activity):(\\d+)\\)");
     private static final Pattern NOTE_TOKEN = Pattern.compile("\\[([^\\]]+)\\]\\(note:(\\d+)\\)");
 
     /**
@@ -269,6 +275,8 @@ public class ReferenceService {
             case TYPE_COMPANY -> companyMapper.exists(workspaceId, refId);
             case TYPE_NOTE -> noteMapper.getVisibleNoteById(workspaceId, refId, currentUserId) != null;
             case TYPE_FILE -> attachmentMapper.exists(workspaceId, refId);
+            case TYPE_TASK -> taskMapper.exists(workspaceId, refId);
+            case TYPE_ACTIVITY -> activityMapper.exists(workspaceId, refId);
             default -> false;
         };
     }

@@ -192,6 +192,29 @@ class NoteMentionTest extends AbstractServiceTest {
     }
 
     /**
+     * A note may reference a task and an activity; both resolve to hydrated
+     * references, while a token pointing at a non-existent task is dropped.
+     */
+    @Test
+    void taskAndActivityReferences_areResolved() {
+        var task = newTask(currentUser, null, null);
+        var activity = newActivity(currentUser, null, null);
+        int ghostTaskId = task.getId() + 90000;
+
+        Note created = noteService.create(draft(
+            "Follow up on [Task](task:" + task.getId() + ") after [Call](activity:" + activity.getId() + ")"
+            + " but ignore [Ghost](task:" + ghostTaskId + ")"));
+
+        var refs = created.getReferences();
+        assertNotNull(refs);
+        assertTrue(refs.stream()
+            .anyMatch(r -> "task".equals(r.getRefType()) && r.getRefId() == task.getId()));
+        assertTrue(refs.stream()
+            .anyMatch(r -> "activity".equals(r.getRefType()) && r.getRefId() == activity.getId()));
+        assertTrue(refs.stream().noneMatch(r -> r.getRefId() == ghostTaskId));
+    }
+
+    /**
      * A private note linked as a reference target inside a more-visible note does
      * not leak its label/existence to a non-author: the reference is dropped and
      * the content token is masked on the read path.
