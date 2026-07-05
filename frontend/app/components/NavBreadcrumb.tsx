@@ -45,8 +45,8 @@ export default function NavBreadcrumb() {
     const nodes = buildNodes(trail);
 
     return (
-        <Breadcrumb className="mb-5">
-            <BreadcrumbList>
+        <Breadcrumb className="min-w-0">
+            <BreadcrumbList className="flex-nowrap overflow-hidden">
                 {nodes.map((node, i) => (
                     <Fragment key={node.kind === 'crumb' ? node.crumb.pathname : 'ellipsis'}>
                         {i > 0 && <BreadcrumbSeparator />}

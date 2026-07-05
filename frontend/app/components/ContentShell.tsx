@@ -95,21 +95,24 @@ export default function ContentShell({
                     >
                         <MenuIcon className="size-5 text-muted-foreground" />
                     </Button>
-                    <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon"
-                        onClick={() => setOpen((o) => !o)}
-                        aria-label={open ? t("hideSidebar") : t("showSidebar")}
-                        aria-expanded={open}
-                        className="absolute left-6 hidden md:inline-flex"
-                    >
-                        {open ? (
-                            <PanelLeftCloseIcon className="size-5 text-muted-foreground" />
-                        ) : (
-                            <PanelLeftOpenIcon className="size-5 text-muted-foreground" />
-                        )}
-                    </Button>
+                    <div className="absolute left-6 hidden max-w-[calc(50%-20rem)] items-center gap-2 md:flex">
+                        <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => setOpen((o) => !o)}
+                            aria-label={open ? t("hideSidebar") : t("showSidebar")}
+                            aria-expanded={open}
+                            className="shrink-0"
+                        >
+                            {open ? (
+                                <PanelLeftCloseIcon className="size-5 text-muted-foreground" />
+                            ) : (
+                                <PanelLeftOpenIcon className="size-5 text-muted-foreground" />
+                            )}
+                        </Button>
+                        <NavBreadcrumb />
+                    </div>
 
                     <div className="w-full max-w-xl min-w-0">
                         <SearchBar />
@@ -117,7 +120,6 @@ export default function ContentShell({
                 </div>
 
                 <main className="flex-1 overflow-x-hidden overflow-y-auto p-6">
-                    <NavBreadcrumb />
                     {children}
                 </main>
             </div>
