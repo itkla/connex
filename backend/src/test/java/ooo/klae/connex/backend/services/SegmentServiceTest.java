@@ -13,6 +13,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 
 import ooo.klae.connex.backend.beans.Activity;
 import ooo.klae.connex.backend.beans.Company;
+import ooo.klae.connex.backend.beans.Deal;
 import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.beans.PersonEdge;
 import ooo.klae.connex.backend.beans.Pipeline;
@@ -315,6 +316,80 @@ class SegmentServiceTest extends AbstractServiceTest {
     @Test
     void unsupportedRecordType_throws() {
         assertThrows(BadRequestException.class, () -> segmentService.evaluate("person", def("all", predicate("open_deal"))));
+    }
+
+    private Deal dealWith(Pipeline pipeline, Stage stage, Company company, double value, String closeDate) {
+        Deal deal = new Deal();
+        deal.setName("Deal " + unique());
+        deal.setWorkspaceId(workspace.getId());
+        deal.setOwnerId(currentUser.getId());
+        deal.setValue(value);
+        deal.setCurrency("JPY");
+        deal.setPipelineId(pipeline.getId());
+        deal.setStageId(stage.getId());
+        deal.setCompanyId(company.getId());
+        deal.setExpectedCloseDate(closeDate);
+        dealMapper.insert(deal);
+        return deal;
+    }
+
+    @Test
+    void rootNegate_complementsWholeDefinition() {
+        Company fintech = companyWithIndustry("Acme", "Fintech");
+        Company other = companyWithIndustry("Beta", "Logistics");
+        SegmentDefinition definition = def("all", field("industry", "equals", "Fintech"));
+        definition.setNegate(true);
+
+        List<Integer> ids = evaluate(definition);
+
+        assertFalse(ids.contains(fintech.getId()));
+        assertTrue(ids.contains(other.getId()));
+    }
+
+    @Test
+    void nestedGroups_mixAndOr() {
+        Company match = companyWithIndustry("Acme Robotics", "Fintech");
+        Company wrongName = companyWithIndustry("Beta Corp", "Fintech");
+        Company wrongIndustry = companyWithIndustry("Gamma Robotics", "Logistics");
+        SegmentDefinition inner = def("any", field("name", "contains", "robotics"), field("name", "contains", "widgets"));
+        SegmentDefinition definition = new SegmentDefinition();
+        definition.setMatch("all");
+        definition.setConditions(List.of(field("industry", "equals", "Fintech")));
+        definition.setGroups(List.of(inner));
+
+        List<Integer> ids = evaluate(definition);
+
+        assertTrue(ids.contains(match.getId()));
+        assertFalse(ids.contains(wrongName.getId()));
+        assertFalse(ids.contains(wrongIndustry.getId()));
+    }
+
+    @Test
+    void dealField_valueGte_matches() {
+        Pipeline pipeline = newPipeline();
+        Stage stage = newStage(pipeline, 0);
+        Company company = newCompany();
+        Deal big = dealWith(pipeline, stage, company, 1000.0, null);
+        Deal small = dealWith(pipeline, stage, company, 100.0, null);
+
+        List<Integer> ids = segmentService.evaluate("deal", def("all", field("value", "gte", "500")));
+
+        assertTrue(ids.contains(big.getId()));
+        assertFalse(ids.contains(small.getId()));
+    }
+
+    @Test
+    void dealField_closeDateIsSet_matchesOnlyDatedDeals() {
+        Pipeline pipeline = newPipeline();
+        Stage stage = newStage(pipeline, 0);
+        Company company = newCompany();
+        Deal dated = dealWith(pipeline, stage, company, 1000.0, "2030-01-01");
+        Deal undated = dealWith(pipeline, stage, company, 1000.0, null);
+
+        List<Integer> ids = segmentService.evaluate("deal", def("all", field("close_date", "is_set", "")));
+
+        assertTrue(ids.contains(dated.getId()));
+        assertFalse(ids.contains(undated.getId()));
     }
 
     @Test

@@ -273,6 +273,36 @@ class RuleServiceTest extends AbstractServiceTest {
     }
 
     @Test
+    void create_personRuleWithCompanyOnlyField_throws() {
+        RuleRequest request = req("person", entityChange("person.updated"), "user", action("notify"));
+        SegmentDefinition condition = new SegmentDefinition();
+        condition.setMatch("all");
+        SegmentCondition industry = new SegmentCondition();
+        industry.setType("field");
+        industry.setField("industry");
+        industry.setOp("equals");
+        industry.setValue("Tech");
+        condition.setConditions(List.of(industry));
+        request.setCondition(condition);
+
+        assertThrows(BadRequestException.class, () -> ruleService.create(request));
+    }
+
+    @Test
+    void create_emptyNestedGroup_throws() {
+        RuleRequest request = req("company", entityChange("company.updated"), "user", action("notify"));
+        SegmentDefinition condition = new SegmentDefinition();
+        condition.setMatch("all");
+        SegmentDefinition emptyGroup = new SegmentDefinition();
+        emptyGroup.setMatch("all");
+        emptyGroup.setConditions(List.of());
+        condition.setGroups(List.of(emptyGroup));
+        request.setCondition(condition);
+
+        assertThrows(BadRequestException.class, () -> ruleService.create(request));
+    }
+
+    @Test
     void preview_returnsCountAndSample() {
         Company company = newCompany();
         RulePreviewRequest request = new RulePreviewRequest();

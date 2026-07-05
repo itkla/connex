@@ -13,6 +13,7 @@ import org.springframework.stereotype.Service;
 import lombok.RequiredArgsConstructor;
 
 import ooo.klae.connex.backend.beans.PersonEdge;
+import ooo.klae.connex.backend.dto.RecordLabelDto;
 import ooo.klae.connex.backend.dto.RelationshipTemperatureDto;
 import ooo.klae.connex.backend.dto.SegmentCondition;
 import ooo.klae.connex.backend.dto.SegmentDefinition;
@@ -144,7 +145,89 @@ public class SegmentService {
         return new SegmentFieldsDto(industries, tags);
     }
 
+    /** id + display label for a bounded set of records of {@code recordType}, for a preview sample. */
+    public List<RecordLabelDto> labels(String recordType, List<Integer> ids) {
+        if (ids == null || ids.isEmpty()) {
+            return List.of();
+        }
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        return switch (requireSupported(recordType)) {
+            case "person" -> segmentMapper.personLabels(workspaceId, ids);
+            case "deal" -> segmentMapper.dealLabels(workspaceId, ids);
+            default -> segmentMapper.companyLabels(workspaceId, ids);
+        };
+    }
+
+    /**
+     * Validates a definition's shape and legality — record type, depth, total count, each group's
+     * match and non-emptiness, and every condition's field/operator/value against the catalog —
+     * without executing any SQL. Used to reject a semantically invalid WHEN at rule-authoring time so
+     * it fails loudly there instead of silently never matching at evaluation.
+     */
+    public void validate(String recordType, SegmentDefinition definition) {
+        String type = requireSupported(recordType);
+        if (definition == null) {
+            return;
+        }
+        int total = countConditions(definition, 1);
+        if (total > MAX_CONDITIONS) {
+            throw new BadRequestException("A rule may reference at most " + MAX_CONDITIONS + " conditions");
+        }
+        validateGroup(definition, type);
+    }
+
+    private void validateGroup(SegmentDefinition group, String recordType) {
+        String match = normalize(group.getMatch());
+        if (!"any".equals(match) && !"all".equals(match)) {
+            throw new BadRequestException("Invalid match (expected 'all' or 'any'): " + group.getMatch());
+        }
+        List<SegmentCondition> conditions = group.getConditions() == null ? List.of() : group.getConditions();
+        List<SegmentDefinition> groups = group.getGroups() == null ? List.of() : group.getGroups();
+        if (conditions.isEmpty() && groups.isEmpty()) {
+            throw new BadRequestException("A condition group requires at least one condition or nested group");
+        }
+        for (SegmentCondition condition : conditions) {
+            validateCondition(condition, recordType);
+        }
+        for (SegmentDefinition nested : groups) {
+            validateGroup(nested, recordType);
+        }
+    }
+
+    private void validateCondition(SegmentCondition condition, String recordType) {
+        String type = normalize(condition.getType());
+        if ("predicate".equals(type)) {
+            if (!"company".equals(recordType)) {
+                throw new BadRequestException("Predicates are only available for company records");
+            }
+            String key = normalize(condition.getKey());
+            if (key == null || !PREDICATE_KEYS.contains(key)) {
+                throw new BadRequestException("Unknown predicate: " + condition.getKey());
+            }
+            return;
+        }
+        if ("field".equals(type)) {
+            String field = normalize(condition.getField());
+            String op = normalize(condition.getOp());
+            if (field == null || op == null) {
+                throw new BadRequestException("Field condition requires 'field' and 'op'");
+            }
+            Kind kind = fieldKind(recordType, field);
+            if (!OPS.get(kind).contains(op)) {
+                throw new BadRequestException("Unsupported operator for '" + field + "': " + condition.getOp());
+            }
+            bindValue(kind, op, condition, new HashMap<>());
+            return;
+        }
+        throw new BadRequestException("Unknown condition type (expected 'predicate' or 'field'): " + condition.getType());
+    }
+
     private Set<Integer> evaluateGroup(SegmentDefinition group, EvalContext ctx, int depth) {
+        Set<Integer> matched = combineMembers(group, ctx, depth);
+        return group.isNegate() ? complement(matched, ctx) : matched;
+    }
+
+    private Set<Integer> combineMembers(SegmentDefinition group, EvalContext ctx, int depth) {
         if (depth > MAX_DEPTH) {
             throw new BadRequestException("Conditions are nested too deeply (max " + MAX_DEPTH + " levels)");
         }
@@ -175,11 +258,7 @@ public class SegmentService {
             }
         }
         for (SegmentDefinition nested : groups) {
-            Set<Integer> matched = evaluateGroup(nested, ctx, depth + 1);
-            if (nested.isNegate()) {
-                matched = complement(matched, ctx);
-            }
-            result = combine(result, matched, any);
+            result = combine(result, evaluateGroup(nested, ctx, depth + 1), any);
             if (result.isEmpty() && !any) {
                 return result;
             }

@@ -13,7 +13,6 @@ import tools.jackson.databind.ObjectMapper;
 
 import ooo.klae.connex.backend.beans.Rule;
 import ooo.klae.connex.backend.beans.RuleExecution;
-import ooo.klae.connex.backend.dto.RecordLabelDto;
 import ooo.klae.connex.backend.dto.RuleAction;
 import ooo.klae.connex.backend.dto.RuleDto;
 import ooo.klae.connex.backend.dto.RulePreviewDto;
@@ -24,7 +23,6 @@ import ooo.klae.connex.backend.dto.SegmentDefinition;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.RuleMapper;
-import ooo.klae.connex.backend.mappers.SegmentMapper;
 import ooo.klae.connex.backend.services.WorkspaceService.Role;
 import ooo.klae.connex.backend.tenant.Permission;
 import ooo.klae.connex.backend.tenant.RequirePermission;
@@ -41,7 +39,6 @@ public class RuleService {
 
     private final RuleMapper ruleMapper;
     private final SegmentService segmentService;
-    private final SegmentMapper segmentMapper;
     private final WorkspaceService workspaceService;
     private final AuthService authService;
     private final AuditService auditService;
@@ -106,18 +103,7 @@ public class RuleService {
         }
         List<Integer> ids = segmentService.evaluate(recordType, request.getCondition());
         List<Integer> sampleIds = ids.stream().sorted().limit(PREVIEW_SAMPLE).toList();
-        List<RecordLabelDto> sample = sampleIds.isEmpty() ? List.of() : labelsFor(recordType, sampleIds);
-        return new RulePreviewDto(ids.size(), sample);
-    }
-
-    private List<RecordLabelDto> labelsFor(String recordType, List<Integer> ids) {
-        int workspaceId = workspaceService.getCurrentWorkspaceId();
-        return switch (recordType) {
-            case "company" -> segmentMapper.companyLabels(workspaceId, ids);
-            case "person" -> segmentMapper.personLabels(workspaceId, ids);
-            case "deal" -> segmentMapper.dealLabels(workspaceId, ids);
-            default -> List.of();
-        };
+        return new RulePreviewDto(ids.size(), segmentService.labels(recordType, sampleIds));
     }
 
     @Transactional
@@ -183,6 +169,9 @@ public class RuleService {
         }
         if (request.getCondition() != null && !hasWhen(request.getCondition())) {
             throw new BadRequestException("A WHEN condition must contain at least one condition");
+        }
+        if (request.getCondition() != null) {
+            segmentService.validate(recordType, request.getCondition());
         }
         validateTrigger(request.getTrigger(), recordType, request.getCondition());
         validateActions(request.getActions(), recordType);

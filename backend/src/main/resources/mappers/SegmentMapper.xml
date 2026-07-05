@@ -91,7 +91,7 @@
             <when test="op == 'before'">AND ${col} IS NOT NULL AND ${col} &lt; #{value}</when>
             <when test="op == 'after'">AND ${col} IS NOT NULL AND ${col} &gt; #{value}</when>
             <when test="op == 'within_days'">AND ${col} IS NOT NULL AND ${col} &gt;= #{dateFrom} AND ${col} &lt;= #{dateTo}</when>
-            <when test="op == 'is_set'">AND ${col} IS NOT NULL AND ${col} &lt;&gt; ''</when>
+            <when test="op == 'is_set'">AND ${col} IS NOT NULL</when>
             <otherwise>AND 1 = 0</otherwise>
         </choose>
     </sql>

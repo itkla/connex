@@ -7,6 +7,7 @@ import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 
 import org.springframework.stereotype.Service;
@@ -843,14 +844,10 @@ public class DealService {
             "Updated owner on " + deal.getName(),
             auditService.singleChange("ownerId", deal.getOwnerId(), ownerId));
         notificationChanges.publish(workspaceId, "deal", dealId);
-        if (ownerChanged(deal.getOwnerId(), ownerId)) {
+        if (!Objects.equals(deal.getOwnerId(), ownerId)) {
             ruleTriggers.publish(workspaceId, "deal", dealId, "deal.owner_changed");
         }
         return dealMapper.getDealById(workspaceId, dealId);
-    }
-
-    private static boolean ownerChanged(Integer before, Integer after) {
-        return before == null ? after != null : !before.equals(after);
     }
 
     public List<User> getCollaborators(int dealId) {
