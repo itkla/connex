@@ -6,7 +6,7 @@ import {
     getContactsFromCookie,
     getCurrentUserFromCookie,
     getIntroductions,
-    getIntroSuggestionsFromCookie,
+    getIntroSuggestionsResultFromCookie,
 } from '@/app/lib/api';
 import type { IntroductionRecord, Page } from '@/app/lib/types';
 import IntroductionsBoard from '@/app/components/introductions/IntroductionsBoard';
@@ -25,8 +25,8 @@ export default async function IntroductionsPage() {
 
     const init = { headers: { cookie: cookie ?? '' }, cache: 'no-store' } as const;
 
-    const [suggestions, lineage, contacts] = await Promise.all([
-        getIntroSuggestionsFromCookie(cookie, 40),
+    const [suggestionsResult, lineage, contacts] = await Promise.all([
+        getIntroSuggestionsResultFromCookie(cookie, 40),
         getIntroductions({ page: 1, size: 50 }, init).catch(
             () => ({ items: [], total: 0 }) as Page<IntroductionRecord>,
         ),
@@ -35,7 +35,9 @@ export default async function IntroductionsPage() {
 
     return (
         <IntroductionsBoard
-            initialSuggestions={suggestions}
+            key={suggestionsResult.ok ? 'loaded' : 'failed'}
+            initialSuggestions={suggestionsResult.ok ? suggestionsResult.data : []}
+            suggestionsFailed={!suggestionsResult.ok}
             initialLineage={lineage.items}
             initialLineageTotal={lineage.total}
             contacts={contacts}

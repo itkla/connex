@@ -9,21 +9,25 @@ type StatTile = {
     label: string;
     hint: string;
     value: number;
+    unavailable?: boolean;
 };
 
 /**
  * Overview strip for the Introductions page: how many intros are worth making, how many of those are
  * strong matches worth prioritizing, and how many the team has already made. Mirrors the analytics
- * KPI tile treatment.
+ * KPI tile treatment. When the suggestion queue failed to load ({@code queueUnavailable}), the two
+ * queue-derived tiles show an em dash instead of claiming zero.
  */
 export default function IntroStats({
     opportunities,
     strong,
     made,
+    queueUnavailable = false,
 }: {
     opportunities: number;
     strong: number;
     made: number;
+    queueUnavailable?: boolean;
 }) {
     const t = useTranslations('Introductions');
     const tiles: StatTile[] = [
@@ -32,8 +36,15 @@ export default function IntroStats({
             label: t('statOpportunities'),
             hint: t('statOpportunitiesHint'),
             value: opportunities,
+            unavailable: queueUnavailable,
         },
-        { key: 'strong', label: t('statStrong'), hint: t('statStrongHint'), value: strong },
+        {
+            key: 'strong',
+            label: t('statStrong'),
+            hint: t('statStrongHint'),
+            value: strong,
+            unavailable: queueUnavailable,
+        },
         { key: 'made', label: t('statMade'), hint: t('statMadeHint'), value: made },
     ];
 
@@ -44,7 +55,11 @@ export default function IntroStats({
                     <span className="text-xs font-medium tracking-[0.12em] text-muted-foreground uppercase">
                         {tile.label}
                     </span>
-                    <CountUp value={tile.value} className="text-3xl leading-none text-foreground tabular-nums" />
+                    {tile.unavailable ? (
+                        <span className="text-3xl leading-none text-muted-foreground tabular-nums">—</span>
+                    ) : (
+                        <CountUp value={tile.value} className="text-3xl leading-none text-foreground tabular-nums" />
+                    )}
                     <span className="text-xs text-muted-foreground">{tile.hint}</span>
                 </div>
             ))}

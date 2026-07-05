@@ -919,6 +919,28 @@ export function getIntroSuggestionsFromCookie(cookie: string | null, limit?: num
     return safeWithCookie<Types.IntroSuggestion>((init) => getIntroSuggestions(init, limit), cookie);
 }
 
+export type IntroSuggestionsResult = { ok: true; data: Types.IntroSuggestion[] } | { ok: false };
+
+/**
+ * As {@link getIntroSuggestionsFromCookie}, but reports a fetch failure distinctly from an empty
+ * result, so the introductions page can render an error state instead of presenting a backend
+ * fault as an empty workspace.
+ */
+export async function getIntroSuggestionsResultFromCookie(
+    cookie: string | null,
+    limit?: number,
+): Promise<IntroSuggestionsResult> {
+    if (!cookie) return { ok: false };
+    try {
+        return {
+            ok: true,
+            data: await getIntroSuggestions({ headers: { cookie }, cache: "no-store" }, limit),
+        };
+    } catch {
+        return { ok: false };
+    }
+}
+
 export function getIntroductions(params: { page?: number; size?: number } = {}, init: RequestInit = {}) {
     return getJson<Types.Page<Types.IntroductionRecord>>(`/api/introductions${buildQuery(params)}`, init);
 }

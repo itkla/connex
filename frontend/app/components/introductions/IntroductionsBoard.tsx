@@ -1,11 +1,13 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useMemo, useState, useTransition } from 'react';
+import { useRouter } from 'next/navigation';
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
 import { useTranslations } from 'next-intl';
-import { ArrowsRightLeftIcon, PlusIcon } from '@heroicons/react/24/outline';
+import { ArrowPathIcon, ArrowsRightLeftIcon, ExclamationTriangleIcon, PlusIcon } from '@heroicons/react/24/outline';
 
 import { Button } from '@/components/ui/button';
+import { cn } from '@/lib/utils';
 import { dismissIntroSuggestion, recordIntroduction } from '@/app/lib/api';
 import { toastError, toastSuccess } from '@/app/lib/toast';
 import type { Contact, IntroSuggestion, IntroductionRecord } from '@/app/lib/types';
@@ -41,20 +43,26 @@ function SectionHeading({ title, count }: { title: string; count: number }) {
  * and the lineage of intros made. Recording a pair here also creates the connection on the backend,
  * so a recorded pair simply leaves the queue and lands in the timeline. The queue is one animated list
  * so promoting the next-best suggestion to the lead is a continuous transition, not a remount.
+ * When the suggestions fetch failed ({@code suggestionsFailed}), the queue renders a distinct error
+ * state with a retry instead of masquerading as an empty workspace.
  */
 export default function IntroductionsBoard({
     initialSuggestions,
+    suggestionsFailed = false,
     initialLineage,
     initialLineageTotal,
     contacts,
 }: {
     initialSuggestions: IntroSuggestion[];
+    suggestionsFailed?: boolean;
     initialLineage: IntroductionRecord[];
     initialLineageTotal: number;
     contacts: Contact[];
 }) {
     const t = useTranslations('Introductions');
     const reduce = useReducedMotion() ?? false;
+    const router = useRouter();
+    const [retrying, startRetry] = useTransition();
     const [suggestions, setSuggestions] = useState(initialSuggestions);
     const [lineage, setLineage] = useState(initialLineage);
     const [madeTotal, setMadeTotal] = useState(initialLineageTotal);
@@ -170,18 +178,41 @@ export default function IntroductionsBoard({
             </Rise>
 
             <Rise delay={0.06}>
-                <IntroStats opportunities={suggestions.length} strong={strongCount} made={madeTotal} />
+                <IntroStats
+                    opportunities={suggestions.length}
+                    strong={strongCount}
+                    made={madeTotal}
+                    queueUnavailable={suggestionsFailed}
+                />
             </Rise>
 
             <Rise delay={0.12}>
                 <section className="space-y-3">
                 <SectionHeading title={t('toMake')} count={suggestions.length} />
                 {suggestions.length === 0 ? (
-                    <div className="flex flex-col items-center justify-center gap-2 rounded-2xl border border-dashed border-border bg-card px-6 py-16 text-center">
-                        <ArrowsRightLeftIcon className="size-6 text-muted-foreground" aria-hidden />
-                        <p className="text-sm font-medium text-foreground">{t('toMakeEmptyTitle')}</p>
-                        <p className="max-w-md text-sm text-muted-foreground">{t('toMakeEmptyHint')}</p>
-                    </div>
+                    suggestionsFailed ? (
+                        <div className="flex flex-col items-center justify-center gap-2 rounded-2xl border border-border bg-card px-6 py-16 text-center">
+                            <ExclamationTriangleIcon className="size-6 text-destructive" aria-hidden />
+                            <p className="text-sm font-medium text-foreground">{t('toMakeErrorTitle')}</p>
+                            <p className="max-w-md text-sm text-muted-foreground">{t('toMakeErrorHint')}</p>
+                            <Button
+                                variant="outline"
+                                size="sm"
+                                className="mt-2"
+                                disabled={retrying}
+                                onClick={() => startRetry(() => router.refresh())}
+                            >
+                                <ArrowPathIcon className={cn('size-4', retrying && 'animate-spin')} aria-hidden />
+                                {t('retry')}
+                            </Button>
+                        </div>
+                    ) : (
+                        <div className="flex flex-col items-center justify-center gap-2 rounded-2xl border border-dashed border-border bg-card px-6 py-16 text-center">
+                            <ArrowsRightLeftIcon className="size-6 text-muted-foreground" aria-hidden />
+                            <p className="text-sm font-medium text-foreground">{t('toMakeEmptyTitle')}</p>
+                            <p className="max-w-md text-sm text-muted-foreground">{t('toMakeEmptyHint')}</p>
+                        </div>
+                    )
                 ) : (
                     <motion.div layout={!reduce} role="list" className="space-y-3">
                         <AnimatePresence mode="popLayout" initial={false}>
