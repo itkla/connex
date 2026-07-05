@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import dynamic from "next/dynamic";
 import { useTranslations } from "next-intl";
@@ -41,41 +41,75 @@ export default function NoteEditorView({ note, currentUserId, persons, deals, us
     const [content, setContent] = useState(note?.content ?? "");
     const [status, setStatus] = useState<SaveStatus>("idle");
     const dirtyRef = useRef(false);
+    const savingRef = useRef(false);
+    const saveRef = useRef<() => void>(() => {});
+    const stateRef = useRef({ noteId, title, content });
+
+    useEffect(() => {
+        stateRef.current = { noteId, title, content };
+    }, [noteId, title, content]);
 
     const person = note?.person ? persons.find((item) => item.id === note.person) ?? null : null;
     const deal = note?.deal ? deals.find((item) => item.id === note.deal) ?? null : null;
     const author = users.find((item) => item.id === (note?.author ?? currentUserId)) ?? null;
 
+    const save = useCallback(() => {
+        if (savingRef.current) return;
+        const snapshot = stateRef.current;
+        const body = snapshot.content;
+        const nextTitle = snapshot.title.trim() ? snapshot.title.trim() : null;
+        if (!body.trim()) {
+            dirtyRef.current = false;
+            setStatus("idle");
+            return;
+        }
+        savingRef.current = true;
+        dirtyRef.current = false;
+        setStatus("saving");
+        const request =
+            snapshot.noteId == null
+                ? createNote({ content: body, title: nextTitle, author: currentUserId })
+                : updateNote(snapshot.noteId, { content: body, title: nextTitle });
+        request
+            .then((saved) => {
+                if (snapshot.noteId == null && saved?.id) {
+                    stateRef.current = { ...stateRef.current, noteId: saved.id };
+                    setNoteId(saved.id);
+                    window.history.replaceState(null, "", `/activity/notes/${saved.id}`);
+                }
+                setStatus("saved");
+            })
+            .catch(() => {
+                dirtyRef.current = true;
+                setStatus("error");
+                toastError(t("saveError"));
+            })
+            .finally(() => {
+                savingRef.current = false;
+                if (dirtyRef.current) saveRef.current();
+            });
+    }, [currentUserId, t]);
+
+    useEffect(() => {
+        saveRef.current = save;
+    }, [save]);
+
     useEffect(() => {
         if (!dirtyRef.current) return;
-        const handle = setTimeout(() => {
-            const body = content;
-            const nextTitle = title.trim() ? title.trim() : null;
-            if (!body.trim() && noteId == null) {
-                setStatus("idle");
-                return;
-            }
-            setStatus("saving");
-            const request =
-                noteId == null
-                    ? createNote({ content: body, title: nextTitle, author: currentUserId })
-                    : updateNote(noteId, { content: body, title: nextTitle });
-            request
-                .then((saved) => {
-                    dirtyRef.current = false;
-                    if (noteId == null && saved?.id) {
-                        setNoteId(saved.id);
-                        window.history.replaceState(null, "", `/activity/notes/${saved.id}`);
-                    }
-                    setStatus("saved");
-                })
-                .catch(() => {
-                    setStatus("error");
-                    toastError(t("saveError"));
-                });
-        }, 900);
+        const handle = setTimeout(() => save(), 900);
         return () => clearTimeout(handle);
-    }, [title, content, noteId, currentUserId, t]);
+    }, [title, content, save]);
+
+    useEffect(() => {
+        const flush = () => {
+            if (dirtyRef.current) saveRef.current();
+        };
+        window.addEventListener("beforeunload", flush);
+        return () => {
+            window.removeEventListener("beforeunload", flush);
+            flush();
+        };
+    }, []);
 
     const markDirty = () => {
         dirtyRef.current = true;

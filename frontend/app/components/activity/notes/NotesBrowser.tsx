@@ -43,7 +43,7 @@ type Props = {
 
 type GroupBy = 'record' | 'none';
 type SortBy = 'updated' | 'created' | 'title';
-type NoteGroup = { id: string; label: string | null; notes: Note[]; latest: string };
+type NoteGroup = { id: string; label: string | null; notes: Note[] };
 
 const STANDALONE = '__standalone';
 
@@ -100,7 +100,7 @@ export default function NotesBrowser({ notes, persons, deals, users }: Props) {
         });
 
         if (groupBy === 'none') {
-            return [{ id: '__all', label: null, notes: sorted, latest: sorted[0]?.updatedAt ?? '' }];
+            return [{ id: '__all', label: null, notes: sorted }];
         }
 
         const map = new Map<string, NoteGroup>();
@@ -116,16 +116,19 @@ export default function NotesBrowser({ notes, persons, deals, users }: Props) {
             }
             let group = map.get(id);
             if (!group) {
-                group = { id, label, notes: [], latest: note.updatedAt ?? '' };
+                group = { id, label, notes: [] };
                 map.set(id, group);
             }
             group.notes.push(note);
-            if ((note.updatedAt ?? '') > group.latest) group.latest = note.updatedAt ?? '';
         }
         return Array.from(map.values()).sort((a, b) => {
             if (a.id === STANDALONE) return 1;
             if (b.id === STANDALONE) return -1;
-            return b.latest.localeCompare(a.latest);
+            if (sortBy === 'title') {
+                return (a.label ?? '').localeCompare(b.label ?? '', locale);
+            }
+            const key = sortBy === 'created' ? 'createdAt' : 'updatedAt';
+            return (b.notes[0]?.[key] ?? '').localeCompare(a.notes[0]?.[key] ?? '');
         });
     }, [filtered, groupBy, sortBy, locale, personById, dealById, t]);
 
@@ -167,7 +170,6 @@ export default function NotesBrowser({ notes, persons, deals, users }: Props) {
                         </div>
                         <Button
                             className="bg-brand text-white hover:bg-brand-dark"
-                            aria-label={t('newAria')}
                             onClick={() => router.push('/activity/notes/new')}
                         >
                             <PlusIcon strokeWidth={2.5} />

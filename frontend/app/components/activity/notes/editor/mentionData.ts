@@ -31,6 +31,10 @@ export const TRIGGER_TYPES: Record<MentionTrigger, readonly MentionType[]> = {
 
 const MAX_SUGGESTIONS = 8;
 
+function safeLabel(value: string): string {
+    return value.replace(/[[\]]/g, "").replace(/[\r\n]+/g, " ").trim();
+}
+
 function workspaceKey(): string {
     if (typeof document === "undefined") return "";
     const match = document.cookie.match(/(?:^|;\s*)connex_workspace=([^;]+)/);
@@ -54,7 +58,7 @@ function memberItem(member: WorkspaceMember): MentionItem {
     return {
         type: "user",
         id: member.id,
-        label: member.displayName || member.username,
+        label: safeLabel(member.displayName || member.username),
         sublabel: `@${member.username}`,
         avatarUrl: member.profilePictureUrl ?? null,
     };
@@ -64,7 +68,7 @@ function userItem(user: User): MentionItem {
     return {
         type: "user",
         id: user.id,
-        label: user.displayName || user.username,
+        label: safeLabel(user.displayName || user.username),
         sublabel: `@${user.username}`,
         avatarUrl: user.profilePictureUrl ?? null,
     };
@@ -74,21 +78,21 @@ function personItem(person: Contact): MentionItem {
     return {
         type: "person",
         id: person.id,
-        label: person.name,
+        label: safeLabel(person.name),
         sublabel: person.title || person.company?.name || "Contact",
         avatarUrl: person.imageUrl || null,
     };
 }
 
 function dealItem(deal: Deal): MentionItem {
-    return { type: "deal", id: deal.id, label: deal.name, sublabel: "Deal", avatarUrl: null };
+    return { type: "deal", id: deal.id, label: safeLabel(deal.name), sublabel: "Deal", avatarUrl: null };
 }
 
 function companyItem(company: Company): MentionItem {
     return {
         type: "company",
         id: company.id,
-        label: company.name,
+        label: safeLabel(company.name),
         sublabel: company.industry || "Company",
         avatarUrl: null,
     };
