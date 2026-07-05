@@ -3,6 +3,7 @@ package ooo.klae.connex.backend.dto;
 import java.util.List;
 
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
@@ -36,6 +37,9 @@ public class NoteDto {
     @Size(max = 255)
     private String title;
 
+    @Pattern(regexp = "^(private|workspace)$")
+    private String visibility;
+
     @JsonProperty(access = JsonProperty.Access.READ_ONLY)
     private Integer author;
 
@@ -55,6 +59,7 @@ public class NoteDto {
         dto.id = n.getId();
         dto.content = n.getContent();
         dto.title = n.getTitle();
+        dto.visibility = n.getVisibility();
         dto.author = n.getAuthor() != null ? n.getAuthor().getId() : null;
         dto.person = n.getPerson() != null ? n.getPerson().getId() : null;
         dto.deal = n.getDeal() != null ? n.getDeal().getId() : null;
@@ -71,6 +76,7 @@ public class NoteDto {
         if (id != null) n.setId(id);
         n.setContent(content);
         n.setTitle(title);
+        n.setVisibility(visibility);
         if (author != null) {
             User u = new User();
             u.setId(author);

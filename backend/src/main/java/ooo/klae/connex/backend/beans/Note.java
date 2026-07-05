@@ -23,6 +23,7 @@ public class Note {
     private int workspaceId; // owning workspace
     private String content;
     private String title;
+    private String visibility;
     @JsonIdentityReference(alwaysAsId = true)
     private User author;
     @JsonIdentityReference(alwaysAsId = true)
@@ -63,6 +64,14 @@ public class Note {
 
     public void setTitle(String title) {
         this.title = title;
+    }
+
+    public String getVisibility() {
+        return visibility;
+    }
+
+    public void setVisibility(String visibility) {
+        this.visibility = visibility;
     }
 
     public User getAuthor() {

@@ -38,6 +38,7 @@ public class UserService implements UserDetailsService {
     private final AuditService auditService;
     private final WorkspaceService workspaceService;
     private final OrgMemberService orgMemberService;
+    private final AuthService authService;
     private final NotificationChangePublisher notificationChanges;
     private final ReferenceService referenceService;
 
@@ -159,7 +160,7 @@ public class UserService implements UserDetailsService {
     public List<Note> getNotesByUserId(int userId) {
         getUserById(userId);
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        return referenceService.hydrate(workspaceId, noteMapper.getNotesByAuthorId(workspaceId, userId));
+        return referenceService.hydrate(workspaceId, noteMapper.getVisibleNotesByAuthorId(workspaceId, userId, authService.getCurrentUser().getId()));
     }
 
     /**
