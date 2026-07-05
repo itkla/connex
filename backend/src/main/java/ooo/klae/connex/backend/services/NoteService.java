@@ -62,13 +62,13 @@ public class NoteService {
 
     public List<Note> getAllNotes() {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        int currentUserId = authService.getCurrentUser().getId();
+        int currentUserId = workspaceService.getCurrentUserId();
         return referenceService.hydrate(workspaceId, noteMapper.getVisibleNotes(workspaceId, currentUserId));
     }
 
     public List<Note> getNotesByPersonId(int personId) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        int currentUserId = authService.getCurrentUser().getId();
+        int currentUserId = workspaceService.getCurrentUserId();
         return referenceService.hydrate(workspaceId, noteMapper.getVisibleNotesByPersonId(workspaceId, personId, currentUserId));
     }
 
@@ -77,19 +77,19 @@ public class NoteService {
         if (!dealMapper.exists(workspaceId, dealId)) {
             throw new ResourceNotFoundException("Deal not found with id: " + dealId);
         }
-        int currentUserId = authService.getCurrentUser().getId();
+        int currentUserId = workspaceService.getCurrentUserId();
         return referenceService.hydrate(workspaceId, noteMapper.getVisibleNotesByDealId(workspaceId, dealId, currentUserId));
     }
 
     public List<Note> getNotesByAuthorId(int authorId) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        int currentUserId = authService.getCurrentUser().getId();
+        int currentUserId = workspaceService.getCurrentUserId();
         return referenceService.hydrate(workspaceId, noteMapper.getVisibleNotesByAuthorId(workspaceId, authorId, currentUserId));
     }
 
     public Note getNoteById(int id) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        int currentUserId = authService.getCurrentUser().getId();
+        int currentUserId = workspaceService.getCurrentUserId();
         Note note = noteMapper.getVisibleNoteById(workspaceId, id, currentUserId);
         if (note == null) throw new ResourceNotFoundException("Note not found with id: " + id);
         return hydrateReferences(workspaceId, note);
@@ -138,7 +138,7 @@ public class NoteService {
     @RequirePermission(Permission.NOTE_DELETE)
     public void delete(int id) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        int currentUserId = authService.getCurrentUser().getId();
+        int currentUserId = workspaceService.getCurrentUserId();
         Note before = noteMapper.getVisibleNoteById(workspaceId, id, currentUserId);
         if (before == null) throw new ResourceNotFoundException("Note not found with id: " + id);
         noteMapper.delete(workspaceId, id);

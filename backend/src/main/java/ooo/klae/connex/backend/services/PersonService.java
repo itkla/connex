@@ -50,7 +50,6 @@ public class PersonService {
     private final EmploymentService employmentService;
     private final CustomFieldValueService customFieldValueService;
     private final ReferenceService referenceService;
-    private final AuthService authService;
     private final RuleTriggerPublisher ruleTriggers;
 
     private static final Set<String> AUDIT_FIELDS =
@@ -155,7 +154,7 @@ public class PersonService {
             referenceService.hydrateActivities(workspaceId, List.of(hydrated.getActivities()));
         }
         hydrated.setNotes(
-            referenceService.hydrate(workspaceId, noteMapper.getVisibleNotesByPersonId(workspaceId, id, authService.getCurrentUser().getId())).toArray(new Note[0]));
+            referenceService.hydrate(workspaceId, noteMapper.getVisibleNotesByPersonId(workspaceId, id, workspaceService.getCurrentUserId())).toArray(new Note[0]));
         return hydrated;
     }
 
@@ -311,7 +310,7 @@ public class PersonService {
     public List<Note> getNotesByPersonId(int personId) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         requirePerson(workspaceId, personId);
-        return referenceService.hydrate(workspaceId, noteMapper.getVisibleNotesByPersonId(workspaceId, personId, authService.getCurrentUser().getId()));
+        return referenceService.hydrate(workspaceId, noteMapper.getVisibleNotesByPersonId(workspaceId, personId, workspaceService.getCurrentUserId()));
     }
 
     /**
