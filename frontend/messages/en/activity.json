@@ -306,5 +306,20 @@
     "toastCreated": "Tag created",
     "toastUpdated": "Tag updated",
     "toastFailedSave": "Failed to save tag"
+  },
+  "ActivityNotesEditor": {
+    "placeholder": "Start writing… @ to mention people, # to link records.",
+    "bold": "Bold",
+    "italic": "Italic",
+    "strike": "Strikethrough",
+    "code": "Inline code",
+    "heading1": "Heading 1",
+    "heading2": "Heading 2",
+    "heading3": "Heading 3",
+    "bulletList": "Bullet list",
+    "orderedList": "Numbered list",
+    "taskList": "Checklist",
+    "blockquote": "Quote",
+    "codeBlock": "Code block"
   }
 }

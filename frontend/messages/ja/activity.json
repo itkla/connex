@@ -306,5 +306,20 @@
     "toastCreated": "タグを作成しました",
     "toastUpdated": "タグを更新しました",
     "toastFailedSave": "タグを保存できませんでした"
+  },
+  "ActivityNotesEditor": {
+    "placeholder": "入力を始めましょう… @でメンション、#でレコードをリンク",
+    "bold": "太字",
+    "italic": "斜体",
+    "strike": "取り消し線",
+    "code": "インラインコード",
+    "heading1": "見出し1",
+    "heading2": "見出し2",
+    "heading3": "見出し3",
+    "bulletList": "箇条書き",
+    "orderedList": "番号付きリスト",
+    "taskList": "チェックリスト",
+    "blockquote": "引用",
+    "codeBlock": "コードブロック"
   }
 }
