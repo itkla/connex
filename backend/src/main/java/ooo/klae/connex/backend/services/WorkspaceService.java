@@ -178,13 +178,19 @@ public class WorkspaceService {
 
     @Transactional
     WorkspaceMembershipDto provisionWorkspace(String name, int ownerUserId) {
+        int orgId = orgIdForOwner(ownerUserId, name);
         Workspace workspace = new Workspace();
-        workspace.setOrgId(orgIdForOwner(ownerUserId, name));
+        workspace.setOrgId(orgId);
         workspace.setName(name.trim());
         workspace.setSlug(generateSlug(name));
         workspaceMapper.insert(workspace);
         workspaceMapper.addMember(workspace.getId(), ownerUserId, "owner");
-        return new WorkspaceMembershipDto(workspace.getId(), workspace.getName(), workspace.getSlug(), "owner");
+        WorkspaceMembershipDto membership =
+                new WorkspaceMembershipDto(workspace.getId(), workspace.getName(), workspace.getSlug(), "owner");
+        membership.setOrgId(orgId);
+        membership.setOrgName(organizationMapper.getById(orgId).getName());
+        membership.setOrgRole(orgMemberService.orgRoleOf(orgId, ownerUserId));
+        return membership;
     }
 
     /**

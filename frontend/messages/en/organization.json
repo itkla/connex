@@ -1,0 +1,60 @@
+{
+  "Organization": {
+    "title": "Organization",
+    "subtitle": "Administer your organization — the account above your workspaces. These settings apply to every workspace in the organization.",
+    "tabMembers": "Administrators",
+    "tabDomains": "Allowed domains",
+    "tabSso": "Single sign-on",
+    "tabAudit": "Audit log",
+    "noAccessTitle": "Organization administrators only",
+    "noAccessBody": "You need an organization owner or admin role to manage these settings."
+  },
+  "OrgMembers": {
+    "title": "Administrators",
+    "subtitle": "People who can administer this organization — configure SSO, allowed domains, and manage administrators. Distinct from workspace membership.",
+    "roleOwner": "Owner",
+    "roleAdmin": "Admin",
+    "roleOwnerHint": "Full control, including managing administrators and ownership.",
+    "roleAdminHint": "Administer org settings, but not administrators.",
+    "you": "You",
+    "changeRole": "Change role",
+    "remove": "Remove",
+    "cancel": "Cancel",
+    "removeConfirmTitle": "Remove administrator?",
+    "removeConfirmBody": "{name} will lose organization administrator access. Their workspace membership is unaffected.",
+    "lastOwnerTooltip": "An organization must keep at least one owner. Promote another owner first.",
+    "empty": "No administrators yet.",
+    "addTitle": "Add an administrator",
+    "addSubtitle": "Grant an existing Connex account organization access by email. Owners can manage administrators; admins can configure settings.",
+    "addEmailPlaceholder": "name@company.com",
+    "addEmailLabel": "Email address",
+    "addRoleLabel": "Role",
+    "addButton": "Add administrator",
+    "addedToast": "Administrator added",
+    "roleUpdatedToast": "Role updated",
+    "removedToast": "Administrator removed"
+  },
+  "OrgDomains": {
+    "title": "Allowed domains",
+    "subtitle": "Restrict who can be invited into any workspace in this organization. When set, every invite and join — links, email invites, and SSO — must match one of these email domains. Leave empty to allow any domain.",
+    "placeholder": "company.com",
+    "label": "Email domain",
+    "addButton": "Add domain",
+    "removeDomain": "Remove domain",
+    "empty": "No domain restrictions — members can be invited from any email domain. Add a domain to restrict who can join workspaces in this organization.",
+    "loadError": "Couldn't load allowed domains. Refresh to try again.",
+    "addedToast": "Domain added",
+    "removedToast": "Domain removed"
+  },
+  "OrgAudit": {
+    "title": "Audit log",
+    "subtitle": "Organization-level governance events — SSO configuration, administrators, and allowed-domain changes. Workspace record changes appear in each workspace's own audit log.",
+    "empty": "No organization events yet.",
+    "loadMore": "Load more",
+    "loadError": "Couldn't load the audit log.",
+    "actorSystem": "System",
+    "colEvent": "Event",
+    "colActor": "By",
+    "colWhen": "When"
+  }
+}

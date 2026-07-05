@@ -1,5 +1,5 @@
-import SsoPanel from "@/app/components/settings/SsoPanel";
+import { redirect } from "next/navigation";
 
-export default function SsoSettingsPage() {
-    return <SsoPanel />;
+export default function LegacySsoSettingsPage() {
+    redirect("/organization/sso");
 }

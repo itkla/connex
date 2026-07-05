@@ -1023,11 +1023,25 @@ export type AuditChange = {
 
 export type WorkspaceRole = "owner" | "admin" | "member";
 
+export type OrgRole = "owner" | "admin";
+
 export type Workspace = {
     id: number;
     name: string;
     slug: string;
     role: WorkspaceRole;
+    orgId: number;
+    orgName: string;
+    orgRole: OrgRole | null;
+};
+
+export type OrgMember = {
+    id: number;
+    username: string;
+    displayName: string;
+    email: string;
+    profilePictureUrl: string | null;
+    orgRole: OrgRole;
 };
 
 export type MyWorkspaces = {

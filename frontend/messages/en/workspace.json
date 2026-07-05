@@ -67,8 +67,7 @@
     "tabRoles": "Roles",
     "tabRules": "Rules",
     "tabCustomFields": "Custom fields",
-    "tabEmail": "Email",
-    "tabSso": "SSO"
+    "tabEmail": "Email"
   },
   "WorkspaceMembers": {
     "title": "Members",

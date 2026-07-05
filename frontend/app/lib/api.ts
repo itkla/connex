@@ -1402,6 +1402,42 @@ export function getAuditLogs(params: Types.AuditLogParams = {}, init: RequestIni
 }
 
 /*
+* == Organization admin (org control plane)
+*/
+
+export function getOrgMembers(orgId: number, init: RequestInit = {}) {
+    return getJson<Types.OrgMember[]>(`/api/orgs/${orgId}/members`, { cache: "no-store", ...init });
+}
+
+export function addOrgMemberByEmail(orgId: number, email: string, orgRole: Types.OrgRole) {
+    return postJson<void>(`/api/orgs/${orgId}/members`, { email, orgRole });
+}
+
+export function setOrgMemberRole(orgId: number, userId: number, orgRole: Types.OrgRole) {
+    return putJson<void>(`/api/orgs/${orgId}/members/${userId}`, { orgRole });
+}
+
+export function removeOrgMember(orgId: number, userId: number) {
+    return deleteJson<void>(`/api/orgs/${orgId}/members/${userId}`);
+}
+
+export function getOrgAllowedDomains(orgId: number, init: RequestInit = {}) {
+    return getJson<string[]>(`/api/orgs/${orgId}/allowed-domains`, { cache: "no-store", ...init });
+}
+
+export function addOrgAllowedDomain(orgId: number, domain: string) {
+    return postJson<string[]>(`/api/orgs/${orgId}/allowed-domains`, { domain });
+}
+
+export function removeOrgAllowedDomain(orgId: number, domain: string) {
+    return deleteJson<void>(`/api/orgs/${orgId}/allowed-domains?domain=${encodeURIComponent(domain)}`);
+}
+
+export function getOrgAudit(orgId: number, params: Types.AuditLogParams = {}, init: RequestInit = {}) {
+    return getJson<Types.AuditLogEntry[]>(`/api/orgs/${orgId}/audit${buildQuery(params)}`, { cache: "no-store", ...init });
+}
+
+/*
 * == Workspaces (tenancy)
 */
 

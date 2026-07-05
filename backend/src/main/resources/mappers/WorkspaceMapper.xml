@@ -12,9 +12,12 @@
   </select>
 
   <select id="getMembershipsForUser" resultType="ooo.klae.connex.backend.dto.WorkspaceMembershipDto">
-    SELECT w.id, w.name, w.slug, wm.role
+    SELECT w.id, w.name, w.slug, wm.role,
+           w.org_id AS orgId, o.name AS orgName, om.org_role AS orgRole
     FROM workspace w
     JOIN workspace_member wm ON wm.workspace_id = w.id
+    JOIN organization o ON o.id = w.org_id
+    LEFT JOIN org_member om ON om.org_id = w.org_id AND om.user_id = wm.user_id
     WHERE wm.user_id = #{userId} AND wm.status = 'active'
     ORDER BY w.name, w.id
   </select>
