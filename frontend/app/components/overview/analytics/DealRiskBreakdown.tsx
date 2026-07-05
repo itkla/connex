@@ -93,7 +93,7 @@ export default function DealRiskBreakdown({
                                 </span>
                                 <div className="h-1.5 w-20 shrink-0 overflow-hidden rounded-full bg-muted">
                                     <div
-                                        className="h-full rounded-full bg-muted-foreground/50"
+                                        className="h-full rounded-full bg-muted-foreground/50 transition-[width] duration-500 ease-out motion-reduce:transition-none"
                                         style={{ width: `${(factor.count / maxFactor) * 100}%` }}
                                     />
                                 </div>

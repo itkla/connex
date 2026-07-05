@@ -175,6 +175,7 @@ export default function AnalyticsBoard({
         [warm, atRisk, introSuggestions],
     );
 
+    const hasDeals = deals.length > 0;
     const hasRelationshipData =
         contactTemps.length > 0 ||
         companyTemps.length > 0 ||
@@ -183,6 +184,7 @@ export default function AnalyticsBoard({
         introLineage.length > 0 ||
         recentMoves.length > 0 ||
         tasks.length > 0;
+    const relBase = hasDeals ? 6 : 0;
 
     const rangeOptions: { key: RangeKey; label: string }[] = [
         { key: '30d', label: t('range30d') },
@@ -197,7 +199,7 @@ export default function AnalyticsBoard({
                     <h1 className="text-3xl font-extrabold tracking-tight text-foreground md:text-4xl">{t('title')}</h1>
                     <p className="mt-1.5 text-sm text-muted-foreground">{t('subtitle')}</p>
                 </div>
-                {deals.length > 0 && (
+                {(hasDeals || hasRelationshipData) && (
                     <div className="flex items-center gap-2">
                     {currencyCounts.size > 1 ? (
                         <DropdownMenu>
@@ -234,9 +236,11 @@ export default function AnalyticsBoard({
                 )}
             </header>
 
-            {deals.length === 0 ? (
+            {!hasDeals && !hasRelationshipData ? (
                 <FirstRun />
             ) : (
+                <>
+            {hasDeals && (
                 <>
             <Reveal index={0} reduce={reduce}>
                 <KpiCluster kpis={kpis} currency={currency} />
@@ -343,11 +347,13 @@ export default function AnalyticsBoard({
                     <TopDeals deals={dealsInCurrency} companyById={companyById} />
                 </Panel>
             </Reveal>
+                </>
+            )}
 
             {hasRelationshipData && (
                 <>
-                    <Reveal index={6} reduce={reduce}>
-                        <div className="pt-4">
+                    <Reveal index={relBase} reduce={reduce}>
+                        <div className={hasDeals ? 'pt-4' : undefined}>
                             <h2 className="text-xl font-bold tracking-tight text-foreground md:text-2xl">
                                 {t('relationshipsTitle')}
                             </h2>
@@ -355,11 +361,11 @@ export default function AnalyticsBoard({
                         </div>
                     </Reveal>
 
-                    <Reveal index={7} reduce={reduce}>
+                    <Reveal index={relBase + 1} reduce={reduce}>
                         <RelationshipKpis data={relationshipKpis} currency={currency} />
                     </Reveal>
 
-                    <Reveal index={8} reduce={reduce} className="grid grid-cols-1 gap-6 lg:grid-cols-5">
+                    <Reveal index={relBase + 2} reduce={reduce} className="grid grid-cols-1 gap-6 lg:grid-cols-5">
                         <Panel
                             title={t('warmthTitle')}
                             subtitle={t('warmthSubtitle')}
@@ -379,7 +385,7 @@ export default function AnalyticsBoard({
                         </Panel>
                     </Reveal>
 
-                    <Reveal index={9} reduce={reduce} className="grid grid-cols-1 gap-6 lg:grid-cols-5">
+                    <Reveal index={relBase + 3} reduce={reduce} className="grid grid-cols-1 gap-6 lg:grid-cols-5">
                         <Panel
                             title={t('dealRiskTitle')}
                             info={t('dealRiskInfo')}
@@ -404,7 +410,7 @@ export default function AnalyticsBoard({
                         </Panel>
                     </Reveal>
 
-                    <Reveal index={10} reduce={reduce} className="grid grid-cols-1 gap-6 lg:grid-cols-5">
+                    <Reveal index={relBase + 4} reduce={reduce} className="grid grid-cols-1 gap-6 lg:grid-cols-5">
                         <Panel
                             title={t('introsTitle')}
                             subtitle={t('introsSubtitle')}

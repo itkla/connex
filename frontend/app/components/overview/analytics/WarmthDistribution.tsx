@@ -94,21 +94,23 @@ export default function WarmthDistribution({
                 <EntityRow label={t('companies')} counts={companyCounts} />
             </div>
 
-            <div className="mt-6 flex flex-wrap items-center gap-x-5 gap-y-2 border-t border-border pt-4">
-                <span className="text-xs font-medium uppercase tracking-[0.12em] text-muted-foreground">
-                    {t('trendLabel')}
-                </span>
-                {(Object.keys(trends) as TemperatureTrend[]).map((trend) => {
-                    const Icon = TREND_ICON[trend];
-                    return (
-                        <span key={trend} className="flex items-center gap-1.5 text-sm tabular-nums text-foreground">
-                            <Icon className={`size-4 ${TREND_TONE[trend]}`} />
-                            {trends[trend]}
-                            <span className="text-muted-foreground">{t(`trend_${trend}`)}</span>
-                        </span>
-                    );
-                })}
-            </div>
+            {contactTotal > 0 && (
+                <div className="mt-6 flex flex-wrap items-center gap-x-5 gap-y-2 border-t border-border pt-4">
+                    <span className="text-xs font-medium uppercase tracking-[0.12em] text-muted-foreground">
+                        {t('trendLabel')}
+                    </span>
+                    {(Object.keys(trends) as TemperatureTrend[]).map((trend) => {
+                        const Icon = TREND_ICON[trend];
+                        return (
+                            <span key={trend} className="flex items-center gap-1.5 text-sm tabular-nums text-foreground">
+                                <Icon className={`size-4 ${TREND_TONE[trend]}`} />
+                                {trends[trend]}
+                                <span className="text-muted-foreground">{t(`trend_${trend}`)}</span>
+                            </span>
+                        );
+                    })}
+                </div>
+            )}
         </div>
     );
 }
