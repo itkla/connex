@@ -45,7 +45,9 @@ public class RuleService {
     private static final Set<String> RECORD_TYPES = Set.of("company", "person", "deal", "task");
     private static final Set<String> TRIGGER_TYPES = Set.of("entity_change", "schedule");
     private static final Set<String> EXECUTION_MODES = Set.of("user", "system");
-    private static final Set<String> ACTION_TYPES = Set.of("create_task", "log_activity", "add_tag", "notify");
+    private static final Set<String> ACTION_TYPES = Set.of(
+        "create_task", "log_activity", "add_tag", "remove_tag", "create_note",
+        "assign_owner", "change_stage", "notify");
     private static final Set<String> CADENCES = Set.of("hourly", "daily", "weekly");
     private static final Set<String> ENTITY_CHANGE_RECORD_TYPES = Set.of("deal", "company", "person", "task");
     private static final Set<String> SEGMENT_RECORD_TYPES = Set.of("company", "person", "deal");
@@ -59,6 +61,10 @@ public class RuleService {
         "create_task", Set.of("person", "deal"),
         "log_activity", Set.of("person", "deal"),
         "add_tag", Set.of("company", "person", "deal"),
+        "remove_tag", Set.of("company", "person", "deal"),
+        "create_note", Set.of("person", "deal"),
+        "assign_owner", Set.of("deal"),
+        "change_stage", Set.of("deal"),
         "notify", Set.of("company", "person", "deal", "task"));
 
     @RequirePermission(Permission.RULE_MANAGE)
@@ -160,7 +166,9 @@ public class RuleService {
         return switch (type) {
             case "create_task" -> Permission.TASK_CREATE;
             case "log_activity" -> Permission.ACTIVITY_CREATE;
-            case "add_tag" -> switch (recordType) {
+            case "create_note" -> Permission.NOTE_CREATE;
+            case "assign_owner", "change_stage" -> Permission.DEAL_UPDATE;
+            case "add_tag", "remove_tag" -> switch (recordType) {
                 case "company" -> Permission.COMPANY_UPDATE;
                 case "person" -> Permission.PERSON_UPDATE;
                 case "deal" -> Permission.DEAL_UPDATE;
@@ -220,9 +228,20 @@ public class RuleService {
             switch (type) {
                 case "create_task", "notify" -> requireText(action.getTitle(), "title");
                 case "log_activity" -> requireText(action.getActivityType(), "activityType");
-                case "add_tag" -> {
+                case "create_note" -> requireText(action.getBody(), "body");
+                case "add_tag", "remove_tag" -> {
                     if (action.getTagId() == null) {
-                        throw new BadRequestException("An add_tag action requires a tagId");
+                        throw new BadRequestException("A " + type + " action requires a tagId");
+                    }
+                }
+                case "assign_owner" -> {
+                    if (action.getTargetUserId() == null) {
+                        throw new BadRequestException("An assign_owner action requires a targetUserId");
+                    }
+                }
+                case "change_stage" -> {
+                    if (action.getTargetStageId() == null) {
+                        throw new BadRequestException("A change_stage action requires a targetStageId");
                     }
                 }
                 default -> throw new BadRequestException("Invalid action type: " + action.getType());

@@ -51,7 +51,10 @@ class RuleServiceTest extends AbstractServiceTest {
         switch (type) {
             case "create_task", "notify" -> action.setTitle("title");
             case "log_activity" -> action.setActivityType("note");
-            case "add_tag" -> action.setTagId(1);
+            case "add_tag", "remove_tag" -> action.setTagId(1);
+            case "create_note" -> action.setBody("Automated note");
+            case "assign_owner" -> action.setTargetUserId(1);
+            case "change_stage" -> action.setTargetStageId(1);
             default -> { }
         }
         return action;
@@ -235,6 +238,28 @@ class RuleServiceTest extends AbstractServiceTest {
     void create_scheduleWithoutCondition_throws() {
         assertThrows(BadRequestException.class,
             () -> ruleService.create(req("company", schedule("daily"), "user", action("notify"))));
+    }
+
+    @Test
+    void create_assignOwnerWithoutTarget_throws() {
+        RuleAction bare = new RuleAction();
+        bare.setType("assign_owner");
+        assertThrows(BadRequestException.class,
+            () -> ruleService.create(req("deal", entityChange("deal.stage_changed"), "user", bare)));
+    }
+
+    @Test
+    void create_changeStageOnCompanyRule_throws() {
+        assertThrows(BadRequestException.class,
+            () -> ruleService.create(req("company", entityChange("company.updated"), "user", action("change_stage"))));
+    }
+
+    @Test
+    void create_recordMutatingActionsOnDeal_roundTrip() {
+        RuleDto created = ruleService.create(req("deal", entityChange("deal.won"), "user",
+            action("assign_owner"), action("change_stage"), action("create_note")));
+        assertEquals(3, created.getActions().size());
+        assertEquals("assign_owner", created.getActions().get(0).getType());
     }
 
     @Test
