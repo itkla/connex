@@ -2,6 +2,7 @@ package ooo.klae.connex.backend.services;
 
 import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 import org.springframework.stereotype.Service;
@@ -46,11 +47,19 @@ public class RuleService {
     private static final Set<String> EXECUTION_MODES = Set.of("user", "system");
     private static final Set<String> ACTION_TYPES = Set.of("create_task", "log_activity", "add_tag", "notify");
     private static final Set<String> CADENCES = Set.of("hourly", "daily", "weekly");
-    private static final Set<String> ENTITY_CHANGE_RECORD_TYPES = Set.of("deal", "company");
+    private static final Set<String> ENTITY_CHANGE_RECORD_TYPES = Set.of("deal", "company", "person", "task");
     private static final Set<String> SEGMENT_RECORD_TYPES = Set.of("company", "person", "deal");
-    private static final Set<String> DEAL_EVENTS = Set.of("deal.created", "deal.stage_changed", "deal.updated", "deal.won", "deal.lost");
+    private static final Set<String> DEAL_EVENTS = Set.of(
+        "deal.created", "deal.stage_changed", "deal.updated", "deal.won", "deal.lost",
+        "deal.owner_changed", "deal.value_changed");
     private static final Set<String> COMPANY_EVENTS = Set.of("company.created", "company.updated");
-    private static final Set<String> LINKED_ACTIONS = Set.of("create_task", "log_activity");
+    private static final Set<String> PERSON_EVENTS = Set.of("person.created", "person.updated", "person.job_changed");
+    private static final Set<String> TASK_EVENTS = Set.of("task.created", "task.completed");
+    private static final Map<String, Set<String>> ACTION_RECORD_TYPES = Map.of(
+        "create_task", Set.of("person", "deal"),
+        "log_activity", Set.of("person", "deal"),
+        "add_tag", Set.of("company", "person", "deal"),
+        "notify", Set.of("company", "person", "deal", "task"));
 
     @RequirePermission(Permission.RULE_MANAGE)
     public List<RuleDto> list() {
@@ -173,7 +182,13 @@ public class RuleService {
             if (trigger.getEvents() == null || trigger.getEvents().isEmpty()) {
                 throw new BadRequestException("An entity-change trigger requires at least one event");
             }
-            Set<String> supported = "deal".equals(recordType) ? DEAL_EVENTS : COMPANY_EVENTS;
+            Set<String> supported = switch (recordType) {
+                case "deal" -> DEAL_EVENTS;
+                case "company" -> COMPANY_EVENTS;
+                case "person" -> PERSON_EVENTS;
+                case "task" -> TASK_EVENTS;
+                default -> Set.of();
+            };
             for (String event : trigger.getEvents()) {
                 if (!supported.contains(event)) {
                     throw new BadRequestException("Unsupported event for " + recordType + ": " + event);
@@ -198,8 +213,9 @@ public class RuleService {
             if (!ACTION_TYPES.contains(type)) {
                 throw new BadRequestException("Invalid action type: " + action.getType());
             }
-            if (LINKED_ACTIONS.contains(type) && !"deal".equals(recordType)) {
-                throw new BadRequestException("'" + type + "' actions are only supported for deal rules");
+            Set<String> supportedRecordTypes = ACTION_RECORD_TYPES.get(type);
+            if (supportedRecordTypes == null || !supportedRecordTypes.contains(recordType)) {
+                throw new BadRequestException("'" + type + "' actions are not supported for " + recordType + " rules");
             }
             switch (type) {
                 case "create_task", "notify" -> requireText(action.getTitle(), "title");

@@ -208,9 +208,27 @@ class RuleServiceTest extends AbstractServiceTest {
     }
 
     @Test
-    void create_entityChangePerson_throws() {
-        assertThrows(BadRequestException.class,
+    void create_entityChangePerson_allowed() {
+        assertDoesNotThrow(
             () -> ruleService.create(req("person", entityChange("person.updated"), "user", action("notify"))));
+    }
+
+    @Test
+    void create_entityChangeTask_allowed() {
+        assertDoesNotThrow(
+            () -> ruleService.create(req("task", entityChange("task.completed"), "user", action("notify"))));
+    }
+
+    @Test
+    void create_unsupportedPersonEvent_throws() {
+        assertThrows(BadRequestException.class,
+            () -> ruleService.create(req("person", entityChange("person.deleted"), "user", action("notify"))));
+    }
+
+    @Test
+    void create_tagActionOnTaskRule_throws() {
+        assertThrows(BadRequestException.class,
+            () -> ruleService.create(req("task", entityChange("task.created"), "user", action("add_tag"))));
     }
 
     @Test

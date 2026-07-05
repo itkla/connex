@@ -346,6 +346,9 @@ public class DealService {
             auditService.diff(before, deal, AUDIT_FIELDS));
         notificationChanges.publish(workspaceId, "deal", id);
         ruleTriggers.publish(workspaceId, "deal", id, stageChanged ? "deal.stage_changed" : "deal.updated");
+        if (Double.compare(before.getValue(), deal.getValue()) != 0) {
+            ruleTriggers.publish(workspaceId, "deal", id, "deal.value_changed");
+        }
         syncClosedReasonMentions(workspaceId, deal);
         return hydrateReferences(workspaceId, deal);
     }
@@ -840,7 +843,14 @@ public class DealService {
             "Updated owner on " + deal.getName(),
             auditService.singleChange("ownerId", deal.getOwnerId(), ownerId));
         notificationChanges.publish(workspaceId, "deal", dealId);
+        if (ownerChanged(deal.getOwnerId(), ownerId)) {
+            ruleTriggers.publish(workspaceId, "deal", dealId, "deal.owner_changed");
+        }
         return dealMapper.getDealById(workspaceId, dealId);
+    }
+
+    private static boolean ownerChanged(Integer before, Integer after) {
+        return before == null ? after != null : !before.equals(after);
     }
 
     public List<User> getCollaborators(int dealId) {
