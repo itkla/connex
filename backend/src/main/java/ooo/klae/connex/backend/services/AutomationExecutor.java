@@ -24,10 +24,12 @@ public class AutomationExecutor {
 
     private final TenantContext tenantContext;
     private final WorkspaceService workspaceService;
+    private final AutomationScope automationScope;
 
     /**
      * Runs {@code work} with {@code principal} installed in the security context and {@code workspaceId}
-     * in the tenant context, restoring both afterward.
+     * in the tenant context, and the thread marked as executing automation (so its mutations do not
+     * re-trigger rules), restoring all three afterward.
      */
     public <T> T runAs(int workspaceId, User principal, String role, Supplier<T> work) {
         SecurityContext previousSecurity = SecurityContextHolder.getContext();
@@ -41,9 +43,11 @@ public class AutomationExecutor {
         context.setAuthentication(new UsernamePasswordAuthenticationToken(principal, null, principal.getAuthorities()));
         SecurityContextHolder.setContext(context);
         tenantContext.set(workspaceId, workspaceService.getOrgId(workspaceId), principal.getId(), role);
+        boolean previousScope = automationScope.enter();
         try {
             return work.get();
         } finally {
+            automationScope.restore(previousScope);
             if (hadTenant) {
                 tenantContext.set(previousWorkspace, previousOrg, previousUser, previousRole);
             } else {

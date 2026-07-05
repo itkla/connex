@@ -11,9 +11,12 @@ import org.springframework.beans.factory.annotation.Autowired;
 
 import ooo.klae.connex.backend.beans.Company;
 import ooo.klae.connex.backend.beans.Deal;
+import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.beans.Pipeline;
 import ooo.klae.connex.backend.beans.Stage;
 import ooo.klae.connex.backend.beans.Tag;
+import ooo.klae.connex.backend.beans.Task;
+import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.dto.RuleAction;
 import ooo.klae.connex.backend.dto.RuleDto;
 import ooo.klae.connex.backend.dto.RuleRequest;
@@ -218,5 +221,172 @@ class RuleEngineServiceTest extends AbstractServiceTest {
 
         assertTrue(tagged(stale.getId(), tag.getId()));
         assertEquals(1, matchedExecutions(rule.getId()));
+    }
+
+    private static RuleAction notifyAction() {
+        RuleAction action = new RuleAction();
+        action.setType("notify");
+        action.setTitle("Automated");
+        return action;
+    }
+
+    private RuleDto entityChangeRule(String recordType, RuleAction action, SegmentDefinition condition, String... events) {
+        RuleTrigger trigger = new RuleTrigger();
+        trigger.setType("entity_change");
+        trigger.setEvents(List.of(events));
+        RuleRequest request = new RuleRequest();
+        request.setName("Rule " + unique());
+        request.setRecordType(recordType);
+        request.setTrigger(trigger);
+        request.setCondition(condition);
+        request.setActions(List.of(action));
+        request.setExecutionMode("user");
+        return ruleService.create(request);
+    }
+
+    private boolean firedFor(int ruleId, int entityId) {
+        return ruleMapper.getExecutionsByRule(workspace.getId(), ruleId, 50).stream()
+            .anyMatch(e -> e.getTriggerEntityId() == entityId && "matched".equals(e.getStatus()));
+    }
+
+    @Test
+    void entityChange_dealWhenCondition_filtersByField() {
+        Pipeline pipeline = newPipeline();
+        Stage stage = newStage(pipeline, 0);
+        Company company = newCompany();
+        Deal big = newDeal(pipeline, stage, company);
+        Deal small = newDeal(pipeline, stage, company);
+        small.setValue(100.0);
+        dealMapper.update(small);
+        Tag tag = newTag();
+
+        SegmentDefinition condition = new SegmentDefinition();
+        condition.setMatch("all");
+        SegmentCondition value = new SegmentCondition();
+        value.setType("field");
+        value.setField("value");
+        value.setOp("gte");
+        value.setValue("500");
+        condition.setConditions(List.of(value));
+        RuleAction tagIt = new RuleAction();
+        tagIt.setType("add_tag");
+        tagIt.setTagId(tag.getId());
+        RuleDto rule = entityChangeRule("deal", tagIt, condition, "deal.updated");
+
+        ruleEngineService.onEntityChange(workspace.getId(), "deal", big.getId(), "deal.updated");
+        ruleEngineService.onEntityChange(workspace.getId(), "deal", small.getId(), "deal.updated");
+
+        assertTrue(firedFor(rule.getId(), big.getId()));
+        assertFalse(firedFor(rule.getId(), small.getId()));
+    }
+
+    @Test
+    void entityChange_person_fires() {
+        Person person = newPerson(newCompany());
+        RuleDto rule = entityChangeRule("person", notifyAction(), null, "person.updated");
+
+        ruleEngineService.onEntityChange(workspace.getId(), "person", person.getId(), "person.updated");
+
+        assertEquals(1, matchedExecutions(rule.getId()));
+    }
+
+    @Test
+    void entityChange_task_fires() {
+        Task task = newTask(currentUser, newPerson(newCompany()), null);
+        RuleDto rule = entityChangeRule("task", notifyAction(), null, "task.completed");
+
+        ruleEngineService.onEntityChange(workspace.getId(), "task", task.getId(), "task.completed");
+
+        assertEquals(1, matchedExecutions(rule.getId()));
+    }
+
+    @Test
+    void throttle_collapsesRepeatFiresWithinWindow() {
+        Company company = newCompany();
+        Tag tag = newTag();
+        RuleAction tagIt = new RuleAction();
+        tagIt.setType("add_tag");
+        tagIt.setTagId(tag.getId());
+        RuleTrigger trigger = new RuleTrigger();
+        trigger.setType("entity_change");
+        trigger.setEvents(List.of("company.updated"));
+        trigger.setThrottleMinutes(60);
+        RuleRequest request = new RuleRequest();
+        request.setName("Throttled " + unique());
+        request.setRecordType("company");
+        request.setTrigger(trigger);
+        request.setActions(List.of(tagIt));
+        request.setExecutionMode("user");
+        RuleDto rule = ruleService.create(request);
+
+        ruleEngineService.onEntityChange(workspace.getId(), "company", company.getId(), "company.updated");
+        ruleEngineService.onEntityChange(workspace.getId(), "company", company.getId(), "company.updated");
+
+        assertEquals(1, matchedExecutions(rule.getId()));
+    }
+
+    @Test
+    void assignOwner_action_reassignsDeal() {
+        Pipeline pipeline = newPipeline();
+        Stage stage = newStage(pipeline, 0);
+        Deal deal = newDeal(pipeline, stage, newCompany());
+        User newOwner = newUser();
+        RuleAction assign = new RuleAction();
+        assign.setType("assign_owner");
+        assign.setTargetUserId(newOwner.getId());
+        RuleDto rule = entityChangeRule("deal", assign, null, "deal.won");
+
+        ruleEngineService.onEntityChange(workspace.getId(), "deal", deal.getId(), "deal.won");
+
+        assertEquals(1, matchedExecutions(rule.getId()));
+        assertEquals(newOwner.getId(), dealMapper.getDealById(workspace.getId(), deal.getId()).getOwnerId());
+    }
+
+    @Test
+    void changeStage_action_movesDeal() {
+        Pipeline pipeline = newPipeline();
+        Stage from = newStage(pipeline, 0);
+        Stage to = newStage(pipeline, 1);
+        Deal deal = newDeal(pipeline, from, newCompany());
+        RuleAction move = new RuleAction();
+        move.setType("change_stage");
+        move.setTargetStageId(to.getId());
+        RuleDto rule = entityChangeRule("deal", move, null, "deal.updated");
+
+        ruleEngineService.onEntityChange(workspace.getId(), "deal", deal.getId(), "deal.updated");
+
+        assertEquals(1, matchedExecutions(rule.getId()));
+        assertEquals(to.getId(), dealMapper.getDealById(workspace.getId(), deal.getId()).getStageId());
+    }
+
+    @Test
+    void createNote_action_succeeds() {
+        Pipeline pipeline = newPipeline();
+        Stage stage = newStage(pipeline, 0);
+        Deal deal = newDeal(pipeline, stage, newCompany());
+        RuleAction note = new RuleAction();
+        note.setType("create_note");
+        note.setBody("Automated follow-up");
+        RuleDto rule = entityChangeRule("deal", note, null, "deal.won");
+
+        ruleEngineService.onEntityChange(workspace.getId(), "deal", deal.getId(), "deal.won");
+
+        assertEquals(1, matchedExecutions(rule.getId()));
+    }
+
+    @Test
+    void removeTag_action_untagsCompany() {
+        Company company = newCompany();
+        Tag tag = newTag();
+        companyMapper.addTag(workspace.getId(), company.getId(), tag.getId());
+        RuleAction remove = new RuleAction();
+        remove.setType("remove_tag");
+        remove.setTagId(tag.getId());
+        RuleDto rule = entityChangeRule("company", remove, null, "company.updated");
+
+        ruleEngineService.onEntityChange(workspace.getId(), "company", company.getId(), "company.updated");
+
+        assertEquals(1, matchedExecutions(rule.getId()));
+        assertFalse(tagged(company.getId(), tag.getId()));
     }
 }

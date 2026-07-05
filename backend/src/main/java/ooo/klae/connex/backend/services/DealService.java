@@ -7,6 +7,7 @@ import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 
 import org.springframework.stereotype.Service;
@@ -346,6 +347,9 @@ public class DealService {
             auditService.diff(before, deal, AUDIT_FIELDS));
         notificationChanges.publish(workspaceId, "deal", id);
         ruleTriggers.publish(workspaceId, "deal", id, stageChanged ? "deal.stage_changed" : "deal.updated");
+        if (Double.compare(before.getValue(), deal.getValue()) != 0) {
+            ruleTriggers.publish(workspaceId, "deal", id, "deal.value_changed");
+        }
         syncClosedReasonMentions(workspaceId, deal);
         return hydrateReferences(workspaceId, deal);
     }
@@ -840,6 +844,9 @@ public class DealService {
             "Updated owner on " + deal.getName(),
             auditService.singleChange("ownerId", deal.getOwnerId(), ownerId));
         notificationChanges.publish(workspaceId, "deal", dealId);
+        if (!Objects.equals(deal.getOwnerId(), ownerId)) {
+            ruleTriggers.publish(workspaceId, "deal", dealId, "deal.owner_changed");
+        }
         return dealMapper.getDealById(workspaceId, dealId);
     }
 

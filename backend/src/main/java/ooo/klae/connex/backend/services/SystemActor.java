@@ -15,7 +15,9 @@ import ooo.klae.connex.backend.tenant.Permission;
  * and the fixed, narrow set of action permissions it is granted. The system user belongs to no
  * workspace and cannot authenticate; the rule engine always scopes its actions to the firing rule's
  * own workspace, so this grant never widens a real member's reach. The catalog is intentionally
- * limited to exactly what the v1 automation actions need.
+ * limited to exactly what the automation actions need — {@code *_UPDATE} covers add/remove tag,
+ * owner reassignment and stage changes; {@code TASK_CREATE}/{@code ACTIVITY_CREATE}/{@code NOTE_CREATE}
+ * cover the record-creating actions. Management permissions are deliberately withheld.
  */
 @Component
 @RequiredArgsConstructor
@@ -24,7 +26,7 @@ public class SystemActor {
     static final String USERNAME = "__connex_system__";
 
     private static final Set<Permission> PERMISSIONS = Set.of(
-        Permission.TASK_CREATE, Permission.ACTIVITY_CREATE,
+        Permission.TASK_CREATE, Permission.ACTIVITY_CREATE, Permission.NOTE_CREATE,
         Permission.COMPANY_UPDATE, Permission.PERSON_UPDATE, Permission.DEAL_UPDATE);
 
     private final UserMapper userMapper;

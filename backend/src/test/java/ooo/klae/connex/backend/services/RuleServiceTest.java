@@ -13,10 +13,13 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
 
+import ooo.klae.connex.backend.beans.Company;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.beans.WorkspaceRole;
 import ooo.klae.connex.backend.dto.RuleAction;
 import ooo.klae.connex.backend.dto.RuleDto;
+import ooo.klae.connex.backend.dto.RulePreviewDto;
+import ooo.klae.connex.backend.dto.RulePreviewRequest;
 import ooo.klae.connex.backend.dto.RuleRequest;
 import ooo.klae.connex.backend.dto.RuleTrigger;
 import ooo.klae.connex.backend.dto.SegmentCondition;
@@ -51,7 +54,10 @@ class RuleServiceTest extends AbstractServiceTest {
         switch (type) {
             case "create_task", "notify" -> action.setTitle("title");
             case "log_activity" -> action.setActivityType("note");
-            case "add_tag" -> action.setTagId(1);
+            case "add_tag", "remove_tag" -> action.setTagId(1);
+            case "create_note" -> action.setBody("Automated note");
+            case "assign_owner" -> action.setTargetUserId(1);
+            case "change_stage" -> action.setTargetStageId(1);
             default -> { }
         }
         return action;
@@ -156,13 +162,32 @@ class RuleServiceTest extends AbstractServiceTest {
     }
 
     @Test
-    void create_conditionOnNonCompany_throws() {
+    void create_emptyConditionOnDealRule_throws() {
         RuleRequest request = req("deal", entityChange("deal.won"), "user", action("notify"));
         SegmentDefinition condition = new SegmentDefinition();
         condition.setMatch("all");
         condition.setConditions(List.of());
         request.setCondition(condition);
         assertThrows(BadRequestException.class, () -> ruleService.create(request));
+    }
+
+    @Test
+    void create_dealRuleWithFieldCondition_roundTrips() {
+        RuleRequest request = req("deal", entityChange("deal.won"), "user", action("notify"));
+        SegmentDefinition condition = new SegmentDefinition();
+        condition.setMatch("all");
+        SegmentCondition field = new SegmentCondition();
+        field.setType("field");
+        field.setField("value");
+        field.setOp("gte");
+        field.setValue("1000");
+        condition.setConditions(List.of(field));
+        request.setCondition(condition);
+
+        RuleDto created = ruleService.create(request);
+
+        assertEquals("value",
+            ruleService.getById(created.getId()).getCondition().getConditions().get(0).getField());
     }
 
     @Test
@@ -189,9 +214,27 @@ class RuleServiceTest extends AbstractServiceTest {
     }
 
     @Test
-    void create_entityChangePerson_throws() {
-        assertThrows(BadRequestException.class,
+    void create_entityChangePerson_allowed() {
+        assertDoesNotThrow(
             () -> ruleService.create(req("person", entityChange("person.updated"), "user", action("notify"))));
+    }
+
+    @Test
+    void create_entityChangeTask_allowed() {
+        assertDoesNotThrow(
+            () -> ruleService.create(req("task", entityChange("task.completed"), "user", action("notify"))));
+    }
+
+    @Test
+    void create_unsupportedPersonEvent_throws() {
+        assertThrows(BadRequestException.class,
+            () -> ruleService.create(req("person", entityChange("person.deleted"), "user", action("notify"))));
+    }
+
+    @Test
+    void create_tagActionOnTaskRule_throws() {
+        assertThrows(BadRequestException.class,
+            () -> ruleService.create(req("task", entityChange("task.created"), "user", action("add_tag"))));
     }
 
     @Test
@@ -201,10 +244,94 @@ class RuleServiceTest extends AbstractServiceTest {
     }
 
     @Test
+    void create_assignOwnerWithoutTarget_throws() {
+        RuleAction bare = new RuleAction();
+        bare.setType("assign_owner");
+        assertThrows(BadRequestException.class,
+            () -> ruleService.create(req("deal", entityChange("deal.stage_changed"), "user", bare)));
+    }
+
+    @Test
+    void create_changeStageOnCompanyRule_throws() {
+        assertThrows(BadRequestException.class,
+            () -> ruleService.create(req("company", entityChange("company.updated"), "user", action("change_stage"))));
+    }
+
+    @Test
+    void create_recordMutatingActionsOnDeal_roundTrip() {
+        RuleDto created = ruleService.create(req("deal", entityChange("deal.won"), "user",
+            action("assign_owner"), action("change_stage"), action("create_note")));
+        assertEquals(3, created.getActions().size());
+        assertEquals("assign_owner", created.getActions().get(0).getType());
+    }
+
+    @Test
     void delete_removesRule() {
         RuleDto created = ruleService.create(req("company", entityChange("company.updated"), "user", action("notify")));
         ruleService.delete(created.getId());
         assertThrows(ResourceNotFoundException.class, () -> ruleService.getById(created.getId()));
+    }
+
+    @Test
+    void create_personRuleWithCompanyOnlyField_throws() {
+        RuleRequest request = req("person", entityChange("person.updated"), "user", action("notify"));
+        SegmentDefinition condition = new SegmentDefinition();
+        condition.setMatch("all");
+        SegmentCondition industry = new SegmentCondition();
+        industry.setType("field");
+        industry.setField("industry");
+        industry.setOp("equals");
+        industry.setValue("Tech");
+        condition.setConditions(List.of(industry));
+        request.setCondition(condition);
+
+        assertThrows(BadRequestException.class, () -> ruleService.create(request));
+    }
+
+    @Test
+    void create_emptyNestedGroup_throws() {
+        RuleRequest request = req("company", entityChange("company.updated"), "user", action("notify"));
+        SegmentDefinition condition = new SegmentDefinition();
+        condition.setMatch("all");
+        SegmentDefinition emptyGroup = new SegmentDefinition();
+        emptyGroup.setMatch("all");
+        emptyGroup.setConditions(List.of());
+        condition.setGroups(List.of(emptyGroup));
+        request.setCondition(condition);
+
+        assertThrows(BadRequestException.class, () -> ruleService.create(request));
+    }
+
+    @Test
+    void preview_returnsCountAndSample() {
+        Company company = newCompany();
+        RulePreviewRequest request = new RulePreviewRequest();
+        request.setRecordType("company");
+        SegmentDefinition condition = new SegmentDefinition();
+        condition.setMatch("all");
+        SegmentCondition byName = new SegmentCondition();
+        byName.setType("field");
+        byName.setField("name");
+        byName.setOp("contains");
+        byName.setValue(company.getName());
+        condition.setConditions(List.of(byName));
+        request.setCondition(condition);
+
+        RulePreviewDto preview = ruleService.preview(request);
+
+        assertTrue(preview.getMatchCount() >= 1);
+        assertTrue(preview.getSample().stream().anyMatch(record -> record.getId() == company.getId()));
+    }
+
+    @Test
+    void preview_emptyCondition_throws() {
+        RulePreviewRequest request = new RulePreviewRequest();
+        request.setRecordType("company");
+        SegmentDefinition condition = new SegmentDefinition();
+        condition.setMatch("all");
+        condition.setConditions(List.of());
+        request.setCondition(condition);
+        assertThrows(BadRequestException.class, () -> ruleService.preview(request));
     }
 
     @Test

@@ -28,6 +28,7 @@ public class EmploymentService {
     private final PersonEmploymentMapper employmentMapper;
     private final CompanyMapper companyMapper;
     private final WorkspaceService workspaceService;
+    private final RuleTriggerPublisher ruleTriggers;
     private final Clock clock;
 
     private static final int RECENT_MOVE_DAYS = 90;
@@ -48,6 +49,7 @@ public class EmploymentService {
         String now = now();
         employmentMapper.closeCurrent(workspaceId, personId, now);
         insertCurrent(workspaceId, personId, newCompanyId, title, now);
+        ruleTriggers.publish(workspaceId, "person", personId, "person.job_changed");
     }
 
     /** Employment history for a contact in the active workspace, current row first. */

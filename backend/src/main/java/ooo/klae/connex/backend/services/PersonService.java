@@ -50,6 +50,7 @@ public class PersonService {
     private final EmploymentService employmentService;
     private final CustomFieldValueService customFieldValueService;
     private final ReferenceService referenceService;
+    private final RuleTriggerPublisher ruleTriggers;
 
     private static final Set<String> AUDIT_FIELDS =
         Set.of("name", "email", "phone", "title", "imageUrl");
@@ -171,6 +172,7 @@ public class PersonService {
         auditService.record("person.create", "person", person.getId(), person.getName(),
             "Created person " + person.getName(),
             auditService.diff(null, person, AUDIT_FIELDS));
+        ruleTriggers.publish(workspaceId, "person", person.getId(), "person.created");
         return person;
     }
 
@@ -193,6 +195,7 @@ public class PersonService {
         auditService.record("person.update", "person", id, person.getName(),
             "Updated person " + person.getName(),
             auditService.diff(before, person, AUDIT_FIELDS));
+        ruleTriggers.publish(workspaceId, "person", id, "person.updated");
         return person;
     }
 

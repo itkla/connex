@@ -9,6 +9,7 @@ import lombok.RequiredArgsConstructor;
 
 import ooo.klae.connex.backend.beans.Activity;
 import ooo.klae.connex.backend.beans.Deal;
+import ooo.klae.connex.backend.beans.Note;
 import ooo.klae.connex.backend.beans.Notification;
 import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.beans.Task;
@@ -31,6 +32,7 @@ public class RuleActionExecutor {
     private final CompanyService companyService;
     private final PersonService personService;
     private final DealService dealService;
+    private final NoteService noteService;
     private final NotificationDelivery notificationDelivery;
 
     private static final DateTimeFormatter TIMESTAMP = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
@@ -43,6 +45,10 @@ public class RuleActionExecutor {
             case "create_task" -> createTask(action, ctx);
             case "log_activity" -> logActivity(action, ctx);
             case "add_tag" -> addTag(action, ctx);
+            case "remove_tag" -> removeTag(action, ctx);
+            case "create_note" -> createNote(action, ctx);
+            case "assign_owner" -> dealService.updateOwner(ctx.entityId(), action.getTargetUserId());
+            case "change_stage" -> dealService.changeStage(ctx.entityId(), action.getTargetStageId());
             case "notify" -> notify(action, ctx);
             default -> throw new BadRequestException("Unsupported action: " + action.getType());
         }
@@ -84,6 +90,26 @@ public class RuleActionExecutor {
             case "deal" -> dealService.addTag(ctx.entityId(), action.getTagId());
             default -> throw new BadRequestException("Cannot tag record type: " + ctx.recordType());
         }
+    }
+
+    private void removeTag(RuleAction action, RuleFireContext ctx) {
+        switch (ctx.recordType()) {
+            case "company" -> companyService.removeTag(ctx.entityId(), action.getTagId());
+            case "person" -> personService.removeTag(ctx.entityId(), action.getTagId());
+            case "deal" -> dealService.removeTag(ctx.entityId(), action.getTagId());
+            default -> throw new BadRequestException("Cannot remove tag from record type: " + ctx.recordType());
+        }
+    }
+
+    private void createNote(RuleAction action, RuleFireContext ctx) {
+        Note note = new Note();
+        note.setContent(action.getBody());
+        if ("person".equals(ctx.recordType())) {
+            note.setPerson(person(ctx.entityId()));
+        } else if ("deal".equals(ctx.recordType())) {
+            note.setDeal(deal(ctx.entityId()));
+        }
+        noteService.create(note);
     }
 
     private void notify(RuleAction action, RuleFireContext ctx) {

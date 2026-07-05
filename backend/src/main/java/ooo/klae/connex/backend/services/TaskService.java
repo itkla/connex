@@ -49,6 +49,7 @@ public class TaskService {
     private final ReferenceService referenceService;
     private final NotificationDelivery notificationDelivery;
     private final NotificationPreferenceService notificationPreferenceService;
+    private final RuleTriggerPublisher ruleTriggers;
     private final ObjectMapper objectMapper;
 
     private static final String STATUS_TODO = "todo";
@@ -107,6 +108,7 @@ public class TaskService {
             "Created task " + task.getDescription(),
             auditService.diff(null, task, AUDIT_FIELDS));
         notificationChanges.publish(workspaceId, "task", task.getId());
+        ruleTriggers.publish(workspaceId, "task", task.getId(), "task.created");
         List<Integer> mentioned =
             referenceService.syncReferences(workspaceId, ReferenceService.SOURCE_TASK, task.getId(), task.getDescription());
         if (actor != null) {
@@ -138,6 +140,9 @@ public class TaskService {
             "Updated task " + task.getDescription(),
             auditService.diff(before, task, AUDIT_FIELDS));
         notificationChanges.publish(workspaceId, "task", id);
+        if (!before.isCompleted() && task.isCompleted()) {
+            ruleTriggers.publish(workspaceId, "task", id, "task.completed");
+        }
         List<Integer> mentioned =
             referenceService.syncReferences(workspaceId, ReferenceService.SOURCE_TASK, id, task.getDescription());
         if (actor != null) {
@@ -182,6 +187,7 @@ public class TaskService {
             "Completed task " + task.getDescription(),
             auditService.singleChange("completed", task.isCompleted(), true));
         notificationChanges.publish(workspaceId, "task", id);
+        ruleTriggers.publish(workspaceId, "task", id, "task.completed");
         return hydrate(workspaceId, completed);
     }
 
@@ -240,6 +246,9 @@ public class TaskService {
                           : "Reordered task " + before.getDescription(),
             auditService.diff(before, moved, AUDIT_FIELDS));
         notificationChanges.publish(workspaceId, "task", id);
+        if (toDone && !fromDone) {
+            ruleTriggers.publish(workspaceId, "task", id, "task.completed");
+        }
         return hydrate(workspaceId, moved);
     }
 

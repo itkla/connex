@@ -68,7 +68,7 @@ public class RuleEngineService {
                 if (!conditionMatches(rule, workspaceId, entityId)) {
                     continue;
                 }
-                fire(rule, workspaceId, recordType, entityId, event + ":" + System.nanoTime());
+                fire(rule, workspaceId, recordType, entityId, dedupeSuffix(trigger, event));
             } catch (Exception e) {
                 log.warn("Rule {} dispatch failed on {} {}: {}", rule.getId(), recordType, entityId, e.getMessage());
             }
@@ -102,19 +102,19 @@ public class RuleEngineService {
     }
 
     private boolean conditionMatches(Rule rule, int workspaceId, int entityId) {
-        if (rule.getConditionJson() == null || !"company".equals(rule.getRecordType())) {
+        if (rule.getConditionJson() == null) {
             return true;
         }
         SegmentDefinition definition = read(rule.getConditionJson(), SegmentDefinition.class);
-        return segmentService.evaluate(workspaceId, conditionActorId(rule), "company", definition).contains(entityId);
+        return segmentService.evaluate(workspaceId, conditionActorId(rule), rule.getRecordType(), definition).contains(entityId);
     }
 
     private List<Integer> scheduleMatches(Rule rule, int workspaceId) {
-        if (!"company".equals(rule.getRecordType()) || rule.getConditionJson() == null) {
+        if (rule.getConditionJson() == null) {
             return List.of();
         }
         SegmentDefinition definition = read(rule.getConditionJson(), SegmentDefinition.class);
-        return segmentService.evaluate(workspaceId, conditionActorId(rule), "company", definition);
+        return segmentService.evaluate(workspaceId, conditionActorId(rule), rule.getRecordType(), definition);
     }
 
     private int conditionActorId(Rule rule) {
@@ -131,6 +131,15 @@ public class RuleEngineService {
             case "weekly" -> now.get(IsoFields.WEEK_BASED_YEAR) + "W" + now.get(IsoFields.WEEK_OF_WEEK_BASED_YEAR);
             default -> now.format(DAY);
         };
+    }
+
+    private String dedupeSuffix(RuleTrigger trigger, String event) {
+        Integer throttle = trigger.getThrottleMinutes();
+        if (throttle != null && throttle > 0) {
+            long window = (System.currentTimeMillis() / 60000L) / throttle;
+            return event + ":t" + throttle + ":" + window;
+        }
+        return event + ":" + System.nanoTime();
     }
 
     private void fire(Rule rule, int workspaceId, String recordType, int entityId, String dedupeSuffix) {

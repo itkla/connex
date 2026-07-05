@@ -2,6 +2,7 @@ package ooo.klae.connex.backend.services;
 
 import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 import org.springframework.stereotype.Service;
@@ -14,6 +15,8 @@ import ooo.klae.connex.backend.beans.Rule;
 import ooo.klae.connex.backend.beans.RuleExecution;
 import ooo.klae.connex.backend.dto.RuleAction;
 import ooo.klae.connex.backend.dto.RuleDto;
+import ooo.klae.connex.backend.dto.RulePreviewDto;
+import ooo.klae.connex.backend.dto.RulePreviewRequest;
 import ooo.klae.connex.backend.dto.RuleRequest;
 import ooo.klae.connex.backend.dto.RuleTrigger;
 import ooo.klae.connex.backend.dto.SegmentDefinition;
@@ -35,21 +38,38 @@ import ooo.klae.connex.backend.tenant.RequirePermission;
 public class RuleService {
 
     private final RuleMapper ruleMapper;
+    private final SegmentService segmentService;
     private final WorkspaceService workspaceService;
     private final AuthService authService;
     private final AuditService auditService;
     private final ObjectMapper objectMapper;
 
     private static final int MAX_JSON_BYTES = 16384;
+    private static final int PREVIEW_SAMPLE = 25;
     private static final Set<String> RECORD_TYPES = Set.of("company", "person", "deal", "task");
     private static final Set<String> TRIGGER_TYPES = Set.of("entity_change", "schedule");
     private static final Set<String> EXECUTION_MODES = Set.of("user", "system");
-    private static final Set<String> ACTION_TYPES = Set.of("create_task", "log_activity", "add_tag", "notify");
+    private static final Set<String> ACTION_TYPES = Set.of(
+        "create_task", "log_activity", "add_tag", "remove_tag", "create_note",
+        "assign_owner", "change_stage", "notify");
     private static final Set<String> CADENCES = Set.of("hourly", "daily", "weekly");
-    private static final Set<String> ENTITY_CHANGE_RECORD_TYPES = Set.of("deal", "company");
-    private static final Set<String> DEAL_EVENTS = Set.of("deal.created", "deal.stage_changed", "deal.updated", "deal.won", "deal.lost");
+    private static final Set<String> ENTITY_CHANGE_RECORD_TYPES = Set.of("deal", "company", "person", "task");
+    private static final Set<String> SEGMENT_RECORD_TYPES = Set.of("company", "person", "deal");
+    private static final Set<String> DEAL_EVENTS = Set.of(
+        "deal.created", "deal.stage_changed", "deal.updated", "deal.won", "deal.lost",
+        "deal.owner_changed", "deal.value_changed");
     private static final Set<String> COMPANY_EVENTS = Set.of("company.created", "company.updated");
-    private static final Set<String> LINKED_ACTIONS = Set.of("create_task", "log_activity");
+    private static final Set<String> PERSON_EVENTS = Set.of("person.created", "person.updated", "person.job_changed");
+    private static final Set<String> TASK_EVENTS = Set.of("task.created", "task.completed");
+    private static final Map<String, Set<String>> ACTION_RECORD_TYPES = Map.of(
+        "create_task", Set.of("person", "deal"),
+        "log_activity", Set.of("person", "deal"),
+        "add_tag", Set.of("company", "person", "deal"),
+        "remove_tag", Set.of("company", "person", "deal"),
+        "create_note", Set.of("person", "deal"),
+        "assign_owner", Set.of("deal"),
+        "change_stage", Set.of("deal"),
+        "notify", Set.of("company", "person", "deal", "task"));
 
     @RequirePermission(Permission.RULE_MANAGE)
     public List<RuleDto> list() {
@@ -66,6 +86,24 @@ public class RuleService {
     public List<RuleExecution> executions(int id) {
         requireRule(id);
         return ruleMapper.getExecutionsByRule(workspaceService.getCurrentWorkspaceId(), id, 50);
+    }
+
+    /**
+     * Dry-runs a WHEN condition over the active workspace's records of {@code recordType}, returning
+     * the total match count and a bounded sample — without creating or firing a rule.
+     */
+    @RequirePermission(Permission.RULE_MANAGE)
+    public RulePreviewDto preview(RulePreviewRequest request) {
+        String recordType = normalize(request.getRecordType());
+        if (!SEGMENT_RECORD_TYPES.contains(recordType)) {
+            throw new BadRequestException("Preview is not supported for record type: " + request.getRecordType());
+        }
+        if (!hasWhen(request.getCondition())) {
+            throw new BadRequestException("A preview requires at least one condition");
+        }
+        List<Integer> ids = segmentService.evaluate(recordType, request.getCondition());
+        List<Integer> sampleIds = ids.stream().sorted().limit(PREVIEW_SAMPLE).toList();
+        return new RulePreviewDto(ids.size(), segmentService.labels(recordType, sampleIds));
     }
 
     @Transactional
@@ -126,8 +164,14 @@ public class RuleService {
         if ("system".equals(mode)) {
             workspaceService.requireRole(Role.ADMIN);
         }
-        if (request.getCondition() != null && !"company".equals(recordType)) {
-            throw new BadRequestException("WHEN conditions are only supported for company rules");
+        if (request.getCondition() != null && !SEGMENT_RECORD_TYPES.contains(recordType)) {
+            throw new BadRequestException("WHEN conditions are not supported for record type: " + request.getRecordType());
+        }
+        if (request.getCondition() != null && !hasWhen(request.getCondition())) {
+            throw new BadRequestException("A WHEN condition must contain at least one condition");
+        }
+        if (request.getCondition() != null) {
+            segmentService.validate(recordType, request.getCondition());
         }
         validateTrigger(request.getTrigger(), recordType, request.getCondition());
         validateActions(request.getActions(), recordType);
@@ -147,7 +191,9 @@ public class RuleService {
         return switch (type) {
             case "create_task" -> Permission.TASK_CREATE;
             case "log_activity" -> Permission.ACTIVITY_CREATE;
-            case "add_tag" -> switch (recordType) {
+            case "create_note" -> Permission.NOTE_CREATE;
+            case "assign_owner", "change_stage" -> Permission.DEAL_UPDATE;
+            case "add_tag", "remove_tag" -> switch (recordType) {
                 case "company" -> Permission.COMPANY_UPDATE;
                 case "person" -> Permission.PERSON_UPDATE;
                 case "deal" -> Permission.DEAL_UPDATE;
@@ -169,20 +215,26 @@ public class RuleService {
             if (trigger.getEvents() == null || trigger.getEvents().isEmpty()) {
                 throw new BadRequestException("An entity-change trigger requires at least one event");
             }
-            Set<String> supported = "deal".equals(recordType) ? DEAL_EVENTS : COMPANY_EVENTS;
+            Set<String> supported = switch (recordType) {
+                case "deal" -> DEAL_EVENTS;
+                case "company" -> COMPANY_EVENTS;
+                case "person" -> PERSON_EVENTS;
+                case "task" -> TASK_EVENTS;
+                default -> Set.of();
+            };
             for (String event : trigger.getEvents()) {
                 if (!supported.contains(event)) {
                     throw new BadRequestException("Unsupported event for " + recordType + ": " + event);
                 }
             }
         } else {
-            if (!"company".equals(recordType)) {
-                throw new BadRequestException("Schedule rules are only supported for company records");
+            if (!SEGMENT_RECORD_TYPES.contains(recordType)) {
+                throw new BadRequestException("Schedule rules are not supported for record type: " + recordType);
             }
             if (trigger.getCadence() == null || !CADENCES.contains(normalize(trigger.getCadence()))) {
                 throw new BadRequestException("A schedule rule requires a valid cadence");
             }
-            if (condition == null || condition.getConditions() == null || condition.getConditions().isEmpty()) {
+            if (!hasWhen(condition)) {
                 throw new BadRequestException("A schedule rule requires a WHEN condition");
             }
         }
@@ -194,15 +246,27 @@ public class RuleService {
             if (!ACTION_TYPES.contains(type)) {
                 throw new BadRequestException("Invalid action type: " + action.getType());
             }
-            if (LINKED_ACTIONS.contains(type) && !"deal".equals(recordType)) {
-                throw new BadRequestException("'" + type + "' actions are only supported for deal rules");
+            Set<String> supportedRecordTypes = ACTION_RECORD_TYPES.get(type);
+            if (supportedRecordTypes == null || !supportedRecordTypes.contains(recordType)) {
+                throw new BadRequestException("'" + type + "' actions are not supported for " + recordType + " rules");
             }
             switch (type) {
                 case "create_task", "notify" -> requireText(action.getTitle(), "title");
                 case "log_activity" -> requireText(action.getActivityType(), "activityType");
-                case "add_tag" -> {
+                case "create_note" -> requireText(action.getBody(), "body");
+                case "add_tag", "remove_tag" -> {
                     if (action.getTagId() == null) {
-                        throw new BadRequestException("An add_tag action requires a tagId");
+                        throw new BadRequestException("A " + type + " action requires a tagId");
+                    }
+                }
+                case "assign_owner" -> {
+                    if (action.getTargetUserId() == null) {
+                        throw new BadRequestException("An assign_owner action requires a targetUserId");
+                    }
+                }
+                case "change_stage" -> {
+                    if (action.getTargetStageId() == null) {
+                        throw new BadRequestException("A change_stage action requires a targetStageId");
                     }
                 }
                 default -> throw new BadRequestException("Invalid action type: " + action.getType());
@@ -261,6 +325,15 @@ public class RuleService {
         } catch (Exception e) {
             throw new BadRequestException("Corrupt rule configuration");
         }
+    }
+
+    private static boolean hasWhen(SegmentDefinition condition) {
+        if (condition == null) {
+            return false;
+        }
+        boolean hasConditions = condition.getConditions() != null && !condition.getConditions().isEmpty();
+        boolean hasGroups = condition.getGroups() != null && !condition.getGroups().isEmpty();
+        return hasConditions || hasGroups;
     }
 
     private static void requireText(String value, String field) {

@@ -26,4 +26,11 @@ public final class LikePattern {
     public static String containing(String input) {
         return "%" + escape(input) + "%";
     }
+
+    /**
+     * Builds a {@code ...%} "starts with" prefix pattern with the input safely escaped.
+     */
+    public static String starting(String input) {
+        return escape(input) + "%";
+    }
 }
