@@ -31,6 +31,7 @@ public class AttachmentService {
     private final TagMapper tagMapper;
     private final AuditService auditService;
     private final WorkspaceService workspaceService;
+    private final ReferenceService referenceService;
 
     private static final Set<String> AUDIT_FIELDS =
         Set.of("fileName", "entityType", "entityId", "url", "contentType", "size");
@@ -214,6 +215,7 @@ public class AttachmentService {
         Attachment before = attachmentMapper.getById(workspaceId, id);
         if (before == null) throw new ResourceNotFoundException("Attachment not found with id: " + id);
         attachmentMapper.delete(workspaceId, id);
+        referenceService.deleteReferencesTo(workspaceId, ReferenceService.TYPE_FILE, id);
         auditService.record("attachment.delete", "attachment", id, before.getFileName(),
             "Deleted attachment " + before.getFileName(),
             auditService.diff(before, null, AUDIT_FIELDS));

@@ -16,14 +16,12 @@ import ooo.klae.connex.backend.beans.Activity;
 import ooo.klae.connex.backend.beans.EntityReference;
 import ooo.klae.connex.backend.beans.Note;
 import ooo.klae.connex.backend.beans.Task;
-import ooo.klae.connex.backend.mappers.ActivityMapper;
 import ooo.klae.connex.backend.mappers.AttachmentMapper;
 import ooo.klae.connex.backend.mappers.CompanyMapper;
 import ooo.klae.connex.backend.mappers.DealMapper;
 import ooo.klae.connex.backend.mappers.EntityReferenceMapper;
 import ooo.klae.connex.backend.mappers.NoteMapper;
 import ooo.klae.connex.backend.mappers.PersonMapper;
-import ooo.klae.connex.backend.mappers.TaskMapper;
 
 import lombok.RequiredArgsConstructor;
 
@@ -47,8 +45,6 @@ public class ReferenceService {
     private final DealMapper dealMapper;
     private final CompanyMapper companyMapper;
     private final NoteMapper noteMapper;
-    private final TaskMapper taskMapper;
-    private final ActivityMapper activityMapper;
     private final AttachmentMapper attachmentMapper;
 
     public static final String SOURCE_NOTE = "note";
@@ -63,12 +59,11 @@ public class ReferenceService {
     static final String TYPE_COMPANY = "company";
     static final String TYPE_NOTE = "note";
     static final String TYPE_FILE = "file";
-    static final String TYPE_TASK = "task";
-    static final String TYPE_ACTIVITY = "activity";
     private static final int MAX_REFERENCES = 100;
     private static final int MAX_LABEL_LENGTH = 255;
     private static final Pattern TOKEN =
-        Pattern.compile("\\[([^\\]]+)\\]\\((user|person|deal|company|note|file|task|activity):(\\d+)\\)");
+        Pattern.compile("\\[([^\\]]+)\\]\\((user|person|deal|company|note|file):(\\d+)\\)");
+    private static final Pattern NOTE_TOKEN = Pattern.compile("\\[([^\\]]+)\\]\\(note:(\\d+)\\)");
 
     /**
      * Re-derives and persists a source entity's @/# references from its content,
@@ -141,6 +136,18 @@ public class ReferenceService {
     }
 
     /**
+     * Removes every reference pointing AT a target entity, invoked when the
+     * target itself is deleted so no dangling inbound chip is left behind.
+     *
+     * @param workspaceId the owning workspace
+     * @param refType     the deleted target's type (e.g. {@code note}, {@code file})
+     * @param refId       the deleted target's id
+     */
+    public void deleteReferencesTo(int workspaceId, String refType, int refId) {
+        entityReferenceMapper.deleteByTarget(workspaceId, refType, refId);
+    }
+
+    /**
      * Attaches each note's resolved references in a single batch query, so any
      * read path (including MyBatis collections that bypass {@code NoteService})
      * returns notes the frontend can render as chips. Mutates the notes in place
@@ -159,6 +166,7 @@ public class ReferenceService {
         for (Note note : notes) {
             note.setReferences(bySource.getOrDefault(note.getId(), List.of()));
         }
+        redactInvisibleNoteReferences(workspaceId, notes);
         return notes;
     }
 
@@ -261,10 +269,57 @@ public class ReferenceService {
             case TYPE_COMPANY -> companyMapper.exists(workspaceId, refId);
             case TYPE_NOTE -> noteMapper.getVisibleNoteById(workspaceId, refId, currentUserId) != null;
             case TYPE_FILE -> attachmentMapper.exists(workspaceId, refId);
-            case TYPE_TASK -> taskMapper.exists(workspaceId, refId);
-            case TYPE_ACTIVITY -> activityMapper.exists(workspaceId, refId);
             default -> false;
         };
+    }
+
+    /**
+     * Removes note-type reference targets (and masks their content tokens) that
+     * the current reader cannot see, so a private note's label/existence never
+     * leaks through a more-visible source note's stored references or content.
+     */
+    private void redactInvisibleNoteReferences(int workspaceId, List<Note> notes) {
+        Set<Integer> targetNoteIds = new HashSet<>();
+        for (Note note : notes) {
+            if (note.getReferences() != null) {
+                for (EntityReference reference : note.getReferences()) {
+                    if (TYPE_NOTE.equals(reference.getRefType())) {
+                        targetNoteIds.add(reference.getRefId());
+                    }
+                }
+            }
+            if (note.getContent() != null) {
+                Matcher matcher = NOTE_TOKEN.matcher(note.getContent());
+                while (matcher.find()) {
+                    targetNoteIds.add(Integer.parseInt(matcher.group(2)));
+                }
+            }
+        }
+        if (targetNoteIds.isEmpty()) {
+            return;
+        }
+        int currentUserId = workspaceService.getCurrentUserId();
+        Set<Integer> visible = new HashSet<>(
+            noteMapper.getVisibleNoteIdsIn(workspaceId, new ArrayList<>(targetNoteIds), currentUserId));
+        for (Note note : notes) {
+            if (note.getReferences() != null) {
+                note.setReferences(note.getReferences().stream()
+                    .filter(reference -> !TYPE_NOTE.equals(reference.getRefType())
+                        || visible.contains(reference.getRefId()))
+                    .toList());
+            }
+            note.setContent(redactNoteTokens(note.getContent(), visible));
+        }
+    }
+
+    private static String redactNoteTokens(String content, Set<Integer> visibleNoteIds) {
+        if (content == null) {
+            return null;
+        }
+        return NOTE_TOKEN.matcher(content).replaceAll(match ->
+            visibleNoteIds.contains(Integer.parseInt(match.group(2)))
+                ? Matcher.quoteReplacement(match.group())
+                : "(private note)");
     }
 
     private EntityReference build(

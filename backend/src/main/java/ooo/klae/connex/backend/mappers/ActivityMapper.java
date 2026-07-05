@@ -17,7 +17,6 @@ public interface ActivityMapper {
     List<Activity> getActivitiesByDealId(@Param("workspaceId") int workspaceId, @Param("dealId") int dealId);
     List<Activity> getActivitiesByCreatedById(@Param("workspaceId") int workspaceId, @Param("createdById") int createdById);
     Activity getActivityById(@Param("workspaceId") int workspaceId, @Param("id") int id);
-    boolean exists(@Param("workspaceId") int workspaceId, @Param("id") int id);
     List<Activity> search(@Param("workspaceId") int workspaceId, @Param("query") String query);
     int insert(Activity activity);
     int update(Activity activity);

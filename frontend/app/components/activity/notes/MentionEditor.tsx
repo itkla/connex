@@ -10,7 +10,7 @@ import { type Company, type Deal, type NoteReferenceType, type SearchResults, ty
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { cn } from '@/lib/utils';
 
-const TOKEN = /\[([^\]]+)\]\((user|person|deal|company):(\d+)\)/g;
+const TOKEN = /\[([^\]]+)\]\((user|person|deal|company|note|file):(\d+)\)/g;
 const HANDLE = /[A-Za-z0-9_.\-]/;
 const MAX_SUGGESTIONS = 8;
 const MENU_WIDTH = 288;

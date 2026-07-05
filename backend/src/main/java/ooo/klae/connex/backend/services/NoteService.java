@@ -105,7 +105,7 @@ public class NoteService {
         int currentUserId = workspaceService.getCurrentUserId();
         Note note = noteMapper.getVisibleNoteById(workspaceId, id, currentUserId);
         if (note == null) throw new ResourceNotFoundException("Note not found with id: " + id);
-        return hydrateReferences(workspaceId, note);
+        return referenceService.hydrate(workspaceId, List.of(note)).get(0);
     }
 
     @Transactional
@@ -161,6 +161,7 @@ public class NoteService {
         if (before == null) throw new ResourceNotFoundException("Note not found with id: " + id);
         noteMapper.delete(workspaceId, id);
         referenceService.deleteReferences(workspaceId, ReferenceService.SOURCE_NOTE, id);
+        referenceService.deleteReferencesTo(workspaceId, ReferenceService.TYPE_NOTE, id);
         auditService.record("note.delete", "note", id, auditLabel(before),
             "Deleted note",
             auditService.diff(before, null, auditFields(before.getVisibility())));

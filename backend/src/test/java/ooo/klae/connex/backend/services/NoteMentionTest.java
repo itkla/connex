@@ -3,6 +3,7 @@ package ooo.klae.connex.backend.services;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -10,6 +11,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.context.SecurityContextHolder;
 
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.beans.Note;
@@ -186,6 +189,36 @@ class NoteMentionTest extends AbstractServiceTest {
 
         assertTrue(referenceService
             .referencesFor(workspace.getId(), ReferenceService.SOURCE_NOTE, created.getId()).isEmpty());
+    }
+
+    /**
+     * A private note linked as a reference target inside a more-visible note does
+     * not leak its label/existence to a non-author: the reference is dropped and
+     * the content token is masked on the read path.
+     */
+    @Test
+    void privateNoteTarget_isRedactedForNonAuthor() {
+        Note draftP = draft("secret acquisition plan");
+        draftP.setVisibility("private");
+        Note privateNote = noteService.create(draftP);
+
+        Note draftW = draft("See [Secret Plan](note:" + privateNote.getId() + ") for details");
+        Note workspaceNote = noteService.create(draftW);
+
+        Note asAuthor = noteService.getNoteById(workspaceNote.getId());
+        assertTrue(asAuthor.getReferences().stream()
+            .anyMatch(r -> "note".equals(r.getRefType()) && r.getRefId() == privateNote.getId()));
+        assertTrue(asAuthor.getContent().contains("note:" + privateNote.getId()));
+
+        User other = newUser();
+        SecurityContextHolder.getContext().setAuthentication(
+            new UsernamePasswordAuthenticationToken(other, null, other.getAuthorities()));
+
+        Note asOther = noteService.getNoteById(workspaceNote.getId());
+        assertTrue(asOther.getReferences().stream().noneMatch(r -> "note".equals(r.getRefType())));
+        assertFalse(asOther.getContent().contains("Secret Plan"));
+        assertFalse(asOther.getContent().contains("note:" + privateNote.getId()));
+        assertTrue(asOther.getContent().contains("(private note)"));
     }
 
     /**

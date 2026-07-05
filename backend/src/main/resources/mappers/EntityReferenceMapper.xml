@@ -37,4 +37,9 @@
     DELETE FROM entity_reference
     WHERE workspace_id = #{workspaceId} AND source_type = #{sourceType} AND source_id = #{sourceId}
   </delete>
+
+  <delete id="deleteByTarget">
+    DELETE FROM entity_reference
+    WHERE workspace_id = #{workspaceId} AND ref_type = #{refType} AND ref_id = #{refId}
+  </delete>
 </mapper>

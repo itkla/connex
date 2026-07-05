@@ -111,6 +111,13 @@
     ORDER BY n.updated_at DESC
   </select>
 
+  <select id="getVisibleNoteIdsIn" resultType="int">
+    SELECT id FROM note
+    WHERE workspace_id = #{workspaceId}
+      AND id IN <foreach item="noteId" collection="ids" open="(" separator="," close=")">#{noteId}</foreach>
+      AND (visibility = 'workspace' OR author_id = #{currentUserId})
+  </select>
+
   <select id="getVisibleNoteById" resultMap="NoteResult">
     SELECT <include refid="noteColumns"/> FROM note
     WHERE workspace_id = #{workspaceId} AND id = #{id}
