@@ -8,6 +8,7 @@
     <result property="workspaceId" column="workspace_id"/>
     <result property="content"   column="content"/>
     <result property="title"     column="title"/>
+    <result property="visibility" column="visibility"/>
     <result property="createdAt" column="created_at"/>
     <result property="updatedAt" column="updated_at"/>
     <association property="author" javaType="User">
@@ -22,11 +23,11 @@
   </resultMap>
 
   <sql id="noteColumns">
-    id, workspace_id, content, title, author_id, person_id, deal_id, created_at, updated_at
+    id, workspace_id, content, title, visibility, author_id, person_id, deal_id, created_at, updated_at
   </sql>
 
   <sql id="qualifiedNoteColumns">
-    n.id, n.workspace_id, n.content, n.title, n.author_id, n.person_id, n.deal_id, n.created_at, n.updated_at
+    n.id, n.workspace_id, n.content, n.title, n.visibility, n.author_id, n.person_id, n.deal_id, n.created_at, n.updated_at
   </sql>
 
   <select id="getAllNotes" resultMap="NoteResult">
@@ -71,10 +72,67 @@
     LIMIT 10
   </select>
 
+  <select id="getVisibleNotes" resultMap="NoteResult">
+    SELECT <include refid="noteColumns"/> FROM note
+    WHERE workspace_id = #{workspaceId}
+      AND (visibility = 'workspace' OR author_id = #{currentUserId})
+    ORDER BY created_at DESC
+  </select>
+
+  <select id="getVisibleNotesByPersonId" resultMap="NoteResult">
+    SELECT <include refid="noteColumns"/> FROM note
+    WHERE workspace_id = #{workspaceId} AND person_id = #{personId}
+      AND (visibility = 'workspace' OR author_id = #{currentUserId})
+    ORDER BY created_at DESC
+  </select>
+
+  <select id="getVisibleNotesByDealId" resultMap="NoteResult">
+    SELECT <include refid="noteColumns"/> FROM note
+    WHERE workspace_id = #{workspaceId} AND deal_id = #{dealId}
+      AND (visibility = 'workspace' OR author_id = #{currentUserId})
+    ORDER BY created_at DESC
+  </select>
+
+  <select id="getVisibleNotesByAuthorId" resultMap="NoteResult">
+    SELECT <include refid="noteColumns"/> FROM note
+    WHERE workspace_id = #{workspaceId} AND author_id = #{authorId}
+      AND (visibility = 'workspace' OR author_id = #{currentUserId})
+    ORDER BY created_at DESC
+  </select>
+
+  <select id="getVisibleNoteById" resultMap="NoteResult">
+    SELECT <include refid="noteColumns"/> FROM note
+    WHERE workspace_id = #{workspaceId} AND id = #{id}
+      AND (visibility = 'workspace' OR author_id = #{currentUserId})
+  </select>
+
+  <select id="searchVisible" resultMap="NoteResult">
+    SELECT <include refid="qualifiedNoteColumns"/>
+    FROM note n
+    LEFT JOIN app_user u ON u.id = n.author_id
+    LEFT JOIN person   p ON p.id = n.person_id
+    LEFT JOIN deal     d ON d.id = n.deal_id
+    WHERE n.workspace_id = #{workspaceId}
+      AND (n.visibility = 'workspace' OR n.author_id = #{currentUserId})
+      AND (n.content LIKE #{query}
+      OR n.title LIKE #{query}
+      OR u.display_name LIKE #{query}
+      OR u.username LIKE #{query}
+      OR p.name LIKE #{query}
+      OR d.name LIKE #{query})
+    ORDER BY n.created_at DESC
+    LIMIT 10
+  </select>
+
   <insert id="insert" useGeneratedKeys="true" keyProperty="id">
-    INSERT INTO note (workspace_id, content, title, author_id, person_id, deal_id)
+    INSERT INTO note (workspace_id, content, title, visibility, author_id, person_id, deal_id)
     VALUES (
-      #{workspaceId}, #{content}, #{title}, #{author.id},
+      #{workspaceId}, #{content}, #{title},
+      <choose>
+        <when test="visibility != null">#{visibility}</when>
+        <otherwise>'workspace'</otherwise>
+      </choose>,
+      #{author.id},
       <choose>
         <when test="person != null">#{person.id}</when>
         <otherwise>NULL</otherwise>
@@ -90,6 +148,7 @@
     UPDATE note
     SET content = #{content},
         title = #{title},
+        <if test="visibility != null">visibility = #{visibility},</if>
         author_id = #{author.id},
         person_id =
           <choose>

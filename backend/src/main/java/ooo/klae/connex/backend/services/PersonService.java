@@ -154,7 +154,7 @@ public class PersonService {
             referenceService.hydrateActivities(workspaceId, List.of(hydrated.getActivities()));
         }
         hydrated.setNotes(
-            referenceService.hydrate(workspaceId, noteMapper.getNotesByPersonId(workspaceId, id)).toArray(new Note[0]));
+            referenceService.hydrate(workspaceId, noteMapper.getVisibleNotesByPersonId(workspaceId, id, workspaceService.getCurrentUserId())).toArray(new Note[0]));
         return hydrated;
     }
 
@@ -310,7 +310,7 @@ public class PersonService {
     public List<Note> getNotesByPersonId(int personId) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         requirePerson(workspaceId, personId);
-        return referenceService.hydrate(workspaceId, noteMapper.getNotesByPersonId(workspaceId, personId));
+        return referenceService.hydrate(workspaceId, noteMapper.getVisibleNotesByPersonId(workspaceId, personId, workspaceService.getCurrentUserId()));
     }
 
     /**

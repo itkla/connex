@@ -97,6 +97,11 @@ public class WorkspaceService {
         return fallbackWorkspaceId(currentUser().getId());
     }
 
+    /** The id of the authenticated user in the current security context. */
+    public int getCurrentUserId() {
+        return currentUser().getId();
+    }
+
     /** The organization owning the active workspace. */
     public int getCurrentOrgId() {
         if (tenantContext.isResolved()) {

@@ -336,6 +336,9 @@
     "saved": "Saved",
     "saveError": "Couldn't save",
     "untitled": "Untitled",
-    "titlePlaceholder": "Untitled note"
+    "titlePlaceholder": "Untitled note",
+    "visibilityPrivate": "Private",
+    "visibilityWorkspace": "Workspace",
+    "visibilityAria": "Note visibility"
   }
 }

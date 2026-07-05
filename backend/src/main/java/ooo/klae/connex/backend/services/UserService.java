@@ -159,7 +159,7 @@ public class UserService implements UserDetailsService {
     public List<Note> getNotesByUserId(int userId) {
         getUserById(userId);
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        return referenceService.hydrate(workspaceId, noteMapper.getNotesByAuthorId(workspaceId, userId));
+        return referenceService.hydrate(workspaceId, noteMapper.getVisibleNotesByAuthorId(workspaceId, userId, workspaceService.getCurrentUserId()));
     }
 
     /**

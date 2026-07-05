@@ -33,6 +33,7 @@ class NoteMentionTest extends AbstractServiceTest {
     private Note draft(String content) {
         Note note = new Note();
         note.setContent(content);
+        note.setVisibility("workspace");
         return note;
     }
 
