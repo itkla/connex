@@ -15,19 +15,21 @@ type StatTile = {
 /**
  * Overview strip for the Introductions page: how many intros are worth making, how many of those are
  * strong matches worth prioritizing, and how many the team has already made. Mirrors the analytics
- * KPI tile treatment. When the suggestion queue failed to load ({@code queueUnavailable}), the two
- * queue-derived tiles show an em dash instead of claiming zero.
+ * KPI tile treatment. When a tile's source failed to load ({@code queueUnavailable} /
+ * {@code lineageUnavailable}), it shows an unavailable marker instead of claiming zero.
  */
 export default function IntroStats({
     opportunities,
     strong,
     made,
     queueUnavailable = false,
+    lineageUnavailable = false,
 }: {
     opportunities: number;
     strong: number;
     made: number;
     queueUnavailable?: boolean;
+    lineageUnavailable?: boolean;
 }) {
     const t = useTranslations('Introductions');
     const tiles: StatTile[] = [
@@ -45,7 +47,13 @@ export default function IntroStats({
             value: strong,
             unavailable: queueUnavailable,
         },
-        { key: 'made', label: t('statMade'), hint: t('statMadeHint'), value: made },
+        {
+            key: 'made',
+            label: t('statMade'),
+            hint: t('statMadeHint'),
+            value: made,
+            unavailable: lineageUnavailable,
+        },
     ];
 
     return (
@@ -56,11 +64,15 @@ export default function IntroStats({
                         {tile.label}
                     </span>
                     {tile.unavailable ? (
-                        <span className="text-3xl leading-none text-muted-foreground tabular-nums">—</span>
+                        <span aria-hidden className="text-3xl leading-none text-muted-foreground tabular-nums">
+                            —
+                        </span>
                     ) : (
                         <CountUp value={tile.value} className="text-3xl leading-none text-foreground tabular-nums" />
                     )}
-                    <span className="text-xs text-muted-foreground">{tile.hint}</span>
+                    <span className="text-xs text-muted-foreground">
+                        {tile.unavailable ? t('statUnavailable') : tile.hint}
+                    </span>
                 </div>
             ))}
         </div>

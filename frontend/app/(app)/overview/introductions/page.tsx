@@ -5,10 +5,9 @@ import { redirect } from 'next/navigation';
 import {
     getContactsFromCookie,
     getCurrentUserFromCookie,
-    getIntroductions,
+    getIntroductionsResultFromCookie,
     getIntroSuggestionsResultFromCookie,
 } from '@/app/lib/api';
-import type { IntroductionRecord, Page } from '@/app/lib/types';
 import IntroductionsBoard from '@/app/components/introductions/IntroductionsBoard';
 
 export const metadata: Metadata = {
@@ -16,6 +15,14 @@ export const metadata: Metadata = {
     description: 'People in your network worth introducing to each other',
 };
 
+/**
+ * Server entry for the Introductions page. The suggestions and lineage fetches are failure-aware
+ * so the board can render distinct error states instead of presenting a backend fault as an empty
+ * workspace. The board is keyed on which fetches succeeded: recovering via the retry (a
+ * failed → loaded transition) remounts the board so its state re-seeds from the fresh server data,
+ * while refreshes that stay in the same state intentionally preserve the board's optimistic
+ * client state.
+ */
 export default async function IntroductionsPage() {
     const cookie = (await headers()).get('cookie');
     const user = await getCurrentUserFromCookie(cookie);
@@ -23,23 +30,20 @@ export default async function IntroductionsPage() {
         redirect('/auth/login');
     }
 
-    const init = { headers: { cookie: cookie ?? '' }, cache: 'no-store' } as const;
-
-    const [suggestionsResult, lineage, contacts] = await Promise.all([
+    const [suggestionsResult, lineageResult, contacts] = await Promise.all([
         getIntroSuggestionsResultFromCookie(cookie, 40),
-        getIntroductions({ page: 1, size: 50 }, init).catch(
-            () => ({ items: [], total: 0 }) as Page<IntroductionRecord>,
-        ),
+        getIntroductionsResultFromCookie(cookie, { page: 1, size: 50 }),
         getContactsFromCookie(cookie),
     ]);
 
     return (
         <IntroductionsBoard
-            key={suggestionsResult.ok ? 'loaded' : 'failed'}
+            key={`${suggestionsResult.ok ? 'q' : 'qx'}-${lineageResult.ok ? 'l' : 'lx'}`}
             initialSuggestions={suggestionsResult.ok ? suggestionsResult.data : []}
             suggestionsFailed={!suggestionsResult.ok}
-            initialLineage={lineage.items}
-            initialLineageTotal={lineage.total}
+            initialLineage={lineageResult.ok ? lineageResult.data.items : []}
+            initialLineageTotal={lineageResult.ok ? lineageResult.data.total : 0}
+            lineageFailed={!lineageResult.ok}
             contacts={contacts}
         />
     );
