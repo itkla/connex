@@ -5,17 +5,20 @@ import {
     search as globalSearch,
 } from "@/app/lib/api";
 import type {
+    Activity,
     Attachment,
     Company,
     Contact,
     Deal,
     Note,
     SearchResults,
+    Task,
     User,
     WorkspaceMember,
 } from "@/app/lib/types";
+import { noteSnippet } from "@/app/lib/noteText";
 
-export type MentionType = "user" | "person" | "deal" | "company" | "note" | "file";
+export type MentionType = "user" | "person" | "deal" | "company" | "note" | "file" | "task" | "activity";
 export type MentionTrigger = "@" | "#";
 
 export type MentionItem = {
@@ -28,7 +31,7 @@ export type MentionItem = {
 
 export const TRIGGER_TYPES: Record<MentionTrigger, readonly MentionType[]> = {
     "@": ["user", "person"],
-    "#": ["deal", "company", "note", "file"],
+    "#": ["deal", "company", "note", "file", "task", "activity"],
 };
 
 const MAX_SUGGESTIONS = 8;
@@ -110,6 +113,26 @@ function fileItem(file: Attachment): MentionItem {
     return { type: "file", id: file.id, label: safeLabel(file.fileName), sublabel: "File", avatarUrl: null };
 }
 
+function taskItem(task: Task): MentionItem {
+    return {
+        type: "task",
+        id: task.id,
+        label: safeLabel(noteSnippet(task.description, 80)) || "Task",
+        sublabel: "Task",
+        avatarUrl: null,
+    };
+}
+
+function activityItem(activity: Activity): MentionItem {
+    return {
+        type: "activity",
+        id: activity.id,
+        label: safeLabel(activity.subject) || "Activity",
+        sublabel: "Activity",
+        avatarUrl: null,
+    };
+}
+
 function membersPool(): Promise<MentionItem[]> {
     resetWhenWorkspaceChanged();
     if (!membersPromise) {
@@ -141,6 +164,8 @@ function fromSearchResults(results: SearchResults): MentionItem[] {
         ...results.companies.map(companyItem),
         ...results.notes.map(noteItem),
         ...results.attachments.map(fileItem),
+        ...results.tasks.map(taskItem),
+        ...results.activities.map(activityItem),
     ];
 }
 

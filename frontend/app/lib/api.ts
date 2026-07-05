@@ -577,6 +577,10 @@ export function getTasks(init: RequestInit = {}) { // get all tasks for all user
     return getJson<Types.Task[]>(`/api/tasks`, init);
 }
 
+export function getTaskById(id: number, init: RequestInit = {}) {
+    return getJson<Types.Task>(`/api/tasks/${id}`, init);
+}
+
 export function getTasksFromCookie(cookie: string | null) { // authenticate then get all tasks
     return safeWithCookie<Types.Task>((init) => getTasks(init), cookie);
 }
@@ -620,6 +624,10 @@ export function rescheduleTask(id: number, dueDate: string, init: RequestInit = 
 
 export function getActivities(init: RequestInit = {}) { // get all activities for all users
     return getJson<Types.Activity[]>(`/api/activities`, init);
+}
+
+export function getActivityById(id: number, init: RequestInit = {}) {
+    return getJson<Types.Activity>(`/api/activities/${id}`, init);
 }
 
 export function getActivitiesFromCookie(cookie: string | null) { // authenticate then get all activities
