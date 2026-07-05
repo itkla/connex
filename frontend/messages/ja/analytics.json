@@ -28,7 +28,24 @@
     "emptyTitle": "分析できるデータがまだありません",
     "emptyBody": "商談を追加し、活動を記録すると、売上の推移・成約率・パイプラインの価値・チームの勢いがここに表示されます。",
     "emptyCreateDeal": "商談を作成",
-    "emptySetupPipeline": "パイプラインを設定"
+    "emptySetupPipeline": "パイプラインを設定",
+    "relationshipsTitle": "リレーションシップ・インテリジェンス",
+    "relationshipsSubtitle": "温度・冷え込み・商談リスク・紹介の状況をまとめて",
+    "warmthTitle": "関係の温度",
+    "warmthSubtitle": "バンド別の分布（現在）",
+    "warmthInfo": "連絡先と会社を温度バンド（ホット／ウォーム／クール／コールド）で分類。やり取りの新しさと頻度から算出します。トレンドは上昇・横ばい・低下の連絡先数です。",
+    "decayTitle": "まもなく冷え込み",
+    "decayInfo": "接触がないと冷え込むと予測される、まだ温かい連絡先を時期別に表示します。商談ではなく減衰予測に基づきます。",
+    "dealRiskTitle": "リスクのある商談",
+    "dealRiskInfo": "リスクエンジンが検知した進行中の商談を、深刻度と要因別に表示。金額は選択中の通貨でのリスク対象の予定額合計です。",
+    "taskStatusTitle": "タスクの状況",
+    "taskStatusSubtitle": "すべての未完了・完了タスク",
+    "taskStatusInfo": "タスクをカンバンの列（未着手・進行中・完了）別に表示。中央は完了の割合です。",
+    "introsTitle": "ウォーム紹介",
+    "introsSubtitle": "可能な紹介と実施した紹介",
+    "introsInfo": "あなたが橋渡しできる紹介の候補と、選択期間中に実際に記録された紹介です。",
+    "movesTitle": "最近の異動",
+    "movesInfo": "最近転職した連絡先です。キーパーソンの異動は、新しい会社での有力なリードになります。"
   },
   "AnalyticsKpis": {
     "wonRevenue": "受注売上",
@@ -90,5 +107,59 @@
     "rowSummary": "受注 {won} · 進行中 {open}",
     "deals": "{count} 件の進行中商談",
     "empty": "パイプラインの活動がまだありません"
+  },
+  "AnalyticsRelationshipKpis": {
+    "warmShare": "温かい連絡先",
+    "cooling": "冷え込み中",
+    "pipelineAtRisk": "リスクのある案件額",
+    "introOpportunities": "紹介の機会",
+    "warmShareCaption": "{count} 件中",
+    "coolingCaption": "勢いが低下中",
+    "pipelineAtRiskCaption": "{count} 件の商談",
+    "introOpportunitiesCaption": "実施可能",
+    "infoAria": "計算方法",
+    "warmShareTooltip": "スコア済み連絡先のうち、現在ホットまたはウォームの割合。",
+    "coolingTooltip": "温度トレンドが低下している連絡先。今は温かいが勢いを失っています。",
+    "pipelineAtRiskTooltip": "リスクエンジンが検知した進行中商談の予定額合計（選択中の通貨）。",
+    "introOpportunitiesTooltip": "双方を知っているため橋渡しできる紹介の候補です。"
+  },
+  "AnalyticsWarmth": {
+    "empty": "関係スコアがまだありません",
+    "contacts": "連絡先",
+    "companies": "会社",
+    "trendLabel": "トレンド",
+    "trend_rising": "上昇",
+    "trend_steady": "横ばい",
+    "trend_cooling": "低下"
+  },
+  "AnalyticsDecay": {
+    "empty": "冷え込むと予測される温かい関係はありません。",
+    "summary": "90日以内に冷え込むと予測される連絡先",
+    "bucket_soon": "30日以内",
+    "bucket_mid": "31〜60日",
+    "bucket_later": "61〜90日"
+  },
+  "AnalyticsDealRisk": {
+    "empty": "現在リスクのある進行中商談はありません。",
+    "summary": "リスクのある商談 {count} 件",
+    "factorsLabel": "主な要因",
+    "factor_close_overdue": "クローズ予定日の超過",
+    "factor_closing_soon_quiet": "クローズ間近だが静か",
+    "factor_stalled": "停滞",
+    "factor_stakeholder_cold": "関係者が冷え込み",
+    "factor_no_stakeholders": "関係者なし"
+  },
+  "AnalyticsTaskStatus": {
+    "empty": "タスクがまだありません",
+    "todo": "未着手",
+    "in_progress": "進行中",
+    "done": "完了",
+    "count": "{count} 件"
+  },
+  "AnalyticsIntros": {
+    "opportunities": "実施可能な紹介",
+    "made": "実施した紹介",
+    "madeInPeriod": "今期間の実施数",
+    "emptyMade": "今期間に記録された紹介はありません"
   }
 }

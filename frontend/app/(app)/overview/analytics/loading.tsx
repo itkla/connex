@@ -15,9 +15,23 @@ function PanelSkeleton({ className, chart = 'h-64' }: { className?: string; char
     );
 }
 
+function KpiRowSkeleton() {
+    return (
+        <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
+            {Array.from({ length: 4 }).map((_, i) => (
+                <div key={i} className="flex flex-col gap-4 rounded-2xl border border-border bg-card px-5 py-4">
+                    <Skeleton className="h-3 w-20" />
+                    <Skeleton className="h-8 w-24" />
+                    <Skeleton className="h-3 w-16" />
+                </div>
+            ))}
+        </div>
+    );
+}
+
 export default function AnalyticsLoading() {
     return (
-        <div className="mx-auto w-full max-w-7xl space-y-6 px-2 pb-12">
+        <div className="mx-auto w-full max-w-[100rem] space-y-6 px-2 pb-12">
             <header className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
                 <div className="space-y-2">
                     <Skeleton className="h-9 w-48" />
@@ -26,18 +40,30 @@ export default function AnalyticsLoading() {
                 <Skeleton className="h-9 w-56 rounded-full" />
             </header>
 
-            <div className="grid grid-cols-2 gap-4 md:grid-cols-5">
-                {Array.from({ length: 5 }).map((_, i) => (
-                    <div key={i} className="flex flex-col gap-4 rounded-2xl border border-border bg-card px-5 py-4">
-                        <Skeleton className="h-3 w-20" />
-                        <Skeleton className="h-8 w-24" />
-                        <Skeleton className="h-3 w-16" />
-                    </div>
-                ))}
-            </div>
+            <KpiRowSkeleton />
 
             <PanelSkeleton chart="h-72" />
             <PanelSkeleton chart="h-56" />
+
+            <div className="grid grid-cols-1 gap-6 lg:grid-cols-5">
+                <PanelSkeleton className="lg:col-span-3" />
+                <PanelSkeleton className="lg:col-span-2" chart="h-48" />
+            </div>
+            <div className="grid grid-cols-1 gap-6 lg:grid-cols-5">
+                <PanelSkeleton className="lg:col-span-3" />
+                <PanelSkeleton className="lg:col-span-2" chart="h-48" />
+            </div>
+            <div className="grid grid-cols-1 gap-6 lg:grid-cols-5">
+                <PanelSkeleton className="lg:col-span-3" />
+                <PanelSkeleton className="lg:col-span-2" chart="h-48" />
+            </div>
+
+            <div className="space-y-2 pt-4">
+                <Skeleton className="h-7 w-56" />
+                <Skeleton className="h-4 w-80" />
+            </div>
+
+            <KpiRowSkeleton />
 
             <div className="grid grid-cols-1 gap-6 lg:grid-cols-5">
                 <PanelSkeleton className="lg:col-span-3" />

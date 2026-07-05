@@ -28,7 +28,24 @@
     "emptyTitle": "No data to analyze yet",
     "emptyBody": "As you add deals and log activity, this page fills in with revenue trends, win rates, pipeline value, and team momentum.",
     "emptyCreateDeal": "Create a deal",
-    "emptySetupPipeline": "Set up a pipeline"
+    "emptySetupPipeline": "Set up a pipeline",
+    "relationshipsTitle": "Relationship intelligence",
+    "relationshipsSubtitle": "Warmth, decay, deal risk, and warm intros across your book",
+    "warmthTitle": "Relationship warmth",
+    "warmthSubtitle": "Distribution across bands, now",
+    "warmthInfo": "Contacts and companies by warmth band (hot / warm / cool / cold), scored from interaction recency and frequency. Trend counts contacts rising, steady, or cooling.",
+    "decayTitle": "Cooling soon",
+    "decayInfo": "Still-warm contacts predicted to go cold if untouched, grouped by how soon. Based on the decay forecast, not deals.",
+    "dealRiskTitle": "Deals at risk",
+    "dealRiskInfo": "Open deals the risk engine flags, by severity and contributing factor. Value is total expected value at risk in the selected currency.",
+    "taskStatusTitle": "Task status",
+    "taskStatusSubtitle": "Across every open and closed task",
+    "taskStatusInfo": "Tasks by Kanban column (to do, in progress, done). Center shows the share done.",
+    "introsTitle": "Warm introductions",
+    "introsSubtitle": "Opportunities available and intros made",
+    "introsInfo": "Suggested introductions you're positioned to make, and introductions actually logged over the selected period.",
+    "movesTitle": "Recent moves",
+    "movesInfo": "Contacts who recently changed companies — a champion who moves is a warm lead at their new account."
   },
   "AnalyticsKpis": {
     "wonRevenue": "Won revenue",
@@ -90,5 +107,59 @@
     "rowSummary": "Won {won} · Open {open}",
     "deals": "{count, plural, one {# open deal} other {# open deals}}",
     "empty": "No pipeline activity yet"
+  },
+  "AnalyticsRelationshipKpis": {
+    "warmShare": "Warm contacts",
+    "cooling": "Cooling off",
+    "pipelineAtRisk": "Pipeline at risk",
+    "introOpportunities": "Intro opportunities",
+    "warmShareCaption": "of {count} tracked",
+    "coolingCaption": "losing warmth",
+    "pipelineAtRiskCaption": "{count, plural, one {# deal} other {# deals}}",
+    "introOpportunitiesCaption": "ready to make",
+    "infoAria": "How this is calculated",
+    "warmShareTooltip": "Share of scored contacts in the hot or warm band right now.",
+    "coolingTooltip": "Contacts whose warmth trend is cooling — warm today but losing momentum.",
+    "pipelineAtRiskTooltip": "Total expected value of open deals the risk engine flags, in the selected currency.",
+    "introOpportunitiesTooltip": "Suggested introductions you're positioned to make because you know both sides."
+  },
+  "AnalyticsWarmth": {
+    "empty": "No relationship scores yet",
+    "contacts": "Contacts",
+    "companies": "Companies",
+    "trendLabel": "Trend",
+    "trend_rising": "rising",
+    "trend_steady": "steady",
+    "trend_cooling": "cooling"
+  },
+  "AnalyticsDecay": {
+    "empty": "No warm relationships are predicted to cool off.",
+    "summary": "contacts predicted to go cold within 90 days",
+    "bucket_soon": "Within 30 days",
+    "bucket_mid": "31–60 days",
+    "bucket_later": "61–90 days"
+  },
+  "AnalyticsDealRisk": {
+    "empty": "No open deals are at risk right now.",
+    "summary": "{count, plural, one {# deal at risk} other {# deals at risk}}",
+    "factorsLabel": "Common factors",
+    "factor_close_overdue": "Close date overdue",
+    "factor_closing_soon_quiet": "Closing soon but quiet",
+    "factor_stalled": "Stalled",
+    "factor_stakeholder_cold": "Stakeholder cold",
+    "factor_no_stakeholders": "No stakeholders"
+  },
+  "AnalyticsTaskStatus": {
+    "empty": "No tasks yet",
+    "todo": "To do",
+    "in_progress": "In progress",
+    "done": "Done",
+    "count": "{count, plural, one {# task} other {# tasks}}"
+  },
+  "AnalyticsIntros": {
+    "opportunities": "Opportunities available",
+    "made": "Intros made",
+    "madeInPeriod": "Made this period",
+    "emptyMade": "No introductions logged this period"
   }
 }
