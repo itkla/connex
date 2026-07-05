@@ -127,7 +127,12 @@
   <insert id="insert" useGeneratedKeys="true" keyProperty="id">
     INSERT INTO note (workspace_id, content, title, visibility, author_id, person_id, deal_id)
     VALUES (
-      #{workspaceId}, #{content}, #{title}, #{visibility}, #{author.id},
+      #{workspaceId}, #{content}, #{title},
+      <choose>
+        <when test="visibility != null">#{visibility}</when>
+        <otherwise>'workspace'</otherwise>
+      </choose>,
+      #{author.id},
       <choose>
         <when test="person != null">#{person.id}</when>
         <otherwise>NULL</otherwise>
@@ -143,7 +148,7 @@
     UPDATE note
     SET content = #{content},
         title = #{title},
-        visibility = #{visibility},
+        <if test="visibility != null">visibility = #{visibility},</if>
         author_id = #{author.id},
         person_id =
           <choose>
