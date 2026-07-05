@@ -13,10 +13,13 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
 
+import ooo.klae.connex.backend.beans.Company;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.beans.WorkspaceRole;
 import ooo.klae.connex.backend.dto.RuleAction;
 import ooo.klae.connex.backend.dto.RuleDto;
+import ooo.klae.connex.backend.dto.RulePreviewDto;
+import ooo.klae.connex.backend.dto.RulePreviewRequest;
 import ooo.klae.connex.backend.dto.RuleRequest;
 import ooo.klae.connex.backend.dto.RuleTrigger;
 import ooo.klae.connex.backend.dto.SegmentCondition;
@@ -267,6 +270,38 @@ class RuleServiceTest extends AbstractServiceTest {
         RuleDto created = ruleService.create(req("company", entityChange("company.updated"), "user", action("notify")));
         ruleService.delete(created.getId());
         assertThrows(ResourceNotFoundException.class, () -> ruleService.getById(created.getId()));
+    }
+
+    @Test
+    void preview_returnsCountAndSample() {
+        Company company = newCompany();
+        RulePreviewRequest request = new RulePreviewRequest();
+        request.setRecordType("company");
+        SegmentDefinition condition = new SegmentDefinition();
+        condition.setMatch("all");
+        SegmentCondition byName = new SegmentCondition();
+        byName.setType("field");
+        byName.setField("name");
+        byName.setOp("contains");
+        byName.setValue(company.getName());
+        condition.setConditions(List.of(byName));
+        request.setCondition(condition);
+
+        RulePreviewDto preview = ruleService.preview(request);
+
+        assertTrue(preview.getMatchCount() >= 1);
+        assertTrue(preview.getSample().stream().anyMatch(record -> record.getId() == company.getId()));
+    }
+
+    @Test
+    void preview_emptyCondition_throws() {
+        RulePreviewRequest request = new RulePreviewRequest();
+        request.setRecordType("company");
+        SegmentDefinition condition = new SegmentDefinition();
+        condition.setMatch("all");
+        condition.setConditions(List.of());
+        request.setCondition(condition);
+        assertThrows(BadRequestException.class, () -> ruleService.preview(request));
     }
 
     @Test
