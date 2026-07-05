@@ -456,6 +456,7 @@ export type NoteReference = {
 export type Note = {
     id: number;
     content: string;
+    title?: string | null;
     author: number;
     person?: number | null;
     deal?: number | null;
@@ -466,6 +467,7 @@ export type Note = {
 
 export type NoteDraft = {
     content: string;
+    title?: string | null;
     author: number;
     person?: number | null;
     deal?: number | null;
@@ -473,6 +475,7 @@ export type NoteDraft = {
 
 export type CreateNotePayload = {
     content: string;
+    title?: string | null;
     author: number;
     person?: number | null;
     deal?: number | null;
@@ -480,6 +483,7 @@ export type CreateNotePayload = {
 
 export type UpdateNotePayload = {
     content?: string;
+    title?: string | null;
     author?: number;
     person?: number | null;
     deal?: number | null;

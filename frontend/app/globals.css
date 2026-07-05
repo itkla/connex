@@ -192,6 +192,74 @@
     @apply w-full rounded-lg bg-muted px-3 py-2 text-sm text-foreground placeholder-muted-foreground outline-none ring-1 ring-border transition focus:ring-2 focus:ring-brand;
   }
 
+  .note-prose {
+    @apply text-[0.9375rem] leading-7 text-foreground;
+  }
+  .note-prose:focus {
+    @apply outline-none;
+  }
+  .note-prose :where(h1) {
+    @apply mt-6 mb-2 text-2xl font-semibold tracking-tight text-foreground;
+  }
+  .note-prose :where(h2) {
+    @apply mt-6 mb-2 text-xl font-semibold tracking-tight text-foreground;
+  }
+  .note-prose :where(h3) {
+    @apply mt-5 mb-1.5 text-lg font-semibold text-foreground;
+  }
+  .note-prose :where(p) {
+    @apply my-2;
+  }
+  .note-prose :where(ul):not([data-type="taskList"]) {
+    @apply my-2 list-disc pl-6;
+  }
+  .note-prose :where(ol) {
+    @apply my-2 list-decimal pl-6;
+  }
+  .note-prose :where(li) {
+    @apply my-1;
+  }
+  .note-prose :where(li) p {
+    @apply my-0;
+  }
+  .note-prose :where(blockquote) {
+    @apply my-3 border-l-2 border-border pl-4 text-muted-foreground;
+  }
+  .note-prose :where(code):not(pre code) {
+    @apply rounded bg-muted px-1 py-0.5 font-mono text-[0.85em];
+  }
+  .note-prose :where(pre) {
+    @apply my-3 overflow-x-auto rounded-lg bg-muted p-3 font-mono text-sm;
+  }
+  .note-prose :where(pre code) {
+    @apply bg-transparent p-0;
+  }
+  .note-prose :where(a) {
+    @apply text-brand-dark underline underline-offset-2;
+  }
+  .note-prose :where(hr) {
+    @apply my-6 border-border;
+  }
+  .note-prose :where(ul[data-type="taskList"]) {
+    @apply my-2 list-none pl-0.5;
+  }
+  .note-prose :where(ul[data-type="taskList"] li) {
+    @apply flex items-start gap-2;
+  }
+  .note-prose :where(ul[data-type="taskList"] li > label) {
+    @apply mt-1 shrink-0 select-none;
+  }
+  .note-prose :where(ul[data-type="taskList"] li > div) {
+    @apply min-w-0 flex-1;
+  }
+  .note-prose[data-empty]::before {
+    @apply pointer-events-none absolute text-muted-foreground;
+    content: attr(data-placeholder);
+  }
+  .note-prose :where(.ProseMirror-selectednode) {
+    @apply rounded ring-2 ring-brand/40;
+  }
+
   .font-display {
     font-family: var(--font-instrument-serif), var(--font-noto-sans-jp), Georgia, "Times New Roman", serif;
   }
