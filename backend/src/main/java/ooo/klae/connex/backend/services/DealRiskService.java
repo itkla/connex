@@ -103,12 +103,20 @@ public class DealRiskService {
      * factor, ordered by descending {@link DealRiskDto#getScore() score}.
      */
     public List<DealRiskDto> assessWorkspace(int workspaceId) {
+        return assessWorkspace(workspaceId, warmthByPerson(workspaceId));
+    }
+
+    /**
+     * As {@link #assessWorkspace(int)}, but reuses an already-computed warmth map keyed by person
+     * id when the caller has one — the scheduled notification sweep scores the workspace once and
+     * shares that map across its passes, avoiding a second full rescore here.
+     */
+    public List<DealRiskDto> assessWorkspace(int workspaceId, Map<Integer, RelationshipTemperatureDto> warmth) {
         Instant now = Instant.now(clock);
         String assessedAt = utc(now);
         List<Deal> open = dealMapper.getAllDeals(workspaceId).stream().filter(DealRiskService::isOpen).toList();
         Map<Integer, Long> lastTouch = dealLastTouch(workspaceId, open, now.toEpochMilli());
         Map<Integer, List<DealStakeholder>> stakeholders = stakeholdersByDeal(workspaceId);
-        Map<Integer, RelationshipTemperatureDto> warmth = warmthByPerson(workspaceId);
 
         List<DealRiskDto> out = new ArrayList<>();
         for (Deal deal : open) {

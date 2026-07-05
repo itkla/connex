@@ -16,6 +16,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.Consumer;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -84,13 +85,18 @@ public class NotificationReconciliationService {
      * only by the scheduled sweep; the per-mutation source-change path skips them, since decay is
      * time-driven and the next sweep picks it up within the reconciliation interval.
      *
-     * <p>Each pass is isolated: a failure in one — including the shared warmth rescore, which the
-     * nudge and intro passes depend on — is logged and skipped without aborting the cycle, so task
-     * and deal reminders still deliver when scoring is down. The resolve pass clears only reminder
-     * types whose pass actually completed this cycle: resolving what was never recomputed would
-     * clear valid reminders, and the next successful sweep would resurrect them as unread, wiping
-     * read/dismiss state. A pass disabled by its feature flag still counts as managed so its stale
-     * notifications are cleaned up.
+     * <p>Every pass runs isolated and atomic (see
+     * {@link #runManagedPass(int, Map, Set, String, boolean, boolean, String, Consumer)}): it stages
+     * its notifications and merges them only on success, a failure is logged without aborting the
+     * cycle, and the resolve pass clears only reminder types whose pass completed — resolving what
+     * was never recomputed would clear valid reminders, and the next successful sweep would
+     * resurrect them as unread, wiping read/dismiss state. The warmth rescore shared by the
+     * relationship passes degrades the same way: when scoring fails, those passes are skipped and
+     * their types left unmanaged while task and deal reminders still deliver. Delivery itself is
+     * deliberately not isolated — an in-app dispatch failure aborts and rolls back the cycle so the
+     * inbox is never half-written. Pass collaborators must not join this transaction with their own
+     * {@code @Transactional}: a caught exception that crossed a joined proxy would mark the
+     * transaction rollback-only and void this isolation.
      */
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void reconcileWorkspace(int workspaceId, boolean includeRelationshipNudges) {
@@ -98,7 +104,87 @@ public class NotificationReconciliationService {
         Map<ReminderKey, Notification> existing = loadExisting(workspaceId);
         Map<PreferenceKey, Boolean> preferences = loadPreferences(workspaceId);
         Map<ReminderKey, Notification> expected = new LinkedHashMap<>();
+        Set<String> managedTypes = new HashSet<>();
 
+        runManagedPass(workspaceId, expected, managedTypes, TASK_TYPE, true, true, "Task-reminder",
+            staged -> addTaskReminders(workspaceId, existing, staged, preferences, triggeredAt));
+        runManagedPass(workspaceId, expected, managedTypes, DEAL_TYPE, true, true, "Deal-close-reminder",
+            staged -> addDealCloseReminders(workspaceId, existing, staged, preferences, triggeredAt));
+
+        if (includeRelationshipNudges) {
+            Map<Integer, RelationshipTemperatureDto> temperatures = scoreByPerson(workspaceId);
+            boolean scored = temperatures != null;
+            runManagedPass(workspaceId, expected, managedTypes, RELATIONSHIP_TYPE, true, scored,
+                "Relationship-nudge",
+                staged -> addRelationshipNudges(workspaceId, existing, staged, preferences, triggeredAt, temperatures));
+            runManagedPass(workspaceId, expected, managedTypes, INTRO_OPPORTUNITY_TYPE,
+                properties.isIntroOpportunitiesEnabled(), scored, "Intro-opportunity",
+                staged -> addIntroOpportunities(workspaceId, staged, preferences, triggeredAt, temperatures));
+            runManagedPass(workspaceId, expected, managedTypes, DEAL_RISK_TYPE,
+                properties.isDealRiskEnabled(), scored, "Deal-risk",
+                staged -> addDealRiskNotifications(workspaceId, staged, preferences, triggeredAt, temperatures));
+        }
+
+        expected.values().forEach(notificationDelivery::deliver);
+        for (Map.Entry<ReminderKey, Notification> entry : existing.entrySet()) {
+            Notification notification = entry.getValue();
+            if (notification.getResolvedAt() == null
+                    && managedTypes.contains(notification.getType())
+                    && !expected.containsKey(entry.getKey())) {
+                notificationMapper.resolveReminder(
+                    workspaceId,
+                    notification.getRecipientId(),
+                    notification.getId(),
+                    triggeredAt
+                );
+            }
+        }
+    }
+
+    /**
+     * Runs one reminder pass atomically and records whether its type may be resolved this cycle.
+     * The pass stages its notifications into a private map that is merged into {@code expected}
+     * only on success, so a mid-pass failure never delivers a partial subset. A disabled pass
+     * ({@code enabled} false) contributes nothing but still counts as managed, so its stale
+     * reminders are cleaned up; a pass whose prerequisite is unavailable ({@code ready} false —
+     * the shared warmth rescore failed) is skipped and left unmanaged; a pass that throws is
+     * logged, its staged notifications are discarded, and its type is left unmanaged so the
+     * resolve pass cannot clear reminders that were never recomputed.
+     */
+    private void runManagedPass(
+        int workspaceId,
+        Map<ReminderKey, Notification> expected,
+        Set<String> managedTypes,
+        String type,
+        boolean enabled,
+        boolean ready,
+        String label,
+        Consumer<Map<ReminderKey, Notification>> pass
+    ) {
+        if (!enabled) {
+            managedTypes.add(type);
+            return;
+        }
+        if (!ready) {
+            return;
+        }
+        try {
+            Map<ReminderKey, Notification> staged = new LinkedHashMap<>();
+            pass.accept(staged);
+            expected.putAll(staged);
+            managedTypes.add(type);
+        } catch (RuntimeException exception) {
+            log.warn("{} reconciliation failed for workspace={}", label, workspaceId, exception);
+        }
+    }
+
+    private void addTaskReminders(
+        int workspaceId,
+        Map<ReminderKey, Notification> existing,
+        Map<ReminderKey, Notification> expected,
+        Map<PreferenceKey, Boolean> preferences,
+        String triggeredAt
+    ) {
         for (TaskReminderCandidate candidate : notificationMapper.findTaskReminderCandidates(workspaceId)) {
             String dedupeKey = "task.due:" + candidate.getTaskId();
             ReminderKey key = new ReminderKey(workspaceId, candidate.getRecipientId(), dedupeKey);
@@ -114,7 +200,15 @@ public class NotificationReconciliationService {
                 expected.put(key, taskNotification(candidate, severity, dedupeKey, triggeredAt));
             }
         }
+    }
 
+    private void addDealCloseReminders(
+        int workspaceId,
+        Map<ReminderKey, Notification> existing,
+        Map<ReminderKey, Notification> expected,
+        Map<PreferenceKey, Boolean> preferences,
+        String triggeredAt
+    ) {
         for (DealReminderCandidate candidate : notificationMapper.findDealReminderCandidates(workspaceId)) {
             String dedupeKey = "deal.close:" + candidate.getDealId();
             ReminderKey key = new ReminderKey(workspaceId, candidate.getRecipientId(), dedupeKey);
@@ -128,54 +222,6 @@ public class NotificationReconciliationService {
             );
             if (severity != null && enabled(preferences, candidate.getRecipientId(), DEAL_TYPE)) {
                 expected.put(key, dealNotification(candidate, severity, dedupeKey, triggeredAt));
-            }
-        }
-
-        Set<String> managedTypes = new HashSet<>(Set.of(TASK_TYPE, DEAL_TYPE));
-        if (includeRelationshipNudges) {
-            Map<Integer, RelationshipTemperatureDto> temperatures = scoreByPerson(workspaceId);
-            if (temperatures != null) {
-                try {
-                    addRelationshipNudges(workspaceId, existing, expected, preferences, triggeredAt, temperatures);
-                    managedTypes.add(RELATIONSHIP_TYPE);
-                } catch (RuntimeException exception) {
-                    log.warn("Relationship-nudge reconciliation failed for workspace={}", workspaceId, exception);
-                }
-            }
-            if (!properties.isIntroOpportunitiesEnabled()) {
-                managedTypes.add(INTRO_OPPORTUNITY_TYPE);
-            } else if (temperatures != null) {
-                try {
-                    addIntroOpportunities(workspaceId, expected, preferences, triggeredAt, temperatures);
-                    managedTypes.add(INTRO_OPPORTUNITY_TYPE);
-                } catch (RuntimeException exception) {
-                    log.warn("Intro-opportunity reconciliation failed for workspace={}", workspaceId, exception);
-                }
-            }
-            if (!properties.isDealRiskEnabled()) {
-                managedTypes.add(DEAL_RISK_TYPE);
-            } else {
-                try {
-                    addDealRiskNotifications(workspaceId, expected, preferences, triggeredAt);
-                    managedTypes.add(DEAL_RISK_TYPE);
-                } catch (RuntimeException exception) {
-                    log.warn("Deal-risk reconciliation failed for workspace={}", workspaceId, exception);
-                }
-            }
-        }
-
-        expected.values().forEach(notificationDelivery::deliver);
-        for (Map.Entry<ReminderKey, Notification> entry : existing.entrySet()) {
-            Notification notification = entry.getValue();
-            if (notification.getResolvedAt() == null
-                    && managedTypes.contains(notification.getType())
-                    && !expected.containsKey(entry.getKey())) {
-                notificationMapper.resolveReminder(
-                    workspaceId,
-                    notification.getRecipientId(),
-                    notification.getId(),
-                    triggeredAt
-                );
             }
         }
     }
@@ -227,17 +273,18 @@ public class NotificationReconciliationService {
      * the deal page, not the inbox. Deduped per (deal, recipient); the resolve pass clears a
      * notification once the deal is no longer at risk or has closed. A same-severity re-emit does not
      * disturb a dismissed notification, but any severity change (in either direction) re-surfaces it
-     * as unread — the shared upsert's behaviour for every reminder type. Like the relationship-nudge
-     * pass this rescores the whole workspace, so it runs only on the scheduled sweep.
+     * as unread — the shared upsert's behaviour for every reminder type. Assesses every open deal in
+     * the workspace against the sweep's shared warmth map, so it runs only on the scheduled sweep.
      */
     private void addDealRiskNotifications(
         int workspaceId,
         Map<ReminderKey, Notification> expected,
         Map<PreferenceKey, Boolean> preferences,
-        String triggeredAt
+        String triggeredAt,
+        Map<Integer, RelationshipTemperatureDto> temperatures
     ) {
         Map<Integer, DealRiskDto> byDeal = new HashMap<>();
-        for (DealRiskDto risk : dealRiskService.assessWorkspace(workspaceId)) {
+        for (DealRiskDto risk : dealRiskService.assessWorkspace(workspaceId, temperatures)) {
             if (riskSeverity(risk.getLevel()) != null) {
                 byDeal.put(risk.getDealId(), risk);
             }
