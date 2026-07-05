@@ -647,6 +647,106 @@ class NotificationReconciliationServiceTest {
         verify(introductionService, never()).computeSuggestions(anyInt(), anyInt(), any());
     }
 
+    @Test
+    void scoringFailureStillDeliversTaskRemindersAndPreservesRelationshipNotifications() {
+        NotificationMapper notificationMapper = Mockito.mock(NotificationMapper.class);
+        PreferenceMapper preferenceMapper = Mockito.mock(PreferenceMapper.class);
+        NotificationDispatcher dispatcher = Mockito.mock(NotificationDispatcher.class);
+        ScoringService scoringService = Mockito.mock(ScoringService.class);
+        IntroductionService introductionService = Mockito.mock(IntroductionService.class);
+        Clock clock = Clock.fixed(Instant.parse("2026-06-23T15:30:00Z"), ZoneOffset.UTC);
+
+        TaskReminderCandidate task = new TaskReminderCandidate();
+        task.setWorkspaceId(7);
+        task.setTaskId(91);
+        task.setTaskLabel("Send proposal");
+        task.setDueDate("2026-06-23");
+        task.setRecipientId(42);
+
+        Notification nudge = reminderNotification(
+            101, NotificationReconciliationService.RELATIONSHIP_TYPE, "relationship.cooling:5:9");
+        Notification intro = reminderNotification(
+            55, NotificationReconciliationService.INTRO_OPPORTUNITY_TYPE, "relationship.intro_opportunity:3:8");
+
+        when(notificationMapper.findTaskReminderCandidates(7)).thenReturn(List.of(task));
+        when(notificationMapper.findWorkspaceReminderNotifications(7)).thenReturn(List.of(nudge, intro));
+        when(scoringService.scoreContacts(7)).thenThrow(new IllegalStateException("scoring down"));
+
+        NotificationReconciliationService service = new NotificationReconciliationService(
+            notificationMapper, preferenceMapper, wrap(dispatcher, notificationMapper, preferenceMapper),
+            new NotificationProperties(), scoringService, introductionService, noRiskService(), clock,
+            new ObjectMapper());
+        service.reconcileWorkspace(7, true);
+
+        ArgumentCaptor<Notification> captor = ArgumentCaptor.forClass(Notification.class);
+        verify(dispatcher).dispatch(captor.capture());
+        assertEquals(NotificationReconciliationService.TASK_TYPE, captor.getValue().getType());
+        verify(introductionService, never()).computeSuggestions(anyInt(), anyInt(), any());
+        verify(notificationMapper, never()).resolveReminder(anyInt(), anyInt(), anyInt(), any());
+    }
+
+    @Test
+    void dealRiskPassFailureDoesNotResolveExistingDealRiskNotifications() {
+        NotificationMapper notificationMapper = Mockito.mock(NotificationMapper.class);
+        PreferenceMapper preferenceMapper = Mockito.mock(PreferenceMapper.class);
+        NotificationDispatcher dispatcher = Mockito.mock(NotificationDispatcher.class);
+        DealRiskService dealRiskService = Mockito.mock(DealRiskService.class);
+        Clock clock = Clock.fixed(Instant.parse("2026-06-23T15:30:00Z"), ZoneOffset.UTC);
+
+        Notification existing = reminderNotification(
+            202, NotificationReconciliationService.DEAL_RISK_TYPE, "deal.risk:101");
+        when(notificationMapper.findWorkspaceReminderNotifications(7)).thenReturn(List.of(existing));
+        when(dealRiskService.assessWorkspace(7)).thenThrow(new IllegalStateException("risk engine down"));
+
+        NotificationReconciliationService service = new NotificationReconciliationService(
+            notificationMapper, preferenceMapper, wrap(dispatcher, notificationMapper, preferenceMapper),
+            new NotificationProperties(), Mockito.mock(ScoringService.class),
+            Mockito.mock(IntroductionService.class), dealRiskService, clock, new ObjectMapper());
+        service.reconcileWorkspace(7, true);
+
+        verify(dispatcher, never()).dispatch(any());
+        verify(notificationMapper, never()).resolveReminder(anyInt(), anyInt(), anyInt(), any());
+    }
+
+    @Test
+    void disabledPassesStillResolveTheirStaleNotifications() {
+        NotificationMapper notificationMapper = Mockito.mock(NotificationMapper.class);
+        PreferenceMapper preferenceMapper = Mockito.mock(PreferenceMapper.class);
+        NotificationDispatcher dispatcher = Mockito.mock(NotificationDispatcher.class);
+        DealRiskService dealRiskService = Mockito.mock(DealRiskService.class);
+        Clock clock = Clock.fixed(Instant.parse("2026-06-23T15:30:00Z"), ZoneOffset.UTC);
+
+        NotificationProperties properties = new NotificationProperties();
+        properties.setIntroOpportunitiesEnabled(false);
+        properties.setDealRiskEnabled(false);
+
+        Notification intro = reminderNotification(
+            55, NotificationReconciliationService.INTRO_OPPORTUNITY_TYPE, "relationship.intro_opportunity:3:8");
+        Notification risk = reminderNotification(
+            202, NotificationReconciliationService.DEAL_RISK_TYPE, "deal.risk:101");
+        when(notificationMapper.findWorkspaceReminderNotifications(7)).thenReturn(List.of(intro, risk));
+
+        NotificationReconciliationService service = new NotificationReconciliationService(
+            notificationMapper, preferenceMapper, wrap(dispatcher, notificationMapper, preferenceMapper), properties,
+            Mockito.mock(ScoringService.class), Mockito.mock(IntroductionService.class),
+            dealRiskService, clock, new ObjectMapper());
+        service.reconcileWorkspace(7, true);
+
+        verify(dealRiskService, never()).assessWorkspace(anyInt());
+        verify(notificationMapper).resolveReminder(7, 42, 55, "2026-06-23 15:30:00");
+        verify(notificationMapper).resolveReminder(7, 42, 202, "2026-06-23 15:30:00");
+    }
+
+    private static Notification reminderNotification(int id, String type, String dedupeKey) {
+        Notification notification = new Notification();
+        notification.setId(id);
+        notification.setWorkspaceId(7);
+        notification.setRecipientId(42);
+        notification.setType(type);
+        notification.setDedupeKey(dedupeKey);
+        return notification;
+    }
+
     private static ooo.klae.connex.backend.dto.IntroSuggestionDto introSuggestion() {
         ooo.klae.connex.backend.dto.IntroSuggestionDto suggestion =
             new ooo.klae.connex.backend.dto.IntroSuggestionDto();

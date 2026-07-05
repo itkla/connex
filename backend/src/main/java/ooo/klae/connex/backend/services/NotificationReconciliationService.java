@@ -10,6 +10,7 @@ import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -79,9 +80,17 @@ public class NotificationReconciliationService {
 
     /**
      * Reconciles a workspace's reminder notifications. The {@code includeRelationshipNudges} flag
-     * gates the relationship-decay pass, which rescores the whole workspace and is therefore run
-     * only by the scheduled sweep; the per-mutation source-change path skips it, since decay is
+     * gates the relationship-decay passes, which rescore the whole workspace and are therefore run
+     * only by the scheduled sweep; the per-mutation source-change path skips them, since decay is
      * time-driven and the next sweep picks it up within the reconciliation interval.
+     *
+     * <p>Each pass is isolated: a failure in one — including the shared warmth rescore, which the
+     * nudge and intro passes depend on — is logged and skipped without aborting the cycle, so task
+     * and deal reminders still deliver when scoring is down. The resolve pass clears only reminder
+     * types whose pass actually completed this cycle: resolving what was never recomputed would
+     * clear valid reminders, and the next successful sweep would resurrect them as unread, wiping
+     * read/dismiss state. A pass disabled by its feature flag still counts as managed so its stale
+     * notifications are cleaned up.
      */
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void reconcileWorkspace(int workspaceId, boolean includeRelationshipNudges) {
@@ -122,23 +131,33 @@ public class NotificationReconciliationService {
             }
         }
 
+        Set<String> managedTypes = new HashSet<>(Set.of(TASK_TYPE, DEAL_TYPE));
         if (includeRelationshipNudges) {
             Map<Integer, RelationshipTemperatureDto> temperatures = scoreByPerson(workspaceId);
-            try {
-                addRelationshipNudges(workspaceId, existing, expected, preferences, triggeredAt, temperatures);
-            } catch (RuntimeException exception) {
-                log.warn("Relationship-nudge reconciliation failed for workspace={}", workspaceId, exception);
+            if (temperatures != null) {
+                try {
+                    addRelationshipNudges(workspaceId, existing, expected, preferences, triggeredAt, temperatures);
+                    managedTypes.add(RELATIONSHIP_TYPE);
+                } catch (RuntimeException exception) {
+                    log.warn("Relationship-nudge reconciliation failed for workspace={}", workspaceId, exception);
+                }
             }
-            if (properties.isIntroOpportunitiesEnabled()) {
+            if (!properties.isIntroOpportunitiesEnabled()) {
+                managedTypes.add(INTRO_OPPORTUNITY_TYPE);
+            } else if (temperatures != null) {
                 try {
                     addIntroOpportunities(workspaceId, expected, preferences, triggeredAt, temperatures);
+                    managedTypes.add(INTRO_OPPORTUNITY_TYPE);
                 } catch (RuntimeException exception) {
                     log.warn("Intro-opportunity reconciliation failed for workspace={}", workspaceId, exception);
                 }
             }
-            if (properties.isDealRiskEnabled()) {
+            if (!properties.isDealRiskEnabled()) {
+                managedTypes.add(DEAL_RISK_TYPE);
+            } else {
                 try {
                     addDealRiskNotifications(workspaceId, expected, preferences, triggeredAt);
+                    managedTypes.add(DEAL_RISK_TYPE);
                 } catch (RuntimeException exception) {
                     log.warn("Deal-risk reconciliation failed for workspace={}", workspaceId, exception);
                 }
@@ -146,7 +165,6 @@ public class NotificationReconciliationService {
         }
 
         expected.values().forEach(notificationDelivery::deliver);
-        Set<String> managedTypes = managedReminderTypes(includeRelationshipNudges);
         for (Map.Entry<ReminderKey, Notification> entry : existing.entrySet()) {
             Notification notification = entry.getValue();
             if (notification.getResolvedAt() == null
@@ -160,18 +178,6 @@ public class NotificationReconciliationService {
                 );
             }
         }
-    }
-
-    /**
-     * Reminder types the current pass recomputes, and may therefore resolve. The per-mutation pass
-     * (no relationship nudges) recomputes only task/deal reminders; it must not resolve the
-     * relationship and intro reminders it never recomputed, or it would clear them on every mutation
-     * and the next scheduled sweep would resurrect them as unread (wiping read/dismiss state).
-     */
-    private static Set<String> managedReminderTypes(boolean includeRelationshipNudges) {
-        return includeRelationshipNudges
-            ? Set.of(TASK_TYPE, DEAL_TYPE, DEAL_RISK_TYPE, RELATIONSHIP_TYPE, INTRO_OPPORTUNITY_TYPE)
-            : Set.of(TASK_TYPE, DEAL_TYPE);
     }
 
     private void addRelationshipNudges(
@@ -513,12 +519,24 @@ public class NotificationReconciliationService {
         return COOLING_TREND.equals(trend) ? WARNING : null;
     }
 
+    /**
+     * Warmth for every contact in the workspace, keyed by person id — or {@code null} when scoring
+     * fails, in which case the caller skips the temperature-dependent passes for this cycle (their
+     * types stay unmanaged, preserving existing notifications) while task and deal reminders still
+     * deliver. Decay is time-driven, so the next sweep recovers naturally once scoring succeeds.
+     */
     private Map<Integer, RelationshipTemperatureDto> scoreByPerson(int workspaceId) {
-        Map<Integer, RelationshipTemperatureDto> temperatures = new HashMap<>();
-        for (RelationshipTemperatureDto temperature : scoringService.scoreContacts(workspaceId)) {
-            temperatures.put(temperature.getId(), temperature);
+        try {
+            Map<Integer, RelationshipTemperatureDto> temperatures = new HashMap<>();
+            for (RelationshipTemperatureDto temperature : scoringService.scoreContacts(workspaceId)) {
+                temperatures.put(temperature.getId(), temperature);
+            }
+            return temperatures;
+        } catch (RuntimeException exception) {
+            log.warn("Warmth scoring failed for workspace={}; skipping relationship passes this cycle",
+                workspaceId, exception);
+            return null;
         }
-        return temperatures;
     }
 
     private Map<ReminderKey, Notification> loadExisting(int workspaceId) {
