@@ -2,24 +2,32 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { motion, useReducedMotion } from 'motion/react';
-import {
-    BuildingOffice2Icon,
-    MagnifyingGlassIcon,
-    UserIcon,
-    XMarkIcon,
-} from '@heroicons/react/24/outline';
+import { MagnifyingGlassIcon, XMarkIcon } from '@heroicons/react/24/outline';
 import { useTranslations } from 'next-intl';
-
-import { cn } from '@/lib/utils';
 
 export type MapSearchItem = { id: string; label: string; kind: 'company' | 'contact' | 'user' };
 
-const MAX_RESULTS = 8;
+/** Best match for a query: exact › prefix › substring, tie-broken by the shortest (closest) label. */
+function bestMatch(items: MapSearchItem[], q: string): MapSearchItem | null {
+    if (!q) return null;
+    let best: MapSearchItem | null = null;
+    let bestScore = 0;
+    for (const it of items) {
+        const label = it.label.toLowerCase();
+        const score = label === q ? 3 : label.startsWith(q) ? 2 : label.includes(q) ? 1 : 0;
+        if (score === 0) continue;
+        if (score > bestScore || (score === bestScore && best !== null && it.label.length < best.label.length)) {
+            best = it;
+            bestScore = score;
+        }
+    }
+    return best;
+}
 
 /**
  * Map search control, styled and animated like the time-travel control (a rounded pill that
- * morph-expands). Selecting a result highlights the path to that node — the same active-tree
- * highlight hovering a node produces — and pans the map to it.
+ * morph-expands). Pressing Enter pans the map to the best-matching node and highlights the path to
+ * it — the same active-tree highlight hovering a node produces.
  */
 export default function MapSearch({
     items,
@@ -36,30 +44,24 @@ export default function MapSearch({
     const reduce = useReducedMotion();
     const [open, setOpen] = useState(false);
     const [query, setQuery] = useState('');
-    const [showResults, setShowResults] = useState(false);
     const inputRef = useRef<HTMLInputElement>(null);
 
-    const results = useMemo(() => {
-        const q = query.trim().toLowerCase();
-        if (!q) return [];
-        return items.filter((it) => it.label.toLowerCase().includes(q)).slice(0, MAX_RESULTS);
-    }, [items, query]);
+    const match = useMemo(() => bestMatch(items, query.trim().toLowerCase()), [items, query]);
 
     useEffect(() => {
         if (open) inputRef.current?.focus();
     }, [open]);
 
-    const pick = (it: MapSearchItem) => {
-        setQuery(it.label);
-        setShowResults(false);
-        onSelect(it.id);
+    const submit = () => {
+        if (!match) return;
+        setQuery(match.label);
+        onSelect(match.id);
         inputRef.current?.blur();
     };
 
     const collapse = () => {
         setOpen(false);
         setQuery('');
-        setShowResults(false);
         onClear();
     };
 
@@ -79,21 +81,19 @@ export default function MapSearch({
                     <MagnifyingGlassIcon className="size-4" />
                 </button>
             ) : (
-                <div className="relative flex items-center gap-1">
+                <div className="flex items-center gap-1">
                     <MagnifyingGlassIcon className="ml-2 size-4 shrink-0 text-muted-foreground" />
                     <input
                         ref={inputRef}
                         value={query}
                         onChange={(e) => {
                             setQuery(e.target.value);
-                            setShowResults(true);
                             if (activeId) onClear();
                         }}
-                        onFocus={() => setShowResults(true)}
                         onKeyDown={(e) => {
-                            if (e.key === 'Enter' && results[0]) {
+                            if (e.key === 'Enter') {
                                 e.preventDefault();
-                                pick(results[0]);
+                                submit();
                             } else if (e.key === 'Escape') {
                                 collapse();
                             }
@@ -110,28 +110,6 @@ export default function MapSearch({
                     >
                         <XMarkIcon className="size-4" />
                     </button>
-
-                    {showResults && results.length > 0 && (
-                        <div className="absolute top-full right-0 mt-2 w-64 overflow-hidden rounded-xl border border-border bg-popover p-1 text-popover-foreground shadow-xl">
-                            {results.map((it) => {
-                                const Icon = it.kind === 'company' ? BuildingOffice2Icon : UserIcon;
-                                return (
-                                    <button
-                                        key={it.id}
-                                        type="button"
-                                        onClick={() => pick(it)}
-                                        className={cn(
-                                            'flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-sm transition-colors hover:bg-muted',
-                                            activeId === it.id && 'bg-muted',
-                                        )}
-                                    >
-                                        <Icon className="size-4 shrink-0 text-muted-foreground" />
-                                        <span className="truncate">{it.label}</span>
-                                    </button>
-                                );
-                            })}
-                        </div>
-                    )}
                 </div>
             )}
         </motion.div>

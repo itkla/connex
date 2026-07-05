@@ -64,7 +64,6 @@
     "MapSearch": {
         "open": "マップを検索",
         "placeholder": "人物・会社を検索…",
-        "close": "検索を閉じる",
-        "noResults": "一致なし"
+        "close": "検索を閉じる"
     }
 }

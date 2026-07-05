@@ -64,7 +64,6 @@
     "MapSearch": {
         "open": "Search the map",
         "placeholder": "Search people & companies…",
-        "close": "Close search",
-        "noResults": "No matches"
+        "close": "Close search"
     }
 }
