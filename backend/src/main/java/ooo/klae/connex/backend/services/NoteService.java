@@ -52,7 +52,9 @@ public class NoteService {
     private final ObjectMapper objectMapper;
 
     private static final Set<String> AUDIT_FIELDS = Set.of("content", "title", "visibility");
+    private static final Set<String> PRIVATE_AUDIT_FIELDS = Set.of("visibility");
     private static final Set<String> VALID_VISIBILITY = Set.of("private", "workspace");
+    private static final String PRIVATE = "private";
     private static final String MENTION_TYPE = "note.mention";
     private static final String MENTION_CATEGORY = "note";
     private static final String MENTION_SEVERITY = "info";
@@ -102,14 +104,17 @@ public class NoteService {
         User actor = authService.getCurrentUser();
         note.setWorkspaceId(workspaceId);
         note.setAuthor(actor);
-        note.setVisibility(normalizeVisibility(note.getVisibility(), "workspace"));
+        note.setVisibility(normalizeVisibility(note.getVisibility(),
+            note.getPerson() == null && note.getDeal() == null ? PRIVATE : "workspace"));
         requireLinkedRecordsVisible(workspaceId, note);
         noteMapper.insert(note);
-        auditService.record("note.create", "note", note.getId(), note.getContent(),
+        auditService.record("note.create", "note", note.getId(), auditLabel(note),
             "Created note",
-            auditService.diff(null, note, AUDIT_FIELDS));
+            auditService.diff(null, note, auditFields(note.getVisibility())));
         List<Integer> mentioned = referenceService.syncReferences(workspaceId, note.getId(), note.getContent());
-        notifyMentions(workspaceId, note, mentioned, actor);
+        if (!PRIVATE.equals(note.getVisibility())) {
+            notifyMentions(workspaceId, note, mentioned, actor);
+        }
         return hydrateReferences(workspaceId, note);
     }
 
@@ -126,11 +131,13 @@ public class NoteService {
         note.setVisibility(normalizeVisibility(note.getVisibility(), before.getVisibility()));
         requireLinkedRecordsVisible(workspaceId, note);
         noteMapper.update(note);
-        auditService.record("note.update", "note", id, note.getContent(),
+        auditService.record("note.update", "note", id, auditLabel(note),
             "Updated note",
-            auditService.diff(before, note, AUDIT_FIELDS));
+            auditService.diff(before, note, auditFields(note.getVisibility())));
         List<Integer> mentioned = referenceService.syncReferences(workspaceId, id, note.getContent());
-        notifyMentions(workspaceId, note, mentioned, actor);
+        if (!PRIVATE.equals(note.getVisibility())) {
+            notifyMentions(workspaceId, note, mentioned, actor);
+        }
         return hydrateReferences(workspaceId, note);
     }
 
@@ -143,9 +150,9 @@ public class NoteService {
         if (before == null) throw new ResourceNotFoundException("Note not found with id: " + id);
         noteMapper.delete(workspaceId, id);
         referenceService.deleteReferences(workspaceId, ReferenceService.SOURCE_NOTE, id);
-        auditService.record("note.delete", "note", id, before.getContent(),
+        auditService.record("note.delete", "note", id, auditLabel(before),
             "Deleted note",
-            auditService.diff(before, null, AUDIT_FIELDS));
+            auditService.diff(before, null, auditFields(before.getVisibility())));
     }
 
     private void notifyMentions(int workspaceId, Note note, List<Integer> recipientIds, User actor) {
@@ -208,6 +215,14 @@ public class NoteService {
             return fallback;
         }
         return value;
+    }
+
+    private static Set<String> auditFields(String visibility) {
+        return PRIVATE.equals(visibility) ? PRIVATE_AUDIT_FIELDS : AUDIT_FIELDS;
+    }
+
+    private static String auditLabel(Note note) {
+        return PRIVATE.equals(note.getVisibility()) ? "" : note.getContent();
     }
 
     private void requireLinkedRecordsVisible(int workspaceId, Note note) {
