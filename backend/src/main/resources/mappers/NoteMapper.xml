@@ -100,6 +100,17 @@
     ORDER BY created_at DESC
   </select>
 
+  <select id="getNotesReferencing" resultMap="NoteResult">
+    SELECT <include refid="qualifiedNoteColumns"/>
+    FROM note n
+    JOIN entity_reference er
+      ON er.workspace_id = n.workspace_id AND er.source_type = 'note' AND er.source_id = n.id
+    WHERE er.workspace_id = #{workspaceId}
+      AND er.ref_type = #{refType} AND er.ref_id = #{refId}
+      AND (n.visibility = 'workspace' OR n.author_id = #{currentUserId})
+    ORDER BY n.updated_at DESC
+  </select>
+
   <select id="getVisibleNoteById" resultMap="NoteResult">
     SELECT <include refid="noteColumns"/> FROM note
     WHERE workspace_id = #{workspaceId} AND id = #{id}

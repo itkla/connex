@@ -16,10 +16,14 @@ import ooo.klae.connex.backend.beans.Activity;
 import ooo.klae.connex.backend.beans.EntityReference;
 import ooo.klae.connex.backend.beans.Note;
 import ooo.klae.connex.backend.beans.Task;
+import ooo.klae.connex.backend.mappers.ActivityMapper;
+import ooo.klae.connex.backend.mappers.AttachmentMapper;
 import ooo.klae.connex.backend.mappers.CompanyMapper;
 import ooo.klae.connex.backend.mappers.DealMapper;
 import ooo.klae.connex.backend.mappers.EntityReferenceMapper;
+import ooo.klae.connex.backend.mappers.NoteMapper;
 import ooo.klae.connex.backend.mappers.PersonMapper;
+import ooo.klae.connex.backend.mappers.TaskMapper;
 
 import lombok.RequiredArgsConstructor;
 
@@ -42,6 +46,10 @@ public class ReferenceService {
     private final PersonMapper personMapper;
     private final DealMapper dealMapper;
     private final CompanyMapper companyMapper;
+    private final NoteMapper noteMapper;
+    private final TaskMapper taskMapper;
+    private final ActivityMapper activityMapper;
+    private final AttachmentMapper attachmentMapper;
 
     public static final String SOURCE_NOTE = "note";
     public static final String SOURCE_TASK = "task";
@@ -53,10 +61,14 @@ public class ReferenceService {
     static final String TYPE_PERSON = "person";
     static final String TYPE_DEAL = "deal";
     static final String TYPE_COMPANY = "company";
+    static final String TYPE_NOTE = "note";
+    static final String TYPE_FILE = "file";
+    static final String TYPE_TASK = "task";
+    static final String TYPE_ACTIVITY = "activity";
     private static final int MAX_REFERENCES = 100;
     private static final int MAX_LABEL_LENGTH = 255;
     private static final Pattern TOKEN =
-        Pattern.compile("\\[([^\\]]+)\\]\\((user|person|deal|company):(\\d+)\\)");
+        Pattern.compile("\\[([^\\]]+)\\]\\((user|person|deal|company|note|file|task|activity):(\\d+)\\)");
 
     /**
      * Re-derives and persists a source entity's @/# references from its content,
@@ -76,7 +88,8 @@ public class ReferenceService {
     @Transactional
     public List<Integer> syncReferences(int workspaceId, String sourceType, int sourceId, String content) {
         Set<Integer> before = mentionedMemberIds(entityReferenceMapper.findBySource(workspaceId, sourceType, sourceId));
-        List<EntityReference> resolved = resolve(workspaceId, sourceType, sourceId, content);
+        int currentUserId = workspaceService.getCurrentUserId();
+        List<EntityReference> resolved = resolve(workspaceId, sourceType, sourceId, content, currentUserId);
 
         entityReferenceMapper.deleteBySource(workspaceId, sourceType, sourceId);
         for (EntityReference reference : resolved) {
@@ -213,7 +226,8 @@ public class ReferenceService {
         return bySource;
     }
 
-    private List<EntityReference> resolve(int workspaceId, String sourceType, int sourceId, String content) {
+    private List<EntityReference> resolve(
+            int workspaceId, String sourceType, int sourceId, String content, int currentUserId) {
         if (content == null || content.isBlank()) {
             return List.of();
         }
@@ -227,7 +241,7 @@ public class ReferenceService {
             } catch (NumberFormatException ignored) {
                 continue;
             }
-            if (!isVisible(workspaceId, type, refId)) {
+            if (!isVisible(workspaceId, type, refId, currentUserId)) {
                 continue;
             }
             String key = type + ":" + refId;
@@ -239,12 +253,16 @@ public class ReferenceService {
         return new ArrayList<>(unique.values());
     }
 
-    private boolean isVisible(int workspaceId, String type, int refId) {
+    private boolean isVisible(int workspaceId, String type, int refId, int currentUserId) {
         return switch (type) {
             case TYPE_USER -> workspaceService.isMemberIncludingPending(workspaceId, refId);
             case TYPE_PERSON -> personMapper.exists(workspaceId, refId);
             case TYPE_DEAL -> dealMapper.exists(workspaceId, refId);
             case TYPE_COMPANY -> companyMapper.exists(workspaceId, refId);
+            case TYPE_NOTE -> noteMapper.getVisibleNoteById(workspaceId, refId, currentUserId) != null;
+            case TYPE_FILE -> attachmentMapper.exists(workspaceId, refId);
+            case TYPE_TASK -> taskMapper.exists(workspaceId, refId);
+            case TYPE_ACTIVITY -> activityMapper.exists(workspaceId, refId);
             default -> false;
         };
     }

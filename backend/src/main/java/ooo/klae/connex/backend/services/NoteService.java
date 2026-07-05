@@ -89,6 +89,17 @@ public class NoteService {
         return referenceService.hydrate(workspaceId, noteMapper.getVisibleNotesByAuthorId(workspaceId, authorId, currentUserId));
     }
 
+    /**
+     * The notes visible to the caller that reference the given entity — note-source
+     * backlinks. Private source notes are excluded in SQL for non-authors, so a
+     * private note never surfaces as a backlink to someone who cannot read it.
+     */
+    public List<Note> getNotesReferencing(String refType, int refId) {
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        int currentUserId = workspaceService.getCurrentUserId();
+        return referenceService.hydrate(workspaceId, noteMapper.getNotesReferencing(workspaceId, refType, refId, currentUserId));
+    }
+
     public Note getNoteById(int id) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         int currentUserId = workspaceService.getCurrentUserId();

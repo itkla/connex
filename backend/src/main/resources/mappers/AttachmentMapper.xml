@@ -249,4 +249,11 @@
   <delete id="deleteByEntity">
     DELETE FROM attachment WHERE workspace_id = #{workspaceId} AND entity_type = #{entityType} AND entity_id = #{entityId}
   </delete>
+
+  <select id="exists" resultType="boolean">
+    SELECT EXISTS(
+      SELECT 1 FROM attachment WHERE workspace_id = #{workspaceId} AND id = #{id}
+    )
+  </select>
+
 </mapper>
