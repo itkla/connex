@@ -341,5 +341,25 @@
     "visibilityWorkspace": "ワークスペース",
     "visibilityAria": "ノートの公開範囲",
     "backlinksTitle": "参照元"
+  },
+  "ActivityTaskDetail": {
+    "back": "タスクに戻る",
+    "untitled": "無題のタスク",
+    "status": "ステータス",
+    "dueDate": "期限",
+    "noDueDate": "期限なし",
+    "assignee": "担当者",
+    "unassigned": "未割り当て",
+    "contact": "連絡先",
+    "deal": "取引",
+    "created": "作成日"
+  },
+  "ActivityActivityDetail": {
+    "back": "アクティビティに戻る",
+    "type": "種類",
+    "contact": "連絡先",
+    "deal": "取引",
+    "loggedBy": "記録者",
+    "when": "日時"
   }
 }
