@@ -236,7 +236,9 @@
     "actionTagRequired": "Choose a tag for the tag action",
     "record": {
       "deal": "deal",
-      "company": "company"
+      "company": "company",
+      "person": "contact",
+      "task": "task"
     },
     "cadence": {
       "hourly": "hour",
@@ -249,18 +251,33 @@
         "stage_changed": "stage changed",
         "won": "won",
         "lost": "lost",
-        "updated": "updated"
+        "updated": "updated",
+        "owner_changed": "owner changed",
+        "value_changed": "value changed"
       },
       "company": {
         "created": "created",
         "updated": "updated"
+      },
+      "person": {
+        "created": "created",
+        "updated": "updated",
+        "job_changed": "changed jobs"
+      },
+      "task": {
+        "created": "created",
+        "completed": "completed"
       }
     },
     "action": {
       "create_task": "create a task",
       "log_activity": "log an activity",
       "add_tag": "add a tag",
-      "notify": "send a notification"
+      "notify": "send a notification",
+      "remove_tag": "remove a tag",
+      "create_note": "add a note",
+      "assign_owner": "assign an owner",
+      "change_stage": "move to a stage"
     },
     "runAs": {
       "user": {
@@ -274,7 +291,25 @@
     },
     "summaryEntity": "When a {record} — {events}",
     "summarySchedule": "Every {cadence}",
-    "summaryFull": "{trigger} → {actions}"
+    "summaryFull": "{trigger} → {actions}",
+    "actionNotePlaceholder": "Note text",
+    "actionNoteRequired": "Add note text",
+    "actionOwnerRequired": "Choose an owner to assign",
+    "actionStageRequired": "Choose a stage to move to",
+    "actionOwner": "Owner",
+    "actionStage": "Stage",
+    "pickOwner": "Choose a member",
+    "pickStage": "Choose a stage",
+    "stageFilterLabel": "only in stage",
+    "anyStage": "any stage",
+    "throttlePrefix": "at most once every",
+    "throttleSuffix": "min per record",
+    "throttleOff": "off",
+    "throttleLabel": "Cooldown minutes",
+    "previewButton": "Preview matches",
+    "previewing": "Checking…",
+    "previewCount": "{count, plural, =0 {No records match right now} one {# record matches right now} other {# records match right now}}",
+    "previewFailed": "Could not run the preview."
   },
   "WorkspaceCustomFields": {
     "newField": "Add field",

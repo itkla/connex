@@ -25,24 +25,48 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
+import { previewRule } from "@/app/lib/api";
 import SegmentBuilder, { EMPTY_DEFINITION } from "@/app/components/records/SegmentBuilder";
-import type { Rule, RuleAction, RuleRequest, RuleTrigger, SegmentDefinition, SegmentFields } from "@/app/lib/types";
+import type {
+    Rule,
+    RuleAction,
+    RuleBuilderOptions,
+    RulePreview,
+    RuleRequest,
+    RuleTrigger,
+    SavedViewRecordType,
+    SegmentDefinition,
+    SegmentFields,
+} from "@/app/lib/types";
 
-const DEAL_EVENTS = ["deal.created", "deal.stage_changed", "deal.won", "deal.lost", "deal.updated"];
-const COMPANY_EVENTS = ["company.created", "company.updated"];
+const RECORD_TYPES = ["deal", "company", "person", "task"];
+const EVENTS: Record<string, string[]> = {
+    deal: ["deal.created", "deal.stage_changed", "deal.updated", "deal.won", "deal.lost", "deal.owner_changed", "deal.value_changed"],
+    company: ["company.created", "company.updated"],
+    person: ["person.created", "person.updated", "person.job_changed"],
+    task: ["task.created", "task.completed"],
+};
+const ACTIONS: Record<string, string[]> = {
+    deal: ["create_task", "log_activity", "add_tag", "remove_tag", "create_note", "assign_owner", "change_stage", "notify"],
+    company: ["add_tag", "remove_tag", "notify"],
+    person: ["create_task", "log_activity", "add_tag", "remove_tag", "create_note", "notify"],
+    task: ["notify"],
+};
 const CADENCES = ["hourly", "daily", "weekly"];
 const EXECUTION_MODES = ["user", "system"] as const;
+const SEGMENT_RECORD_TYPES = ["company", "person", "deal"];
+const SCHEDULE_RECORD_TYPES = ["company", "person", "deal"];
 
 function eventsFor(recordType: string): string[] {
-    return recordType === "deal" ? DEAL_EVENTS : COMPANY_EVENTS;
+    return EVENTS[recordType] ?? [];
 }
 
 function actionsFor(recordType: string): string[] {
-    return recordType === "deal" ? ["create_task", "log_activity", "add_tag", "notify"] : ["add_tag", "notify"];
+    return ACTIONS[recordType] ?? ["notify"];
 }
 
-function defaultAction(): RuleAction {
-    return { type: "notify", title: "", body: "" };
+function defaultAction(recordType: string): RuleAction {
+    return actionsFor(recordType).includes("notify") ? { type: "notify", title: "", body: "" } : { type: actionsFor(recordType)[0] };
 }
 
 type Props = {
@@ -50,6 +74,7 @@ type Props = {
     onOpenChange: (open: boolean) => void;
     editing: Rule | null;
     fields: SegmentFields | null;
+    options: RuleBuilderOptions | null;
     onSubmit: (payload: RuleRequest) => Promise<void>;
 };
 
@@ -57,7 +82,7 @@ type Props = {
  * Create/edit dialog for an automation rule. The field state lives in {@link RuleForm}, remounted per
  * target via {@code key} so it initializes from props without an effect; the save lifecycle lives here.
  */
-export default function RuleDialog({ open, onOpenChange, editing, fields, onSubmit }: Props) {
+export default function RuleDialog({ open, onOpenChange, editing, fields, options, onSubmit }: Props) {
     const [isSaving, setIsSaving] = useState(false);
 
     const handleOpenChange = (next: boolean) => {
@@ -84,6 +109,7 @@ export default function RuleDialog({ open, onOpenChange, editing, fields, onSubm
                         key={editing ? `edit-${editing.id}` : "new"}
                         editing={editing}
                         fields={fields}
+                        options={options}
                         isSaving={isSaving}
                         onSubmit={handleSubmit}
                     />
@@ -96,11 +122,13 @@ export default function RuleDialog({ open, onOpenChange, editing, fields, onSubm
 function RuleForm({
     editing,
     fields,
+    options,
     isSaving,
     onSubmit,
 }: {
     editing: Rule | null;
     fields: SegmentFields | null;
+    options: RuleBuilderOptions | null;
     isSaving: boolean;
     onSubmit: (payload: RuleRequest) => void;
 }) {
@@ -111,21 +139,30 @@ function RuleForm({
     const [triggerType, setTriggerType] = useState<string>(editing?.trigger.type ?? "entity_change");
     const [events, setEvents] = useState<string[]>(editing?.trigger.events ?? []);
     const [cadence, setCadence] = useState<string>(editing?.trigger.cadence ?? "daily");
+    const [targetStageId, setTargetStageId] = useState<number | undefined>(editing?.trigger.targetStageId);
+    const [throttle, setThrottle] = useState<string>(editing?.trigger.throttleMinutes ? String(editing.trigger.throttleMinutes) : "");
     const [condition, setCondition] = useState<SegmentDefinition>(editing?.condition ?? EMPTY_DEFINITION);
-    const [actions, setActions] = useState<RuleAction[]>(editing?.actions?.length ? editing.actions : [defaultAction()]);
+    const [actions, setActions] = useState<RuleAction[]>(editing?.actions?.length ? editing.actions : [defaultAction(editing?.recordType ?? "deal")]);
     const [executionMode, setExecutionMode] = useState<"user" | "system">(editing?.executionMode ?? "user");
     const [error, setError] = useState<string | null>(null);
+    const [preview, setPreview] = useState<RulePreview | null>(null);
+    const [previewing, setPreviewing] = useState(false);
 
-    const isCompany = recordType === "company";
+    const supportsCondition = SEGMENT_RECORD_TYPES.includes(recordType);
+    const supportsSchedule = SCHEDULE_RECORD_TYPES.includes(recordType);
     const isSchedule = triggerType === "schedule";
+    const hasCondition = (condition.conditions?.length ?? 0) > 0 || (condition.groups?.length ?? 0) > 0;
+    const canFilterStage = recordType === "deal" && !isSchedule;
 
     const changeRecordType = (next: string) => {
         setRecordType(next);
         setEvents([]);
-        if (next === "deal") {
+        setTargetStageId(undefined);
+        setPreview(null);
+        if (!SCHEDULE_RECORD_TYPES.includes(next)) {
             setTriggerType("entity_change");
         }
-        setActions((prev) => prev.map((action) => (actionsFor(next).includes(action.type) ? action : defaultAction())));
+        setActions((prev) => prev.map((action) => (actionsFor(next).includes(action.type) ? action : defaultAction(next))));
     };
 
     const toggleEvent = (event: string) => {
@@ -134,8 +171,21 @@ function RuleForm({
 
     const setAction = (index: number, action: RuleAction) =>
         setActions((prev) => prev.map((existing, i) => (i === index ? action : existing)));
-    const addAction = () => setActions((prev) => [...prev, defaultAction()]);
+    const addAction = () => setActions((prev) => [...prev, defaultAction(recordType)]);
     const removeAction = (index: number) => setActions((prev) => (prev.length > 1 ? prev.filter((_, i) => i !== index) : prev));
+
+    const runPreview = async () => {
+        setPreviewing(true);
+        setPreview(null);
+        try {
+            const result = await previewRule(recordType as SavedViewRecordType, condition);
+            setPreview(result);
+        } catch {
+            setError(t("previewFailed"));
+        } finally {
+            setPreviewing(false);
+        }
+    };
 
     const previewTrigger = isSchedule
         ? t("summarySchedule", { cadence: t(`cadence.${cadence}`) })
@@ -143,7 +193,7 @@ function RuleForm({
               record: t(`record.${recordType}`),
               events: events.length ? events.map((event) => t(`event.${event}`)).join(", ") : t("previewAnyChange"),
           });
-    const preview = t("summaryFull", {
+    const summary = t("summaryFull", {
         trigger: previewTrigger,
         actions: actions.map((action) => t(`action.${action.type}`)).join(", "),
     });
@@ -158,7 +208,7 @@ function RuleForm({
             setError(t("eventsRequired"));
             return;
         }
-        const conditionPayload = isCompany && condition.conditions.length > 0 ? condition : undefined;
+        const conditionPayload = supportsCondition && hasCondition ? condition : undefined;
         if (isSchedule && !conditionPayload) {
             setError(t("conditionRequired"));
             return;
@@ -172,17 +222,31 @@ function RuleForm({
                 setError(t("actionActivityTypeRequired"));
                 return;
             }
-            if (action.type === "add_tag" && !action.tagId) {
+            if ((action.type === "add_tag" || action.type === "remove_tag") && !action.tagId) {
                 setError(t("actionTagRequired"));
                 return;
             }
+            if (action.type === "create_note" && !action.body?.trim()) {
+                setError(t("actionNoteRequired"));
+                return;
+            }
+            if (action.type === "assign_owner" && !action.targetUserId) {
+                setError(t("actionOwnerRequired"));
+                return;
+            }
+            if (action.type === "change_stage" && !action.targetStageId) {
+                setError(t("actionStageRequired"));
+                return;
+            }
         }
+        const throttleMinutes = Number(throttle);
         const trigger: RuleTrigger = isSchedule
             ? { type: "schedule", cadence }
             : {
                   type: "entity_change",
                   events,
-                  ...(editing?.trigger.targetStageId ? { targetStageId: editing.trigger.targetStageId } : {}),
+                  ...(canFilterStage && targetStageId ? { targetStageId } : {}),
+                  ...(throttle && throttleMinutes > 0 ? { throttleMinutes } : {}),
               };
         const normalizedActions = actions.map((action) =>
             action.type === "create_task" && action.dueInDays == null ? { ...action, dueInDays: 3 } : action,
@@ -220,7 +284,7 @@ function RuleForm({
 
                 <p className="flex items-start gap-2 rounded-lg bg-muted/50 px-3 py-2.5 text-sm leading-relaxed text-foreground">
                     <BoltIcon aria-hidden className="mt-0.5 size-4 shrink-0 text-brand" />
-                    <span>{preview}</span>
+                    <span>{summary}</span>
                 </p>
 
                 <Field label={t("whenLabel")}>
@@ -228,11 +292,12 @@ function RuleForm({
                         <Select value={recordType} onValueChange={changeRecordType}>
                             <SelectTrigger size="sm" aria-label={t("recordType")} className="w-32"><SelectValue /></SelectTrigger>
                             <SelectContent>
-                                <SelectItem value="deal">{t("record.deal")}</SelectItem>
-                                <SelectItem value="company">{t("record.company")}</SelectItem>
+                                {RECORD_TYPES.map((type) => (
+                                    <SelectItem key={type} value={type}>{t(`record.${type}`)}</SelectItem>
+                                ))}
                             </SelectContent>
                         </Select>
-                        {isCompany && (
+                        {supportsSchedule && (
                             <Select value={triggerType} onValueChange={setTriggerType}>
                                 <SelectTrigger size="sm" aria-label={t("triggerKind")} className="w-48"><SelectValue /></SelectTrigger>
                                 <SelectContent>
@@ -250,30 +315,63 @@ function RuleForm({
                             animate={{ opacity: 1 }}
                             exit={reduce ? { opacity: 1 } : { opacity: 0 }}
                             transition={{ duration: 0.15, ease: [0.23, 1, 0.32, 1] }}
+                            className="space-y-2.5"
                         >
                             {triggerType === "entity_change" ? (
-                                <div className="flex flex-wrap gap-1.5">
-                                    {eventsFor(recordType).map((event) => {
-                                        const on = events.includes(event);
-                                        return (
-                                            <button
-                                                key={event}
-                                                type="button"
-                                                aria-pressed={on}
-                                                onClick={() => toggleEvent(event)}
-                                                className={cn(
-                                                    "inline-flex items-center gap-1 rounded-full px-3 py-1 text-xs font-medium ring-1 transition active:scale-[0.97] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                                                    on
-                                                        ? "bg-brand/15 text-foreground ring-brand"
-                                                        : "bg-muted text-muted-foreground ring-border hover:text-foreground",
-                                                )}
+                                <>
+                                    <div className="flex flex-wrap gap-1.5">
+                                        {eventsFor(recordType).map((event) => {
+                                            const on = events.includes(event);
+                                            return (
+                                                <button
+                                                    key={event}
+                                                    type="button"
+                                                    aria-pressed={on}
+                                                    onClick={() => toggleEvent(event)}
+                                                    className={cn(
+                                                        "inline-flex items-center gap-1 rounded-full px-3 py-1 text-xs font-medium ring-1 transition active:scale-[0.97] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                                                        on
+                                                            ? "bg-brand/15 text-foreground ring-brand"
+                                                            : "bg-muted text-muted-foreground ring-border hover:text-foreground",
+                                                    )}
+                                                >
+                                                    {on && <CheckIcon aria-hidden className="size-3 text-brand" />}
+                                                    {t(`event.${event}`)}
+                                                </button>
+                                            );
+                                        })}
+                                    </div>
+                                    {canFilterStage && (
+                                        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                                            <span>{t("stageFilterLabel")}</span>
+                                            <Select
+                                                value={targetStageId ? String(targetStageId) : "any"}
+                                                onValueChange={(value) => setTargetStageId(value === "any" ? undefined : Number(value))}
                                             >
-                                                {on && <CheckIcon aria-hidden className="size-3 text-brand" />}
-                                                {t(`event.${event}`)}
-                                            </button>
-                                        );
-                                    })}
-                                </div>
+                                                <SelectTrigger size="sm" aria-label={t("stageFilterLabel")} className="w-48"><SelectValue /></SelectTrigger>
+                                                <SelectContent>
+                                                    <SelectItem value="any">{t("anyStage")}</SelectItem>
+                                                    {(options?.stages ?? []).map((stage) => (
+                                                        <SelectItem key={stage.id} value={String(stage.id)}>{stage.pipeline} · {stage.name}</SelectItem>
+                                                    ))}
+                                                </SelectContent>
+                                            </Select>
+                                        </div>
+                                    )}
+                                    <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
+                                        <span>{t("throttlePrefix")}</span>
+                                        <Input
+                                            type="number"
+                                            min={1}
+                                            value={throttle}
+                                            onChange={(event) => setThrottle(event.target.value)}
+                                            placeholder={t("throttleOff")}
+                                            aria-label={t("throttleLabel")}
+                                            className="h-9 w-20"
+                                        />
+                                        <span>{t("throttleSuffix")}</span>
+                                    </div>
+                                </>
                             ) : (
                                 <div className="flex items-center gap-2 text-sm text-muted-foreground">
                                     <span>{t("everyPrefix")}</span>
@@ -291,9 +389,32 @@ function RuleForm({
                     </AnimatePresence>
                 </Field>
 
-                {isCompany && (
+                {supportsCondition && (
                     <Field label={isSchedule ? t("conditionRequiredLabel") : t("conditionLabel")}>
-                        <SegmentBuilder definition={condition} fields={fields} onChange={setCondition} />
+                        <div className="flex flex-wrap items-center gap-2">
+                            <SegmentBuilder
+                                definition={condition}
+                                fields={fields}
+                                onChange={setCondition}
+                                recordType={recordType}
+                                options={options}
+                            />
+                            {hasCondition && (
+                                <Button type="button" variant="ghost" size="sm" onClick={runPreview} disabled={previewing} className="text-muted-foreground hover:text-foreground">
+                                    {previewing ? t("previewing") : t("previewButton")}
+                                </Button>
+                            )}
+                        </div>
+                        {preview && (
+                            <div className="rounded-lg bg-muted/50 px-3 py-2 text-sm">
+                                <p className="font-medium text-foreground">{t("previewCount", { count: preview.matchCount })}</p>
+                                {preview.sample.length > 0 && (
+                                    <p className="mt-0.5 truncate text-xs text-muted-foreground">
+                                        {preview.sample.map((record) => record.label).join(", ")}
+                                    </p>
+                                )}
+                            </div>
+                        )}
                     </Field>
                 )}
 
@@ -305,6 +426,7 @@ function RuleForm({
                                 action={action}
                                 recordType={recordType}
                                 fields={fields}
+                                options={options}
                                 onChange={(next) => setAction(index, next)}
                                 onRemove={actions.length > 1 ? () => removeAction(index) : undefined}
                             />
@@ -378,12 +500,14 @@ function ActionRow({
     action,
     recordType,
     fields,
+    options,
     onChange,
     onRemove,
 }: {
     action: RuleAction;
     recordType: string;
     fields: SegmentFields | null;
+    options: RuleBuilderOptions | null;
     onChange: (action: RuleAction) => void;
     onRemove?: () => void;
 }) {
@@ -415,6 +539,16 @@ function ActionRow({
                         onChange={(event) => onChange({ ...action, body: event.target.value })}
                         placeholder={t("actionBodyPlaceholder")}
                         aria-label={t("actionBodyPlaceholder")}
+                        maxLength={2000}
+                        className="h-9"
+                    />
+                )}
+                {action.type === "create_note" && (
+                    <Input
+                        value={action.body ?? ""}
+                        onChange={(event) => onChange({ ...action, body: event.target.value })}
+                        placeholder={t("actionNotePlaceholder")}
+                        aria-label={t("actionNotePlaceholder")}
                         maxLength={2000}
                         className="h-9"
                     />
@@ -453,12 +587,32 @@ function ActionRow({
                         />
                     </>
                 )}
-                {action.type === "add_tag" && (
+                {(action.type === "add_tag" || action.type === "remove_tag") && (
                     <Select value={action.tagId ? String(action.tagId) : undefined} onValueChange={(value) => onChange({ ...action, tagId: Number(value) })}>
                         <SelectTrigger size="sm" aria-label={t("tag")}><SelectValue placeholder={t("pickTag")} /></SelectTrigger>
                         <SelectContent>
                             {(fields?.tags ?? []).map((tag) => (
                                 <SelectItem key={tag.id} value={String(tag.id)}>{tag.name}</SelectItem>
+                            ))}
+                        </SelectContent>
+                    </Select>
+                )}
+                {action.type === "assign_owner" && (
+                    <Select value={action.targetUserId ? String(action.targetUserId) : undefined} onValueChange={(value) => onChange({ ...action, targetUserId: Number(value) })}>
+                        <SelectTrigger size="sm" aria-label={t("actionOwner")}><SelectValue placeholder={t("pickOwner")} /></SelectTrigger>
+                        <SelectContent>
+                            {(options?.owners ?? []).map((owner) => (
+                                <SelectItem key={owner.id} value={String(owner.id)}>{owner.name}</SelectItem>
+                            ))}
+                        </SelectContent>
+                    </Select>
+                )}
+                {action.type === "change_stage" && (
+                    <Select value={action.targetStageId ? String(action.targetStageId) : undefined} onValueChange={(value) => onChange({ ...action, targetStageId: Number(value) })}>
+                        <SelectTrigger size="sm" aria-label={t("actionStage")}><SelectValue placeholder={t("pickStage")} /></SelectTrigger>
+                        <SelectContent>
+                            {(options?.stages ?? []).map((stage) => (
+                                <SelectItem key={stage.id} value={String(stage.id)}>{stage.pipeline} · {stage.name}</SelectItem>
                             ))}
                         </SelectContent>
                     </Select>

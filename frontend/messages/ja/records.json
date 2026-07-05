@@ -22,7 +22,15 @@
     "field": {
       "industry": "業界",
       "name": "会社名",
-      "tag": "タグ"
+      "tag": "タグ",
+      "title": "役職",
+      "email": "メール",
+      "company": "会社",
+      "value": "取引額",
+      "stage": "ステージ",
+      "owner": "担当者",
+      "status": "ステータス",
+      "close_date": "完了予定日"
     },
     "op": {
       "is": "である",
@@ -30,7 +38,18 @@
       "contains": "を含む",
       "notContains": "を含まない",
       "has": "を持つ",
-      "notHas": "を持たない"
+      "notHas": "を持たない",
+      "startsWith": "で始まる",
+      "isSet": "が設定済み",
+      "isEmpty": "が未設定",
+      "eq": "が等しい",
+      "gt": "より大きい",
+      "gte": "以上",
+      "lt": "より小さい",
+      "lte": "以下",
+      "before": "より前",
+      "after": "より後",
+      "within": "以内"
     },
     "chipField": "{field}が{value}{op}",
     "chipDays": "{label}（{days}日）",
@@ -58,7 +77,21 @@
       "label": "最近の活動なし",
       "labelNot": "最近の活動あり",
       "description": "過去30日間に記録された活動がありません。"
-    }
+    },
+    "status": {
+      "open": "進行中",
+      "won": "成約",
+      "lost": "失注"
+    },
+    "addGroup": "グループを追加",
+    "removeGroup": "グループを削除",
+    "valuePlaceholder": "テキストを入力",
+    "numberPlaceholder": "数値を入力",
+    "datePlaceholder": "日付を選択",
+    "pickStatus": "ステータスを選択",
+    "pickOwner": "担当者を選択",
+    "pickCompany": "会社を選択",
+    "pickStage": "ステージを選択"
   },
   "SavedViews": {
     "all": "すべて",

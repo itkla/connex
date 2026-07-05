@@ -236,7 +236,9 @@
     "actionTagRequired": "タグアクションのタグを選択してください",
     "record": {
       "deal": "取引",
-      "company": "会社"
+      "company": "会社",
+      "person": "連絡先",
+      "task": "タスク"
     },
     "cadence": {
       "hourly": "時間",
@@ -249,18 +251,33 @@
         "stage_changed": "ステージ変更",
         "won": "成約",
         "lost": "失注",
-        "updated": "更新"
+        "updated": "更新",
+        "owner_changed": "担当者変更",
+        "value_changed": "金額変更"
       },
       "company": {
         "created": "作成",
         "updated": "更新"
+      },
+      "person": {
+        "created": "作成",
+        "updated": "更新",
+        "job_changed": "転職"
+      },
+      "task": {
+        "created": "作成",
+        "completed": "完了"
       }
     },
     "action": {
       "create_task": "タスクを作成",
       "log_activity": "活動を記録",
       "add_tag": "タグを追加",
-      "notify": "通知を送信"
+      "notify": "通知を送信",
+      "remove_tag": "タグを削除",
+      "create_note": "メモを追加",
+      "assign_owner": "担当者を割り当て",
+      "change_stage": "ステージを移動"
     },
     "runAs": {
       "user": {
@@ -274,7 +291,25 @@
     },
     "summaryEntity": "{record}が{events}のとき",
     "summarySchedule": "毎{cadence}",
-    "summaryFull": "{trigger} → {actions}"
+    "summaryFull": "{trigger} → {actions}",
+    "actionNotePlaceholder": "メモの内容",
+    "actionNoteRequired": "メモの内容を入力してください",
+    "actionOwnerRequired": "割り当てる担当者を選択してください",
+    "actionStageRequired": "移動先のステージを選択してください",
+    "actionOwner": "担当者",
+    "actionStage": "ステージ",
+    "pickOwner": "メンバーを選択",
+    "pickStage": "ステージを選択",
+    "stageFilterLabel": "次のステージのみ",
+    "anyStage": "すべてのステージ",
+    "throttlePrefix": "最短で",
+    "throttleSuffix": "分に1回（レコードごと）",
+    "throttleOff": "なし",
+    "throttleLabel": "クールダウン（分）",
+    "previewButton": "一致をプレビュー",
+    "previewing": "確認中…",
+    "previewCount": "現在{count}件が一致",
+    "previewFailed": "プレビューを実行できませんでした。"
   },
   "WorkspaceCustomFields": {
     "newField": "フィールドを追加",

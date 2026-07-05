@@ -1539,6 +1539,10 @@ export function deleteRule(id: number) {
     return deleteJson<void>(`/api/rules/${id}`);
 }
 
+export function previewRule(recordType: Types.SavedViewRecordType, condition: Types.SegmentDefinition) {
+    return postJson<Types.RulePreview>(`/api/rules/preview`, { recordType, condition });
+}
+
 export function getPermissionCatalog(init: RequestInit = {}) {
     return getJson<string[]>(`/api/permissions`, { cache: "no-store", ...init });
 }

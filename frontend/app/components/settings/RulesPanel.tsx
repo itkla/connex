@@ -10,8 +10,18 @@ import {
     TrashIcon,
 } from "@heroicons/react/24/outline";
 
-import type { Rule, RuleRequest, SegmentFields } from "@/app/lib/types";
-import { createRule, deleteRule, getRules, getSegmentFields, updateRule } from "@/app/lib/api";
+import type { Rule, RuleBuilderOptions, RuleRequest, SegmentFields } from "@/app/lib/types";
+import {
+    createRule,
+    deleteRule,
+    getActiveWorkspaceMembers,
+    getCompanies,
+    getPipelines,
+    getRules,
+    getSegmentFields,
+    getStagesByPipelineId,
+    updateRule,
+} from "@/app/lib/api";
 import { useWorkspace } from "@/app/hooks/useWorkspace";
 import { toastError, toastSuccess } from "@/app/lib/toast";
 import { Badge } from "@/components/ui/badge";
@@ -64,6 +74,7 @@ export default function RulesPanel() {
 
     const [rules, setRules] = useState<Rule[]>([]);
     const [fields, setFields] = useState<SegmentFields | null>(null);
+    const [options, setOptions] = useState<RuleBuilderOptions | null>(null);
     const [loading, setLoading] = useState(true);
     const [accessDenied, setAccessDenied] = useState(false);
 
@@ -99,6 +110,26 @@ export default function RulesPanel() {
                 if (!cancelled) setFields(loadedFields);
             } catch {
                 if (!cancelled) toastError(t("fieldsLoadFailed"));
+            }
+            const [pipelines, members, companies] = await Promise.all([
+                getPipelines().catch(() => []),
+                getActiveWorkspaceMembers().catch(() => []),
+                getCompanies().catch(() => []),
+            ]);
+            if (cancelled) return;
+            const stageLists = await Promise.all(
+                pipelines.map((pipeline) =>
+                    getStagesByPipelineId(pipeline.id)
+                        .then((stages) => stages.map((stage) => ({ id: stage.id, name: stage.name, pipeline: pipeline.name })))
+                        .catch(() => []),
+                ),
+            );
+            if (!cancelled) {
+                setOptions({
+                    stages: stageLists.flat(),
+                    owners: members.map((member) => ({ id: member.id, name: member.displayName || member.username })),
+                    companies: companies.map((company) => ({ id: company.id, name: company.name })),
+                });
             }
         })();
         return () => {
@@ -251,6 +282,7 @@ export default function RulesPanel() {
                 onOpenChange={setDialogOpen}
                 editing={editing}
                 fields={fields}
+                options={options}
                 onSubmit={submitRule}
             />
 

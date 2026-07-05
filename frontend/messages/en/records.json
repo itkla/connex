@@ -22,7 +22,15 @@
     "field": {
       "industry": "Industry",
       "name": "Company name",
-      "tag": "Tag"
+      "tag": "Tag",
+      "title": "Job title",
+      "email": "Email",
+      "company": "Company",
+      "value": "Deal value",
+      "stage": "Stage",
+      "owner": "Owner",
+      "status": "Status",
+      "close_date": "Close date"
     },
     "op": {
       "is": "is",
@@ -30,7 +38,18 @@
       "contains": "contains",
       "notContains": "doesn't contain",
       "has": "has",
-      "notHas": "doesn't have"
+      "notHas": "doesn't have",
+      "startsWith": "starts with",
+      "isSet": "is set",
+      "isEmpty": "is empty",
+      "eq": "equals",
+      "gt": "is more than",
+      "gte": "is at least",
+      "lt": "is less than",
+      "lte": "is at most",
+      "before": "is before",
+      "after": "is after",
+      "within": "is within"
     },
     "chipField": "{field} {op} {value}",
     "chipDays": "{label} ({days}d)",
@@ -58,7 +77,21 @@
       "label": "No recent activity",
       "labelNot": "Has recent activity",
       "description": "No logged activity in the last 30 days."
-    }
+    },
+    "status": {
+      "open": "Open",
+      "won": "Won",
+      "lost": "Lost"
+    },
+    "addGroup": "Add group",
+    "removeGroup": "Remove group",
+    "valuePlaceholder": "Enter text",
+    "numberPlaceholder": "Enter a number",
+    "datePlaceholder": "Pick a date",
+    "pickStatus": "Choose a status",
+    "pickOwner": "Choose an owner",
+    "pickCompany": "Choose a company",
+    "pickStage": "Choose a stage"
   },
   "SavedViews": {
     "all": "All",
