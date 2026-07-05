@@ -22,6 +22,7 @@ public class Note {
     private int id;
     private int workspaceId; // owning workspace
     private String content;
+    private String title;
     @JsonIdentityReference(alwaysAsId = true)
     private User author;
     @JsonIdentityReference(alwaysAsId = true)
@@ -54,6 +55,14 @@ public class Note {
 
     public void setContent(String content) {
         this.content = content;
+    }
+
+    public String getTitle() {
+        return title;
+    }
+
+    public void setTitle(String title) {
+        this.title = title;
     }
 
     public User getAuthor() {

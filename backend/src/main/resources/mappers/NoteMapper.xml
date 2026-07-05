@@ -7,6 +7,7 @@
     <id     property="id"        column="id"/>
     <result property="workspaceId" column="workspace_id"/>
     <result property="content"   column="content"/>
+    <result property="title"     column="title"/>
     <result property="createdAt" column="created_at"/>
     <result property="updatedAt" column="updated_at"/>
     <association property="author" javaType="User">
@@ -21,11 +22,11 @@
   </resultMap>
 
   <sql id="noteColumns">
-    id, workspace_id, content, author_id, person_id, deal_id, created_at, updated_at
+    id, workspace_id, content, title, author_id, person_id, deal_id, created_at, updated_at
   </sql>
 
   <sql id="qualifiedNoteColumns">
-    n.id, n.workspace_id, n.content, n.author_id, n.person_id, n.deal_id, n.created_at, n.updated_at
+    n.id, n.workspace_id, n.content, n.title, n.author_id, n.person_id, n.deal_id, n.created_at, n.updated_at
   </sql>
 
   <select id="getAllNotes" resultMap="NoteResult">
@@ -61,6 +62,7 @@
     LEFT JOIN deal     d ON d.id = n.deal_id
     WHERE n.workspace_id = #{workspaceId}
       AND (n.content LIKE #{query}
+      OR n.title LIKE #{query}
       OR u.display_name LIKE #{query}
       OR u.username LIKE #{query}
       OR p.name LIKE #{query}
@@ -70,9 +72,9 @@
   </select>
 
   <insert id="insert" useGeneratedKeys="true" keyProperty="id">
-    INSERT INTO note (workspace_id, content, author_id, person_id, deal_id)
+    INSERT INTO note (workspace_id, content, title, author_id, person_id, deal_id)
     VALUES (
-      #{workspaceId}, #{content}, #{author.id},
+      #{workspaceId}, #{content}, #{title}, #{author.id},
       <choose>
         <when test="person != null">#{person.id}</when>
         <otherwise>NULL</otherwise>
@@ -87,6 +89,7 @@
   <update id="update">
     UPDATE note
     SET content = #{content},
+        title = #{title},
         author_id = #{author.id},
         person_id =
           <choose>
