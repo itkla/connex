@@ -5,6 +5,8 @@ import org.apache.ibatis.annotations.Param;
 import java.util.List;
 import java.util.Map;
 
+import ooo.klae.connex.backend.dto.RecordLabelDto;
+
 /**
  * SQL predicates backing the graph-aware smart segments and the rule engine's {@code WHEN}. Every
  * statement is workspace-scoped; the temperature-based predicate ("cooling") is computed in the
@@ -52,4 +54,13 @@ public interface SegmentMapper {
 
     /** Distinct non-blank industry values in the workspace, for the builder's value picker. */
     List<String> distinctIndustries(int workspaceId);
+
+    /** id + name labels for the given companies, for a preview sample. {@code ids} must be non-empty. */
+    List<RecordLabelDto> companyLabels(@Param("workspaceId") int workspaceId, @Param("ids") List<Integer> ids);
+
+    /** id + name labels for the given people, for a preview sample. {@code ids} must be non-empty. */
+    List<RecordLabelDto> personLabels(@Param("workspaceId") int workspaceId, @Param("ids") List<Integer> ids);
+
+    /** id + name labels for the given deals, for a preview sample. {@code ids} must be non-empty. */
+    List<RecordLabelDto> dealLabels(@Param("workspaceId") int workspaceId, @Param("ids") List<Integer> ids);
 }

@@ -68,7 +68,7 @@ public class RuleEngineService {
                 if (!conditionMatches(rule, workspaceId, entityId)) {
                     continue;
                 }
-                fire(rule, workspaceId, recordType, entityId, event + ":" + System.nanoTime());
+                fire(rule, workspaceId, recordType, entityId, dedupeSuffix(trigger, event));
             } catch (Exception e) {
                 log.warn("Rule {} dispatch failed on {} {}: {}", rule.getId(), recordType, entityId, e.getMessage());
             }
@@ -131,6 +131,15 @@ public class RuleEngineService {
             case "weekly" -> now.get(IsoFields.WEEK_BASED_YEAR) + "W" + now.get(IsoFields.WEEK_OF_WEEK_BASED_YEAR);
             default -> now.format(DAY);
         };
+    }
+
+    private String dedupeSuffix(RuleTrigger trigger, String event) {
+        Integer throttle = trigger.getThrottleMinutes();
+        if (throttle != null && throttle > 0) {
+            long window = (System.currentTimeMillis() / 60000L) / throttle;
+            return event + ":t" + throttle + ":" + window;
+        }
+        return event + ":" + System.nanoTime();
     }
 
     private void fire(Rule rule, int workspaceId, String recordType, int entityId, String dedupeSuffix) {

@@ -13,14 +13,18 @@ import tools.jackson.databind.ObjectMapper;
 
 import ooo.klae.connex.backend.beans.Rule;
 import ooo.klae.connex.backend.beans.RuleExecution;
+import ooo.klae.connex.backend.dto.RecordLabelDto;
 import ooo.klae.connex.backend.dto.RuleAction;
 import ooo.klae.connex.backend.dto.RuleDto;
+import ooo.klae.connex.backend.dto.RulePreviewDto;
+import ooo.klae.connex.backend.dto.RulePreviewRequest;
 import ooo.klae.connex.backend.dto.RuleRequest;
 import ooo.klae.connex.backend.dto.RuleTrigger;
 import ooo.klae.connex.backend.dto.SegmentDefinition;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.RuleMapper;
+import ooo.klae.connex.backend.mappers.SegmentMapper;
 import ooo.klae.connex.backend.services.WorkspaceService.Role;
 import ooo.klae.connex.backend.tenant.Permission;
 import ooo.klae.connex.backend.tenant.RequirePermission;
@@ -36,12 +40,15 @@ import ooo.klae.connex.backend.tenant.RequirePermission;
 public class RuleService {
 
     private final RuleMapper ruleMapper;
+    private final SegmentService segmentService;
+    private final SegmentMapper segmentMapper;
     private final WorkspaceService workspaceService;
     private final AuthService authService;
     private final AuditService auditService;
     private final ObjectMapper objectMapper;
 
     private static final int MAX_JSON_BYTES = 16384;
+    private static final int PREVIEW_SAMPLE = 25;
     private static final Set<String> RECORD_TYPES = Set.of("company", "person", "deal", "task");
     private static final Set<String> TRIGGER_TYPES = Set.of("entity_change", "schedule");
     private static final Set<String> EXECUTION_MODES = Set.of("user", "system");
@@ -82,6 +89,35 @@ public class RuleService {
     public List<RuleExecution> executions(int id) {
         requireRule(id);
         return ruleMapper.getExecutionsByRule(workspaceService.getCurrentWorkspaceId(), id, 50);
+    }
+
+    /**
+     * Dry-runs a WHEN condition over the active workspace's records of {@code recordType}, returning
+     * the total match count and a bounded sample — without creating or firing a rule.
+     */
+    @RequirePermission(Permission.RULE_MANAGE)
+    public RulePreviewDto preview(RulePreviewRequest request) {
+        String recordType = normalize(request.getRecordType());
+        if (!SEGMENT_RECORD_TYPES.contains(recordType)) {
+            throw new BadRequestException("Preview is not supported for record type: " + request.getRecordType());
+        }
+        if (!hasWhen(request.getCondition())) {
+            throw new BadRequestException("A preview requires at least one condition");
+        }
+        List<Integer> ids = segmentService.evaluate(recordType, request.getCondition());
+        List<Integer> sampleIds = ids.stream().sorted().limit(PREVIEW_SAMPLE).toList();
+        List<RecordLabelDto> sample = sampleIds.isEmpty() ? List.of() : labelsFor(recordType, sampleIds);
+        return new RulePreviewDto(ids.size(), sample);
+    }
+
+    private List<RecordLabelDto> labelsFor(String recordType, List<Integer> ids) {
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        return switch (recordType) {
+            case "company" -> segmentMapper.companyLabels(workspaceId, ids);
+            case "person" -> segmentMapper.personLabels(workspaceId, ids);
+            case "deal" -> segmentMapper.dealLabels(workspaceId, ids);
+            default -> List.of();
+        };
     }
 
     @Transactional

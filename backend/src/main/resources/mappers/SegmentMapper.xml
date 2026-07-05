@@ -139,6 +139,24 @@
         </choose>
     </select>
 
+    <select id="companyLabels" resultType="ooo.klae.connex.backend.dto.RecordLabelDto">
+        SELECT id, name AS label FROM company
+        WHERE workspace_id = #{workspaceId}
+          AND id IN <foreach item="v" collection="ids" open="(" separator="," close=")">#{v}</foreach>
+    </select>
+
+    <select id="personLabels" resultType="ooo.klae.connex.backend.dto.RecordLabelDto">
+        SELECT id, name AS label FROM person
+        WHERE workspace_id = #{workspaceId}
+          AND id IN <foreach item="v" collection="ids" open="(" separator="," close=")">#{v}</foreach>
+    </select>
+
+    <select id="dealLabels" resultType="ooo.klae.connex.backend.dto.RecordLabelDto">
+        SELECT id, name AS label FROM deal
+        WHERE workspace_id = #{workspaceId}
+          AND id IN <foreach item="v" collection="ids" open="(" separator="," close=")">#{v}</foreach>
+    </select>
+
     <select id="distinctIndustries" resultType="string">
         SELECT DISTINCT industry FROM company
         WHERE workspace_id = #{workspaceId} AND industry IS NOT NULL AND industry != ''
