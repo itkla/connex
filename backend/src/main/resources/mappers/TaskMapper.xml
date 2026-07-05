@@ -146,4 +146,5 @@
     UPDATE task SET due_date = #{dueDate}
     WHERE workspace_id = #{workspaceId} AND id = #{id}
   </update>
+
 </mapper>

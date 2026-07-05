@@ -1,7 +1,13 @@
 "use client";
 
 import { forwardRef, useEffect, useImperativeHandle, useState } from "react";
-import { BriefcaseIcon, BuildingOffice2Icon, UserIcon } from "@heroicons/react/24/outline";
+import {
+    BriefcaseIcon,
+    BuildingOffice2Icon,
+    DocumentTextIcon,
+    PaperClipIcon,
+    UserIcon,
+} from "@heroicons/react/24/outline";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import type { MentionItem, MentionType } from "./mentionData";
 import type { SuggestionListHandle } from "./suggestionRenderer";
@@ -11,6 +17,8 @@ const ICON: Record<MentionType, typeof UserIcon> = {
     person: UserIcon,
     deal: BriefcaseIcon,
     company: BuildingOffice2Icon,
+    note: DocumentTextIcon,
+    file: PaperClipIcon,
 };
 
 type Props = { items: MentionItem[]; command: (item: MentionItem) => void };

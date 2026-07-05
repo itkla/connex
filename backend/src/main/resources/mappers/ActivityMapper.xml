@@ -94,4 +94,5 @@
   </update>
 
   <delete id="delete">DELETE FROM activity WHERE workspace_id = #{workspaceId} AND id = #{id}</delete>
+
 </mapper>

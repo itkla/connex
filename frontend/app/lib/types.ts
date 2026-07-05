@@ -445,7 +445,7 @@ export type DealSummary = {
     ownerName?: string | null;
 };
 
-export type NoteReferenceType = "user" | "person" | "deal" | "company";
+export type NoteReferenceType = "user" | "person" | "deal" | "company" | "note" | "file";
 
 export type NoteReference = {
     type: NoteReferenceType;

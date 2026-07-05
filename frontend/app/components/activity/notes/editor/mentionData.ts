@@ -5,15 +5,17 @@ import {
     search as globalSearch,
 } from "@/app/lib/api";
 import type {
+    Attachment,
     Company,
     Contact,
     Deal,
+    Note,
     SearchResults,
     User,
     WorkspaceMember,
 } from "@/app/lib/types";
 
-export type MentionType = "user" | "person" | "deal" | "company";
+export type MentionType = "user" | "person" | "deal" | "company" | "note" | "file";
 export type MentionTrigger = "@" | "#";
 
 export type MentionItem = {
@@ -26,7 +28,7 @@ export type MentionItem = {
 
 export const TRIGGER_TYPES: Record<MentionTrigger, readonly MentionType[]> = {
     "@": ["user", "person"],
-    "#": ["deal", "company"],
+    "#": ["deal", "company", "note", "file"],
 };
 
 const MAX_SUGGESTIONS = 8;
@@ -98,6 +100,16 @@ function companyItem(company: Company): MentionItem {
     };
 }
 
+function noteItem(note: Note): MentionItem {
+    const title =
+        note.title?.trim() || note.content.split("\n").find((line) => line.trim().length > 0) || "Untitled";
+    return { type: "note", id: note.id, label: safeLabel(title), sublabel: "Note", avatarUrl: null };
+}
+
+function fileItem(file: Attachment): MentionItem {
+    return { type: "file", id: file.id, label: safeLabel(file.fileName), sublabel: "File", avatarUrl: null };
+}
+
 function membersPool(): Promise<MentionItem[]> {
     resetWhenWorkspaceChanged();
     if (!membersPromise) {
@@ -127,6 +139,8 @@ function fromSearchResults(results: SearchResults): MentionItem[] {
         ...results.people.map(personItem),
         ...results.deals.map(dealItem),
         ...results.companies.map(companyItem),
+        ...results.notes.map(noteItem),
+        ...results.attachments.map(fileItem),
     ];
 }
 

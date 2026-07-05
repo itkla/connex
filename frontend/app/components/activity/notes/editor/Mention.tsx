@@ -12,7 +12,7 @@ import { MentionList } from "./MentionList";
 import { queryMentions } from "./mentionData";
 import type { MentionItem, MentionTrigger, MentionType } from "./mentionData";
 
-const TOKEN = /\[([^\]]+)\]\((user|person|deal|company):(\d+)\)/g;
+const TOKEN = /\[([^\]]+)\]\((user|person|deal|company|note|file):(\d+)\)/g;
 const SENTINEL_OPEN = "\uE000";
 const SENTINEL_CLOSE = "\uE001";
 const SENTINEL = /\uE000(\d+)\uE001/g;

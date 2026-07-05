@@ -24,6 +24,8 @@ public interface NoteMapper {
     List<Note> getVisibleNotesByAuthorId(@Param("workspaceId") int workspaceId, @Param("authorId") int authorId, @Param("currentUserId") int currentUserId);
     Note getVisibleNoteById(@Param("workspaceId") int workspaceId, @Param("id") int id, @Param("currentUserId") int currentUserId);
     List<Note> searchVisible(@Param("workspaceId") int workspaceId, @Param("query") String query, @Param("currentUserId") int currentUserId);
+    List<Note> getNotesReferencing(@Param("workspaceId") int workspaceId, @Param("refType") String refType, @Param("refId") int refId, @Param("currentUserId") int currentUserId);
+    List<Integer> getVisibleNoteIdsIn(@Param("workspaceId") int workspaceId, @Param("ids") List<Integer> ids, @Param("currentUserId") int currentUserId);
     int insert(Note note);
     int update(Note note);
     int delete(@Param("workspaceId") int workspaceId, @Param("id") int id);

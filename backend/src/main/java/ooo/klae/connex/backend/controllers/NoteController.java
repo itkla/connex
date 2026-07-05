@@ -62,6 +62,15 @@ public class NoteController {
     }
 
     /**
+     * GET endpoint listing the notes (visible to the caller) that reference a
+     * given entity — the note-source backlinks for {@code refType}:{@code refId}.
+     */
+    @GetMapping("/referencing")
+    public List<NoteDto> getNotesReferencing(@RequestParam String refType, @RequestParam int refId) {
+        return noteService.getNotesReferencing(refType, refId).stream().map(NoteDto::from).toList();
+    }
+
+    /**
      * POST endpoint to create a new note.
      * @param note
      * @return

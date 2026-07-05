@@ -3,21 +3,21 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
-import { BriefcaseIcon, BuildingOffice2Icon, UserIcon } from '@heroicons/react/24/outline';
+import { BriefcaseIcon, BuildingOffice2Icon, DocumentTextIcon, PaperClipIcon, UserIcon } from '@heroicons/react/24/outline';
 
 import { getActiveWorkspaceMembers, getCompanies, getDeals, search } from '@/app/lib/api';
 import { type Company, type Deal, type NoteReferenceType, type SearchResults, type WorkspaceMember } from '@/app/lib/types';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { cn } from '@/lib/utils';
 
-const TOKEN = /\[([^\]]+)\]\((user|person|deal|company):(\d+)\)/g;
+const TOKEN = /\[([^\]]+)\]\((user|person|deal|company|note|file):(\d+)\)/g;
 const HANDLE = /[A-Za-z0-9_.\-]/;
 const MAX_SUGGESTIONS = 8;
 const MENU_WIDTH = 288;
 const MENU_MAX_HEIGHT = 320;
 const SEARCH_DEBOUNCE_MS = 220;
 
-const RECORD_ICON = { person: UserIcon, deal: BriefcaseIcon, company: BuildingOffice2Icon };
+const RECORD_ICON = { person: UserIcon, deal: BriefcaseIcon, company: BuildingOffice2Icon, note: DocumentTextIcon, file: PaperClipIcon };
 
 type Trigger = '@' | '#';
 
