@@ -226,12 +226,14 @@ export default function SegmentBuilder({
     onChange,
     recordType = "company",
     options,
+    advanced = false,
 }: {
     definition: SegmentDefinition;
     fields: SegmentFields | null;
     onChange: (definition: SegmentDefinition) => void;
     recordType?: string;
     options?: RuleBuilderOptions | null;
+    advanced?: boolean;
 }) {
     const t = useTranslations("SmartSegments");
     const [open, setOpen] = useState(false);
@@ -261,6 +263,7 @@ export default function SegmentBuilder({
                             recordType={recordType}
                             fields={fields}
                             options={options}
+                            advanced={advanced}
                             depth={1}
                             onChange={onChange}
                         />
@@ -287,6 +290,7 @@ function GroupEditor({
     recordType,
     fields,
     options,
+    advanced,
     depth,
     onChange,
     onRemove,
@@ -295,6 +299,7 @@ function GroupEditor({
     recordType: string;
     fields: SegmentFields | null;
     options?: RuleBuilderOptions | null;
+    advanced: boolean;
     depth: number;
     onChange: (group: SegmentDefinition) => void;
     onRemove?: () => void;
@@ -307,7 +312,7 @@ function GroupEditor({
     const setConditions = (next: SegmentCondition[]) => onChange({ ...group, conditions: next });
     const setGroups = (next: SegmentDefinition[]) => onChange({ ...group, groups: next.length ? next : undefined });
     const canAddCondition = conditions.length < MAX_GROUP_CONDITIONS;
-    const canAddGroup = depth < MAX_DEPTH - 1;
+    const canAddGroup = advanced && depth < MAX_DEPTH - 1;
 
     return (
         <div className={cn("flex flex-col gap-2", nested && "rounded-xl bg-muted/40 p-3 ring-1 ring-border")}>
@@ -345,6 +350,7 @@ function GroupEditor({
                     recordType={recordType}
                     fields={fields}
                     options={options}
+                    advanced={advanced}
                     onChange={(next) => setConditions(conditions.map((existing, i) => (i === index ? next : existing)))}
                     onRemove={() => setConditions(conditions.filter((_, i) => i !== index))}
                 />
@@ -357,6 +363,7 @@ function GroupEditor({
                     recordType={recordType}
                     fields={fields}
                     options={options}
+                    advanced={advanced}
                     depth={depth + 1}
                     onChange={(next) => setGroups(groups.map((existing, i) => (i === index ? next : existing)))}
                     onRemove={() => setGroups(groups.filter((_, i) => i !== index))}
@@ -396,6 +403,7 @@ function ConditionRow({
     recordType,
     fields,
     options,
+    advanced,
     onChange,
     onRemove,
 }: {
@@ -403,15 +411,17 @@ function ConditionRow({
     recordType: string;
     fields: SegmentFields | null;
     options?: RuleBuilderOptions | null;
+    advanced: boolean;
     onChange: (condition: SegmentCondition) => void;
     onRemove: () => void;
 }) {
     const t = useTranslations("SmartSegments");
     const showPredicates = recordType === "company";
     const kind = condition.type === "field" ? kindOf(recordType, condition.field) : "string";
+    const fieldOperators = advanced ? operatorsForKind(kind) : operatorsForKind(kind).filter((option) => option.op !== "is_set");
     const operators = condition.type === "predicate"
         ? [{ token: "is", op: "is", negate: false }, { token: "isNot", op: "is", negate: true }]
-        : operatorsForKind(kind);
+        : fieldOperators;
 
     const onOperator = (token: string) => {
         const option = operators.find((candidate) => candidate.token === token);
@@ -419,7 +429,12 @@ function ConditionRow({
         if (condition.type === "predicate") {
             onChange({ ...condition, negate: option.negate });
         } else {
-            onChange({ ...condition, op: option.op, negate: option.negate });
+            onChange({
+                ...condition,
+                op: option.op,
+                negate: option.negate,
+                ...(option.op === "within_days" && condition.days == null ? { days: DEFAULT_DAYS } : {}),
+            });
         }
     };
 
@@ -624,25 +639,10 @@ function ValueInput({
         <Select value={condition.value || undefined} onValueChange={(value) => onChange({ ...condition, value })}>
             <SelectTrigger size="sm" aria-label={t("pickStage")} className="min-w-0 flex-1"><SelectValue placeholder={t("pickStage")} /></SelectTrigger>
             <SelectContent>
-                {groupStages(options?.stages ?? []).map((pipeline) => (
-                    <SelectGroup key={pipeline.name}>
-                        <SelectLabel>{pipeline.name}</SelectLabel>
-                        {pipeline.stages.map((stage) => (
-                            <SelectItem key={stage.id} value={String(stage.id)}>{stage.name}</SelectItem>
-                        ))}
-                    </SelectGroup>
+                {(options?.stages ?? []).map((stage) => (
+                    <SelectItem key={stage.id} value={String(stage.id)}>{stage.pipeline} · {stage.name}</SelectItem>
                 ))}
             </SelectContent>
         </Select>
     );
-}
-
-function groupStages(stages: RuleBuilderOptions["stages"]): { name: string; stages: { id: number; name: string }[] }[] {
-    const byPipeline = new Map<string, { id: number; name: string }[]>();
-    for (const stage of stages) {
-        const list = byPipeline.get(stage.pipeline) ?? [];
-        list.push({ id: stage.id, name: stage.name });
-        byPipeline.set(stage.pipeline, list);
-    }
-    return Array.from(byPipeline.entries()).map(([name, list]) => ({ name, stages: list }));
 }

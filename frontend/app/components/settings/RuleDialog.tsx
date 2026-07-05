@@ -159,6 +159,7 @@ function RuleForm({
         setEvents([]);
         setTargetStageId(undefined);
         setPreview(null);
+        setCondition(EMPTY_DEFINITION);
         if (!SCHEDULE_RECORD_TYPES.includes(next)) {
             setTriggerType("entity_change");
         }
@@ -395,9 +396,13 @@ function RuleForm({
                             <SegmentBuilder
                                 definition={condition}
                                 fields={fields}
-                                onChange={setCondition}
+                                onChange={(next) => {
+                                    setCondition(next);
+                                    setPreview(null);
+                                }}
                                 recordType={recordType}
                                 options={options}
+                                advanced
                             />
                             {hasCondition && (
                                 <Button type="button" variant="ghost" size="sm" onClick={runPreview} disabled={previewing} className="text-muted-foreground hover:text-foreground">
