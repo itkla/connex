@@ -8,7 +8,7 @@ import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 
 function Drawer({
-  swipeDirection = "left",
+  swipeDirection = "right",
   ...props
 }: React.ComponentProps<typeof DrawerPrimitive.Root>) {
   return <DrawerPrimitive.Root data-slot="drawer" swipeDirection={swipeDirection} {...props} />
@@ -59,12 +59,12 @@ function DrawerContent({
   return (
     <DrawerPortal>
       <DrawerOverlay />
-      <DrawerPrimitive.Viewport className="pointer-events-none fixed inset-0 z-50 flex items-stretch justify-start p-4 sm:p-6">
+      <DrawerPrimitive.Viewport className="pointer-events-none fixed inset-0 z-50 flex items-stretch justify-end p-4 sm:p-6">
         <DrawerPrimitive.Popup
           data-slot="drawer-content"
           className={cn(
             "group/drawer-popup pointer-events-auto relative flex h-full w-3/4 flex-col overflow-hidden rounded-2xl bg-popover bg-clip-padding text-sm text-popover-foreground shadow-2xl ring-1 ring-foreground/10 outline-none sm:max-w-sm",
-            "[transform:translateX(var(--drawer-swipe-movement-x,0px))] transition-transform duration-300 ease-[cubic-bezier(0.32,0.72,0,1)] data-swiping:transition-none data-starting-style:[transform:translateX(calc(-100%-2rem))] data-ending-style:[transform:translateX(calc(-100%-2rem))]",
+            "[transform:translateX(var(--drawer-swipe-movement-x,0px))] transition-transform duration-300 ease-[cubic-bezier(0.32,0.72,0,1)] data-swiping:transition-none data-starting-style:[transform:translateX(calc(100%+2rem))] data-ending-style:[transform:translateX(calc(100%+2rem))]",
             className
           )}
           {...props}

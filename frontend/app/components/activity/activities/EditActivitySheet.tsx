@@ -119,7 +119,7 @@ export default function EditActivitySheet({
     };
 
     return (
-        <Drawer open={open} onOpenChange={handleOpenChange} disablePointerDismissal>
+        <Drawer open={open} onOpenChange={handleOpenChange}>
             <DrawerContent className="flex w-full flex-col sm:max-w-lg">
                 <DrawerHeader className="border-b pr-12">
                     <div className="flex items-start gap-3">

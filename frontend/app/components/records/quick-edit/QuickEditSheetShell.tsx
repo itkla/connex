@@ -54,7 +54,7 @@ export function QuickEditSheetShell({
     children,
 }: QuickEditSheetShellProps) {
     return (
-        <Drawer open={open} onOpenChange={onOpenChange} disablePointerDismissal>
+        <Drawer open={open} onOpenChange={onOpenChange}>
             <DrawerContent className="flex w-full flex-col gap-0 sm:max-w-lg">
                 <DrawerHeader className="border-b pr-12">
                     <div className="flex items-center gap-3">
