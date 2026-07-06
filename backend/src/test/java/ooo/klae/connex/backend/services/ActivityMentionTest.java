@@ -3,13 +3,17 @@ package ooo.klae.connex.backend.services;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.context.SecurityContextHolder;
 
 import ooo.klae.connex.backend.beans.Activity;
+import ooo.klae.connex.backend.beans.Note;
 import ooo.klae.connex.backend.beans.Notification;
 import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.beans.User;
@@ -18,6 +22,7 @@ import ooo.klae.connex.backend.mappers.NotificationMapper;
 class ActivityMentionTest extends AbstractServiceTest {
 
     @Autowired ActivityService activityService;
+    @Autowired NoteService noteService;
     @Autowired ReferenceService referenceService;
     @Autowired NotificationMapper notificationMapper;
     @Autowired PersonService personService;
@@ -151,5 +156,36 @@ class ActivityMentionTest extends AbstractServiceTest {
             .get(0);
         assertEquals(mentioned.getId(), reference.getRefId());
         assertEquals("user", reference.getRefType());
+    }
+
+    /**
+     * A private note linked inside an activity's notes does not leak its
+     * label/existence to a non-author: on read the reference is dropped and the
+     * inline token is masked to "(private note)".
+     */
+    @Test
+    void privateNoteInActivityNotes_isRedactedForNonAuthor() {
+        Note draftNote = new Note();
+        draftNote.setContent("secret acquisition plan");
+        draftNote.setVisibility("private");
+        Note privateNote = noteService.create(draftNote);
+
+        Activity activity = activityService.create(
+            draft("Discussed [Secret Plan](note:" + privateNote.getId() + ") on the call"));
+
+        Activity asAuthor = activityService.getActivityById(activity.getId());
+        assertTrue(asAuthor.getReferences().stream()
+            .anyMatch(r -> "note".equals(r.getRefType()) && r.getRefId() == privateNote.getId()));
+        assertTrue(asAuthor.getNotes().contains("note:" + privateNote.getId()));
+
+        User other = newUser();
+        SecurityContextHolder.getContext().setAuthentication(
+            new UsernamePasswordAuthenticationToken(other, null, other.getAuthorities()));
+
+        Activity asOther = activityService.getActivityById(activity.getId());
+        assertTrue(asOther.getReferences().stream().noneMatch(r -> "note".equals(r.getRefType())));
+        assertFalse(asOther.getNotes().contains("Secret Plan"));
+        assertFalse(asOther.getNotes().contains("note:" + privateNote.getId()));
+        assertTrue(asOther.getNotes().contains("(private note)"));
     }
 }

@@ -166,9 +166,7 @@ public class ActivityService {
     }
 
     private Activity hydrate(int workspaceId, Activity activity) {
-        activity.setReferences(
-            referenceService.referencesFor(workspaceId, ReferenceService.SOURCE_ACTIVITY, activity.getId()));
-        return activity;
+        return referenceService.hydrateActivities(workspaceId, List.of(activity)).get(0);
     }
 
     private void notifyMentions(int workspaceId, Activity activity, List<Integer> recipientIds, User actor) {

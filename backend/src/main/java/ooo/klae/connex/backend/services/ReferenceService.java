@@ -6,6 +6,8 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.BiConsumer;
+import java.util.function.Function;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -194,6 +196,8 @@ public class ReferenceService {
         for (Task task : tasks) {
             task.setReferences(bySource.getOrDefault(task.getId(), List.of()));
         }
+        redactInvisibleNoteTargets(workspaceId, tasks,
+            Task::getReferences, Task::setReferences, Task::getDescription, Task::setDescription);
         return tasks;
     }
 
@@ -215,6 +219,8 @@ public class ReferenceService {
         for (Activity activity : activities) {
             activity.setReferences(bySource.getOrDefault(activity.getId(), List.of()));
         }
+        redactInvisibleNoteTargets(workspaceId, activities,
+            Activity::getReferences, Activity::setReferences, Activity::getNotes, Activity::setNotes);
         return activities;
     }
 
@@ -287,17 +293,47 @@ public class ReferenceService {
      * leaks through a more-visible source note's stored references or content.
      */
     private void redactInvisibleNoteReferences(int workspaceId, List<Note> notes) {
+        redactInvisibleNoteTargets(workspaceId, notes,
+            Note::getReferences, Note::setReferences, Note::getContent, Note::setContent);
+    }
+
+    /**
+     * Generic note-target redaction shared by every source type (note, task,
+     * activity). For each source item it collects the note ids referenced by its
+     * stored references and inline {@code note:} tokens, resolves which of those
+     * notes the current reader may see, then drops the invisible references and
+     * masks their content tokens to {@code (private note)}. A no-op (and no query)
+     * when no note is referenced. Accessors are passed functionally so the same
+     * logic covers each bean's differing reference/content fields.
+     *
+     * @param workspaceId   the owning workspace
+     * @param items         the source items to redact in place
+     * @param getReferences reads an item's resolved references
+     * @param setReferences writes an item's filtered references
+     * @param getContent    reads an item's stored content
+     * @param setContent    writes an item's masked content
+     * @param <T>           the source bean type
+     */
+    private <T> void redactInvisibleNoteTargets(
+            int workspaceId,
+            List<T> items,
+            Function<T, List<EntityReference>> getReferences,
+            BiConsumer<T, List<EntityReference>> setReferences,
+            Function<T, String> getContent,
+            BiConsumer<T, String> setContent) {
         Set<Integer> targetNoteIds = new HashSet<>();
-        for (Note note : notes) {
-            if (note.getReferences() != null) {
-                for (EntityReference reference : note.getReferences()) {
+        for (T item : items) {
+            List<EntityReference> references = getReferences.apply(item);
+            if (references != null) {
+                for (EntityReference reference : references) {
                     if (TYPE_NOTE.equals(reference.getRefType())) {
                         targetNoteIds.add(reference.getRefId());
                     }
                 }
             }
-            if (note.getContent() != null) {
-                Matcher matcher = NOTE_TOKEN.matcher(note.getContent());
+            String content = getContent.apply(item);
+            if (content != null) {
+                Matcher matcher = NOTE_TOKEN.matcher(content);
                 while (matcher.find()) {
                     targetNoteIds.add(Integer.parseInt(matcher.group(2)));
                 }
@@ -309,14 +345,15 @@ public class ReferenceService {
         int currentUserId = workspaceService.getCurrentUserId();
         Set<Integer> visible = new HashSet<>(
             noteMapper.getVisibleNoteIdsIn(workspaceId, new ArrayList<>(targetNoteIds), currentUserId));
-        for (Note note : notes) {
-            if (note.getReferences() != null) {
-                note.setReferences(note.getReferences().stream()
+        for (T item : items) {
+            List<EntityReference> references = getReferences.apply(item);
+            if (references != null) {
+                setReferences.accept(item, references.stream()
                     .filter(reference -> !TYPE_NOTE.equals(reference.getRefType())
                         || visible.contains(reference.getRefId()))
                     .toList());
             }
-            note.setContent(redactNoteTokens(note.getContent(), visible));
+            setContent.accept(item, redactNoteTokens(getContent.apply(item), visible));
         }
     }
 
@@ -354,7 +391,10 @@ public class ReferenceService {
 
     /**
      * Renders prose content for plain-text contexts (e.g. notification snippets)
-     * by replacing each {@code [Label](type:id)} token with {@code @Label}.
+     * by replacing each {@code [Label](type:id)} token with {@code @Label}. Note
+     * targets are masked to a neutral placeholder instead, since a snippet carries
+     * no reader context: emitting a note's label here would leak a private note's
+     * title to a mentioned member who cannot see it.
      *
      * @param content the raw content
      * @return the content with reference tokens flattened to their labels
@@ -363,6 +403,9 @@ public class ReferenceService {
         if (content == null) {
             return "";
         }
-        return TOKEN.matcher(content).replaceAll(match -> "@" + Matcher.quoteReplacement(match.group(1)));
+        return TOKEN.matcher(content).replaceAll(match ->
+            TYPE_NOTE.equals(match.group(2))
+                ? "a note"
+                : "@" + Matcher.quoteReplacement(match.group(1)));
     }
 }

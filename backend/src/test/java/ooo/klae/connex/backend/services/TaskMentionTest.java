@@ -3,12 +3,16 @@ package ooo.klae.connex.backend.services;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.context.SecurityContextHolder;
 
+import ooo.klae.connex.backend.beans.Note;
 import ooo.klae.connex.backend.beans.Notification;
 import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.beans.Task;
@@ -18,6 +22,7 @@ import ooo.klae.connex.backend.mappers.NotificationMapper;
 class TaskMentionTest extends AbstractServiceTest {
 
     @Autowired TaskService taskService;
+    @Autowired NoteService noteService;
     @Autowired ReferenceService referenceService;
     @Autowired NotificationMapper notificationMapper;
     @Autowired PersonService personService;
@@ -187,5 +192,74 @@ class TaskMentionTest extends AbstractServiceTest {
             .findFirst()
             .orElseThrow();
         assertEquals(mentioned.getId(), withRefs.getReferences().get(0).getRefId());
+    }
+
+    /**
+     * A private note linked inside a task's description does not leak its
+     * label/existence to a non-author: on read the reference is dropped and the
+     * inline token is masked to "(private note)".
+     */
+    @Test
+    void privateNoteInTaskDescription_isRedactedForNonAuthor() {
+        Note draftNote = new Note();
+        draftNote.setContent("secret acquisition plan");
+        draftNote.setVisibility("private");
+        Note privateNote = noteService.create(draftNote);
+
+        Task task = taskService.create(
+            draft("Prep for [Secret Plan](note:" + privateNote.getId() + ") review"));
+
+        Task asAuthor = taskService.getTaskById(task.getId());
+        assertTrue(asAuthor.getReferences().stream()
+            .anyMatch(r -> "note".equals(r.getRefType()) && r.getRefId() == privateNote.getId()));
+        assertTrue(asAuthor.getDescription().contains("note:" + privateNote.getId()));
+
+        User other = newUser();
+        SecurityContextHolder.getContext().setAuthentication(
+            new UsernamePasswordAuthenticationToken(other, null, other.getAuthorities()));
+
+        Task asOther = taskService.getTaskById(task.getId());
+        assertTrue(asOther.getReferences().stream().noneMatch(r -> "note".equals(r.getRefType())));
+        assertFalse(asOther.getDescription().contains("Secret Plan"));
+        assertFalse(asOther.getDescription().contains("note:" + privateNote.getId()));
+        assertTrue(asOther.getDescription().contains("(private note)"));
+    }
+
+    /**
+     * Rescheduling a task returns it hydrated (references populated), so the read
+     * path that only changes the due date still routes through the redacting
+     * hydrate rather than a raw mapper bean.
+     */
+    @Test
+    void reschedule_hydratesReferences() {
+        User mentioned = newUser();
+        Task task = taskService.create(draft(mention("Mentioned", mentioned)));
+
+        Task rescheduled = taskService.reschedule(task.getId(), "2025-01-15");
+
+        assertNotNull(rescheduled.getReferences());
+        assertTrue(rescheduled.getReferences().stream()
+            .anyMatch(r -> "user".equals(r.getRefType()) && r.getRefId() == mentioned.getId()));
+    }
+
+    /**
+     * A mention notification's snippet never carries a referenced note's label:
+     * a note token in the source content is masked, so a private note's title
+     * cannot leak to a mentioned member through the notification.
+     */
+    @Test
+    void mentionNotification_doesNotLeakReferencedNoteLabel() {
+        Note draftNote = new Note();
+        draftNote.setContent("secret acquisition plan");
+        draftNote.setVisibility("private");
+        Note privateNote = noteService.create(draftNote);
+
+        User mentioned = newUser();
+        taskService.create(draft(
+            mention("Mentioned", mentioned) + " see [Q3 Secret](note:" + privateNote.getId() + ")"));
+
+        Notification notification = mentions(mentioned.getId()).get(0);
+        assertFalse(notification.getSourceLabel().contains("Q3 Secret"));
+        assertTrue(notification.getSourceLabel().contains("a note"));
     }
 }
