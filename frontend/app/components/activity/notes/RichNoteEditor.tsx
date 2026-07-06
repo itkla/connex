@@ -11,6 +11,8 @@ import { Markdown } from "tiptap-markdown";
 import { useTranslations } from "next-intl";
 import { Mention, encodeMentions, restoreMentions } from "./editor/Mention";
 import { EditorToolbar } from "./editor/EditorToolbar";
+import { SlashCommand } from "./editor/SlashCommand";
+import { buildSlashCommands } from "./editor/slashCommands";
 
 function readMarkdown(editor: Editor): string {
     const storage = editor.storage as { markdown?: { getMarkdown?: () => string } };
@@ -64,6 +66,7 @@ export default function RichNoteEditor({
                 transformCopiedText: true,
             }),
             Mention.configure({ excludeUserId }),
+            SlashCommand.configure({ commands: buildSlashCommands(t) }),
         ],
         editorProps: {
             attributes: {
