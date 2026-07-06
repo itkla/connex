@@ -4,7 +4,7 @@ import { Node, mergeAttributes } from "@tiptap/core";
 import { NodeViewContent, NodeViewWrapper, ReactNodeViewRenderer } from "@tiptap/react";
 import type { NodeViewProps } from "@tiptap/react";
 import type { Node as PMNode } from "@tiptap/pm/model";
-import { CircleAlert, Info, OctagonAlert, TriangleAlert, type LucideIcon } from "lucide-react";
+import { CircleCheck, Info, OctagonAlert, TriangleAlert, type LucideIcon } from "lucide-react";
 import type { MarkdownSerializeState } from "./markdownSerialize";
 
 export const CALLOUT_VARIANTS = ["info", "success", "warn", "danger"] as const;
@@ -12,7 +12,7 @@ export type CalloutVariant = (typeof CALLOUT_VARIANTS)[number];
 
 const VARIANT_ICON: Record<CalloutVariant, LucideIcon> = {
     info: Info,
-    success: CircleAlert,
+    success: CircleCheck,
     warn: TriangleAlert,
     danger: OctagonAlert,
 };

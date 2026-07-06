@@ -14,6 +14,7 @@ function collapseTokens(value: string): string {
  */
 export function noteSnippet(content: string, max = 180): string {
     const plain = collapseTokens(content)
+        .replace(/^[ \t]*>?[ \t]*\[!\w+\][ \t]*$/gm, " ")
         .replace(/```[\s\S]*?```/g, " ")
         .replace(/`([^`]*)`/g, "$1")
         .replace(/^\s{0,3}#{1,6}\s+/gm, "")
@@ -36,8 +37,8 @@ export function deriveNoteTitle(note: Pick<Note, "title" | "content">, fallback 
     if (explicit) return explicit;
     const firstLine = note.content
         .split("\n")
-        .map((line) => line.replace(/^\s{0,3}#{1,6}\s+/, "").trim())
-        .find((line) => line.length > 0);
+        .map((line) => line.replace(/^\s*>\s?/, "").replace(/^\s{0,3}#{1,6}\s+/, "").trim())
+        .find((line) => line.length > 0 && !/^\[!\w+\]$/.test(line));
     if (!firstLine) return fallback;
     const plain = collapseTokens(firstLine);
     return plain.length > 120 ? `${plain.slice(0, 120).trimEnd()}…` : plain;

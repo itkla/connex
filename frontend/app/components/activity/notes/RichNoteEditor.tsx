@@ -120,7 +120,7 @@ export default function RichNoteEditor({
             {editable ? <EditorToolbar editor={editor} labels={labels} /> : null}
             {editable && editor ? (
                 <DragHandle editor={editor} className="note-drag-handle">
-                    <span className="note-drag-handle-grip" title={t("dragHandleAria")}>
+                    <span className="note-drag-handle-grip" title={t("dragHandleAria")} aria-hidden="true">
                         <GripVertical className="size-4" />
                     </span>
                 </DragHandle>

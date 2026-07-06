@@ -263,7 +263,7 @@
     @apply my-3 flex gap-2.5 rounded-xl px-3.5 py-2.5 ring-1 ring-inset;
   }
   .note-prose :where(.note-callout-icon) {
-    @apply mt-px flex size-6 shrink-0 items-center justify-center rounded-md transition-transform focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 active:scale-90 disabled:pointer-events-none;
+    @apply mt-px flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-md transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 hover:ring-1 hover:ring-inset hover:ring-foreground/15 active:scale-90 disabled:cursor-default disabled:pointer-events-none;
   }
   .note-prose :where(.note-callout-body) {
     @apply min-w-0 flex-1;
