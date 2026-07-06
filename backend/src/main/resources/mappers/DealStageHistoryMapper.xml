@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="ooo.klae.connex.backend.mappers.DealStageHistoryMapper">
+
+  <resultMap id="DealStageHistoryResult" type="DealStageHistory">
+    <id     property="id"          column="id"/>
+    <result property="workspaceId" column="workspace_id"/>
+    <result property="dealId"      column="deal_id"/>
+    <result property="stageId"     column="stage_id"/>
+    <result property="stageName"   column="stage_name"/>
+    <result property="achievedAt"  column="achieved_at"/>
+  </resultMap>
+
+  <insert id="insert" useGeneratedKeys="true" keyProperty="id">
+    INSERT INTO deal_stage_history (workspace_id, deal_id, stage_id, stage_name, achieved_at)
+    VALUES (#{workspaceId}, #{dealId}, #{stageId}, #{stageName}, #{achievedAt})
+  </insert>
+
+  <select id="getByDealId" resultMap="DealStageHistoryResult">
+    SELECT id, workspace_id, deal_id, stage_id, stage_name, achieved_at
+    FROM deal_stage_history
+    WHERE workspace_id = #{workspaceId} AND deal_id = #{dealId} AND stage_id IS NOT NULL
+    ORDER BY achieved_at ASC, id ASC
+  </select>
+</mapper>

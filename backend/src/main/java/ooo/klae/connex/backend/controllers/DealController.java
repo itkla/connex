@@ -28,6 +28,7 @@ import ooo.klae.connex.backend.dto.DealMoveRequest;
 import ooo.klae.connex.backend.dto.DealOwnerDto;
 import ooo.klae.connex.backend.dto.DealRescheduleRequest;
 import ooo.klae.connex.backend.dto.DealRiskDto;
+import ooo.klae.connex.backend.dto.DealStageHistoryDto;
 import ooo.klae.connex.backend.dto.DealSummaryDto;
 import ooo.klae.connex.backend.dto.NoteDto;
 import ooo.klae.connex.backend.dto.TagDto;
@@ -115,6 +116,16 @@ public class DealController {
     @GetMapping("/{id}/summary")
     public DealSummaryDto getDealSummary(@PathVariable int id) {
         return dealService.getDealSummary(id);
+    }
+
+    /**
+     * GET endpoint returning when the deal reached each stage, earliest first.
+     * @param id the deal to read history for
+     * @return the deal's stage-achievement log
+     */
+    @GetMapping("/{id}/stage-history")
+    public List<DealStageHistoryDto> getStageHistory(@PathVariable int id) {
+        return dealService.getStageHistory(id).stream().map(DealStageHistoryDto::from).toList();
     }
 
     /**

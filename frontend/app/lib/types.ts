@@ -647,6 +647,13 @@ export type Pipeline = {
     updatedAt: string;
 };
 
+/** One record of a deal reaching a stage. Append-only, so a re-entered stage has multiple entries. */
+export type DealStageHistory = {
+    id: number;
+    stageId: number;
+    achievedAt: string;
+};
+
 export type CreatePipelinePayload = {
     name?: string;
     stages?: { name: string; success?: boolean; failure?: boolean }[];

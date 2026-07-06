@@ -104,7 +104,8 @@
     "closed": "Closed",
     "expectedClose": "Expected close",
     "closedReasonWonTitle": "Why this deal was won",
-    "closedReasonLostTitle": "Why this deal was lost"
+    "closedReasonLostTitle": "Why this deal was lost",
+    "achievedOn": "Reached on {date}"
   },
   "DealsTaskList": {
     "taskDeleted": "Task deleted",

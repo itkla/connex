@@ -20,6 +20,7 @@ import ooo.klae.connex.backend.beans.Activity;
 import ooo.klae.connex.backend.beans.Company;
 import ooo.klae.connex.backend.beans.Deal;
 import ooo.klae.connex.backend.beans.DealPerson;
+import ooo.klae.connex.backend.beans.DealStageHistory;
 import ooo.klae.connex.backend.beans.Note;
 import ooo.klae.connex.backend.beans.Notification;
 import ooo.klae.connex.backend.beans.Person;
@@ -73,6 +74,7 @@ public class DealService {
     private final UserMapper userMapper;
     private final NotificationDelivery notificationDelivery;
     private final NotificationPreferenceService notificationPreferenceService;
+    private final DealStageHistoryService dealStageHistoryService;
     private final ObjectMapper objectMapper;
 
     private static final DateTimeFormatter MYSQL_DATETIME = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
@@ -258,6 +260,19 @@ public class DealService {
     }
 
     /**
+     * When the deal reached each stage, earliest first. Readable by any member who can see the deal.
+     * @param id the deal to read history for
+     * @return the deal's stage-achievement log
+     */
+    public List<DealStageHistory> getStageHistory(int id) {
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        if (dealMapper.getDealById(workspaceId, id) == null) {
+            throw new ResourceNotFoundException("Deal not found with id: " + id);
+        }
+        return dealStageHistoryService.getHistory(id);
+    }
+
+    /**
      * Name-resolved projection of a deal for hover previews / inline references:
      * stage, pipeline, company, and owner are hydrated to display names.
      *
@@ -310,6 +325,9 @@ public class DealService {
             deal.setPosition(dealMapper.nextDealPosition(workspaceId, deal.getStageId()));
         }
         dealMapper.insert(deal);
+        if (deal.getStageId() != null) {
+            dealStageHistoryService.record(workspaceId, deal.getId(), deal.getStageId());
+        }
         auditService.record("deal.create", "deal", deal.getId(), deal.getName(),
             "Created deal " + deal.getName(),
             auditService.diff(null, deal, AUDIT_FIELDS));
@@ -342,6 +360,9 @@ public class DealService {
             : before.getPosition());
         reconcileCloseState(deal);
         dealMapper.update(deal);
+        if (stageChanged) {
+            dealStageHistoryService.record(workspaceId, id, newStage);
+        }
         auditService.record("deal.update", "deal", id, deal.getName(),
             "Updated deal " + deal.getName(),
             auditService.diff(before, deal, AUDIT_FIELDS));
@@ -444,6 +465,9 @@ public class DealService {
         }
         reconcileCloseState(deal);
         dealMapper.update(deal);
+        if (terminal) {
+            dealStageHistoryService.record(workspaceId, id, deal.getStageId());
+        }
         auditService.record("deal.reopen", "deal", id, deal.getName(),
             "Reopened deal " + deal.getName(),
             auditService.diff(before, deal, AUDIT_FIELDS));
@@ -815,6 +839,9 @@ public class DealService {
         deal.setPosition(index);
         reconcileCloseState(deal);
         dealMapper.update(deal);
+        if (stageChanged) {
+            dealStageHistoryService.record(workspaceId, dealId, stageId);
+        }
         for (int i = 0; i < target.size(); i++) {
             int id = target.get(i);
             if (id != dealId) dealMapper.setPosition(workspaceId, id, i);

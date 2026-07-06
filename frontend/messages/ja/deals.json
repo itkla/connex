@@ -104,7 +104,8 @@
     "closed": "決着日",
     "expectedClose": "決着予定日",
     "closedReasonWonTitle": "成約に至った理由",
-    "closedReasonLostTitle": "失注に至った理由"
+    "closedReasonLostTitle": "失注に至った理由",
+    "achievedOn": "{date} に到達"
   },
   "DealsTaskList": {
     "taskDeleted": "タスクを削除しました",

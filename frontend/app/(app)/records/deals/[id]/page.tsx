@@ -21,6 +21,7 @@ import {
     getDealCollaborators,
     getDealPeople,
     getDealRisk,
+    getDealStageHistory,
     getDeals,
     getNotesForDeal,
     getPipelines,
@@ -34,6 +35,7 @@ import {
     type Company,
     type Contact,
     type Deal,
+    type DealStageHistory,
     type Note,
     type Pipeline,
     type Stage,
@@ -80,7 +82,7 @@ export default async function DealPage({ params }: { params: { id: number } }) {
     const t = await getTranslations('DealsPage');
     const locale = await getLocale();
 
-    const [deal, currentUser, activities, notes, tasks, tags, peopleRaw, allPipelines, allCompanies, allPersons, allDeals, allUsers, attachments, notificationPage, collaborators, customFields, risk] =
+    const [deal, currentUser, activities, notes, tasks, tags, peopleRaw, allPipelines, allCompanies, allPersons, allDeals, allUsers, attachments, notificationPage, collaborators, customFields, risk, stageHistory] =
         await Promise.all([
             getDealById(id, init).catch(() => null),
             getCurrentUserFromCookie(cookie),
@@ -99,6 +101,7 @@ export default async function DealPage({ params }: { params: { id: number } }) {
             getDealCollaborators(id, init).catch(() => [] as User[]),
             getEntityCustomFieldsFromCookie("deal", id, cookie),
             getDealRisk(id, init).catch(() => null),
+            getDealStageHistory(id, init).catch(() => [] as DealStageHistory[]),
         ]);
 
     if (!deal) notFound();
@@ -262,6 +265,7 @@ export default async function DealPage({ params }: { params: { id: number } }) {
                             closedAt={deal.closedAt}
                             closedReason={deal.closedReason}
                             references={deal.references}
+                            stageHistory={stageHistory}
                         />
                     </section>
                 </Rise>
