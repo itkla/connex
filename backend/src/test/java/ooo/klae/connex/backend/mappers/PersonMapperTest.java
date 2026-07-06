@@ -58,6 +58,34 @@ class PersonMapperTest extends AbstractMapperTest {
     }
 
     /**
+     * The evaluation opt-out update is partial (a null flag stays unchanged) and workspace-scoped.
+     */
+    @Test
+    void updateEvaluationExclusions_isPartialAndWorkspaceScoped() {
+        Person person = newPerson(newCompany());
+        Person initial = personMapper.getPersonById(workspace.getId(), person.getId());
+        assertFalse(initial.isRiskExcluded());
+        assertFalse(initial.isIntroExcluded());
+
+        assertEquals(1, personMapper.updateEvaluationExclusions(workspace.getId(), person.getId(), true, null));
+        Person updated = personMapper.getPersonById(workspace.getId(), person.getId());
+        assertTrue(updated.isRiskExcluded());
+        assertFalse(updated.isIntroExcluded());
+
+        assertEquals(1, personMapper.updateEvaluationExclusions(workspace.getId(), person.getId(), null, true));
+        updated = personMapper.getPersonById(workspace.getId(), person.getId());
+        assertTrue(updated.isRiskExcluded());
+        assertTrue(updated.isIntroExcluded());
+
+        Workspace other = new Workspace();
+        other.setName("Other Workspace");
+        other.setSlug("other-" + unique());
+        workspaceMapper.insert(other);
+        assertEquals(0, personMapper.updateEvaluationExclusions(other.getId(), person.getId(), false, false));
+        assertTrue(personMapper.getPersonById(workspace.getId(), person.getId()).isRiskExcluded());
+    }
+
+    /**
      * Gets all persons and checks if the returned list includes the inserted person.
      */
     @Test

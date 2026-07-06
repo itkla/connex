@@ -3,6 +3,7 @@ package ooo.klae.connex.backend.mappers;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -269,5 +270,26 @@ class DealMapperTest extends AbstractMapperTest {
         assertNull(dealMapper.getDealById(other.getId(), deal.getId()));
         assertEquals(0, dealMapper.delete(other.getId(), deal.getId()));
         assertNotNull(dealMapper.getDealById(workspace.getId(), deal.getId()));
+    }
+
+    /**
+     * The risk-evaluation opt-out toggle round-trips and is workspace-scoped.
+     */
+    @Test
+    void updateRiskExcluded_togglesFlagAndIsWorkspaceScoped() {
+        Pipeline pipeline = newPipeline();
+        Stage stage = newStage(pipeline, 0);
+        Deal deal = newDeal(pipeline, stage, newCompany());
+        assertFalse(dealMapper.getDealById(workspace.getId(), deal.getId()).isRiskExcluded());
+
+        assertEquals(1, dealMapper.updateRiskExcluded(workspace.getId(), deal.getId(), true));
+        assertTrue(dealMapper.getDealById(workspace.getId(), deal.getId()).isRiskExcluded());
+
+        Workspace other = new Workspace();
+        other.setName("Other Workspace");
+        other.setSlug("other-" + unique());
+        workspaceMapper.insert(other);
+        assertEquals(0, dealMapper.updateRiskExcluded(other.getId(), deal.getId(), false));
+        assertTrue(dealMapper.getDealById(workspace.getId(), deal.getId()).isRiskExcluded());
     }
 }
