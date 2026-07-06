@@ -352,7 +352,14 @@
     "slashQuoteHint": "Capture a quote",
     "slashCodeHint": "Formatted code snippet",
     "slashDivider": "Divider",
-    "slashDividerHint": "Visual separator"
+    "slashDividerHint": "Visual separator",
+    "slashCallout": "Callout",
+    "slashCalloutHint": "Highlighted note box",
+    "slashToggle": "Toggle",
+    "slashToggleHint": "Collapsible section",
+    "calloutCycleAria": "Change callout style",
+    "toggleExpand": "Expand",
+    "toggleCollapse": "Collapse"
   },
   "ActivityTaskDetail": {
     "back": "Back to tasks",

@@ -1,8 +1,10 @@
 import type { Editor, Range } from "@tiptap/core";
 import {
+    ChevronRight,
     Heading1,
     Heading2,
     Heading3,
+    Info,
     List,
     ListOrdered,
     ListTodo,
@@ -119,6 +121,41 @@ export function buildSlashCommands(t: Translate): SlashCommandItem[] {
             icon: Minus,
             run: (editor, range) =>
                 editor.chain().focus().deleteRange(range).setHorizontalRule().run(),
+        },
+        {
+            id: "callout",
+            title: t("slashCallout"),
+            subtitle: t("slashCalloutHint"),
+            keywords: ["callout", "note", "info", "highlight", "aside", "warning"],
+            icon: Info,
+            run: (editor, range) =>
+                editor
+                    .chain()
+                    .focus()
+                    .deleteRange(range)
+                    .insertContent({
+                        type: "callout",
+                        attrs: { variant: "info" },
+                        content: [{ type: "paragraph" }],
+                    })
+                    .run(),
+        },
+        {
+            id: "toggle",
+            title: t("slashToggle"),
+            subtitle: t("slashToggleHint"),
+            keywords: ["toggle", "collapse", "details", "accordion", "expand", "fold"],
+            icon: ChevronRight,
+            run: (editor, range) =>
+                editor
+                    .chain()
+                    .focus()
+                    .deleteRange(range)
+                    .insertContent({
+                        type: "toggle",
+                        content: [{ type: "toggleSummary" }, { type: "paragraph" }],
+                    })
+                    .run(),
         },
     ];
 }

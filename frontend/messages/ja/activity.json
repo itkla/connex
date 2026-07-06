@@ -352,7 +352,14 @@
     "slashQuoteHint": "引用を挿入",
     "slashCodeHint": "整形済みコード",
     "slashDivider": "区切り線",
-    "slashDividerHint": "視覚的な区切り"
+    "slashDividerHint": "視覚的な区切り",
+    "slashCallout": "コールアウト",
+    "slashCalloutHint": "強調表示のボックス",
+    "slashToggle": "トグル",
+    "slashToggleHint": "折りたたみ可能なセクション",
+    "calloutCycleAria": "コールアウトのスタイルを変更",
+    "toggleExpand": "展開",
+    "toggleCollapse": "折りたたむ"
   },
   "ActivityTaskDetail": {
     "back": "タスクに戻る",

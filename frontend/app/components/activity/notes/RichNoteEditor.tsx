@@ -13,6 +13,8 @@ import { Mention, encodeMentions, restoreMentions } from "./editor/Mention";
 import { EditorToolbar } from "./editor/EditorToolbar";
 import { SlashCommand } from "./editor/SlashCommand";
 import { buildSlashCommands } from "./editor/slashCommands";
+import { Callout } from "./editor/Callout";
+import { Toggle, ToggleSummary } from "./editor/Toggle";
 
 function readMarkdown(editor: Editor): string {
     const storage = editor.storage as { markdown?: { getMarkdown?: () => string } };
@@ -66,6 +68,9 @@ export default function RichNoteEditor({
                 transformCopiedText: true,
             }),
             Mention.configure({ excludeUserId }),
+            Callout.configure({ cycleLabel: t("calloutCycleAria") }),
+            ToggleSummary,
+            Toggle.configure({ expandLabel: t("toggleExpand"), collapseLabel: t("toggleCollapse") }),
             SlashCommand.configure({ commands: buildSlashCommands(t) }),
         ],
         editorProps: {
