@@ -30,6 +30,7 @@ import ooo.klae.connex.backend.dto.PersonEmploymentDto;
 import ooo.klae.connex.backend.dto.PersonFacets;
 import ooo.klae.connex.backend.dto.PersonDetailDto;
 import ooo.klae.connex.backend.dto.PersonDto;
+import ooo.klae.connex.backend.dto.PersonEvaluationDto;
 import ooo.klae.connex.backend.dto.TagDto;
 import ooo.klae.connex.backend.dto.TaskDto;
 import ooo.klae.connex.backend.services.BulkOperationService;
@@ -187,6 +188,18 @@ public class PersonController {
     @PutMapping("/{id}")
     public PersonDto updatePerson(@PathVariable int id, @Valid @RequestBody PersonDto dto) {
         return PersonDto.from(personService.update(id, dto.toBean()));
+    }
+
+    /**
+     * PUT endpoint to set the contact's engine-evaluation opt-outs (issue #358).
+     * @param id
+     * @param dto
+     * @return the updated contact
+     */
+    @PutMapping("/{id}/evaluation")
+    public PersonDto updateEvaluation(@PathVariable int id, @Valid @RequestBody PersonEvaluationDto dto) {
+        return PersonDto.from(
+            personService.updateEvaluationExclusions(id, dto.getRiskExcluded(), dto.getIntroExcluded()));
     }
 
     /**

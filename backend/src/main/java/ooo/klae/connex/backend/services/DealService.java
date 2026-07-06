@@ -877,6 +877,25 @@ public class DealService {
         return dealMapper.getDealById(workspaceId, dealId);
     }
 
+    /**
+     * Sets the deal's risk-evaluation opt-out (issue #358): an excluded deal is skipped by the
+     * deal-risk engine and its existing deal.risk notifications resolve on the next scheduled
+     * sweep. Plain close-date reminders are unaffected.
+     */
+    @Transactional
+    @RequirePermission(Permission.DEAL_UPDATE)
+    public Deal updateRiskExcluded(int dealId, boolean riskExcluded) {
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        Deal deal = dealMapper.getDealById(workspaceId, dealId);
+        if (deal == null) throw new ResourceNotFoundException("Deal not found with id: " + dealId);
+        dealMapper.updateRiskExcluded(workspaceId, dealId, riskExcluded);
+        auditService.record("deal.updateEvaluation", "deal", dealId, deal.getName(),
+            (riskExcluded ? "Excluded " + deal.getName() + " from" : "Included " + deal.getName() + " in")
+                + " risk evaluation",
+            auditService.singleChange("riskExcluded", deal.isRiskExcluded(), riskExcluded));
+        return dealMapper.getDealById(workspaceId, dealId);
+    }
+
     public List<User> getCollaborators(int dealId) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         if (dealMapper.getDealById(workspaceId, dealId) == null) {

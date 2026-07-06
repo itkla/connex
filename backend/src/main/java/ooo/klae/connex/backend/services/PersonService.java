@@ -17,6 +17,7 @@ import ooo.klae.connex.backend.beans.PersonEmployment;
 import ooo.klae.connex.backend.beans.Tag;
 import ooo.klae.connex.backend.beans.Task;
 import ooo.klae.connex.backend.dto.CustomFieldEntryDto;
+import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.tenant.Permission;
 import ooo.klae.connex.backend.tenant.RequirePermission;
@@ -54,6 +55,8 @@ public class PersonService {
 
     private static final Set<String> AUDIT_FIELDS =
         Set.of("name", "email", "phone", "title", "imageUrl");
+
+    private static final Set<String> EVALUATION_AUDIT_FIELDS = Set.of("riskExcluded", "introExcluded");
 
     /** Sort key that orders the contacts page by relationship temperature (computed in Java). */
     private static final String WARMTH_SORT = "warmth";
@@ -197,6 +200,30 @@ public class PersonService {
             auditService.diff(before, person, AUDIT_FIELDS));
         ruleTriggers.publish(workspaceId, "person", id, "person.updated");
         return person;
+    }
+
+    /**
+     * Sets the contact's engine-evaluation opt-outs (issue #358). {@code riskExcluded} removes the
+     * contact from relationship-decay nudges and from contributing a stakeholder-cold factor to
+     * deal risk; {@code introExcluded} removes them from introduction suggestions and
+     * intro-opportunity nudges. A {@code null} flag is left unchanged. Warmth display and plain
+     * date reminders are unaffected, and existing engine notifications about the contact resolve
+     * on the next scheduled sweep.
+     */
+    @Transactional
+    @RequirePermission(Permission.PERSON_UPDATE)
+    public Person updateEvaluationExclusions(int id, Boolean riskExcluded, Boolean introExcluded) {
+        if (riskExcluded == null && introExcluded == null) {
+            throw new BadRequestException("At least one evaluation flag must be provided");
+        }
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        Person before = requirePerson(workspaceId, id);
+        personMapper.updateEvaluationExclusions(workspaceId, id, riskExcluded, introExcluded);
+        Person after = requirePerson(workspaceId, id);
+        auditService.record("person.updateEvaluation", "person", id, before.getName(),
+            "Updated engine evaluation opt-outs for " + before.getName(),
+            auditService.diff(before, after, EVALUATION_AUDIT_FIELDS));
+        return after;
     }
 
     /** Resolved company id for a person, treating an absent or zero-id company as {@code null}. */
