@@ -259,6 +259,72 @@
   .note-prose :where(.ProseMirror-selectednode) {
     @apply rounded ring-2 ring-brand/40;
   }
+  .note-prose :where(.note-callout) {
+    @apply my-3 flex gap-2.5 rounded-xl px-3.5 py-2.5 ring-1 ring-inset;
+  }
+  .note-prose :where(.note-callout-icon) {
+    @apply mt-px flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-md transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 hover:ring-1 hover:ring-inset hover:ring-foreground/15 active:scale-90 disabled:cursor-default disabled:pointer-events-none;
+  }
+  .note-prose :where(.note-callout-body) {
+    @apply min-w-0 flex-1;
+  }
+  .note-prose :where(.note-callout-body > :first-child) {
+    @apply mt-0;
+  }
+  .note-prose :where(.note-callout-body > :last-child) {
+    @apply mb-0;
+  }
+  .note-prose :where(.note-callout[data-callout="info"]) {
+    @apply bg-sky-50 ring-sky-600/15 dark:bg-sky-950/30 dark:ring-sky-400/15;
+  }
+  .note-prose :where(.note-callout[data-callout="info"] .note-callout-icon) {
+    @apply bg-sky-500/15 text-sky-600 dark:text-sky-300;
+  }
+  .note-prose :where(.note-callout[data-callout="success"]) {
+    @apply bg-emerald-50 ring-emerald-600/15 dark:bg-emerald-950/30 dark:ring-emerald-400/15;
+  }
+  .note-prose :where(.note-callout[data-callout="success"] .note-callout-icon) {
+    @apply bg-emerald-500/15 text-emerald-600 dark:text-emerald-300;
+  }
+  .note-prose :where(.note-callout[data-callout="warn"]) {
+    @apply bg-amber-50 ring-amber-600/15 dark:bg-amber-950/30 dark:ring-amber-400/15;
+  }
+  .note-prose :where(.note-callout[data-callout="warn"] .note-callout-icon) {
+    @apply bg-amber-500/15 text-amber-600 dark:text-amber-300;
+  }
+  .note-prose :where(.note-callout[data-callout="danger"]) {
+    @apply bg-rose-50 ring-rose-600/15 dark:bg-rose-950/30 dark:ring-rose-400/15;
+  }
+  .note-prose :where(.note-callout[data-callout="danger"] .note-callout-icon) {
+    @apply bg-rose-500/15 text-rose-600 dark:text-rose-300;
+  }
+  .note-prose :where(.note-toggle) {
+    @apply relative my-2 pl-6;
+  }
+  .note-prose :where(.note-toggle-chevron) {
+    @apply absolute top-1 left-0 flex size-5 items-center justify-center rounded text-muted-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 hover:bg-accent hover:text-foreground;
+  }
+  .note-prose :where(.note-toggle-chevron svg) {
+    @apply transition-transform duration-150;
+  }
+  .note-prose :where(.note-toggle[data-open="true"] .note-toggle-chevron svg) {
+    @apply rotate-90;
+  }
+  .note-prose :where(.note-toggle-summary) {
+    @apply font-medium text-foreground;
+  }
+  .note-prose :where(.note-toggle-content > :first-child) {
+    @apply mt-0;
+  }
+  .note-prose :where(.note-toggle[data-open="false"] .note-toggle-content > :not(.note-toggle-summary)) {
+    @apply hidden;
+  }
+  .note-drag-handle {
+    @apply z-20 flex items-center;
+  }
+  .note-drag-handle-grip {
+    @apply flex size-6 cursor-grab items-center justify-center rounded-md text-muted-foreground/50 transition-colors hover:bg-accent hover:text-foreground active:cursor-grabbing;
+  }
 
   .font-display {
     font-family: var(--font-instrument-serif), var(--font-noto-sans-jp), Georgia, "Times New Roman", serif;

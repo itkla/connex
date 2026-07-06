@@ -20,6 +20,7 @@
     "@simplewebauthn/browser": "^13.3.0",
     "@stomp/stompjs": "^7.3.0",
     "@tiptap/core": "3.27.1",
+    "@tiptap/extension-drag-handle-react": "3.27.1",
     "@tiptap/extension-placeholder": "3.27.1",
     "@tiptap/extension-task-item": "3.27.1",
     "@tiptap/extension-task-list": "3.27.1",

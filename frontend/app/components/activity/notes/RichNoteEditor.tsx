@@ -11,6 +11,12 @@ import { Markdown } from "tiptap-markdown";
 import { useTranslations } from "next-intl";
 import { Mention, encodeMentions, restoreMentions } from "./editor/Mention";
 import { EditorToolbar } from "./editor/EditorToolbar";
+import { SlashCommand } from "./editor/SlashCommand";
+import { buildSlashCommands } from "./editor/slashCommands";
+import { Callout } from "./editor/Callout";
+import { Toggle, ToggleSummary } from "./editor/Toggle";
+import { DragHandle } from "@tiptap/extension-drag-handle-react";
+import { GripVertical } from "lucide-react";
 
 function readMarkdown(editor: Editor): string {
     const storage = editor.storage as { markdown?: { getMarkdown?: () => string } };
@@ -64,6 +70,10 @@ export default function RichNoteEditor({
                 transformCopiedText: true,
             }),
             Mention.configure({ excludeUserId }),
+            Callout.configure({ cycleLabel: t("calloutCycleAria") }),
+            ToggleSummary,
+            Toggle.configure({ expandLabel: t("toggleExpand"), collapseLabel: t("toggleCollapse") }),
+            SlashCommand.configure({ commands: buildSlashCommands(t) }),
         ],
         editorProps: {
             attributes: {
@@ -108,6 +118,13 @@ export default function RichNoteEditor({
     return (
         <div className={className}>
             {editable ? <EditorToolbar editor={editor} labels={labels} /> : null}
+            {editable && editor ? (
+                <DragHandle editor={editor} className="note-drag-handle">
+                    <span className="note-drag-handle-grip" title={t("dragHandleAria")} aria-hidden="true">
+                        <GripVertical className="size-4" />
+                    </span>
+                </DragHandle>
+            ) : null}
             <EditorContent editor={editor} />
         </div>
     );
