@@ -14,6 +14,7 @@ import {
     TrashIcon,
     EllipsisHorizontalIcon,
     InboxStackIcon,
+    ClockIcon,
 } from '@heroicons/react/24/outline';
 import { PlusIcon } from '@heroicons/react/24/solid';
 
@@ -77,6 +78,11 @@ function startOfDayKey(ts: number): number {
     const d = new Date(ts);
     d.setHours(0, 0, 0, 0);
     return d.getTime();
+}
+
+function isPlanned(a: Activity, now: number): boolean {
+    const ts = activityTime(a);
+    return ts !== -Infinity && startOfDayKey(ts) > startOfDayKey(now);
 }
 
 function bumpOption(map: Map<string, { label: string; count: number }>, key: string, label: string) {
@@ -247,7 +253,16 @@ export default function ActivitiesBrowser({ activities, persons, deals, users, c
                 const diffDays = Math.round((today - dayKey) / DAY_MS);
                 if (diffDays === 0) label = t('groupToday');
                 else if (diffDays === 1) label = t('groupYesterday');
-                else label = new Intl.DateTimeFormat(locale, { weekday: 'long', month: 'long', day: 'numeric' }).format(new Date(dayKey));
+                else if (diffDays === -1) label = t('groupTomorrow');
+                else {
+                    const sameYear = new Date(dayKey).getFullYear() === new Date(now).getFullYear();
+                    label = new Intl.DateTimeFormat(locale, {
+                        weekday: 'long',
+                        month: 'long',
+                        day: 'numeric',
+                        ...(sameYear ? {} : { year: 'numeric' }),
+                    }).format(new Date(dayKey));
+                }
             }
             if (!map.has(id)) map.set(id, { id, label, sortKey, items: [] });
             map.get(id)!.items.push(a);
@@ -457,6 +472,8 @@ export default function ActivitiesBrowser({ activities, persons, deals, users, c
                                                     creator={userById.get(activity.createdById)}
                                                     time={formatTime(activity)}
                                                     typeLabel={t(`type${normalizeType(activity.type)}` as 'typeCall')}
+                                                    planned={isPlanned(activity, now)}
+                                                    plannedLabel={t('planned')}
                                                     onOpen={() => setEditing(activity)}
                                                     onEdit={() => setEditing(activity)}
                                                     onDelete={() => setDeleting(activity)}
@@ -604,6 +621,8 @@ type TimelineRowProps = {
     deal?: Deal;
     creator?: User;
     time: string;
+    planned: boolean;
+    plannedLabel: string;
     onOpen: () => void;
     onEdit: () => void;
     onDelete: () => void;
@@ -622,6 +641,8 @@ function TimelineRow({
     deal,
     creator,
     time,
+    planned,
+    plannedLabel,
     onOpen,
     onEdit,
     onDelete,
@@ -652,7 +673,11 @@ function TimelineRow({
                     }}
                 />
                 <span
-                    className={cn('relative z-10 mt-0.5 flex size-8 items-center justify-center rounded-full ring-1 ring-inset', meta.chip)}
+                    className={cn(
+                        'relative z-10 mt-0.5 flex size-8 items-center justify-center rounded-full ring-1 ring-inset',
+                        meta.chip,
+                        planned && 'outline-1 outline-dashed outline-offset-2 outline-muted-foreground/40',
+                    )}
                     aria-hidden
                 >
                     <Icon className="size-4" />
@@ -667,7 +692,15 @@ function TimelineRow({
                 <div className="flex items-start gap-2">
                     <div className="min-w-0 flex-1">
                         <p className="truncate text-sm font-medium text-foreground">{activity.subject}</p>
-                        <p className="mt-0.5 text-xs text-muted-foreground">{typeLabel}</p>
+                        <div className="mt-0.5 flex items-center gap-1.5">
+                            <span className="text-xs text-muted-foreground">{typeLabel}</span>
+                            {planned && (
+                                <span className="inline-flex items-center gap-1 rounded-full border border-dashed border-muted-foreground/40 px-1.5 py-px text-[10px] font-medium text-muted-foreground">
+                                    <ClockIcon className="size-3 shrink-0" aria-hidden />
+                                    {plannedLabel}
+                                </span>
+                            )}
+                        </div>
                     </div>
                     <div className="flex shrink-0 items-center gap-0.5">
                         <span className="text-xs tabular-nums text-muted-foreground">{time}</span>
