@@ -278,7 +278,7 @@ public class TaskService {
             "Rescheduled task " + after.getDescription(),
             auditService.singleChange("dueDate", before.getDueDate(), dueDate));
         notificationChanges.publish(workspaceId, "task", id);
-        return after;
+        return hydrate(workspaceId, after);
     }
 
     private void validateReferences(Task task, int workspaceId) {

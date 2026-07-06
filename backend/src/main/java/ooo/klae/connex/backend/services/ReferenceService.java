@@ -391,7 +391,10 @@ public class ReferenceService {
 
     /**
      * Renders prose content for plain-text contexts (e.g. notification snippets)
-     * by replacing each {@code [Label](type:id)} token with {@code @Label}.
+     * by replacing each {@code [Label](type:id)} token with {@code @Label}. Note
+     * targets are masked to a neutral placeholder instead, since a snippet carries
+     * no reader context: emitting a note's label here would leak a private note's
+     * title to a mentioned member who cannot see it.
      *
      * @param content the raw content
      * @return the content with reference tokens flattened to their labels
@@ -400,6 +403,9 @@ public class ReferenceService {
         if (content == null) {
             return "";
         }
-        return TOKEN.matcher(content).replaceAll(match -> "@" + Matcher.quoteReplacement(match.group(1)));
+        return TOKEN.matcher(content).replaceAll(match ->
+            TYPE_NOTE.equals(match.group(2))
+                ? "a note"
+                : "@" + Matcher.quoteReplacement(match.group(1)));
     }
 }

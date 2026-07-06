@@ -224,4 +224,42 @@ class TaskMentionTest extends AbstractServiceTest {
         assertFalse(asOther.getDescription().contains("note:" + privateNote.getId()));
         assertTrue(asOther.getDescription().contains("(private note)"));
     }
+
+    /**
+     * Rescheduling a task returns it hydrated (references populated), so the read
+     * path that only changes the due date still routes through the redacting
+     * hydrate rather than a raw mapper bean.
+     */
+    @Test
+    void reschedule_hydratesReferences() {
+        User mentioned = newUser();
+        Task task = taskService.create(draft(mention("Mentioned", mentioned)));
+
+        Task rescheduled = taskService.reschedule(task.getId(), "2025-01-15");
+
+        assertNotNull(rescheduled.getReferences());
+        assertTrue(rescheduled.getReferences().stream()
+            .anyMatch(r -> "user".equals(r.getRefType()) && r.getRefId() == mentioned.getId()));
+    }
+
+    /**
+     * A mention notification's snippet never carries a referenced note's label:
+     * a note token in the source content is masked, so a private note's title
+     * cannot leak to a mentioned member through the notification.
+     */
+    @Test
+    void mentionNotification_doesNotLeakReferencedNoteLabel() {
+        Note draftNote = new Note();
+        draftNote.setContent("secret acquisition plan");
+        draftNote.setVisibility("private");
+        Note privateNote = noteService.create(draftNote);
+
+        User mentioned = newUser();
+        taskService.create(draft(
+            mention("Mentioned", mentioned) + " see [Q3 Secret](note:" + privateNote.getId() + ")"));
+
+        Notification notification = mentions(mentioned.getId()).get(0);
+        assertFalse(notification.getSourceLabel().contains("Q3 Secret"));
+        assertTrue(notification.getSourceLabel().contains("a note"));
+    }
 }
