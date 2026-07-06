@@ -319,6 +319,12 @@
   .note-prose :where(.note-toggle[data-open="false"] .note-toggle-content > :not(.note-toggle-summary)) {
     @apply hidden;
   }
+  .note-drag-handle {
+    @apply z-20 flex items-center;
+  }
+  .note-drag-handle-grip {
+    @apply flex size-6 cursor-grab items-center justify-center rounded-md text-muted-foreground/50 transition-colors hover:bg-accent hover:text-foreground active:cursor-grabbing;
+  }
 
   .font-display {
     font-family: var(--font-instrument-serif), var(--font-noto-sans-jp), Georgia, "Times New Roman", serif;

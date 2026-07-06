@@ -359,7 +359,8 @@
     "slashToggleHint": "折りたたみ可能なセクション",
     "calloutCycleAria": "コールアウトのスタイルを変更",
     "toggleExpand": "展開",
-    "toggleCollapse": "折りたたむ"
+    "toggleCollapse": "折りたたむ",
+    "dragHandleAria": "ドラッグして移動"
   },
   "ActivityTaskDetail": {
     "back": "タスクに戻る",

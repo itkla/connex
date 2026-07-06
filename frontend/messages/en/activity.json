@@ -359,7 +359,8 @@
     "slashToggleHint": "Collapsible section",
     "calloutCycleAria": "Change callout style",
     "toggleExpand": "Expand",
-    "toggleCollapse": "Collapse"
+    "toggleCollapse": "Collapse",
+    "dragHandleAria": "Drag to move"
   },
   "ActivityTaskDetail": {
     "back": "Back to tasks",

@@ -15,6 +15,8 @@ import { SlashCommand } from "./editor/SlashCommand";
 import { buildSlashCommands } from "./editor/slashCommands";
 import { Callout } from "./editor/Callout";
 import { Toggle, ToggleSummary } from "./editor/Toggle";
+import { DragHandle } from "@tiptap/extension-drag-handle-react";
+import { GripVertical } from "lucide-react";
 
 function readMarkdown(editor: Editor): string {
     const storage = editor.storage as { markdown?: { getMarkdown?: () => string } };
@@ -116,6 +118,13 @@ export default function RichNoteEditor({
     return (
         <div className={className}>
             {editable ? <EditorToolbar editor={editor} labels={labels} /> : null}
+            {editable && editor ? (
+                <DragHandle editor={editor} className="note-drag-handle">
+                    <span className="note-drag-handle-grip" title={t("dragHandleAria")}>
+                        <GripVertical className="size-4" />
+                    </span>
+                </DragHandle>
+            ) : null}
             <EditorContent editor={editor} />
         </div>
     );
