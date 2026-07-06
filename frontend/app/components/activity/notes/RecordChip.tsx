@@ -2,8 +2,10 @@
 
 import Link from "next/link";
 import {
+    BoltIcon,
     BriefcaseIcon,
     BuildingOffice2Icon,
+    CheckCircleIcon,
     DocumentTextIcon,
     PaperClipIcon,
     UserIcon,
@@ -13,7 +15,7 @@ import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/h
 
 import RecordPreview from "./RecordPreview";
 
-type RecordType = "person" | "deal" | "company" | "note" | "file";
+type RecordType = "person" | "deal" | "company" | "note" | "file" | "task" | "activity";
 
 const RECORD: Record<RecordType, { href: (id: number) => string; Icon: typeof UserIcon }> = {
     person: { href: (id) => `/records/contacts/${id}`, Icon: UserIcon },
@@ -21,6 +23,8 @@ const RECORD: Record<RecordType, { href: (id: number) => string; Icon: typeof Us
     company: { href: (id) => `/records/companies/${id}`, Icon: BuildingOffice2Icon },
     note: { href: (id) => `/activity/notes/${id}`, Icon: DocumentTextIcon },
     file: { href: (id) => `/library/files?file=${id}`, Icon: PaperClipIcon },
+    task: { href: (id) => `/activity/tasks/${id}`, Icon: CheckCircleIcon },
+    activity: { href: (id) => `/activity/activities/${id}`, Icon: BoltIcon },
 };
 
 /**

@@ -95,4 +95,10 @@
 
   <delete id="delete">DELETE FROM activity WHERE workspace_id = #{workspaceId} AND id = #{id}</delete>
 
+  <select id="exists" resultType="boolean">
+    SELECT EXISTS(
+      SELECT 1 FROM activity WHERE workspace_id = #{workspaceId} AND id = #{id}
+    )
+  </select>
+
 </mapper>

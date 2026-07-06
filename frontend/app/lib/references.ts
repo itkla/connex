@@ -10,7 +10,7 @@ export type NoteSegment =
     | { kind: "text"; value: string }
     | { kind: "reference"; refType: NoteReferenceType; id: number; label: string };
 
-const TOKEN = /\[([^\]]+)\]\((user|person|deal|company|note|file):(\d+)\)/g;
+const TOKEN = /\[([^\]]+)\]\((user|person|deal|company|note|file|task|activity):(\d+)\)/g;
 
 /**
  * Splits note content into ordered text and reference segments. A token is
@@ -58,5 +58,5 @@ export function parseNoteContent(content: string, references: NoteReference[] = 
  * @returns the content with tokens reduced to their labels
  */
 export function noteContentToPlainText(content: string): string {
-    return content.replace(/\[([^\]]+)\]\((?:user|person|deal|company|note|file):\d+\)/g, (_full, label: string) => `@${label}`);
+    return content.replace(/\[([^\]]+)\]\((?:user|person|deal|company|note|file|task|activity):\d+\)/g, (_full, label: string) => `@${label}`);
 }

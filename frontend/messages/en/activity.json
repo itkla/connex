@@ -341,5 +341,25 @@
     "visibilityWorkspace": "Workspace",
     "visibilityAria": "Note visibility",
     "backlinksTitle": "Referenced by"
+  },
+  "ActivityTaskDetail": {
+    "back": "Back to tasks",
+    "untitled": "Untitled task",
+    "status": "Status",
+    "dueDate": "Due",
+    "noDueDate": "No due date",
+    "assignee": "Assignee",
+    "unassigned": "Unassigned",
+    "contact": "Contact",
+    "deal": "Deal",
+    "created": "Created"
+  },
+  "ActivityActivityDetail": {
+    "back": "Back to activity",
+    "type": "Type",
+    "contact": "Contact",
+    "deal": "Deal",
+    "loggedBy": "Logged by",
+    "when": "When"
   }
 }

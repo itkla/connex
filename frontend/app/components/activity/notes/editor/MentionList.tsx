@@ -2,8 +2,10 @@
 
 import { forwardRef, useEffect, useImperativeHandle, useState } from "react";
 import {
+    BoltIcon,
     BriefcaseIcon,
     BuildingOffice2Icon,
+    CheckCircleIcon,
     DocumentTextIcon,
     PaperClipIcon,
     UserIcon,
@@ -19,6 +21,8 @@ const ICON: Record<MentionType, typeof UserIcon> = {
     company: BuildingOffice2Icon,
     note: DocumentTextIcon,
     file: PaperClipIcon,
+    task: CheckCircleIcon,
+    activity: BoltIcon,
 };
 
 type Props = { items: MentionItem[]; command: (item: MentionItem) => void };
