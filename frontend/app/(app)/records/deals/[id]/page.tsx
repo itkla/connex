@@ -61,6 +61,7 @@ import SummaryTile from '@/app/components/SummaryTile';
 import { EngagementSparkline, type EngagementPoint } from '@/app/components/records/companies/CompanyCard';
 import DealActionsMenu from '@/app/components/records/deals/DealActionsMenu';
 import DealActivityBreakdown from '@/app/components/records/deals/DealActivityBreakdown';
+import EngineEvaluationPanel from '@/app/components/records/EngineEvaluationPanel';
 import DealRiskPanel from '@/app/components/records/deals/DealRiskPanel';
 import DealRiskPill from '@/app/components/records/deals/DealRiskPill';
 import DealLifecycleProgress from '@/app/components/records/deals/DealLifecycleProgress';
@@ -345,6 +346,12 @@ export default async function DealPage({ params }: { params: { id: number } }) {
                                 <InfoRow label={t('updated')} value={formatDateTime(deal.updatedAt, locale)} />
                                 <CustomFieldRows entityType="deal" entityId={deal.id} initialEntries={customFields} />
                             </dl>
+
+                            <EngineEvaluationPanel
+                                kind="deal"
+                                id={deal.id}
+                                riskExcluded={deal.riskExcluded ?? false}
+                            />
 
                             <Attachments
                                 entityType="deal"

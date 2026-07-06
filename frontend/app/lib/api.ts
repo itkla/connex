@@ -1003,6 +1003,10 @@ export function updateContact(id: number, payload: Types.UpdateContactPayload) {
     return putJson<Types.Contact>(`/api/persons/${id}`, payload);
 }
 
+export function updateContactEvaluation(id: number, payload: Types.UpdateContactEvaluationPayload) {
+    return putJson<Types.Contact>(`/api/persons/${id}/evaluation`, payload);
+}
+
 export function deleteContactFromCookie(id: number, cookie: string | null) {
     return safeWithCookie<void>((init) => deleteContact(id, init), cookie);
 }
@@ -1147,6 +1151,10 @@ export function rescheduleDeal(id: number, expectedCloseDate: string) {
 
 export function updateDealOwner(id: number, ownerId: number | null) {
     return putJson<Types.Deal>(`/api/deals/${id}/owner`, { ownerId });
+}
+
+export function updateDealEvaluation(id: number, payload: Types.UpdateDealEvaluationPayload) {
+    return putJson<Types.Deal>(`/api/deals/${id}/evaluation`, payload);
 }
 
 export function getDealCollaborators(id: number, init: RequestInit = {}) {
