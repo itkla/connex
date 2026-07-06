@@ -3,6 +3,7 @@ package ooo.klae.connex.backend.dto;
 import java.util.Arrays;
 
 import com.fasterxml.jackson.annotation.JsonIdentityReference;
+import com.fasterxml.jackson.annotation.JsonProperty;
 
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
@@ -59,6 +60,12 @@ public class PersonDto {
 
     private String imageUrl;
 
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
+    private Boolean riskExcluded;
+
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
+    private Boolean introExcluded;
+
     public static PersonDto from(Person p) {
         if (p == null) return null;
         return populate(new PersonDto(), p);
@@ -82,6 +89,8 @@ public class PersonDto {
         dto.setCreatedAt(p.getCreatedAt());
         dto.setUpdatedAt(p.getUpdatedAt());
         dto.setImageUrl(p.getImageUrl());
+        dto.setRiskExcluded(p.isRiskExcluded());
+        dto.setIntroExcluded(p.isIntroExcluded());
         return dto;
     }
 

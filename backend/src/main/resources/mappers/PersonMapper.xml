@@ -13,6 +13,8 @@
     <result property="createdAt" column="created_at"/>
     <result property="updatedAt" column="updated_at"/>
     <result property="imageUrl" column="image_url"/>
+    <result property="riskExcluded" column="risk_excluded"/>
+    <result property="introExcluded" column="intro_excluded"/>
     <association property="company" javaType="Company" notNullColumn="company_id">
       <id property="id" column="company_id"/>
       <result property="name" column="company_name"/>
@@ -27,7 +29,8 @@
   </resultMap>
 
   <sql id="personColumns">
-    p.id, p.workspace_id, p.name, p.email, p.phone, p.company_id, p.title, p.created_at, p.updated_at, p.image_url
+    p.id, p.workspace_id, p.name, p.email, p.phone, p.company_id, p.title, p.created_at, p.updated_at, p.image_url,
+    p.risk_excluded, p.intro_excluded
   </sql>
 
   <sql id="companyJoinColumns">
@@ -254,6 +257,15 @@
       <if test="title != null">title = #{title},</if>
       company_id = <choose><when test="company != null">#{company.id}</when><otherwise>NULL</otherwise></choose>,
       <if test="imageUrl != null">image_url = #{imageUrl},</if>
+    </set>
+    WHERE workspace_id = #{workspaceId} AND id = #{id}
+  </update>
+
+  <update id="updateEvaluationExclusions">
+    UPDATE person
+    <set>
+      <if test="riskExcluded != null">risk_excluded = #{riskExcluded},</if>
+      <if test="introExcluded != null">intro_excluded = #{introExcluded},</if>
     </set>
     WHERE workspace_id = #{workspaceId} AND id = #{id}
   </update>

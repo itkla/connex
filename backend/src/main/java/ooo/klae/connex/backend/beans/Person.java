@@ -34,6 +34,8 @@ public class Person {
     private String createdAt;
     private String updatedAt;
     private String imageUrl;
+    private boolean riskExcluded;
+    private boolean introExcluded;
 
     public int getId() {
         return id;

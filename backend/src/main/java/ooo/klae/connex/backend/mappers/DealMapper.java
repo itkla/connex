@@ -98,6 +98,12 @@ public interface DealMapper {
         @Param("dealId") int dealId,
         @Param("ownerId") Integer ownerId
     );
+    /** Targeted update of the deal-risk evaluation opt-out. */
+    int updateRiskExcluded(
+        @Param("workspaceId") int workspaceId,
+        @Param("dealId") int dealId,
+        @Param("riskExcluded") boolean riskExcluded
+    );
     List<User> getCollaborators(@Param("workspaceId") int workspaceId, @Param("dealId") int dealId);
     int clearCollaborators(@Param("workspaceId") int workspaceId, @Param("dealId") int dealId);
     int removeCollaborator(
