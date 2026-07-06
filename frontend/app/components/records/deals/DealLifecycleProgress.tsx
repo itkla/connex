@@ -2,9 +2,9 @@ import { Fragment, type CSSProperties } from 'react';
 import { CheckIcon, XMarkIcon, CheckCircleIcon, XCircleIcon } from '@heroicons/react/24/solid';
 import { getLocale, getTranslations } from 'next-intl/server';
 
-import { type Stage, type NoteReference } from '@/app/lib/types';
+import { type Stage, type NoteReference, type DealStageHistory } from '@/app/lib/types';
 import NoteContent from '@/app/components/activity/notes/NoteContent';
-import { formatDate, parseMysqlDateTime, startOfLocalDay } from '@/app/lib/utils';
+import { formatDate, formatShortDate, parseMysqlDateTime, startOfLocalDay } from '@/app/lib/utils';
 import { classifyStage, type DealOutcome } from '@/app/components/records/deals/dealOutcome';
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
 
@@ -21,6 +21,7 @@ export default async function DealLifecycleProgress({
     closedAt,
     closedReason,
     references,
+    stageHistory,
 }: {
     stages: Stage[];
     currentStageId: number | null;
@@ -30,9 +31,19 @@ export default async function DealLifecycleProgress({
     closedAt?: string;
     closedReason?: string;
     references?: NoteReference[];
+    stageHistory?: DealStageHistory[];
 }) {
     const t = await getTranslations('DealsLifecycleProgress');
     const locale = await getLocale();
+
+    const achievedByStage = new Map<number, string>();
+    for (const h of stageHistory ?? []) {
+        const prev = achievedByStage.get(h.stageId);
+        if (prev === undefined || parseMysqlDateTime(h.achievedAt) < parseMysqlDateTime(prev)) {
+            achievedByStage.set(h.stageId, h.achievedAt);
+        }
+    }
+    const hasStageDates = achievedByStage.size > 0;
     const sorted = [...stages].sort((a, b) => a.position - b.position);
     const filtered = sorted.filter((s) => {
         const c = classifyStage(s);
@@ -125,7 +136,7 @@ export default async function DealLifecycleProgress({
     return (
         <div className="overflow-hidden rounded-2xl">
             <div className={`border border-border bg-muted p-4 sm:p-6 ${isClosed && closedReason ? 'rounded-t-2xl border-b-0' : 'rounded-2xl'}`}>
-            <div className="relative h-14 sm:h-16">
+            <div className={`relative ${hasStageDates ? 'h-[4.5rem] sm:h-20' : 'h-14 sm:h-16'}`}>
                 <div
                     aria-hidden="true"
                     className="pointer-events-none absolute inset-x-0 top-4 h-px -translate-y-1/2 bg-border"
@@ -163,6 +174,7 @@ export default async function DealLifecycleProgress({
                     const left = stagePct(i);
                     const isFirst = i === 0 && filtered.length > 1;
                     const isLast = i === filtered.length - 1 && filtered.length > 1;
+                    const achievedAt = achievedByStage.get(stage.id);
 
                     // TODO: move these to a css file so they can be applied elsewhere.
 
@@ -229,6 +241,15 @@ export default async function DealLifecycleProgress({
                             >
                                 {stage.name}
                             </span>
+                            {achievedAt && (isPast || isCurrent || wonAchieved || lostAchieved) ? (
+                                <span
+                                    className={`absolute top-[3.35rem] max-w-[56px] truncate text-[9px] tabular-nums text-muted-foreground sm:top-[3.9rem] sm:max-w-[88px] sm:text-[10px] ${labelAlign}`}
+                                    style={labelStyle}
+                                    title={t('achievedOn', { date: formatDate(achievedAt, locale) })}
+                                >
+                                    {formatShortDate(achievedAt, locale)}
+                                </span>
+                            ) : null}
                         </Fragment>
                     );
                 })}

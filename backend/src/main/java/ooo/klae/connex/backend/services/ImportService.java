@@ -66,6 +66,7 @@ public class ImportService {
     private final TagService tagService;
     private final PipelineMapper pipelineMapper;
     private final EmploymentService employmentService;
+    private final DealStageHistoryService dealStageHistoryService;
     private final CustomFieldDefinitionMapper customFieldDefinitionMapper;
     private final CustomFieldDefinitionService customFieldDefinitionService;
     private final CustomFieldValueService customFieldValueService;
@@ -437,6 +438,9 @@ public class ImportService {
             for (int i = 0; i < beans.size(); i++) {
                 Deal bean = beans.get(i);
                 PlanRow row = toCreate.get(i);
+                if (bean.getStageId() != null) {
+                    dealStageHistoryService.record(workspaceId, bean.getId(), bean.getStageId());
+                }
                 attachDealTags(workspaceId, bean.getId(), row.tagNames, tagByName);
                 linkDealPeople(workspaceId, bean.getId(), row.peopleEmails, personByEmail);
                 applyCustomValues("deal", bean.getId(), row.custom, columnToDef, action, false);
@@ -484,6 +488,7 @@ public class ImportService {
             Map<String, Integer> personByEmail, Map<Integer, String> stageOutcome) {
         Deal existing = dealMapper.getDealById(workspaceId, row.matchedId);
         if (existing == null) return;
+        Integer beforeStageId = existing.getStageId();
         existing.setName(merge(action, existing.getName(), row.std.get("name")));
         existing.setCurrency(merge(action, existing.getCurrency(), row.std.get("currency")));
         existing.setExpectedCloseDate(merge(action, existing.getExpectedCloseDate(), row.std.get("expectedCloseDate")));
@@ -501,6 +506,10 @@ public class ImportService {
         }
         reconcileClose(workspaceId, existing, stageOutcome);
         dealMapper.update(existing);
+        Integer afterStageId = existing.getStageId();
+        if (afterStageId != null && !afterStageId.equals(beforeStageId)) {
+            dealStageHistoryService.record(workspaceId, existing.getId(), afterStageId);
+        }
         attachDealTags(workspaceId, existing.getId(), row.tagNames, tagByName);
         linkDealPeople(workspaceId, existing.getId(), row.peopleEmails, personByEmail);
         applyCustomValues("deal", existing.getId(), row.custom, columnToDef, action, true);

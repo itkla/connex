@@ -1083,6 +1083,11 @@ export function getDealSummary(id: number, init: RequestInit = {}) {
     return getJson<Types.DealSummary>(`/api/deals/${id}/summary`, init);
 }
 
+/** When the deal reached each stage, earliest first. Drives the lifecycle progress timestamps. */
+export function getDealStageHistory(id: number, init: RequestInit = {}) {
+    return getJson<Types.DealStageHistory[]>(`/api/deals/${id}/stage-history`, init);
+}
+
 /** Risk assessment for every at-risk open deal in the active workspace, highest risk first. */
 export function getDealRisks(init: RequestInit = {}) {
     return getJson<Types.DealRisk[]>(`/api/deals/risk`, init);

@@ -62,6 +62,7 @@ public class TenantScopeInterceptor implements Interceptor {
         MAPPERS + "EntityReferenceMapper",
         MAPPERS + "AttachmentMapper",
         MAPPERS + "DealMapper",
+        MAPPERS + "DealStageHistoryMapper",
         MAPPERS + "TaskMapper",
         MAPPERS + "NotificationMapper",
         MAPPERS + "IntroductionMapper",

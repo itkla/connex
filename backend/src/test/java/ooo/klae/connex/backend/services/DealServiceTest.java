@@ -13,6 +13,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import ooo.klae.connex.backend.beans.Activity;
 import ooo.klae.connex.backend.beans.Company;
 import ooo.klae.connex.backend.beans.Deal;
+import ooo.klae.connex.backend.beans.DealStageHistory;
 import ooo.klae.connex.backend.beans.Note;
 import ooo.klae.connex.backend.beans.Pipeline;
 import ooo.klae.connex.backend.beans.Stage;
@@ -191,6 +192,100 @@ class DealServiceTest extends AbstractServiceTest {
         assertEquals(List.of(a.getId(), b.getId(), moved.getId()),
             target.stream().map(Deal::getId).toList());
         assertEquals(List.of(0, 1, 2), target.stream().map(Deal::getPosition).toList());
+    }
+
+    @Test
+    void create_recordsInitialStageHistory() {
+        Pipeline pipeline = newPipeline();
+        Stage stage = newStage(pipeline, 0);
+        Company company = newCompany();
+
+        Deal deal = new Deal();
+        deal.setName("Deal " + unique());
+        deal.setWorkspaceId(workspace.getId());
+        deal.setValue(1000.0);
+        deal.setCurrency("JPY");
+        deal.setPipelineId(pipeline.getId());
+        deal.setStageId(stage.getId());
+        deal.setCompanyId(company.getId());
+        Deal created = dealService.create(deal);
+
+        List<DealStageHistory> history = dealService.getStageHistory(created.getId());
+        assertEquals(1, history.size());
+        assertEquals(stage.getId(), history.get(0).getStageId());
+    }
+
+    @Test
+    void move_acrossStages_recordsStageHistory() {
+        Pipeline pipeline = newPipeline();
+        Stage from = newStage(pipeline, 0);
+        Stage to = newStage(pipeline, 1);
+        Company company = newCompany();
+        Deal deal = newDeal(pipeline, from, company);
+
+        dealService.move(deal.getId(), to.getId(), 0);
+
+        List<DealStageHistory> history = dealService.getStageHistory(deal.getId());
+        assertEquals(1, history.size());
+        assertEquals(to.getId(), history.get(0).getStageId());
+    }
+
+    @Test
+    void move_withinSameStage_doesNotRecordStageHistory() {
+        Pipeline pipeline = newPipeline();
+        Stage stage = newStage(pipeline, 0);
+        Company company = newCompany();
+        Deal a = newDeal(pipeline, stage, company);
+        Deal b = newDeal(pipeline, stage, company);
+
+        dealService.move(b.getId(), stage.getId(), 0);
+
+        assertTrue(dealService.getStageHistory(b.getId()).isEmpty());
+    }
+
+    @Test
+    void update_changingStage_recordsStageHistory() {
+        Pipeline pipeline = newPipeline();
+        Stage from = newStage(pipeline, 0);
+        Stage to = newStage(pipeline, 1);
+        Company company = newCompany();
+        Deal deal = newDeal(pipeline, from, company);
+
+        deal.setStageId(to.getId());
+        dealService.update(deal.getId(), deal);
+
+        List<DealStageHistory> history = dealService.getStageHistory(deal.getId());
+        assertEquals(1, history.size());
+        assertEquals(to.getId(), history.get(0).getStageId());
+    }
+
+    @Test
+    void reopen_fromTerminalStage_recordsReturnStageHistory() {
+        Pipeline pipeline = newPipeline();
+        Stage open = newStage(pipeline, 0);
+        Stage won = new Stage();
+        won.setName("Won " + unique());
+        won.setPipeline(pipeline);
+        won.setPosition(1);
+        won.setWorkspaceId(workspace.getId());
+        won.setSuccess(true);
+        pipelineMapper.insertStage(won);
+        Company company = newCompany();
+        Deal deal = newDeal(pipeline, open, company);
+
+        dealService.move(deal.getId(), won.getId(), 0);
+        dealService.reopen(deal.getId());
+
+        List<DealStageHistory> history = dealService.getStageHistory(deal.getId());
+        assertEquals(2, history.size());
+        assertEquals(won.getId(), history.get(0).getStageId());
+        assertEquals(open.getId(), history.get(1).getStageId());
+        assertEquals(open.getId(), dealService.getDealById(deal.getId()).getStageId());
+    }
+
+    @Test
+    void getStageHistory_throwsWhenDealMissing() {
+        assertThrows(ResourceNotFoundException.class, () -> dealService.getStageHistory(-1));
     }
 
     @Test
