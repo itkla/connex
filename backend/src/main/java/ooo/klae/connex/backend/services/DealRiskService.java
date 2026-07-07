@@ -44,7 +44,10 @@ import ooo.klae.connex.backend.util.DateTimes;
  * warmth per contact, this composes those warmth bands with a deal's own schedule and silence into
  * per-deal risk. Nothing is persisted — every read recomputes from the current data.
  *
- * <p>A deal is assessed only while open ({@code closed_at IS NULL}). Each signal that fires becomes
+ * <p>A deal is assessed only while open ({@code closed_at IS NULL}) and not opted out of risk
+ * evaluation ({@code risk_excluded}, issue #358); an excluded deal reads as {@code none}. A
+ * stakeholder who is opted out likewise contributes no cold-relationship factor, though they still
+ * count as a stakeholder for {@code no_stakeholders}. Each signal that fires becomes
  * a {@link DealRiskFactor}; the overall {@link DealRiskDto#getLevel() level} is the highest severity
  * among them, and a bounded composite {@link DealRiskDto#getScore() score} orders at-risk deals.
  * A deal's "last touch" is the most recent of its activities, notes, tasks, or — as a floor so a
@@ -114,7 +117,9 @@ public class DealRiskService {
     public List<DealRiskDto> assessWorkspace(int workspaceId, Map<Integer, RelationshipTemperatureDto> warmth) {
         Instant now = Instant.now(clock);
         String assessedAt = utc(now);
-        List<Deal> open = dealMapper.getAllDeals(workspaceId).stream().filter(DealRiskService::isOpen).toList();
+        List<Deal> open = dealMapper.getAllDeals(workspaceId).stream()
+            .filter(deal -> isOpen(deal) && !deal.isRiskExcluded())
+            .toList();
         Map<Integer, Long> lastTouch = dealLastTouch(workspaceId, open, now.toEpochMilli());
         Map<Integer, List<DealStakeholder>> stakeholders = stakeholdersByDeal(workspaceId);
 
@@ -131,13 +136,13 @@ public class DealRiskService {
 
     /**
      * Assesses a single deal. Returns a {@code "none"} assessment when the deal does not exist in the
-     * workspace or is already closed.
+     * workspace, is already closed, or is opted out of risk evaluation.
      */
     public DealRiskDto assessDeal(int workspaceId, int dealId) {
         Instant now = Instant.now(clock);
         String assessedAt = utc(now);
         Deal deal = dealMapper.getDealById(workspaceId, dealId);
-        if (deal == null || !isOpen(deal)) {
+        if (deal == null || !isOpen(deal) || deal.isRiskExcluded()) {
             return new DealRiskDto(dealId, NONE, 0, List.of(), assessedAt);
         }
         List<DealStakeholder> dealStakeholders = dealMapper.getDealStakeholdersByDealId(workspaceId, dealId);
@@ -232,10 +237,14 @@ public class DealRiskService {
 
     /**
      * A cooling-stakeholder factor for one deal contact, or {@code null} when the contact is warm
-     * enough not to warrant one. A cold band is sharper than a cooling-but-still-cool band, and a
-     * key role (champion, decision maker, buyer, sponsor) escalates either by one step.
+     * enough not to warrant one or is opted out of risk evaluation. A cold band is sharper than a
+     * cooling-but-still-cool band, and a key role (champion, decision maker, buyer, sponsor)
+     * escalates either by one step.
      */
     private DealRiskFactor stakeholderColdFactor(DealStakeholder person, RelationshipTemperatureDto warmth) {
+        if (person.isRiskExcluded()) {
+            return null;
+        }
         if (warmth == null) {
             return null;
         }

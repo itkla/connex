@@ -40,6 +40,7 @@ public class Deal {
     private String closedAt;
     private String closedReason;
     private Boolean won; // outcome when closed: TRUE=won, FALSE=lost, NULL=open. closed_at follows this.
+    private boolean riskExcluded;
     private String createdAt;
     private String updatedAt;
     private List<EntityReference> references; // @/# references resolved from closedReason

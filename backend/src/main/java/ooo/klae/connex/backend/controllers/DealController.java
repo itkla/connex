@@ -24,6 +24,7 @@ import ooo.klae.connex.backend.dto.CustomFieldValueRequest;
 import ooo.klae.connex.backend.dto.CustomFieldValuesRequest;
 import ooo.klae.connex.backend.dto.DealCollaboratorsDto;
 import ooo.klae.connex.backend.dto.DealDto;
+import ooo.klae.connex.backend.dto.DealEvaluationDto;
 import ooo.klae.connex.backend.dto.DealMoveRequest;
 import ooo.klae.connex.backend.dto.DealOwnerDto;
 import ooo.klae.connex.backend.dto.DealRescheduleRequest;
@@ -331,6 +332,17 @@ public class DealController {
     @PutMapping("/{id}/owner")
     public DealDto updateOwner(@PathVariable int id, @Valid @RequestBody DealOwnerDto dto) {
         return DealDto.from(dealService.updateOwner(id, dto.getOwnerId()));
+    }
+
+    /**
+     * PUT endpoint to set the deal's risk-evaluation opt-out (issue #358).
+     * @param id
+     * @param dto
+     * @return the updated deal
+     */
+    @PutMapping("/{id}/evaluation")
+    public DealDto updateEvaluation(@PathVariable int id, @Valid @RequestBody DealEvaluationDto dto) {
+        return DealDto.from(dealService.updateRiskExcluded(id, dto.getRiskExcluded()));
     }
 
     @GetMapping("/{id}/collaborators")

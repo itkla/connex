@@ -295,6 +295,37 @@ class DealRiskServiceTest extends AbstractServiceTest {
     }
 
     @Test
+    void riskExcludedDealIsSkippedByBothAssessments() {
+        Deal deal = openDeal();
+        closeDateOf(deal, "2126-06-01");
+        dealMapper.updateRiskExcluded(workspace.getId(), deal.getId(), true);
+
+        assertThat(service.assessDeal(workspace.getId(), deal.getId()).getLevel()).isEqualTo("none");
+        assertThat(service.assessWorkspace(workspace.getId()))
+            .noneMatch(risk -> risk.getDealId() == deal.getId());
+
+        dealMapper.updateRiskExcluded(workspace.getId(), deal.getId(), false);
+        assertThat(service.assessDeal(workspace.getId(), deal.getId()).getLevel()).isEqualTo("high");
+    }
+
+    @Test
+    void riskExcludedStakeholderContributesNoColdFactorButStillCountsAsStakeholder() {
+        Deal deal = openDeal();
+        closeDateOf(deal, "2126-12-31");
+        touch(deal, "2126-06-20 10:00:00");
+        Person contact = newPerson(company);
+        dealMapper.addPerson(workspace.getId(), deal.getId(), contact.getId(), "Champion");
+        warmth(contact.getId(), 4, "cold", "steady", 60);
+        personMapper.updateEvaluationExclusions(workspace.getId(), contact.getId(), true, null);
+
+        DealRiskDto risk = service.assessDeal(workspace.getId(), deal.getId());
+
+        assertThat(factor(risk, "stakeholder_cold")).isNull();
+        assertThat(factor(risk, "no_stakeholders")).isNull();
+        assertThat(risk.getLevel()).isEqualTo("none");
+    }
+
+    @Test
     void multipleColdStakeholdersScoreCappedToHighest() {
         Deal deal = openDeal();
         closeDateOf(deal, "2126-12-31");

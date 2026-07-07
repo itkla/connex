@@ -1,4 +1,14 @@
 {
+  "EngineEvaluation": {
+    "title": "インサイト",
+    "contactRiskLabel": "リスク・関係低下シグナル",
+    "contactRiskHint": "この連絡先の関係低下の通知と、商談リスクへの反映",
+    "contactIntroLabel": "紹介の候補",
+    "contactIntroHint": "この連絡先を紹介の候補として提案します",
+    "dealRiskLabel": "リスク評価",
+    "dealRiskHint": "この商談をリスクシグナルの評価対象にします。クローズ日のリマインダーは維持されます",
+    "updateFailed": "設定を更新できませんでした"
+  },
   "SmartSegments": {
     "title": "スマートセグメント",
     "evaluateFailed": "セグメントを評価できませんでした。",

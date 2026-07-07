@@ -17,4 +17,5 @@ public class DealStakeholder {
     private int personId;
     private String personLabel;
     private String role;
+    private boolean riskExcluded;
 }

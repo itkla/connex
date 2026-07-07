@@ -583,6 +583,9 @@ export type Contact = {
     imageUrl: string;
     createdAt: string;
     updatedAt: string;
+    /** Engine-evaluation opt-outs (issue #358); read-only, set via the evaluation endpoint. */
+    riskExcluded?: boolean;
+    introExcluded?: boolean;
 };
 
 export type Deal = {
@@ -605,8 +608,19 @@ export type Deal = {
     references?: NoteReference[];
     /** Outcome when closed: true = won, false = lost, null/undefined = open. closedAt follows this. */
     won?: boolean | null;
+    /** Deal-risk evaluation opt-out (issue #358); read-only, set via the evaluation endpoint. */
+    riskExcluded?: boolean;
     createdAt: string;
     updatedAt: string;
+};
+
+export type UpdateContactEvaluationPayload = {
+    riskExcluded?: boolean;
+    introExcluded?: boolean;
+};
+
+export type UpdateDealEvaluationPayload = {
+    riskExcluded: boolean;
 };
 
 export type CreateDealPayload = {

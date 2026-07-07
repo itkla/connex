@@ -80,6 +80,7 @@
     FROM person p
     LEFT JOIN company c ON c.id = p.company_id
     WHERE p.workspace_id = #{workspaceId}
+      AND p.intro_excluded = FALSE
       AND (
         EXISTS (SELECT 1 FROM activity a WHERE a.workspace_id = #{workspaceId} AND a.person_id = p.id)
         OR EXISTS (SELECT 1 FROM note n WHERE n.workspace_id = #{workspaceId} AND n.person_id = p.id)

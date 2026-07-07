@@ -284,6 +284,36 @@ class NotificationMapperTest extends AbstractMapperTest {
         );
     }
 
+    /**
+     * Evaluation opt-outs (issue #358) gate the engine candidate queries: a risk-excluded person
+     * stops being a relationship-nudge candidate, and a risk-excluded deal stops producing
+     * deal-risk recipients.
+     */
+    @Test
+    void evaluationOptOutsFilterNudgeCandidatesAndOpenDealRecipients() {
+        User owner = newUser();
+        Company company = newCompany();
+        Pipeline pipeline = newPipeline();
+        Stage stage = newStage(pipeline, 0);
+        Deal deal = newDeal(pipeline, stage, company);
+        dealMapper.updateOwner(workspace.getId(), deal.getId(), owner.getId());
+        Person stakeholder = newPerson(company);
+        dealMapper.addPerson(workspace.getId(), deal.getId(), stakeholder.getId(), "champion");
+
+        assertTrue(notificationMapper.findRelationshipNudgeCandidates(workspace.getId()).stream()
+            .anyMatch(candidate -> candidate.getPersonId() == stakeholder.getId()));
+        assertTrue(notificationMapper.findOpenDealRecipients(workspace.getId()).stream()
+            .anyMatch(recipient -> recipient.getDealId() == deal.getId()));
+
+        personMapper.updateEvaluationExclusions(workspace.getId(), stakeholder.getId(), true, null);
+        assertFalse(notificationMapper.findRelationshipNudgeCandidates(workspace.getId()).stream()
+            .anyMatch(candidate -> candidate.getPersonId() == stakeholder.getId()));
+
+        dealMapper.updateRiskExcluded(workspace.getId(), deal.getId(), true);
+        assertFalse(notificationMapper.findOpenDealRecipients(workspace.getId()).stream()
+            .anyMatch(recipient -> recipient.getDealId() == deal.getId()));
+    }
+
     @Test
     void snoozeHidesNotificationUntilWindowPassesAndSurvivesReconcile() {
         User recipient = newUser();

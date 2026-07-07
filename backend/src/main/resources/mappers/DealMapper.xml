@@ -19,6 +19,7 @@
     <result property="closedAt" column="closed_at"/>
     <result property="closedReason" column="closed_reason"/>
     <result property="won" column="won"/>
+    <result property="riskExcluded" column="risk_excluded"/>
     <result property="createdAt" column="created_at"/>
     <result property="updatedAt" column="updated_at"/>
   </resultMap>
@@ -52,17 +53,18 @@
     <result property="personId" column="person_id"/>
     <result property="personLabel" column="person_label"/>
     <result property="role" column="role"/>
+    <result property="riskExcluded" column="person_risk_excluded"/>
   </resultMap>
 
   <sql id="dealColumns">
     id, workspace_id, owner_id, name, value, actual_value, currency, pipeline_id, stage_id, position, company_id,
-    expected_close_date, closed_at, closed_reason, won, created_at, updated_at
+    expected_close_date, closed_at, closed_reason, won, risk_excluded, created_at, updated_at
   </sql>
 
   <sql id="qualifiedDealColumns">
     d.id, d.workspace_id, d.owner_id, d.name, d.value, d.actual_value, d.currency,
     d.pipeline_id, d.stage_id, d.position, d.company_id, d.expected_close_date, d.closed_at,
-    d.closed_reason, d.won, d.created_at, d.updated_at
+    d.closed_reason, d.won, d.risk_excluded, d.created_at, d.updated_at
   </sql>
 
   <select id="getDealPeopleByDealId" resultMap="DealPersonResult">
@@ -80,7 +82,8 @@
     SELECT dp.deal_id AS deal_id,
            p.id AS person_id,
            p.name AS person_label,
-           dp.role AS role
+           dp.role AS role,
+           p.risk_excluded AS person_risk_excluded
     FROM deal_person dp
     JOIN deal d ON d.id = dp.deal_id AND d.workspace_id = #{workspaceId}
     JOIN person p ON p.id = dp.person_id AND p.workspace_id = d.workspace_id
@@ -92,7 +95,8 @@
     SELECT dp.deal_id AS deal_id,
            p.id AS person_id,
            p.name AS person_label,
-           dp.role AS role
+           dp.role AS role,
+           p.risk_excluded AS person_risk_excluded
     FROM deal_person dp
     JOIN deal d ON d.id = dp.deal_id AND d.workspace_id = #{workspaceId}
     JOIN person p ON p.id = dp.person_id AND p.workspace_id = d.workspace_id
@@ -323,6 +327,12 @@
   <update id="updateOwner">
     UPDATE deal
     SET owner_id = #{ownerId,jdbcType=INTEGER}
+    WHERE workspace_id = #{workspaceId} AND id = #{dealId}
+  </update>
+
+  <update id="updateRiskExcluded">
+    UPDATE deal
+    SET risk_excluded = #{riskExcluded}
     WHERE workspace_id = #{workspaceId} AND id = #{dealId}
   </update>
 

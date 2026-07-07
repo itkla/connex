@@ -21,13 +21,17 @@ import InfoRow from "@/app/components/me/InfoRow";
 import Timeline from "@/app/components/me/Timeline";
 import Attachments from "@/app/components/attachments/Attachments";
 import CustomFieldRows from "@/app/components/records/CustomFieldRows";
+import EngineEvaluationPanel from "@/app/components/records/EngineEvaluationPanel";
 import { formatCompactCurrency, formatDate, formatDateTime, formatShortDate } from "@/app/lib/utils";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
 import EntityNotificationBanner from "@/app/components/notifications/EntityNotificationBanner";
 
 export default async function ContactPage({ params }: { params: { id: number } }) {
     const { id } = await params;
-    const cookie = (await cookies()).toString();
+    const cookieStore = await cookies();
+    const cookie = cookieStore.toString();
+    const activeWorkspaceCookie = cookieStore.get("connex_workspace")?.value;
+    const activeWorkspaceId = activeWorkspaceCookie ? Number(activeWorkspaceCookie) : null;
     const init = { headers: { cookie } } as const;
     const t = await getTranslations("ContactsPage");
     const locale = await getLocale();
@@ -58,6 +62,9 @@ export default async function ContactPage({ params }: { params: { id: number } }
     const notes = contact.notes ?? [];
     const deals = contact.deals ?? [];
     const openTasks = tasks.filter((t) => !t.completed).length;
+    const ownsContact = activeWorkspaceId !== null
+        && Number.isFinite(activeWorkspaceId)
+        && contact.workspaceId === activeWorkspaceId;
 
     const interactionUserIds = Array.from(new Set<number>([
         ...activities.map((a) => a.createdById),
@@ -182,6 +189,15 @@ export default async function ContactPage({ params }: { params: { id: number } }
                                 <InfoRow label={t("updated")} value={formatDateTime(contact.updatedAt, locale)} />
                                 <CustomFieldRows entityType="person" entityId={contact.id} initialEntries={customFields} />
                             </dl>
+
+                            {ownsContact ? (
+                                <EngineEvaluationPanel
+                                    kind="contact"
+                                    id={contact.id}
+                                    riskExcluded={contact.riskExcluded ?? false}
+                                    introExcluded={contact.introExcluded ?? false}
+                                />
+                            ) : null}
 
                             {employment.length > 0 && (
                                 <div className="mt-6">

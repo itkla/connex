@@ -1,4 +1,14 @@
 {
+  "EngineEvaluation": {
+    "title": "Insights",
+    "contactRiskLabel": "Risk & cooling signals",
+    "contactRiskHint": "Cooling nudges for this contact, and their warmth counting toward deal risk",
+    "contactIntroLabel": "Intro suggestions",
+    "contactIntroHint": "Offer this contact as an introduction candidate",
+    "dealRiskLabel": "Risk evaluation",
+    "dealRiskHint": "Assess this deal for risk signals and alerts. Close-date reminders stay on",
+    "updateFailed": "Couldn't update the setting"
+  },
   "SmartSegments": {
     "title": "Smart segments",
     "evaluateFailed": "Could not evaluate segments.",
