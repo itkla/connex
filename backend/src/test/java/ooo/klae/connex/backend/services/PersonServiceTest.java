@@ -2,6 +2,7 @@ package ooo.klae.connex.backend.services;
 
 import java.util.List;
 
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -17,11 +18,46 @@ import ooo.klae.connex.backend.beans.Pipeline;
 import ooo.klae.connex.backend.beans.Stage;
 import ooo.klae.connex.backend.beans.Task;
 import ooo.klae.connex.backend.beans.User;
+import ooo.klae.connex.backend.beans.Workspace;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
+import ooo.klae.connex.backend.mappers.ShareMapper;
 
 class PersonServiceTest extends AbstractServiceTest {
 
     @Autowired PersonService personService;
+    @Autowired ShareMapper shareMapper;
+
+    @Test
+    void updateEvaluationExclusions_updatesOwnedContactOnly() {
+        Person person = newPerson(newCompany());
+
+        Person riskUpdated = personService.updateEvaluationExclusions(person.getId(), true, null);
+        assertTrue(riskUpdated.isRiskExcluded());
+        assertFalse(riskUpdated.isIntroExcluded());
+
+        Person introUpdated = personService.updateEvaluationExclusions(person.getId(), null, true);
+        assertTrue(introUpdated.isRiskExcluded());
+        assertTrue(introUpdated.isIntroExcluded());
+
+        Person idempotent = personService.updateEvaluationExclusions(person.getId(), true, true);
+        assertTrue(idempotent.isRiskExcluded());
+        assertTrue(idempotent.isIntroExcluded());
+    }
+
+    @Test
+    void updateEvaluationExclusions_rejectsSharedInContact() {
+        Workspace other = newOtherWorkspace();
+        Person foreign = personInWorkspace(other);
+        shareMapper.sharePerson(foreign.getId(), other.getId(), workspace.getId(), currentUser.getId(), true);
+
+        assertTrue(personMapper.exists(workspace.getId(), foreign.getId()));
+        assertFalse(personMapper.existsOwned(workspace.getId(), foreign.getId()));
+        assertThrows(ResourceNotFoundException.class,
+            () -> personService.updateEvaluationExclusions(foreign.getId(), true, true));
+        Person ownerView = personMapper.getPersonById(other.getId(), foreign.getId());
+        assertFalse(ownerView.isRiskExcluded());
+        assertFalse(ownerView.isIntroExcluded());
+    }
 
     @Test
     void getDealsByPersonId_returnsOnlyDealsLinkedToPerson() {
@@ -99,5 +135,24 @@ class PersonServiceTest extends AbstractServiceTest {
     @Test
     void getTasksByPersonId_throwsWhenPersonMissing() {
         assertThrows(ResourceNotFoundException.class, () -> personService.getTasksByPersonId(-1));
+    }
+
+    private Workspace newOtherWorkspace() {
+        Workspace other = new Workspace();
+        other.setName("Other Workspace");
+        other.setSlug("other-" + unique());
+        workspaceMapper.insert(other);
+        return other;
+    }
+
+    private Person personInWorkspace(Workspace target) {
+        String s = unique();
+        Person person = new Person();
+        person.setName("Foreign " + s);
+        person.setEmail(s + ".foreign@example.com");
+        person.setTitle("Engineer");
+        person.setWorkspaceId(target.getId());
+        personMapper.insert(person);
+        return person;
     }
 }

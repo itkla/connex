@@ -82,13 +82,19 @@ export default function EngineEvaluationPanel(props: PanelProps) {
                     <div key={row.key} className="flex items-center justify-between gap-4 px-6 py-4">
                         <div className="min-w-0">
                             <p className="text-sm font-medium text-foreground">{row.label}</p>
-                            <p className="mt-0.5 text-xs text-muted-foreground">{row.hint}</p>
+                            <p
+                                id={`engine-evaluation-${props.kind}-${props.id}-${row.key}-hint`}
+                                className="mt-0.5 text-xs text-muted-foreground"
+                            >
+                                {row.hint}
+                            </p>
                         </div>
                         <Switch
                             checked={row.checked}
                             disabled={saving}
                             onCheckedChange={(value) => void save(row.key, value)}
                             aria-label={row.label}
+                            aria-describedby={`engine-evaluation-${props.kind}-${props.id}-${row.key}-hint`}
                         />
                     </div>
                 ))}

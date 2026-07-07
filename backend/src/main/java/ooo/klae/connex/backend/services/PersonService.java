@@ -217,9 +217,9 @@ public class PersonService {
             throw new BadRequestException("At least one evaluation flag must be provided");
         }
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        Person before = requirePerson(workspaceId, id);
+        Person before = requireOwnedPerson(workspaceId, id);
         personMapper.updateEvaluationExclusions(workspaceId, id, riskExcluded, introExcluded);
-        Person after = requirePerson(workspaceId, id);
+        Person after = requireOwnedPerson(workspaceId, id);
         auditService.record("person.updateEvaluation", "person", id, before.getName(),
             "Updated engine evaluation opt-outs for " + before.getName(),
             auditService.diff(before, after, EVALUATION_AUDIT_FIELDS));
@@ -391,6 +391,13 @@ public class PersonService {
         Person person = personMapper.getPersonById(workspaceId, personId);
         if (person == null) throw new ResourceNotFoundException("Person not found with id: " + personId);
         return person;
+    }
+
+    private Person requireOwnedPerson(int workspaceId, int personId) {
+        if (!personMapper.existsOwned(workspaceId, personId)) {
+            throw new ResourceNotFoundException("Person not found with id: " + personId);
+        }
+        return requirePerson(workspaceId, personId);
     }
 
     private Person hydrateScopedRelationships(Person person, int workspaceId) {
