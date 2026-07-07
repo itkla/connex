@@ -60,6 +60,18 @@ class PersonServiceTest extends AbstractServiceTest {
     }
 
     @Test
+    void delete_rejectsSharedInContact() {
+        Workspace other = newOtherWorkspace();
+        Person foreign = personInWorkspace(other);
+        shareMapper.sharePerson(foreign.getId(), other.getId(), workspace.getId(), currentUser.getId(), true);
+
+        assertTrue(personMapper.exists(workspace.getId(), foreign.getId()));
+        assertFalse(personMapper.existsOwned(workspace.getId(), foreign.getId()));
+        assertThrows(ResourceNotFoundException.class, () -> personService.delete(foreign.getId()));
+        assertTrue(personMapper.existsOwned(other.getId(), foreign.getId()));
+    }
+
+    @Test
     void getDealsByPersonId_returnsOnlyDealsLinkedToPerson() {
         Pipeline pipeline = newPipeline();
         Stage stage = newStage(pipeline, 0);

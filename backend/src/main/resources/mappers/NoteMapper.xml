@@ -13,12 +13,16 @@
     <result property="updatedAt" column="updated_at"/>
     <association property="author" javaType="User">
       <id property="id" column="author_id"/>
+      <result property="displayName" column="author_display_name"/>
+      <result property="username" column="author_username"/>
     </association>
     <association property="person" javaType="Person">
       <id property="id" column="person_id"/>
+      <result property="name" column="person_name"/>
     </association>
     <association property="deal" javaType="Deal">
       <id property="id" column="deal_id"/>
+      <result property="name" column="deal_name"/>
     </association>
   </resultMap>
 
@@ -28,6 +32,14 @@
 
   <sql id="qualifiedNoteColumns">
     n.id, n.workspace_id, n.content, n.title, n.visibility, n.author_id, n.person_id, n.deal_id, n.created_at, n.updated_at
+  </sql>
+
+  <sql id="searchNoteColumns">
+    <include refid="qualifiedNoteColumns"/>,
+    u.display_name AS author_display_name,
+    u.username AS author_username,
+    p.name AS person_name,
+    d.name AS deal_name
   </sql>
 
   <select id="getAllNotes" resultMap="NoteResult">
@@ -56,7 +68,7 @@
   </select>
 
   <select id="search" resultMap="NoteResult">
-    SELECT <include refid="qualifiedNoteColumns"/>
+    SELECT <include refid="searchNoteColumns"/>
     FROM note n
     LEFT JOIN app_user u ON u.id = n.author_id
     LEFT JOIN person   p ON p.id = n.person_id
@@ -68,7 +80,7 @@
       OR u.username LIKE #{query}
       OR p.name LIKE #{query}
       OR d.name LIKE #{query})
-    ORDER BY n.created_at DESC
+    ORDER BY n.created_at DESC, n.id DESC
     LIMIT 10
   </select>
 
@@ -125,7 +137,7 @@
   </select>
 
   <select id="searchVisible" resultMap="NoteResult">
-    SELECT <include refid="qualifiedNoteColumns"/>
+    SELECT <include refid="searchNoteColumns"/>
     FROM note n
     LEFT JOIN app_user u ON u.id = n.author_id
     LEFT JOIN person   p ON p.id = n.person_id
@@ -138,8 +150,8 @@
       OR u.username LIKE #{query}
       OR p.name LIKE #{query}
       OR d.name LIKE #{query})
-    ORDER BY n.created_at DESC
-    LIMIT 10
+    ORDER BY n.created_at DESC, n.id DESC
+    LIMIT #{limit} OFFSET #{offset}
   </select>
 
   <insert id="insert" useGeneratedKeys="true" keyProperty="id">

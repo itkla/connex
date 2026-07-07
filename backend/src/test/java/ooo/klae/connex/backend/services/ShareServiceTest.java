@@ -12,6 +12,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 
 import ooo.klae.connex.backend.beans.Company;
+import ooo.klae.connex.backend.beans.Note;
 import ooo.klae.connex.backend.beans.Organization;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.beans.Workspace;
@@ -26,6 +27,8 @@ class ShareServiceTest extends AbstractServiceTest {
     @Autowired WorkspaceService workspaceService;
     @Autowired TenantContext tenantContext;
     @Autowired OrganizationMapper organizationMapper;
+    @Autowired NoteService noteService;
+    @Autowired ReferenceService referenceService;
 
     @AfterEach
     void clearContext() {
@@ -85,6 +88,52 @@ class ShareServiceTest extends AbstractServiceTest {
         tenantContext.clear();
 
         assertNull(companyMapper.getCompanyById(b.getId(), company.getId()));
+    }
+
+    @Test
+    void unshareRemovesReferencesInFormerGranteeWorkspace() {
+        WorkspaceMembershipDto a = workspaceService.createWorkspace("Owner refs WS", currentUser.getId());
+        WorkspaceMembershipDto b = createSiblingWorkspace(a, "Grantee refs WS");
+        Company company = companyIn(a.getId());
+
+        tenantContext.set(a.getId(), workspaceService.getOrgId(a.getId()), currentUser.getId(), "owner");
+        shareService.share("company", company.getId(), b.getId(), false);
+        tenantContext.clear();
+
+        tenantContext.set(b.getId(), workspaceService.getOrgId(b.getId()), currentUser.getId(), "owner");
+        Note note = new Note();
+        note.setContent("See [" + company.getName() + "](company:" + company.getId() + ")");
+        note.setVisibility("workspace");
+        Note created = noteService.create(note);
+        assertTrue(referenceService.referencesFor(b.getId(), ReferenceService.SOURCE_NOTE, created.getId()).stream()
+            .anyMatch(reference -> ReferenceService.TYPE_COMPANY.equals(reference.getRefType())
+                && reference.getRefId() == company.getId()));
+        tenantContext.clear();
+
+        tenantContext.set(a.getId(), workspaceService.getOrgId(a.getId()), currentUser.getId(), "owner");
+        shareService.unshare("company", company.getId(), b.getId());
+        tenantContext.clear();
+
+        assertTrue(referenceService.referencesFor(b.getId(), ReferenceService.SOURCE_NOTE, created.getId()).isEmpty());
+    }
+
+    @Test
+    void noOpUnshareDoesNotRemoveReferences() {
+        WorkspaceMembershipDto a = workspaceService.createWorkspace("Owner noop refs WS", currentUser.getId());
+        Company company = companyIn(a.getId());
+
+        tenantContext.set(a.getId(), workspaceService.getOrgId(a.getId()), currentUser.getId(), "owner");
+        Note note = new Note();
+        note.setContent("See [" + company.getName() + "](company:" + company.getId() + ")");
+        note.setVisibility("workspace");
+        Note created = noteService.create(note);
+
+        shareService.unshare("company", company.getId(), a.getId());
+        tenantContext.clear();
+
+        assertTrue(referenceService.referencesFor(a.getId(), ReferenceService.SOURCE_NOTE, created.getId()).stream()
+            .anyMatch(reference -> ReferenceService.TYPE_COMPANY.equals(reference.getRefType())
+                && reference.getRefId() == company.getId()));
     }
 
     @Test

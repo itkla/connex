@@ -42,7 +42,7 @@ type Props = {
 };
 
 type GroupBy = 'record' | 'none';
-type SortBy = 'updated' | 'created' | 'title';
+type SortBy = 'updated' | 'created' | 'title' | 'author';
 type NoteGroup = { id: string; label: string | null; notes: Note[] };
 
 const STANDALONE = '__standalone';
@@ -92,6 +92,14 @@ export default function NotesBrowser({ notes, persons, deals, users }: Props) {
 
     const groups = useMemo<NoteGroup[]>(() => {
         const sorted = [...filtered].sort((a, b) => {
+            if (sortBy === 'author') {
+                const authorA = userById.get(a.author);
+                const authorB = userById.get(b.author);
+                return (authorA?.displayName || authorA?.username || '').localeCompare(
+                    authorB?.displayName || authorB?.username || '',
+                    locale,
+                );
+            }
             if (sortBy === 'title') {
                 return deriveNoteTitle(a).localeCompare(deriveNoteTitle(b), locale);
             }
@@ -130,7 +138,7 @@ export default function NotesBrowser({ notes, persons, deals, users }: Props) {
             const key = sortBy === 'created' ? 'createdAt' : 'updatedAt';
             return (b.notes[0]?.[key] ?? '').localeCompare(a.notes[0]?.[key] ?? '');
         });
-    }, [filtered, groupBy, sortBy, locale, personById, dealById, t]);
+    }, [filtered, groupBy, sortBy, locale, personById, dealById, userById, t]);
 
     const hasActiveFilters = query.trim() !== '' || groupBy !== 'record' || sortBy !== 'updated';
     const chips: FilterChipData[] = query.trim()
@@ -219,6 +227,7 @@ export default function NotesBrowser({ notes, persons, deals, users }: Props) {
                                 { value: 'updated', label: t('sortUpdated') },
                                 { value: 'created', label: t('sortCreated') },
                                 { value: 'title', label: t('sortTitle') },
+                                { value: 'author', label: t('sortAuthor') },
                             ]}
                         />
                     </FilterBar>

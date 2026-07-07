@@ -29,12 +29,29 @@ export type MentionItem = {
     avatarUrl: string | null;
 };
 
+export type MentionLabels = Partial<Record<MentionType | "untitled", string>>;
+
 export const TRIGGER_TYPES: Record<MentionTrigger, readonly MentionType[]> = {
     "@": ["user", "person"],
     "#": ["deal", "company", "note", "file", "task", "activity"],
 };
 
 const MAX_SUGGESTIONS = 8;
+const DEFAULT_LABELS: Record<MentionType | "untitled", string> = {
+    user: "User",
+    person: "Contact",
+    deal: "Deal",
+    company: "Company",
+    note: "Note",
+    file: "File",
+    task: "Task",
+    activity: "Activity",
+    untitled: "Untitled",
+};
+
+function labelFor(labels: MentionLabels | undefined, type: MentionType | "untitled"): string {
+    return labels?.[type] ?? DEFAULT_LABELS[type];
+}
 
 function safeLabel(value: string): string {
     return value.replace(/[[\]]/g, "").replace(/[\r\n]+/g, " ").trim();
@@ -79,58 +96,64 @@ function userItem(user: User): MentionItem {
     };
 }
 
-function personItem(person: Contact): MentionItem {
+function personItem(person: Contact, labels?: MentionLabels): MentionItem {
     return {
         type: "person",
         id: person.id,
         label: safeLabel(person.name),
-        sublabel: person.title || person.company?.name || "Contact",
+        sublabel: person.title || person.company?.name || labelFor(labels, "person"),
         avatarUrl: person.imageUrl || null,
     };
 }
 
-function dealItem(deal: Deal): MentionItem {
-    return { type: "deal", id: deal.id, label: safeLabel(deal.name), sublabel: "Deal", avatarUrl: null };
+function dealItem(deal: Deal, labels?: MentionLabels): MentionItem {
+    return { type: "deal", id: deal.id, label: safeLabel(deal.name), sublabel: labelFor(labels, "deal"), avatarUrl: null };
 }
 
-function companyItem(company: Company): MentionItem {
+function companyItem(company: Company, labels?: MentionLabels): MentionItem {
     return {
         type: "company",
         id: company.id,
         label: safeLabel(company.name),
-        sublabel: company.industry || "Company",
+        sublabel: company.industry || labelFor(labels, "company"),
         avatarUrl: null,
     };
 }
 
-function noteItem(note: Note): MentionItem {
+function noteItem(note: Note, labels?: MentionLabels): MentionItem {
     const title =
-        note.title?.trim() || note.content.split("\n").find((line) => line.trim().length > 0) || "Untitled";
-    return { type: "note", id: note.id, label: safeLabel(title), sublabel: "Note", avatarUrl: null };
+        note.title?.trim() || note.content.split("\n").find((line) => line.trim().length > 0) || labelFor(labels, "untitled");
+    return { type: "note", id: note.id, label: safeLabel(title), sublabel: labelFor(labels, "note"), avatarUrl: null };
 }
 
-function fileItem(file: Attachment): MentionItem {
-    return { type: "file", id: file.id, label: safeLabel(file.fileName), sublabel: "File", avatarUrl: null };
+function fileItem(file: Attachment, labels?: MentionLabels): MentionItem {
+    return { type: "file", id: file.id, label: safeLabel(file.fileName), sublabel: labelFor(labels, "file"), avatarUrl: null };
 }
 
-function taskItem(task: Task): MentionItem {
+function taskItem(task: Task, labels?: MentionLabels): MentionItem {
     return {
         type: "task",
         id: task.id,
-        label: safeLabel(noteSnippet(task.description, 80)) || "Task",
-        sublabel: "Task",
+        label: safeLabel(noteSnippet(task.description, 80)) || labelFor(labels, "task"),
+        sublabel: labelFor(labels, "task"),
         avatarUrl: null,
     };
 }
 
-function activityItem(activity: Activity): MentionItem {
+function activityItem(activity: Activity, labels?: MentionLabels): MentionItem {
     return {
         type: "activity",
         id: activity.id,
-        label: safeLabel(activity.subject) || "Activity",
-        sublabel: "Activity",
+        label: safeLabel(activity.subject) || labelFor(labels, "activity"),
+        sublabel: labelFor(labels, "activity"),
         avatarUrl: null,
     };
+}
+
+function localizeItem(item: MentionItem, labels?: MentionLabels): MentionItem {
+    const fallback = DEFAULT_LABELS[item.type];
+    if (item.sublabel !== fallback) return item;
+    return { ...item, sublabel: labelFor(labels, item.type) };
 }
 
 function membersPool(): Promise<MentionItem[]> {
@@ -148,24 +171,24 @@ function recordsPool(): Promise<MentionItem[]> {
     if (!recordsPromise) {
         recordsPromise = Promise.all([getCompanies(), getDeals()])
             .then(([companies, deals]) => [
-                ...companies.map(companyItem),
-                ...deals.map(dealItem),
+                ...companies.map((company) => companyItem(company)),
+                ...deals.map((deal) => dealItem(deal)),
             ])
             .catch(() => []);
     }
     return recordsPromise;
 }
 
-function fromSearchResults(results: SearchResults): MentionItem[] {
+function fromSearchResults(results: SearchResults, labels?: MentionLabels): MentionItem[] {
     return [
         ...results.users.map(userItem),
-        ...results.people.map(personItem),
-        ...results.deals.map(dealItem),
-        ...results.companies.map(companyItem),
-        ...results.notes.map(noteItem),
-        ...results.attachments.map(fileItem),
-        ...results.tasks.map(taskItem),
-        ...results.activities.map(activityItem),
+        ...results.people.map((person) => personItem(person, labels)),
+        ...results.deals.map((deal) => dealItem(deal, labels)),
+        ...results.companies.map((company) => companyItem(company, labels)),
+        ...results.notes.map((note) => noteItem(note, labels)),
+        ...results.attachments.map((file) => fileItem(file, labels)),
+        ...results.tasks.map((task) => taskItem(task, labels)),
+        ...results.activities.map((activity) => activityItem(activity, labels)),
     ];
 }
 
@@ -182,11 +205,14 @@ export async function queryMentions(
     trigger: MentionTrigger,
     query: string,
     excludeUserId?: number,
+    labels?: MentionLabels,
 ): Promise<MentionItem[]> {
     const allowed = TRIGGER_TYPES[trigger];
     const needle = query.trim().toLowerCase();
     const pool = trigger === "@" ? await membersPool() : await recordsPool();
-    const local = pool.filter((item) => item.type !== "user" || item.id !== excludeUserId);
+    const local = pool
+        .map((item) => localizeItem(item, labels))
+        .filter((item) => item.type !== "user" || item.id !== excludeUserId);
 
     if (!needle) {
         return local.filter((item) => allowed.includes(item.type)).slice(0, MAX_SUGGESTIONS);
@@ -194,7 +220,7 @@ export async function queryMentions(
 
     const results = await globalSearch(query.trim()).catch(() => null);
     if (results) {
-        const remote = fromSearchResults(results).filter(
+        const remote = fromSearchResults(results, labels).filter(
             (item) =>
                 allowed.includes(item.type) &&
                 (item.type !== "user" || item.id !== excludeUserId),

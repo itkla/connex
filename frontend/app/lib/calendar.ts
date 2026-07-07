@@ -216,7 +216,7 @@ export function buildEvents(data: CalendarData): CalendarEvent[] {
             startMs: ms,
             allDay: false,
             dayKey: dayKeyFromMs(ms),
-            href: `/activity/notes?id=${note.id}`,
+            href: `/activity/notes?note=${note.id}`,
             draggable: false,
             raw: note,
         });

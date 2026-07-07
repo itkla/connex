@@ -533,6 +533,7 @@ public class DealService {
         customFieldValueService.deleteByEntity("deal", id);
         dealMapper.delete(workspaceId, id);
         referenceService.deleteReferences(workspaceId, ReferenceService.SOURCE_DEAL, id);
+        referenceService.deleteReferencesTo(workspaceId, ReferenceService.TYPE_DEAL, id);
         auditService.record("deal.delete", "deal", id, before.getName(),
             "Deleted deal " + before.getName(),
             auditService.diff(before, null, AUDIT_FIELDS));

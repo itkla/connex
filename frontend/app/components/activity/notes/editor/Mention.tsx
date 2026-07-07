@@ -10,7 +10,7 @@ import Suggestion from "@tiptap/suggestion";
 import { createSuggestionRenderer } from "./suggestionRenderer";
 import { MentionList } from "./MentionList";
 import { queryMentions } from "./mentionData";
-import type { MentionItem, MentionTrigger, MentionType } from "./mentionData";
+import type { MentionItem, MentionLabels, MentionTrigger, MentionType } from "./mentionData";
 
 const TOKEN = /\[([^\]]+)\]\((user|person|deal|company|note|file|task|activity):(\d+)\)/g;
 const SENTINEL_OPEN = "\uE000";
@@ -21,6 +21,7 @@ export type MentionAttrs = { refType: MentionType; refId: number; label: string 
 
 export interface MentionOptions {
     excludeUserId?: number;
+    labels?: MentionLabels;
 }
 
 function MentionView({ node }: NodeViewProps) {
@@ -42,7 +43,12 @@ function MentionView({ node }: NodeViewProps) {
     );
 }
 
-function mentionSuggestion(editor: Editor, char: MentionTrigger, excludeUserId?: number) {
+function mentionSuggestion(
+    editor: Editor,
+    char: MentionTrigger,
+    excludeUserId?: number,
+    labels?: MentionLabels,
+) {
     return Suggestion<MentionItem>({
         editor,
         char,
@@ -54,7 +60,7 @@ function mentionSuggestion(editor: Editor, char: MentionTrigger, excludeUserId?:
             const before = resolved.parent.textBetween(0, resolved.parentOffset, undefined, " ");
             return before.trim().length > 0;
         },
-        items: ({ query }) => queryMentions(char, query, excludeUserId),
+        items: ({ query }) => queryMentions(char, query, excludeUserId, labels),
         command: ({ editor: instance, range, props }) => {
             instance
                 .chain()
@@ -86,7 +92,7 @@ export const Mention = Node.create<MentionOptions>({
     draggable: false,
 
     addOptions() {
-        return { excludeUserId: undefined };
+        return { excludeUserId: undefined, labels: undefined };
     },
 
     addAttributes() {
@@ -150,8 +156,8 @@ export const Mention = Node.create<MentionOptions>({
 
     addProseMirrorPlugins() {
         return [
-            mentionSuggestion(this.editor, "@", this.options.excludeUserId),
-            mentionSuggestion(this.editor, "#", this.options.excludeUserId),
+            mentionSuggestion(this.editor, "@", this.options.excludeUserId, this.options.labels),
+            mentionSuggestion(this.editor, "#", this.options.excludeUserId, this.options.labels),
         ];
     },
 });

@@ -97,6 +97,9 @@ public class NoteService {
     public List<Note> getNotesReferencing(String refType, int refId) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         int currentUserId = workspaceService.getCurrentUserId();
+        if (!referenceService.isTargetVisible(workspaceId, refType, refId, currentUserId)) {
+            throw new ResourceNotFoundException("Reference target not found");
+        }
         return referenceService.hydrate(workspaceId, noteMapper.getNotesReferencing(workspaceId, refType, refId, currentUserId));
     }
 

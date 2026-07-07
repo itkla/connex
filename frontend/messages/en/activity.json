@@ -99,6 +99,7 @@
     "sortUpdated": "Last updated",
     "sortCreated": "Date created",
     "sortTitle": "Title",
+    "sortAuthor": "Author",
     "standalone": "Standalone",
     "untitled": "Untitled",
     "open": "Open",
@@ -133,6 +134,7 @@
     "titleCreate": "New note",
     "titleEdit": "Edit note",
     "description": "Capture a thought, follow-up, or context. Link it to a person or deal so everyone can see it.",
+    "titleLabel": "Title",
     "contentLabel": "Content",
     "contentPlaceholder": "What's on your mind?",
     "personLabel": "Contact",
@@ -141,6 +143,7 @@
     "dealLabel": "Deal",
     "dealPlaceholder": "Link a deal",
     "noDealFound": "No deal found.",
+    "visibilityLabel": "Visibility",
     "cancel": "Cancel",
     "create": "Create",
     "save": "Save",
@@ -320,7 +323,7 @@
     "toastFailedSave": "Failed to save tag"
   },
   "ActivityNotesEditor": {
-    "placeholder": "Start writing… @ to mention people, # to link records.",
+    "placeholder": "Start writing… @ to mention people, # to link records, notes, files, tasks, or activities.",
     "bold": "Bold",
     "italic": "Italic",
     "strike": "Strikethrough",
@@ -362,7 +365,14 @@
     "calloutCycleAria": "Change callout style",
     "toggleExpand": "Expand",
     "toggleCollapse": "Collapse",
-    "dragHandleAria": "Drag to move"
+    "dragHandleAria": "Drag to move",
+    "mentionContact": "Contact",
+    "mentionDeal": "Deal",
+    "mentionCompany": "Company",
+    "mentionNote": "Note",
+    "mentionFile": "File",
+    "mentionTask": "Task",
+    "mentionActivity": "Activity"
   },
   "ActivityTaskDetail": {
     "back": "Back to tasks",

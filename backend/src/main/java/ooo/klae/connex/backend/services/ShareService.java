@@ -3,6 +3,7 @@ package ooo.klae.connex.backend.services;
 import java.util.List;
 
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.dto.ShareDto;
@@ -28,6 +29,7 @@ public class ShareService {
     private final WorkspaceService workspaceService;
     private final AuthService authService;
     private final AuditService auditService;
+    private final ReferenceService referenceService;
 
     public List<ShareDto> listShares(String typeRaw, int entityId) {
         Type type = parseType(typeRaw);
@@ -67,15 +69,25 @@ public class ShareService {
                 "Shared with workspace " + targetWorkspaceId, null);
     }
 
+    @Transactional
     public void unshare(String typeRaw, int entityId, int targetWorkspaceId) {
         Type type = parseType(typeRaw);
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         int actorId = authService.getCurrentUser().getId();
         workspaceService.requirePermission(workspaceId, actorId, Permission.SHARE_MANAGE);
         requireOwned(type, workspaceId, entityId);
+        if (!shareExists(type, entityId, workspaceId, targetWorkspaceId)) {
+            return;
+        }
         switch (type) {
-            case COMPANY -> shareMapper.unshareCompany(entityId, workspaceId, targetWorkspaceId);
-            case PERSON -> shareMapper.unsharePerson(entityId, workspaceId, targetWorkspaceId);
+            case COMPANY -> {
+                referenceService.deleteReferencesToInWorkspace(targetWorkspaceId, ReferenceService.TYPE_COMPANY, entityId);
+                shareMapper.unshareCompany(entityId, workspaceId, targetWorkspaceId);
+            }
+            case PERSON -> {
+                referenceService.deleteReferencesToInWorkspace(targetWorkspaceId, ReferenceService.TYPE_PERSON, entityId);
+                shareMapper.unsharePerson(entityId, workspaceId, targetWorkspaceId);
+            }
             case PIPELINE -> shareMapper.unsharePipeline(entityId, workspaceId, targetWorkspaceId);
         }
         auditService.record("workspace.unshare", type.name().toLowerCase(), entityId, null,

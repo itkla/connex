@@ -40,6 +40,26 @@
 
   <delete id="deleteByTarget">
     DELETE FROM entity_reference
+    WHERE ref_type = #{refType} AND ref_id = #{refId}
+      AND (
+        workspace_id = #{workspaceId}
+        OR (#{refType} = 'company' AND workspace_id IN (
+          SELECT cs.workspace_id
+          FROM company_share cs
+          JOIN company c ON c.id = cs.company_id AND c.workspace_id = #{workspaceId}
+          WHERE cs.company_id = #{refId}
+        ))
+        OR (#{refType} = 'person' AND workspace_id IN (
+          SELECT ps.workspace_id
+          FROM person_share ps
+          JOIN person p ON p.id = ps.person_id AND p.workspace_id = #{workspaceId}
+          WHERE ps.person_id = #{refId}
+        ))
+      )
+  </delete>
+
+  <delete id="deleteByTargetInWorkspace">
+    DELETE FROM entity_reference
     WHERE workspace_id = #{workspaceId} AND ref_type = #{refType} AND ref_id = #{refId}
   </delete>
 </mapper>

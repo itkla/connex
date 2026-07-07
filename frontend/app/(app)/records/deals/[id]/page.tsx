@@ -70,6 +70,7 @@ import DealTaskList from '@/app/components/records/deals/DealTaskList';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import EntityNotificationBanner from '@/app/components/notifications/EntityNotificationBanner';
 import CustomFieldRows from '@/app/components/records/CustomFieldRows';
+import BacklinksPanel from '@/app/components/activity/notes/BacklinksPanel';
 
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 
@@ -441,6 +442,8 @@ export default async function DealPage({ params }: { params: { id: number } }) {
                                     />
                                 </div>
                             </div>
+
+                            <BacklinksPanel refType="deal" refId={deal.id} />
                         </section>
                     </Rise>
                 </div>

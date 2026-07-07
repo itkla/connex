@@ -99,6 +99,7 @@
     "sortUpdated": "更新順",
     "sortCreated": "作成順",
     "sortTitle": "タイトル順",
+    "sortAuthor": "作成者順",
     "standalone": "スタンドアロン",
     "untitled": "無題",
     "open": "開く",
@@ -133,6 +134,7 @@
     "titleCreate": "新しいメモ",
     "titleEdit": "メモを編集",
     "description": "考えやフォローアップ、コンテキストを記録します。人物や案件と関連付けるとチーム全員に共有されます。",
+    "titleLabel": "タイトル",
     "contentLabel": "内容",
     "contentPlaceholder": "何を考えていますか？",
     "personLabel": "人物",
@@ -141,6 +143,7 @@
     "dealLabel": "案件",
     "dealPlaceholder": "案件を関連付け",
     "noDealFound": "該当する案件がありません。",
+    "visibilityLabel": "公開範囲",
     "cancel": "キャンセル",
     "create": "作成",
     "save": "保存",
@@ -320,7 +323,7 @@
     "toastFailedSave": "タグを保存できませんでした"
   },
   "ActivityNotesEditor": {
-    "placeholder": "入力を始めましょう… @でメンション、#でレコードをリンク",
+    "placeholder": "入力を始めましょう… @でメンション、#でレコード・ノート・ファイル・タスク・アクティビティをリンク",
     "bold": "太字",
     "italic": "斜体",
     "strike": "取り消し線",
@@ -362,7 +365,14 @@
     "calloutCycleAria": "コールアウトのスタイルを変更",
     "toggleExpand": "展開",
     "toggleCollapse": "折りたたむ",
-    "dragHandleAria": "ドラッグして移動"
+    "dragHandleAria": "ドラッグして移動",
+    "mentionContact": "連絡先",
+    "mentionDeal": "案件",
+    "mentionCompany": "会社",
+    "mentionNote": "ノート",
+    "mentionFile": "ファイル",
+    "mentionTask": "タスク",
+    "mentionActivity": "アクティビティ"
   },
   "ActivityTaskDetail": {
     "back": "タスクに戻る",

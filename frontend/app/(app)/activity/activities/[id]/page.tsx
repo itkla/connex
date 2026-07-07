@@ -104,8 +104,8 @@ export default async function ActivityDetailPage({ params }: { params: Promise<{
 
                 {activity.notes ? (
                     <Rise delay={0.05}>
-                        <div className="rounded-2xl border border-border bg-card px-6 py-5 text-base leading-relaxed whitespace-pre-wrap text-foreground">
-                            <NoteContent content={activity.notes} references={activity.references} />
+                        <div className="rounded-2xl border border-border bg-card px-6 py-5 text-foreground">
+                            <NoteContent content={activity.notes} references={activity.references} block />
                         </div>
                     </Rise>
                 ) : null}

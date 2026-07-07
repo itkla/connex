@@ -40,6 +40,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import ContactsGrid from "@/app/components/records/companies/ContactsGrid";
 import Attachments from "@/app/components/attachments/Attachments";
 import CustomFieldRows from "@/app/components/records/CustomFieldRows";
+import BacklinksPanel from "@/app/components/activity/notes/BacklinksPanel";
 
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 
@@ -305,6 +306,8 @@ export default async function CompanyPage({ params }: { params: { id: number } }
                                     />
                                 </div>
                             </div>
+
+                            <BacklinksPanel refType="company" refId={company.id} />
                         </section>
                     </Rise>
                 </div>

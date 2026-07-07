@@ -21,6 +21,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import CompanyAvatar from "@/app/components/records/companies/CompanyAvatar";
 import UserAvatar from "@/app/components/records/users/UserAvatar";
 import { search as searchApi } from "@/app/lib/api";
+import { deriveNoteTitle, noteSnippet } from "@/app/lib/noteText";
 import type { SearchResults } from "@/app/lib/types";
 import { formatFileSize } from "@/app/lib/utils";
 import { cn } from "@/lib/utils";
@@ -192,22 +193,23 @@ export default function SearchBar() {
         }));
         addGroup("activities", t("groupActivities"), results.activities, (a) => ({
             key: `activity-${a.id}`,
-            href: "/activity/all",
+            href: `/activity/activities/${a.id}`,
             icon: BoltIcon,
             label: a.subject,
             subtitle: a.type || undefined,
         }));
         addGroup("notes", t("groupNotes"), results.notes, (n) => ({
             key: `note-${n.id}`,
-            href: "/activity/notes",
+            href: `/activity/notes/${n.id}`,
             icon: DocumentTextIcon,
-            label: truncate(n.content),
+            label: deriveNoteTitle(n, truncate(n.content)),
+            subtitle: noteSnippet(n.content, 90) || undefined,
         }));
         addGroup("tasks", t("groupTasks"), results.tasks, (task) => ({
             key: `task-${task.id}`,
-            href: "/activity/tasks",
+            href: `/activity/tasks/${task.id}`,
             icon: CheckCircleIcon,
-            label: truncate(task.description),
+            label: truncate(noteSnippet(task.description, 120)),
         }));
         addGroup("attachments", t("groupAttachments"), results.attachments, (a) => ({
             key: `attachment-${a.id}`,

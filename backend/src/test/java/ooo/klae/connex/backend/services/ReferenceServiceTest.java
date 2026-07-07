@@ -3,10 +3,13 @@ package ooo.klae.connex.backend.services;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.context.SecurityContextHolder;
 
 import ooo.klae.connex.backend.beans.Company;
 import ooo.klae.connex.backend.beans.Deal;
@@ -233,5 +236,63 @@ class ReferenceServiceTest extends AbstractServiceTest {
             "[Foreign](company:" + foreign.getId() + ")");
 
         assertTrue(stored(note).isEmpty());
+    }
+
+    @Test
+    void hydrate_redactsPrivateNoteLinksWithTitlesAndReferenceDefinitions() {
+        Note target = new Note();
+        target.setWorkspaceId(workspace.getId());
+        target.setContent("private body");
+        target.setTitle("Secret target");
+        target.setVisibility("private");
+        target.setAuthor(currentUser);
+        noteMapper.insert(target);
+        Note visibleTarget = new Note();
+        visibleTarget.setWorkspaceId(workspace.getId());
+        visibleTarget.setContent("visible body");
+        visibleTarget.setTitle("Visible target");
+        visibleTarget.setVisibility("workspace");
+        visibleTarget.setAuthor(currentUser);
+        noteMapper.insert(visibleTarget);
+        Note source = new Note();
+        source.setWorkspaceId(workspace.getId());
+        source.setContent("See [Secret](<note:" + target.getId() + "> \"title\") and [Hidden][n] and [Shortcut] and [First][dup] and [Spaced   Shortcut]\n\n[n]: <note:"
+            + target.getId() + ">\n[Shortcut]: <note:" + target.getId() + ">\n[dup]: <note:" + target.getId()
+            + ">\n[dup]: <note:" + visibleTarget.getId() + ">\n[Spaced Shortcut]: <note:" + target.getId() + ">");
+        source.setVisibility("workspace");
+        source.setAuthor(currentUser);
+        noteMapper.insert(source);
+        User other = newUser();
+        SecurityContextHolder.getContext().setAuthentication(
+            new UsernamePasswordAuthenticationToken(other, null, other.getAuthorities()));
+
+        Note hydrated = referenceService.hydrate(workspace.getId(), List.of(source)).getFirst();
+
+        assertTrue(hydrated.getContent().contains("(private note)"));
+        assertFalse(hydrated.getContent().contains("Secret"));
+        assertFalse(hydrated.getContent().contains("Hidden"));
+        assertFalse(hydrated.getContent().contains("Shortcut"));
+        assertFalse(hydrated.getContent().contains("First"));
+        assertFalse(hydrated.getContent().contains("Spaced"));
+        assertFalse(hydrated.getContent().contains("note:" + target.getId()));
+    }
+
+    @Test
+    void hydrate_ignoresOversizedNoteReferenceIds() {
+        Note source = new Note();
+        source.setWorkspaceId(workspace.getId());
+        source.setContent("Bad [note](note:999999999999999999) and [Hidden][n]\n\n[n]: note:999999999999999999");
+        source.setVisibility("workspace");
+        source.setAuthor(currentUser);
+        noteMapper.insert(source);
+        User other = newUser();
+        SecurityContextHolder.getContext().setAuthentication(
+            new UsernamePasswordAuthenticationToken(other, null, other.getAuthorities()));
+
+        Note hydrated = referenceService.hydrate(workspace.getId(), List.of(source)).getFirst();
+
+        assertTrue(hydrated.getContent().contains("(private note)"));
+        assertFalse(hydrated.getContent().contains("Hidden"));
+        assertFalse(hydrated.getContent().contains("999999999999999999"));
     }
 }

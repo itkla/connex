@@ -208,7 +208,7 @@
     @apply mt-5 mb-1.5 text-lg font-semibold text-foreground;
   }
   .note-prose :where(p) {
-    @apply my-2;
+    @apply my-2 whitespace-pre-wrap;
   }
   .note-prose :where(ul):not([data-type="taskList"]) {
     @apply my-2 list-disc pl-6;
@@ -243,14 +243,32 @@
   .note-prose :where(ul[data-type="taskList"]) {
     @apply my-2 list-none pl-0.5;
   }
+  .note-prose :where(ul.contains-task-list) {
+    @apply my-2 list-none pl-0.5;
+  }
   .note-prose :where(ul[data-type="taskList"] li) {
+    @apply flex items-start gap-2;
+  }
+  .note-prose :where(li.task-list-item) {
     @apply flex items-start gap-2;
   }
   .note-prose :where(ul[data-type="taskList"] li > label) {
     @apply mt-1 shrink-0 select-none;
   }
+  .note-prose :where(li.task-list-item > input) {
+    @apply mt-1 shrink-0;
+  }
   .note-prose :where(ul[data-type="taskList"] li > div) {
     @apply min-w-0 flex-1;
+  }
+  .note-prose :where(table) {
+    @apply my-4 w-full overflow-hidden rounded-lg border border-border text-sm;
+  }
+  .note-prose :where(th) {
+    @apply bg-muted px-3 py-2 text-left font-semibold text-foreground;
+  }
+  .note-prose :where(td) {
+    @apply border-t border-border px-3 py-2;
   }
   .note-prose[data-empty]::before {
     @apply pointer-events-none absolute text-muted-foreground;

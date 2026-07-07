@@ -22,7 +22,12 @@ public interface TaskMapper {
     List<Task> getTasksByDealId(@Param("workspaceId") int workspaceId, @Param("dealId") int dealId);
     Task getTaskById(@Param("workspaceId") int workspaceId, @Param("id") int id);
     boolean exists(@Param("workspaceId") int workspaceId, @Param("id") int id);
-    List<Task> search(@Param("workspaceId") int workspaceId, @Param("query") String query);
+    List<Task> search(
+        @Param("workspaceId") int workspaceId,
+        @Param("query") String query,
+        @Param("limit") int limit,
+        @Param("offset") int offset
+    );
     int insert(Task task);
     int update(Task task);
     int delete(@Param("workspaceId") int workspaceId, @Param("id") int id);

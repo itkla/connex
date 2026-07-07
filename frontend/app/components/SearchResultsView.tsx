@@ -18,7 +18,7 @@ import CompanyAvatar from "@/app/components/records/companies/CompanyAvatar";
 import UserAvatar from "@/app/components/records/users/UserAvatar";
 import Rise from "@/app/components/motion/Rise";
 import SectionHeader from "@/app/components/dashboard/SectionHeader";
-import { noteContentToPlainText } from "@/app/lib/references";
+import { deriveNoteTitle, noteSnippet } from "@/app/lib/noteText";
 import type { SearchResults } from "@/app/lib/types";
 import { formatFileSize } from "@/app/lib/utils";
 
@@ -114,22 +114,23 @@ export default function SearchResultsView({
     }));
     add("activities", t("groupActivities"), results.activities, (a) => ({
         key: `activity-${a.id}`,
-        href: "/activity/all",
+        href: `/activity/activities/${a.id}`,
         icon: BoltIcon,
         label: a.subject,
         subtitle: a.type || undefined,
     }));
     add("notes", t("groupNotes"), results.notes, (n) => ({
         key: `note-${n.id}`,
-        href: "/activity/notes",
+        href: `/activity/notes/${n.id}`,
         icon: DocumentTextIcon,
-        label: truncate(n.content),
+        label: deriveNoteTitle(n, truncate(n.content)),
+        subtitle: noteSnippet(n.content, 90) || undefined,
     }));
     add("tasks", t("groupTasks"), results.tasks, (task) => ({
         key: `task-${task.id}`,
-        href: "/activity/tasks",
+        href: `/activity/tasks/${task.id}`,
         icon: CheckCircleIcon,
-        label: truncate(noteContentToPlainText(task.description)),
+        label: truncate(noteSnippet(task.description) || task.description),
     }));
     add("attachments", t("groupAttachments"), results.attachments, (a) => ({
         key: `attachment-${a.id}`,

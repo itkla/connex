@@ -18,7 +18,12 @@ public interface ActivityMapper {
     List<Activity> getActivitiesByCreatedById(@Param("workspaceId") int workspaceId, @Param("createdById") int createdById);
     Activity getActivityById(@Param("workspaceId") int workspaceId, @Param("id") int id);
     boolean exists(@Param("workspaceId") int workspaceId, @Param("id") int id);
-    List<Activity> search(@Param("workspaceId") int workspaceId, @Param("query") String query);
+    List<Activity> search(
+        @Param("workspaceId") int workspaceId,
+        @Param("query") String query,
+        @Param("limit") int limit,
+        @Param("offset") int offset
+    );
     int insert(Activity activity);
     int update(Activity activity);
     int delete(@Param("workspaceId") int workspaceId, @Param("id") int id);

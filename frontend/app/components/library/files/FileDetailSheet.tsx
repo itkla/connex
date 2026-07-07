@@ -28,6 +28,7 @@ import type { Attachment, Tag } from '@/app/lib/types';
 import { classifyKind, KIND_ICON, KIND_LABEL_KEY, sourceMetaFor } from '@/app/components/library/files/fileMeta';
 import FileGlyph from '@/app/components/library/files/FileGlyph';
 import TagEditor from '@/app/components/records/contacts/TagEditor';
+import BacklinksPanel from '@/app/components/activity/notes/BacklinksPanel';
 
 type Props = {
     attachment: Attachment | null;
@@ -144,6 +145,8 @@ export default function FileDetailSheet({
                                     />
                                 </div>
                             </div>
+
+                            <BacklinksPanel refType="file" refId={a.id} />
 
                             <div className="space-y-2">
                                 <h3 className="text-xs font-medium uppercase tracking-[0.12em] text-muted-foreground">

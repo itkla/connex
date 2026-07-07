@@ -159,6 +159,7 @@ public class TaskService {
         if (before == null) throw new ResourceNotFoundException("Task not found with id: " + id);
         taskMapper.delete(workspaceId, id);
         referenceService.deleteReferences(workspaceId, ReferenceService.SOURCE_TASK, id);
+        referenceService.deleteReferencesTo(workspaceId, ReferenceService.TYPE_TASK, id);
         auditService.record("task.delete", "task", id, before.getDescription(),
             "Deleted task " + before.getDescription(),
             auditService.diff(before, null, AUDIT_FIELDS));

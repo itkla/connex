@@ -2,10 +2,12 @@
 
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { useTranslations } from 'next-intl';
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
 import { BoltIcon, BriefcaseIcon, BuildingOffice2Icon, CheckCircleIcon, DocumentTextIcon, PaperClipIcon, UserIcon } from '@heroicons/react/24/outline';
 
 import { getActiveWorkspaceMembers, getCompanies, getDeals, search } from '@/app/lib/api';
+import { noteSnippet } from '@/app/lib/noteText';
 import { type Company, type Deal, type NoteReferenceType, type SearchResults, type WorkspaceMember } from '@/app/lib/types';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { cn } from '@/lib/utils';
@@ -23,7 +25,7 @@ type Trigger = '@' | '#';
 
 const TRIGGER_TYPES: Record<Trigger, readonly NoteReferenceType[]> = {
     '@': ['user', 'person'],
-    '#': ['deal', 'company'],
+    '#': ['deal', 'company', 'note', 'file', 'task', 'activity'],
 };
 
 function currentWorkspaceKey(): string {
@@ -59,6 +61,14 @@ type Suggestion = {
     avatarUrl?: string | null;
 };
 
+type SuggestionLabels = {
+    untitled: string;
+    note: string;
+    file: string;
+    task: string;
+    activity: string;
+};
+
 function memberSuggestions(members: WorkspaceMember[], excludeUserId?: number): Suggestion[] {
     return members
         .filter((member) => member.id !== excludeUserId)
@@ -71,7 +81,7 @@ function memberSuggestions(members: WorkspaceMember[], excludeUserId?: number): 
         }));
 }
 
-function searchSuggestions(results: SearchResults, excludeUserId?: number): Suggestion[] {
+function searchSuggestions(results: SearchResults, labels: SuggestionLabels, excludeUserId?: number): Suggestion[] {
     const users = (results.users ?? [])
         .filter((user) => user.id !== excludeUserId)
         .map((user): Suggestion => ({
@@ -100,7 +110,31 @@ function searchSuggestions(results: SearchResults, excludeUserId?: number): Sugg
         label: company.name,
         sublabel: company.industry || 'Company',
     }));
-    return [...users, ...people, ...deals, ...companies];
+    const notes = (results.notes ?? []).map((note): Suggestion => ({
+        type: 'note',
+        id: note.id,
+        label: note.title?.trim() || noteSnippet(note.content, 80) || labels.untitled,
+        sublabel: labels.note,
+    }));
+    const files = (results.attachments ?? []).map((file): Suggestion => ({
+        type: 'file',
+        id: file.id,
+        label: file.fileName,
+        sublabel: labels.file,
+    }));
+    const tasks = (results.tasks ?? []).map((task): Suggestion => ({
+        type: 'task',
+        id: task.id,
+        label: noteSnippet(task.description, 80) || labels.task,
+        sublabel: labels.task,
+    }));
+    const activities = (results.activities ?? []).map((activity): Suggestion => ({
+        type: 'activity',
+        id: activity.id,
+        label: activity.subject || labels.activity,
+        sublabel: labels.activity,
+    }));
+    return [...users, ...people, ...deals, ...companies, ...notes, ...files, ...tasks, ...activities];
 }
 
 let recordsCache: { key: string; promise: Promise<Suggestion[]> } | null = null;
@@ -154,17 +188,18 @@ function splitTokens(value: string): EditorSegment[] {
 }
 
 function makeChip(type: NoteReferenceType, id: number, label: string): HTMLSpanElement {
+    const safeLabel = sanitizeLabel(label);
     const chip = document.createElement('span');
     chip.dataset.refType = type;
     chip.dataset.refId = String(id);
-    chip.dataset.label = label;
+    chip.dataset.label = safeLabel;
     chip.contentEditable = 'false';
     if (type === 'user') {
         chip.className = 'rounded-sm bg-brand-light/50 px-0.5 font-medium text-brand-dark';
-        chip.textContent = `@${label}`;
+        chip.textContent = `@${safeLabel}`;
     } else {
         chip.className = 'rounded-sm bg-muted px-1 font-medium text-foreground';
-        chip.textContent = label;
+        chip.textContent = safeLabel;
     }
     return chip;
 }
@@ -181,7 +216,7 @@ function serializeNode(node: Node): string {
     if (node.nodeType === Node.TEXT_NODE) return node.textContent ?? '';
     if (!(node instanceof HTMLElement)) return '';
     if (node.dataset.refType && node.dataset.refId) {
-        return `[${node.dataset.label ?? ''}](${node.dataset.refType}:${node.dataset.refId})`;
+        return `[${sanitizeLabel(node.dataset.label ?? '')}](${node.dataset.refType}:${node.dataset.refId})`;
     }
     if (node.tagName === 'BR') return '\n';
     let inner = '';
@@ -233,6 +268,7 @@ export default function MentionEditor({
     ariaDescribedby,
     autoFocus,
 }: Props) {
+    const t = useTranslations('ActivityNotesEditor');
     const editorRef = useRef<HTMLDivElement>(null);
     const lastValue = useRef<string | null>(null);
     const savedRange = useRef<Range | null>(null);
@@ -298,6 +334,13 @@ export default function MentionEditor({
 
     const suggestions = useMemo(() => {
         if (!query) return [];
+        const suggestionLabels: SuggestionLabels = {
+            untitled: t('untitled'),
+            note: t('mentionNote'),
+            file: t('mentionFile'),
+            task: t('mentionTask'),
+            activity: t('mentionActivity'),
+        };
         const allowed = TRIGGER_TYPES[query.trigger];
         const needle = query.text.toLowerCase();
         const pool = query.trigger === '@' ? memberSuggestions(members, excludeUserId) : records;
@@ -305,7 +348,7 @@ export default function MentionEditor({
             return pool.slice(0, MAX_SUGGESTIONS);
         }
         if (results) {
-            return searchSuggestions(results, excludeUserId)
+            return searchSuggestions(results, suggestionLabels, excludeUserId)
                 .filter((suggestion) => allowed.includes(suggestion.type))
                 .slice(0, MAX_SUGGESTIONS);
         }
@@ -315,7 +358,7 @@ export default function MentionEditor({
                     suggestion.label.toLowerCase().includes(needle) || suggestion.sublabel.toLowerCase().includes(needle),
             )
             .slice(0, MAX_SUGGESTIONS);
-    }, [query, members, records, results, excludeUserId]);
+    }, [query, members, records, results, excludeUserId, t]);
 
     const menuOpen = query !== null && suggestions.length > 0;
     const activeOptionId = menuOpen ? `${listboxId}-opt-${activeIndex}` : undefined;

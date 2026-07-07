@@ -4,6 +4,7 @@ import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.function.BiConsumer;
@@ -69,9 +70,14 @@ public class ReferenceService {
     static final String TYPE_ACTIVITY = "activity";
     private static final int MAX_REFERENCES = 100;
     private static final int MAX_LABEL_LENGTH = 255;
+    private static final int INVALID_NOTE_REFERENCE_ID = -1;
     private static final Pattern TOKEN =
-        Pattern.compile("\\[([^\\]]+)\\]\\((user|person|deal|company|note|file|task|activity):(\\d+)\\)");
-    private static final Pattern NOTE_TOKEN = Pattern.compile("\\[([^\\]]+)\\]\\(note:(\\d+)\\)");
+        Pattern.compile("\\[([^\\]]+)\\]\\(\\s*<?(user|person|deal|company|note|file|task|activity):(\\d+)>?(?:\\s+(?:\"[^\"]*\"|'[^']*'|\\([^)]*\\)))?\\s*\\)");
+    private static final Pattern NOTE_TOKEN = Pattern.compile("\\[([^\\]]+)\\]\\(\\s*<?note:(\\d+)>?(?:\\s+(?:\"[^\"]*\"|'[^']*'|\\([^)]*\\)))?\\s*\\)");
+    private static final Pattern NOTE_REFERENCE_LINK = Pattern.compile("\\[([^\\]]+)\\]\\[([^\\]]*)\\]");
+    private static final Pattern NOTE_SHORTCUT_REFERENCE_LINK = Pattern.compile("(?<!!)(?<!\\])\\[([^\\]]+)\\](?![\\[(])");
+    private static final Pattern NOTE_REFERENCE_DEFINITION =
+        Pattern.compile("(?m)^\\s{0,3}\\[([^\\]]+)\\]:[ \\t]*<?note:(\\d+)>?(?:[ \\t]+.*)?$");
 
     /**
      * Re-derives and persists a source entity's @/# references from its content,
@@ -145,14 +151,34 @@ public class ReferenceService {
 
     /**
      * Removes every reference pointing AT a target entity, invoked when the
-     * target itself is deleted so no dangling inbound chip is left behind.
+     * target itself is deleted so no dangling inbound chip is left behind,
+     * including references stored in workspaces where the target was shared.
      *
-     * @param workspaceId the owning workspace
+     * @param workspaceId the workspace deleting the target
      * @param refType     the deleted target's type (e.g. {@code note}, {@code file})
      * @param refId       the deleted target's id
      */
     public void deleteReferencesTo(int workspaceId, String refType, int refId) {
         entityReferenceMapper.deleteByTarget(workspaceId, refType, refId);
+    }
+
+    public void deleteReferencesToInWorkspace(int workspaceId, String refType, int refId) {
+        entityReferenceMapper.deleteByTargetInWorkspace(workspaceId, refType, refId);
+    }
+
+    /**
+     * Whether the current reader may know that a reference target exists.
+     * Note targets apply author/workspace visibility; other target types are
+     * workspace-scoped today.
+     *
+     * @param workspaceId    the owning workspace
+     * @param refType        the referenced entity type
+     * @param refId          the referenced entity id
+     * @param currentUserId  the reader id
+     * @return true when the target is visible to the reader
+     */
+    public boolean isTargetVisible(int workspaceId, String refType, int refId, int currentUserId) {
+        return isVisible(workspaceId, refType, refId, currentUserId);
     }
 
     /**
@@ -322,6 +348,7 @@ public class ReferenceService {
             Function<T, String> getContent,
             BiConsumer<T, String> setContent) {
         Set<Integer> targetNoteIds = new HashSet<>();
+        boolean sawNoteReference = false;
         for (T item : items) {
             List<EntityReference> references = getReferences.apply(item);
             if (references != null) {
@@ -333,18 +360,17 @@ public class ReferenceService {
             }
             String content = getContent.apply(item);
             if (content != null) {
-                Matcher matcher = NOTE_TOKEN.matcher(content);
-                while (matcher.find()) {
-                    targetNoteIds.add(Integer.parseInt(matcher.group(2)));
-                }
+                sawNoteReference = sawNoteReference || hasNoteReference(content);
+                targetNoteIds.addAll(noteTargetIds(content));
             }
         }
-        if (targetNoteIds.isEmpty()) {
+        if (targetNoteIds.isEmpty() && !sawNoteReference) {
             return;
         }
         int currentUserId = workspaceService.getCurrentUserId();
-        Set<Integer> visible = new HashSet<>(
-            noteMapper.getVisibleNoteIdsIn(workspaceId, new ArrayList<>(targetNoteIds), currentUserId));
+        Set<Integer> visible = targetNoteIds.isEmpty()
+            ? Set.of()
+            : new HashSet<>(noteMapper.getVisibleNoteIdsIn(workspaceId, new ArrayList<>(targetNoteIds), currentUserId));
         for (T item : items) {
             List<EntityReference> references = getReferences.apply(item);
             if (references != null) {
@@ -361,10 +387,81 @@ public class ReferenceService {
         if (content == null) {
             return null;
         }
-        return NOTE_TOKEN.matcher(content).replaceAll(match ->
-            visibleNoteIds.contains(Integer.parseInt(match.group(2)))
+        Map<String, Integer> definitions = noteReferenceDefinitions(content);
+        String redacted = NOTE_TOKEN.matcher(content).replaceAll(match -> {
+            Integer noteId = parsePositiveInt(match.group(2));
+            return noteId != null && visibleNoteIds.contains(noteId)
                 ? Matcher.quoteReplacement(match.group())
-                : "(private note)");
+                : "(private note)";
+        });
+        redacted = NOTE_REFERENCE_LINK.matcher(redacted).replaceAll(match -> {
+            String key = match.group(2).isBlank() ? match.group(1) : match.group(2);
+            Integer noteId = definitions.get(referenceKey(key));
+            return noteId == null || noteId > 0 && visibleNoteIds.contains(noteId)
+                ? Matcher.quoteReplacement(match.group())
+                : "(private note)";
+        });
+        redacted = NOTE_REFERENCE_DEFINITION.matcher(redacted).replaceAll(match -> {
+            Integer noteId = parsePositiveInt(match.group(2));
+            return noteId == null || !visibleNoteIds.contains(noteId) ? "" : Matcher.quoteReplacement(match.group());
+        });
+        return redactShortcutReferenceLinks(redacted, definitions, visibleNoteIds);
+    }
+
+    private static String redactShortcutReferenceLinks(
+            String content, Map<String, Integer> definitions, Set<Integer> visibleNoteIds) {
+        return NOTE_SHORTCUT_REFERENCE_LINK.matcher(content).replaceAll(match -> {
+            Integer noteId = definitions.get(referenceKey(match.group(1)));
+            return noteId == null || noteId > 0 && visibleNoteIds.contains(noteId)
+                ? Matcher.quoteReplacement(match.group())
+                : "(private note)";
+        });
+    }
+
+    private static Set<Integer> noteTargetIds(String content) {
+        Set<Integer> ids = new HashSet<>();
+        Matcher inline = NOTE_TOKEN.matcher(content);
+        while (inline.find()) {
+            Integer noteId = parsePositiveInt(inline.group(2));
+            if (noteId != null) {
+                ids.add(noteId);
+            }
+        }
+        Matcher definition = NOTE_REFERENCE_DEFINITION.matcher(content);
+        while (definition.find()) {
+            Integer noteId = parsePositiveInt(definition.group(2));
+            if (noteId != null) {
+                ids.add(noteId);
+            }
+        }
+        return ids;
+    }
+
+    private static boolean hasNoteReference(String content) {
+        return NOTE_TOKEN.matcher(content).find() || NOTE_REFERENCE_DEFINITION.matcher(content).find();
+    }
+
+    private static Map<String, Integer> noteReferenceDefinitions(String content) {
+        Map<String, Integer> definitions = new LinkedHashMap<>();
+        Matcher matcher = NOTE_REFERENCE_DEFINITION.matcher(content);
+        while (matcher.find()) {
+            Integer noteId = parsePositiveInt(matcher.group(2));
+            definitions.putIfAbsent(referenceKey(matcher.group(1)), noteId == null ? INVALID_NOTE_REFERENCE_ID : noteId);
+        }
+        return definitions;
+    }
+
+    private static String referenceKey(String value) {
+        return value.trim().replaceAll("\\s+", " ").toLowerCase(Locale.ROOT);
+    }
+
+    private static Integer parsePositiveInt(String value) {
+        try {
+            int parsed = Integer.parseInt(value);
+            return parsed > 0 ? parsed : null;
+        } catch (NumberFormatException e) {
+            return null;
+        }
     }
 
     private EntityReference build(

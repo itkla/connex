@@ -10,6 +10,7 @@ import { TaskItem } from "@tiptap/extension-task-item";
 import { Markdown } from "tiptap-markdown";
 import { useTranslations } from "next-intl";
 import { Mention, encodeMentions, restoreMentions } from "./editor/Mention";
+import type { MentionLabels } from "./editor/mentionData";
 import { EditorToolbar } from "./editor/EditorToolbar";
 import { SlashCommand } from "./editor/SlashCommand";
 import { buildSlashCommands } from "./editor/slashCommands";
@@ -24,13 +25,35 @@ function readMarkdown(editor: Editor): string {
 }
 
 type Props = {
+    id?: string;
     value: string;
     onChange: (markdown: string) => void;
     editable?: boolean;
     excludeUserId?: number;
     autofocus?: boolean;
     className?: string;
+    ariaLabel?: string;
+    ariaInvalid?: boolean;
+    ariaDescribedby?: string;
 };
+
+function editableAttributes(
+    id: string | undefined,
+    ariaLabel: string | undefined,
+    ariaInvalid: boolean | undefined,
+    ariaDescribedby: string | undefined,
+) {
+    const attributes: Record<string, string> = {
+        class: "note-prose min-h-[15rem] max-w-none focus:outline-none",
+        role: "textbox",
+        "aria-multiline": "true",
+    };
+    if (id) attributes.id = id;
+    if (ariaLabel) attributes["aria-label"] = ariaLabel;
+    if (ariaInvalid !== undefined) attributes["aria-invalid"] = String(ariaInvalid);
+    if (ariaDescribedby) attributes["aria-describedby"] = ariaDescribedby;
+    return attributes;
+}
 
 /**
  * WYSIWYG note editor built on Tiptap. Stores Markdown with inline
@@ -38,14 +61,28 @@ type Props = {
  * resolving @/# mentions unchanged.
  */
 export default function RichNoteEditor({
+    id,
     value,
     onChange,
     editable = true,
     excludeUserId,
     autofocus = false,
     className,
+    ariaLabel,
+    ariaInvalid,
+    ariaDescribedby,
 }: Props) {
     const t = useTranslations("ActivityNotesEditor");
+    const mentionLabels = {
+        person: t("mentionContact"),
+        deal: t("mentionDeal"),
+        company: t("mentionCompany"),
+        note: t("mentionNote"),
+        file: t("mentionFile"),
+        task: t("mentionTask"),
+        activity: t("mentionActivity"),
+        untitled: t("untitled"),
+    } satisfies MentionLabels;
     const onChangeRef = useRef(onChange);
     const loadingRef = useRef(false);
 
@@ -69,16 +106,14 @@ export default function RichNoteEditor({
                 transformPastedText: true,
                 transformCopiedText: true,
             }),
-            Mention.configure({ excludeUserId }),
+            Mention.configure({ excludeUserId, labels: mentionLabels }),
             Callout.configure({ cycleLabel: t("calloutCycleAria") }),
             ToggleSummary,
             Toggle.configure({ expandLabel: t("toggleExpand"), collapseLabel: t("toggleCollapse") }),
             SlashCommand.configure({ commands: buildSlashCommands(t) }),
         ],
         editorProps: {
-            attributes: {
-                class: "note-prose min-h-[15rem] max-w-none focus:outline-none",
-            },
+            attributes: editableAttributes(id, ariaLabel, ariaInvalid, ariaDescribedby),
         },
         onUpdate: ({ editor: instance }) => {
             if (loadingRef.current) return;
@@ -99,6 +134,14 @@ export default function RichNoteEditor({
     useEffect(() => {
         editor?.setEditable(editable);
     }, [editor, editable]);
+
+    useEffect(() => {
+        editor?.setOptions({
+            editorProps: {
+                attributes: editableAttributes(id, ariaLabel, ariaInvalid, ariaDescribedby),
+            },
+        });
+    }, [editor, id, ariaLabel, ariaInvalid, ariaDescribedby]);
 
     const labels = {
         bold: t("bold"),

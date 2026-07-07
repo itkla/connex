@@ -41,6 +41,7 @@ public class CompanyService {
     private final RuleTriggerPublisher ruleTriggers;
     private final WorkspaceService workspaceService;
     private final CustomFieldValueService customFieldValueService;
+    private final ReferenceService referenceService;
 
     private static final Set<String> AUDIT_FIELDS =
         Set.of("name", "website", "industry", "phone", "address", "logoUrl");
@@ -137,9 +138,9 @@ public class CompanyService {
     @RequirePermission(Permission.COMPANY_DELETE)
     public void deleteCompany(int id) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        Company before = companyMapper.getCompanyById(workspaceId, id);
-        if (before == null) throw new ResourceNotFoundException("Company not found with id: " + id);
+        Company before = requireOwnedCompany(workspaceId, id);
         customFieldValueService.deleteByEntity("company", id);
+        referenceService.deleteReferencesTo(workspaceId, ReferenceService.TYPE_COMPANY, id);
         companyMapper.delete(workspaceId, id);
         auditService.record("company.delete", "company", id, before.getName(),
             "Deleted company " + before.getName(),
@@ -270,5 +271,12 @@ public class CompanyService {
         Company company = companyMapper.getCompanyById(workspaceId, companyId);
         if (company == null) throw new ResourceNotFoundException("Company not found with id: " + companyId);
         return company;
+    }
+
+    private Company requireOwnedCompany(int workspaceId, int companyId) {
+        if (!companyMapper.existsOwned(workspaceId, companyId)) {
+            throw new ResourceNotFoundException("Company not found with id: " + companyId);
+        }
+        return requireCompany(workspaceId, companyId);
     }
 }

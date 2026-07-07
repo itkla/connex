@@ -248,8 +248,9 @@ public class PersonService {
     @RequirePermission(Permission.PERSON_DELETE)
     public void delete(int id) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        Person before = requirePerson(workspaceId, id);
+        Person before = requireOwnedPerson(workspaceId, id);
         customFieldValueService.deleteByEntity("person", id);
+        referenceService.deleteReferencesTo(workspaceId, ReferenceService.TYPE_PERSON, id);
         personMapper.delete(workspaceId, id);
         auditService.record("person.delete", "person", id, before.getName(),
             "Deleted person " + before.getName(),

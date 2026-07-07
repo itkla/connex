@@ -204,6 +204,7 @@ export default function NoteEditorView({ note, currentUserId, persons, deals, us
                             }}
                             excludeUserId={currentUserId}
                             autofocus={noteId == null}
+                            ariaLabel={t("placeholder")}
                         />
                     </div>
 

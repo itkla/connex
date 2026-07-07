@@ -1,11 +1,12 @@
 'use client';
 
 import { useRef, useState, type WheelEvent } from 'react';
+import dynamic from 'next/dynamic';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { toastError, toastSuccess } from '@/app/lib/toast';
 import { Loader2Icon } from 'lucide-react';
-import { Bars3BottomLeftIcon, UserIcon, BriefcaseIcon } from '@heroicons/react/24/outline';
+import { UserIcon, BriefcaseIcon, LockClosedIcon, UsersIcon } from '@heroicons/react/24/outline';
 
 import {
     Dialog,
@@ -26,14 +27,16 @@ import {
 } from '@/components/ui/combobox';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
-import MentionEditor from './MentionEditor';
+import { SegmentedToggle } from '@/app/components/filters';
 import { InputGroupAddon } from '@/components/ui/input-group';
 import { DialogStatusCover, resolveDialogStatus, fieldInputClass } from '@/components/ui/dialog-status-cover';
 import { cn } from '@/lib/utils';
 
 import { ApiError, createNote, updateNote, isFieldError } from '@/app/lib/api';
 import { useFieldErrors } from '@/app/hooks/useFieldErrors';
-import type { Contact, Deal, Note } from '@/app/lib/types';
+import type { Contact, Deal, Note, NoteVisibility } from '@/app/lib/types';
+
+const RichNoteEditor = dynamic(() => import('./RichNoteEditor'), { ssr: false });
 
 type Props = {
     open: boolean;
@@ -65,7 +68,7 @@ export default function NoteDialog({
 
     return (
         <Dialog open={open} onOpenChange={handleOpenChange}>
-            <DialogContent className="gap-0 overflow-hidden p-0 sm:max-w-lg">
+            <DialogContent className="gap-0 overflow-hidden p-0 sm:max-w-3xl">
                 <NoteDialogForm
                     note={note}
                     persons={persons}
@@ -110,9 +113,14 @@ function NoteDialogForm({
 }: FormProps) {
     const router = useRouter();
     const t = useTranslations('ActivityNotesDialog');
+    const te = useTranslations('ActivityNotesEditor');
     const isEdit = note !== null;
 
+    const [title, setTitle] = useState(() => note?.title ?? '');
     const [content, setContent] = useState(() => note?.content ?? '');
+    const [visibility, setVisibility] = useState<NoteVisibility>(() =>
+        note?.visibility ?? (note?.person || note?.deal || defaultPerson || defaultDeal ? 'workspace' : 'private'),
+    );
     const [selectedPerson, setSelectedPerson] = useState<Contact | null>(() =>
         note ? persons.find((p) => p.id === note.person) ?? null : defaultPerson,
     );
@@ -139,7 +147,8 @@ function NoteDialogForm({
             if (isEdit && note) {
                 await updateNote(note.id, {
                     content: trimmed,
-                    title: note.title ?? null,
+                    title: title.trim() || null,
+                    visibility,
                     author: note.author,
                     person: selectedPerson?.id ?? null,
                     deal: selectedDeal?.id ?? null,
@@ -148,6 +157,8 @@ function NoteDialogForm({
             } else {
                 await createNote({
                     content: trimmed,
+                    title: title.trim() || null,
+                    visibility,
                     author: currentUserId,
                     person: selectedPerson?.id ?? null,
                     deal: selectedDeal?.id ?? null,
@@ -193,21 +204,36 @@ function NoteDialogForm({
 
                 <form onSubmit={handleSubmit} className="grid gap-5">
                     <div className="ncd-rise grid gap-1.5" style={{ animationDelay: '90ms' }}>
+                        <Label htmlFor="note-title">{t('titleLabel')}</Label>
+                        <input
+                            id="note-title"
+                            value={title}
+                            onChange={(event) => setTitle(event.target.value)}
+                            placeholder={te('titlePlaceholder')}
+                            className={cn(fieldInputClass, 'px-3 py-2')}
+                        />
+                    </div>
+
+                    <div className="ncd-rise grid gap-1.5" style={{ animationDelay: '90ms' }}>
                         <Label htmlFor="note-content">{t('contentLabel')}</Label>
-                        <div className="group relative">
-                            <Bars3BottomLeftIcon className="pointer-events-none absolute left-3 top-3 size-4 text-muted-foreground transition-colors group-focus-within:text-brand" />
-                            <MentionEditor
+                        <div
+                            className={cn(
+                                fieldInputClass,
+                                'max-h-[52vh] min-h-72 overflow-y-auto px-3 py-2 text-left',
+                            )}
+                        >
+                            <RichNoteEditor
                                 id="note-content"
                                 value={content}
                                 onChange={(next) => {
                                     setContent(next);
                                     clearError('content');
                                 }}
-                                placeholder={t('contentPlaceholder')}
+                                excludeUserId={currentUserId}
+                                ariaLabel={t('contentLabel')}
                                 ariaInvalid={Boolean(fieldErrors.content)}
                                 ariaDescribedby={fieldErrors.content ? 'note-content-error' : undefined}
-                                autoFocus
-                                className={cn(fieldInputClass, 'pl-9 pr-3 py-2')}
+                                autofocus
                             />
                         </div>
                         {fieldErrors.content && <p id="note-content-error" className="text-sm text-destructive">{fieldErrors.content}</p>}
@@ -273,6 +299,27 @@ function NoteDialogForm({
                                 </ComboboxContent>
                             </Combobox>
                         </div>
+                    </div>
+
+                    <div className="ncd-rise grid gap-1.5" style={{ animationDelay: '165ms' }}>
+                        <Label>{t('visibilityLabel')}</Label>
+                        <SegmentedToggle<NoteVisibility>
+                            ariaLabel={te('visibilityAria')}
+                            value={visibility}
+                            onChange={setVisibility}
+                            options={[
+                                {
+                                    value: 'private',
+                                    label: te('visibilityPrivate'),
+                                    icon: <LockClosedIcon className="h-3.5 w-3.5" />,
+                                },
+                                {
+                                    value: 'workspace',
+                                    label: te('visibilityWorkspace'),
+                                    icon: <UsersIcon className="h-3.5 w-3.5" />,
+                                },
+                            ]}
+                        />
                     </div>
 
                     <DialogFooter className="ncd-rise" style={{ animationDelay: '190ms' }}>

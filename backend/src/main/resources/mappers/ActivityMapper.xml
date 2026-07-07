@@ -53,8 +53,8 @@
   <select id="search" resultMap="ActivityResult">
     SELECT <include refid="activityColumns"/> FROM activity
     WHERE workspace_id = #{workspaceId} AND (subject LIKE #{query} OR notes LIKE #{query})
-    ORDER BY timestamp DESC
-    LIMIT 10
+    ORDER BY timestamp DESC, id DESC
+    LIMIT #{limit} OFFSET #{offset}
   </select>
 
   <insert id="insert" useGeneratedKeys="true" keyProperty="id">

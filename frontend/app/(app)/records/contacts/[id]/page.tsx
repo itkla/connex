@@ -25,6 +25,7 @@ import EngineEvaluationPanel from "@/app/components/records/EngineEvaluationPane
 import { formatCompactCurrency, formatDate, formatDateTime, formatShortDate } from "@/app/lib/utils";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
 import EntityNotificationBanner from "@/app/components/notifications/EntityNotificationBanner";
+import BacklinksPanel from "@/app/components/activity/notes/BacklinksPanel";
 
 export default async function ContactPage({ params }: { params: { id: number } }) {
     const { id } = await params;
@@ -338,6 +339,8 @@ export default async function ContactPage({ params }: { params: { id: number } }
                                     />
                                 </div>
                             </div>
+
+                            <BacklinksPanel refType="person" refId={contact.id} />
                         </section>
                     </Rise>
                 </div>

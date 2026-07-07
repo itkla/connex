@@ -33,14 +33,14 @@
     SELECT <include refid="taskColumns"/>
     FROM task
     WHERE workspace_id = #{workspaceId}
-    ORDER BY due_date IS NULL, due_date
+    ORDER BY due_date IS NULL, due_date, id
   </select>
 
   <select id="getTasksByAssignedToId" resultMap="TaskResult">
     SELECT <include refid="taskColumns"/>
     FROM task
     WHERE workspace_id = #{workspaceId} AND assigned_to_id = #{assignedToId}
-    ORDER BY due_date IS NULL, due_date
+    ORDER BY due_date IS NULL, due_date, id
   </select>
 
   <select id="getTasksByPersonId" resultMap="TaskResult">
@@ -67,8 +67,8 @@
     SELECT <include refid="taskColumns"/>
     FROM task
     WHERE workspace_id = #{workspaceId} AND description LIKE #{query}
-    ORDER BY due_date IS NULL, due_date
-    LIMIT 10
+    ORDER BY due_date IS NULL, due_date, id
+    LIMIT #{limit} OFFSET #{offset}
   </select>
 
   <insert id="insert" useGeneratedKeys="true" keyProperty="id">

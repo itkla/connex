@@ -149,6 +149,7 @@ public class ActivityService {
     /**
      * Deletes a workspace-scoped activity.
      */
+    @Transactional
     @RequirePermission(Permission.ACTIVITY_DELETE)
     public void delete(int id) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
@@ -160,6 +161,7 @@ public class ActivityService {
         }
         activityMapper.delete(workspaceId, id);
         referenceService.deleteReferences(workspaceId, ReferenceService.SOURCE_ACTIVITY, id);
+        referenceService.deleteReferencesTo(workspaceId, ReferenceService.TYPE_ACTIVITY, id);
         auditService.record("activity.delete", "activity", id, before.getSubject(),
             "Deleted activity " + before.getSubject(),
             auditService.diff(before, null, AUDIT_FIELDS));
