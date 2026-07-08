@@ -60,6 +60,19 @@ public class ActivityService {
         return referenceService.hydrateActivities(workspaceId, activityMapper.getAllActivities(workspaceId));
     }
 
+    public List<Activity> getActivitiesPage(int limit, int offset) {
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        return referenceService.hydrateActivities(workspaceId,
+            activityMapper.getActivitiesPage(workspaceId, limit, offset));
+    }
+
+    public List<Activity> getActivitiesPage(Integer personId, Integer dealId, Integer createdById, int limit, int offset) {
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        requireDealExists(workspaceId, dealId);
+        return referenceService.hydrateActivities(workspaceId,
+            activityMapper.getActivitiesFilteredPage(workspaceId, personId, dealId, createdById, limit, offset));
+    }
+
     public List<Activity> getActivitiesByPersonId(int personId) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         return referenceService.hydrateActivities(workspaceId,
@@ -68,9 +81,7 @@ public class ActivityService {
 
     public List<Activity> getActivitiesByDealId(int dealId) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        if (!dealMapper.exists(workspaceId, dealId)) {
-            throw new ResourceNotFoundException("Deal not found with id: " + dealId);
-        }
+        requireDealExists(workspaceId, dealId);
         return referenceService.hydrateActivities(workspaceId,
             activityMapper.getActivitiesByDealId(workspaceId, dealId));
     }
@@ -167,6 +178,12 @@ public class ActivityService {
 
     private Activity hydrate(int workspaceId, Activity activity) {
         return referenceService.hydrateActivities(workspaceId, List.of(activity)).get(0);
+    }
+
+    private void requireDealExists(int workspaceId, Integer dealId) {
+        if (dealId != null && !dealMapper.exists(workspaceId, dealId)) {
+            throw new ResourceNotFoundException("Deal not found with id: " + dealId);
+        }
     }
 
     private void notifyMentions(int workspaceId, Activity activity, List<Integer> recipientIds, User actor) {

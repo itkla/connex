@@ -3,10 +3,15 @@ package ooo.klae.connex.backend.webauthn;
 import org.springframework.security.web.webauthn.jackson.WebauthnJacksonModule;
 import org.springframework.stereotype.Component;
 
+import ooo.klae.connex.backend.config.RequestBodySizeProperties;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
+import ooo.klae.connex.backend.exceptions.RequestBodyTooLargeException;
 
 import tools.jackson.core.JacksonException;
+import tools.jackson.core.StreamReadConstraints;
+import tools.jackson.core.exc.StreamConstraintsException;
 import tools.jackson.core.type.TypeReference;
+import tools.jackson.core.json.JsonFactory;
 import tools.jackson.databind.json.JsonMapper;
 
 /**
@@ -18,9 +23,17 @@ import tools.jackson.databind.json.JsonMapper;
 @Component
 public class WebAuthnJsonMapper {
 
-    private final JsonMapper mapper = JsonMapper.builder()
-        .addModule(new WebauthnJacksonModule())
-        .build();
+    private final JsonMapper mapper;
+
+    public WebAuthnJsonMapper(RequestBodySizeProperties properties) {
+        this.mapper = JsonMapper.builder(JsonFactory.builder()
+            .streamReadConstraints(StreamReadConstraints.builder()
+                .maxDocumentLength(properties.getWebauthnMaxBodyBytes())
+                .build())
+            .build())
+            .addModule(new WebauthnJacksonModule())
+            .build();
+    }
 
     /**
      * Serializes a relying-party option object to the JSON the browser's WebAuthn client consumes.
@@ -41,6 +54,8 @@ public class WebAuthnJsonMapper {
     public <T> T read(String json, TypeReference<T> type) {
         try {
             return mapper.readValue(json, type);
+        } catch (StreamConstraintsException ex) {
+            throw new RequestBodyTooLargeException(mapper.tokenStreamFactory().streamReadConstraints().getMaxDocumentLength());
         } catch (JacksonException ex) {
             throw new BadRequestException("Malformed WebAuthn payload");
         }

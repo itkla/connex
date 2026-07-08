@@ -30,6 +30,7 @@ import org.springframework.security.core.session.SessionRegistryImpl;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.web.context.SecurityContextHolderFilter;
 import org.springframework.security.web.csrf.CsrfTokenRequestAttributeHandler;
 import org.springframework.session.FindByIndexNameSessionRepository;
 import org.springframework.session.Session;
@@ -94,9 +95,11 @@ public class SecurityConfig {
             SocialLoginClientRegistrations socialLoginClientRegistrations,
             DbRelyingPartyRegistrationRepository dbRelyingPartyRegistrationRepository,
             SsoAuthenticationSuccessHandler ssoAuthenticationSuccessHandler,
+            RequestBodySizeProperties requestBodySizeProperties,
             @Value("${connex.security.csrf-enabled:true}") boolean csrfEnabled,
             @Value("${connex.sso.enabled:false}") boolean ssoEnabled) throws Exception {
         boolean oauthEnabled = ssoEnabled || socialLoginClientRegistrations.anyEnabled();
+        http.addFilterBefore(new ApiRequestBodySizeFilter(requestBodySizeProperties), SecurityContextHolderFilter.class);
         if (csrfEnabled) {
             // Session-stored token (default repo), echoed by the SPA in a header it fetches from
             // GET /api/auth/csrf. A plain (non-XOR) handler keeps the token stable so the client can

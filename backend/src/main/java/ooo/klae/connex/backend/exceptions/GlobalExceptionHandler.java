@@ -9,10 +9,13 @@ import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.AuthenticationException;
+import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
+
+import tools.jackson.core.exc.StreamConstraintsException;
 
 @RestControllerAdvice
 public class GlobalExceptionHandler {
@@ -73,6 +76,19 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.BAD_REQUEST).body("Invalid value for parameter: " + ex.getName());
     }
 
+    @ExceptionHandler(RequestBodyTooLargeException.class)
+    public ResponseEntity<String> requestBodyTooLarge(RequestBodyTooLargeException ex) {
+        return ResponseEntity.status(HttpStatus.PAYLOAD_TOO_LARGE).body("Request body is too large");
+    }
+
+    @ExceptionHandler(HttpMessageNotReadableException.class)
+    public ResponseEntity<String> unreadableMessage(HttpMessageNotReadableException ex) {
+        if (hasCause(ex, RequestBodyTooLargeException.class) || hasCause(ex, StreamConstraintsException.class)) {
+            return ResponseEntity.status(HttpStatus.PAYLOAD_TOO_LARGE).body("Request body is too large");
+        }
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body("Malformed request body");
+    }
+
     @ExceptionHandler(Exception.class)
     public ResponseEntity<String> internalError(Exception ex) {
         log.error("Unhandled exception", ex);
@@ -82,5 +98,16 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(AuthenticationException.class)
     public ResponseEntity<String> authenticationError(AuthenticationException ex) {
         return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body("Authentication failed");
+    }
+
+    private static boolean hasCause(Throwable throwable, Class<? extends Throwable> type) {
+        Throwable current = throwable;
+        while (current != null) {
+            if (type.isInstance(current)) {
+                return true;
+            }
+            current = current.getCause();
+        }
+        return false;
     }
 }

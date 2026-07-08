@@ -13,6 +13,14 @@ import java.util.List;
 
 public interface ActivityMapper {
     List<Activity> getAllActivities(int workspaceId);
+    List<Activity> getActivitiesPage(@Param("workspaceId") int workspaceId, @Param("limit") int limit, @Param("offset") int offset);
+    List<Activity> getActivitiesFilteredPage(
+        @Param("workspaceId") int workspaceId,
+        @Param("personId") Integer personId,
+        @Param("dealId") Integer dealId,
+        @Param("createdById") Integer createdById,
+        @Param("limit") int limit,
+        @Param("offset") int offset);
     List<Activity> getActivitiesByPersonId(@Param("workspaceId") int workspaceId, @Param("personId") int personId);
     List<Activity> getActivitiesByDealId(@Param("workspaceId") int workspaceId, @Param("dealId") int dealId);
     List<Activity> getActivitiesByCreatedById(@Param("workspaceId") int workspaceId, @Param("createdById") int createdById);

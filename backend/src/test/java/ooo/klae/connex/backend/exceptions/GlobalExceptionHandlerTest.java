@@ -11,6 +11,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.converter.HttpMessageNotReadableException;
 
 /**
  * The data-integrity handler must not echo which unique column collided (#81): a duplicate email or
@@ -80,5 +81,23 @@ class GlobalExceptionHandlerTest {
 
         assertEquals(HttpStatus.TOO_MANY_REQUESTS, response.getStatusCode());
         assertEquals("slow down", response.getBody());
+    }
+
+    @Test
+    void unreadableMessage_onRequestBodyLimit_mapsTo413() {
+        ResponseEntity<String> response = handler.unreadableMessage(
+            new HttpMessageNotReadableException("too large", new RequestBodyTooLargeException(8), null));
+
+        assertEquals(HttpStatus.PAYLOAD_TOO_LARGE, response.getStatusCode());
+        assertEquals("Request body is too large", response.getBody());
+    }
+
+    @Test
+    void unreadableMessage_onMalformedBody_mapsTo400() {
+        ResponseEntity<String> response = handler.unreadableMessage(
+            new HttpMessageNotReadableException("bad json", null));
+
+        assertEquals(HttpStatus.BAD_REQUEST, response.getStatusCode());
+        assertEquals("Malformed request body", response.getBody());
     }
 }

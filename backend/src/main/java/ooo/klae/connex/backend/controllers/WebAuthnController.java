@@ -31,6 +31,7 @@ import ooo.klae.connex.backend.dto.PasskeyDto;
 import ooo.klae.connex.backend.dto.RenamePasskeyRequest;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
+import ooo.klae.connex.backend.exceptions.RequestBodyTooLargeException;
 import ooo.klae.connex.backend.exceptions.TooManyRequestsException;
 import ooo.klae.connex.backend.services.AuthService;
 import ooo.klae.connex.backend.services.LoginRateLimiter;
@@ -101,6 +102,8 @@ public class WebAuthnController {
             PublicKeyCredential<AuthenticatorAttestationResponse> credential = json.read(body, ATTESTATION_TYPE);
             CredentialRecord record = webAuthnService.finishRegistration(options, credential, label);
             return Map.of("credentialId", record.getCredentialId().toBase64UrlString());
+        } catch (RequestBodyTooLargeException ex) {
+            throw ex;
         } catch (BadRequestException ex) {
             throw ex;
         } catch (RuntimeException ex) {
@@ -143,6 +146,8 @@ public class WebAuthnController {
         try {
             PublicKeyCredential<AuthenticatorAssertionResponse> assertion = json.read(body, ASSERTION_TYPE);
             user = webAuthnService.finishLogin(options, assertion);
+        } catch (RequestBodyTooLargeException ex) {
+            throw ex;
         } catch (RuntimeException ex) {
             loginRateLimiter.recordFailure(ip, null, now);
             throw new BadCredentialsException("Passkey authentication failed");

@@ -29,16 +29,21 @@
   </resultMap>
 
   <sql id="personColumns">
-    p.id, p.workspace_id, p.name, p.email, p.phone, p.company_id, p.title, p.created_at, p.updated_at, p.image_url,
+    p.id, p.workspace_id, p.name, p.email, p.phone, p.title, p.created_at, p.updated_at, p.image_url,
     p.risk_excluded, p.intro_excluded
   </sql>
 
   <sql id="companyJoinColumns">
-    c.name AS company_name, c.logo_url AS company_logo_url
+    c.id AS company_id, c.name AS company_name, c.logo_url AS company_logo_url
   </sql>
 
   <sql id="companyJoin">
     LEFT JOIN company c ON c.id = p.company_id
+      AND (c.workspace_id = #{workspaceId}
+        OR EXISTS (SELECT 1 FROM company_share cs
+          JOIN workspace vws ON vws.id = cs.workspace_id
+          JOIN workspace ows ON ows.id = c.workspace_id AND ows.org_id = vws.org_id
+          WHERE cs.company_id = c.id AND cs.workspace_id = #{workspaceId}))
   </sql>
 
   <!-- Owned-or-shared visibility: a person is visible to its owning workspace and any workspace it
@@ -87,7 +92,7 @@
     ORDER BY p.name
   </select>
 
-  <select id="getPersonById" resultMap="PersonFullResult">
+  <select id="getPersonById" resultMap="PersonResult">
     SELECT <include refid="personColumns"/>, <include refid="companyJoinColumns"/>
     FROM person p
     <include refid="companyJoin"/>
@@ -181,7 +186,8 @@
 
   <select id="distinctCompanies" resultType="string">
     SELECT DISTINCT c.name
-    FROM person p JOIN company c ON c.id = p.company_id
+    FROM person p
+    <include refid="companyJoin"/>
     WHERE p.workspace_id = #{workspaceId} AND c.name IS NOT NULL AND c.name &lt;&gt; ''
     ORDER BY c.name
   </select>

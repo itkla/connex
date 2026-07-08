@@ -45,18 +45,21 @@ public class ActivityController {
         @RequestParam(required = false) Integer paginationRange,
         @RequestParam(required = false) Integer itemsPerPage
     ) {
+        Integer selectedPersonId = personId;
+        Integer selectedDealId = selectedPersonId == null ? dealId : null;
+        Integer selectedCreatedById = selectedPersonId == null && selectedDealId == null ? createdById : null;
         List<Activity> activities;
-        if (personId != null) activities = activityService.getActivitiesByPersonId(personId);
-        else if (dealId != null) activities = activityService.getActivitiesByDealId(dealId);
-        else if (createdById != null) activities = activityService.getActivitiesByCreatedById(createdById);
+        if (itemsPerPage != null) {
+            int size = Math.min(Math.max(itemsPerPage, 1), 200);
+            int page = paginationRange == null ? 1 : Math.max(paginationRange, 1);
+            int offset = (int) Math.min(Integer.MAX_VALUE, (long) (page - 1) * size);
+            activities = activityService.getActivitiesPage(
+                selectedPersonId, selectedDealId, selectedCreatedById, size, offset);
+        } else if (selectedPersonId != null) activities = activityService.getActivitiesByPersonId(selectedPersonId);
+        else if (selectedDealId != null) activities = activityService.getActivitiesByDealId(selectedDealId);
+        else if (selectedCreatedById != null) activities = activityService.getActivitiesByCreatedById(selectedCreatedById);
         else activities = activityService.getAllActivities();
-        List<ActivityDto> dtos = activities.stream().map(ActivityDto::from).toList();
-        if (itemsPerPage == null) return dtos;
-        int size = Math.min(Math.max(itemsPerPage, 1), 200);
-        int page = paginationRange == null ? 1 : Math.max(paginationRange, 1);
-        int from = (int) Math.min(Integer.MAX_VALUE, (long) (page - 1) * size);
-        if (from >= dtos.size()) return List.of();
-        return dtos.subList(from, Math.min(dtos.size(), from + size));
+        return activities.stream().map(ActivityDto::from).toList();
     }
 
     /**
