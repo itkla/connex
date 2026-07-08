@@ -4,6 +4,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import ooo.klae.connex.backend.mappers.ActivityMapper;
+import ooo.klae.connex.backend.mappers.CompanyMapper;
 import ooo.klae.connex.backend.mappers.DealMapper;
 import ooo.klae.connex.backend.mappers.NoteMapper;
 import ooo.klae.connex.backend.mappers.PersonMapper;
@@ -40,6 +41,7 @@ import lombok.RequiredArgsConstructor;
 @RequiredArgsConstructor
 public class PersonService {
     private final PersonMapper personMapper;
+    private final CompanyMapper companyMapper;
     private final TagMapper tagMapper;
     private final DealMapper dealMapper;
     private final ActivityMapper activityMapper;
@@ -169,6 +171,7 @@ public class PersonService {
     @RequirePermission(Permission.PERSON_CREATE)
     public Person create(Person person) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
+        validateCompanyVisible(workspaceId, person);
         person.setWorkspaceId(workspaceId);
         personMapper.insert(person);
         employmentService.recordInitial(workspaceId, person.getId(), companyIdOf(person), person.getTitle());
@@ -189,6 +192,7 @@ public class PersonService {
     public Person update(int id, Person person) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         Person before = requirePerson(workspaceId, id);
+        validateCompanyVisible(workspaceId, person);
         person.setId(id);
         person.setWorkspaceId(workspaceId);
         personMapper.update(person);
@@ -230,6 +234,13 @@ public class PersonService {
     private static Integer companyIdOf(Person person) {
         return (person.getCompany() == null || person.getCompany().getId() == 0)
             ? null : person.getCompany().getId();
+    }
+
+    private void validateCompanyVisible(int workspaceId, Person person) {
+        Integer companyId = companyIdOf(person);
+        if (companyId != null && !companyMapper.exists(workspaceId, companyId)) {
+            throw new BadRequestException("Company not found with id: " + companyId);
+        }
     }
 
     /**
@@ -402,6 +413,8 @@ public class PersonService {
 
     private Person hydrateScopedRelationships(Person person, int workspaceId) {
         person.setDeals(dealMapper.getDealsByPersonId(workspaceId, person.getId()).toArray(Deal[]::new));
+        person.setTags(tagMapper.getTagsByPersonId(workspaceId, person.getId()).toArray(Tag[]::new));
+        person.setActivities(activityMapper.getActivitiesByPersonId(workspaceId, person.getId()).toArray(Activity[]::new));
         person.setTasks(taskMapper.getTasksByPersonId(workspaceId, person.getId()).toArray(Task[]::new));
         return person;
     }

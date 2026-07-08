@@ -1,8 +1,11 @@
 package ooo.klae.connex.backend.services;
 
+import java.util.Arrays;
 import java.util.List;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -17,8 +20,10 @@ import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.beans.Pipeline;
 import ooo.klae.connex.backend.beans.Stage;
 import ooo.klae.connex.backend.beans.Task;
+import ooo.klae.connex.backend.beans.Tag;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.beans.Workspace;
+import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.ShareMapper;
 
@@ -57,6 +62,61 @@ class PersonServiceTest extends AbstractServiceTest {
         Person ownerView = personMapper.getPersonById(other.getId(), foreign.getId());
         assertFalse(ownerView.isRiskExcluded());
         assertFalse(ownerView.isIntroExcluded());
+    }
+
+    @Test
+    void getPersonById_returnsOnlyActiveWorkspaceChildrenForSharedContact() {
+        Workspace ownerWorkspace = newWorkspaceInSameOrg();
+        Company ownerCompany = companyInWorkspace(ownerWorkspace);
+        Person shared = personInWorkspace(ownerWorkspace, ownerCompany);
+        Activity ownerActivity = activityInWorkspace(ownerWorkspace, shared);
+        Task ownerTask = taskInWorkspace(ownerWorkspace, shared);
+        Note ownerNote = noteInWorkspace(ownerWorkspace, shared);
+        Tag ownerTag = tagInWorkspace(ownerWorkspace);
+        personMapper.addTag(ownerWorkspace.getId(), shared.getId(), ownerTag.getId());
+        Activity activeActivity = activityInWorkspace(workspace, shared);
+        Task activeTask = taskInWorkspace(workspace, shared);
+        Note activeNote = noteInWorkspace(workspace, shared);
+        shareMapper.sharePerson(shared.getId(), ownerWorkspace.getId(), workspace.getId(), currentUser.getId(), true);
+
+        Person detail = personService.getPersonById(shared.getId());
+
+        assertEquals(List.of(activeActivity.getId()), Arrays.stream(detail.getActivities()).map(Activity::getId).toList());
+        assertEquals(List.of(activeTask.getId()), Arrays.stream(detail.getTasks()).map(Task::getId).toList());
+        assertEquals(List.of(activeNote.getId()), Arrays.stream(detail.getNotes()).map(Note::getId).toList());
+        assertTrue(Arrays.stream(detail.getActivities()).noneMatch(activity -> activity.getId() == ownerActivity.getId()));
+        assertTrue(Arrays.stream(detail.getTasks()).noneMatch(task -> task.getId() == ownerTask.getId()));
+        assertTrue(Arrays.stream(detail.getNotes()).noneMatch(note -> note.getId() == ownerNote.getId()));
+        assertTrue(Arrays.stream(detail.getTags()).noneMatch(tag -> tag.getId() == ownerTag.getId()));
+        assertNull(detail.getCompany(), "person share alone must not disclose owner-workspace company metadata");
+    }
+
+    @Test
+    void create_rejectsUnsharedForeignCompany() {
+        Workspace ownerWorkspace = newWorkspaceInSameOrg();
+        Company ownerCompany = companyInWorkspace(ownerWorkspace);
+        Person person = personDraft(ownerCompany);
+
+        assertThrows(BadRequestException.class, () -> personService.create(person));
+    }
+
+    @Test
+    void update_rejectsUnsharedForeignCompany() {
+        Person existing = personService.create(personDraft(null));
+        Workspace ownerWorkspace = newWorkspaceInSameOrg();
+        Company ownerCompany = companyInWorkspace(ownerWorkspace);
+        Person update = personDraft(ownerCompany);
+
+        assertThrows(BadRequestException.class, () -> personService.update(existing.getId(), update));
+    }
+
+    @Test
+    void distinctCompanies_doesNotRevealUnsharedForeignCompanyName() {
+        Workspace ownerWorkspace = newWorkspaceInSameOrg();
+        Company ownerCompany = companyInWorkspace(ownerWorkspace);
+        personInWorkspace(workspace, ownerCompany);
+
+        assertFalse(personService.distinctCompanies().contains(ownerCompany.getName()));
     }
 
     @Test
@@ -145,14 +205,86 @@ class PersonServiceTest extends AbstractServiceTest {
         return other;
     }
 
+    private Workspace newWorkspaceInSameOrg() {
+        Workspace other = new Workspace();
+        other.setName("Other Workspace");
+        other.setSlug("other-" + unique());
+        other.setOrgId(workspaceMapper.getOrgId(workspace.getId()));
+        workspaceMapper.insert(other);
+        return other;
+    }
+
     private Person personInWorkspace(Workspace target) {
+        return personInWorkspace(target, null);
+    }
+
+    private Person personInWorkspace(Workspace target, Company company) {
+        Person person = personDraft(company);
+        person.setWorkspaceId(target.getId());
+        personMapper.insert(person);
+        return person;
+    }
+
+    private Person personDraft(Company company) {
         String s = unique();
         Person person = new Person();
         person.setName("Foreign " + s);
         person.setEmail(s + ".foreign@example.com");
         person.setTitle("Engineer");
-        person.setWorkspaceId(target.getId());
-        personMapper.insert(person);
+        person.setCompany(company);
         return person;
+    }
+
+    private Company companyInWorkspace(Workspace target) {
+        Company company = new Company();
+        company.setName("Company " + unique());
+        company.setWorkspaceId(target.getId());
+        companyMapper.insert(company);
+        return company;
+    }
+
+    private Activity activityInWorkspace(Workspace target, Person person) {
+        Activity activity = new Activity();
+        activity.setWorkspaceId(target.getId());
+        activity.setType("call");
+        activity.setSubject("Activity " + unique());
+        activity.setNotes("Notes " + unique());
+        activity.setPerson(person);
+        activity.setCreatedBy(currentUser);
+        activity.setTimestamp("2024-06-01 10:00:00");
+        activityMapper.insert(activity);
+        return activity;
+    }
+
+    private Task taskInWorkspace(Workspace target, Person person) {
+        Task task = new Task();
+        task.setWorkspaceId(target.getId());
+        task.setDescription("Task " + unique());
+        task.setCompleted(false);
+        task.setStatus("todo");
+        task.setDueDate("2024-12-31");
+        task.setAssignedTo(currentUser);
+        task.setPerson(person);
+        taskMapper.insert(task);
+        return task;
+    }
+
+    private Note noteInWorkspace(Workspace target, Person person) {
+        Note note = new Note();
+        note.setWorkspaceId(target.getId());
+        note.setContent("Note " + unique());
+        note.setAuthor(currentUser);
+        note.setPerson(person);
+        noteMapper.insert(note);
+        return note;
+    }
+
+    private Tag tagInWorkspace(Workspace target) {
+        Tag tag = new Tag();
+        tag.setWorkspaceId(target.getId());
+        tag.setName("tag_" + unique());
+        tag.setColor("#abcdef");
+        tagMapper.insert(tag);
+        return tag;
     }
 }

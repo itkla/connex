@@ -30,6 +30,29 @@
     WHERE workspace_id = #{workspaceId} ORDER BY timestamp DESC
   </select>
 
+  <select id="getActivitiesPage" resultMap="ActivityResult">
+    SELECT <include refid="activityColumns"/> FROM activity
+    WHERE workspace_id = #{workspaceId}
+    ORDER BY timestamp DESC
+    LIMIT #{limit} OFFSET #{offset}
+  </select>
+
+  <select id="getActivitiesFilteredPage" resultMap="ActivityResult">
+    SELECT <include refid="activityColumns"/> FROM activity
+    WHERE workspace_id = #{workspaceId}
+    <if test="personId != null">
+      AND person_id = #{personId}
+    </if>
+    <if test="dealId != null">
+      AND deal_id = #{dealId}
+    </if>
+    <if test="createdById != null">
+      AND created_by_id = #{createdById}
+    </if>
+    ORDER BY timestamp DESC
+    LIMIT #{limit} OFFSET #{offset}
+  </select>
+
   <select id="getActivitiesByPersonId" resultMap="ActivityResult">
     SELECT <include refid="activityColumns"/> FROM activity
     WHERE workspace_id = #{workspaceId} AND person_id = #{personId} ORDER BY timestamp DESC
