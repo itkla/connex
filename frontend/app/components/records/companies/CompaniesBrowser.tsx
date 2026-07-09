@@ -34,7 +34,7 @@ import CompanyAvatar from '@/app/components/records/companies/CompanyAvatar';
 import NewCompanyDialog from '@/app/components/records/companies/NewCompanyDialog';
 import { type PendingContact, type PendingContactDraft } from '@/app/components/records/companies/CompanyContactsField';
 import QuickEditCompanySheet, { type CompanyDraft } from '@/app/components/records/companies/QuickEditCompanySheet';
-import { createCompany, createContact, updateContact, getUsers, getTasks, getDeals, updateCompany, getActivities, getNotes, getCompanyTemperatures, isFieldError, evaluateSegments, getSegmentFields, getTags, bulkAddTagToCompanies, bulkRemoveTagFromCompanies, bulkDeleteCompanies } from '@/app/lib/api';
+import { createCompany, createContact, updateContact, getUsers, getTasks, getDeals, updateCompany, getActivities, getNotes, getCompaniesPage, getCompanyTemperatures, isFieldError, evaluateSegments, getSegmentFields, getTags, bulkAddTagToCompanies, bulkRemoveTagFromCompanies, bulkDeleteCompanies } from '@/app/lib/api';
 import BulkTagDialog from '@/app/components/records/BulkTagDialog';
 import { notifyBulkResult } from '@/app/lib/bulkToast';
 import { uploadCompanyLogo, uploadContactPicture, pickDominantCurrency, parseMysqlDateTime } from '@/app/lib/utils';
@@ -75,12 +75,41 @@ function cleanCompanyPayload(payload: CreateCompanyPayload): CreateCompanyPayloa
     };
 }
 
-export default function CompaniesBrowser({ companies, savedViews }: { companies: Company[]; savedViews: SavedView[] }) {
+export default function CompaniesBrowser({ companies: initialCompanies, total: initialTotal, savedViews }: { companies: Company[]; total: number; savedViews: SavedView[] }) {
     const router = useRouter();
     const t = useTranslations('CompaniesBrowser');
     const tf = useTranslations('Filters');
     const tSeg = useTranslations('SmartSegments');
     const reduce = useReducedMotion() ?? false;
+    const [companies, setCompanies] = useState(initialCompanies);
+    const [total, setTotal] = useState(initialTotal);
+    const [page, setPage] = useState(1);
+    const [size, setSize] = useState(25);
+    const [loadingPage, setLoadingPage] = useState(false);
+    const loadCompaniesPage = useCallback((nextPage: number, nextSize: number) => {
+        setLoadingPage(true);
+        getCompaniesPage({ page: nextPage, size: nextSize })
+            .then((response) => {
+                setCompanies(response.items);
+                setTotal(response.total);
+            })
+            .catch(() => {
+                setCompanies([]);
+                setTotal(0);
+            })
+            .finally(() => {
+                setLoadingPage(false);
+            });
+    }, []);
+    const changePage = useCallback((nextPage: number) => {
+        setPage(nextPage);
+        loadCompaniesPage(nextPage, size);
+    }, [loadCompaniesPage, size]);
+    const changePageSize = useCallback((nextSize: number) => {
+        setSize(nextSize);
+        setPage(1);
+        loadCompaniesPage(1, nextSize);
+    }, [loadCompaniesPage]);
     const {
         displayMode,
         setDisplayMode,
@@ -171,10 +200,10 @@ export default function CompaniesBrowser({ companies, savedViews }: { companies:
         return () => { active = false; clearTimeout(timer); };
     }, [evaluable, segmentsKey, segmentResult, tSeg]);
     useEffect(() => {
-        getCompanyTemperatures()
+        getCompanyTemperatures(companies.map((company) => company.id))
             .then((temps) => setTempByCompanyId(new Map(temps.map((temp) => [temp.id, temp]))))
             .catch(() => setTempByCompanyId(new Map()));
-    }, []);
+    }, [companies]);
 
     const ensureMetricsLoaded = useCallback(() => {
         if (metricsStatus === 'loading' || metricsStatus === 'ready') return;
@@ -357,6 +386,7 @@ export default function CompaniesBrowser({ companies, savedViews }: { companies:
             key: 'warmth',
             label: t('columnWarmth'),
             getSortValue: (c) => tempByCompanyId.get(c.id)?.score ?? null,
+            sortable: false,
             render: (c) => <TemperaturePill temp={tempByCompanyId.get(c.id)} />,
         },
         {
@@ -630,7 +660,7 @@ export default function CompaniesBrowser({ companies, savedViews }: { companies:
                 <Rise delay={0.18}>
                     <RecordsRenderView<Company>
                         data={visibleCompanies}
-                        loading={segmentsLoading}
+                        loading={loadingPage || segmentsLoading}
                         columns={[...columns, ...customColumns]}
                         addColumnSlot={addColumnSlot}
                         renderCard={(item, { onQuickEdit, onDelete }) => (
@@ -654,6 +684,13 @@ export default function CompaniesBrowser({ companies, savedViews }: { companies:
                         entityLabel={t('entityLabel')}
                         selectionActions={selectionActions}
                         sortState={sortState}
+                        pagination={{
+                            page,
+                            pageSize: size,
+                            total,
+                            onPageChange: changePage,
+                            onPageSizeChange: changePageSize,
+                        }}
                     />
                 </Rise>
 

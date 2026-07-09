@@ -3,12 +3,16 @@ package ooo.klae.connex.backend.services;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.anyInt;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
+import java.util.LinkedHashSet;
 import java.util.List;
 
 import org.junit.jupiter.api.Test;
@@ -96,6 +100,68 @@ class ScoringServiceTest {
         assertNotEquals("cold", fresh.getBand());
         assertTrue(fresh.getScore() > aged.getScore());
         assertEquals("cold", aged.getBand());
+    }
+
+    @Test
+    void scoreContactsSubsetOnlyScoresVisibleRequestedIds() {
+        PersonMapper personMapper = mock(PersonMapper.class);
+        CompanyMapper companyMapper = mock(CompanyMapper.class);
+        DealMapper dealMapper = mock(DealMapper.class);
+        ActivityMapper activityMapper = mock(ActivityMapper.class);
+        NoteMapper noteMapper = mock(NoteMapper.class);
+        TaskMapper taskMapper = mock(TaskMapper.class);
+        Person person = person(1, null);
+        Activity activity = activity(person, "meeting", "2026-06-29 12:00:00");
+        activity.setId(10);
+        when(personMapper.exists(WS, 1)).thenReturn(true);
+        when(personMapper.exists(WS, 2)).thenReturn(false);
+        when(activityMapper.getActivitiesByPersonId(WS, 1)).thenReturn(List.of(activity));
+        when(noteMapper.getNotesByPersonId(WS, 1)).thenReturn(List.of());
+        when(taskMapper.getTasksByPersonId(WS, 1)).thenReturn(List.of());
+        ScoringService service = new ScoringService(personMapper, companyMapper, dealMapper,
+            activityMapper, noteMapper, taskMapper, Clock.fixed(NOW, ZoneOffset.UTC));
+
+        List<RelationshipTemperatureDto> scores = service.scoreContacts(WS, new LinkedHashSet<>(List.of(1, 2)));
+
+        assertEquals(List.of(1), scores.stream().map(RelationshipTemperatureDto::getId).toList());
+        assertNotEquals("cold", scores.getFirst().getBand());
+        verify(personMapper, never()).getAllPersons(anyInt());
+        verify(activityMapper, never()).getAllActivities(anyInt());
+    }
+
+    @Test
+    void scoreCompaniesSubsetDeduplicatesTouchesAndAvoidsWorkspaceScan() {
+        PersonMapper personMapper = mock(PersonMapper.class);
+        CompanyMapper companyMapper = mock(CompanyMapper.class);
+        DealMapper dealMapper = mock(DealMapper.class);
+        ActivityMapper activityMapper = mock(ActivityMapper.class);
+        NoteMapper noteMapper = mock(NoteMapper.class);
+        TaskMapper taskMapper = mock(TaskMapper.class);
+        Company company = company(10);
+        Person person = person(1, 10);
+        Deal deal = new Deal();
+        deal.setId(20);
+        Activity activity = activity(person, "meeting", "2026-06-29 12:00:00");
+        activity.setId(30);
+        activity.setDeal(deal);
+        when(companyMapper.exists(WS, 10)).thenReturn(true);
+        when(personMapper.getPersonsByCompanyId(WS, 10)).thenReturn(List.of(person));
+        when(dealMapper.getDealsByCompanyId(WS, 10)).thenReturn(List.of(deal));
+        when(activityMapper.getActivitiesByPersonId(WS, 1)).thenReturn(List.of(activity));
+        when(noteMapper.getNotesByPersonId(WS, 1)).thenReturn(List.of());
+        when(taskMapper.getTasksByPersonId(WS, 1)).thenReturn(List.of());
+        when(activityMapper.getActivitiesByDealId(WS, 20)).thenReturn(List.of(activity));
+        when(noteMapper.getNotesByDealId(WS, 20)).thenReturn(List.of());
+        when(taskMapper.getTasksByDealId(WS, 20)).thenReturn(List.of());
+        ScoringService service = new ScoringService(personMapper, companyMapper, dealMapper,
+            activityMapper, noteMapper, taskMapper, Clock.fixed(NOW, ZoneOffset.UTC));
+
+        List<RelationshipTemperatureDto> scores = service.scoreCompanies(WS, new LinkedHashSet<>(List.of(company.getId())));
+
+        assertEquals(List.of(10), scores.stream().map(RelationshipTemperatureDto::getId).toList());
+        assertEquals(1, scores.getFirst().getTouchCount());
+        verify(companyMapper, never()).getAllCompanies(anyInt());
+        verify(activityMapper, never()).getAllActivities(anyInt());
     }
 
     private static RelationshipTemperatureDto scoreFor(List<RelationshipTemperatureDto> scores, int id) {

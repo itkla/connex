@@ -8,6 +8,10 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -25,7 +29,14 @@ import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.beans.Workspace;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
+import ooo.klae.connex.backend.mappers.ActivityMapper;
+import ooo.klae.connex.backend.mappers.CompanyMapper;
+import ooo.klae.connex.backend.mappers.DealMapper;
+import ooo.klae.connex.backend.mappers.NoteMapper;
+import ooo.klae.connex.backend.mappers.PersonMapper;
 import ooo.klae.connex.backend.mappers.ShareMapper;
+import ooo.klae.connex.backend.mappers.TagMapper;
+import ooo.klae.connex.backend.mappers.TaskMapper;
 
 class PersonServiceTest extends AbstractServiceTest {
 
@@ -138,6 +149,34 @@ class PersonServiceTest extends AbstractServiceTest {
     @Test
     void getDealsByPersonId_throwsWhenPersonMissing() {
         assertThrows(ResourceNotFoundException.class, () -> personService.getDealsByPersonId(-1));
+    }
+
+    @Test
+    void getMatchingPersonIdsRejectsTooManyMatchesBeforeFetchingIds() {
+        PersonMapper mapper = mock(PersonMapper.class);
+        WorkspaceService workspaceService = mock(WorkspaceService.class);
+        PersonService service = new PersonService(
+            mapper,
+            mock(CompanyMapper.class),
+            mock(TagMapper.class),
+            mock(DealMapper.class),
+            mock(ActivityMapper.class),
+            mock(NoteMapper.class),
+            mock(TaskMapper.class),
+            mock(AuditService.class),
+            workspaceService,
+            mock(EmploymentService.class),
+            mock(CustomFieldValueService.class),
+            mock(ReferenceService.class),
+            mock(RuleTriggerPublisher.class)
+        );
+        when(workspaceService.getCurrentWorkspaceId()).thenReturn(7);
+        when(mapper.countPersons(7, "Security", null, null, false)).thenReturn(1001L);
+
+        assertThrows(BadRequestException.class,
+            () -> service.getMatchingPersonIds("Security", null, null, false));
+
+        verify(mapper, never()).getPersonIdsFiltered(7, "Security", null, null, false, 1000);
     }
 
     @Test

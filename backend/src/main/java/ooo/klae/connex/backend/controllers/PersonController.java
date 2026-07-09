@@ -12,7 +12,9 @@ import org.springframework.web.bind.annotation.RestController;
 
 import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.util.LikePattern;
+import ooo.klae.connex.backend.util.PageBounds;
 import ooo.klae.connex.backend.dto.ActivityDto;
+import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.dto.BulkDeleteRequest;
 import ooo.klae.connex.backend.dto.BulkOperationResult;
 import ooo.klae.connex.backend.dto.BulkTagRequest;
@@ -57,6 +59,7 @@ public class PersonController {
     private final EmploymentService employmentService;
     private final ConnectionService connectionService;
     private final BulkOperationService bulkOperationService;
+    private static final String WARMTH_SORT = "warmth";
 
     /**
      * GET endpoint for the "recently moved" feed: contacts who recently changed companies.
@@ -84,7 +87,7 @@ public class PersonController {
         if (companyId != null) persons = personService.getPersonsByCompanyId(companyId);
         else if (tagId != null) persons = personService.getPersonsByTagId(tagId);
         else if (dealId != null) persons = personService.getPersonsByDealId(dealId);
-        else persons = personService.getAllPersons();
+        else throw new BadRequestException("A filter is required; use /api/persons/page for workspace-wide lists");
         return persons.stream().map(PersonDto::from).toList();
     }
 
@@ -100,7 +103,6 @@ public class PersonController {
      * @param titles
      * @param noCompany
      * @return
-     * @throws IllegalArgumentException if the page or size is less than 1.
      */
     @GetMapping("/page")
     public PageResponse<PersonDto> getPersonsPage(
@@ -113,11 +115,13 @@ public class PersonController {
         @RequestParam(required = false) List<String> titles,
         @RequestParam(defaultValue = "false") boolean noCompany
     ) {
-        size = Math.min(Math.max(size, 1), 100);
-        page = Math.max(page, 1);
+        if (WARMTH_SORT.equalsIgnoreCase(sort)) {
+            throw new BadRequestException("Warmth sorting requires a precomputed score index and is not available for paginated contacts");
+        }
+        PageBounds bounds = PageBounds.of(page, size);
         String query = (q == null || q.isBlank()) ? null : LikePattern.containing(q);
-        int offset = Math.max(0, (page - 1) * size);
-        List<PersonDto> items = personService.getPersonsPage(query, sort, dir, companies, titles, noCompany, size, offset)
+        List<PersonDto> items = personService.getPersonsPage(query, sort, dir, companies, titles, noCompany,
+            bounds.size(), bounds.offset())
             .stream().map(PersonDto::from).toList();
         return new PageResponse<>(items, personService.countPersons(query, companies, titles, noCompany));
     }
@@ -140,6 +144,12 @@ public class PersonController {
         @RequestParam(defaultValue = "false") boolean noCompany
     ) {
         String query = (q == null || q.isBlank()) ? null : LikePattern.containing(q);
+        if (query == null
+            && (companies == null || companies.isEmpty())
+            && (titles == null || titles.isEmpty())
+            && !noCompany) {
+            throw new BadRequestException("At least one filter is required before selecting matching contact ids");
+        }
         return personService.getMatchingPersonIds(query, companies, titles, noCompany);
     }
 

@@ -73,6 +73,12 @@ public class ActivityService {
             activityMapper.getActivitiesFilteredPage(workspaceId, personId, dealId, createdById, limit, offset));
     }
 
+    public long countActivities(Integer personId, Integer dealId, Integer createdById) {
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        requireDealExists(workspaceId, dealId);
+        return activityMapper.countActivities(workspaceId, personId, dealId, createdById);
+    }
+
     public List<Activity> getActivitiesByPersonId(int personId) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         return referenceService.hydrateActivities(workspaceId,

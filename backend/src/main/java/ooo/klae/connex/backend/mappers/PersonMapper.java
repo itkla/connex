@@ -30,14 +30,14 @@ public interface PersonMapper {
     long countPersons(@Param("workspaceId") int workspaceId, @Param("query") String query,
             @Param("companies") List<String> companies,
             @Param("titles") List<String> titles, @Param("noCompany") boolean noCompany);
-    /** Same filter predicates as {@code getPersonsPage} but unpaginated, for sorts computed in Java (warmth). */
+    /** Same filter predicates as {@code getPersonsPage} but unpaginated, for CSV exports. */
     List<Person> getPersonsFiltered(@Param("workspaceId") int workspaceId, @Param("query") String query,
             @Param("companies") List<String> companies, @Param("titles") List<String> titles,
             @Param("noCompany") boolean noCompany);
-    /** Ids only for the same filter predicates as {@code getPersonsFiltered}; backs "select all matching". */
+    /** Ids only for the same filter predicates as {@code getPersonsPage}; backs "select all matching". */
     List<Integer> getPersonIdsFiltered(@Param("workspaceId") int workspaceId, @Param("query") String query,
             @Param("companies") List<String> companies, @Param("titles") List<String> titles,
-            @Param("noCompany") boolean noCompany);
+            @Param("noCompany") boolean noCompany, @Param("limit") int limit);
     List<String> distinctCompanies(int workspaceId);
     List<String> distinctTitles(int workspaceId);
     boolean hasPersonWithoutCompany(int workspaceId);

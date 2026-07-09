@@ -13,6 +13,8 @@ import java.util.List;
 
 public interface CompanyMapper {
     List<Company> getAllCompanies(int workspaceId);
+    List<Company> getCompaniesPage(@Param("workspaceId") int workspaceId, @Param("limit") int limit, @Param("offset") int offset);
+    long countCompanies(int workspaceId);
     List<Company> getCompaniesByTagId(@Param("workspaceId") int workspaceId, @Param("tagId") int tagId);
     Company getCompanyById(@Param("workspaceId") int workspaceId, @Param("id") int id);
     List<Company> getCompaniesWithWebsite(int workspaceId);

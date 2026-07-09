@@ -111,6 +111,32 @@ class TaskMapperTest extends AbstractMapperTest {
         assertTrue(all.stream().anyMatch(x -> x.getId() == task.getId()));
     }
 
+    @Test
+    void getTasksPageLimitsAndCountsWorkspaceRows() {
+        Workspace pageWorkspace = newWorkspace();
+        User user = newUser();
+        Task first = build("first", user, null, null);
+        first.setWorkspaceId(pageWorkspace.getId());
+        first.setDueDate("2024-01-01");
+        taskMapper.insert(first);
+        Task second = build("second", user, null, null);
+        second.setWorkspaceId(pageWorkspace.getId());
+        second.setDueDate("2024-01-01");
+        taskMapper.insert(second);
+        Task third = build("third", user, null, null);
+        third.setWorkspaceId(pageWorkspace.getId());
+        third.setDueDate("2024-01-01");
+        taskMapper.insert(third);
+        Task foreign = build("foreign", user, null, null);
+        taskMapper.insert(foreign);
+
+        List<Task> page = taskMapper.getTasksPage(pageWorkspace.getId(), 2, 0);
+
+        assertEquals(List.of(first.getId(), second.getId()), page.stream().map(Task::getId).toList());
+        assertEquals(3, taskMapper.countTasks(pageWorkspace.getId()));
+        assertTrue(page.stream().noneMatch(task -> task.getId() == foreign.getId()));
+    }
+
     /**
      * Updates a task and checks if the new values are persisted.
      */
@@ -219,5 +245,13 @@ class TaskMapperTest extends AbstractMapperTest {
         assertNull(taskMapper.getTaskById(other.getId(), task.getId()));
         assertEquals(0, taskMapper.complete(other.getId(), task.getId(), user.getId(), 0));
         assertFalse(taskMapper.getTaskById(workspace.getId(), task.getId()).isCompleted());
+    }
+
+    private Workspace newWorkspace() {
+        Workspace ws = new Workspace();
+        ws.setName("WS " + unique());
+        ws.setSlug("ws_" + unique());
+        workspaceMapper.insert(ws);
+        return ws;
     }
 }

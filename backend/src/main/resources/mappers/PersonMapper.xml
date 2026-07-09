@@ -149,6 +149,7 @@
       <otherwise>p.name</otherwise>
     </choose>
     <choose><when test="dir == 'desc'">DESC</when><otherwise>ASC</otherwise></choose>
+    , p.id ASC
   </sql>
 
   <select id="getPersonsPage" resultMap="PersonResult">
@@ -165,6 +166,8 @@
     FROM person p
     <include refid="companyJoin"/>
     <include refid="pageWhere"/>
+    ORDER BY p.id
+    LIMIT #{limit}
   </select>
 
   <select id="countPersons" resultType="long">
@@ -174,8 +177,6 @@
     <include refid="pageWhere"/>
   </select>
 
-  <!-- Every person matching the page filters, unpaginated. Backs the warmth sort, which is
-       ordered in Java (PersonService) so the single scoring formula is reused rather than rebuilt in SQL. -->
   <select id="getPersonsFiltered" resultMap="PersonResult">
     SELECT <include refid="personColumns"/>, <include refid="companyJoinColumns"/>
     FROM person p

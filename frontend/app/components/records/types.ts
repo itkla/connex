@@ -18,6 +18,7 @@ export interface ColumnDef<T> {
     key: string;
     label: string;
     getSortValue?: (item: T) => SortValue;
+    sortable?: boolean;
     render?: (item: T) => ReactNode;
     renderHeader?: () => ReactNode;
     copyable?: {

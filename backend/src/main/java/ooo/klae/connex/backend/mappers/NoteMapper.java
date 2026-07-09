@@ -19,6 +19,8 @@ public interface NoteMapper {
     Note getNoteById(@Param("workspaceId") int workspaceId, @Param("id") int id);
     List<Note> search(@Param("workspaceId") int workspaceId, @Param("query") String query);
     List<Note> getVisibleNotes(@Param("workspaceId") int workspaceId, @Param("currentUserId") int currentUserId);
+    List<Note> getVisibleNotesPage(@Param("workspaceId") int workspaceId, @Param("currentUserId") int currentUserId, @Param("limit") int limit, @Param("offset") int offset);
+    long countVisibleNotes(@Param("workspaceId") int workspaceId, @Param("currentUserId") int currentUserId);
     List<Note> getVisibleNotesByPersonId(@Param("workspaceId") int workspaceId, @Param("personId") int personId, @Param("currentUserId") int currentUserId);
     List<Note> getVisibleNotesByDealId(@Param("workspaceId") int workspaceId, @Param("dealId") int dealId, @Param("currentUserId") int currentUserId);
     List<Note> getVisibleNotesByAuthorId(@Param("workspaceId") int workspaceId, @Param("authorId") int authorId, @Param("currentUserId") int currentUserId);

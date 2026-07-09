@@ -14,6 +14,8 @@ import java.util.List;
 
 public interface TaskMapper {
     List<Task> getAllTasks(int workspaceId);
+    List<Task> getTasksPage(@Param("workspaceId") int workspaceId, @Param("limit") int limit, @Param("offset") int offset);
+    long countTasks(int workspaceId);
     List<Task> getTasksByAssignedToId(
         @Param("workspaceId") int workspaceId,
         @Param("assignedToId") int assignedToId

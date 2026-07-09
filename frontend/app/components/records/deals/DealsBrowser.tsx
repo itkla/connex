@@ -45,6 +45,7 @@ import {
     reopenDeal,
     updateDeal,
     getCompanies,
+    getDealsPage,
     getPipelines,
     getStagesByPipelineId,
     getDealPeople,
@@ -114,13 +115,42 @@ function diffDraft(original: DealDraft, draft: DealDraft): boolean {
     );
 }
 
-export default function DealsBrowser({ deals, savedViews }: { deals: Deal[]; savedViews: SavedView[] }) {
+export default function DealsBrowser({ deals: initialDeals, total: initialTotal, savedViews }: { deals: Deal[]; total: number; savedViews: SavedView[] }) {
     const router = useRouter();
     const t = useTranslations('DealsBrowser');
     const tf = useTranslations('Filters');
     const { levelLabel } = useRiskText();
     const locale = useLocale();
     const reduce = useReducedMotion() ?? false;
+    const [deals, setDeals] = useState(initialDeals);
+    const [total, setTotal] = useState(initialTotal);
+    const [page, setPage] = useState(1);
+    const [size, setSize] = useState(25);
+    const [loadingPage, setLoadingPage] = useState(false);
+    const loadDealsPage = useCallback((nextPage: number, nextSize: number) => {
+        setLoadingPage(true);
+        getDealsPage({ page: nextPage, size: nextSize })
+            .then((response) => {
+                setDeals(response.items);
+                setTotal(response.total);
+            })
+            .catch(() => {
+                setDeals([]);
+                setTotal(0);
+            })
+            .finally(() => {
+                setLoadingPage(false);
+            });
+    }, []);
+    const changePage = useCallback((nextPage: number) => {
+        setPage(nextPage);
+        loadDealsPage(nextPage, size);
+    }, [loadDealsPage, size]);
+    const changePageSize = useCallback((nextSize: number) => {
+        setSize(nextSize);
+        setPage(1);
+        loadDealsPage(1, nextSize);
+    }, [loadDealsPage]);
 
     const [companies, setCompanies] = useState<Company[]>([]);
     const [pipelines, setPipelines] = useState<Pipeline[]>([]);
@@ -791,6 +821,7 @@ export default function DealsBrowser({ deals, savedViews }: { deals: Deal[]; sav
                     ) : (
                         <RecordsRenderView<Deal>
                             data={visibleDeals}
+                            loading={loadingPage}
                             columns={[...columns, ...customColumns]}
                             addColumnSlot={addColumnSlot}
                             renderCard={(item, { onQuickEdit, onDelete }) => (
@@ -824,6 +855,13 @@ export default function DealsBrowser({ deals, savedViews }: { deals: Deal[]; sav
                             gridClassName="grid grid-cols-1 gap-3"
                             entityLabel={t('entityLabel')}
                             selectionActions={selectionActions}
+                            pagination={{
+                                page,
+                                pageSize: size,
+                                total,
+                                onPageChange: changePage,
+                                onPageSizeChange: changePageSize,
+                            }}
                         />
                     )}
                 </Rise>

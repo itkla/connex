@@ -8,6 +8,7 @@ import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -35,8 +36,7 @@ import ooo.klae.connex.backend.util.DateTimes;
  * Computes relationship "temperature" (warmth) for contacts and companies on read.
  *
  * <p>This is the single source of truth for warmth across the app: the relationship map
- * colours nodes by band, the dashboard surfaces cooling relationships, and the records
- * tables expose a sortable warmth column — all from the scores produced here.
+ * colours nodes by band and the dashboard surfaces cooling relationships from the scores produced here.
  *
  * <p>Warmth is a recency-decayed, intent-weighted sum of logged interactions. Each touch
  * starts at a base weight (meeting &gt; call &gt; email &gt; note &gt; task) and decays by
@@ -111,7 +111,7 @@ public class ScoringService {
         long reference = Instant.now(clock).toEpochMilli();
         List<RelationshipTemperatureDto> out = new ArrayList<>(personIds.size());
         for (Integer personId : personIds) {
-            if (personId != null) {
+            if (personId != null && personMapper.exists(workspaceId, personId)) {
                 out.add(temperature(personId, touchesForPerson(workspaceId, personId), reference, Long.MAX_VALUE));
             }
         }
@@ -176,6 +176,21 @@ public class ScoringService {
     }
 
     /**
+     * Scores only the given visible companies as of now, gathering each company's touches directly
+     * instead of scanning every company in the workspace.
+     */
+    public List<RelationshipTemperatureDto> scoreCompanies(int workspaceId, Set<Integer> companyIds) {
+        long reference = Instant.now(clock).toEpochMilli();
+        List<RelationshipTemperatureDto> out = new ArrayList<>(companyIds.size());
+        for (Integer companyId : companyIds) {
+            if (companyId != null && companyMapper.exists(workspaceId, companyId)) {
+                out.add(temperature(companyId, touchesForCompany(workspaceId, companyId), reference, Long.MAX_VALUE));
+            }
+        }
+        return out;
+    }
+
+    /**
      * Scores every company in the workspace as of {@code asOf}: warmth is decayed against that
      * instant and only interactions logged on or before it are counted. Company attribution uses
      * present-day contact/deal parentage; the time-travel replay refines attribution to the
@@ -227,14 +242,54 @@ public class ScoringService {
         return byCompany;
     }
 
-    /**
-     * Convenience map of contact id → warmth score, used to order the contacts records page by
-     * warmth without duplicating the scoring formula.
-     */
-    public Map<Integer, Integer> contactScoreMap(int workspaceId) {
-        Map<Integer, Integer> map = new HashMap<>();
-        for (RelationshipTemperatureDto d : scoreContacts(workspaceId)) map.put(d.getId(), d.getScore());
-        return map;
+    private List<Touch> touchesForCompany(int workspaceId, int companyId) {
+        Map<String, Touch> touches = new LinkedHashMap<>();
+        for (Person person : personMapper.getPersonsByCompanyId(workspaceId, companyId)) {
+            collectPersonTouches(workspaceId, person.getId(), touches);
+        }
+        for (Deal deal : dealMapper.getDealsByCompanyId(workspaceId, companyId)) {
+            collectDealTouches(workspaceId, deal.getId(), touches);
+        }
+        return new ArrayList<>(touches.values());
+    }
+
+    private void collectPersonTouches(int workspaceId, int personId, Map<String, Touch> touches) {
+        for (Activity activity : activityMapper.getActivitiesByPersonId(workspaceId, personId)) {
+            addActivityTouch(touches, activity);
+        }
+        for (Note note : noteMapper.getNotesByPersonId(workspaceId, personId)) {
+            addNoteTouch(touches, note);
+        }
+        for (Task task : taskMapper.getTasksByPersonId(workspaceId, personId)) {
+            addTaskTouch(touches, task);
+        }
+    }
+
+    private void collectDealTouches(int workspaceId, int dealId, Map<String, Touch> touches) {
+        for (Activity activity : activityMapper.getActivitiesByDealId(workspaceId, dealId)) {
+            addActivityTouch(touches, activity);
+        }
+        for (Note note : noteMapper.getNotesByDealId(workspaceId, dealId)) {
+            addNoteTouch(touches, note);
+        }
+        for (Task task : taskMapper.getTasksByDealId(workspaceId, dealId)) {
+            addTaskTouch(touches, task);
+        }
+    }
+
+    private void addActivityTouch(Map<String, Touch> touches, Activity activity) {
+        Long ts = epoch(activity.getTimestamp());
+        if (ts != null) touches.putIfAbsent("activity:" + activity.getId(), new Touch(ts, activityWeight(activity.getType())));
+    }
+
+    private void addNoteTouch(Map<String, Touch> touches, Note note) {
+        Long ts = epoch(note.getCreatedAt());
+        if (ts != null) touches.putIfAbsent("note:" + note.getId(), new Touch(ts, NOTE_WEIGHT));
+    }
+
+    private void addTaskTouch(Map<String, Touch> touches, Task task) {
+        Long ts = epoch(task.getCreatedAt());
+        if (ts != null) touches.putIfAbsent("task:" + task.getId(), new Touch(ts, TASK_WEIGHT));
     }
 
     /** Per-frame contact and company warmth bands, produced from a single touch load. */

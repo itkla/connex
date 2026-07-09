@@ -189,6 +189,25 @@ function buildQuery(params: Record<string, unknown>): string {
     return qs ? `?${qs}` : "";
 }
 
+const WORKSPACE_LIST_PAGE_SIZE = 100;
+
+function hasQueryValues(params: Record<string, unknown>): boolean {
+    return Object.values(params).some((value) => {
+        if (Array.isArray(value)) return value.length > 0;
+        if (typeof value === "string") return value.trim().length > 0;
+        if (typeof value === "boolean") return value;
+        return value !== undefined && value !== null;
+    });
+}
+
+async function getBoundedPageItems<T>(
+    fetchPage: (params: Types.PageParams, init: RequestInit) => Promise<Types.Page<T>>,
+    init: RequestInit = {},
+): Promise<T[]> {
+    const response = await fetchPage({ page: 1, size: WORKSPACE_LIST_PAGE_SIZE }, init);
+    return response.items;
+}
+
 /*
 * == Authentication
 */
@@ -573,15 +592,19 @@ export function getUserNotesFromCookie(id: number, cookie: string | null) {
 * == Task management
 */
 
-export function getTasks(init: RequestInit = {}) { // get all tasks for all users
-    return getJson<Types.Task[]>(`/api/tasks`, init);
+export function getTasks(init: RequestInit = {}) {
+    return getBoundedPageItems<Types.Task>(getTasksPage, init);
+}
+
+export function getTasksPage(params: Types.PageParams = {}, init: RequestInit = {}) {
+    return getJson<Types.Page<Types.Task>>(`/api/tasks/page${buildQuery(params)}`, init);
 }
 
 export function getTaskById(id: number, init: RequestInit = {}) {
     return getJson<Types.Task>(`/api/tasks/${id}`, init);
 }
 
-export function getTasksFromCookie(cookie: string | null) { // authenticate then get all tasks
+export function getTasksFromCookie(cookie: string | null) {
     return safeWithCookie<Types.Task>((init) => getTasks(init), cookie);
 }
 
@@ -622,15 +645,22 @@ export function rescheduleTask(id: number, dueDate: string, init: RequestInit = 
 * == Activity management
 */
 
-export function getActivities(init: RequestInit = {}) { // get all activities for all users
-    return getJson<Types.Activity[]>(`/api/activities`, init);
+export function getActivities(init: RequestInit = {}) {
+    return getBoundedPageItems<Types.Activity>(
+        (params, requestInit) => getActivitiesPage(params, requestInit),
+        init,
+    );
+}
+
+export function getActivitiesPage(params: Types.ActivitiesPageParams = {}, init: RequestInit = {}) {
+    return getJson<Types.Page<Types.Activity>>(`/api/activities/page${buildQuery(params)}`, init);
 }
 
 export function getActivityById(id: number, init: RequestInit = {}) {
     return getJson<Types.Activity>(`/api/activities/${id}`, init);
 }
 
-export function getActivitiesFromCookie(cookie: string | null) { // authenticate then get all activities
+export function getActivitiesFromCookie(cookie: string | null) {
     return safeWithCookie<Types.Activity>((init) => getActivities(init), cookie);
 }
 
@@ -650,12 +680,15 @@ export function deleteActivity(id: number, init: RequestInit = {}) {
 * == Note management
 */
 
-// get all notes for all users
 export function getNotes(init: RequestInit = {}) {
-    return getJson<Types.Note[]>(`/api/notes`, init);
+    return getBoundedPageItems<Types.Note>(getNotesPage, init);
 }
 
-export function getNotesFromCookie(cookie: string | null) { // authenticate then get all notes
+export function getNotesPage(params: Types.PageParams = {}, init: RequestInit = {}) {
+    return getJson<Types.Page<Types.Note>>(`/api/notes/page${buildQuery(params)}`, init);
+}
+
+export function getNotesFromCookie(cookie: string | null) {
     return safeWithCookie<Types.Note>((init) => getNotes(init), cookie);
 }
 
@@ -687,7 +720,11 @@ export function deleteNote(id: number, init: RequestInit = {}) {
 */
 
 export function getCompanies(init: RequestInit = {}) {
-    return getJson<Types.Company[]>(`/api/companies`, init);
+    return getBoundedPageItems<Types.Company>(getCompaniesPage, init);
+}
+
+export function getCompaniesPage(params: Types.PageParams = {}, init: RequestInit = {}) {
+    return getJson<Types.Page<Types.Company>>(`/api/companies/page${buildQuery(params)}`, init);
 }
 
 export function getCompaniesFromCookie(cookie: string | null) {
@@ -735,6 +772,12 @@ export function removeCompanyTag(id: number, tagId: number, init: RequestInit = 
 */
 
 export function getContacts(filters: Types.ContactFilters = {}, init: RequestInit = {}) {
+    if (!hasQueryValues(filters)) {
+        return getBoundedPageItems<Types.Contact>(
+            (params, requestInit) => getContactsPage(params, requestInit),
+            init,
+        );
+    }
     return getJson<Types.Contact[]>(`/api/persons${buildQuery(filters)}`, init);
 }
 
@@ -879,7 +922,7 @@ export function bulkChangeDealStage(ids: number[], stageId: number) {
     return runBulk(ids, (chunk) => postJson<Types.BulkOperationResult>(`/api/deals/bulk/stage`, { ids: chunk, stageId }));
 }
 
-/** Ids of every contact matching the active filter (for "select all matching", beyond the loaded page). */
+/** Ids of every contact matching an active filter, capped by the backend bulk-operation limit. */
 export function getContactIds(params: Types.ContactsPageParams = {}, init: RequestInit = {}) {
     const query = buildQuery({ q: params.q, companies: params.companies, titles: params.titles, noCompany: params.noCompany });
     return getJson<number[]>(`/api/persons/ids${query}`, init);
@@ -921,20 +964,24 @@ export function getContactIntroPath(id: number, init: RequestInit = {}) {
 * == Relationship temperature (warmth) scoring
 */
 
-export function getContactTemperatures(init: RequestInit = {}) {
-    return getJson<Types.RelationshipTemperature[]>(`/api/scoring/contacts`, init);
+export function getContactTemperatures(ids: number[], init: RequestInit = {}) {
+    if (ids.length === 0) return Promise.resolve([] as Types.RelationshipTemperature[]);
+    return getJson<Types.RelationshipTemperature[]>(`/api/scoring/contacts${buildQuery({ ids })}`, init);
 }
 
-export function getContactTemperaturesFromCookie(cookie: string | null) {
-    return safeWithCookie<Types.RelationshipTemperature>((init) => getContactTemperatures(init), cookie);
+export function getContactTemperaturesFromCookie(cookie: string | null, ids: number[]) {
+    if (ids.length === 0) return Promise.resolve([] as Types.RelationshipTemperature[]);
+    return safeWithCookie<Types.RelationshipTemperature>((init) => getContactTemperatures(ids, init), cookie);
 }
 
-export function getCompanyTemperatures(init: RequestInit = {}) {
-    return getJson<Types.RelationshipTemperature[]>(`/api/scoring/companies`, init);
+export function getCompanyTemperatures(ids: number[], init: RequestInit = {}) {
+    if (ids.length === 0) return Promise.resolve([] as Types.RelationshipTemperature[]);
+    return getJson<Types.RelationshipTemperature[]>(`/api/scoring/companies${buildQuery({ ids })}`, init);
 }
 
-export function getCompanyTemperaturesFromCookie(cookie: string | null) {
-    return safeWithCookie<Types.RelationshipTemperature>((init) => getCompanyTemperatures(init), cookie);
+export function getCompanyTemperaturesFromCookie(cookie: string | null, ids: number[]) {
+    if (ids.length === 0) return Promise.resolve([] as Types.RelationshipTemperature[]);
+    return safeWithCookie<Types.RelationshipTemperature>((init) => getCompanyTemperatures(ids, init), cookie);
 }
 
 /*
@@ -1072,7 +1119,11 @@ export function getContactTasksFromCookie(id: number, cookie: string | null) {
 */
 
 export function getDeals(init: RequestInit = {}) {
-    return getJson<Types.Deal[]>(`/api/deals`, init);
+    return getBoundedPageItems<Types.Deal>(getDealsPage, init);
+}
+
+export function getDealsPage(params: Types.PageParams = {}, init: RequestInit = {}) {
+    return getJson<Types.Page<Types.Deal>>(`/api/deals/page${buildQuery(params)}`, init);
 }
 
 export function getDealsFromCookie(cookie: string | null) {

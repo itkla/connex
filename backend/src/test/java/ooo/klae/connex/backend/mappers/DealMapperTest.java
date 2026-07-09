@@ -79,6 +79,26 @@ class DealMapperTest extends AbstractMapperTest {
         assertTrue(all.stream().anyMatch(x -> x.getId() == deal.getId()));
     }
 
+    @Test
+    void getDealsPageLimitsAndCountsWorkspaceRows() {
+        Workspace pageWorkspace = newWorkspace();
+        Pipeline pipeline = newPipelineIn(pageWorkspace);
+        Stage stage = newStageIn(pageWorkspace, pipeline, 0);
+        Deal first = newDealIn(pageWorkspace, pipeline, stage);
+        Deal second = newDealIn(pageWorkspace, pipeline, stage);
+        Deal third = newDealIn(pageWorkspace, pipeline, stage);
+        Pipeline foreignPipeline = newPipeline();
+        Stage foreignStage = newStage(foreignPipeline, 0);
+        Deal foreign = newDeal(foreignPipeline, foreignStage, newCompany());
+
+        List<Deal> page = dealMapper.getDealsPage(pageWorkspace.getId(), 2, 0);
+
+        assertEquals(2, page.size());
+        assertEquals(3, dealMapper.countDeals(pageWorkspace.getId()));
+        assertTrue(page.stream().noneMatch(deal -> deal.getId() == foreign.getId()));
+        assertTrue(page.stream().allMatch(deal -> List.of(first.getId(), second.getId(), third.getId()).contains(deal.getId())));
+    }
+
     /**
      * Updates a deal and checks if the new values are persisted.
      */
@@ -291,5 +311,43 @@ class DealMapperTest extends AbstractMapperTest {
         workspaceMapper.insert(other);
         assertEquals(0, dealMapper.updateRiskExcluded(other.getId(), deal.getId(), false));
         assertTrue(dealMapper.getDealById(workspace.getId(), deal.getId()).isRiskExcluded());
+    }
+
+    private Workspace newWorkspace() {
+        Workspace ws = new Workspace();
+        ws.setName("WS " + unique());
+        ws.setSlug("ws_" + unique());
+        workspaceMapper.insert(ws);
+        return ws;
+    }
+
+    private Pipeline newPipelineIn(Workspace ws) {
+        Pipeline pipeline = new Pipeline();
+        pipeline.setName("Pipeline " + unique());
+        pipeline.setWorkspaceId(ws.getId());
+        pipelineMapper.insertPipeline(pipeline);
+        return pipeline;
+    }
+
+    private Stage newStageIn(Workspace ws, Pipeline pipeline, int position) {
+        Stage stage = new Stage();
+        stage.setName("Stage " + unique());
+        stage.setPipeline(pipeline);
+        stage.setPosition(position);
+        stage.setWorkspaceId(ws.getId());
+        pipelineMapper.insertStage(stage);
+        return stage;
+    }
+
+    private Deal newDealIn(Workspace ws, Pipeline pipeline, Stage stage) {
+        Deal deal = new Deal();
+        deal.setName("Deal " + unique());
+        deal.setWorkspaceId(ws.getId());
+        deal.setValue(1000.0);
+        deal.setCurrency("JPY");
+        deal.setPipelineId(pipeline.getId());
+        deal.setStageId(stage.getId());
+        dealMapper.insert(deal);
+        return deal;
     }
 }

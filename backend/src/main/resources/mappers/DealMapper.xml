@@ -111,6 +111,18 @@
     ORDER BY stage_id, position, id
   </select>
 
+  <select id="getDealsPage" resultMap="DealResult">
+    SELECT <include refid="dealColumns"/>
+    FROM deal
+    WHERE workspace_id = #{workspaceId}
+    ORDER BY stage_id, position, id
+    LIMIT #{limit} OFFSET #{offset}
+  </select>
+
+  <select id="countDeals" resultType="long">
+    SELECT COUNT(*) FROM deal WHERE workspace_id = #{workspaceId}
+  </select>
+
   <select id="getDealsByPipelineId" resultMap="DealResult">
     SELECT <include refid="dealColumns"/>
     FROM deal

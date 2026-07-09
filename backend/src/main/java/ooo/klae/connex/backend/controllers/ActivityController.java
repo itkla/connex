@@ -12,7 +12,10 @@ import org.springframework.web.bind.annotation.RestController;
 
 import ooo.klae.connex.backend.beans.Activity;
 import ooo.klae.connex.backend.dto.ActivityDto;
+import ooo.klae.connex.backend.dto.PageResponse;
+import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.services.ActivityService;
+import ooo.klae.connex.backend.util.PageBounds;
 
 import java.util.List;
 
@@ -50,16 +53,35 @@ public class ActivityController {
         Integer selectedCreatedById = selectedPersonId == null && selectedDealId == null ? createdById : null;
         List<Activity> activities;
         if (itemsPerPage != null) {
-            int size = Math.min(Math.max(itemsPerPage, 1), 200);
-            int page = paginationRange == null ? 1 : Math.max(paginationRange, 1);
-            int offset = (int) Math.min(Integer.MAX_VALUE, (long) (page - 1) * size);
+            PageBounds bounds = PageBounds.of(paginationRange == null ? 1 : paginationRange, itemsPerPage);
             activities = activityService.getActivitiesPage(
-                selectedPersonId, selectedDealId, selectedCreatedById, size, offset);
+                selectedPersonId, selectedDealId, selectedCreatedById, bounds.size(), bounds.offset());
         } else if (selectedPersonId != null) activities = activityService.getActivitiesByPersonId(selectedPersonId);
         else if (selectedDealId != null) activities = activityService.getActivitiesByDealId(selectedDealId);
         else if (selectedCreatedById != null) activities = activityService.getActivitiesByCreatedById(selectedCreatedById);
-        else activities = activityService.getAllActivities();
+        else throw new BadRequestException("A filter or pagination is required; use /api/activities/page for workspace-wide lists");
         return activities.stream().map(ActivityDto::from).toList();
+    }
+
+    /**
+     * GET endpoint for a bounded, paginated slice of activities in the active workspace.
+     */
+    @GetMapping("/page")
+    public PageResponse<ActivityDto> getActivitiesPage(
+        @RequestParam(defaultValue = "1") int page,
+        @RequestParam(defaultValue = "25") int size,
+        @RequestParam(required = false) Integer personId,
+        @RequestParam(required = false) Integer dealId,
+        @RequestParam(required = false) Integer createdById
+    ) {
+        Integer selectedPersonId = personId;
+        Integer selectedDealId = selectedPersonId == null ? dealId : null;
+        Integer selectedCreatedById = selectedPersonId == null && selectedDealId == null ? createdById : null;
+        PageBounds bounds = PageBounds.of(page, size);
+        List<ActivityDto> items = activityService.getActivitiesPage(
+            selectedPersonId, selectedDealId, selectedCreatedById, bounds.size(), bounds.offset())
+            .stream().map(ActivityDto::from).toList();
+        return new PageResponse<>(items, activityService.countActivities(selectedPersonId, selectedDealId, selectedCreatedById));
     }
 
     /**

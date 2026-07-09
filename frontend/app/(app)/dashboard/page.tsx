@@ -77,7 +77,7 @@ export default async function Dashboard() {
 
     const init = { headers: { cookie: cookie ?? '' } } as const;
     const emptyFacets: AttachmentFacets = { sources: [], kinds: [], tags: [], orphaned: 0, total: 0, totalSize: 0 };
-    const [companies, contacts, deals, pipelines, tasks, activities, notes, users, recentFiles, fileFacets, contactTemps, recentMoves, introSuggestions, dealRisks, layoutResponse, companyTemps, notifications] =
+    const [companies, contacts, deals, pipelines, tasks, activities, notes, users, recentFiles, fileFacets, recentMoves, introSuggestions, dealRisks, layoutResponse, notifications] =
         await Promise.all([
             getCompaniesFromCookie(cookie),
             getContactsFromCookie(cookie),
@@ -91,16 +91,19 @@ export default async function Dashboard() {
                 () => ({ items: [], total: 0 }) as Page<Attachment>,
             ),
             getAttachmentFacets(init).catch(() => emptyFacets),
-            getContactTemperaturesFromCookie(cookie),
             getRecentMovesFromCookie(cookie),
             getIntroSuggestionsFromCookie(cookie, 4),
             getDealRisksFromCookie(cookie),
             getDashboardLayoutFromCookie(cookie),
-            getCompanyTemperaturesFromCookie(cookie),
             getNotifications({ state: 'unread', page: 1, size: 6 }, init).catch(
                 () => ({ items: [], total: 0 }) as Page<Notification>,
             ),
         ]);
+
+    const [contactTemps, companyTemps] = await Promise.all([
+        getContactTemperaturesFromCookie(cookie, contacts.map((contact) => contact.id)),
+        getCompanyTemperaturesFromCookie(cookie, companies.map((company) => company.id)),
+    ]);
 
     const stages = (
         await Promise.all(pipelines.map((pipeline) => getStagesByPipelineId(pipeline.id, init).catch(() => [] as Stage[])))

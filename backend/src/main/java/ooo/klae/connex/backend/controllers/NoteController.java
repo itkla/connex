@@ -12,7 +12,10 @@ import org.springframework.web.bind.annotation.RestController;
 
 import ooo.klae.connex.backend.beans.Note;
 import ooo.klae.connex.backend.dto.NoteDto;
+import ooo.klae.connex.backend.dto.PageResponse;
+import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.services.NoteService;
+import ooo.klae.connex.backend.util.PageBounds;
 
 import java.util.List;
 
@@ -47,8 +50,22 @@ public class NoteController {
         if (personId != null) notes = noteService.getNotesByPersonId(personId);
         else if (dealId != null) notes = noteService.getNotesByDealId(dealId);
         else if (authorId != null) notes = noteService.getNotesByAuthorId(authorId);
-        else notes = noteService.getAllNotes();
+        else throw new BadRequestException("A filter is required; use /api/notes/page for workspace-wide lists");
         return notes.stream().map(NoteDto::from).toList();
+    }
+
+    /**
+     * GET endpoint for a bounded, paginated slice of notes visible to the caller.
+     */
+    @GetMapping("/page")
+    public PageResponse<NoteDto> getNotesPage(
+        @RequestParam(defaultValue = "1") int page,
+        @RequestParam(defaultValue = "25") int size
+    ) {
+        PageBounds bounds = PageBounds.of(page, size);
+        List<NoteDto> items = noteService.getNotesPage(bounds.size(), bounds.offset())
+            .stream().map(NoteDto::from).toList();
+        return new PageResponse<>(items, noteService.countNotes());
     }
 
     /**

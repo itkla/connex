@@ -22,8 +22,6 @@ import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.tenant.Permission;
 import ooo.klae.connex.backend.tenant.RequirePermission;
-import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -49,7 +47,6 @@ public class PersonService {
     private final TaskMapper taskMapper;
     private final AuditService auditService;
     private final WorkspaceService workspaceService;
-    private final ScoringService scoringService;
     private final EmploymentService employmentService;
     private final CustomFieldValueService customFieldValueService;
     private final ReferenceService referenceService;
@@ -60,8 +57,7 @@ public class PersonService {
 
     private static final Set<String> EVALUATION_AUDIT_FIELDS = Set.of("riskExcluded", "introExcluded");
 
-    /** Sort key that orders the contacts page by relationship temperature (computed in Java). */
-    private static final String WARMTH_SORT = "warmth";
+    private static final int MAX_MATCHING_IDS = 1000;
 
     /**
      * Retrieves all {@code Person} records in the active workspace.
@@ -92,32 +88,8 @@ public class PersonService {
     public List<Person> getPersonsPage(String query, String sort, String dir, List<String> companies,
             List<String> titles, boolean noCompany, int limit, int offset) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        if (WARMTH_SORT.equalsIgnoreCase(sort)) {
-            return warmthSortedPage(workspaceId, query, dir, companies, titles, noCompany, limit, offset);
-        }
         return personMapper.getPersonsPage(workspaceId, query, sort, dir,
             companies, titles, noCompany, limit, offset);
-    }
-
-    /**
-     * Orders the filtered contacts by relationship temperature, then pages in memory. Warmth is not a
-     * stored column, so this reuses {@link ScoringService}'s single formula instead of duplicating it
-     * in SQL. The page total still comes from {@code countPersons}, so the same filter predicates apply.
-     *
-     * <p>Default (and the natural "warmth" reading) is warmest first; ascending lists coldest first.
-     * Name stays an ascending tiebreak either way so equal-score rows have a stable order.
-     */
-    private List<Person> warmthSortedPage(int workspaceId, String query, String dir, List<String> companies,
-            List<String> titles, boolean noCompany, int limit, int offset) {
-        List<Person> filtered = new ArrayList<>(
-            personMapper.getPersonsFiltered(workspaceId, query, companies, titles, noCompany));
-        Map<Integer, Integer> scores = scoringService.contactScoreMap(workspaceId);
-        boolean ascending = "asc".equalsIgnoreCase(dir);
-        Comparator<Person> byScore = Comparator.comparingInt((Person p) -> scores.getOrDefault(p.getId(), 0));
-        filtered.sort((ascending ? byScore : byScore.reversed())
-            .thenComparing(p -> p.getName() == null ? "" : p.getName(), String.CASE_INSENSITIVE_ORDER));
-        if (offset >= filtered.size()) return List.of();
-        return filtered.subList(offset, Math.min(offset + limit, filtered.size()));
     }
 
     public long countPersons(String query, List<String> companies, List<String> titles, boolean noCompany) {
@@ -131,7 +103,23 @@ public class PersonService {
      */
     public List<Integer> getMatchingPersonIds(String query, List<String> companies, List<String> titles,
             boolean noCompany) {
-        return personMapper.getPersonIdsFiltered(workspaceService.getCurrentWorkspaceId(), query, companies, titles, noCompany);
+        if (!hasMatchingIdFilter(query, companies, titles, noCompany)) {
+            throw new BadRequestException("At least one filter is required before selecting matching contact ids");
+        }
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        long total = personMapper.countPersons(workspaceId, query, companies, titles, noCompany);
+        if (total > MAX_MATCHING_IDS) {
+            throw new BadRequestException("Too many matching contacts; narrow the filters before selecting all");
+        }
+        return personMapper.getPersonIdsFiltered(workspaceId, query, companies, titles, noCompany, MAX_MATCHING_IDS);
+    }
+
+    private static boolean hasMatchingIdFilter(String query, List<String> companies, List<String> titles,
+            boolean noCompany) {
+        return query != null
+            || (companies != null && !companies.isEmpty())
+            || (titles != null && !titles.isEmpty())
+            || noCompany;
     }
 
     public List<String> distinctCompanies() {

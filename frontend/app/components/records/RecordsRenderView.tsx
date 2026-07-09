@@ -57,6 +57,10 @@ function pageList(current: number, total: number): (number | 'gap')[] {
 }
 const CHECKBOX_CLASS = 'size-[18px] border-border data-[state=checked]:border-brand data-[state=checked]:bg-brand data-[state=checked]:text-white data-[state=indeterminate]:border-brand data-[state=indeterminate]:bg-brand data-[state=indeterminate]:text-white';
 
+function isSortableColumn<T>(column: ColumnDef<T>): boolean {
+    return column.sortable !== false && !!column.getSortValue;
+}
+
 interface Props<T extends { id: SelectionId; name?: string }> {
     data: T[];
     columns: ColumnDef<T>[];
@@ -129,6 +133,7 @@ export default function RecordsRenderView<T extends { id: SelectionId; name?: st
     const sortedData = useMemo(() => {
         if (server || !activeSortKey) return data;
         const col = columns.find((c) => c.key === activeSortKey);
+        if (col?.sortable === false) return data;
         if (!col?.getSortValue) return data;
         const dir = activeSortDirection === 'asc' ? 1 : -1;
         return [...data].sort((a, b) => {
@@ -204,7 +209,7 @@ export default function RecordsRenderView<T extends { id: SelectionId; name?: st
     const stickyHeaderBg = "bg-card before:absolute before:inset-0 before:-z-10 before:bg-muted/60 before:content-['']";
 
     const gridSortOptions =
-        sortOptions ?? columns.filter((c) => c.getSortValue).map((c) => ({ key: c.key, label: c.label }));
+        sortOptions ?? columns.filter(isSortableColumn).map((c) => ({ key: c.key, label: c.label }));
     const activeSortOption = gridSortOptions.find((o) => o.key === activeSortKey);
     const gridSortBar =
         !controlled && displayMode === 'grid' && gridSortOptions.length > 0 ? (
@@ -425,7 +430,7 @@ export default function RecordsRenderView<T extends { id: SelectionId; name?: st
                                 {renderAvatar && <th className={cn('sticky z-20 w-12 px-4 py-2.5', stickyHeaderBg)} style={{ left: frozenOffsets.avatar }} aria-hidden />}
                                 {columns.map((col, colIndex) => {
                                     const active = activeSortKey === col.key;
-                                    const sortable = !!col.getSortValue;
+                                    const sortable = isSortableColumn(col);
                                     const Icon = active
                                         ? activeSortDirection === 'asc'
                                             ? ChevronUpIcon
