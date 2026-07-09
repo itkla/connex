@@ -1,0 +1,97 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="ooo.klae.connex.backend.mappers.AppiIncidentMapper">
+
+  <resultMap id="AppiIncidentResult" type="AppiIncident">
+    <id property="id" column="id"/>
+    <result property="orgId" column="org_id"/>
+    <result property="title" column="title"/>
+    <result property="status" column="status"/>
+    <result property="severity" column="severity"/>
+    <result property="reportable" column="reportable"/>
+    <result property="occurredFrom" column="occurred_from"/>
+    <result property="occurredTo" column="occurred_to"/>
+    <result property="detectedAt" column="detected_at"/>
+    <result property="customerNotifiedAt" column="customer_notified_at"/>
+    <result property="ppcReportedAt" column="ppc_reported_at"/>
+    <result property="individualsNotifiedAt" column="individuals_notified_at"/>
+    <result property="summary" column="summary"/>
+    <result property="containment" column="containment"/>
+    <result property="createdBy" column="created_by"/>
+    <result property="updatedBy" column="updated_by"/>
+    <result property="createdAt" column="created_at"/>
+    <result property="updatedAt" column="updated_at"/>
+  </resultMap>
+
+  <sql id="incidentColumns">
+    id, org_id, title, status, severity, reportable, occurred_from, occurred_to,
+    detected_at, customer_notified_at, ppc_reported_at, individuals_notified_at,
+    summary, containment, created_by, updated_by, created_at, updated_at
+  </sql>
+
+  <insert id="insert" useGeneratedKeys="true" keyProperty="id">
+    INSERT INTO appi_incident
+      (org_id, title, status, severity, reportable, occurred_from, occurred_to,
+       detected_at, customer_notified_at, ppc_reported_at, individuals_notified_at,
+       summary, containment, created_by, updated_by)
+    VALUES
+      (#{orgId}, #{title}, #{status}, #{severity}, #{reportable}, #{occurredFrom}, #{occurredTo},
+       COALESCE(#{detectedAt}, CURRENT_TIMESTAMP), #{customerNotifiedAt}, #{ppcReportedAt},
+       #{individualsNotifiedAt}, #{summary}, #{containment}, #{createdBy}, #{updatedBy})
+  </insert>
+
+  <update id="update">
+    UPDATE appi_incident
+    SET title = #{title},
+        status = #{status},
+        severity = #{severity},
+        reportable = #{reportable},
+        occurred_from = #{occurredFrom},
+        occurred_to = #{occurredTo},
+        detected_at = COALESCE(#{detectedAt}, detected_at),
+        customer_notified_at = #{customerNotifiedAt},
+        ppc_reported_at = #{ppcReportedAt},
+        individuals_notified_at = #{individualsNotifiedAt},
+        summary = #{summary},
+        containment = #{containment},
+        updated_by = #{updatedBy}
+    WHERE id = #{id} AND org_id = #{orgId}
+  </update>
+
+  <select id="findById" resultMap="AppiIncidentResult">
+    SELECT <include refid="incidentColumns"/>
+    FROM appi_incident
+    WHERE org_id = #{orgId} AND id = #{incidentId}
+  </select>
+
+  <select id="findByOrg" resultMap="AppiIncidentResult">
+    SELECT <include refid="incidentColumns"/>
+    FROM appi_incident
+    WHERE org_id = #{orgId}
+    ORDER BY detected_at DESC, id DESC
+    LIMIT #{limit} OFFSET #{offset}
+  </select>
+
+  <select id="scopeFromAudit" resultType="ooo.klae.connex.backend.dto.AppiIncidentScopeDto">
+    SELECT
+      CASE WHEN w.id IS NULL THEN NULL ELSE al.workspace_id END AS workspaceId,
+      w.name AS workspaceName,
+      COALESCE(al.entity_type, 'system') AS entityType,
+      al.action,
+      al.outcome,
+      COUNT(*) AS eventCount,
+      MIN(al.created_at) AS firstSeenAt,
+      MAX(al.created_at) AS lastSeenAt
+    FROM audit_log al
+    LEFT JOIN workspace w ON w.id = al.workspace_id AND w.org_id = al.org_id
+    WHERE al.org_id = #{orgId}
+      AND (#{occurredFrom} IS NULL OR al.created_at >= #{occurredFrom})
+      AND (#{occurredTo} IS NULL OR al.created_at &lt;= #{occurredTo})
+    GROUP BY CASE WHEN w.id IS NULL THEN NULL ELSE al.workspace_id END,
+      w.name, COALESCE(al.entity_type, 'system'), al.action, al.outcome
+    ORDER BY eventCount DESC, lastSeenAt DESC
+    LIMIT #{limit}
+  </select>
+
+</mapper>
