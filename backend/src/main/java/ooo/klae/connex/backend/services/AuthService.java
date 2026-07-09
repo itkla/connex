@@ -48,6 +48,7 @@ public class AuthService {
     private final RegistrationVerificationService registrationVerificationService;
     private final SsoConnectionService ssoConnectionService;
     private final SessionSecurityService sessionSecurityService;
+    private final WorkspaceCookie workspaceCookie;
     private final SecurityContextRepository securityContextRepository = new HttpSessionSecurityContextRepository();
 
     @Value("${connex.signup.mode:open}")
@@ -209,7 +210,7 @@ public class AuthService {
         Integer activeWorkspaceId = workspaceService.defaultWorkspaceIdFor(refreshedUser.getId());
         if (activeWorkspaceId != null) {
             workspaceService.rememberActive(refreshedUser.getId(), activeWorkspaceId);
-            WorkspaceCookie.set(httpResponse, activeWorkspaceId);
+            workspaceCookie.set(httpResponse, activeWorkspaceId);
         }
         return refreshedUser;
     }

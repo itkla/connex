@@ -60,9 +60,9 @@ import ooo.klae.connex.backend.services.SessionSecurityService;
  * token — the SAML signature and {@code InResponseTo} are its defense. That same cross-site
  * top-level POST also means the session cookie must be {@code SameSite=None} for the stashed
  * AuthnRequest to be matched; the global cookie stays {@code SameSite=Lax} (for OIDC/password/dev
- * over plain HTTP), so a SAML-enabled deployment must additionally set
- * {@code server.servlet.session.cookie.same-site: none} with {@code CONNEX_SESSION_COOKIE_SECURE=true}
- * and end-to-end HTTPS. This is a per-environment deploy setting, not a global code change.
+     * over plain HTTP), so a SAML-enabled deployment must additionally set
+     * {@code CONNEX_SESSION_COOKIE_SAME_SITE=none} with {@code CONNEX_SESSION_COOKIE_SECURE=true} and
+     * end-to-end HTTPS. This is a per-environment deploy setting, not a global code change.
  *
  * Some code inspired by Springboot development tutorial videos
  */

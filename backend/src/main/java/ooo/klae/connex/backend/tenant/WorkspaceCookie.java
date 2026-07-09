@@ -1,25 +1,51 @@
 package ooo.klae.connex.backend.tenant;
 
+import java.time.Duration;
+
 import jakarta.servlet.http.HttpServletResponse;
+
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.ResponseCookie;
+import org.springframework.stereotype.Component;
 
 /**
  * Writes the non-HttpOnly {@code connex_workspace} cookie the frontend reads to
  * pin the active workspace (also forwarded by SSR pages). Not HttpOnly by design;
  * it is a non-sensitive id and the server always re-validates membership.
  */
-public final class WorkspaceCookie {
+@Component
+public class WorkspaceCookie {
 
     public static final String NAME = "connex_workspace";
-    private static final int ONE_YEAR_SECONDS = 31_536_000;
+    private static final Duration ONE_YEAR = Duration.ofDays(365);
 
-    private WorkspaceCookie() {}
+    private final WorkspaceCookieProperties properties;
 
-    public static void set(HttpServletResponse response, int workspaceId) {
-        response.addHeader("Set-Cookie",
-            NAME + "=" + workspaceId + "; Path=/; Max-Age=" + ONE_YEAR_SECONDS + "; SameSite=Lax");
+    public WorkspaceCookie(WorkspaceCookieProperties properties) {
+        this.properties = properties;
     }
 
-    public static void clear(HttpServletResponse response) {
-        response.addHeader("Set-Cookie", NAME + "=; Path=/; Max-Age=0; SameSite=Lax");
+    public void set(HttpServletResponse response, int workspaceId) {
+        response.addHeader(HttpHeaders.SET_COOKIE, builder(Integer.toString(workspaceId))
+            .maxAge(ONE_YEAR)
+            .build()
+            .toString());
+    }
+
+    public void clear(HttpServletResponse response) {
+        response.addHeader(HttpHeaders.SET_COOKIE, builder("")
+            .maxAge(Duration.ZERO)
+            .build()
+            .toString());
+    }
+
+    private ResponseCookie.ResponseCookieBuilder builder(String value) {
+        ResponseCookie.ResponseCookieBuilder builder = ResponseCookie.from(NAME, value)
+            .path("/")
+            .sameSite(properties.sameSiteHeaderValue());
+        if (properties.isSecure()) {
+            builder.secure(true);
+        }
+        return builder;
     }
 }

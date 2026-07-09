@@ -38,11 +38,10 @@ import ooo.klae.connex.backend.mappers.SsoConnectionMapper;
  *
  * <p><strong>Deployment note:</strong> the SAML assertion-consumer endpoint receives a cross-site
  * top-level POST from the IdP, so the session cookie must be sent on that navigation. The default
- * session cookie is {@code SameSite=Lax} (kept as-is for OIDC/password/dev over plain HTTP); a
- * deployment that actually enables SAML must set {@code server.servlet.session.cookie.same-site: none}
- * together with {@code CONNEX_SESSION_COOKIE_SECURE=true} and end-to-end HTTPS, otherwise the stashed
- * AuthnRequest cannot be matched on the round-trip. This is a per-environment deploy setting, not a
- * global code change.
+     * session cookie is {@code SameSite=Lax} (kept as-is for OIDC/password/dev over plain HTTP); a
+     * deployment that actually enables SAML must set {@code CONNEX_SESSION_COOKIE_SAME_SITE=none} together
+     * with {@code CONNEX_SESSION_COOKIE_SECURE=true} and end-to-end HTTPS, otherwise the stashed AuthnRequest
+     * cannot be matched on the round-trip. This is a per-environment deploy setting, not a global code change.
  */
 @Component
 @RequiredArgsConstructor
