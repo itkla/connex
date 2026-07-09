@@ -5,8 +5,8 @@ custody, backup, export, and plaintext-access claims. Use it when updating
 `SECURITY.md`, the DPA template, security questionnaires, customer proposals,
 and dedicated/on-prem architecture notes.
 
-Status: living control matrix for issues [#369] and [#373]. It is intentionally
-conservative. Do not turn a planned control into a shipped claim.
+Status: living control matrix for issues [#369], [#373], and [#376]. It is
+intentionally conservative. Do not turn a planned control into a shipped claim.
 
 ## Docs Lint Checklist
 
@@ -61,7 +61,7 @@ secret storage, backup/export handling, or customer-facing security wording:
 | Deployment model | Storage encryption mode | Key controller | Customer revocation | Backend/operator plaintext access | Backup, snapshot, export posture | Allowed customer-facing wording |
 | --- | --- | --- | --- | --- | --- | --- |
 | Connex-operated pooled SaaS | Managed cloud database/storage encryption for database volumes, object storage, snapshots, and backups is the required production posture. Do not claim it as shipped until production evidence is attached under [#371]. | Connex and its cloud provider control infrastructure keys. Customers do not control the database storage key. | Not available for searchable CRM data. Customers can revoke third-party credentials they own, and Connex secret-store keys can fail closed for never-searched credentials, but that is not database CMK. | Connex application code processes plaintext customer CRM content. Privileged Connex production access could expose plaintext through approved operational paths, subject to access control, audit, and incident controls. | Hosted backups and snapshots must be encrypted under Connex/cloud controls before Connex can make a shipped hosted at-rest encryption claim. Customer CSV/API exports are plaintext at generation and must be protected by the customer after download. | "Connex is implementing and evidencing hosted at-rest encryption controls under #371. Connex processes customer data to provide the service. Hosted SaaS is not E2EE or zero-knowledge." |
-| Dedicated per-organization database tier | Future/dedicated architecture: organization-dedicated database/storage/backup scope with a per-org storage key or CMK option where supported by the managed database provider. Track feasibility and rollout under [#313]/[#100]/[#376]. | Connex controls keys by default. Customer-managed key custody exists only if explicitly contracted and implemented for the dedicated tier. | Not available by default. If a dedicated CMK tier is implemented, customer key revocation must make the dedicated environment unavailable until the key is restored or rotated by an agreed recovery process. | The Connex backend still processes plaintext while the dedicated environment is running and keys are available. Connex operator access depends on the support and access model in the signed agreement. | Dedicated snapshots/backups must stay inside the same tenant/key boundary. Logical exports are plaintext at generation unless separately encrypted by the customer or a contracted export process. | "Dedicated database isolation and optional CMK are tier-specific controls. They reduce shared-infrastructure blast radius but do not make the running application E2EE." |
+| Dedicated per-organization database tier | Future/dedicated architecture: dedicated database isolation plus the hosted storage-encryption posture tracked under [#371]. It is not a customer-managed-key tier by default. True dedicated CMK requires the feasibility gates in `DEDICATED_SAAS_CMK_FEASIBILITY.md` and rollout under [#313]/[#376]. | Connex controls keys by default. Customer-managed key custody exists only for contracted dedicated infrastructure whose database storage, backups, snapshots, replicas, and restore targets are created and verified under the organization's selected KMS key. | Not available by default. If a dedicated CMK tier is implemented, customer key disablement or revocation must make the dedicated environment unavailable according to the provider-specific recovery process. | The Connex backend still processes plaintext while the dedicated environment is running and keys are available. Connex operator access depends on the support and access model in the signed agreement. | Dedicated snapshots/backups must stay inside the same tenant/key boundary. Restore, blue-green, and repointing flows must verify the target encryption posture before traffic moves. Logical exports are plaintext at generation unless separately encrypted by the customer or a contracted export process. | "Dedicated database isolation is a tier-specific control. Dedicated CMK is available only when contractually implemented and evidenced for that organization's infrastructure. It does not make the running application E2EE." |
 | Customer-operated or on-prem | Customer-operated MySQL/InnoDB data-at-rest encryption, full-volume encryption, or both, enabled before Connex migrations run. Keyring/KMS/HSM/KMIP/Vault custody sits outside the Connex application package. See `ON_PREM_ENCRYPTION_RUNBOOK.md`. | Customer controls infrastructure, database keyring, KMS/HSM/KMIP/Vault policy, backup keys, and Connex runtime secrets. | Supported according to the selected mode. MySQL/InnoDB keyring revocation can prevent startup, recovery, or encrypted tablespace access when the database needs the key. Full-volume key revocation usually blocks attach, restart, restore, or snapshot decryptability, but may not stop an already-running mounted database immediately. | The Connex backend processes plaintext inside the customer environment while running. Connex personnel have no routine access to the environment or keys unless the customer grants support access. | Customer is responsible for encrypted physical backups, encrypted keyring backup custody, encrypted logical dumps, and encrypted app/API exports. Plaintext exports must not be stored or transferred unencrypted. | "In customer-operated deployments, the customer controls the environment and encryption keys. Key revocation has mode-specific lockout effects; the running app still processes plaintext inside that customer environment." |
 
 ## What Each Control Buys
@@ -74,6 +74,11 @@ operator from reading plaintext through authorized service paths.
 Customer-managed database keys add custody and revocation leverage over the
 storage layer. They still do not make the running application blind to data
 while the key is available.
+
+Dedicated database isolation is not the same as dedicated key custody. A
+dedicated logical database on a shared encrypted server reduces tenant
+blast-radius but does not create a per-organization customer-managed storage
+key. See `DEDICATED_SAAS_CMK_FEASIBILITY.md`.
 
 The Connex secret store is narrower than database encryption. It protects
 never-searched credentials such as SMTP passwords, OIDC client secrets, and
@@ -93,11 +98,11 @@ specific commitment.
 | Question | Answer |
 | --- | --- |
 | Is Connex data encrypted at rest? | The exact guarantee depends on the deployment model in the matrix above. Hosted pooled SaaS at-rest encryption must not be described as shipped until production evidence is attached under #371. Customer-operated deployments can run MySQL/InnoDB or volume encryption with customer-held keys. |
-| Does Connex support customer-managed keys? | Hosted pooled SaaS does not provide customer-managed database keys. Dedicated per-organization CMK is a tracked future/dedicated-tier control. Customer-operated deployments can use customer-controlled keyring/KMS/HSM/KMIP/Vault integrations outside the Connex application package. |
+| Does Connex support customer-managed keys? | Hosted pooled SaaS does not provide customer-managed database keys. Dedicated per-organization CMK is available only after the contracted dedicated infrastructure satisfies `DEDICATED_SAAS_CMK_FEASIBILITY.md`; a dedicated logical database alone is not enough. Customer-operated deployments can use customer-controlled keyring/KMS/HSM/KMIP/Vault integrations outside the Connex application package. |
 | Can Connex access plaintext customer data? | In hosted SaaS, yes: Connex backend services process plaintext customer CRM content to provide the product, and privileged operational access is controlled by policy, audit, and least privilege. In customer-operated deployments, plaintext processing happens inside the customer's environment while the app runs. |
 | Is Connex E2EE or zero-knowledge? | No for hosted SaaS and no for the running Connex application. Customer-operated encryption gives the customer infrastructure/key custody, not application-layer end-to-end encryption. |
 | Are backups encrypted? | Hosted backup/snapshot encryption must not be described as shipped until production evidence is attached under #371. Customer-operated backups must be encrypted by the customer, including keyring backup material. Logical dumps and application exports are plaintext at generation unless separately encrypted. |
-| What happens if a customer revokes a key? | For hosted pooled SaaS searchable CRM data, customer key revocation is not available. For customer-operated MySQL/InnoDB keys, revocation or withholding can lock the database/application out when the database needs the key. For full-volume encryption, revocation usually affects attach, restart, restore, or snapshot decryptability and may not immediately stop an already-running mounted database. For Connex secret-store credentials, revocation makes only those wrapped credentials unavailable. |
+| What happens if a customer revokes a key? | For hosted pooled SaaS searchable CRM data, customer key revocation is not available. For a contracted dedicated CMK tier, revocation behavior must follow `DEDICATED_SAAS_CMK_FEASIBILITY.md` and the provider-specific runbook. For customer-operated MySQL/InnoDB keys, revocation or withholding can lock the database/application out when the database needs the key. For full-volume encryption, revocation usually affects attach, restart, restore, or snapshot decryptability and may not immediately stop an already-running mounted database. For Connex secret-store credentials, revocation makes only those wrapped credentials unavailable. |
 
 ## Required Cross-Links
 
@@ -110,7 +115,7 @@ encryption or key-custody claims:
 - Dedicated per-organization database architecture ([#313]).
 - Deployment architecture / on-prem planning ([#100]).
 - Production storage encryption evidence ([#371]).
-- Dedicated-tier CMK feasibility ([#376]).
+- Dedicated-tier CMK feasibility (`DEDICATED_SAAS_CMK_FEASIBILITY.md`, [#376]).
 - On-prem encryption runbook ([#373]).
 
 ## References
@@ -122,6 +127,7 @@ encryption or key-custody claims:
 - MySQL file-based keyring component: https://dev.mysql.com/doc/refman/en/keyring-file-component.html
 - MySQL backup and recovery overview: https://dev.mysql.com/doc/refman/8.0/en/backup-and-recovery.html
 - MySQL `mysqldump`: https://dev.mysql.com/doc/refman/8.0/en/mysqldump.html
+- AWS RDS encryption overview: https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/Overview.Encryption.html
 
 [#92]: https://github.com/itkla/connex/issues/92
 [#93]: https://github.com/itkla/connex/issues/93
