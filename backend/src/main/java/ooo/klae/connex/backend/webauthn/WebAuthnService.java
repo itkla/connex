@@ -168,9 +168,10 @@ public class WebAuthnService {
      * @param label the new nickname
      */
     @Transactional
-    public void rename(int callerUserId, String credentialId, String label) {
-        byte[] id = requireOwned(callerUserId, credentialId);
-        credentialMapper.updateLabel(id, label);
+    public String rename(int callerUserId, String credentialId, String label) {
+        WebauthnCredentialRow row = requireOwned(callerUserId, credentialId);
+        credentialMapper.updateLabel(row.getCredentialId(), label);
+        return row.getLabel();
     }
 
     /**
@@ -179,9 +180,10 @@ public class WebAuthnService {
      * @param credentialId the target credential (base64url)
      */
     @Transactional
-    public void delete(int callerUserId, String credentialId) {
-        requireOwned(callerUserId, credentialId);
+    public String delete(int callerUserId, String credentialId) {
+        WebauthnCredentialRow row = requireOwned(callerUserId, credentialId);
         userCredentials.delete(Bytes.fromBase64(credentialId));
+        return row.getLabel();
     }
 
     private void ensureUserEntity(User user) {
@@ -195,7 +197,7 @@ public class WebAuthnService {
         }
     }
 
-    private byte[] requireOwned(int callerUserId, String credentialId) {
+    private WebauthnCredentialRow requireOwned(int callerUserId, String credentialId) {
         byte[] id = Bytes.fromBase64(credentialId).getBytes();
         WebauthnCredentialRow row = credentialMapper.findByCredentialId(id);
         if (row == null) {
@@ -205,7 +207,7 @@ public class WebAuthnService {
         if (owner == null || owner != callerUserId) {
             throw new ResourceNotFoundException("Passkey not found");
         }
-        return id;
+        return row;
     }
 
     private PasskeyDto toDto(WebauthnCredentialRow row) {

@@ -5,6 +5,7 @@ import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.util.EnumSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 
@@ -191,6 +192,8 @@ public class WorkspaceService {
         workspace.setSlug(generateSlug(name));
         workspaceMapper.insert(workspace);
         workspaceMapper.addMember(workspace.getId(), ownerUserId, "owner");
+        auditService.record("org.workspace.create", "organization", orgId, workspace.getName(),
+                "Workspace created", Map.of("workspaceId", workspace.getId(), "ownerUserId", ownerUserId));
         WorkspaceMembershipDto membership =
                 new WorkspaceMembershipDto(workspace.getId(), workspace.getName(), workspace.getSlug(), "owner");
         membership.setOrgId(orgId);
@@ -220,6 +223,10 @@ public class WorkspaceService {
         organization.setSlug(generateSlug(name));
         organizationMapper.insert(organization);
         orgMemberService.addFoundingOwner(organization.getId(), ownerUserId);
+        auditService.record("org.create", "organization", organization.getId(), organization.getName(),
+                "Organization created", Map.of("ownerUserId", ownerUserId));
+        auditService.record("org.member.founding_owner", "organization", organization.getId(), organization.getName(),
+                "Founding organization owner granted", Map.of("userId", ownerUserId));
         return organization.getId();
     }
 
@@ -516,8 +523,10 @@ public class WorkspaceService {
             return;
         }
         workspaceMapper.addMember(workspaceId, userId, role);
-        auditService.record("workspace.member.sso_provision", "workspace", workspaceId, null,
-                "Provisioned an SSO member into the workspace", null);
+        int orgId = workspaceMapper.getOrgId(workspaceId);
+        auditService.record("org.workspace_member.sso_provision", "organization", orgId, null,
+                "Provisioned an SSO member into a workspace",
+                Map.of("workspaceId", workspaceId, "userId", userId, "role", role));
     }
 
     /** Workspaces the user has been added to but not yet accepted. */

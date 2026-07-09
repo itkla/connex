@@ -1,7 +1,11 @@
 package ooo.klae.connex.backend.controllers;
 
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -24,6 +28,7 @@ import ooo.klae.connex.backend.services.OrgMemberService;
 @RequestMapping("/api/orgs/{orgId}/audit")
 @RequiredArgsConstructor
 public class OrgAuditController {
+    private static final byte[] UTF8_BOM = { (byte) 0xEF, (byte) 0xBB, (byte) 0xBF };
 
     private final AuditService auditService;
     private final OrgMemberService orgMemberService;
@@ -35,5 +40,24 @@ public class OrgAuditController {
             @RequestParam(defaultValue = "0") int offset) {
         orgMemberService.requireOrgAdmin(orgId, authService.getCurrentUser().getId());
         return auditService.recentForOrg(orgId, limit, offset);
+    }
+
+    @GetMapping("/export")
+    public ResponseEntity<byte[]> exportOrgAudit(@PathVariable int orgId,
+            @RequestParam(defaultValue = "10000") int limit,
+            @RequestParam(defaultValue = "0") int offset) {
+        orgMemberService.requireOrgAdmin(orgId, authService.getCurrentUser().getId());
+        return csv("org-audit-log.csv", auditService.exportRecentForOrg(orgId, limit, offset));
+    }
+
+    private static ResponseEntity<byte[]> csv(String filename, String body) {
+        byte[] content = body.getBytes(StandardCharsets.UTF_8);
+        byte[] payload = new byte[UTF8_BOM.length + content.length];
+        System.arraycopy(UTF8_BOM, 0, payload, 0, UTF8_BOM.length);
+        System.arraycopy(content, 0, payload, UTF8_BOM.length, content.length);
+        return ResponseEntity.ok()
+            .contentType(new MediaType("text", "csv", StandardCharsets.UTF_8))
+            .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + filename + "\"")
+            .body(payload);
     }
 }

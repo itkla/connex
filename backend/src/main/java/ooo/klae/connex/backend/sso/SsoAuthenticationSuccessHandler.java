@@ -3,7 +3,9 @@ package ooo.klae.connex.backend.sso;
 import java.io.IOException;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 import org.springframework.security.core.Authentication;
 import org.springframework.security.oauth2.client.authentication.OAuth2AuthenticationToken;
@@ -22,6 +24,7 @@ import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.mail.MailProperties;
 import ooo.klae.connex.backend.mappers.SsoConnectionMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
+import ooo.klae.connex.backend.services.AuditService;
 import ooo.klae.connex.backend.services.AuthService;
 import ooo.klae.connex.backend.services.SocialLoginService;
 import ooo.klae.connex.backend.services.SsoLinkService;
@@ -59,6 +62,7 @@ public class SsoAuthenticationSuccessHandler implements AuthenticationSuccessHan
     private final SocialLoginService socialLoginService;
     private final SsoLinkService ssoLinkService;
     private final AuthService authService;
+    private final AuditService auditService;
     private final MailProperties mailProperties;
     private final SsoConnectionMapper ssoConnectionMapper;
     private final WorkspaceMapper workspaceMapper;
@@ -95,7 +99,8 @@ public class SsoAuthenticationSuccessHandler implements AuthenticationSuccessHan
         boolean emailVerified = Boolean.TRUE.equals(user.getEmailVerified());
         SsoLoginResult result = ssoLoginService.resolve("oidc", user.getIssuer().toString(), user.getSubject(),
                 user.getEmail(), emailVerified, orgId, user.getFullName());
-        completeResolution(result, request, response, frontendBase);
+        completeResolution(result, request, response, frontendBase, "auth.login.sso",
+                " logged in with SSO", loginContext("oidc", orgId));
     }
 
     private void handleSocial(String provider, OidcUser user, HttpServletRequest request,
@@ -110,7 +115,8 @@ public class SsoAuthenticationSuccessHandler implements AuthenticationSuccessHan
                 : Boolean.TRUE.equals(user.getEmailVerified());
         SsoLoginResult result = socialLoginService.resolve(provider, user.getIssuer().toString(),
                 user.getSubject(), email, emailVerified, user.getFullName());
-        completeResolution(result, request, response, frontendBase);
+        completeResolution(result, request, response, frontendBase, "auth.login.social",
+                " logged in with social login", loginContext(provider, null));
     }
 
     /**
@@ -160,14 +166,18 @@ public class SsoAuthenticationSuccessHandler implements AuthenticationSuccessHan
         String displayName = resolveSamlDisplayName(assertion, email);
         SsoLoginResult result = ssoLoginService.resolve("saml", connection.getSamlIdpEntityId(),
                 assertion.getNameId(), email, true, orgId, displayName);
-        completeResolution(result, request, response, frontendBase);
+        completeResolution(result, request, response, frontendBase, "auth.login.sso",
+                " logged in with SSO", loginContext("saml", orgId));
     }
 
     private void completeResolution(SsoLoginResult result, HttpServletRequest request,
-            HttpServletResponse response, String frontendBase) throws IOException {
+            HttpServletResponse response, String frontendBase, String auditAction, String auditSummarySuffix,
+            Map<String, Object> auditContext) throws IOException {
         switch (result) {
             case SsoLoginResult.Login login -> {
                 User user = authService.establishAuthenticatedSession(login.user(), request, response);
+                auditService.record(auditAction, "user", user.getId(), user.getDisplayName(),
+                        user.getDisplayName() + auditSummarySuffix, auditContext);
                 boolean hasWorkspace = !workspaceMapper.getWorkspacesForUser(user.getId()).isEmpty();
                 response.sendRedirect(frontendBase + (hasWorkspace ? "/dashboard" : "/onboarding"));
             }
@@ -177,6 +187,15 @@ public class SsoAuthenticationSuccessHandler implements AuthenticationSuccessHan
                         + URLEncoder.encode(linkToken, StandardCharsets.UTF_8));
             }
         }
+    }
+
+    private static Map<String, Object> loginContext(String provider, Integer orgId) {
+        Map<String, Object> context = new LinkedHashMap<>();
+        context.put("provider", provider);
+        if (orgId != null) {
+            context.put("orgId", orgId);
+        }
+        return context;
     }
 
     private static String resolveSamlDisplayName(Saml2ResponseAssertionAccessor assertion, String email) {

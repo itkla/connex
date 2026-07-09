@@ -19,6 +19,14 @@ public interface AuditLogMapper {
         @Param("limit") int limit,
         @Param("offset") int offset);
 
+    List<AuditLog> findWorkspaceExport(@Param("workspaceId") Integer workspaceId,
+        @Param("limit") int limit,
+        @Param("offset") int offset);
+
+    List<AuditLog> findOrgExport(@Param("orgId") int orgId,
+        @Param("limit") int limit,
+        @Param("offset") int offset);
+
     List<AuditLog> findRecentByOrg(@Param("orgId") int orgId,
         @Param("limit") int limit,
         @Param("offset") int offset);

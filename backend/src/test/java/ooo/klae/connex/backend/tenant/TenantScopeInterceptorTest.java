@@ -40,6 +40,7 @@ class TenantScopeInterceptorTest {
         assertFalse(interceptor.requiresResolvedContext(NS + "UserMapper.search"));
         assertFalse(interceptor.requiresResolvedContext(NS + "PreferenceMapper.isEnabled"));
         assertFalse(interceptor.requiresResolvedContext(NS + "AuditLogMapper.insert"));
+        assertFalse(interceptor.requiresResolvedContext(NS + "AuditLogMapper.findOrgExport"));
     }
 
     @Test

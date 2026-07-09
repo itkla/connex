@@ -41,6 +41,7 @@ class SsoLoginServiceTest extends AbstractServiceTest {
     @Autowired private SsoDomainMapper ssoDomainMapper;
     @Autowired private OrgAllowedDomainMapper orgAllowedDomainMapper;
     @Autowired private WorkspaceService workspaceService;
+    @Autowired private AuditService auditService;
 
     private int orgId;
 
@@ -172,6 +173,21 @@ class SsoLoginServiceTest extends AbstractServiceTest {
         assertNotNull(identity, "a federated identity link must be recorded");
         assertEquals(created.getId(), identity.getUserId());
         assertEquals(orgId, identity.getOrgId());
+        assertTrue(auditService.recentForOrg(orgId, 50, 0).stream()
+                .anyMatch(entry -> "org.sso_user.provision".equals(entry.getAction())
+                        && "organization".equals(entry.getEntityType())
+                        && Integer.valueOf(orgId).equals(entry.getOrgId())),
+                "SSO account provisioning must be visible in the org audit trail");
+        assertTrue(auditService.recentForOrg(orgId, 50, 0).stream()
+                .anyMatch(entry -> "org.federated_identity.link".equals(entry.getAction())
+                        && "organization".equals(entry.getEntityType())
+                        && Integer.valueOf(orgId).equals(entry.getOrgId())),
+                "SSO federated identity binding must be visible in the org audit trail");
+        assertTrue(auditService.recentForOrg(orgId, 50, 0).stream()
+                .anyMatch(entry -> "org.workspace_member.sso_provision".equals(entry.getAction())
+                        && "organization".equals(entry.getEntityType())
+                        && Integer.valueOf(orgId).equals(entry.getOrgId())),
+                "SSO JIT workspace membership must be visible in the org audit trail");
     }
 
     @Test

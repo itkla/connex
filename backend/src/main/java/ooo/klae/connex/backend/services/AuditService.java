@@ -47,11 +47,13 @@ public class AuditService {
     private static final int HASH_LEN = 64;
     private static final int ERROR_MAX = 500;
     private static final int MAX_OFFSET = 100_000;
+    private static final int EXPORT_MAX_LIMIT = 10_000;
 
     private static final String OUTCOME_SUCCESS = "success";
     private static final String OUTCOME_FAILURE = "failure";
 
     private final AuditLogMapper auditLogMapper;
+    private final AuditIntegrityService auditIntegrityService;
     private final ObjectMapper objectMapper;
     private final TenantContext tenantContext;
     private final ClientIpResolver clientIpResolver;
@@ -72,7 +74,7 @@ public class AuditService {
      */
     public void record(String action, String entityType, Integer entityId,
             String targetLabel, String summary, Object changes) {
-        write(action, entityType, entityId, targetLabel, OUTCOME_SUCCESS, summary, changes, null);
+        write(action, entityType, entityId, targetLabel, OUTCOME_SUCCESS, summary, changes, null, false);
     }
 
     /**
@@ -88,7 +90,7 @@ public class AuditService {
             String targetLabel, String summary, String errorMessage) {
         Object context = errorMessage == null ? null
                 : Map.of("error", truncate(errorMessage, ERROR_MAX));
-        write(action, entityType, entityId, targetLabel, OUTCOME_FAILURE, summary, null, context);
+        write(action, entityType, entityId, targetLabel, OUTCOME_FAILURE, summary, null, context, true);
     }
 
     /**
@@ -103,7 +105,7 @@ public class AuditService {
      * @param context
      */
     private void write(String action, String entityType, Integer entityId, String targetLabel,
-            String outcome, String summary, Object changes, Object context) {
+            String outcome, String summary, Object changes, Object context, boolean independent) {
         try {
             AuditLog entry = new AuditLog();
             entry.setAction(truncate(action, ACTION_MAX));
@@ -121,9 +123,12 @@ public class AuditService {
             resolveActor(entry);
             resolveRequest(entry);
 
-            auditLogMapper.insert(entry);
+            if (independent) {
+                auditIntegrityService.appendIndependent(entry);
+            } else {
+                auditIntegrityService.append(entry);
+            }
         } catch (Exception e) {
-            // Auditing must never break the operation it is observing.
             log.error("Failed to record audit event action={} entityType={} entityId={}",
                     action, entityType, entityId, e);
         }
@@ -204,6 +209,40 @@ public class AuditService {
     }
 
     /**
+     * Exports recent workspace audit events as CSV.
+     * @param limit the maximum number of events to export, capped per request
+     * @param offset the number of events to skip
+     * @return CSV text
+     */
+    public String exportRecent(int limit, int offset) {
+        return toCsv(auditLogMapper.findWorkspaceExport(tenantContext.getWorkspaceId(), exportCap(limit), offset(offset)));
+    }
+
+    /**
+     * Exports workspace audit events for a single target as CSV.
+     * @param entityType the entity type to scope to
+     * @param entityId the entity id to scope to
+     * @param limit the maximum number of events to export, capped per request
+     * @param offset the number of events to skip
+     * @return CSV text
+     */
+    public String exportForEntity(String entityType, int entityId, int limit, int offset) {
+        return toCsv(auditLogMapper.findByEntity(tenantContext.getWorkspaceId(), entityType, entityId,
+                exportCap(limit), offset(offset)));
+    }
+
+    /**
+     * Exports org-plane audit events as CSV.
+     * @param orgId the organization to scope to
+     * @param limit the maximum number of events to export, capped per request
+     * @param offset the number of events to skip
+     * @return CSV text
+     */
+    public String exportRecentForOrg(int orgId, int limit, int offset) {
+        return toCsv(auditLogMapper.findOrgExport(orgId, exportCap(limit), offset(offset)));
+    }
+
+    /**
      * Resolves the actor details.
      * @param entry
      */
@@ -248,7 +287,7 @@ public class AuditService {
         var session = req.getSession(false);
         if (session == null)
             return null;
-        return sha256Hex(session.getId()); // store a hash, never the raw session id
+        return sha256Hex(session.getId());
     }
 
     /**
@@ -310,6 +349,15 @@ public class AuditService {
     }
 
     /**
+     * Caps an export limit to a minimum of 1 and a maximum of 10,000.
+     * @param limit
+     * @return
+     */
+    private static int exportCap(int limit) {
+        return Math.max(1, Math.min(limit, EXPORT_MAX_LIMIT));
+    }
+
+    /**
      * Clamps an offset to the range [0, {@value #MAX_OFFSET}], bounding how deep a
      * paged read can scan regardless of the requested value.
      * @param offset
@@ -348,5 +396,72 @@ public class AuditService {
         } catch (Exception e) {
             return null;
         }
+    }
+
+    private String toCsv(List<AuditLog> entries) {
+        StringBuilder sb = new StringBuilder();
+        writeCsvRow(sb, List.of("id", "workspaceId", "orgId", "action", "entityType", "entityId",
+                "actorId", "actorLabel", "currentActorLabel", "targetLabel", "outcome", "summary",
+                "changes", "context", "ipAddress", "userAgent", "sessionId", "requestId",
+                "chainScopeType", "chainScopeId", "chainIndex", "prevHash", "rowHash", "createdAt",
+                "integrityPayload"));
+        for (AuditLog entry : entries) {
+            writeCsvRow(sb, List.of(
+                    csvCell(entry.getId()),
+                    csvCell(entry.getWorkspaceId()),
+                    csvCell(entry.getOrgId()),
+                    csvCell(entry.getAction()),
+                    csvCell(entry.getEntityType()),
+                    csvCell(entry.getEntityId()),
+                    csvCell(entry.getActorId()),
+                    csvCell(entry.getActorLabel()),
+                    csvCell(entry.getCurrentActorLabel()),
+                    csvCell(entry.getTargetLabel()),
+                    csvCell(entry.getOutcome()),
+                    csvCell(entry.getSummary()),
+                    csvCell(entry.getChanges()),
+                    csvCell(entry.getContext()),
+                    csvCell(entry.getIpAddress()),
+                    csvCell(entry.getUserAgent()),
+                    csvCell(entry.getSessionId()),
+                    csvCell(entry.getRequestId()),
+                    csvCell(entry.getChainScopeType()),
+                    csvCell(entry.getChainScopeId()),
+                    csvCell(entry.getChainIndex()),
+                    csvCell(entry.getPrevHash()),
+                    csvCell(entry.getRowHash()),
+                    csvCell(entry.getCreatedAt()),
+                    csvCell(auditIntegrityService.integrityPayload(entry))));
+        }
+        return sb.toString();
+    }
+
+    private static String csvCell(Object value) {
+        return value == null ? "" : String.valueOf(value);
+    }
+
+    private static void writeCsvRow(StringBuilder sb, List<String> cells) {
+        for (int i = 0; i < cells.size(); i++) {
+            if (i > 0) {
+                sb.append(',');
+            }
+            sb.append(escapeCsv(cells.get(i)));
+        }
+        sb.append("\r\n");
+    }
+
+    private static String escapeCsv(String value) {
+        if (value == null || value.isEmpty()) {
+            return "";
+        }
+        String s = value;
+        char first = s.charAt(0);
+        if (first == '=' || first == '+' || first == '-' || first == '@' || first == '\t' || first == '\r') {
+            s = "'" + s;
+        }
+        if (s.indexOf(',') >= 0 || s.indexOf('"') >= 0 || s.indexOf('\n') >= 0 || s.indexOf('\r') >= 0) {
+            s = "\"" + s.replace("\"", "\"\"") + "\"";
+        }
+        return s;
     }
 }

@@ -8,3 +8,8 @@ server:
                 # The frontend proxies the session cookie over http://localhost, where a
                 # Secure cookie would be dropped by the browser. Never enable dev in prod.
                 secure: false
+
+connex:
+    audit:
+        integrity:
+            hmac-secret: ${CONNEX_AUDIT_INTEGRITY_HMAC_SECRET:dev-audit-integrity-hmac-secret-change-me}
