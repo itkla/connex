@@ -11,14 +11,14 @@ import javax.crypto.spec.SecretKeySpec;
 import org.springframework.stereotype.Component;
 
 import ooo.klae.connex.backend.exceptions.BadRequestException;
+import ooo.klae.connex.backend.secrets.SecretPurpose;
+import ooo.klae.connex.backend.secrets.SecretReference;
+import ooo.klae.connex.backend.secrets.SecretStore;
 
 /**
- * Symmetric authenticated encryption for secrets stored at rest — currently the
- * per-workspace SMTP password. Uses AES/GCM with a random 96-bit IV prepended to
- * the ciphertext; the whole blob is Base64 for column storage. The key is the
- * Base64-decoded {@code connex.mail.secret-key}. When no key is configured,
- * encryption is unavailable and callers that need it fail loudly rather than
- * persisting a recoverable secret in plaintext.
+ * Compatibility facade for workspace SMTP secrets. New writes go to the central
+ * envelope secret store; legacy AES-GCM blobs remain decryptable through
+ * {@code connex.mail.secret-key} so existing deployments do not lose access.
  */
 @Component
 public class SecretCipher {
@@ -29,26 +29,64 @@ public class SecretCipher {
     private static final SecureRandom RANDOM = new SecureRandom();
 
     private final SecretKeySpec key;
+    private final SecretStore secretStore;
 
-    public SecretCipher(MailProperties properties) {
+    public SecretCipher(MailProperties properties, SecretStore secretStore) {
         this.key = buildKey(properties.getSecretKey());
+        this.secretStore = secretStore;
     }
 
     /**
-     * Whether a usable encryption key is configured. When false, per-workspace SMTP
-     * passwords cannot be stored.
+     * Whether a usable secret-store or legacy encryption key is configured.
      * @return true when a key is available
      */
     public boolean isAvailable() {
+        return secretStore.isAvailable() || key != null;
+    }
+
+    public boolean hasLegacyKey() {
         return key != null;
     }
 
     /**
-     * Encrypts UTF-8 plaintext to a Base64 {@code iv:ciphertext} blob.
+     * Stores a workspace SMTP password in the central secret store.
+     * @param workspaceId the owning workspace
      * @param plaintext the value to protect
-     * @return the Base64-encoded encrypted blob
+     * @return the central secret-store reference
      */
-    public String encrypt(String plaintext) {
+    public String encryptForWorkspace(int workspaceId, String plaintext) {
+        return secretStore.put(SecretPurpose.WORKSPACE_SMTP_PASSWORD, workspaceId, plaintext);
+    }
+
+    /**
+     * Decrypts a secret-store reference or a legacy Base64 AES-GCM blob.
+     * @param encoded the stored secret reference or legacy encrypted blob
+     * @return the recovered UTF-8 plaintext
+     */
+    public String decryptForWorkspace(int workspaceId, String encoded) {
+        if (SecretReference.isReference(encoded)) {
+            return secretStore.get(SecretPurpose.WORKSPACE_SMTP_PASSWORD, workspaceId, encoded);
+        }
+        requireKey();
+        try {
+            byte[] blob = Base64.getDecoder().decode(encoded);
+            byte[] iv = new byte[IV_BYTES];
+            System.arraycopy(blob, 0, iv, 0, IV_BYTES);
+            Cipher cipher = Cipher.getInstance(TRANSFORMATION);
+            cipher.init(Cipher.DECRYPT_MODE, key, new GCMParameterSpec(TAG_BITS, iv));
+            byte[] plaintext = cipher.doFinal(blob, IV_BYTES, blob.length - IV_BYTES);
+            return new String(plaintext, StandardCharsets.UTF_8);
+        } catch (Exception e) {
+            throw new IllegalStateException("Failed to decrypt secret", e);
+        }
+    }
+
+    /**
+     * Legacy AES-GCM encryptor used only by compatibility tests.
+     * @param plaintext the value to protect
+     * @return the legacy encrypted blob
+     */
+    public String encryptLegacy(String plaintext) {
         requireKey();
         try {
             byte[] iv = new byte[IV_BYTES];
@@ -65,24 +103,12 @@ public class SecretCipher {
         }
     }
 
-    /**
-     * Decrypts a Base64 {@code iv:ciphertext} blob produced by {@link #encrypt(String)}.
-     * @param encoded the Base64-encoded encrypted blob
-     * @return the recovered UTF-8 plaintext
-     */
     public String decrypt(String encoded) {
-        requireKey();
-        try {
-            byte[] blob = Base64.getDecoder().decode(encoded);
-            byte[] iv = new byte[IV_BYTES];
-            System.arraycopy(blob, 0, iv, 0, IV_BYTES);
-            Cipher cipher = Cipher.getInstance(TRANSFORMATION);
-            cipher.init(Cipher.DECRYPT_MODE, key, new GCMParameterSpec(TAG_BITS, iv));
-            byte[] plaintext = cipher.doFinal(blob, IV_BYTES, blob.length - IV_BYTES);
-            return new String(plaintext, StandardCharsets.UTF_8);
-        } catch (Exception e) {
-            throw new IllegalStateException("Failed to decrypt secret", e);
-        }
+        return decryptForWorkspace(0, encoded);
+    }
+
+    public void deleteReferenceForWorkspace(int workspaceId, String encoded) {
+        secretStore.delete(SecretPurpose.WORKSPACE_SMTP_PASSWORD, workspaceId, encoded);
     }
 
     private void requireKey() {

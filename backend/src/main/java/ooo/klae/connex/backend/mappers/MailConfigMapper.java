@@ -1,5 +1,9 @@
 package ooo.klae.connex.backend.mappers;
 
+import java.util.List;
+
+import org.apache.ibatis.annotations.Param;
+
 import ooo.klae.connex.backend.beans.WorkspaceMailConfig;
 
 /**
@@ -13,7 +17,11 @@ public interface MailConfigMapper {
 
     WorkspaceMailConfig findByWorkspace(int workspaceId);
 
+    List<WorkspaceMailConfig> listLegacySecretConfigs();
+
     int upsert(WorkspaceMailConfig config);
+
+    int updatePasswordReference(@Param("workspaceId") int workspaceId, @Param("passwordEnc") String passwordEnc);
 
     int delete(int workspaceId);
 }

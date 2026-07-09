@@ -16,6 +16,8 @@ spring:
         password: ${CONNEX_DB_PASSWORD}
 
 connex:
+    secret-store:
+        master-key: ${CONNEX_SECRET_STORE_MASTER_KEY:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=}
     audit:
         integrity:
             hmac-secret: ${CONNEX_AUDIT_INTEGRITY_HMAC_SECRET:dev-audit-integrity-hmac-secret-change-me}

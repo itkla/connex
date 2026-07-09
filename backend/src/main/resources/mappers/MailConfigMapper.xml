@@ -10,6 +10,15 @@
     WHERE workspace_id = #{workspaceId}
   </select>
 
+  <select id="listLegacySecretConfigs" resultType="WorkspaceMailConfig">
+    SELECT workspace_id, enabled, host, port, username, password_enc,
+           from_address, from_name, starttls, `ssl`, `auth`, updated_at
+    FROM workspace_mail_config
+    WHERE password_enc IS NOT NULL
+      AND password_enc != ''
+      AND password_enc NOT LIKE 'secret:v1:%'
+  </select>
+
   <insert id="upsert">
     INSERT INTO workspace_mail_config
       (workspace_id, enabled, host, port, username, password_enc,
@@ -29,6 +38,12 @@
       `ssl` = VALUES(`ssl`),
       `auth` = VALUES(`auth`)
   </insert>
+
+  <update id="updatePasswordReference">
+    UPDATE workspace_mail_config
+    SET password_enc = #{passwordEnc}
+    WHERE workspace_id = #{workspaceId}
+  </update>
 
   <delete id="delete">
     DELETE FROM workspace_mail_config WHERE workspace_id = #{workspaceId}

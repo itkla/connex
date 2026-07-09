@@ -1,9 +1,10 @@
 package ooo.klae.connex.backend.sso;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertNull;
-import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -25,7 +26,7 @@ import ooo.klae.connex.backend.mappers.WorkspaceMapper;
  * with the right SP assertion-consumer location, SP entityId, and asserting-party (IdP) entityId,
  * SSO location, REDIRECT binding, and verification credential; a disabled, OIDC, or unknown org
  * resolves to null; a malformed registration id or a malformed certificate resolves to null rather
- * than throwing; and built registrations are cached until evicted.
+ * than throwing; and built registrations are rebuilt rather than cached with decrypted key material.
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.NONE)
 @Transactional
@@ -117,12 +118,12 @@ class DbRelyingPartyRegistrationRepositoryTest {
     }
 
     @Test
-    void resolvedRegistration_isCachedUntilEvicted() {
+    void resolvedRegistration_isRebuiltWithoutSecretBearingCache() {
         ssoConnectionMapper.upsert(samlConnection());
 
         RelyingPartyRegistration first = repository.findByRegistrationId(registrationId);
         RelyingPartyRegistration second = repository.findByRegistrationId(registrationId);
-        assertSame(first, second, "a resolved registration must be served from cache");
+        assertNotSame(first, second, "registrations must not be cached with decrypted key material");
 
         repository.evict(orgId);
         RelyingPartyRegistration rebuilt = repository.findByRegistrationId(registrationId);
@@ -170,5 +171,13 @@ class DbRelyingPartyRegistrationRepositoryTest {
 
         assertNull(repository.findByRegistrationId(registrationId),
                 "a malformed certificate must be skipped (null), never a 500");
+    }
+
+    @Test
+    void samlSpKeyMaterialToStringRedactsPrivateKey() {
+        String rendered = new SamlSpKeyMaterial("private-key", "certificate").toString();
+
+        assertFalse(rendered.contains("private-key"));
+        assertTrue(rendered.contains("certificate"));
     }
 }

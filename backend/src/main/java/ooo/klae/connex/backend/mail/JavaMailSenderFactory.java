@@ -23,6 +23,9 @@ public class JavaMailSenderFactory {
      * @return a configured mail sender
      */
     public JavaMailSender forConfig(ResolvedMailConfig config) {
+        if (config.password() != null) {
+            return build(config);
+        }
         return cache.computeIfAbsent(fingerprint(config), key -> build(config));
     }
 
@@ -54,7 +57,6 @@ public class JavaMailSenderFactory {
                 config.host(),
                 String.valueOf(config.port()),
                 String.valueOf(config.username()),
-                String.valueOf(config.password()),
                 config.starttls() + ":" + config.ssl() + ":" + config.auth());
     }
 }
