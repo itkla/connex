@@ -35,6 +35,27 @@ or architecture issue:
 - Do state whether exports are plaintext at generation and who must encrypt
   them after export.
 
+## Encryption PR Review Checklist
+
+Use this checklist on any PR that adds cryptography, storage encryption,
+secret storage, backup/export handling, or customer-facing security wording:
+
+- Searchable business data such as names, companies, emails, deals, notes,
+  addresses, custom fields, tags, and relationship graph data must not use
+  app-level column/row encryption in hosted SaaS.
+- Approved app-level encryption is limited to never-searched credentials and
+  tokens such as SMTP passwords, SSO OIDC client secrets, SAML private keys, and
+  future entries in `secret_value`.
+- New encrypted/ciphertext schema columns require an explicit allowlist update
+  in the encryption guardrail architecture test and a short explanation of why
+  the value is a never-searched secret.
+- Audit `changes`, structured logs, exceptions, and API responses must not
+  include plaintext secrets, ciphertext, wrapped data keys, encrypted references,
+  or secret identifiers beyond scoped metadata needed for diagnostics.
+- Customer-facing wording must link back to this matrix and must not describe
+  hosted SaaS as E2EE, zero-knowledge, customer-only-key encrypted, or unable to
+  access plaintext.
+
 ## Matrix
 
 | Deployment model | Storage encryption mode | Key controller | Customer revocation | Backend/operator plaintext access | Backup, snapshot, export posture | Allowed customer-facing wording |
