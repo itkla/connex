@@ -40,8 +40,18 @@ connex:
         # all rows with that key_id have been rewrapped.
         key-id: ${CONNEX_SECRET_STORE_KEY_ID:local-v1}
         master-key: ${CONNEX_SECRET_STORE_MASTER_KEY:}
+        disabled-key-ids: ${CONNEX_SECRET_STORE_DISABLED_KEY_IDS:}
+        lazy-rewrap-enabled: ${CONNEX_SECRET_STORE_LAZY_REWRAP_ENABLED:true}
+        batch-rewrap-on-startup: ${CONNEX_SECRET_STORE_BATCH_REWRAP_ON_STARTUP:false}
+        batch-rewrap-limit: ${CONNEX_SECRET_STORE_BATCH_REWRAP_LIMIT:1000}
         # keys:
         #   old-v1: ${CONNEX_SECRET_STORE_KEY_OLD_V1:}
+        # metadata:
+        #   local-v1:
+        #     version: "1"
+        #     owner: "operator"
+        #     scope: "instance"
+        #     created-at: "2026-07-09T00:00:00Z"
     cors:
         allowed-origins: ${CONNEX_CORS_ALLOWED_ORIGINS:http://localhost:3000}
     websocket:

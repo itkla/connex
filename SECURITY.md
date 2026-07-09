@@ -34,9 +34,9 @@ APPI groups these into four categories plus external-environment. This is our cu
 - **Authentication:** WebAuthn / passkeys; password fallback hashed with BCrypt. **CSRF** enabled (session-token model); **session rotation** on login; cookies `HttpOnly` + `SameSite=Lax` + `Secure` (env-gated).
 - **Authorization / RBAC:** custom per-workspace roles (`owner`/`admin`/`member` + custom `workspace_role`, `V13`) over a catalog of fine-grained permissions, enforced on a single path via `@RequirePermission` → `AuthorizationManager`. Destructive/structural ops are permission-gated and CI-backstopped (`RbacEnforcementArchTest`).
 - **Transport:** HSTS (1y, `includeSubDomains`) + a restrictive Content-Security-Policy (`default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'`) in `SecurityConfig`.
-- **Secrets:** externalized to environment (`CONNEX_DB_*`, bootstrap credentials); local Docker passwords are kept in untracked `backend/.env`.
+- **Secrets:** externalized to environment (`CONNEX_DB_*`, bootstrap credentials); local Docker passwords are kept in untracked `backend/.env`. Never-searched integration secrets are stored through the central envelope-encrypted secret store with key IDs, keyring rotation, disabled-key fail-closed behavior, metadata-only diagnostics, and audited use/rewrap operations ([runbook](SECRET_STORE_KEY_LIFECYCLE_RUNBOOK.md), [#372]).
 - **Database transport:** non-dev startup requires `CONNEX_DB_URL` to use MySQL Connector/J verified TLS (`sslMode=VERIFY_CA` or `sslMode=VERIFY_IDENTITY`). Local `dev` and `test` profiles may explicitly use plaintext Docker MySQL.
-- *In progress:* at-rest encryption + customer-managed key (CMK) — [#92]; operational rotation of any database credentials that reused old committed local defaults — [#88]; session idle/absolute timeouts + WebAuthn step-up for sensitive ops — [#98]; brute-force/rate-limit protection — [#80].
+- *In progress:* broader at-rest encryption + customer-managed key (CMK) — [#92]; operational rotation of any database credentials that reused old committed local defaults — [#88]; brute-force/rate-limit protection — [#80].
 
 ### 2.5 External-environment grasp (外的環境の把握)
 - SaaS personal data is stored in **Japan**. Where any handling involves a party outside Japan (e.g. a future AI provider under BYOP, [#94]), we identify the country and take account of its data-protection framework, and handle it under APPI Art. 28. No third-party AI/enrichment/analytics/email integrations send personal data externally today.
@@ -62,7 +62,7 @@ Security & personal-information contact: {{PRIVACY_CONTACT_EMAIL}}. Please repor
 ---
 
 ### Roadmap references
-Tracked under the security roadmap [#87] and the APPI pathway [#224]. Key open items: [#97] org boundary close-out · [#89] read-scoping backstop · [#92] CMK · [#91] audit tamper-evidence · [#98] step-up · [#80] rate-limit · [#99] CI scanning · [#106] third-party pentest.
+Tracked under the security roadmap [#87] and the APPI pathway [#224]. Key open items: [#97] org boundary close-out · [#89] read-scoping backstop · [#92] CMK · [#80] rate-limit · [#99] CI scanning · [#106] third-party pentest.
 
 [#87]: https://github.com/itkla/connex/issues/87
 [#89]: https://github.com/itkla/connex/issues/89
@@ -77,6 +77,7 @@ Tracked under the security roadmap [#87] and the APPI pathway [#224]. Key open i
 [#104]: https://github.com/itkla/connex/issues/104
 [#105]: https://github.com/itkla/connex/issues/105
 [#106]: https://github.com/itkla/connex/issues/106
+[#372]: https://github.com/itkla/connex/issues/372
 [#221]: https://github.com/itkla/connex/issues/221
 [#222]: https://github.com/itkla/connex/issues/222
 [#223]: https://github.com/itkla/connex/issues/223
