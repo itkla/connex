@@ -44,6 +44,9 @@ secret storage, backup/export handling, or customer-facing security wording:
 - Searchable business data such as names, companies, emails, deals, notes,
   addresses, custom fields, tags, and relationship graph data must not use
   app-level column/row encryption in hosted SaaS.
+- `special_care` classification changes handling policy, not the app-level
+  encryption boundary for searchable CRM fields. Follow
+  `SPECIAL_CARE_DATA_POLICY.md` for special-care governance.
 - Approved app-level encryption is limited to never-searched credentials and
   tokens such as SMTP passwords, SSO OIDC client secrets, SAML private keys, and
   future entries in `secret_value`.
@@ -113,6 +116,8 @@ encryption or key-custody claims:
 - `SECURITY.md` / APPI security control disclosure ([#104]).
 - `APPI_DPA_TEMPLATE.md` and security questionnaire boilerplate ([#93]/[#369]).
 - At-rest encryption and CMK roadmap ([#92]).
+- Special-care data classification and free-text governance
+  (`SPECIAL_CARE_DATA_POLICY.md`, [#222]).
 - Dedicated per-organization database architecture ([#313]).
 - Deployment architecture / on-prem planning ([#100]).
 - SaaS storage encryption evidence (`SAAS_STORAGE_ENCRYPTION_RUNBOOK.md`, [#371]).
@@ -137,6 +142,7 @@ encryption or key-custody claims:
 [#93]: https://github.com/itkla/connex/issues/93
 [#100]: https://github.com/itkla/connex/issues/100
 [#104]: https://github.com/itkla/connex/issues/104
+[#222]: https://github.com/itkla/connex/issues/222
 [#313]: https://github.com/itkla/connex/issues/313
 [#369]: https://github.com/itkla/connex/issues/369
 [#371]: https://github.com/itkla/connex/issues/371

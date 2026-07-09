@@ -32,7 +32,7 @@ Art. 26 (and Enforcement Rules) make a breach a **reportable situation** when **
 
 | # | Trigger | Notes |
 |---|---|---|
-| A | Breach involving **要配慮個人情報** (special-care-required PI) | Health, criminal record, social-status, etc. Note the free-text/custom-field channel ([#222]) — assume special-care data may be present unless proven otherwise. |
+| A | Breach involving **要配慮個人情報** (special-care-required PI) | Health, criminal record, social-status, etc. Use [SPECIAL_CARE_DATA_POLICY.md](SPECIAL_CARE_DATA_POLICY.md) for classified custom fields and free-text handling; assume special-care data may be present unless proven otherwise. |
 | B | Breach likely to cause **property damage** | Data usable for financial fraud (payment data, credentials enabling it). |
 | C | Breach committed with **wrongful/improper purpose** | Unauthorized access, exfiltration, malicious insider, ransomware. Nearly every external attack lands here. |
 | D | Breach involving **> 1,000 data subjects** | Count distinct affected individuals across all affected workspaces/orgs. |
@@ -99,7 +99,7 @@ workspace/org audit exports under their existing gates.
 Deliverables from this phase:
 - List of affected **organizations** (customers) and **workspaces**.
 - Count of **distinct affected data subjects** (drives Trigger D).
-- Whether any **要配慮個人情報** was in scope (Trigger A) — remember free-text notes and untyped custom fields ([#222]).
+- Whether any **要配慮個人情報** was in scope (Trigger A) — check `special_care` custom fields and the free-text surfaces listed in [SPECIAL_CARE_DATA_POLICY.md](SPECIAL_CARE_DATA_POLICY.md).
 - Nature of access (Trigger C).
 
 > **Caveat:** `audit_log` triggers block row UPDATE/DELETE but not DDL — a privileged attacker could drop them. Tamper-evidence is tracked in [#91]; until it lands, corroborate audit_log with DB/infra logs and treat gaps as worst-case.

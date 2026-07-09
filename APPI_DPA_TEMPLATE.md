@@ -2,7 +2,7 @@
 
 > **Template for counsel — NOT a binding agreement and NOT legal advice.** This is a starting clause set for the entrustment (委託) of personal-data handling from a Connex customer (the **Entruster / 委託元**, the APPI handling operator) to Connex (the **Entrustee / 委託先**). Bracketed items and the responsible legal entity **must** be completed and the whole reviewed by qualified Japanese counsel before execution. Issue [#93].
 >
-> Governs alongside the [Security Posture](SECURITY.md), [Encryption Guarantee Matrix](ENCRYPTION_GUARANTEE_MATRIX.md), [SaaS Storage Encryption Runbook](SAAS_STORAGE_ENCRYPTION_RUNBOOK.md), and [Breach Response Runbook](APPI_BREACH_RESPONSE_RUNBOOK.md). Where this template and a signed DPA differ, the signed DPA governs.
+> Governs alongside the [Security Posture](SECURITY.md), [Encryption Guarantee Matrix](ENCRYPTION_GUARANTEE_MATRIX.md), [SaaS Storage Encryption Runbook](SAAS_STORAGE_ENCRYPTION_RUNBOOK.md), [Special-Care Data Policy](SPECIAL_CARE_DATA_POLICY.md), and [Breach Response Runbook](APPI_BREACH_RESPONSE_RUNBOOK.md). Where this template and a signed DPA differ, the signed DPA governs.
 
 ## 1. Parties & roles
 - **Entruster (委託元):** [customer legal name] — the operator handling personal information under the APPI.
@@ -13,7 +13,7 @@
 - **Purpose:** to provide the Connex service (CRM storage, relationship intelligence, scoring, and features the Entruster enables).
 - **Categories of data subjects:** the Entruster's contacts, employees, and business relationships.
 - **Categories of personal data:** names, contact details, employment history, activities, notes, relationship data, and any custom fields the Entruster populates.
-- **要配慮個人情報:** the Entruster must not load special-care-required personal information without a lawful basis; classification/guardrails per [#222].
+- **Special-care-required personal information:** the Entruster must not load special-care-required personal information without a lawful basis and required consent; classification and free-text guardrails are defined in [SPECIAL_CARE_DATA_POLICY.md](SPECIAL_CARE_DATA_POLICY.md), [#222].
 - Connex handles data **only** within this scope and the Entruster's documented instructions.
 
 ## 3. Entrustee obligations (APPI Art. 25 supervision-ready)
