@@ -36,10 +36,10 @@ class EncryptionGuardrailArchTest {
     private static final Pattern ALTER_TABLE =
         Pattern.compile("^\\s*ALTER\\s+TABLE\\s+`?([a-z0-9_]+)`?\\b", Pattern.CASE_INSENSITIVE);
     private static final Pattern COLUMN_DEFINITION =
-        Pattern.compile("^\\s*(?:(?:ADD|MODIFY)\\s+)?(?:COLUMN\\s+)?`?([a-z0-9_]+)`?\\s+\\w+",
+        Pattern.compile("(?:^|,)\\s*(?:(?:ADD|MODIFY)\\s+)?(?:COLUMN\\s+)?`?([a-z0-9_]+)`?\\s+\\w+",
             Pattern.CASE_INSENSITIVE);
     private static final Pattern CHANGE_COLUMN_DEFINITION =
-        Pattern.compile("^\\s*CHANGE\\s+(?:COLUMN\\s+)?`?[a-z0-9_]+`?\\s+`?([a-z0-9_]+)`?\\s+\\w+",
+        Pattern.compile("(?:^|,)\\s*CHANGE\\s+(?:COLUMN\\s+)?`?[a-z0-9_]+`?\\s+`?([a-z0-9_]+)`?\\s+\\w+",
             Pattern.CASE_INSENSITIVE);
     private static final Pattern CRYPTO_COLUMN_NAME =
         Pattern.compile("(^encrypted_|_encrypted(?:_|$)|_enc$|ciphertext|data_key|_cipher(?:_|$)|"
@@ -52,9 +52,14 @@ class EncryptionGuardrailArchTest {
             + "Connex cannot see|Connex cannot access|Connex cannot read|technically unable to decrypt|"
             + "customer[- ]only[- ]key|inaccessible to Connex|cannot access plaintext",
             Pattern.CASE_INSENSITIVE);
-    private static final Pattern SUPPORTED_DOC_CONTEXT =
-        Pattern.compile("do not say|must not(?: describe)?|does not make|do not make|is not|are not|"
-            + "No for hosted|deny the claim|qualify it|used to deny|customer-operated|on-prem",
+    private static final Pattern SUPPORTED_DOC_POLICY_CONTEXT =
+        Pattern.compile("do not say|must not(?: describe)?|does not make|do not make|"
+            + "No for hosted|deny the claim|qualify it|used to deny",
+            Pattern.CASE_INSENSITIVE);
+    private static final Pattern SUPPORTED_DOC_NEGATION_CONTEXT =
+        Pattern.compile("\\b(?:is|are|does|do|must)\\s+not\\b.{0,120}"
+            + "(?:E2EE|zero[- ]knowledge|end-to-end encrypted|end-to-end encryption|"
+            + "customer[- ]only[- ]key|unable to decrypt|cannot access plaintext)",
             Pattern.CASE_INSENSITIVE);
     private static final Pattern SINGLE_CHANGE_FIELD =
         Pattern.compile("auditService\\.singleChange\\(\\s*\"([^\"]+)\"");
@@ -128,7 +133,7 @@ class EncryptionGuardrailArchTest {
                 String next = i + 1 >= lines.size() ? "" : lines.get(i + 1);
                 String context = previous + " " + line + " " + next;
                 if (UNSUPPORTED_DOC_CLAIM.matcher(line).find()
-                    && !SUPPORTED_DOC_CONTEXT.matcher(context).find()) {
+                    && !supportedDocClaimContext(context)) {
                     violations.add(relative(path) + ":" + (i + 1) + ": " + line.strip());
                 }
             }
@@ -181,8 +186,8 @@ class EncryptionGuardrailArchTest {
             }
 
             if (table != null) {
-                String columnName = columnName(trimmed);
-                if (columnName != null) {
+                String columnScanLine = columnScanLine(trimmed, create, alter);
+                for (String columnName : columnNames(columnScanLine)) {
                     String qualified = table + "." + columnName;
                     if (APPROVED_SECRET_COLUMNS.contains(qualified)) {
                         seenApproved.add(qualified);
@@ -202,13 +207,35 @@ class EncryptionGuardrailArchTest {
         }
     }
 
-    private String columnName(String line) {
+    private List<String> columnNames(String line) {
+        List<String> names = new ArrayList<>();
         Matcher changed = CHANGE_COLUMN_DEFINITION.matcher(line);
-        if (changed.find()) {
-            return changed.group(1).toLowerCase(Locale.ROOT);
+        while (changed.find()) {
+            names.add(changed.group(1).toLowerCase(Locale.ROOT));
         }
         Matcher column = COLUMN_DEFINITION.matcher(line);
-        return column.find() ? column.group(1).toLowerCase(Locale.ROOT) : null;
+        while (column.find()) {
+            String name = column.group(1).toLowerCase(Locale.ROOT);
+            if (!names.contains(name)) {
+                names.add(name);
+            }
+        }
+        return names;
+    }
+
+    private String columnScanLine(String line, Matcher create, Matcher alter) {
+        if (create.find(0)) {
+            return line.substring(create.end()).strip();
+        }
+        if (alter.find(0)) {
+            return line.substring(alter.end()).strip();
+        }
+        return line;
+    }
+
+    private boolean supportedDocClaimContext(String context) {
+        return SUPPORTED_DOC_POLICY_CONTEXT.matcher(context).find()
+            || SUPPORTED_DOC_NEGATION_CONTEXT.matcher(context).find();
     }
 
     private List<Path> customerFacingTextFiles() throws IOException {
@@ -222,10 +249,12 @@ class EncryptionGuardrailArchTest {
 
         for (String directory : List.of(
             ".github",
+            "docs",
             "frontend/app",
             "frontend/components",
             "frontend/emails",
-            "frontend/messages")) {
+            "frontend/messages",
+            "frontend/public")) {
             Path scanRoot = root.resolve(directory);
             if (Files.exists(scanRoot)) {
                 try (Stream<Path> files = Files.walk(scanRoot)) {
