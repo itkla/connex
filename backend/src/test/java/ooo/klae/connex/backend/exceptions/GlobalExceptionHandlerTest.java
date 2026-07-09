@@ -84,6 +84,15 @@ class GlobalExceptionHandlerTest {
     }
 
     @Test
+    void secretUnavailable_returnsSanitizedBody() {
+        ResponseEntity<String> response = handler.secretUnavailable(
+            new SecretUnavailableException("missing key id prod-v1"));
+
+        assertEquals(HttpStatus.SERVICE_UNAVAILABLE, response.getStatusCode());
+        assertEquals("Encrypted secret is unavailable", response.getBody());
+    }
+
+    @Test
     void unreadableMessage_onRequestBodyLimit_mapsTo413() {
         ResponseEntity<String> response = handler.unreadableMessage(
             new HttpMessageNotReadableException("too large", new RequestBodyTooLargeException(8), null));

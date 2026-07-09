@@ -66,6 +66,12 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS).body(ex.getMessage());
     }
 
+    @ExceptionHandler(SecretUnavailableException.class)
+    public ResponseEntity<String> secretUnavailable(SecretUnavailableException ex) {
+        log.warn("Encrypted secret unavailable", ex);
+        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body("Encrypted secret is unavailable");
+    }
+
     @ExceptionHandler(DataIntegrityViolationException.class)
     public ResponseEntity<Map<String, String>> dataIntegrity(DataIntegrityViolationException ex) {
         return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of("message", "This record conflicts with existing data"));

@@ -74,7 +74,42 @@ public class AuditService {
      */
     public void record(String action, String entityType, Integer entityId,
             String targetLabel, String summary, Object changes) {
-        write(action, entityType, entityId, targetLabel, OUTCOME_SUCCESS, summary, changes, null, false);
+        write(action, entityType, entityId, targetLabel, OUTCOME_SUCCESS, summary, changes, null, false,
+                false, null, null);
+    }
+
+    /**
+     * Records a successful audit event with explicit workspace/org scope.
+     * @param action action name
+     * @param entityType audited entity type
+     * @param entityId audited entity id
+     * @param workspaceId explicit workspace scope, or null
+     * @param orgId explicit organization scope, or null
+     * @param targetLabel target descriptor
+     * @param summary summary text
+     * @param changes sanitized metadata
+     */
+    public void recordScoped(String action, String entityType, Integer entityId,
+            Integer workspaceId, Integer orgId, String targetLabel, String summary, Object changes) {
+        write(action, entityType, entityId, targetLabel, OUTCOME_SUCCESS, summary, changes, null, false,
+                true, workspaceId, orgId);
+    }
+
+    /**
+     * Records a successful audit event in its own transaction with explicit scope.
+     * @param action action name
+     * @param entityType audited entity type
+     * @param entityId audited entity id
+     * @param workspaceId explicit workspace scope, or null
+     * @param orgId explicit organization scope, or null
+     * @param targetLabel target descriptor
+     * @param summary summary text
+     * @param changes sanitized metadata
+     */
+    public void recordIndependentScoped(String action, String entityType, Integer entityId,
+            Integer workspaceId, Integer orgId, String targetLabel, String summary, Object changes) {
+        write(action, entityType, entityId, targetLabel, OUTCOME_SUCCESS, summary, changes, null, true,
+                true, workspaceId, orgId);
     }
 
     /**
@@ -90,7 +125,27 @@ public class AuditService {
             String targetLabel, String summary, String errorMessage) {
         Object context = errorMessage == null ? null
                 : Map.of("error", truncate(errorMessage, ERROR_MAX));
-        write(action, entityType, entityId, targetLabel, OUTCOME_FAILURE, summary, null, context, true);
+        write(action, entityType, entityId, targetLabel, OUTCOME_FAILURE, summary, null, context, true,
+                false, null, null);
+    }
+
+    /**
+     * Records a failed audit event with explicit workspace/org scope.
+     * @param action action name
+     * @param entityType audited entity type
+     * @param entityId audited entity id
+     * @param workspaceId explicit workspace scope, or null
+     * @param orgId explicit organization scope, or null
+     * @param targetLabel target descriptor
+     * @param summary summary text
+     * @param errorMessage sanitized error class or reason
+     */
+    public void recordFailureScoped(String action, String entityType, Integer entityId,
+            Integer workspaceId, Integer orgId, String targetLabel, String summary, String errorMessage) {
+        Object context = errorMessage == null ? null
+                : Map.of("error", truncate(errorMessage, ERROR_MAX));
+        write(action, entityType, entityId, targetLabel, OUTCOME_FAILURE, summary, null, context, true,
+                true, workspaceId, orgId);
     }
 
     /**
@@ -105,7 +160,8 @@ public class AuditService {
      * @param context
      */
     private void write(String action, String entityType, Integer entityId, String targetLabel,
-            String outcome, String summary, Object changes, Object context, boolean independent) {
+            String outcome, String summary, Object changes, Object context, boolean independent,
+            boolean explicitScope, Integer workspaceId, Integer orgId) {
         try {
             AuditLog entry = new AuditLog();
             entry.setAction(truncate(action, ACTION_MAX));
@@ -117,9 +173,14 @@ public class AuditService {
             entry.setChanges(toJson(changes));
             entry.setContext(toJson(context));
 
-            boolean orgLevel = "organization".equals(entityType);
-            entry.setWorkspaceId(orgLevel ? null : tenantContext.getWorkspaceId());
-            entry.setOrgId(orgLevel ? entityId : tenantContext.getOrgId());
+            if (explicitScope) {
+                entry.setWorkspaceId(workspaceId);
+                entry.setOrgId(orgId);
+            } else {
+                boolean orgLevel = "organization".equals(entityType);
+                entry.setWorkspaceId(orgLevel ? null : tenantContext.getWorkspaceId());
+                entry.setOrgId(orgLevel ? entityId : tenantContext.getOrgId());
+            }
             resolveActor(entry);
             resolveRequest(entry);
 

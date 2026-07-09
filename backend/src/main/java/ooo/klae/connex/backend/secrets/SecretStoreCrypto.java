@@ -4,7 +4,9 @@ import java.nio.charset.StandardCharsets;
 import java.security.SecureRandom;
 import java.util.Base64;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.Map;
+import java.util.Set;
 
 import javax.crypto.Cipher;
 import javax.crypto.spec.GCMParameterSpec;
@@ -12,7 +14,7 @@ import javax.crypto.spec.SecretKeySpec;
 
 import org.springframework.stereotype.Component;
 
-import ooo.klae.connex.backend.exceptions.BadRequestException;
+import ooo.klae.connex.backend.exceptions.SecretUnavailableException;
 
 /**
  * AES-GCM envelope encryption primitive for the database-backed secret store.
@@ -33,9 +35,11 @@ public class SecretStoreCrypto {
     private final String activeKeyId;
     private final SecretKeySpec activeKeyEncryptionKey;
     private final Map<String, SecretKeySpec> keyEncryptionKeys;
+    private final Set<String> disabledKeyIds;
 
     public SecretStoreCrypto(SecretStoreProperties properties) {
         this.activeKeyId = normalizeKeyId(properties.getKeyId());
+        this.disabledKeyIds = normalizeKeyIds(properties.getDisabledKeyIds());
         Map<String, SecretKeySpec> built = new LinkedHashMap<>();
         Map<String, String> configuredKeys = properties.getKeys() == null ? Map.of() : properties.getKeys();
         for (Map.Entry<String, String> entry : configuredKeys.entrySet()) {
@@ -55,7 +59,7 @@ public class SecretStoreCrypto {
     }
 
     public boolean isAvailable() {
-        return activeKeyEncryptionKey != null;
+        return activeKeyEncryptionKey != null && !isDisabled(activeKeyId);
     }
 
     public String activeKeyId() {
@@ -64,7 +68,30 @@ public class SecretStoreCrypto {
 
     public boolean hasKey(String keyId) {
         String normalized = normalizeKeyId(keyId);
+        return normalized != null && keyEncryptionKeys.containsKey(normalized) && !disabledKeyIds.contains(normalized);
+    }
+
+    public boolean hasConfiguredKey(String keyId) {
+        String normalized = normalizeKeyId(keyId);
         return normalized != null && keyEncryptionKeys.containsKey(normalized);
+    }
+
+    public boolean isDisabled(String keyId) {
+        String normalized = normalizeKeyId(keyId);
+        return normalized != null && disabledKeyIds.contains(normalized);
+    }
+
+    public boolean isActiveKey(String keyId) {
+        String normalized = normalizeKeyId(keyId);
+        return normalized != null && normalized.equals(activeKeyId);
+    }
+
+    public Set<String> configuredKeyIds() {
+        return keyEncryptionKeys.keySet();
+    }
+
+    public Set<String> disabledKeyIds() {
+        return disabledKeyIds;
     }
 
     public EncryptedSecret encrypt(String plaintext, String aad) {
@@ -79,26 +106,47 @@ public class SecretStoreCrypto {
 
     public String decrypt(String keyId, String encryptedDataKey, String ciphertext, String aad) {
         SecretKeySpec key = keyFor(keyId);
-        byte[] dataKey = decryptWithKey(key, encryptedDataKey, aad);
+        byte[] dataKey;
+        try {
+            dataKey = decryptWithKey(key, encryptedDataKey, aad);
+        } catch (IllegalStateException e) {
+            throw new SecretUnavailableException("Encrypted integration secret key does not match stored secret", e);
+        }
         byte[] plaintext = decryptWithKey(new SecretKeySpec(dataKey, "AES"), ciphertext, aad);
         return new String(plaintext, StandardCharsets.UTF_8);
     }
 
     private void requireKey() {
         if (activeKeyEncryptionKey == null) {
-            throw new BadRequestException(
-                    "Cannot store or read encrypted integration secrets: no active CONNEX_SECRET_STORE key is configured");
+            throw new SecretUnavailableException(
+                    "No active CONNEX_SECRET_STORE key is configured");
+        }
+        if (isDisabled(activeKeyId)) {
+            throw new SecretUnavailableException("The active CONNEX_SECRET_STORE key is disabled");
         }
     }
 
     private SecretKeySpec keyFor(String keyId) {
         String normalized = normalizeKeyId(keyId);
+        if (isDisabled(normalized)) {
+            throw new SecretUnavailableException("Encrypted integration secret key is disabled");
+        }
         SecretKeySpec key = normalized == null ? null : keyEncryptionKeys.get(normalized);
         if (key == null) {
-            throw new BadRequestException(
-                    "Cannot read encrypted integration secret: key id is not configured");
+            throw new SecretUnavailableException("Encrypted integration secret key is not configured");
         }
         return key;
+    }
+
+    public boolean canUnwrapDataKey(String keyId, String encryptedDataKey, String aad) {
+        try {
+            decryptWithKey(keyFor(keyId), encryptedDataKey, aad);
+            return true;
+        } catch (SecretUnavailableException e) {
+            throw e;
+        } catch (RuntimeException e) {
+            return false;
+        }
     }
 
     private static SecretKeySpec buildOptionalKey(String base64Key, String propertyName) {
@@ -126,6 +174,20 @@ public class SecretStoreCrypto {
         }
         String trimmed = keyId.trim();
         return trimmed.isEmpty() ? null : trimmed;
+    }
+
+    private static Set<String> normalizeKeyIds(Set<String> keyIds) {
+        Set<String> normalized = new LinkedHashSet<>();
+        if (keyIds == null) {
+            return normalized;
+        }
+        for (String keyId : keyIds) {
+            String value = normalizeKeyId(keyId);
+            if (value != null) {
+                normalized.add(value);
+            }
+        }
+        return Set.copyOf(normalized);
     }
 
     private static String encryptWithKey(SecretKeySpec key, byte[] plaintext, String aad) {
