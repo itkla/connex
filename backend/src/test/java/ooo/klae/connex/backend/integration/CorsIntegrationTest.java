@@ -74,6 +74,15 @@ class CorsIntegrationTest {
     }
 
     @Test
+    void actualCorsRequestAllowsLocalStagingOrigin() throws Exception {
+        mockMvc.perform(get("/api/companies")
+                .header("Origin", "http://localhost:3001"))
+            .andExpect(status().isUnauthorized())
+            .andExpect(header().string("Access-Control-Allow-Origin", "http://localhost:3001"))
+            .andExpect(header().string("Access-Control-Allow-Credentials", "true"));
+    }
+
+    @Test
     void preflightRejectsHeadersOutsideApiAllowList() throws Exception {
         mockMvc.perform(options("/api/companies")
                 .header("Origin", "http://localhost:3000")
