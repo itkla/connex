@@ -2,7 +2,6 @@ package ooo.klae.connex.backend.tenant;
 
 import java.util.Locale;
 
-import jakarta.validation.constraints.AssertTrue;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Pattern;
 
@@ -31,8 +30,7 @@ public class WorkspaceCookieProperties {
         return normalized.substring(0, 1).toUpperCase(Locale.ROOT) + normalized.substring(1);
     }
 
-    @AssertTrue(message = "secure must be true when SameSite is None")
-    public boolean isSecureWhenSameSiteNone() {
-        return secure || !"None".equals(sameSiteHeaderValue());
+    public boolean isEffectiveSecure() {
+        return secure || "None".equals(sameSiteHeaderValue());
     }
 }
