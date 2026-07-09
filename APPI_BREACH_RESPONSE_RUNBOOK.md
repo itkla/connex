@@ -1,6 +1,6 @@
 # Connex — Personal-Data Breach Response Runbook (APPI Art. 26)
 
-> **Status:** Phase-0 process deliverable for the APPI compliance pathway ([#224]) — issue [#223]. This is the **process slice**; incident tooling (scoping automation, alerting) follows.
+> **Status:** Process deliverable for the APPI compliance pathway ([#224]) — issue [#223]. Connex now has an org-scoped incident register and audit-scope helper; alerting hooks remain future work.
 > **Not legal advice.** The thresholds, deadlines, and entrustee construction below are framework reasoning and must be confirmed with Japanese counsel and, where relevant, each customer's Data Processing Agreement (DPA, [#93]). When this runbook and a signed DPA disagree, **the DPA governs** for that customer.
 >
 > **Owner:** {{SECURITY_OWNER}} · **Last reviewed:** {{DATE}} · Review at least every 6 months and after every incident.
@@ -74,7 +74,7 @@ Connex does not usually file with the PPC for customer data — but must move fa
 
 ### 5.1 Detect & declare (target: immediate)
 - **Trigger:** report from monitoring, a customer, a researcher, or staff.
-- **Action:** the receiver opens an incident record ({{INCIDENT_TRACKER}}), assigns an Incident Lead, starts a timestamped timeline. Set a provisional severity.
+- **Action:** the receiver opens an incident record in `/api/orgs/{orgId}/appi-incidents`, assigns an Incident Lead, starts a timestamped timeline. Set a provisional severity.
 - **Escalation:** notify the Incident Lead within 1 hour of any credible report, 24/7.
 
 ### 5.2 Contain (target: within hours)
@@ -88,6 +88,13 @@ Use the append-only **`audit_log`** (`AuditLog.java`, `V10__audit_log_workspace.
 - **`entity_type` / `entity_id`** — which records (person, note, activity, custom field…) were read/exported/modified.
 - **`actor_id` / `ip_address` / `user_agent` / `session_id`** — forensic attribution of unauthorized access.
 - **`action` / `changes` / `created_at`** — what happened, when, with before/after diffs.
+
+The org-admin incident scope endpoint
+`/api/orgs/{orgId}/appi-incidents/{incidentId}/scope` returns metadata-only
+counts grouped by workspace, entity type, action, and outcome for the incident
+window. It deliberately does not expose audit `changes`, target labels, IP
+addresses, user agents, session hashes, or request IDs; those remain in the
+workspace/org audit exports under their existing gates.
 
 Deliverables from this phase:
 - List of affected **organizations** (customers) and **workspaces**.

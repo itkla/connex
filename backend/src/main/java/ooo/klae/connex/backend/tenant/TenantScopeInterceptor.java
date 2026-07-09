@@ -85,6 +85,7 @@ public class TenantScopeInterceptor implements Interceptor {
      */
     public static final Set<String> CONTROL_PLANE_NAMESPACES = Set.of(
         MAPPERS + "AllowedDomainMapper",
+        MAPPERS + "AppiIncidentMapper",
         MAPPERS + "AuditIntegrityMapper",
         MAPPERS + "OrgAllowedDomainMapper",
         MAPPERS + "EmailChangeTokenMapper",
