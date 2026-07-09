@@ -55,6 +55,7 @@ public class SsoConnectionService {
     private final AuditService auditService;
     private final DbClientRegistrationRepository dbClientRegistrationRepository;
     private final DbRelyingPartyRegistrationRepository dbRelyingPartyRegistrationRepository;
+    private final SessionSecurityService sessionSecurityService;
 
     /**
      * Returns the SSO connection for the acting workspace's organization, with the
@@ -96,6 +97,7 @@ public class SsoConnectionService {
     @Transactional
     public SsoConnectionDto save(int workspaceId, int actorId, SsoConnectionRequest request) {
         int orgId = requireAdministrableOrg(workspaceId, actorId);
+        sessionSecurityService.requireRecentAuthentication(actorId);
         if (!ssoProperties.isEnabled()) {
             throw new BadRequestException("Single sign-on is not enabled on this instance");
         }

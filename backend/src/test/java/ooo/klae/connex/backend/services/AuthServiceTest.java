@@ -1,12 +1,14 @@
 package ooo.klae.connex.backend.services;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.security.authentication.BadCredentialsException;
 
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.dto.RegisterDto;
@@ -60,5 +62,20 @@ class AuthServiceTest extends AbstractServiceTest {
 
         assertTrue(userMapper.getUserById(user.getId()).isEmailVerified(),
             "with verification off, self-serve accounts are verified so enabling it later never gates them");
+    }
+
+    @Test
+    void requireCurrentPassword_acceptsTheAccountPassword() {
+        User user = authService.register(registration("pw_" + unique(), unique() + "@example.com"), true);
+
+        assertDoesNotThrow(() -> authService.requireCurrentPassword(user.getId(), "Aa1!aaaa", "203.0.113.10"));
+    }
+
+    @Test
+    void requireCurrentPassword_rejectsWrongPassword() {
+        User user = authService.register(registration("badpw_" + unique(), unique() + "@example.com"), true);
+
+        assertThrows(BadCredentialsException.class,
+            () -> authService.requireCurrentPassword(user.getId(), "wrong", "203.0.113.10"));
     }
 }

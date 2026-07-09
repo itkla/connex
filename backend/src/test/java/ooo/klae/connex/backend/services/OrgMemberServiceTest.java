@@ -141,6 +141,7 @@ class OrgMemberServiceTest extends AbstractServiceTest {
 
     @Test
     void creatingAWorkspaceMakesTheCreatorTheFoundingOrgOwner() {
+        clearRequestContext();
         WorkspaceMembershipDto created = workspaceService.createWorkspace("Fresh " + unique(), currentUser.getId());
         int orgId = workspaceService.getOrgId(created.getId());
         assertEquals("owner", orgMemberMapper.getRole(orgId, currentUser.getId()),

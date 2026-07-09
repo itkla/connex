@@ -22,6 +22,7 @@ public class AllowedDomainService {
     private final AllowedDomainMapper allowedDomainMapper;
     private final WorkspaceService workspaceService;
     private final AuditService auditService;
+    private final SessionSecurityService sessionSecurityService;
 
     public List<String> listDomains(int workspaceId, int actorId) {
         workspaceService.requirePermission(workspaceId, actorId, Permission.WORKSPACE_SETTINGS);
@@ -30,6 +31,7 @@ public class AllowedDomainService {
 
     public List<String> addDomain(int workspaceId, int actorId, String domainRaw) {
         workspaceService.requirePermission(workspaceId, actorId, Permission.WORKSPACE_SETTINGS);
+        sessionSecurityService.requireRecentAuthentication(actorId);
         String domain = DomainUtil.normalize(domainRaw);
         allowedDomainMapper.add(workspaceId, domain);
         auditService.record("workspace.allowed_domain.add", "workspace", workspaceId, domain,
@@ -39,6 +41,7 @@ public class AllowedDomainService {
 
     public void removeDomain(int workspaceId, int actorId, String domainRaw) {
         workspaceService.requirePermission(workspaceId, actorId, Permission.WORKSPACE_SETTINGS);
+        sessionSecurityService.requireRecentAuthentication(actorId);
         String domain = DomainUtil.normalize(domainRaw);
         allowedDomainMapper.remove(workspaceId, domain);
         auditService.record("workspace.allowed_domain.remove", "workspace", workspaceId, domain,

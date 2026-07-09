@@ -48,6 +48,7 @@ class WorkspaceMailConfigServiceTest {
     @Mock private MailService mailService;
     @Mock private EmailTemplateRenderer templateRenderer;
     @Mock private UserMapper userMapper;
+    @Mock private SessionSecurityService sessionSecurityService;
 
     private final MailProperties mailProperties = new MailProperties();
 
@@ -58,7 +59,8 @@ class WorkspaceMailConfigServiceTest {
 
     private WorkspaceMailConfigService service() {
         return new WorkspaceMailConfigService(mailConfigMapper, workspaceService, auditService,
-                secretCipher, mailConfigResolver, mailService, templateRenderer, userMapper, mailProperties);
+                secretCipher, mailConfigResolver, mailService, templateRenderer, userMapper, mailProperties,
+                sessionSecurityService);
     }
 
     private MailConfigRequest enabledRequest() {
@@ -84,6 +86,7 @@ class WorkspaceMailConfigServiceTest {
 
         service().saveConfig(3, 9, req);
 
+        verify(sessionSecurityService).requireRecentAuthentication(9);
         ArgumentCaptor<WorkspaceMailConfig> captor = ArgumentCaptor.forClass(WorkspaceMailConfig.class);
         verify(secretCipher).encrypt("rawpw");
         verify(mailConfigMapper).upsert(captor.capture());
@@ -208,6 +211,7 @@ class WorkspaceMailConfigServiceTest {
     void deleteConfig_deletesAndRequiresPermission() {
         service().deleteConfig(3, 9);
         verify(workspaceService).requirePermission(3, 9, Permission.WORKSPACE_SETTINGS);
+        verify(sessionSecurityService).requireRecentAuthentication(9);
         verify(mailConfigMapper).delete(3);
         assertTrue(true);
     }

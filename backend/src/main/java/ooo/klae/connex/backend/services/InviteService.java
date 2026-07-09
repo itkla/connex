@@ -42,6 +42,7 @@ public class InviteService {
     private final OrgAllowedDomainService orgAllowedDomainService;
     private final AuditService auditService;
     private final InviteEmailService inviteEmailService;
+    private final SessionSecurityService sessionSecurityService;
 
     /**
      * Invites someone to a workspace by email. An address that already belongs to
@@ -52,6 +53,7 @@ public class InviteService {
     @Transactional
     public InviteResultDto createInvite(int workspaceId, User actor, String emailRaw, String roleRaw) {
         workspaceService.requirePermission(workspaceId, actor.getId(), Permission.MEMBER_MANAGE);
+        sessionSecurityService.requireRecentAuthentication(actor.getId());
         String email = normalizeEmail(emailRaw);
         String role = normalizeRole(roleRaw);
         requireOrgDomainAllowed(workspaceId, email);
@@ -104,6 +106,7 @@ public class InviteService {
     /** Revokes a pending invite. */
     public void revokeInvite(int workspaceId, int inviteId, int actorId) {
         workspaceService.requirePermission(workspaceId, actorId, Permission.MEMBER_MANAGE);
+        sessionSecurityService.requireRecentAuthentication(actorId);
         if (inviteMapper.markRevoked(inviteId, workspaceId) == 0) {
             throw new ResourceNotFoundException("Invite not found");
         }
@@ -151,6 +154,7 @@ public class InviteService {
     /** Invites an existing Connex user to the workspace by email; they join after accepting. */
     public MemberDto addExistingMember(int workspaceId, int actorId, String emailRaw, String roleRaw) {
         workspaceService.requirePermission(workspaceId, actorId, Permission.MEMBER_MANAGE);
+        sessionSecurityService.requireRecentAuthentication(actorId);
         String email = normalizeEmail(emailRaw);
         String role = normalizeRole(roleRaw);
         requireOrgDomainAllowed(workspaceId, email);

@@ -4,9 +4,12 @@ import java.util.UUID;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.context.request.RequestContextHolder;
+import org.springframework.web.context.request.ServletRequestAttributes;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 
@@ -31,6 +34,7 @@ import ooo.klae.connex.backend.mappers.TagMapper;
 import ooo.klae.connex.backend.mappers.TaskMapper;
 import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
+import ooo.klae.connex.backend.tenant.TenantContext;
 
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.NONE)
 @Transactional
@@ -46,6 +50,7 @@ abstract class AbstractServiceTest {
     @Autowired protected NoteMapper noteMapper;
     @Autowired protected TaskMapper taskMapper;
     @Autowired protected WorkspaceMapper workspaceMapper;
+    @Autowired protected TenantContext tenantContext;
 
     protected Workspace workspace;
     protected User currentUser;
@@ -60,16 +65,39 @@ abstract class AbstractServiceTest {
             workspaceMapper.insert(workspace);
         }
         currentUser = newUser();
-        // The session user owns the default test workspace so role-gated operations run as owner.
         workspaceMapper.updateMemberRole(workspace.getId(), currentUser.getId(), "owner");
+        authenticateAs(currentUser, workspace.getId());
+    }
+
+    protected void authenticateAs(User user, int workspaceId) {
         SecurityContextHolder.getContext().setAuthentication(
-            new UsernamePasswordAuthenticationToken(currentUser, null, currentUser.getAuthorities())
+            new UsernamePasswordAuthenticationToken(user, null, user.getAuthorities())
         );
+        int orgId = workspaceServiceOrgId(workspaceId);
+        String role = workspaceMapper.getRole(workspaceId, user.getId());
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        long now = System.currentTimeMillis();
+        request.getSession().setAttribute(SessionSecurityService.AUTHENTICATED_AT_ATTR, now);
+        request.getSession().setAttribute(SessionSecurityService.WEBAUTHN_STEP_UP_AT_ATTR, now);
+        request.getSession().setAttribute(SessionSecurityService.WEBAUTHN_STEP_UP_USER_ATTR, user.getId());
+        RequestContextHolder.setRequestAttributes(new ServletRequestAttributes(request));
+        tenantContext.set(workspaceId, orgId, user.getId(), role == null ? "member" : role);
     }
 
     @AfterEach
     void clearAuthentication() {
         SecurityContextHolder.clearContext();
+        clearRequestContext();
+    }
+
+    protected void clearRequestContext() {
+        RequestContextHolder.resetRequestAttributes();
+        tenantContext.clear();
+    }
+
+    private int workspaceServiceOrgId(int workspaceId) {
+        Integer orgId = workspaceMapper.getOrgId(workspaceId);
+        return orgId == null ? workspaceId : orgId;
     }
 
     protected static String unique() {

@@ -24,6 +24,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.dto.PasskeyDto;
+import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.mappers.WebauthnCredentialMapper;
@@ -89,6 +90,20 @@ public class WebAuthnService {
     }
 
     /**
+     * Issues assertion options for the authenticated account's own enrolled passkeys.
+     * @param auth the current authenticated principal
+     * @return request options restricted to the caller's credentials
+     */
+    public PublicKeyCredentialRequestOptions createStepUpOptions(Authentication auth) {
+        User user = (User) auth.getPrincipal();
+        if (listForUser(user.getId()).isEmpty()) {
+            throw new BadRequestException("No passkey enrolled");
+        }
+        return rpOperations.createCredentialRequestOptions(
+            new ImmutablePublicKeyCredentialRequestOptionsRequest(auth));
+    }
+
+    /**
      * Verifies an assertion (advancing the signature counter) and resolves the owning account.
      * Does not establish a session — the controller runs the shared login ceremony.
      * @param options the options issued in {@link #createLoginOptions}
@@ -112,6 +127,22 @@ public class WebAuthnService {
     }
 
     /**
+     * Verifies a step-up assertion and ensures the credential belongs to the authenticated caller.
+     * @param auth the current authenticated principal
+     * @param options the options issued in {@link #createStepUpOptions}
+     * @param assertion the client's assertion response
+     */
+    @Transactional
+    public void finishStepUp(Authentication auth, PublicKeyCredentialRequestOptions options,
+            PublicKeyCredential<AuthenticatorAssertionResponse> assertion) {
+        User currentUser = (User) auth.getPrincipal();
+        User assertedUser = finishLogin(options, assertion);
+        if (assertedUser.getId() != currentUser.getId()) {
+            throw new BadCredentialsException("Passkey authentication failed");
+        }
+    }
+
+    /**
      * Lists the enrolled passkeys owned by the given account.
      * @param userId the owning account
      * @return the account's passkeys (empty if none)
@@ -124,6 +155,10 @@ public class WebAuthnService {
         return credentialMapper.findByUserEntityUserId(entity.getId()).stream()
             .map(this::toDto)
             .toList();
+    }
+
+    public boolean hasPasskey(int userId) {
+        return !listForUser(userId).isEmpty();
     }
 
     /**

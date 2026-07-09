@@ -38,7 +38,7 @@ class WorkspaceServiceTest extends AbstractServiceTest {
         try {
             assertEquals(second.getId(), workspaceService.getCurrentWorkspaceId());
         } finally {
-            tenantContext.clear();
+            clearRequestContext();
         }
         // Off the request thread it falls back to the first/default membership.
         assertEquals(workspace.getId(), workspaceService.getCurrentWorkspaceId());
@@ -53,7 +53,7 @@ class WorkspaceServiceTest extends AbstractServiceTest {
         try {
             assertEquals(orgId, workspaceService.getCurrentOrgId());
         } finally {
-            tenantContext.clear();
+            clearRequestContext();
         }
     }
 

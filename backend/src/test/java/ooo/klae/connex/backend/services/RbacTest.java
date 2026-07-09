@@ -11,6 +11,7 @@ import java.util.Set;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.web.context.request.RequestContextHolder;
 
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.beans.WorkspaceRole;
@@ -86,6 +87,15 @@ class RbacTest extends AbstractServiceTest {
     }
 
     @Test
+    void roleManagementRequiresRecentWebAuthnStepUp() {
+        WorkspaceMembershipDto ws = workspaceService.createWorkspace("Step Up WS", currentUser.getId());
+        RequestContextHolder.resetRequestAttributes();
+
+        assertThrows(ForbiddenException.class,
+            () -> roleService.createRole(ws.getId(), currentUser.getId(), "No Step Up", List.of()));
+    }
+
+    @Test
     void adminCannotDemoteAnOwnerWithoutOwnerRole() {
         WorkspaceMembershipDto ws = workspaceService.createWorkspace("Owner Guard WS", currentUser.getId());
         User coOwner = newUser();
@@ -108,6 +118,7 @@ class RbacTest extends AbstractServiceTest {
         WorkspaceRole roleAdmin = roleService.createRole(ws.getId(), currentUser.getId(), "RoleAdmin",
             List.of("ROLE_MANAGE", "PERSON_CREATE"));
         workspaceService.assignCustomRole(ws.getId(), currentUser.getId(), delegate.getId(), roleAdmin.getId());
+        authenticateAs(delegate, ws.getId());
 
         assertThrows(ForbiddenException.class,
             () -> roleService.createRole(ws.getId(), delegate.getId(), "SuperRole", List.of("MEMBER_MANAGE")));
@@ -125,6 +136,7 @@ class RbacTest extends AbstractServiceTest {
         workspaceService.assignCustomRole(ws.getId(), currentUser.getId(), delegate.getId(), roleAdmin.getId());
         WorkspaceRole superRole = roleService.createRole(ws.getId(), currentUser.getId(), "Super",
             List.of("MEMBER_MANAGE", "WORKSPACE_SETTINGS"));
+        authenticateAs(delegate, ws.getId());
 
         assertThrows(ForbiddenException.class,
             () -> workspaceService.assignCustomRole(ws.getId(), delegate.getId(), delegate.getId(), superRole.getId()));
@@ -138,6 +150,7 @@ class RbacTest extends AbstractServiceTest {
         WorkspaceRole hrRole = roleService.createRole(ws.getId(), currentUser.getId(), "HR",
             List.of("MEMBER_MANAGE"));
         workspaceService.assignCustomRole(ws.getId(), currentUser.getId(), delegate.getId(), hrRole.getId());
+        authenticateAs(delegate, ws.getId());
 
         assertThrows(ForbiddenException.class,
             () -> workspaceService.changeMemberRole(ws.getId(), delegate.getId(), delegate.getId(), "admin"));

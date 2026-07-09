@@ -1,6 +1,7 @@
 package ooo.klae.connex.backend.services;
 
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.Authentication;
@@ -46,6 +47,7 @@ public class AuthService {
     private final ClientIpResolver clientIpResolver;
     private final RegistrationVerificationService registrationVerificationService;
     private final SsoConnectionService ssoConnectionService;
+    private final SessionSecurityService sessionSecurityService;
     private final SecurityContextRepository securityContextRepository = new HttpSessionSecurityContextRepository();
 
     @Value("${connex.signup.mode:open}")
@@ -202,6 +204,7 @@ public class AuthService {
         ));
         SecurityContextHolder.setContext(context);
         securityContextRepository.saveContext(context, httpRequest, httpResponse);
+        sessionSecurityService.markAuthenticated(httpRequest, refreshedUser.getId());
 
         Integer activeWorkspaceId = workspaceService.defaultWorkspaceIdFor(refreshedUser.getId());
         if (activeWorkspaceId != null) {
@@ -209,6 +212,23 @@ public class AuthService {
             WorkspaceCookie.set(httpResponse, activeWorkspaceId);
         }
         return refreshedUser;
+    }
+
+    public void requireCurrentPassword(int userId, String password, String clientIp) {
+        User user = userMapper.getUserById(userId);
+        if (user == null) {
+            throw new BadCredentialsException("Incorrect password");
+        }
+        long now = System.currentTimeMillis();
+        String username = user.getUsername();
+        if (loginRateLimiter.isBlocked(clientIp, username, now)) {
+            throw new TooManyRequestsException("Too many login attempts. Please try again later.");
+        }
+        if (password == null || user.getPassword() == null || !passwordEncoder.matches(password, user.getPassword())) {
+            loginRateLimiter.recordFailure(clientIp, username, now);
+            throw new BadCredentialsException("Incorrect password");
+        }
+        loginRateLimiter.recordSuccess(username);
     }
 
     /**

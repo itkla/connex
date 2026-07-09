@@ -29,7 +29,7 @@ class ShareServiceTest extends AbstractServiceTest {
 
     @AfterEach
     void clearContext() {
-        tenantContext.clear();
+        clearRequestContext();
     }
 
     private Company companyIn(int workspaceId) {
@@ -48,7 +48,7 @@ class ShareServiceTest extends AbstractServiceTest {
     private WorkspaceMembershipDto createSiblingWorkspace(WorkspaceMembershipDto first, String name) {
         tenantContext.set(first.getId(), workspaceService.getOrgId(first.getId()), currentUser.getId(), "owner");
         WorkspaceMembershipDto sibling = workspaceService.createWorkspace(name, currentUser.getId());
-        tenantContext.clear();
+        authenticateAs(currentUser, first.getId());
         return sibling;
     }
 
@@ -61,9 +61,9 @@ class ShareServiceTest extends AbstractServiceTest {
         assertNull(companyMapper.getCompanyById(b.getId(), company.getId()));
         assertFalse(companyMapper.exists(b.getId(), company.getId()));
 
-        tenantContext.set(a.getId(), workspaceService.getOrgId(a.getId()), currentUser.getId(), "owner");
+        authenticateAs(currentUser, a.getId());
         shareService.share("company", company.getId(), b.getId(), false);
-        tenantContext.clear();
+        authenticateAs(currentUser, b.getId());
 
         Company seenByB = companyMapper.getCompanyById(b.getId(), company.getId());
         assertNotNull(seenByB);
@@ -77,12 +77,12 @@ class ShareServiceTest extends AbstractServiceTest {
         WorkspaceMembershipDto b = createSiblingWorkspace(a, "Grantee2 WS");
         Company company = companyIn(a.getId());
 
-        tenantContext.set(a.getId(), workspaceService.getOrgId(a.getId()), currentUser.getId(), "owner");
+        authenticateAs(currentUser, a.getId());
         shareService.share("company", company.getId(), b.getId(), false);
         assertNotNull(companyMapper.getCompanyById(b.getId(), company.getId()));
 
         shareService.unshare("company", company.getId(), b.getId());
-        tenantContext.clear();
+        authenticateAs(currentUser, b.getId());
 
         assertNull(companyMapper.getCompanyById(b.getId(), company.getId()));
     }

@@ -50,6 +50,7 @@ public class WorkspaceMailConfigService {
     private final EmailTemplateRenderer templateRenderer;
     private final UserMapper userMapper;
     private final MailProperties mailProperties;
+    private final SessionSecurityService sessionSecurityService;
 
     /**
      * Returns the workspace's SMTP config for the settings page (password omitted).
@@ -72,6 +73,7 @@ public class WorkspaceMailConfigService {
      */
     public MailConfigDto saveConfig(int workspaceId, int actorId, MailConfigRequest request) {
         workspaceService.requirePermission(workspaceId, actorId, Permission.WORKSPACE_SETTINGS);
+        sessionSecurityService.requireRecentAuthentication(actorId);
 
         if (request.isEnabled()) {
             if (isBlank(request.getHost())) {
@@ -116,6 +118,7 @@ public class WorkspaceMailConfigService {
      */
     public void deleteConfig(int workspaceId, int actorId) {
         workspaceService.requirePermission(workspaceId, actorId, Permission.WORKSPACE_SETTINGS);
+        sessionSecurityService.requireRecentAuthentication(actorId);
         mailConfigMapper.delete(workspaceId);
         auditService.record("workspace.mail_config.delete", "workspace", workspaceId, null,
                 "Removed workspace email settings", null);
@@ -130,6 +133,7 @@ public class WorkspaceMailConfigService {
      */
     public MailTestResult sendTest(int workspaceId, int actorId) {
         workspaceService.requirePermission(workspaceId, actorId, Permission.WORKSPACE_SETTINGS);
+        sessionSecurityService.requireRecentAuthentication(actorId);
         User actor = userMapper.getUserById(actorId);
         if (actor == null || isBlank(actor.getEmail())) {
             return MailTestResult.failure("Your account has no email address to send a test to");
