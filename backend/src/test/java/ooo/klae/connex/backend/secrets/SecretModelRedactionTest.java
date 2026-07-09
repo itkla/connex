@@ -6,6 +6,7 @@ import org.junit.jupiter.api.Test;
 
 import ooo.klae.connex.backend.beans.SsoConnection;
 import ooo.klae.connex.backend.beans.WorkspaceMailConfig;
+import ooo.klae.connex.backend.dto.MailConfigDto;
 
 class SecretModelRedactionTest {
 
@@ -37,5 +38,17 @@ class SecretModelRedactionTest {
         String rendered = secret.toString();
         assertFalse(rendered.contains("wrapped-data-key"));
         assertFalse(rendered.contains("encrypted-payload"));
+    }
+
+    @Test
+    void mailConfigDtoOmitsStoredPasswordReference() {
+        WorkspaceMailConfig config = new WorkspaceMailConfig();
+        config.setAuth(true);
+        config.setPasswordEnc("secret:v1:44");
+
+        MailConfigDto dto = MailConfigDto.from(config);
+
+        assertFalse(dto.toString().contains("secret:v1:44"));
+        assertFalse(dto.toString().contains("passwordEnc"));
     }
 }
