@@ -9,6 +9,12 @@ server:
                 # Secure cookie would be dropped by the browser. Never enable dev in prod.
                 secure: false
 
+spring:
+    datasource:
+        url: ${CONNEX_DB_URL:jdbc:mysql://localhost:3306/${CONNEX_DB_NAME:connexdb}?createDatabaseIfNotExist=true&sslMode=DISABLED}
+        username: ${CONNEX_DB_USERNAME}
+        password: ${CONNEX_DB_PASSWORD}
+
 connex:
     audit:
         integrity:

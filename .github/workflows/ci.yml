@@ -20,21 +20,19 @@ jobs:
       mysql:
         image: mysql:9.7
         env:
-          MYSQL_ROOT_PASSWORD: rootpassword
+          MYSQL_ROOT_PASSWORD: ci-${{ github.run_id }}-${{ github.run_attempt }}-root
           MYSQL_DATABASE: connexdb
-          MYSQL_USER: connexuser
-          MYSQL_PASSWORD: connexpassword
         ports:
           - 3306:3306
         options: >-
-          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -prootpassword"
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -pci-${{ github.run_id }}-${{ github.run_attempt }}-root"
           --health-interval=10s
           --health-timeout=5s
           --health-retries=15
     env:
-      CONNEX_DB_URL: jdbc:mysql://127.0.0.1:3306/connexdb
-      CONNEX_DB_USERNAME: connexuser
-      CONNEX_DB_PASSWORD: connexpassword
+      CONNEX_DB_URL: jdbc:mysql://127.0.0.1:3306/connexdb?sslMode=DISABLED
+      CONNEX_DB_USERNAME: root
+      CONNEX_DB_PASSWORD: ci-${{ github.run_id }}-${{ github.run_attempt }}-root
     steps:
       - uses: actions/checkout@v7
       - name: Set up JDK 26
@@ -44,7 +42,7 @@ jobs:
           java-version: '26'
           cache: gradle
       - name: Allow non-SUPER routine creation under binary logging
-        run: mysql -h 127.0.0.1 -P 3306 -uroot -prootpassword -e "SET GLOBAL log_bin_trust_function_creators = 1;"
+        run: mysql -h 127.0.0.1 -P 3306 -uroot -pci-${{ github.run_id }}-${{ github.run_attempt }}-root -e "SET GLOBAL log_bin_trust_function_creators = 1;"
       - name: Test (runs Flyway migrations, arch tests, tenant-isolation tests)
         working-directory: backend
         run: bash gradlew test --no-daemon --stacktrace

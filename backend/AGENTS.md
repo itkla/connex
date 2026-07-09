@@ -30,7 +30,7 @@ This is the most load-bearing property of Connex. A change that leaks data acros
 ## Security & secrets
 
 - **Never log secrets or PII** — no passwords, tokens, session ids, WebAuthn material, or personal contact data in logs or error messages.
-- **Never commit credentials.** The values in `docker-compose.yml` (`rootpassword`, `connexuser`/`connexpassword`) are **local-dev only** — never reuse them anywhere real, never add real secrets to the repo. Use env/config for anything sensitive.
+- **Never commit credentials.** Database passwords live in local env/config, not source control. For local Docker MySQL, create `backend/.env` from `backend/.env.example`, fill throwaway local passwords, and keep the file untracked.
 - **Validate all input** at the boundary (`@Valid` + Bean Validation on DTOs). Treat request data as hostile.
 - **Auth/WebAuthn** flows are sensitive: don't weaken session handling, CSRF, or credential verification to simplify a change.
 - Prefer parameterized MyBatis (`#{}`) over string substitution (`${}`) to avoid SQL injection.
@@ -82,7 +82,7 @@ Automation rules (`RuleService` CRUD + `RuleEngineService` execution, issue #54)
 
 ## Commands
 
-- Run (local): `SPRING_PROFILES_ACTIVE=dev ./gradlew bootRun` — the `dev` profile (`application-dev.yml`) turns the session cookie's `Secure` flag off so login works over plain-HTTP `localhost` and supplies a local-only audit-integrity HMAC secret. Without it the fail-closed default (`Secure=true`) drops `JSESSIONID` over HTTP and non-dev startup requires `CONNEX_AUDIT_INTEGRITY_HMAC_SECRET`.
-- Test: `./gradlew test`
+- Run (local): load `CONNEX_DB_*` from your untracked `backend/.env`, then run `SPRING_PROFILES_ACTIVE=dev ./gradlew bootRun` — the `dev` profile (`application-dev.yml`) turns the session cookie's `Secure` flag off so login works over plain-HTTP `localhost`, permits local plaintext DB transport, and supplies a local-only audit-integrity HMAC secret. Without it the fail-closed default (`Secure=true`) drops `JSESSIONID` over HTTP and non-dev startup requires `CONNEX_AUDIT_INTEGRITY_HMAC_SECRET` plus a `CONNEX_DB_URL` with `sslMode=VERIFY_CA` or `sslMode=VERIFY_IDENTITY`.
+- Test: load `CONNEX_DB_*` from your untracked `backend/.env`, then run `./gradlew test`
 - Build: `./gradlew build`
-- DB up: `docker compose up -d db` (from `backend/`)
+- DB up: create `backend/.env` from `backend/.env.example`, fill local-only passwords, then run `docker compose up -d db` (from `backend/`)
