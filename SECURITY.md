@@ -3,7 +3,7 @@
 > **Purpose.** One document serving two audiences: the **enterprise security-posture artifact** buyers ask for during procurement, and the **APPI 安全管理措置 (security control measures) disclosure** referenced from our public [Data Disclosure page](frontend/app/disclosure) (APPI Art. 32). Issue [#104].
 > **Status: living document.** It describes the architecture as it actually stands today and marks in-progress items with their tracking issue. It is deliberately honest about what has **not** landed yet — do not read an in-progress item as a shipped control.
 > **Not legal advice.** Confirm the APPI framing and any customer commitments with counsel and the signed DPA ([APPI_DPA_TEMPLATE.md](APPI_DPA_TEMPLATE.md), [#93]).
-> **Owner:** {{SECURITY_OWNER}} · **Last reviewed:** 2026-07-01
+> **Owner:** {{SECURITY_OWNER}} · **Last reviewed:** 2026-07-09
 
 ---
 
@@ -36,7 +36,8 @@ APPI groups these into four categories plus external-environment. This is our cu
 - **Transport:** HSTS (1y, `includeSubDomains`) + a restrictive Content-Security-Policy (`default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'`) in `SecurityConfig`.
 - **Secrets:** externalized to environment (`CONNEX_DB_*`, bootstrap credentials); local Docker passwords are kept in untracked `backend/.env`. Never-searched integration secrets are stored through the central envelope-encrypted secret store with key IDs, keyring rotation, disabled-key fail-closed behavior, metadata-only diagnostics, and audited use/rewrap operations ([runbook](SECRET_STORE_KEY_LIFECYCLE_RUNBOOK.md), [#372]).
 - **Database transport:** non-dev startup requires `CONNEX_DB_URL` to use MySQL Connector/J verified TLS (`sslMode=VERIFY_CA` or `sslMode=VERIFY_IDENTITY`). Local `dev` and `test` profiles may explicitly use plaintext Docker MySQL.
-- *In progress:* broader at-rest encryption + customer-managed key (CMK) — [#92]; operational rotation of any database credentials that reused old committed local defaults — [#88]; brute-force/rate-limit protection — [#80].
+- **Encryption guarantees:** customer-facing encryption, key custody, revocation, backup/export, and plaintext-access claims are governed by the canonical [Encryption Guarantee Matrix](ENCRYPTION_GUARANTEE_MATRIX.md), [#369]. Hosted Connex is not E2EE or zero-knowledge: the backend processes customer CRM content in plaintext to provide the service. Customer-operated/on-prem encryption default-on guidance is in [ON_PREM_ENCRYPTION_RUNBOOK.md](ON_PREM_ENCRYPTION_RUNBOOK.md), [#373].
+- *In progress:* production storage-encryption evidence and broader at-rest encryption + customer-managed key (CMK) — [#92]/[#371]/[#376]; operational rotation of any database credentials that reused old committed local defaults — [#88]; brute-force/rate-limit protection — [#80].
 
 ### 2.5 External-environment grasp (外的環境の把握)
 - SaaS personal data is stored in **Japan**. Where any handling involves a party outside Japan (e.g. a future AI provider under BYOP, [#94]), we identify the country and take account of its data-protection framework, and handle it under APPI Art. 28. No third-party AI/enrichment/analytics/email integrations send personal data externally today.
@@ -62,7 +63,7 @@ Security & personal-information contact: {{PRIVACY_CONTACT_EMAIL}}. Please repor
 ---
 
 ### Roadmap references
-Tracked under the security roadmap [#87] and the APPI pathway [#224]. Key open items: [#97] org boundary close-out · [#89] read-scoping backstop · [#92] CMK · [#80] rate-limit · [#99] CI scanning · [#106] third-party pentest.
+Tracked under the security roadmap [#87] and the APPI pathway [#224]. Key open items: [#97] org boundary close-out · [#89] read-scoping backstop · [#92] CMK · [#313]/[#100] dedicated database/deployment architecture · [#371] production storage encryption evidence · [#376] dedicated-tier CMK feasibility · [#80] rate-limit · [#99] CI scanning · [#106] third-party pentest.
 
 [#87]: https://github.com/itkla/connex/issues/87
 [#89]: https://github.com/itkla/connex/issues/89
@@ -72,12 +73,18 @@ Tracked under the security roadmap [#87] and the APPI pathway [#224]. Key open i
 [#94]: https://github.com/itkla/connex/issues/94
 [#97]: https://github.com/itkla/connex/issues/97
 [#98]: https://github.com/itkla/connex/issues/98
+[#100]: https://github.com/itkla/connex/issues/100
 [#80]: https://github.com/itkla/connex/issues/80
 [#99]: https://github.com/itkla/connex/issues/99
 [#104]: https://github.com/itkla/connex/issues/104
 [#105]: https://github.com/itkla/connex/issues/105
 [#106]: https://github.com/itkla/connex/issues/106
+[#313]: https://github.com/itkla/connex/issues/313
+[#369]: https://github.com/itkla/connex/issues/369
+[#371]: https://github.com/itkla/connex/issues/371
 [#372]: https://github.com/itkla/connex/issues/372
+[#373]: https://github.com/itkla/connex/issues/373
+[#376]: https://github.com/itkla/connex/issues/376
 [#221]: https://github.com/itkla/connex/issues/221
 [#222]: https://github.com/itkla/connex/issues/222
 [#223]: https://github.com/itkla/connex/issues/223
