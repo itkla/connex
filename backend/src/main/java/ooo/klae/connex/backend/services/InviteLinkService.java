@@ -43,11 +43,13 @@ public class InviteLinkService {
     private final AllowedDomainService allowedDomainService;
     private final OrgAllowedDomainService orgAllowedDomainService;
     private final RegistrationVerificationService registrationVerificationService;
+    private final SessionSecurityService sessionSecurityService;
 
     /** Creates a shareable link. Defaults: member role, 14-day expiry, unlimited uses. */
     public InviteLinkDto createLink(int workspaceId, User actor, String roleRaw,
             Integer expiresInDays, Integer maxUses) {
         workspaceService.requirePermission(workspaceId, actor.getId(), Permission.MEMBER_MANAGE);
+        sessionSecurityService.requireRecentAuthentication(actor.getId());
         String role = normalizeRole(roleRaw);
         int days = (expiresInDays == null || expiresInDays <= 0) ? DEFAULT_EXPIRES_IN_DAYS : expiresInDays;
         String token = generateToken();
@@ -66,6 +68,7 @@ public class InviteLinkService {
     /** Revokes a link so it can no longer be redeemed. */
     public void revokeLink(int workspaceId, int linkId, int actorId) {
         workspaceService.requirePermission(workspaceId, actorId, Permission.MEMBER_MANAGE);
+        sessionSecurityService.requireRecentAuthentication(actorId);
         if (inviteLinkMapper.markRevoked(linkId, workspaceId) == 0) {
             throw new ResourceNotFoundException("Invite link not found");
         }

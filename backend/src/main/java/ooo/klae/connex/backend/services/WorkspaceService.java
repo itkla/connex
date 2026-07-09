@@ -50,6 +50,7 @@ public class WorkspaceService {
     private final TenantContext tenantContext;
     private final AuditService auditService;
     private final SystemActor systemActor;
+    private final SessionSecurityService sessionSecurityService;
 
     private static final DateTimeFormatter TS = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
@@ -390,6 +391,7 @@ public class WorkspaceService {
     /** Assigns a custom role to a member; managing roles requires the ROLE_MANAGE permission. */
     public MemberDto assignCustomRole(int workspaceId, int actorId, int targetUserId, int roleId) {
         requirePermission(workspaceId, actorId, Permission.ROLE_MANAGE);
+        sessionSecurityService.requireRecentAuthentication(actorId);
         MemberDto target = workspaceMapper.getMember(workspaceId, targetUserId);
         if (target == null) {
             throw new ResourceNotFoundException("User is not a member of this workspace");
@@ -443,6 +445,7 @@ public class WorkspaceService {
     @Transactional
     public MemberDto changeMemberRole(int workspaceId, int actorId, int targetUserId, String roleRaw) {
         requirePermission(workspaceId, actorId, Permission.MEMBER_MANAGE);
+        sessionSecurityService.requireRecentAuthentication(actorId);
         Role newRole = parseAssignableRole(roleRaw);
         MemberDto target = workspaceMapper.getMember(workspaceId, targetUserId);
         if (target == null) {
@@ -472,6 +475,7 @@ public class WorkspaceService {
     @Transactional
     public void removeMember(int workspaceId, int actorId, int targetUserId) {
         requirePermission(workspaceId, actorId, Permission.MEMBER_MANAGE);
+        sessionSecurityService.requireRecentAuthentication(actorId);
         MemberDto target = workspaceMapper.getMember(workspaceId, targetUserId);
         if (target == null) {
             throw new ResourceNotFoundException("User is not a member of this workspace");

@@ -34,7 +34,7 @@ class WorkspaceOrgPlacementTest extends AbstractServiceTest {
 
     @AfterEach
     void clearTenantContext() {
-        tenantContext.clear();
+        clearRequestContext();
     }
 
     private void assignCustomRole(User member, String roleName, String permission) {
@@ -82,6 +82,7 @@ class WorkspaceOrgPlacementTest extends AbstractServiceTest {
     @Test
     void unresolvedContext_getsAFreshOrg() {
         int existingOrg = workspaceService.getOrgId(workspace.getId());
+        clearRequestContext();
 
         WorkspaceMembershipDto created = workspaceService.createWorkspace("Fresh " + unique(), currentUser.getId());
 

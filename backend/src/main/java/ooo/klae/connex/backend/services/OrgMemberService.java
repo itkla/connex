@@ -38,6 +38,7 @@ public class OrgMemberService {
     private final OrgMemberMapper orgMemberMapper;
     private final UserMapper userMapper;
     private final AuditService auditService;
+    private final SessionSecurityService sessionSecurityService;
 
     /** Records a user as the founding owner of a freshly created organization. */
     public void addFoundingOwner(int orgId, int userId) {
@@ -97,6 +98,7 @@ public class OrgMemberService {
     @Transactional
     public void setMemberByEmail(int orgId, int actorId, String emailRaw, String roleRaw) {
         requireOrgOwner(orgId, actorId);
+        sessionSecurityService.requireRecentAuthentication(actorId);
         String email = emailRaw == null ? "" : emailRaw.trim().toLowerCase();
         User target = userMapper.getUserByEmail(email);
         if (target == null) {
@@ -113,6 +115,7 @@ public class OrgMemberService {
     @Transactional
     public void setMember(int orgId, int actorId, int targetUserId, String roleRaw) {
         requireOrgOwner(orgId, actorId);
+        sessionSecurityService.requireRecentAuthentication(actorId);
         OrgRole role = parseRole(roleRaw);
         User target = userMapper.getUserById(targetUserId);
         if (target == null) {
@@ -133,6 +136,7 @@ public class OrgMemberService {
     @Transactional
     public void removeMember(int orgId, int actorId, int targetUserId) {
         requireOrgOwner(orgId, actorId);
+        sessionSecurityService.requireRecentAuthentication(actorId);
         if (isSoleOwner(orgId, targetUserId)) {
             throw new BadRequestException("An organization must keep at least one owner");
         }

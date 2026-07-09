@@ -28,6 +28,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.dto.PasskeyDto;
+import ooo.klae.connex.backend.dto.PasskeyRegistrationOptionsRequest;
 import ooo.klae.connex.backend.dto.RenamePasskeyRequest;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
@@ -35,6 +36,7 @@ import ooo.klae.connex.backend.exceptions.RequestBodyTooLargeException;
 import ooo.klae.connex.backend.exceptions.TooManyRequestsException;
 import ooo.klae.connex.backend.services.AuthService;
 import ooo.klae.connex.backend.services.LoginRateLimiter;
+import ooo.klae.connex.backend.services.SessionSecurityService;
 import ooo.klae.connex.backend.services.SsoConnectionService;
 import ooo.klae.connex.backend.util.ClientIpResolver;
 import ooo.klae.connex.backend.webauthn.WebAuthnJsonMapper;
@@ -42,6 +44,7 @@ import ooo.klae.connex.backend.webauthn.WebAuthnService;
 
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import jakarta.servlet.http.HttpSession;
 import jakarta.validation.Valid;
 
 import tools.jackson.core.type.TypeReference;
@@ -64,6 +67,7 @@ public class WebAuthnController {
         new TypeReference<>() {};
     private static final TypeReference<PublicKeyCredential<AuthenticatorAssertionResponse>> ASSERTION_TYPE =
         new TypeReference<>() {};
+    private static final String FIRST_PASSKEY_BOOTSTRAP_USER_ATTR = "connex.firstPasskeyBootstrapUserId";
 
     private final WebAuthnService webAuthnService;
     private final AuthService authService;
@@ -73,15 +77,23 @@ public class WebAuthnController {
     private final LoginRateLimiter loginRateLimiter;
     private final ClientIpResolver clientIpResolver;
     private final SsoConnectionService ssoConnectionService;
+    private final SessionSecurityService sessionSecurityService;
 
     /**
      * Issues passkey registration options for the authenticated user and stashes them in the session.
      */
     @PostMapping(value = "/register/options", produces = MediaType.APPLICATION_JSON_VALUE)
-    public ResponseEntity<String> registerOptions(HttpServletRequest req, HttpServletResponse res) {
+    public ResponseEntity<String> registerOptions(
+            @Valid @RequestBody(required = false) PasskeyRegistrationOptionsRequest request,
+            HttpServletRequest req, HttpServletResponse res) {
         Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        User user = authService.getCurrentUser();
+        boolean firstPasskeyBootstrap = authorizePasskeyRegistrationOptions(user, request, req);
         PublicKeyCredentialCreationOptions options = webAuthnService.createRegistrationOptions(auth);
         creationOptions.save(req, res, options);
+        if (firstPasskeyBootstrap) {
+            markFirstPasskeyBootstrap(req, user.getId());
+        }
         return ResponseEntity.ok(json.write(options));
     }
 
@@ -98,7 +110,9 @@ public class WebAuthnController {
         if (options == null) {
             throw new BadRequestException("No passkey registration in progress");
         }
+        User user = authService.getCurrentUser();
         try {
+            authorizePasskeyRegistrationVerify(user, req);
             PublicKeyCredential<AuthenticatorAttestationResponse> credential = json.read(body, ATTESTATION_TYPE);
             CredentialRecord record = webAuthnService.finishRegistration(options, credential, label);
             return Map.of("credentialId", record.getCredentialId().toBase64UrlString());
@@ -106,10 +120,15 @@ public class WebAuthnController {
             throw ex;
         } catch (BadRequestException ex) {
             throw ex;
+        } catch (ForbiddenException ex) {
+            throw ex;
+        } catch (BadCredentialsException ex) {
+            throw ex;
         } catch (RuntimeException ex) {
             throw new BadRequestException("Passkey registration failed");
         } finally {
             creationOptions.save(req, res, null);
+            clearFirstPasskeyBootstrap(req);
         }
     }
 
@@ -158,7 +177,44 @@ public class WebAuthnController {
             throw new ForbiddenException("This account must sign in with SSO");
         }
         authService.establishAuthenticatedSession(user, req, res);
+        sessionSecurityService.markStepUp(req, user.getId());
         return Map.of("message", "You are now logged in");
+    }
+
+    /**
+     * Issues passkey assertion options for re-authenticating the current session.
+     */
+    @PostMapping(value = "/step-up/options", produces = MediaType.APPLICATION_JSON_VALUE)
+    public ResponseEntity<String> stepUpOptions(HttpServletRequest req, HttpServletResponse res) {
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        PublicKeyCredentialRequestOptions options = webAuthnService.createStepUpOptions(auth);
+        requestOptions.save(req, res, options);
+        return ResponseEntity.ok(json.write(options));
+    }
+
+    /**
+     * Verifies a passkey assertion for the current user and refreshes the recent-auth stamp.
+     */
+    @PostMapping(value = "/step-up", consumes = MediaType.APPLICATION_JSON_VALUE)
+    public Map<String, String> stepUpVerify(@RequestBody String body, HttpServletRequest req,
+            HttpServletResponse res) {
+        PublicKeyCredentialRequestOptions options = requestOptions.load(req);
+        if (options == null) {
+            throw new BadCredentialsException("No passkey step-up in progress");
+        }
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        try {
+            PublicKeyCredential<AuthenticatorAssertionResponse> assertion = json.read(body, ASSERTION_TYPE);
+            webAuthnService.finishStepUp(auth, options, assertion);
+        } catch (RequestBodyTooLargeException ex) {
+            throw ex;
+        } catch (RuntimeException ex) {
+            throw new BadCredentialsException("Passkey step-up failed");
+        } finally {
+            requestOptions.save(req, res, null);
+        }
+        sessionSecurityService.markStepUp(req, authService.getCurrentUser().getId());
+        return Map.of("message", "Recent authentication refreshed");
     }
 
     /**
@@ -175,7 +231,9 @@ public class WebAuthnController {
     @PatchMapping("/credentials/{credentialId}")
     public Map<String, String> renameCredential(@PathVariable("credentialId") String credentialId,
             @Valid @RequestBody RenamePasskeyRequest request) {
-        webAuthnService.rename(authService.getCurrentUser().getId(), credentialId, request.getLabel());
+        int userId = authService.getCurrentUser().getId();
+        sessionSecurityService.requireRecentAuthentication(userId);
+        webAuthnService.rename(userId, credentialId, request.getLabel());
         return Map.of("message", "Passkey renamed");
     }
 
@@ -184,7 +242,51 @@ public class WebAuthnController {
      */
     @DeleteMapping("/credentials/{credentialId}")
     public Map<String, String> deleteCredential(@PathVariable("credentialId") String credentialId) {
-        webAuthnService.delete(authService.getCurrentUser().getId(), credentialId);
+        int userId = authService.getCurrentUser().getId();
+        sessionSecurityService.requireRecentAuthentication(userId);
+        webAuthnService.delete(userId, credentialId);
         return Map.of("message", "Passkey removed");
+    }
+
+    private boolean authorizePasskeyRegistrationOptions(User user, PasskeyRegistrationOptionsRequest request,
+            HttpServletRequest httpRequest) {
+        clearFirstPasskeyBootstrap(httpRequest);
+        if (webAuthnService.hasPasskey(user.getId())) {
+            sessionSecurityService.requireRecentAuthentication(user.getId());
+            return false;
+        }
+        String password = request == null ? null : request.getCurrentPassword();
+        authService.requireCurrentPassword(user.getId(), password, clientIpResolver.resolve(httpRequest));
+        return true;
+    }
+
+    private void authorizePasskeyRegistrationVerify(User user, HttpServletRequest httpRequest) {
+        if (webAuthnService.hasPasskey(user.getId())) {
+            sessionSecurityService.requireRecentAuthentication(user.getId());
+            return;
+        }
+        if (!isFirstPasskeyBootstrap(httpRequest, user.getId())) {
+            throw new BadRequestException("Current password confirmation required");
+        }
+    }
+
+    private static void markFirstPasskeyBootstrap(HttpServletRequest request, int userId) {
+        request.getSession().setAttribute(FIRST_PASSKEY_BOOTSTRAP_USER_ATTR, userId);
+    }
+
+    private static void clearFirstPasskeyBootstrap(HttpServletRequest request) {
+        HttpSession session = request.getSession(false);
+        if (session != null) {
+            session.removeAttribute(FIRST_PASSKEY_BOOTSTRAP_USER_ATTR);
+        }
+    }
+
+    private static boolean isFirstPasskeyBootstrap(HttpServletRequest request, int userId) {
+        HttpSession session = request.getSession(false);
+        if (session == null) {
+            return false;
+        }
+        Object value = session.getAttribute(FIRST_PASSKEY_BOOTSTRAP_USER_ATTR);
+        return value instanceof Integer typed && typed == userId;
     }
 }

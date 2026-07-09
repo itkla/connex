@@ -22,6 +22,7 @@ public class OrgAllowedDomainService {
     private final OrgAllowedDomainMapper orgAllowedDomainMapper;
     private final OrgMemberService orgMemberService;
     private final AuditService auditService;
+    private final SessionSecurityService sessionSecurityService;
 
     public List<String> listDomains(int orgId, int actorId) {
         orgMemberService.requireOrgAdmin(orgId, actorId);
@@ -30,6 +31,7 @@ public class OrgAllowedDomainService {
 
     public List<String> addDomain(int orgId, int actorId, String domainRaw) {
         orgMemberService.requireOrgAdmin(orgId, actorId);
+        sessionSecurityService.requireRecentAuthentication(actorId);
         String domain = DomainUtil.normalize(domainRaw);
         orgAllowedDomainMapper.add(orgId, domain);
         auditService.record("org.allowed_domain.add", "organization", orgId, domain,
@@ -39,6 +41,7 @@ public class OrgAllowedDomainService {
 
     public void removeDomain(int orgId, int actorId, String domainRaw) {
         orgMemberService.requireOrgAdmin(orgId, actorId);
+        sessionSecurityService.requireRecentAuthentication(actorId);
         String domain = DomainUtil.normalize(domainRaw);
         orgAllowedDomainMapper.remove(orgId, domain);
         auditService.record("org.allowed_domain.remove", "organization", orgId, domain,

@@ -47,6 +47,7 @@ import jakarta.servlet.http.HttpServletResponse;
 
 import ooo.klae.connex.backend.sso.DbRelyingPartyRegistrationRepository;
 import ooo.klae.connex.backend.sso.SsoAuthenticationSuccessHandler;
+import ooo.klae.connex.backend.services.SessionSecurityService;
 
 /**
  * Spring Security configuration.
@@ -134,10 +135,12 @@ public class SecurityConfig {
             DbRelyingPartyRegistrationRepository dbRelyingPartyRegistrationRepository,
             SsoAuthenticationSuccessHandler ssoAuthenticationSuccessHandler,
             RequestBodySizeProperties requestBodySizeProperties,
+            SessionSecurityService sessionSecurityService,
             @Value("${connex.security.csrf-enabled:true}") boolean csrfEnabled,
             @Value("${connex.sso.enabled:false}") boolean ssoEnabled) throws Exception {
         boolean oauthEnabled = ssoEnabled || socialLoginClientRegistrations.anyEnabled();
         http.addFilterBefore(new ApiRequestBodySizeFilter(requestBodySizeProperties), SecurityContextHolderFilter.class);
+        http.addFilterAfter(new AbsoluteSessionTimeoutFilter(sessionSecurityService), SecurityContextHolderFilter.class);
         http.cors(withDefaults());
         if (csrfEnabled) {
             // Session-stored token (default repo), echoed by the SPA in a header it fetches from

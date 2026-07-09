@@ -46,7 +46,7 @@ class OrgAuditViewTest extends AbstractServiceTest {
         try {
             auditService.record("company.update", "company", 123, "Acme", "Changed a workspace record", null);
         } finally {
-            tenantContext.clear();
+            clearRequestContext();
         }
 
         assertTrue(auditService.recentForOrg(orgId, 50, 0).stream()

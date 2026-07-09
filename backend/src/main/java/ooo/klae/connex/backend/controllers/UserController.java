@@ -17,6 +17,7 @@ import ooo.klae.connex.backend.dto.TaskDto;
 import ooo.klae.connex.backend.dto.UpdateTimezoneDto;
 import ooo.klae.connex.backend.dto.UserDto;
 import ooo.klae.connex.backend.services.AuthService;
+import ooo.klae.connex.backend.services.SessionSecurityService;
 import ooo.klae.connex.backend.services.UserService;
 import ooo.klae.connex.backend.services.WorkspaceService;
 import ooo.klae.connex.backend.tenant.Permission;
@@ -38,6 +39,7 @@ public class UserController {
     private final UserService userService;
     private final AuthService authService;
     private final WorkspaceService workspaceService;
+    private final SessionSecurityService sessionSecurityService;
 
     /**
      * GET endpoint to retrieve all users. This will return *all* users, not necessarily just the current user
@@ -66,6 +68,7 @@ public class UserController {
     @PostMapping
     public UserDto createUser(@Valid @RequestBody RegisterDto dto) {
         workspaceService.requirePermission(Permission.MEMBER_MANAGE);
+        sessionSecurityService.requireRecentAuthentication(authService.getCurrentUser().getId());
         return UserDto.from(authService.register(dto, true));
     }
 
