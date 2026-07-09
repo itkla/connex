@@ -18,6 +18,8 @@ spring:
 connex:
     secret-store:
         master-key: ${CONNEX_SECRET_STORE_MASTER_KEY:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=}
+    workspace-cookie:
+        secure: false
     audit:
         integrity:
             hmac-secret: ${CONNEX_AUDIT_INTEGRITY_HMAC_SECRET:dev-audit-integrity-hmac-secret-change-me}

@@ -50,6 +50,7 @@ public class WorkspaceController {
     private final InviteLinkService inviteLinkService;
     private final AllowedDomainService allowedDomainService;
     private final AuthService authService;
+    private final WorkspaceCookie workspaceCookie;
 
     @GetMapping
     public MyWorkspacesDto myWorkspaces() {
@@ -66,7 +67,7 @@ public class WorkspaceController {
         int userId = authService.getCurrentUser().getId();
         WorkspaceMembershipDto created = workspaceService.createWorkspace(request.getName(), userId);
         workspaceService.rememberActive(userId, created.getId());
-        WorkspaceCookie.set(response, created.getId());
+        workspaceCookie.set(response, created.getId());
         return created;
     }
 
@@ -75,7 +76,7 @@ public class WorkspaceController {
         int userId = authService.getCurrentUser().getId();
         workspaceService.requireMember(id, userId);
         workspaceService.rememberActive(userId, id);
-        WorkspaceCookie.set(response, id);
+        workspaceCookie.set(response, id);
     }
 
     @GetMapping("/pending")
@@ -88,7 +89,7 @@ public class WorkspaceController {
         int userId = authService.getCurrentUser().getId();
         WorkspaceMembershipDto membership = workspaceService.approveMembership(id, userId);
         workspaceService.rememberActive(userId, id);
-        WorkspaceCookie.set(response, id);
+        workspaceCookie.set(response, id);
         return membership;
     }
 
