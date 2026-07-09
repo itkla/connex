@@ -15,8 +15,9 @@ mean merely that Connex uses an AWS customer managed KMS key in a Connex-owned
 AWS account.
 
 The planned dedicated per-organization database tier may be sold today only as
-dedicated database isolation plus the hosted storage-encryption posture tracked
-under [#371]. It is not a customer-managed-key tier by default.
+dedicated database isolation plus the hosted storage-encryption posture defined
+in [SAAS_STORAGE_ENCRYPTION_RUNBOOK.md](SAAS_STORAGE_ENCRYPTION_RUNBOOK.md).
+It is not a customer-managed-key tier by default.
 
 True customer-managed database key custody is supportable for Connex-operated
 SaaS only if the dedicated tier is implemented as an infrastructure unit whose
@@ -34,9 +35,9 @@ exists should use the customer-operated/on-prem model in
 
 | Topology | Feasibility | Customer-facing posture |
 | --- | --- | --- |
-| Pooled SaaS database | Not feasible. Multiple organizations share the same database/storage key boundary. | "Hosted pooled SaaS uses Connex/cloud-controlled storage encryption when #371 is evidenced; it does not provide customer-managed database keys." |
+| Pooled SaaS database | Not feasible. Multiple organizations share the same database/storage key boundary. | "Hosted pooled SaaS uses Connex/cloud-controlled storage encryption when the `SAAS_STORAGE_ENCRYPTION_RUNBOOK.md` evidence gate is satisfied; it does not provide customer-managed database keys." |
 | Dedicated schema/catalog on a shared DB instance or cluster | Not a true per-org CMK boundary. For AWS RDS, this is an architectural inference from encryption being configured for DB instance/cluster storage resources, logs, backups, read replicas, and snapshots; a separate logical database name does not by itself create a separate KMS key boundary. | "Dedicated database isolation reduces shared-database blast radius, but the storage key is still Connex/cloud controlled unless a separate infrastructure-level CMK mode is implemented." |
-| Dedicated DB instance or cluster per organization | Technically feasible on AWS RDS/Aurora when created with a customer-controlled or contractually dedicated KMS key and grant model. Operationally supportable only after per-org provisioning, grants, key-policy checks, backup/snapshot/restore handling, monitoring, and revocation runbooks exist. | "Dedicated CMK is available only for contracted dedicated infrastructure whose key, backups, replicas, and restore process are verified per organization. The running Connex app still processes plaintext." |
+| Dedicated DB instance or cluster per organization | Technically feasible on AWS RDS/Aurora when created with a customer-controlled or contractually dedicated KMS key and grant model. Operationally supportable only after per-org provisioning, grants, key-policy checks, backup/snapshot/restore handling, monitoring, revocation runbooks, and the hosted storage evidence gate exist. | "Dedicated CMK is available only for contracted dedicated infrastructure whose key, backups, replicas, and restore process are verified per organization. The running Connex app still processes plaintext." |
 | Customer-operated/on-prem | Supported outside Connex-operated SaaS. The customer controls the database/storage/keyring/KMS/HSM/KMIP/Vault layer and backup keys. | "Customer-operated deployments give the customer infrastructure and key custody; the running app still processes plaintext inside that environment." |
 
 ## Implementation Gates
@@ -123,6 +124,7 @@ equivalent structured values:
 ## References
 
 - AWS RDS encryption overview: https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/Overview.Encryption.html
+- Connex SaaS storage encryption runbook: [SAAS_STORAGE_ENCRYPTION_RUNBOOK.md](SAAS_STORAGE_ENCRYPTION_RUNBOOK.md)
 - Connex encryption guarantee matrix: [ENCRYPTION_GUARANTEE_MATRIX.md](ENCRYPTION_GUARANTEE_MATRIX.md)
 - Customer-operated encryption runbook: [ON_PREM_ENCRYPTION_RUNBOOK.md](ON_PREM_ENCRYPTION_RUNBOOK.md)
 
