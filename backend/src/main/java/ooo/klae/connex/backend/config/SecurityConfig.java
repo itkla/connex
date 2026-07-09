@@ -1,5 +1,9 @@
 package ooo.klae.connex.backend.config;
 
+import static org.springframework.security.config.Customizer.withDefaults;
+
+import java.util.List;
+
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -35,6 +39,9 @@ import org.springframework.security.web.csrf.CsrfTokenRequestAttributeHandler;
 import org.springframework.session.FindByIndexNameSessionRepository;
 import org.springframework.session.Session;
 import org.springframework.session.security.SpringSessionBackedSessionRegistry;
+import org.springframework.web.cors.CorsConfiguration;
+import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
+import org.springframework.web.util.pattern.PathPatternParser;
 
 import jakarta.servlet.http.HttpServletResponse;
 
@@ -62,10 +69,41 @@ import ooo.klae.connex.backend.sso.SsoAuthenticationSuccessHandler;
 @Configuration
 @EnableWebSecurity
 public class SecurityConfig {
+    private static final List<String> API_CORS_ALLOWED_HEADERS = List.of(
+        "Accept",
+        "Accept-Language",
+        "Content-Type",
+        "X-CSRF-TOKEN",
+        "X-XSRF-TOKEN",
+        "X-Workspace-Id"
+    );
+
+    private static final List<String> API_CORS_ALLOWED_METHODS = List.of(
+        "GET",
+        "POST",
+        "PUT",
+        "DELETE",
+        "PATCH",
+        "OPTIONS"
+    );
 
     @Bean
     public PasswordEncoder passwordEncoder() {
         return new BCryptPasswordEncoder();
+    }
+
+    @Bean
+    UrlBasedCorsConfigurationSource corsConfigurationSource(
+            @Value("${connex.cors.allowed-origins}") String[] allowedOrigins) {
+        CorsConfiguration configuration = new CorsConfiguration();
+        configuration.setAllowedOrigins(List.of(allowedOrigins));
+        configuration.setAllowedMethods(API_CORS_ALLOWED_METHODS);
+        configuration.setAllowedHeaders(API_CORS_ALLOWED_HEADERS);
+        configuration.setAllowCredentials(true);
+
+        UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource(PathPatternParser.defaultInstance);
+        source.registerCorsConfiguration("/api/**", configuration);
+        return source;
     }
 
     @Bean
@@ -100,6 +138,7 @@ public class SecurityConfig {
             @Value("${connex.sso.enabled:false}") boolean ssoEnabled) throws Exception {
         boolean oauthEnabled = ssoEnabled || socialLoginClientRegistrations.anyEnabled();
         http.addFilterBefore(new ApiRequestBodySizeFilter(requestBodySizeProperties), SecurityContextHolderFilter.class);
+        http.cors(withDefaults());
         if (csrfEnabled) {
             // Session-stored token (default repo), echoed by the SPA in a header it fetches from
             // GET /api/auth/csrf. A plain (non-XOR) handler keeps the token stable so the client can
