@@ -202,6 +202,14 @@ public class DealService {
         return dealMapper.getAllDeals(workspaceService.getCurrentWorkspaceId());
     }
 
+    public List<Deal> getDealsPage(int limit, int offset) {
+        return dealMapper.getDealsPage(workspaceService.getCurrentWorkspaceId(), limit, offset);
+    }
+
+    public long countDeals() {
+        return dealMapper.countDeals(workspaceService.getCurrentWorkspaceId());
+    }
+
     /**
      * Retrieves all {@code Deal} records by pipeline ID.
      * @param pipelineId

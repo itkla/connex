@@ -54,8 +54,7 @@ export default async function MePage() {
     }
 
     const init = { headers: { cookie: cookie ?? "" } } as const;
-    const [temps, contacts, deals, dealRisks, tasks, activities, notes, users] = await Promise.all([
-        getContactTemperaturesFromCookie(cookie).catch(() => [] as RelationshipTemperature[]),
+    const [contacts, deals, dealRisks, tasks, activities, notes, users] = await Promise.all([
         getContactsFromCookie(cookie).catch(() => [] as Contact[]),
         getDealsFromCookie(cookie).catch(() => [] as Deal[]),
         getDealRisksFromCookie(cookie).catch(() => [] as DealRisk[]),
@@ -64,6 +63,8 @@ export default async function MePage() {
         getUserNotesFromCookie(user.id, cookie).catch(() => [] as Note[]),
         getUsers(init).catch(() => [] as User[]),
     ]);
+    const temps = await getContactTemperaturesFromCookie(cookie, contacts.map((contact) => contact.id))
+        .catch(() => [] as RelationshipTemperature[]);
 
     const myDeals = deals.filter((deal) => deal.ownerId === user.id);
     const currency = pickDominantCurrency(myDeals);

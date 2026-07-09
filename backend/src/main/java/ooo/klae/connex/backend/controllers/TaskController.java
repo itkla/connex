@@ -11,10 +11,13 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import ooo.klae.connex.backend.beans.Task;
+import ooo.klae.connex.backend.dto.PageResponse;
 import ooo.klae.connex.backend.dto.TaskDto;
 import ooo.klae.connex.backend.dto.TaskMoveRequest;
 import ooo.klae.connex.backend.dto.TaskRescheduleRequest;
+import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.services.TaskService;
+import ooo.klae.connex.backend.util.PageBounds;
 
 import java.util.List;
 
@@ -51,8 +54,22 @@ public class TaskController {
         if (assignedToId != null) tasks = taskService.getTasksByAssignedToId(assignedToId);
         else if (personId != null) tasks = taskService.getTasksByPersonId(personId);
         else if (dealId != null) tasks = taskService.getTasksByDealId(dealId);
-        else tasks = taskService.getAllTasks();
+        else throw new BadRequestException("A filter is required; use /api/tasks/page for workspace-wide lists");
         return tasks.stream().map(TaskDto::from).toList();
+    }
+
+    /**
+     * GET endpoint for a bounded, paginated slice of tasks in the active workspace.
+     */
+    @GetMapping("/page")
+    public PageResponse<TaskDto> getTasksPage(
+        @RequestParam(defaultValue = "1") int page,
+        @RequestParam(defaultValue = "25") int size
+    ) {
+        PageBounds bounds = PageBounds.of(page, size);
+        List<TaskDto> items = taskService.getTasksPage(bounds.size(), bounds.offset())
+            .stream().map(TaskDto::from).toList();
+        return new PageResponse<>(items, taskService.countTasks());
     }
 
     /**

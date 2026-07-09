@@ -97,6 +97,38 @@ class PersonMapperTest extends AbstractMapperTest {
         assertTrue(all.stream().anyMatch(x -> x.getId() == person.getId()));
     }
 
+    @Test
+    void getPersonsPageLimitsAndCountsWorkspaceRows() {
+        Workspace pageWorkspace = newWorkspace();
+        Person first = newPersonIn(pageWorkspace);
+        Person second = newPersonIn(pageWorkspace);
+        Person third = newPersonIn(pageWorkspace);
+        Person foreign = newPerson(newCompany());
+
+        List<Person> page = personMapper.getPersonsPage(
+            pageWorkspace.getId(), null, null, null, null, null, false, 2, 0);
+
+        assertEquals(2, page.size());
+        assertEquals(3, personMapper.countPersons(pageWorkspace.getId(), null, null, null, false));
+        assertTrue(page.stream().noneMatch(person -> person.getId() == foreign.getId()));
+        assertTrue(page.stream().allMatch(person -> List.of(first.getId(), second.getId(), third.getId()).contains(person.getId())));
+    }
+
+    @Test
+    void getPersonIdsFilteredAppliesLimitAndWorkspaceScope() {
+        Workspace pageWorkspace = newWorkspace();
+        Person first = newPersonIn(pageWorkspace);
+        Person second = newPersonIn(pageWorkspace);
+        newPersonIn(pageWorkspace);
+        Person foreign = newPerson(newCompany());
+
+        List<Integer> ids = personMapper.getPersonIdsFiltered(
+            pageWorkspace.getId(), null, null, null, false, 2);
+
+        assertEquals(List.of(first.getId(), second.getId()), ids);
+        assertFalse(ids.contains(foreign.getId()));
+    }
+
     /**
      * Updates a person and checks if the new values are persisted
      */

@@ -72,6 +72,15 @@ public class TaskService {
         return referenceService.hydrateTasks(workspaceId, taskMapper.getAllTasks(workspaceId));
     }
 
+    public List<Task> getTasksPage(int limit, int offset) {
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        return referenceService.hydrateTasks(workspaceId, taskMapper.getTasksPage(workspaceId, limit, offset));
+    }
+
+    public long countTasks() {
+        return taskMapper.countTasks(workspaceService.getCurrentWorkspaceId());
+    }
+
     public List<Task> getTasksByAssignedToId(int assignedToId) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         return referenceService.hydrateTasks(workspaceId, taskMapper.getTasksByAssignedToId(workspaceId, assignedToId));

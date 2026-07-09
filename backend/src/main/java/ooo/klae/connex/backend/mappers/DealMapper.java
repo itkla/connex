@@ -16,6 +16,8 @@ import java.util.List;
 
 public interface DealMapper {
     List<Deal> getAllDeals(int workspaceId);
+    List<Deal> getDealsPage(@Param("workspaceId") int workspaceId, @Param("limit") int limit, @Param("offset") int offset);
+    long countDeals(int workspaceId);
     List<Deal> getDealsByPipelineId(@Param("workspaceId") int workspaceId, @Param("pipelineId") int pipelineId);
     List<Deal> getDealsByStageId(@Param("workspaceId") int workspaceId, @Param("stageId") int stageId);
     List<Deal> getDealsByCompanyId(@Param("workspaceId") int workspaceId, @Param("companyId") int companyId);

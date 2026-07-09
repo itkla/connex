@@ -30,7 +30,7 @@ export default async function MapPage({ searchParams }: { searchParams: Promise<
     const t = await getTranslations("MapPage");
     const { companyId, contactId } = await searchParams;
 
-    const [user, workspaces, companies, contacts, deals, users, allActivities, allTasks, allNotes, pipelines, contactTemps, companyTemps] =
+    const [user, workspaces, companies, contacts, deals, users, allActivities, allTasks, allNotes, pipelines] =
         await Promise.all([
             getCurrentUserFromCookie(cookie),
             getMyWorkspacesFromCookie(cookie),
@@ -42,8 +42,6 @@ export default async function MapPage({ searchParams }: { searchParams: Promise<
             getTasks(init).catch(() => [] as Task[]),
             getNotes(init).catch(() => [] as Note[]),
             getPipelines(init).catch(() => [] as Pipeline[]),
-            getContactTemperatures(init).catch(() => [] as RelationshipTemperature[]),
-            getCompanyTemperatures(init).catch(() => [] as RelationshipTemperature[]),
         ]);
 
     if (!user) {
@@ -52,6 +50,11 @@ export default async function MapPage({ searchParams }: { searchParams: Promise<
 
     const activeWorkspace = workspaces.workspaces.find((w) => w.id === workspaces.activeWorkspaceId);
     const ucLabel = activeWorkspace?.name ?? t("yourCompany");
+
+    const [contactTemps, companyTemps] = await Promise.all([
+        getContactTemperatures(contacts.map((contact) => contact.id), init).catch(() => [] as RelationshipTemperature[]),
+        getCompanyTemperatures(companies.map((company) => company.id), init).catch(() => [] as RelationshipTemperature[]),
+    ]);
 
     const contactWarmth = new Map<number, TemperatureBand>(contactTemps.map((t) => [t.id, t.band]));
     const companyWarmth = new Map<number, TemperatureBand>(companyTemps.map((t) => [t.id, t.band]));

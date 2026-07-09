@@ -21,6 +21,11 @@ public interface ActivityMapper {
         @Param("createdById") Integer createdById,
         @Param("limit") int limit,
         @Param("offset") int offset);
+    long countActivities(
+        @Param("workspaceId") int workspaceId,
+        @Param("personId") Integer personId,
+        @Param("dealId") Integer dealId,
+        @Param("createdById") Integer createdById);
     List<Activity> getActivitiesByPersonId(@Param("workspaceId") int workspaceId, @Param("personId") int personId);
     List<Activity> getActivitiesByDealId(@Param("workspaceId") int workspaceId, @Param("dealId") int dealId);
     List<Activity> getActivitiesByCreatedById(@Param("workspaceId") int workspaceId, @Param("createdById") int createdById);

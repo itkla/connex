@@ -32,13 +32,16 @@ import ooo.klae.connex.backend.dto.DealRiskDto;
 import ooo.klae.connex.backend.dto.DealStageHistoryDto;
 import ooo.klae.connex.backend.dto.DealSummaryDto;
 import ooo.klae.connex.backend.dto.NoteDto;
+import ooo.klae.connex.backend.dto.PageResponse;
 import ooo.klae.connex.backend.dto.TagDto;
 import ooo.klae.connex.backend.dto.TaskDto;
 import ooo.klae.connex.backend.dto.UserDto;
+import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.services.BulkOperationService;
 import ooo.klae.connex.backend.services.DealRiskService;
 import ooo.klae.connex.backend.services.DealService;
 import ooo.klae.connex.backend.services.WorkspaceService;
+import ooo.klae.connex.backend.util.PageBounds;
 
 import java.util.List;
 import java.util.Map;
@@ -83,8 +86,22 @@ public class DealController {
         else if (companyId != null)  deals = dealService.getDealsByCompanyId(companyId);
         else if (personId != null)   deals = dealService.getDealsByPersonId(personId);
         else if (tagId != null)      deals = dealService.getDealsByTagId(tagId);
-        else                         deals = dealService.getAllDeals();
+        else                         throw new BadRequestException("A filter is required; use /api/deals/page for workspace-wide lists");
         return deals.stream().map(DealDto::from).toList();
+    }
+
+    /**
+     * GET endpoint for a bounded, paginated slice of deals in the active workspace.
+     */
+    @GetMapping("/page")
+    public PageResponse<DealDto> getDealsPage(
+        @RequestParam(defaultValue = "1") int page,
+        @RequestParam(defaultValue = "25") int size
+    ) {
+        PageBounds bounds = PageBounds.of(page, size);
+        List<DealDto> items = dealService.getDealsPage(bounds.size(), bounds.offset())
+            .stream().map(DealDto::from).toList();
+        return new PageResponse<>(items, dealService.countDeals());
     }
 
     /**

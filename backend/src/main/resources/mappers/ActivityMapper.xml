@@ -33,7 +33,7 @@
   <select id="getActivitiesPage" resultMap="ActivityResult">
     SELECT <include refid="activityColumns"/> FROM activity
     WHERE workspace_id = #{workspaceId}
-    ORDER BY timestamp DESC
+    ORDER BY timestamp DESC, id DESC
     LIMIT #{limit} OFFSET #{offset}
   </select>
 
@@ -49,23 +49,37 @@
     <if test="createdById != null">
       AND created_by_id = #{createdById}
     </if>
-    ORDER BY timestamp DESC
+    ORDER BY timestamp DESC, id DESC
     LIMIT #{limit} OFFSET #{offset}
+  </select>
+
+  <select id="countActivities" resultType="long">
+    SELECT COUNT(*) FROM activity
+    WHERE workspace_id = #{workspaceId}
+    <if test="personId != null">
+      AND person_id = #{personId}
+    </if>
+    <if test="dealId != null">
+      AND deal_id = #{dealId}
+    </if>
+    <if test="createdById != null">
+      AND created_by_id = #{createdById}
+    </if>
   </select>
 
   <select id="getActivitiesByPersonId" resultMap="ActivityResult">
     SELECT <include refid="activityColumns"/> FROM activity
-    WHERE workspace_id = #{workspaceId} AND person_id = #{personId} ORDER BY timestamp DESC
+    WHERE workspace_id = #{workspaceId} AND person_id = #{personId} ORDER BY timestamp DESC, id DESC
   </select>
 
   <select id="getActivitiesByDealId" resultMap="ActivityResult">
     SELECT <include refid="activityColumns"/> FROM activity
-    WHERE workspace_id = #{workspaceId} AND deal_id = #{dealId} ORDER BY timestamp DESC
+    WHERE workspace_id = #{workspaceId} AND deal_id = #{dealId} ORDER BY timestamp DESC, id DESC
   </select>
 
   <select id="getActivitiesByCreatedById" resultMap="ActivityResult">
     SELECT <include refid="activityColumns"/> FROM activity
-    WHERE workspace_id = #{workspaceId} AND created_by_id = #{createdById} ORDER BY timestamp DESC
+    WHERE workspace_id = #{workspaceId} AND created_by_id = #{createdById} ORDER BY timestamp DESC, id DESC
   </select>
 
   <select id="getActivityById" resultMap="ActivityResult">
@@ -76,7 +90,7 @@
   <select id="search" resultMap="ActivityResult">
     SELECT <include refid="activityColumns"/> FROM activity
     WHERE workspace_id = #{workspaceId} AND (subject LIKE #{query} OR notes LIKE #{query})
-    ORDER BY timestamp DESC
+    ORDER BY timestamp DESC, id DESC
     LIMIT 10
   </select>
 

@@ -106,6 +106,32 @@ class NoteMapperTest extends AbstractMapperTest {
         assertTrue(all.stream().anyMatch(x -> x.getId() == note.getId()));
     }
 
+    @Test
+    void getVisibleNotesPageLimitsAndCountsOnlyVisibleRows() {
+        Workspace pageWorkspace = newWorkspace();
+        User current = newUser();
+        User other = newUser();
+        Note workspaceNote = build("workspace", current, null, null);
+        workspaceNote.setWorkspaceId(pageWorkspace.getId());
+        noteMapper.insert(workspaceNote);
+        Note ownPrivate = build("own private", current, null, null);
+        ownPrivate.setWorkspaceId(pageWorkspace.getId());
+        ownPrivate.setVisibility("private");
+        noteMapper.insert(ownPrivate);
+        Note otherPrivate = build("other private", other, null, null);
+        otherPrivate.setWorkspaceId(pageWorkspace.getId());
+        otherPrivate.setVisibility("private");
+        noteMapper.insert(otherPrivate);
+
+        List<Note> page = noteMapper.getVisibleNotesPage(pageWorkspace.getId(), current.getId(), 10, 0);
+
+        assertEquals(2, page.size());
+        assertEquals(2, noteMapper.countVisibleNotes(pageWorkspace.getId(), current.getId()));
+        assertTrue(page.stream().anyMatch(note -> note.getId() == workspaceNote.getId()));
+        assertTrue(page.stream().anyMatch(note -> note.getId() == ownPrivate.getId()));
+        assertTrue(page.stream().noneMatch(note -> note.getId() == otherPrivate.getId()));
+    }
+
     /**
      * Updates a note and checks if the new values are persisted.
      */

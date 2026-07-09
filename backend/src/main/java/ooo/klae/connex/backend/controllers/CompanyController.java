@@ -19,10 +19,13 @@ import ooo.klae.connex.backend.dto.CustomFieldEntryDto;
 import ooo.klae.connex.backend.dto.CustomFieldValueRequest;
 import ooo.klae.connex.backend.dto.CustomFieldValuesRequest;
 import ooo.klae.connex.backend.dto.DealDto;
+import ooo.klae.connex.backend.dto.PageResponse;
 import ooo.klae.connex.backend.dto.PersonDto;
 import ooo.klae.connex.backend.dto.TagDto;
+import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.services.BulkOperationService;
 import ooo.klae.connex.backend.services.CompanyService;
+import ooo.klae.connex.backend.util.PageBounds;
 
 import java.util.List;
 import java.util.Map;
@@ -48,8 +51,25 @@ public class CompanyController {
      */
     @GetMapping
     public List<CompanyDto> getAllCompanies(@RequestParam(required = false) Integer tagId) {
-        List<Company> companies = (tagId != null) ? companyService.getCompaniesByTagId(tagId) : companyService.getAllCompanies();
+        if (tagId == null) {
+            throw new BadRequestException("A filter is required; use /api/companies/page for workspace-wide lists");
+        }
+        List<Company> companies = companyService.getCompaniesByTagId(tagId);
         return companies.stream().map(CompanyDto::from).toList();
+    }
+
+    /**
+     * Retrieves a bounded, paginated slice of companies visible to the active workspace.
+     */
+    @GetMapping("/page")
+    public PageResponse<CompanyDto> getCompaniesPage(
+        @RequestParam(defaultValue = "1") int page,
+        @RequestParam(defaultValue = "25") int size
+    ) {
+        PageBounds bounds = PageBounds.of(page, size);
+        List<CompanyDto> items = companyService.getCompaniesPage(bounds.size(), bounds.offset())
+            .stream().map(CompanyDto::from).toList();
+        return new PageResponse<>(items, companyService.countCompanies());
     }
 
     /**

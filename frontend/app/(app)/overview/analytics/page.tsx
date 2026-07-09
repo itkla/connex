@@ -5,6 +5,7 @@ import { redirect } from 'next/navigation';
 import {
     getActivitiesFromCookie,
     getCompaniesFromCookie,
+    getContactsFromCookie,
     getCompanyTemperaturesFromCookie,
     getContactTemperaturesFromCookie,
     getCurrentUserFromCookie,
@@ -22,6 +23,7 @@ import {
 import type {
     Activity,
     Company,
+    Contact,
     Deal,
     DealRisk,
     IntroSuggestion,
@@ -52,34 +54,37 @@ export default async function AnalyticsPage() {
 
     const [
         companies,
+        contacts,
         deals,
         pipelines,
         tasks,
         activities,
         notes,
         users,
-        contactTemps,
-        companyTemps,
         dealRisks,
         introSuggestions,
         recentMoves,
         introLineage,
     ] = await Promise.all([
         getCompaniesFromCookie(cookie).catch(() => [] as Company[]),
+        getContactsFromCookie(cookie).catch(() => [] as Contact[]),
         getDealsFromCookie(cookie).catch(() => [] as Deal[]),
         getPipelinesFromCookie(cookie).catch(() => [] as Pipeline[]),
         getTasksFromCookie(cookie).catch(() => [] as Task[]),
         getActivitiesFromCookie(cookie).catch(() => [] as Activity[]),
         getNotesFromCookie(cookie).catch(() => [] as Note[]),
         getUsers(init).catch(() => [] as User[]),
-        getContactTemperaturesFromCookie(cookie).catch(() => [] as RelationshipTemperature[]),
-        getCompanyTemperaturesFromCookie(cookie).catch(() => [] as RelationshipTemperature[]),
         getDealRisksFromCookie(cookie).catch(() => [] as DealRisk[]),
         getIntroSuggestionsFromCookie(cookie).catch(() => [] as IntroSuggestion[]),
         getRecentMovesFromCookie(cookie).catch(() => [] as JobMove[]),
         getIntroductions({ size: 500 }, init)
             .then((page) => page.items)
             .catch(() => [] as IntroductionRecord[]),
+    ]);
+
+    const [contactTemps, companyTemps] = await Promise.all([
+        getContactTemperaturesFromCookie(cookie, contacts.map((contact) => contact.id)).catch(() => [] as RelationshipTemperature[]),
+        getCompanyTemperaturesFromCookie(cookie, companies.map((company) => company.id)).catch(() => [] as RelationshipTemperature[]),
     ]);
 
     const stageLists = await Promise.all(

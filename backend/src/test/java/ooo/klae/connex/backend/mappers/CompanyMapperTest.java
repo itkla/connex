@@ -65,6 +65,27 @@ class CompanyMapperTest extends AbstractMapperTest {
         assertTrue(allCompanies.stream().anyMatch(x -> x.getId() == company.getId()));
     }
 
+    @Test
+    void getCompaniesPageLimitsAndCountsVisibleRows() {
+        Workspace pageWorkspace = newWorkspace();
+        Company first = newCompanyIn(pageWorkspace);
+        Company second = newCompanyIn(pageWorkspace);
+        Company third = newCompanyIn(pageWorkspace);
+        first.setName("Same Name");
+        second.setName("Same Name");
+        third.setName("Same Name");
+        companyMapper.update(first);
+        companyMapper.update(second);
+        companyMapper.update(third);
+        Company foreign = newCompany();
+
+        List<Company> page = companyMapper.getCompaniesPage(pageWorkspace.getId(), 2, 0);
+
+        assertEquals(List.of(first.getId(), second.getId()), page.stream().map(Company::getId).toList());
+        assertEquals(3, companyMapper.countCompanies(pageWorkspace.getId()));
+        assertTrue(page.stream().noneMatch(company -> company.getId() == foreign.getId()));
+    }
+
     /**
      * Updates a company and checks if the new values are persisted.
      */

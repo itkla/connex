@@ -33,28 +33,40 @@
     SELECT <include refid="taskColumns"/>
     FROM task
     WHERE workspace_id = #{workspaceId}
-    ORDER BY due_date IS NULL, due_date
+    ORDER BY due_date IS NULL, due_date, id
+  </select>
+
+  <select id="getTasksPage" resultMap="TaskResult">
+    SELECT <include refid="taskColumns"/>
+    FROM task
+    WHERE workspace_id = #{workspaceId}
+    ORDER BY due_date IS NULL, due_date, id
+    LIMIT #{limit} OFFSET #{offset}
+  </select>
+
+  <select id="countTasks" resultType="long">
+    SELECT COUNT(*) FROM task WHERE workspace_id = #{workspaceId}
   </select>
 
   <select id="getTasksByAssignedToId" resultMap="TaskResult">
     SELECT <include refid="taskColumns"/>
     FROM task
     WHERE workspace_id = #{workspaceId} AND assigned_to_id = #{assignedToId}
-    ORDER BY due_date IS NULL, due_date
+    ORDER BY due_date IS NULL, due_date, id
   </select>
 
   <select id="getTasksByPersonId" resultMap="TaskResult">
     SELECT <include refid="taskColumns"/>
     FROM task
     WHERE workspace_id = #{workspaceId} AND person_id = #{personId}
-    ORDER BY due_date IS NULL, due_date
+    ORDER BY due_date IS NULL, due_date, id
   </select>
 
   <select id="getTasksByDealId" resultMap="TaskResult">
     SELECT <include refid="taskColumns"/>
     FROM task
     WHERE workspace_id = #{workspaceId} AND deal_id = #{dealId}
-    ORDER BY due_date IS NULL, due_date
+    ORDER BY due_date IS NULL, due_date, id
   </select>
 
   <select id="getTaskById" resultMap="TaskResult">
@@ -67,7 +79,7 @@
     SELECT <include refid="taskColumns"/>
     FROM task
     WHERE workspace_id = #{workspaceId} AND description LIKE #{query}
-    ORDER BY due_date IS NULL, due_date
+    ORDER BY due_date IS NULL, due_date, id
     LIMIT 10
   </select>
 

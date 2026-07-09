@@ -115,6 +115,32 @@ class ActivityMapperTest extends AbstractMapperTest {
         assertTrue(allActivities.stream().anyMatch(x -> x.getId() == activity.getId()));
     }
 
+    @Test
+    void getActivitiesPageLimitsAndCountsWorkspaceRows() {
+        Workspace pageWorkspace = newWorkspace();
+        User user = newUser();
+        Activity first = build("call", "first", null, null, user);
+        first.setWorkspaceId(pageWorkspace.getId());
+        first.setTimestamp("2024-01-01 09:00:00");
+        activityMapper.insert(first);
+        Activity second = build("call", "second", null, null, user);
+        second.setWorkspaceId(pageWorkspace.getId());
+        second.setTimestamp("2024-01-01 09:00:00");
+        activityMapper.insert(second);
+        Activity third = build("call", "third", null, null, user);
+        third.setWorkspaceId(pageWorkspace.getId());
+        third.setTimestamp("2024-01-01 09:00:00");
+        activityMapper.insert(third);
+        Activity foreign = build("call", "foreign", null, null, user);
+        activityMapper.insert(foreign);
+
+        List<Activity> page = activityMapper.getActivitiesPage(pageWorkspace.getId(), 2, 0);
+
+        assertEquals(List.of(third.getId(), second.getId()), page.stream().map(Activity::getId).toList());
+        assertEquals(3, activityMapper.countActivities(pageWorkspace.getId(), null, null, null));
+        assertTrue(page.stream().noneMatch(activity -> activity.getId() == foreign.getId()));
+    }
+
     /**
      * Updates an activity and checks if the new values are persisted.
      */

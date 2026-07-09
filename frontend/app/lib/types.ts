@@ -19,6 +19,12 @@ export type ContactsPageParams = PageParams & {
     noCompany?: boolean;
 };
 
+export type ActivitiesPageParams = PageParams & {
+    personId?: number;
+    dealId?: number;
+    createdById?: number;
+};
+
 /** One record that a bulk operation could not apply, with its index in the request and the reason. */
 export type BulkOperationError = {
     rowIndex: number;

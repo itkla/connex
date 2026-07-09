@@ -179,10 +179,10 @@ export default function ContactsBrowser({ savedViews }: { savedViews: SavedView[
 
     const [tempByContactId, setTempByContactId] = useState<Map<number, RelationshipTemperature>>(new Map());
     useEffect(() => {
-        getContactTemperatures()
+        getContactTemperatures(contacts.map((contact) => contact.id))
             .then((temps) => setTempByContactId(new Map(temps.map((temp) => [temp.id, temp]))))
             .catch(() => setTempByContactId(new Map()));
-    }, []);
+    }, [contacts]);
 
     const emptyContactDraft: CreateContactPayload = { name: '', email: '', phone: '', title: '' };
     const [newContactDialogOpen, setNewContactDialogOpen] = useState(false);
@@ -371,6 +371,7 @@ export default function ContactsBrowser({ savedViews }: { savedViews: SavedView[
             key: 'warmth',
             label: t('columnWarmth'),
             getSortValue: (c) => tempByContactId.get(c.id)?.score ?? null,
+            sortable: false,
             render: (c) => <TemperaturePill temp={tempByContactId.get(c.id)} />,
         },
         {
@@ -461,14 +462,14 @@ export default function ContactsBrowser({ savedViews }: { savedViews: SavedView[
     );
 
     const currentConfig: SavedViewConfig = useMemo(
-        () => ({ filters: filterState, query, sortKey, sortDirection }),
+        () => ({ filters: filterState, query, sortKey: sortKey === 'warmth' ? null : sortKey, sortDirection }),
         [filterState, query, sortKey, sortDirection],
     );
     const applyView = useCallback(
         (config: SavedViewConfig) => {
             setFilterState(config.filters ?? {});
             applyQuery(config.query ?? '');
-            applySort(config.sortKey ?? null, config.sortDirection ?? 'asc');
+            applySort(config.sortKey === 'warmth' ? null : config.sortKey ?? null, config.sortDirection ?? 'asc');
         },
         [setFilterState, applyQuery, applySort],
     );
@@ -551,7 +552,7 @@ export default function ContactsBrowser({ savedViews }: { savedViews: SavedView[
                 {(() => {
                     const pageFullySelected = contacts.length > 0 && selectedContactIds.length >= contacts.length;
                     const allMatchingSelected = total > contacts.length && selectedContactIds.length >= total;
-                    const canSelectAllMatching = pageFullySelected && total > contacts.length && selectedContactIds.length < total;
+                    const canSelectAllMatching = hasActiveFilters && pageFullySelected && total > contacts.length && selectedContactIds.length < total;
                     if (!canSelectAllMatching && !allMatchingSelected) return null;
                     return (
                         <div className="flex flex-wrap items-center justify-center gap-x-2 gap-y-1 rounded-lg bg-muted px-4 py-2 text-sm text-muted-foreground ring-1 ring-border">

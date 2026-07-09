@@ -52,6 +52,14 @@ public class CompanyService {
         return companyMapper.getAllCompanies(workspaceService.getCurrentWorkspaceId());
     }
 
+    public List<Company> getCompaniesPage(int limit, int offset) {
+        return companyMapper.getCompaniesPage(workspaceService.getCurrentWorkspaceId(), limit, offset);
+    }
+
+    public long countCompanies() {
+        return companyMapper.countCompanies(workspaceService.getCurrentWorkspaceId());
+    }
+
     public List<Company> getCompaniesByTagId(int tagId) {
         return companyMapper.getCompaniesByTagId(workspaceService.getCurrentWorkspaceId(), tagId);
     }
