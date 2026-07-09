@@ -1,9 +1,6 @@
 package ooo.klae.connex.backend.controllers;
 
-import java.util.Arrays;
-import java.util.EnumSet;
 import java.util.List;
-import java.util.Set;
 
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -21,13 +18,8 @@ import ooo.klae.connex.backend.tenant.Permission;
 @RequestMapping("/api/permissions")
 public class PermissionController {
 
-    private static final Set<Permission> INERT = EnumSet.of(Permission.SSO_MANAGE);
-
     @GetMapping
     public List<String> catalog() {
-        return Arrays.stream(Permission.values())
-                .filter(permission -> !INERT.contains(permission))
-                .map(Enum::name)
-                .toList();
+        return Permission.grantableNames();
     }
 }

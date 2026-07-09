@@ -16,13 +16,16 @@ import org.springframework.web.context.request.RequestContextHolder;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.beans.WorkspaceRole;
 import ooo.klae.connex.backend.dto.WorkspaceMembershipDto;
+import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
+import ooo.klae.connex.backend.mappers.RoleMapper;
 import ooo.klae.connex.backend.tenant.Permission;
 
 class RbacTest extends AbstractServiceTest {
 
     @Autowired WorkspaceService workspaceService;
     @Autowired RoleService roleService;
+    @Autowired RoleMapper roleMapper;
 
     @Test
     void builtInRolesMapToExpectedPermissions() {
@@ -32,7 +35,8 @@ class RbacTest extends AbstractServiceTest {
 
         Set<Permission> ownerPerms = workspaceService.permissionsFor(ws.getId(), currentUser.getId());
         assertTrue(ownerPerms.contains(Permission.ROLE_MANAGE));
-        assertTrue(ownerPerms.contains(Permission.WORKSPACE_DELETE));
+        assertFalse(ownerPerms.contains(Permission.WORKSPACE_DELETE));
+        assertFalse(ownerPerms.contains(Permission.SSO_MANAGE));
 
         Set<Permission> memberPerms = workspaceService.permissionsFor(ws.getId(), member.getId());
         assertTrue(memberPerms.contains(Permission.DEAL_DELETE));
@@ -84,6 +88,37 @@ class RbacTest extends AbstractServiceTest {
 
         assertThrows(ForbiddenException.class,
             () -> roleService.createRole(ws.getId(), member.getId(), "Nope", List.of()));
+    }
+
+    @Test
+    void customRolesCannotGrantInertPermissions() {
+        WorkspaceMembershipDto ws = workspaceService.createWorkspace("Inert Permission WS", currentUser.getId());
+
+        assertThrows(BadRequestException.class,
+            () -> roleService.createRole(ws.getId(), currentUser.getId(), "Delete Workspace",
+                List.of("WORKSPACE_DELETE")));
+        assertThrows(BadRequestException.class,
+            () -> roleService.createRole(ws.getId(), currentUser.getId(), "SSO Manager",
+                List.of("SSO_MANAGE")));
+    }
+
+    @Test
+    void inertPermissionRowsDoNotReadBackOrAuthorize() {
+        WorkspaceMembershipDto ws = workspaceService.createWorkspace("Stale Inert Permission WS", currentUser.getId());
+        User member = newUser();
+        workspaceMapper.addMember(ws.getId(), member.getId(), "member");
+        WorkspaceRole role = roleService.createRole(ws.getId(), currentUser.getId(), "Stale",
+            List.of("COMPANY_CREATE"));
+
+        roleMapper.insertPermissions(ws.getId(), role.getId(), List.of("SSO_MANAGE", "WORKSPACE_DELETE"));
+        workspaceService.assignCustomRole(ws.getId(), currentUser.getId(), member.getId(), role.getId());
+
+        WorkspaceRole readBack = roleService.listRoles(ws.getId(), currentUser.getId()).stream()
+            .filter(candidate -> candidate.getId() == role.getId())
+            .findFirst()
+            .orElseThrow();
+        assertEquals(List.of("COMPANY_CREATE"), readBack.getPermissions());
+        assertEquals(Set.of(Permission.COMPANY_CREATE), workspaceService.permissionsFor(ws.getId(), member.getId()));
     }
 
     @Test

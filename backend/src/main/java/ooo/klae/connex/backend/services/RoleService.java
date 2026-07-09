@@ -92,11 +92,15 @@ public class RoleService {
         List<String> valid = new ArrayList<>();
         for (String value : raw) {
             try {
-                String name = Permission.valueOf(value).name();
+                Permission permission = Permission.valueOf(value);
+                if (!Permission.isGrantable(permission)) {
+                    throw new BadRequestException("Permission is not grantable: " + value);
+                }
+                String name = permission.name();
                 if (!valid.contains(name)) {
                     valid.add(name);
                 }
-            } catch (IllegalArgumentException e) {
+            } catch (IllegalArgumentException | NullPointerException e) {
                 throw new BadRequestException("Unknown permission: " + value);
             }
         }
