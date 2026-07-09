@@ -94,8 +94,8 @@ public class MailConfigResolver {
 
     private ResolvedMailConfig fromWorkspace(WorkspaceMailConfig ws) {
         String password = null;
-        if (ws.getPasswordEnc() != null && !ws.getPasswordEnc().isBlank()) {
-            password = secretCipher.decrypt(ws.getPasswordEnc());
+        if (ws.isAuth() && ws.getPasswordEnc() != null && !ws.getPasswordEnc().isBlank()) {
+            password = secretCipher.decryptForWorkspace(ws.getWorkspaceId(), ws.getPasswordEnc());
         }
         String from = (ws.getFromAddress() == null || ws.getFromAddress().isBlank())
                 ? ws.getUsername()

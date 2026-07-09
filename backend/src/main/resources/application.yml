@@ -34,6 +34,14 @@ connex:
     audit:
         integrity:
             hmac-secret: ${CONNEX_AUDIT_INTEGRITY_HMAC_SECRET:}
+    secret-store:
+        # Active envelope key id and Base64 AES key for never-searched integration secrets.
+        # During rotation, keep older keys under connex.secret-store.keys.<key-id> until
+        # all rows with that key_id have been rewrapped.
+        key-id: ${CONNEX_SECRET_STORE_KEY_ID:local-v1}
+        master-key: ${CONNEX_SECRET_STORE_MASTER_KEY:}
+        # keys:
+        #   old-v1: ${CONNEX_SECRET_STORE_KEY_OLD_V1:}
     cors:
         allowed-origins: ${CONNEX_CORS_ALLOWED_ORIGINS:http://localhost:3000}
     websocket:
@@ -109,10 +117,8 @@ connex:
         # Instance-level kill switch for the whole SSO subsystem (#296). Default false so a
         # deployment ships with OIDC/SAML dormant; set true only where enterprise SSO is offered.
         enabled: ${CONNEX_SSO_ENABLED:false}
-        # Per-organization enterprise SSO/IdP (#296). secret-key is a Base64 AES key
-        # (16/24/32 bytes) that encrypts each org's OIDC client secret at rest; it is
-        # required only once an org stores a client secret, and rotating it invalidates
-        # previously stored secrets.
+        # Per-organization enterprise SSO/IdP (#296). secret-key is the legacy Base64
+        # AES key used only to decrypt SSO secrets stored before the central secret store.
         secret-key: ${CONNEX_SSO_SECRET_KEY:}
         # Whether an OIDC issuer may resolve to a loopback/private address. Defaults false so the
         # server-side discovery fetch cannot be aimed at internal services or the cloud metadata
@@ -153,7 +159,7 @@ connex:
         # (password-reset.email-enabled / email-change.email-enabled) — enabling mail alone
         # does NOT start sending reset/verification mail. It is the fallback sender for
         # workspaces without their own SMTP. A workspace can override host/from via
-        # Settings → Email; its SMTP password is AES/GCM-encrypted at rest with secret-key.
+        # Settings → Email; its SMTP password is stored in the central secret store.
         # app-base-url is the frontend origin used to build invite links (never a request header).
         enabled: ${CONNEX_MAIL_ENABLED:false}
         host: ${CONNEX_MAIL_HOST:}
@@ -168,8 +174,8 @@ connex:
         connection-timeout-ms: ${CONNEX_MAIL_CONNECTION_TIMEOUT_MS:10000}
         timeout-ms: ${CONNEX_MAIL_TIMEOUT_MS:10000}
         write-timeout-ms: ${CONNEX_MAIL_WRITE_TIMEOUT_MS:10000}
-        # Base64 AES key (16/24/32 bytes) for encrypting per-workspace SMTP passwords.
-        # Required once a workspace stores its own password; rotating it invalidates them.
+        # Legacy Base64 AES key used only to decrypt workspace SMTP passwords stored
+        # before the central secret store.
         secret-key: ${CONNEX_MAIL_SECRET_KEY:}
         app-base-url: ${CONNEX_MAIL_APP_BASE_URL:http://localhost:3000}
         # Allow workspace-supplied SMTP hosts that resolve to private/loopback/link-local

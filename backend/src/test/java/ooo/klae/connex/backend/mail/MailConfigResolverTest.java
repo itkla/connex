@@ -1,8 +1,11 @@
 package ooo.klae.connex.backend.mail;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -12,6 +15,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import ooo.klae.connex.backend.beans.WorkspaceMailConfig;
+import ooo.klae.connex.backend.dto.MailConfigDto;
 import ooo.klae.connex.backend.mappers.MailConfigMapper;
 
 /**
@@ -65,17 +69,38 @@ class MailConfigResolverTest {
         enableInstance();
         WorkspaceMailConfig ws = new WorkspaceMailConfig();
         ws.setEnabled(true);
+        ws.setWorkspaceId(7);
         ws.setHost("smtp.workspace.test");
         ws.setFromAddress("team@workspace.test");
         ws.setPort(2525);
+        ws.setAuth(true);
         ws.setPasswordEnc("ENC");
         when(mailConfigMapper.findByWorkspace(7)).thenReturn(ws);
-        when(secretCipher.decrypt("ENC")).thenReturn("decrypted-pw");
+        when(secretCipher.decryptForWorkspace(7, "ENC")).thenReturn("decrypted-pw");
 
         ResolvedMailConfig resolved = resolver.resolveForWorkspace(7);
         assertEquals("smtp.workspace.test", resolved.host());
         assertEquals(2525, resolved.port());
         assertEquals("decrypted-pw", resolved.password());
+    }
+
+    @Test
+    void resolveForWorkspace_authDisabledDoesNotDecryptStalePassword() {
+        WorkspaceMailConfig ws = new WorkspaceMailConfig();
+        ws.setEnabled(true);
+        ws.setAuth(false);
+        ws.setWorkspaceId(7);
+        ws.setHost("smtp.workspace.test");
+        ws.setFromAddress("team@workspace.test");
+        ws.setPort(2525);
+        ws.setPasswordEnc("ENC");
+        when(mailConfigMapper.findByWorkspace(7)).thenReturn(ws);
+
+        ResolvedMailConfig resolved = resolver.resolveWorkspaceOnly(7);
+
+        assertNull(resolved.password());
+        verify(secretCipher, never()).decryptForWorkspace(7, "ENC");
+        assertFalse(MailConfigDto.from(ws).isHasPassword());
     }
 
     @Test

@@ -27,4 +27,13 @@ public record ResolvedMailConfig(
         return host != null && !host.isBlank()
                 && fromAddress != null && !fromAddress.isBlank();
     }
+
+    @Override
+    public String toString() {
+        return "ResolvedMailConfig[host=" + host + ", port=" + port + ", username=" + username
+                + ", password=<redacted>, fromAddress=" + fromAddress + ", fromName=" + fromName
+                + ", starttls=" + starttls + ", ssl=" + ssl + ", auth=" + auth
+                + ", connectionTimeoutMs=" + connectionTimeoutMs + ", timeoutMs=" + timeoutMs
+                + ", writeTimeoutMs=" + writeTimeoutMs + "]";
+    }
 }

@@ -1,6 +1,7 @@
 package ooo.klae.connex.backend.beans;
 
 import lombok.Data;
+import lombok.ToString;
 
 /**
  * A single organization's SSO/IdP connection (one row per org). Holds the shared
@@ -9,6 +10,7 @@ import lombok.Data;
  * the raw value never leaves the service layer and is never returned to a client.
  */
 @Data
+@ToString(exclude = { "oidcClientSecretEnc", "samlSpPrivateKeyEnc" })
 public class SsoConnection {
     private int id;
     private int orgId;

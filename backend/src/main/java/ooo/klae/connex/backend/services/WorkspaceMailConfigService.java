@@ -8,6 +8,7 @@ import java.util.Set;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.beans.User;
@@ -71,6 +72,7 @@ public class WorkspaceMailConfigService {
      * @param request the submitted config
      * @return the saved config view
      */
+    @Transactional
     public MailConfigDto saveConfig(int workspaceId, int actorId, MailConfigRequest request) {
         workspaceService.requirePermission(workspaceId, actorId, Permission.WORKSPACE_SETTINGS);
         sessionSecurityService.requireRecentAuthentication(actorId);
@@ -99,13 +101,19 @@ public class WorkspaceMailConfigService {
         config.setSsl(request.isSsl());
         config.setAuth(request.isAuth());
 
-        if (!isBlank(request.getPassword())) {
-            config.setPasswordEnc(secretCipher.encrypt(request.getPassword()));
+        boolean clearStoredPassword = !request.isEnabled() || !request.isAuth();
+        if (clearStoredPassword) {
+            config.setPasswordEnc(null);
+        } else if (!isBlank(request.getPassword())) {
+            config.setPasswordEnc(secretCipher.encryptForWorkspace(workspaceId, request.getPassword()));
         } else if (existing != null) {
             config.setPasswordEnc(existing.getPasswordEnc());
         }
 
         mailConfigMapper.upsert(config);
+        if (clearStoredPassword && existing != null) {
+            secretCipher.deleteReferenceForWorkspace(workspaceId, existing.getPasswordEnc());
+        }
         auditService.record("workspace.mail_config.save", "workspace", workspaceId, config.getHost(),
                 "Updated workspace email settings", null);
         return MailConfigDto.from(mailConfigMapper.findByWorkspace(workspaceId));
@@ -116,10 +124,15 @@ public class WorkspaceMailConfigService {
      * @param workspaceId the workspace
      * @param actorId the requesting user
      */
+    @Transactional
     public void deleteConfig(int workspaceId, int actorId) {
         workspaceService.requirePermission(workspaceId, actorId, Permission.WORKSPACE_SETTINGS);
         sessionSecurityService.requireRecentAuthentication(actorId);
+        WorkspaceMailConfig existing = mailConfigMapper.findByWorkspace(workspaceId);
         mailConfigMapper.delete(workspaceId);
+        if (existing != null) {
+            secretCipher.deleteReferenceForWorkspace(workspaceId, existing.getPasswordEnc());
+        }
         auditService.record("workspace.mail_config.delete", "workspace", workspaceId, null,
                 "Removed workspace email settings", null);
     }

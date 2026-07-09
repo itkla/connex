@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -18,9 +19,15 @@ import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.dto.SsoConnectionDto;
 import ooo.klae.connex.backend.dto.SsoConnectionRequest;
 import ooo.klae.connex.backend.dto.SsoDiscoveryDto;
+import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.mappers.OrgMemberMapper;
+import ooo.klae.connex.backend.mappers.SecretValueMapper;
 import ooo.klae.connex.backend.mappers.SsoConnectionMapper;
+import ooo.klae.connex.backend.secrets.SecretPurpose;
+import ooo.klae.connex.backend.secrets.SecretReference;
+import ooo.klae.connex.backend.secrets.SecretStore;
+import ooo.klae.connex.backend.secrets.StoredSecret;
 import ooo.klae.connex.backend.sso.SsoSecretCipher;
 
 /**
@@ -36,7 +43,9 @@ class SsoConnectionServiceTest extends AbstractServiceTest {
 
     @Autowired private SsoConnectionService ssoConnectionService;
     @Autowired private SsoConnectionMapper ssoConnectionMapper;
+    @Autowired private SecretValueMapper secretValueMapper;
     @Autowired private SsoSecretCipher ssoSecretCipher;
+    @Autowired private SecretStore secretStore;
     @Autowired private OrgMemberMapper orgMemberMapper;
 
     @BeforeEach
@@ -73,10 +82,18 @@ class SsoConnectionServiceTest extends AbstractServiceTest {
         int orgId = workspaceMapper.getOrgId(workspace.getId());
         SsoConnection stored = ssoConnectionMapper.findByOrg(orgId);
         assertNotNull(stored.getOidcClientSecretEnc(), "the secret must be persisted");
+        assertTrue(SecretReference.isReference(stored.getOidcClientSecretEnc()),
+                "the feature row must store a central secret reference");
         assertNotEquals(PLAINTEXT_SECRET, stored.getOidcClientSecretEnc(), "the secret must not be stored in plaintext");
         assertFalse(stored.getOidcClientSecretEnc().contains(PLAINTEXT_SECRET),
                 "the ciphertext must not embed the plaintext");
-        assertEquals(PLAINTEXT_SECRET, ssoSecretCipher.decrypt(stored.getOidcClientSecretEnc()),
+        StoredSecret secret = secretValueMapper.findById(SecretReference.parse(stored.getOidcClientSecretEnc()).id());
+        assertNotNull(secret);
+        assertFalse(secret.getCiphertext().contains(PLAINTEXT_SECRET),
+                "the central ciphertext must not embed the plaintext");
+        assertFalse(secret.getEncryptedDataKey().contains(PLAINTEXT_SECRET),
+                "the wrapped data key must not embed the plaintext");
+        assertEquals(PLAINTEXT_SECRET, ssoSecretCipher.decryptOidcClientSecret(orgId, stored.getOidcClientSecretEnc()),
                 "the stored blob must decrypt back to the original secret");
     }
 
@@ -95,6 +112,48 @@ class SsoConnectionServiceTest extends AbstractServiceTest {
         assertEquals("client-xyz", saved.getOidcClientId());
         assertEquals(firstEnc, ssoConnectionMapper.findByOrg(orgId).getOidcClientSecretEnc(),
                 "a blank secret must keep the previously stored ciphertext");
+    }
+
+    @Test
+    void save_switchToSaml_clearsOidcSecretReference() {
+        ssoConnectionService.save(workspace.getId(), currentUser.getId(), oidcRequest());
+        int orgId = workspaceMapper.getOrgId(workspace.getId());
+        String oidcReference = ssoConnectionMapper.findByOrg(orgId).getOidcClientSecretEnc();
+
+        SsoConnectionRequest saml = new SsoConnectionRequest();
+        saml.setProtocol("saml");
+        saml.setEnabled(true);
+        saml.setJitWorkspaceId(workspace.getId());
+        saml.setSamlIdpEntityId("https://idp.example.com/saml");
+        saml.setSamlSsoUrl("https://idp.example.com/saml/sso");
+        ssoConnectionService.save(workspace.getId(), currentUser.getId(), saml);
+
+        SsoConnection stored = ssoConnectionMapper.findByOrg(orgId);
+        assertNull(stored.getOidcClientSecretEnc());
+        assertFalse(secretStore.exists(SecretPurpose.ORG_SSO_OIDC_CLIENT_SECRET, orgId, oidcReference));
+        assertTrue(SecretReference.isReference(stored.getSamlSpPrivateKeyEnc()));
+        assertNotNull(stored.getSamlSpCertificate());
+    }
+
+    @Test
+    void save_oidcBlankSecretDoesNotReuseOffProtocolStaleSecret() {
+        int orgId = workspaceMapper.getOrgId(workspace.getId());
+        SsoConnection stale = new SsoConnection();
+        stale.setOrgId(orgId);
+        stale.setProtocol("saml");
+        stale.setEnabled(false);
+        stale.setJitWorkspaceId(workspace.getId());
+        stale.setDefaultRole("member");
+        stale.setOidcScopes("openid,email,profile");
+        stale.setOidcClientSecretEnc("legacy-off-protocol-secret");
+        stale.setSamlIdpEntityId("https://idp.example.com/saml");
+        ssoConnectionMapper.upsert(stale);
+
+        SsoConnectionRequest update = oidcRequest();
+        update.setOidcClientSecret(null);
+
+        assertThrows(BadRequestException.class,
+                () -> ssoConnectionService.save(workspace.getId(), currentUser.getId(), update));
     }
 
     @Test

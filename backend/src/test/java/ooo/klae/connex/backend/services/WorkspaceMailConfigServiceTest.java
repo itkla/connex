@@ -17,6 +17,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.transaction.annotation.Transactional;
 
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.beans.WorkspaceMailConfig;
@@ -80,7 +81,7 @@ class WorkspaceMailConfigServiceTest {
 
     @Test
     void saveConfig_encryptsPassword_neverStoresPlaintext() {
-        when(secretCipher.encrypt("rawpw")).thenReturn("ENC::rawpw");
+        when(secretCipher.encryptForWorkspace(3, "rawpw")).thenReturn("secret:v1:99");
         MailConfigRequest req = enabledRequest();
         req.setPassword("rawpw");
 
@@ -88,9 +89,9 @@ class WorkspaceMailConfigServiceTest {
 
         verify(sessionSecurityService).requireRecentAuthentication(9);
         ArgumentCaptor<WorkspaceMailConfig> captor = ArgumentCaptor.forClass(WorkspaceMailConfig.class);
-        verify(secretCipher).encrypt("rawpw");
+        verify(secretCipher).encryptForWorkspace(3, "rawpw");
         verify(mailConfigMapper).upsert(captor.capture());
-        assertEquals("ENC::rawpw", captor.getValue().getPasswordEnc());
+        assertEquals("secret:v1:99", captor.getValue().getPasswordEnc());
         assertFalse("rawpw".equals(captor.getValue().getPasswordEnc()), "password must be stored encrypted");
     }
 
@@ -105,7 +106,49 @@ class WorkspaceMailConfigServiceTest {
         ArgumentCaptor<WorkspaceMailConfig> captor = ArgumentCaptor.forClass(WorkspaceMailConfig.class);
         verify(mailConfigMapper).upsert(captor.capture());
         assertEquals("OLD-ENC", captor.getValue().getPasswordEnc());
-        verify(secretCipher, never()).encrypt(any());
+        verify(secretCipher, never()).encryptForWorkspace(eq(3), any());
+    }
+
+    @Test
+    void saveConfig_disabledClearsStoredPassword() {
+        WorkspaceMailConfig existing = new WorkspaceMailConfig();
+        existing.setPasswordEnc("secret:v1:88");
+        when(mailConfigMapper.findByWorkspace(3)).thenReturn(existing);
+        MailConfigRequest req = enabledRequest();
+        req.setEnabled(false);
+
+        service().saveConfig(3, 9, req);
+
+        ArgumentCaptor<WorkspaceMailConfig> captor = ArgumentCaptor.forClass(WorkspaceMailConfig.class);
+        verify(mailConfigMapper).upsert(captor.capture());
+        assertEquals(null, captor.getValue().getPasswordEnc());
+        verify(secretCipher).deleteReferenceForWorkspace(3, "secret:v1:88");
+    }
+
+    @Test
+    void saveConfig_authDisabledClearsStoredPassword() {
+        WorkspaceMailConfig existing = new WorkspaceMailConfig();
+        existing.setPasswordEnc("secret:v1:89");
+        when(mailConfigMapper.findByWorkspace(3)).thenReturn(existing);
+        MailConfigRequest req = enabledRequest();
+        req.setAuth(false);
+
+        service().saveConfig(3, 9, req);
+
+        ArgumentCaptor<WorkspaceMailConfig> captor = ArgumentCaptor.forClass(WorkspaceMailConfig.class);
+        verify(mailConfigMapper).upsert(captor.capture());
+        assertEquals(null, captor.getValue().getPasswordEnc());
+        verify(secretCipher).deleteReferenceForWorkspace(3, "secret:v1:89");
+    }
+
+    @Test
+    void saveAndDeleteConfigAreTransactional() throws Exception {
+        assertTrue(WorkspaceMailConfigService.class
+            .getMethod("saveConfig", int.class, int.class, MailConfigRequest.class)
+            .isAnnotationPresent(Transactional.class));
+        assertTrue(WorkspaceMailConfigService.class
+            .getMethod("deleteConfig", int.class, int.class)
+            .isAnnotationPresent(Transactional.class));
     }
 
     @Test
@@ -209,10 +252,14 @@ class WorkspaceMailConfigServiceTest {
 
     @Test
     void deleteConfig_deletesAndRequiresPermission() {
+        WorkspaceMailConfig existing = new WorkspaceMailConfig();
+        existing.setPasswordEnc("secret:v1:44");
+        when(mailConfigMapper.findByWorkspace(3)).thenReturn(existing);
         service().deleteConfig(3, 9);
         verify(workspaceService).requirePermission(3, 9, Permission.WORKSPACE_SETTINGS);
         verify(sessionSecurityService).requireRecentAuthentication(9);
         verify(mailConfigMapper).delete(3);
+        verify(secretCipher).deleteReferenceForWorkspace(3, "secret:v1:44");
         assertTrue(true);
     }
 }
