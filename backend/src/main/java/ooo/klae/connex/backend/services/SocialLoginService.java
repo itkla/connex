@@ -3,6 +3,8 @@ package ooo.klae.connex.backend.services;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.Map;
+
 import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.beans.FederatedIdentity;
 import ooo.klae.connex.backend.beans.User;
@@ -40,6 +42,7 @@ public class SocialLoginService {
     private final UserMapper userMapper;
     private final SsoUserProvisioner ssoUserProvisioner;
     private final SsoConnectionService ssoConnectionService;
+    private final AuditService auditService;
 
     /**
      * Resolves an authenticated social identity to a Connex login outcome.
@@ -78,6 +81,8 @@ public class SocialLoginService {
         }
 
         User user = ssoUserProvisioner.provision(email, displayName, true);
+        auditService.record("auth.social_user.provision", "user", user.getId(), user.getDisplayName(),
+                "Social login user provisioned", Map.of("provider", provider));
         FederatedIdentity link = new FederatedIdentity();
         link.setUserId(user.getId());
         link.setOrgId(null);
@@ -85,6 +90,8 @@ public class SocialLoginService {
         link.setIssuer(issuer);
         link.setExternalSubject(subject);
         federatedIdentityMapper.insert(link);
+        auditService.record("auth.federated_identity.link", "user", user.getId(), user.getDisplayName(),
+                "Federated identity linked", Map.of("provider", provider));
 
         return SsoLoginResult.login(user);
     }

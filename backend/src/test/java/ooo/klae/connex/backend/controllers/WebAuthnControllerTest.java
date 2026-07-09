@@ -6,6 +6,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -33,6 +34,7 @@ import ooo.klae.connex.backend.dto.PasskeyRegistrationOptionsRequest;
 import ooo.klae.connex.backend.dto.RenamePasskeyRequest;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.RequestBodyTooLargeException;
+import ooo.klae.connex.backend.services.AuditService;
 import ooo.klae.connex.backend.services.AuthService;
 import ooo.klae.connex.backend.services.LoginRateLimiter;
 import ooo.klae.connex.backend.services.SessionSecurityService;
@@ -54,6 +56,7 @@ class WebAuthnControllerTest {
     private final ClientIpResolver clientIpResolver = mock(ClientIpResolver.class);
     private final SsoConnectionService ssoConnectionService = mock(SsoConnectionService.class);
     private final SessionSecurityService sessionSecurityService = mock(SessionSecurityService.class);
+    private final AuditService auditService = mock(AuditService.class);
     private final WebAuthnController controller = new WebAuthnController(
         webAuthnService,
         authService,
@@ -63,7 +66,8 @@ class WebAuthnControllerTest {
         loginRateLimiter,
         clientIpResolver,
         ssoConnectionService,
-        sessionSecurityService);
+        sessionSecurityService,
+        auditService);
 
     @AfterEach
     void clearSecurityContext() {
@@ -167,6 +171,8 @@ class WebAuthnControllerTest {
 
         verify(sessionSecurityService).requireRecentAuthentication(7);
         verify(webAuthnService).rename(7, "credential-id", "Work key");
+        verify(auditService).record(eq("auth.passkey.rename"), eq("user"), eq(7), eq("User 7"),
+            eq("Passkey renamed"), any());
     }
 
     @Test
@@ -178,6 +184,8 @@ class WebAuthnControllerTest {
 
         verify(sessionSecurityService).requireRecentAuthentication(7);
         verify(webAuthnService).delete(7, "credential-id");
+        verify(auditService).record(eq("auth.passkey.delete"), eq("user"), eq(7), eq("User 7"),
+            eq("Passkey removed"), any());
     }
 
     @Test
@@ -194,14 +202,91 @@ class WebAuthnControllerTest {
     }
 
     @Test
-    void stepUpVerify_requiresPendingChallenge() {
+    void authenticateVerifyAuditsFailedPasskeyAttempt() {
         MockHttpServletRequest request = new MockHttpServletRequest();
         MockHttpServletResponse response = new MockHttpServletResponse();
+        PublicKeyCredentialRequestOptions options = mock(PublicKeyCredentialRequestOptions.class);
+        WebAuthnJsonMapper mapper = mock(WebAuthnJsonMapper.class);
+        WebAuthnController loginController = controller(mapper);
+        when(clientIpResolver.resolve(request)).thenReturn("127.0.0.1");
+        when(requestOptions.load(request)).thenReturn(options);
+        when(mapper.read(eq("{}"), org.mockito.ArgumentMatchers.<TypeReference<PublicKeyCredential<AuthenticatorAssertionResponse>>>any()))
+            .thenThrow(new BadCredentialsException("bad assertion"));
+
+        assertThrows(BadCredentialsException.class, () -> loginController.authenticateVerify("{}", request, response));
+
+        verify(loginRateLimiter).recordFailure(eq("127.0.0.1"), isNull(), anyLong());
+        verify(auditService).recordFailure(eq("auth.login.passkey"), eq("user"), isNull(), eq("127.0.0.1"),
+            eq("Failed passkey login attempt"), eq("bad assertion"));
+    }
+
+    @Test
+    void authenticateVerifyAuditsMissingPasskeyChallenge() {
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        when(clientIpResolver.resolve(request)).thenReturn("127.0.0.1");
+
+        assertThrows(BadCredentialsException.class, () -> controller.authenticateVerify("{}", request, response));
+
+        verify(auditService).recordFailure(eq("auth.login.passkey"), eq("user"), isNull(), eq("127.0.0.1"),
+            eq("Passkey login missing challenge"), isNull());
+    }
+
+    @Test
+    void authenticateVerifyAuditsSsoEnforcedPasskeyRefusal() {
+        User user = user(7);
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        PublicKeyCredentialRequestOptions options = mock(PublicKeyCredentialRequestOptions.class);
+        PublicKeyCredential<AuthenticatorAssertionResponse> assertion = mock();
+        WebAuthnJsonMapper mapper = mock(WebAuthnJsonMapper.class);
+        WebAuthnController loginController = controller(mapper);
+        when(clientIpResolver.resolve(request)).thenReturn("127.0.0.1");
+        when(requestOptions.load(request)).thenReturn(options);
+        when(mapper.read(eq("{}"), org.mockito.ArgumentMatchers.<TypeReference<PublicKeyCredential<AuthenticatorAssertionResponse>>>any()))
+            .thenReturn(assertion);
+        when(webAuthnService.finishLogin(options, assertion)).thenReturn(user);
+        when(ssoConnectionService.isSsoEnforcedForUser(7)).thenReturn(true);
+
+        assertThrows(ooo.klae.connex.backend.exceptions.ForbiddenException.class,
+            () -> loginController.authenticateVerify("{}", request, response));
+
+        verify(auditService).recordFailure(eq("auth.login.passkey_sso_enforced"), eq("user"), eq(7),
+            eq("User 7"), eq("Passkey login refused; SSO enforced"), isNull());
+    }
+
+    @Test
+    void stepUpVerify_requiresPendingChallenge() {
+        User user = user(7);
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        when(authService.getCurrentUser()).thenReturn(user);
 
         assertThrows(BadCredentialsException.class,
             () -> controller.stepUpVerify("{}", request, response));
 
         verify(sessionSecurityService, never()).markStepUp(any(), anyInt());
+        verify(auditService).recordFailure(eq("auth.step_up.passkey"), eq("user"), eq(7), eq("User 7"),
+            eq("Passkey step-up missing challenge"), isNull());
+    }
+
+    @Test
+    void stepUpVerifyAuditsFailedAssertion() {
+        User user = user(7);
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        PublicKeyCredentialRequestOptions options = mock(PublicKeyCredentialRequestOptions.class);
+        WebAuthnJsonMapper mapper = mock(WebAuthnJsonMapper.class);
+        WebAuthnController stepUpController = controller(mapper);
+        when(authService.getCurrentUser()).thenReturn(user);
+        when(requestOptions.load(request)).thenReturn(options);
+        when(mapper.read(eq("{}"), org.mockito.ArgumentMatchers.<TypeReference<PublicKeyCredential<AuthenticatorAssertionResponse>>>any()))
+            .thenThrow(new BadCredentialsException("bad step-up"));
+
+        assertThrows(BadCredentialsException.class, () -> stepUpController.stepUpVerify("{}", request, response));
+
+        verify(auditService).recordFailure(eq("auth.step_up.passkey"), eq("user"), eq(7), eq("User 7"),
+            eq("Failed passkey step-up attempt"), eq("bad step-up"));
     }
 
     @Test
@@ -224,6 +309,8 @@ class WebAuthnControllerTest {
 
         verify(webAuthnService).finishStepUp(any(), eq(options), eq(assertion));
         verify(sessionSecurityService).markStepUp(request, 7);
+        verify(auditService).record(eq("auth.step_up.passkey"), eq("user"), eq(7), eq("User 7"),
+            eq("Passkey step-up completed"), isNull());
         assertEquals("Recent authentication refreshed", result.get("message"));
     }
 
@@ -242,11 +329,14 @@ class WebAuthnControllerTest {
             .thenReturn(assertion);
         when(webAuthnService.finishLogin(options, assertion)).thenReturn(user);
         when(ssoConnectionService.isSsoEnforcedForUser(7)).thenReturn(false);
+        when(authService.establishAuthenticatedSession(user, request, response)).thenReturn(user);
 
         loginController.authenticateVerify("{}", request, response);
 
         verify(authService).establishAuthenticatedSession(user, request, response);
         verify(sessionSecurityService).markStepUp(request, 7);
+        verify(auditService).record(eq("auth.login.passkey"), eq("user"), eq(7), eq("User 7"),
+            eq("User 7 logged in with passkey"), isNull());
     }
 
     private WebAuthnController controller(WebAuthnJsonMapper mapper) {
@@ -259,13 +349,15 @@ class WebAuthnControllerTest {
             loginRateLimiter,
             clientIpResolver,
             ssoConnectionService,
-            sessionSecurityService);
+            sessionSecurityService,
+            auditService);
     }
 
     private static User user(int id) {
         User user = new User();
         user.setId(id);
         user.setUsername("user" + id);
+        user.setDisplayName("User " + id);
         return user;
     }
 

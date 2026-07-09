@@ -24,6 +24,7 @@ class OrgAuditViewTest extends AbstractServiceTest {
     @Autowired private OrgMemberMapper orgMemberMapper;
     @Autowired private OrganizationMapper organizationMapper;
     @Autowired private TenantContext tenantContext;
+    @Autowired private WorkspaceService workspaceService;
 
     @Test
     void orgActionIsAttributedToItsOrgAndVisibleInTheTrail() {
@@ -52,6 +53,19 @@ class OrgAuditViewTest extends AbstractServiceTest {
         assertTrue(auditService.recentForOrg(orgId, 50, 0).stream()
                 .noneMatch(e -> "company.update".equals(e.getAction())),
             "a workspace record action (org_id set, workspace_id set) must not leak into the org-plane trail");
+    }
+
+    @Test
+    void workspaceCreationIsVisibleInTheOrgTrail() {
+        int orgId = workspaceMapper.getOrgId(workspace.getId());
+        orgMemberMapper.addMember(orgId, currentUser.getId(), "owner");
+
+        workspaceService.createWorkspace("Expansion " + unique(), currentUser.getId());
+
+        assertTrue(auditService.recentForOrg(orgId, 50, 0).stream()
+                .anyMatch(e -> "org.workspace.create".equals(e.getAction())
+                        && Integer.valueOf(orgId).equals(e.getOrgId()) && e.getWorkspaceId() == null),
+            "workspace creation must be attributed to the organization and visible in the org audit trail");
     }
 
     @Test

@@ -82,7 +82,7 @@ Automation rules (`RuleService` CRUD + `RuleEngineService` execution, issue #54)
 
 ## Commands
 
-- Run (local): `SPRING_PROFILES_ACTIVE=dev ./gradlew bootRun` — the `dev` profile (`application-dev.yml`) turns the session cookie's `Secure` flag off so login works over plain-HTTP `localhost`. Without it the fail-closed default (`Secure=true`) drops `JSESSIONID` over HTTP and you cannot log in locally.
+- Run (local): `SPRING_PROFILES_ACTIVE=dev ./gradlew bootRun` — the `dev` profile (`application-dev.yml`) turns the session cookie's `Secure` flag off so login works over plain-HTTP `localhost` and supplies a local-only audit-integrity HMAC secret. Without it the fail-closed default (`Secure=true`) drops `JSESSIONID` over HTTP and non-dev startup requires `CONNEX_AUDIT_INTEGRITY_HMAC_SECRET`.
 - Test: `./gradlew test`
 - Build: `./gradlew build`
 - DB up: `docker compose up -d db` (from `backend/`)

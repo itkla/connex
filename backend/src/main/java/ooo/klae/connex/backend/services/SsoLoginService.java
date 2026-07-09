@@ -3,6 +3,8 @@ package ooo.klae.connex.backend.services;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.Map;
+
 import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.beans.FederatedIdentity;
 import ooo.klae.connex.backend.beans.SsoConnection;
@@ -48,6 +50,7 @@ public class SsoLoginService {
     private final WorkspaceService workspaceService;
     private final OrgAllowedDomainService orgAllowedDomainService;
     private final SsoUserProvisioner ssoUserProvisioner;
+    private final AuditService auditService;
 
     /**
      * Resolves an authenticated IdP identity to a Connex login outcome.
@@ -101,6 +104,8 @@ public class SsoLoginService {
             }
         } else {
             user = ssoUserProvisioner.provision(email, displayName, true);
+            auditService.record("org.sso_user.provision", "organization", orgId, user.getDisplayName(),
+                    "SSO user provisioned", Map.of("userId", user.getId(), "provider", provider));
         }
 
         workspaceService.ensureActiveMember(connection.getJitWorkspaceId(), user.getId(),
@@ -113,6 +118,8 @@ public class SsoLoginService {
         link.setIssuer(issuer);
         link.setExternalSubject(subject);
         federatedIdentityMapper.insert(link);
+        auditService.record("org.federated_identity.link", "organization", orgId, user.getDisplayName(),
+                "Federated identity linked", Map.of("userId", user.getId(), "provider", provider));
 
         return SsoLoginResult.login(user);
     }

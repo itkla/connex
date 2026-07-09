@@ -51,6 +51,7 @@ class SsoLinkAndEnforceTest extends AbstractServiceTest {
     @Autowired private SsoConnectionMapper ssoConnectionMapper;
     @Autowired private OrganizationMapper organizationMapper;
     @Autowired private PasswordEncoder passwordEncoder;
+    @Autowired private AuditService auditService;
 
     private int orgId;
 
@@ -72,6 +73,14 @@ class SsoLinkAndEnforceTest extends AbstractServiceTest {
         assertNotNull(identity, "a correct-password confirm must link the IdP identity");
         assertEquals(user.getId(), identity.getUserId());
         assertEquals(orgId, identity.getOrgId());
+        assertTrue(auditService.recentForOrg(orgId, 50, 0).stream()
+                .anyMatch(entry -> "org.federated_identity.link".equals(entry.getAction())
+                        && Integer.valueOf(orgId).equals(entry.getOrgId())),
+                "enterprise SSO account-link confirmation must be visible in the org audit trail");
+        assertTrue(auditService.recentForOrg(orgId, 50, 0).stream()
+                .anyMatch(entry -> "org.login.federated_link".equals(entry.getAction())
+                        && Integer.valueOf(orgId).equals(entry.getOrgId())),
+                "enterprise SSO link-login must be visible in the org audit trail");
 
         assertThrows(ResourceNotFoundException.class, () ->
                 ssoLinkService.confirm(token, "Correct1!", "203.0.113.10",

@@ -85,6 +85,7 @@ public class TenantScopeInterceptor implements Interceptor {
      */
     public static final Set<String> CONTROL_PLANE_NAMESPACES = Set.of(
         MAPPERS + "AllowedDomainMapper",
+        MAPPERS + "AuditIntegrityMapper",
         MAPPERS + "OrgAllowedDomainMapper",
         MAPPERS + "EmailChangeTokenMapper",
         MAPPERS + "FederatedIdentityMapper",
@@ -113,13 +114,14 @@ public class TenantScopeInterceptor implements Interceptor {
      * ({@code /api/auth/**} is excluded from tenant resolution) may reach with an
      * explicit membership-validated workspace id; the statement itself anchors
      * {@code workspace_id} in SQL, so it is safe without a resolved context. The
-     * org-scoped audit read is org-filtered ({@code org_id}) and gated by org
-     * membership (an org admin needn't have any active workspace), so it too may
+     * org-scoped audit reads are org-filtered ({@code org_id}) and gated by org
+     * membership (an org admin needn't have any active workspace), so they too may
      * run without a resolved workspace context.
      */
     private static final Set<String> EXEMPT_STATEMENTS = Set.of(
         MAPPERS + "AuditLogMapper.insert",
         MAPPERS + "AuditLogMapper.findRecentByOrg",
+        MAPPERS + "AuditLogMapper.findOrgExport",
         MAPPERS + "RoleMapper.findPermissions"
     );
 

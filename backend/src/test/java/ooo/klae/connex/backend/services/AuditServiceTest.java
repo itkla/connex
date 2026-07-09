@@ -2,6 +2,7 @@ package ooo.klae.connex.backend.services;
 
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.List;
 
@@ -13,6 +14,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 import tools.jackson.databind.ObjectMapper;
 
+import ooo.klae.connex.backend.beans.AuditLog;
 import ooo.klae.connex.backend.mappers.AuditLogMapper;
 import ooo.klae.connex.backend.tenant.TenantContext;
 import ooo.klae.connex.backend.util.ClientIpResolver;
@@ -20,6 +22,7 @@ import ooo.klae.connex.backend.util.ClientIpResolver;
 @ExtendWith(MockitoExtension.class)
 class AuditServiceTest {
     @Mock private AuditLogMapper auditLogMapper;
+    @Mock private AuditIntegrityService auditIntegrityService;
     @Mock private ObjectMapper objectMapper;
     @Mock private TenantContext tenantContext;
 
@@ -27,7 +30,7 @@ class AuditServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new AuditService(auditLogMapper, objectMapper, tenantContext, new ClientIpResolver(""));
+        service = new AuditService(auditLogMapper, auditIntegrityService, objectMapper, tenantContext, new ClientIpResolver(""));
         when(tenantContext.getWorkspaceId()).thenReturn(7);
     }
 
@@ -78,5 +81,31 @@ class AuditServiceTest {
         when(auditLogMapper.findByEntity(7, "person", 3, 200, 0)).thenReturn(List.of());
         service.forEntity("person", 3, 999, -5);
         verify(auditLogMapper).findByEntity(7, "person", 3, 200, 0);
+    }
+
+    @Test
+    void exportRecentScopesToWorkspaceAndCapsLimitAtTenThousand() {
+        AuditLog entry = new AuditLog();
+        entry.setAction("audit.export");
+        entry.setSummary("=formula");
+        entry.setRowHash("abc123");
+        when(auditLogMapper.findWorkspaceExport(7, 10_000, 0)).thenReturn(List.of(entry));
+        when(auditIntegrityService.integrityPayload(entry)).thenReturn("{\"summary\":\"=formula\"}");
+
+        String csv = service.exportRecent(50_000, -1);
+
+        verify(auditLogMapper).findWorkspaceExport(7, 10_000, 0);
+        assertTrue(csv.contains("rowHash"));
+        assertTrue(csv.contains("integrityPayload"));
+        assertTrue(csv.contains("'=formula"));
+        assertTrue(csv.contains("\"{\"\"summary\"\":\"\"=formula\"\"}\""));
+        assertTrue(csv.contains("abc123"));
+    }
+
+    @Test
+    void exportForEntityScopesToWorkspaceAndForwardsEntity() {
+        when(auditLogMapper.findByEntity(7, "company", 12, 25, 50)).thenReturn(List.of());
+        service.exportForEntity("company", 12, 25, 50);
+        verify(auditLogMapper).findByEntity(7, "company", 12, 25, 50);
     }
 }
