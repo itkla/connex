@@ -43,7 +43,7 @@ public class WorkspaceCookie {
         ResponseCookie.ResponseCookieBuilder builder = ResponseCookie.from(NAME, value)
             .path("/")
             .sameSite(properties.sameSiteHeaderValue());
-        if (properties.isSecure()) {
+        if (properties.isEffectiveSecure()) {
             builder.secure(true);
         }
         return builder;

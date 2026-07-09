@@ -45,14 +45,23 @@ class WorkspaceCookieTest {
     }
 
     @Test
-    void sameSiteNoneRequiresSecureCookie() {
+    void sameSiteNonePromotesSecureCookie() {
         WorkspaceCookieProperties properties = new WorkspaceCookieProperties();
         properties.setSecure(false);
         properties.setSameSite("none");
+        WorkspaceCookie cookie = new WorkspaceCookie(properties);
+        MockHttpServletResponse response = new MockHttpServletResponse();
 
         try (ValidatorFactory factory = Validation.buildDefaultValidatorFactory()) {
-            assertTrue(factory.getValidator().validate(properties).stream()
-                .anyMatch(violation -> violation.getMessage().contains("secure must be true")));
+            assertTrue(factory.getValidator().validate(properties).isEmpty());
         }
+
+        cookie.set(response, 42);
+
+        String header = response.getHeader(HttpHeaders.SET_COOKIE);
+        assertFalse(properties.isSecure());
+        assertTrue(properties.isEffectiveSecure());
+        assertTrue(header.contains("Secure"));
+        assertTrue(header.contains("SameSite=None"));
     }
 }
