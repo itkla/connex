@@ -34,8 +34,9 @@ APPI groups these into four categories plus external-environment. This is our cu
 - **Authentication:** WebAuthn / passkeys; password fallback hashed with BCrypt. **CSRF** enabled (session-token model); **session rotation** on login; cookies `HttpOnly` + `SameSite=Lax` + `Secure` (env-gated).
 - **Authorization / RBAC:** custom per-workspace roles (`owner`/`admin`/`member` + custom `workspace_role`, `V13`) over a catalog of fine-grained permissions, enforced on a single path via `@RequirePermission` → `AuthorizationManager`. Destructive/structural ops are permission-gated and CI-backstopped (`RbacEnforcementArchTest`).
 - **Transport:** HSTS (1y, `includeSubDomains`) + a restrictive Content-Security-Policy (`default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'`) in `SecurityConfig`.
-- **Secrets:** externalized to environment (`CONNEX_DB_*`, bootstrap credentials); not committed for production.
-- *In progress:* at-rest encryption + customer-managed key (CMK) — [#92]; app↔DB JDBC TLS + rotation of the dev-only committed creds — [#88]; session idle/absolute timeouts + WebAuthn step-up for sensitive ops — [#98]; brute-force/rate-limit protection — [#80]; CI dependency + secret scanning — [#99].
+- **Secrets:** externalized to environment (`CONNEX_DB_*`, bootstrap credentials); local Docker passwords are kept in untracked `backend/.env`.
+- **Database transport:** non-dev startup requires `CONNEX_DB_URL` to use MySQL Connector/J verified TLS (`sslMode=VERIFY_CA` or `sslMode=VERIFY_IDENTITY`). Local `dev` and `test` profiles may explicitly use plaintext Docker MySQL.
+- *In progress:* at-rest encryption + customer-managed key (CMK) — [#92]; operational rotation of any database credentials that reused old committed local defaults — [#88]; session idle/absolute timeouts + WebAuthn step-up for sensitive ops — [#98]; brute-force/rate-limit protection — [#80].
 
 ### 2.5 External-environment grasp (外的環境の把握)
 - SaaS personal data is stored in **Japan**. Where any handling involves a party outside Japan (e.g. a future AI provider under BYOP, [#94]), we identify the country and take account of its data-protection framework, and handle it under APPI Art. 28. No third-party AI/enrichment/analytics/email integrations send personal data externally today.

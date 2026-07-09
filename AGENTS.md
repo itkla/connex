@@ -19,8 +19,8 @@ The product centers on relationship signals — temperature/warmth scoring, deca
 
 The verify loops require a running stack. **Prerequisites:** Node 20+, Java 26 (the backend toolchain), and Docker. Bring it up in this order:
 
-1. **Database** — from `backend/`: `docker compose up -d db` (MySQL on `:3306`, Adminer UI on `:9001`). Credentials in `docker-compose.yml` are **dev-only**.
-2. **Backend** — from `backend/`: `SPRING_PROFILES_ACTIVE=dev ./gradlew bootRun` (serves on **`:8080`**, endpoints under `/api`). Flyway runs migrations on start. The `dev` profile disables the session cookie's `Secure` flag so login works over plain-HTTP `localhost` and supplies a local-only audit-integrity HMAC secret; production runs without it (fail-closed `Secure=true`) and must set `CONNEX_AUDIT_INTEGRITY_HMAC_SECRET`.
+1. **Database** — from `backend/`: create `backend/.env` from `backend/.env.example`, fill local-only database passwords, then run `docker compose up -d db` (MySQL on `:3306`, Adminer UI on `:9001`).
+2. **Backend** — from `backend/`: load the same `CONNEX_DB_*` values into your shell, then run `SPRING_PROFILES_ACTIVE=dev ./gradlew bootRun` (serves on **`:8080`**, endpoints under `/api`). Flyway runs migrations on start. The `dev` profile disables the session cookie's `Secure` flag so login works over plain-HTTP `localhost`, permits local plaintext DB transport, and supplies a local-only audit-integrity HMAC secret; production runs without it (fail-closed `Secure=true`) and must set `CONNEX_AUDIT_INTEGRITY_HMAC_SECRET` plus a `CONNEX_DB_URL` with verified MySQL TLS.
 3. **Frontend** — from `frontend/`: `pnpm dev` (Next.js on **`:3000`**). `next.config.ts` rewrites `/api/*` to the backend on `:8080`, so the backend must be up. This repo uses **pnpm** — not npm.
 
 Auth is cookie/session based; workspace selection drives tenant context. See `frontend/proxy.ts` for the route-protection rules.
@@ -158,7 +158,7 @@ Treat GitHub as the system of record. For any tracked piece of work:
 
 - **No unjustified dependencies.** Prefer the libraries already in `package.json` / `build.gradle`. If a new dep is truly needed, call it out and say why before adding it.
 - **Audit new packages.** Whenever you install a frontend package, **always run `pnpm audit`** afterward and resolve or explicitly flag what it reports before continuing — don't introduce known-vulnerable dependencies. Check new backend (Gradle) deps for known CVEs the same way.
-- **Never commit secrets.** No credentials, tokens, keys, or `.env` files in the repo — use environment/config. (The throwaway dev creds in `backend/docker-compose.yml` are the only exception.) On the frontend, any **`NEXT_PUBLIC_`-prefixed env var ships to the browser** — never put a secret behind that prefix.
+- **Never commit secrets.** No credentials, tokens, keys, or `.env` files in the repo — use environment/config. On the frontend, any **`NEXT_PUBLIC_`-prefixed env var ships to the browser** — never put a secret behind that prefix.
 - **Don't leak code or secrets externally.** Look things up in docs/online, but never paste Connex source, data, or secrets into web searches or third-party tools.
 - **Confirm irreversible actions.** No `git push --force`, no resetting or rewriting history on `main` or shared branches, no destructive database operations against shared/dev data — confirm with the user first.
 - **Don't weaken the toolchain.** No disabling/ignoring lint rules, no loosening `tsconfig` `strict`, no `// eslint-disable`, no `@SuppressWarnings` to dodge a real problem. Fix the cause.

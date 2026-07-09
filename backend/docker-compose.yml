@@ -4,10 +4,10 @@ services:
     restart: always
     command: --log-bin-trust-function-creators=1
     environment:
-      MYSQL_ROOT_PASSWORD: rootpassword
-      MYSQL_DATABASE: connexdb
-      MYSQL_USER: connexuser
-      MYSQL_PASSWORD: connexpassword
+      MYSQL_ROOT_PASSWORD: ${CONNEX_DB_ROOT_PASSWORD:?Set CONNEX_DB_ROOT_PASSWORD in backend/.env}
+      MYSQL_DATABASE: ${CONNEX_DB_NAME:-connexdb}
+      MYSQL_USER: ${CONNEX_DB_USERNAME:?Set CONNEX_DB_USERNAME in backend/.env}
+      MYSQL_PASSWORD: ${CONNEX_DB_PASSWORD:?Set CONNEX_DB_PASSWORD in backend/.env}
       TZ: Asia/Tokyo
     ports:
       - 3306:3306
