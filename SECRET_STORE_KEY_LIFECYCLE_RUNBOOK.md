@@ -4,6 +4,11 @@ This runbook covers the central secret store used for never-searched integration
 secrets: workspace SMTP passwords, organization SSO OIDC client secrets, SAML SP
 private keys, and future credentials stored through `SecretStore`.
 
+Database/storage encryption and customer-operated key custody are separate
+controls. Use `ENCRYPTION_GUARANTEE_MATRIX.md` for customer-facing encryption
+claims and `ON_PREM_ENCRYPTION_RUNBOOK.md` for on-prem database/storage
+encryption.
+
 The secret store uses envelope encryption. Each row has its own data key, and
 the configured key-encryption key wraps that data key. Operators rotate by
 adding a new active key while keeping old key material in the keyring until all
@@ -122,8 +127,21 @@ dedicated-tier customer-managed keys should follow the same semantics:
   key cannot decrypt old rows; affected credentials must be re-entered or
   rotated upstream.
 
+These semantics apply only to material encrypted by `SecretStore`. Customer-
+operated database key revocation is broader and may prevent MySQL startup,
+recovery, or access to encrypted tablespaces as described in
+`ON_PREM_ENCRYPTION_RUNBOOK.md`.
+
 ## Audit Expectations
 
 Secret use, failed use, and rewrap operations are audited with scope, purpose,
 secret id, and key ids where relevant. Audit entries never include plaintext,
 ciphertext, wrapped data keys, or key material.
+
+## Related Documents
+
+- `SECURITY.md`
+- `APPI_DPA_TEMPLATE.md`
+- `ENCRYPTION_GUARANTEE_MATRIX.md`
+- `ON_PREM_ENCRYPTION_RUNBOOK.md`
+- `MULTITENANCY_PLAN.md`

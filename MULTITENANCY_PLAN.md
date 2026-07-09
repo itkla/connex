@@ -127,7 +127,9 @@ sub-partitions inside an org. Decisions locked 2026-07-03 (recorded on #313):
 - **No `org_id` denormalization onto business tables.** Org isolation reduces to workspace isolation
   (already enforced in four layers) **plus org-gated seams**; a per-row `org_id` would be a driftable
   second source of truth adding no enforced invariant, and the dedicated-DB SaaS tier (#313 Phase 3/4)
-  makes it moot. #97's original "org_id on every table" mechanism is superseded accordingly.
+  makes it moot. #97's original "org_id on every table" mechanism is superseded accordingly. Dedicated
+  database encryption and CMK claims for this tier must point to `ENCRYPTION_GUARANTEE_MATRIX.md` and
+  remain distinct from hosted SaaS plaintext-access claims (#369/#376).
 - **Enforced seams:** (1) share grants are `INSERT..SELECT` with an ownership + same-org ceiling in SQL —
   0 affected rows means structurally refused (`ShareMapperTest`), and `ShareService` additionally throws;
   (2) **workspace→org placement**: a new workspace joins the active workspace's org only when its creator
