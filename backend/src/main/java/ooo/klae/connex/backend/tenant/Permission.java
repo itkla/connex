@@ -1,5 +1,9 @@
 package ooo.klae.connex.backend.tenant;
 
+import java.util.Arrays;
+import java.util.EnumSet;
+import java.util.List;
+
 /**
  * The fixed catalog of workspace permissions. Built-in roles map to preset
  * bundles of these; owner-defined custom roles select any subset. Reads are
@@ -44,5 +48,27 @@ public enum Permission {
      * endpoint again — doing so re-opens the #316 escalation.
      */
     SSO_MANAGE,
-    WORKSPACE_DELETE
+    /**
+     * Inert. There is no workspace-delete endpoint, so this permission must not
+     * be granted, displayed, or used as an authorization gate.
+     */
+    WORKSPACE_DELETE;
+
+    private static final EnumSet<Permission> INERT = EnumSet.of(SSO_MANAGE, WORKSPACE_DELETE);
+    private static final EnumSet<Permission> GRANTABLE = EnumSet.complementOf(INERT);
+
+    public static boolean isGrantable(Permission permission) {
+        return permission != null && !INERT.contains(permission);
+    }
+
+    public static EnumSet<Permission> grantableSet() {
+        return EnumSet.copyOf(GRANTABLE);
+    }
+
+    public static List<String> grantableNames() {
+        return Arrays.stream(values())
+            .filter(Permission::isGrantable)
+            .map(Enum::name)
+            .toList();
+    }
 }

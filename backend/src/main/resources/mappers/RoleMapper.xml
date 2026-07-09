@@ -47,6 +47,7 @@
     SELECT wrp.permission FROM workspace_role_permission wrp
     JOIN workspace_role wr ON wr.id = wrp.workspace_role_id AND wr.workspace_id = #{workspaceId}
     WHERE wrp.workspace_role_id = #{roleId}
+      AND wrp.permission NOT IN ('SSO_MANAGE', 'WORKSPACE_DELETE')
   </select>
 
   <delete id="clearPermissions">

@@ -58,7 +58,7 @@ public class WorkspaceService {
     /** Built-in role permission bundles. Owner gets the full catalog. */
     private static final Set<Permission> MEMBER_PERMISSIONS = memberPermissions();
     private static final Set<Permission> ADMIN_PERMISSIONS = adminPermissions();
-    private static final Set<Permission> OWNER_PERMISSIONS = EnumSet.allOf(Permission.class);
+    private static final Set<Permission> OWNER_PERMISSIONS = Permission.grantableSet();
 
     private static EnumSet<Permission> memberPermissions() {
         return EnumSet.of(
@@ -366,9 +366,11 @@ public class WorkspaceService {
         EnumSet<Permission> permissions = EnumSet.noneOf(Permission.class);
         for (String value : raw) {
             try {
-                permissions.add(Permission.valueOf(value));
-            } catch (IllegalArgumentException ignored) {
-                // Unknown catalog key (e.g. a removed permission); skip it.
+                Permission permission = Permission.valueOf(value);
+                if (Permission.isGrantable(permission)) {
+                    permissions.add(permission);
+                }
+            } catch (IllegalArgumentException | NullPointerException ignored) {
             }
         }
         return permissions;
