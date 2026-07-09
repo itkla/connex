@@ -18,7 +18,7 @@ import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.beans.PasswordResetToken;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
-import ooo.klae.connex.backend.exceptions.ForbiddenException;
+import ooo.klae.connex.backend.exceptions.SsoEnforcedException;
 import ooo.klae.connex.backend.mappers.PasswordResetTokenMapper;
 import ooo.klae.connex.backend.mappers.UserMapper;
 
@@ -130,7 +130,7 @@ public class PasswordResetService {
             throw new BadRequestException("This reset link is invalid or has expired");
         }
         if (ssoConnectionService.isSsoEnforcedForUser(user.getId())) {
-            throw new ForbiddenException("This account must sign in with SSO");
+            throw new SsoEnforcedException();
         }
 
         userMapper.updatePasswordHash(user.getId(), passwordEncoder.encode(newPassword));

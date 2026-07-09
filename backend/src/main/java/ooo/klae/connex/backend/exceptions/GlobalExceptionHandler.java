@@ -37,6 +37,12 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.FORBIDDEN).body(ex.getMessage());
     }
 
+    @ExceptionHandler(SsoEnforcedException.class)
+    public ResponseEntity<Map<String, String>> ssoEnforced(SsoEnforcedException ex) {
+        return ResponseEntity.status(HttpStatus.FORBIDDEN)
+            .body(Map.of("code", ex.getCode(), "message", ex.getMessage()));
+    }
+
     @ExceptionHandler(DuplicateResourceException.class)
     public ResponseEntity<Map<String, String>> duplicate(DuplicateResourceException ex) {
         if (ex.getField() != null) {

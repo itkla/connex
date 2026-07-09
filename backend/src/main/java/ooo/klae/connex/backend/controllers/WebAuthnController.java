@@ -33,6 +33,7 @@ import ooo.klae.connex.backend.dto.RenamePasskeyRequest;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.RequestBodyTooLargeException;
+import ooo.klae.connex.backend.exceptions.SsoEnforcedException;
 import ooo.klae.connex.backend.exceptions.TooManyRequestsException;
 import ooo.klae.connex.backend.services.AuditService;
 import ooo.klae.connex.backend.services.AuthService;
@@ -186,7 +187,7 @@ public class WebAuthnController {
         if (ssoConnectionService.isSsoEnforcedForUser(user.getId())) {
             auditService.recordFailure("auth.login.passkey_sso_enforced", "user", user.getId(),
                     user.getDisplayName(), "Passkey login refused; SSO enforced", null);
-            throw new ForbiddenException("This account must sign in with SSO");
+            throw new SsoEnforcedException();
         }
         User authenticatedUser = authService.establishAuthenticatedSession(user, req, res);
         sessionSecurityService.markStepUp(req, authenticatedUser.getId());

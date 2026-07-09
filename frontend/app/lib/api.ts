@@ -68,6 +68,23 @@ function isMutating(method?: string): boolean {
     return m !== "GET" && m !== "HEAD" && m !== "OPTIONS";
 }
 
+const CSRF_RETRY_EXEMPT_MUTATION_PATHS = new Set([
+    "/api/auth/login",
+    "/api/auth/register",
+    "/api/auth/logout",
+    "/api/auth/forgot-password",
+    "/api/auth/reset-password",
+    "/api/auth/sso/link/confirm",
+    "/api/auth/verify-email/confirm",
+    "/api/auth/webauthn/authenticate",
+]);
+
+function isCsrfRetryExemptMutation(path: string): boolean {
+    const pathname = path.split("?")[0];
+    return CSRF_RETRY_EXEMPT_MUTATION_PATHS.has(pathname) ||
+        pathname.startsWith("/api/auth/webauthn/authenticate/");
+}
+
 async function requestJson<T>(
     path: string,
     init: RequestInit = {},
@@ -92,7 +109,7 @@ async function requestJson<T>(
     let res = await send(mutating ? await csrfHeader() : {});
 
     // A stale or missing CSRF token surfaces as 403; refresh it once and retry.
-    if (res.status === 403 && mutating && typeof window !== "undefined") {
+    if (await shouldRetryWithFreshCsrf(path, res, mutating)) {
         res = await send(await csrfHeader(true));
     }
 
@@ -107,6 +124,28 @@ async function requestJson<T>(
     }
 
     return JSON.parse(text) as T;
+}
+
+async function shouldRetryWithFreshCsrf(path: string, res: Response, mutating: boolean): Promise<boolean> {
+    if (res.status !== 403 || !mutating || typeof window === "undefined" || isCsrfRetryExemptMutation(path)) {
+        return false;
+    }
+
+    const text = await res.clone().text().catch(() => "");
+    if (!text) {
+        return true;
+    }
+
+    try {
+        const data = JSON.parse(text) as unknown;
+        if (isStringRecord(data)) {
+            return false;
+        }
+    } catch {
+        return text.toLowerCase().includes("csrf");
+    }
+
+    return true;
 }
 
 async function postJson<T>(path: string, body: unknown = {}, init: RequestInit = {}): Promise<T> {
@@ -216,12 +255,14 @@ export type ApiFieldErrors = Record<string, string>;
 
 export class ApiError extends Error {
     status: number;
+    code?: string;
     fieldErrors?: ApiFieldErrors;
 
-    constructor(message: string, status: number, fieldErrors?: ApiFieldErrors) {
+    constructor(message: string, status: number, code?: string, fieldErrors?: ApiFieldErrors) {
         super(message);
         this.name = "ApiError";
         this.status = status;
+        this.code = code;
         this.fieldErrors = fieldErrors;
     }
 }
@@ -250,12 +291,13 @@ async function getApiError(res: Response): Promise<ApiError> {
         const data = JSON.parse(text) as unknown;
 
         if (isStringRecord(data)) {
-            const { message, error, ...fieldErrors } = data;
+            const { message, error, code, ...fieldErrors } = data;
             const fields = Object.keys(fieldErrors).length > 0 ? fieldErrors : undefined;
 
             return new ApiError(
                 message ?? error ?? "Please fix the highlighted fields.",
                 res.status,
+                code,
                 fields,
             );
         }

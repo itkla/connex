@@ -84,6 +84,17 @@ class GlobalExceptionHandlerTest {
     }
 
     @Test
+    void ssoEnforced_returnsStableCode() {
+        ResponseEntity<Map<String, String>> response = handler.ssoEnforced(new SsoEnforcedException());
+
+        assertEquals(HttpStatus.FORBIDDEN, response.getStatusCode());
+        Map<String, String> body = response.getBody();
+        assertNotNull(body);
+        assertEquals(SsoEnforcedException.CODE, body.get("code"));
+        assertEquals("This account must sign in with SSO", body.get("message"));
+    }
+
+    @Test
     void secretUnavailable_returnsSanitizedBody() {
         ResponseEntity<String> response = handler.secretUnavailable(
             new SecretUnavailableException("missing key id prod-v1"));

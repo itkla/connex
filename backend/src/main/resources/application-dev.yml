@@ -16,8 +16,12 @@ spring:
         password: ${CONNEX_DB_PASSWORD}
 
 connex:
+    cors:
+        allowed-origins: ${CONNEX_CORS_ALLOWED_ORIGINS:http://localhost:3000,http://localhost:3001}
     secret-store:
         master-key: ${CONNEX_SECRET_STORE_MASTER_KEY:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=}
+    webauthn:
+        allowed-origins: ${CONNEX_WEBAUTHN_ALLOWED_ORIGINS:http://localhost:3000,http://localhost:3001}
     workspace-cookie:
         secure: false
     audit:

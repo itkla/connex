@@ -20,6 +20,7 @@ import ooo.klae.connex.backend.dto.RegisterDto;
 import ooo.klae.connex.backend.exceptions.DuplicateResourceException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
+import ooo.klae.connex.backend.exceptions.SsoEnforcedException;
 import ooo.klae.connex.backend.exceptions.TooManyRequestsException;
 import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.tenant.WorkspaceCookie;
@@ -156,7 +157,7 @@ public class AuthService {
             loginRateLimiter.recordFailure(clientIp, request.getUsername(), now);
             auditService.recordFailure("auth.login_sso_enforced", "user", candidate.getId(), request.getUsername(),
                     "Password login refused; SSO enforced for " + request.getUsername(), null);
-            throw new ForbiddenException("This account must sign in with SSO");
+            throw new SsoEnforcedException();
         }
         Authentication authentication;
         try {
