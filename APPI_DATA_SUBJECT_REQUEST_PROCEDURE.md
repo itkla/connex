@@ -26,7 +26,7 @@ A data subject (or authorized representative) may request, regarding their **ret
 - For agents, obtain proof of authority.
 
 ## 5. Fulfil the request
-- **Disclosure:** assemble everything held about the subject — person record plus related activities, notes, employment history, relationship edges, custom fields, and any third-party-provision/share records. Until the subject-scoped export in [#221] ships, assemble manually (audit_log + record lookups); do **not** substitute the workspace-wide CSV export, which over-discloses.
+- **Disclosure:** assemble everything held about the subject — person record plus related activities, notes, employment history, relationship edges, custom fields, custom-field classification metadata, and any third-party-provision/share records. Flag `special_care` custom fields and suspected special-care free-text locations under [SPECIAL_CARE_DATA_POLICY.md](SPECIAL_CARE_DATA_POLICY.md). Until the subject-scoped export in [#221] ships, assemble manually (audit_log + record lookups); do **not** substitute the workspace-wide CSV export, which over-discloses.
 - **Correction:** update via the standard record edit; log the change (captured in `audit_log`).
 - **Cease of use / erasure:** until the suspension-of-use flag in [#221] ships, cease processing manually and record the action; note that current deletion is hard-delete per record — confirm with the customer/operator before irreversible deletion.
 - **Cease third-party provision:** exclude the record from sharing and any outbound provision; record the instruction.

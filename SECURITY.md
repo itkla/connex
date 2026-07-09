@@ -44,7 +44,7 @@ APPI groups these into four categories plus external-environment. This is our cu
 
 ## 3. Data lifecycle
 
-- **Categories handled:** account/profile (name, email, passkeys, role), usage/technical (IP, user-agent, session, audit events), and — under entrustment — customer CRM content (contacts, employment history, activities, notes, relationships). Free-text notes and untyped custom fields are an uncontrolled channel for 要配慮個人情報; governance is tracked in [#222].
+- **Categories handled:** account/profile (name, email, passkeys, role), usage/technical (IP, user-agent, session, audit events), and — under entrustment — customer CRM content (contacts, employment history, activities, notes, relationships). Special-care and sensitive-data handling is governed by [SPECIAL_CARE_DATA_POLICY.md](SPECIAL_CARE_DATA_POLICY.md), including the `standard` / `sensitive` / `special_care` custom-field classification model and free-text guardrails ([#222]).
 - **Retention & deletion:** personal data kept only as long as necessary; per-tenant retention policy, export, and teardown are tracked in [#105]. Deletion is currently hard-delete per record.
 - **Data-subject requests (開示等):** handled per [APPI_DATA_SUBJECT_REQUEST_PROCEDURE.md](APPI_DATA_SUBJECT_REQUEST_PROCEDURE.md), [#221]; where Connex is only the entrustee, requests are referred to the customer.
 
