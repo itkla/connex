@@ -121,13 +121,31 @@ class RecordListControllerTest {
     void dealsPageClampsSize() {
         DealController controller = new DealController(
             dealService, bulkOperationService, dealRiskService, workspaceService);
-        when(dealService.getDealsPage(100, 0)).thenReturn(List.of());
-        when(dealService.countDeals()).thenReturn(0L);
+        when(dealService.getDealsPage(
+            null, null, null, null, null, null, null, null, 100, 0)).thenReturn(List.of());
+        when(dealService.countDeals(null, null, null, null, null, null)).thenReturn(37L);
 
-        var response = controller.getDealsPage(0, 500);
+        var response = controller.getDealsPage(
+            0, 500, null, null, null, null, null, null, null, null);
 
-        assertEquals(0, response.total());
-        verify(dealService).getDealsPage(100, 0);
+        assertEquals(37, response.total());
+        verify(dealService).getDealsPage(
+            null, null, null, null, null, null, null, null, 100, 0);
+        verify(dealService).countDeals(null, null, null, null, null, null);
+    }
+
+    @Test
+    void dealsPageRejectsInvalidStatusAndDirection() {
+        DealController controller = new DealController(
+            dealService, bulkOperationService, dealRiskService, workspaceService);
+
+        assertThrows(BadRequestException.class, () -> controller.getDealsPage(
+            1, 25, null, null, "sideways", null, null, null, null, null));
+        assertThrows(BadRequestException.class, () -> controller.getDealsPage(
+            1, 25, null, null, null, null, null, null, null, "stale"));
+
+        verify(dealService, never()).getDealsPage(
+            null, null, null, null, null, null, null, null, 25, 0);
     }
 
     @Test

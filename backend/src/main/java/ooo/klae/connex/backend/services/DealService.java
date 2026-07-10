@@ -30,6 +30,9 @@ import ooo.klae.connex.backend.beans.Tag;
 import ooo.klae.connex.backend.beans.Task;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.dto.CustomFieldEntryDto;
+import ooo.klae.connex.backend.dto.DealCurrencyMetricsDto;
+import ooo.klae.connex.backend.dto.DealFacets;
+import ooo.klae.connex.backend.dto.DealMetricsDto;
 import ooo.klae.connex.backend.dto.DealSummaryDto;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
@@ -202,12 +205,37 @@ public class DealService {
         return dealMapper.getAllDeals(workspaceService.getCurrentWorkspaceId());
     }
 
-    public List<Deal> getDealsPage(int limit, int offset) {
-        return dealMapper.getDealsPage(workspaceService.getCurrentWorkspaceId(), limit, offset);
+    public List<Deal> getDealsPage(String query, String sort, String dir, String currency,
+            Integer pipelineId, Integer stageId, Integer companyId, String status, int limit, int offset) {
+        return dealMapper.getDealsPage(workspaceService.getCurrentWorkspaceId(), query, sort, dir,
+            currency, pipelineId, stageId, companyId, status, limit, offset);
     }
 
-    public long countDeals() {
-        return dealMapper.countDeals(workspaceService.getCurrentWorkspaceId());
+    public long countDeals(String query, String currency, Integer pipelineId, Integer stageId,
+            Integer companyId, String status) {
+        return dealMapper.countDeals(workspaceService.getCurrentWorkspaceId(), query, currency,
+            pipelineId, stageId, companyId, status);
+    }
+
+    public DealMetricsDto getDealMetrics(String query, String currency, Integer pipelineId,
+            Integer stageId, Integer companyId, String status) {
+        List<DealCurrencyMetricsDto> byCurrency = dealMapper.dealMetrics(
+            workspaceService.getCurrentWorkspaceId(), query, currency, pipelineId, stageId, companyId, status);
+        long totalCount = byCurrency.stream()
+            .mapToLong(metrics -> metrics.openCount() + metrics.closedCount())
+            .sum();
+        return new DealMetricsDto(byCurrency, totalCount);
+    }
+
+    public DealFacets getDealFacets() {
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        return new DealFacets(
+            dealMapper.countsByStatus(workspaceId),
+            dealMapper.countsByStage(workspaceId),
+            dealMapper.countsByPipeline(workspaceId),
+            dealMapper.countsByCompany(workspaceId),
+            dealMapper.countsByCurrency(workspaceId)
+        );
     }
 
     /**

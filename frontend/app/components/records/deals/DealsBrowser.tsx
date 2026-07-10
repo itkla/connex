@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { useLocale, useTranslations } from 'next-intl';
@@ -32,7 +32,7 @@ import RecordsFilterPills from '@/app/components/records/RecordsFilterPills';
 import { SearchField, FilterBar, type FilterChipData } from '@/app/components/filters';
 import DeleteRecordDialog from '@/app/components/records/DeleteRecordDialog';
 import { useRecordsBrowser } from '@/app/hooks/useRecordsBrowser';
-import { type ColumnDef, applyRecordFilters, deriveFilterOptions, facetChips, countActiveFilters } from '@/app/components/records/types';
+import { type ColumnDef, type FilterOption, applyRecordFilters, deriveFilterOptions, facetChips, countActiveFilters } from '@/app/components/records/types';
 import DealCard from '@/app/components/records/deals/DealCard';
 import DealRiskPill from '@/app/components/records/deals/DealRiskPill';
 import { useRiskText } from '@/app/components/records/deals/dealRisk';
@@ -63,12 +63,15 @@ import BulkTagDialog from '@/app/components/records/BulkTagDialog';
 import BulkAssignOwnerDialog from '@/app/components/records/BulkAssignOwnerDialog';
 import BulkChangeStageDialog from '@/app/components/records/BulkChangeStageDialog';
 import { notifyBulkResult } from '@/app/lib/bulkToast';
-import { formatCompactCurrency, formatDate, formatDateTime, parseCalendarDate, pickDominantCurrency } from '@/app/lib/utils';
+import { formatCompactCurrency, formatDate, formatDateTime, parseCalendarDate } from '@/app/lib/utils';
 import {
     type Company,
     type CreateDealPayload,
     type Deal,
     type DealRisk,
+    type DealMetrics,
+    type DealFacets,
+    type DealsPageParams,
     type Pipeline,
     type Stage,
     type Contact,
@@ -115,7 +118,7 @@ function diffDraft(original: DealDraft, draft: DealDraft): boolean {
     );
 }
 
-export default function DealsBrowser({ deals: initialDeals, total: initialTotal, savedViews }: { deals: Deal[]; total: number; savedViews: SavedView[] }) {
+export default function DealsBrowser({ deals: initialDeals, total: initialTotal, metrics, serverFacets, savedViews }: { deals: Deal[]; total: number; metrics: DealMetrics; serverFacets: DealFacets; savedViews: SavedView[] }) {
     const router = useRouter();
     const t = useTranslations('DealsBrowser');
     const tf = useTranslations('Filters');
@@ -127,9 +130,14 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
     const [page, setPage] = useState(1);
     const [size, setSize] = useState(25);
     const [loadingPage, setLoadingPage] = useState(false);
-    const loadDealsPage = useCallback((nextPage: number, nextSize: number) => {
+    const sizeRef = useRef(size);
+    useEffect(() => {
+        sizeRef.current = size;
+    }, [size]);
+    const statusRef = useRef<DealsPageParams['status']>(undefined);
+    const loadDealsPage = useCallback((nextPage: number, nextSize: number, status: DealsPageParams['status']) => {
         setLoadingPage(true);
-        getDealsPage({ page: nextPage, size: nextSize })
+        getDealsPage({ page: nextPage, size: nextSize, status })
             .then((response) => {
                 setDeals(response.items);
                 setTotal(response.total);
@@ -144,12 +152,12 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
     }, []);
     const changePage = useCallback((nextPage: number) => {
         setPage(nextPage);
-        loadDealsPage(nextPage, size);
-    }, [loadDealsPage, size]);
+        loadDealsPage(nextPage, sizeRef.current, statusRef.current);
+    }, [loadDealsPage]);
     const changePageSize = useCallback((nextSize: number) => {
         setSize(nextSize);
         setPage(1);
-        loadDealsPage(1, nextSize);
+        loadDealsPage(1, nextSize, statusRef.current);
     }, [loadDealsPage]);
 
     const [companies, setCompanies] = useState<Company[]>([]);
@@ -200,13 +208,21 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
 
     const currencyCounts = useMemo(() => {
         const counts = new Map<string, number>();
-        for (const d of deals) {
-            const c = d.currency || 'USD';
-            counts.set(c, (counts.get(c) ?? 0) + 1);
-        }
+        for (const c of metrics.byCurrency) counts.set(c.currency, c.openCount + c.closedCount);
         return counts;
-    }, [deals]);
-    const dominantCurrency = useMemo(() => pickDominantCurrency(deals), [deals]);
+    }, [metrics]);
+    const dominantCurrency = useMemo(() => {
+        let best: string | null = null;
+        let bestCount = -1;
+        for (const c of metrics.byCurrency) {
+            const n = c.openCount + c.closedCount;
+            if (n > bestCount) {
+                bestCount = n;
+                best = c.currency;
+            }
+        }
+        return best ?? 'USD';
+    }, [metrics]);
     const [selectedCurrency, setSelectedCurrency] = useState<string | null>(null);
     const activeCurrency = selectedCurrency && currencyCounts.has(selectedCurrency)
         ? selectedCurrency
@@ -451,22 +467,14 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
     }, [router, t]);
 
     const summary = useMemo(() => {
-        let openCount = 0;
-        let openValue = 0;
-        let closedActualValue = 0;
-        let closedForecastValue = 0;
-        for (const d of dealsInCurrency) {
-            if (isDealClosed(d)) {
-                closedActualValue += d.actualValue ?? 0;
-                closedForecastValue += d.value ?? 0;
-            } else {
-                openCount++;
-                openValue += d.value ?? 0;
-            }
-        }
+        const m = metrics.byCurrency.find((c) => c.currency === activeCurrency);
+        const openCount = m?.openCount ?? 0;
+        const openValue = m?.openValue ?? 0;
+        const closedActualValue = m?.closedRevenue ?? 0;
+        const closedForecastValue = m?.closedForecast ?? 0;
         const forecastAccuracy = closedForecastValue > 0 ? closedActualValue / closedForecastValue : null;
         return { openCount, openValue, closedActualValue, closedForecastValue, forecastAccuracy };
-    }, [dealsInCurrency]);
+    }, [metrics, activeCurrency]);
 
     const columns: ColumnDef<Deal>[] = useMemo(() => [
         { key: 'name', label: t('columnName'), getSortValue: (d) => d.name ?? null, widthClass: 'min-w-48' },
@@ -584,7 +592,39 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
 
     const { columns: customColumns, addColumnSlot } = useCustomFieldColumns('deal', visibleDeals);
 
-    const facets = useMemo(() => deriveFilterOptions(columns, filteredDeals), [columns, filteredDeals]);
+    const serverStatus = useMemo<DealsPageParams['status']>(() => {
+        const selected = filterState['status'];
+        if (!selected || selected.length !== 1) return undefined;
+        if (selected[0] === 'closed') return 'closed';
+        if (selected[0] === 'open') return 'open';
+        return undefined;
+    }, [filterState]);
+
+    const didMountRef = useRef(false);
+    useEffect(() => {
+        statusRef.current = serverStatus;
+        if (!didMountRef.current) {
+            didMountRef.current = true;
+            return;
+        }
+        setPage(1);
+        loadDealsPage(1, sizeRef.current, serverStatus);
+    }, [serverStatus, loadDealsPage]);
+
+    const facets = useMemo(() => {
+        const base = deriveFilterOptions(columns, filteredDeals);
+        const openCount = serverFacets.status.find((s) => s.key === 'open')?.count ?? 0;
+        const closedCount = serverFacets.status
+            .filter((s) => s.key === 'won' || s.key === 'lost')
+            .reduce((sum, s) => sum + s.count, 0);
+        const statusOptions: FilterOption[] = [];
+        if (openCount > 0) statusOptions.push({ key: 'open', label: t('statusOpen') });
+        if (closedCount > 0) statusOptions.push({ key: 'closed', label: t('statusClosed') });
+        if (statusOptions.length === 0) return base;
+        return base.some((f) => f.key === 'status')
+            ? base.map((f) => (f.key === 'status' ? { ...f, options: statusOptions } : f))
+            : [...base, { key: 'status', label: t('columnStatus'), options: statusOptions }];
+    }, [columns, filteredDeals, serverFacets, t]);
     const hasActiveFilters = query.trim() !== '' || countActiveFilters(filterState) > 0;
     const clearAll = useCallback(() => { setQuery(''); setFilterState({}); }, [setQuery, setFilterState]);
     const chips: FilterChipData[] = [

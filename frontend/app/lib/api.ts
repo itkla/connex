@@ -1164,12 +1164,41 @@ export function getDeals(init: RequestInit = {}) {
     return getBoundedPageItems<Types.Deal>(getDealsPage, init);
 }
 
-export function getDealsPage(params: Types.PageParams = {}, init: RequestInit = {}) {
+export function getDealsPage(params: Types.DealsPageParams = {}, init: RequestInit = {}) {
     return getJson<Types.Page<Types.Deal>>(`/api/deals/page${buildQuery(params)}`, init);
 }
 
 export function getDealsFromCookie(cookie: string | null) {
     return safeWithCookie<Types.Deal>((init) => getDeals(init), cookie);
+}
+
+/**
+ * Workspace-wide deal totals (open pipeline, closed forecast, realized revenue, counts),
+ * grouped per currency, computed server-side over ALL matching deals — not just a page.
+ * Optional filter params narrow the aggregation to match a filtered table view.
+ */
+export function getDealMetrics(params: Types.DealFilterParams = {}, init: RequestInit = {}) {
+    return getJson<Types.DealMetrics>(`/api/deals/metrics${buildQuery(params)}`, init);
+}
+
+export function getDealMetricsFromCookie(cookie: string | null, params: Types.DealFilterParams = {}) {
+    return getJson<Types.DealMetrics>(
+        `/api/deals/metrics${buildQuery(params)}`,
+        cookie ? { headers: { cookie }, cache: "no-store" } : {},
+    );
+}
+
+/**
+ * Stable filter-facet vocabulary (status, stage, pipeline, company, currency) with counts,
+ * computed server-side over the whole workspace so options never vanish when the visible page
+ * lacks them (e.g. the "Closed" status option).
+ */
+export function getDealFacets(init: RequestInit = {}) {
+    return getJson<Types.DealFacets>(`/api/deals/facets`, init);
+}
+
+export function getDealFacetsFromCookie(cookie: string | null) {
+    return getJson<Types.DealFacets>(`/api/deals/facets`, cookie ? { headers: { cookie }, cache: "no-store" } : {});
 }
 
 export function getDealById(id: number, init: RequestInit = {}) {

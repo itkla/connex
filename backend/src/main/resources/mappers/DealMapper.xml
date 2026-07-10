@@ -67,6 +67,55 @@
     d.closed_reason, d.won, d.risk_excluded, d.created_at, d.updated_at
   </sql>
 
+  <sql id="dealFilterWhere">
+    <where>
+      AND d.workspace_id = #{workspaceId}
+      <if test="query != null">
+        AND d.name LIKE #{query}
+      </if>
+      <if test="currency != null">
+        AND d.currency = #{currency}
+      </if>
+      <if test="pipelineId != null">
+        AND d.pipeline_id = #{pipelineId}
+      </if>
+      <if test="stageId != null">
+        AND d.stage_id = #{stageId}
+      </if>
+      <if test="companyId != null">
+        AND d.company_id = #{companyId}
+      </if>
+      <choose>
+        <when test="status == 'open'">AND d.won IS NULL</when>
+        <when test="status == 'closed'">AND d.won IS NOT NULL</when>
+        <when test="status == 'won'">AND d.won = TRUE</when>
+        <when test="status == 'lost'">AND d.won = FALSE</when>
+      </choose>
+    </where>
+  </sql>
+
+  <sql id="dealSortDirection">
+    <choose>
+      <when test="dir == 'desc'">DESC</when>
+      <otherwise>ASC</otherwise>
+    </choose>
+  </sql>
+
+  <sql id="dealPageOrderBy">
+    <choose>
+      <when test="sort == 'name'">ORDER BY d.name <include refid="dealSortDirection"/>, d.id ASC</when>
+      <when test="sort == 'value'">ORDER BY d.value <include refid="dealSortDirection"/>, d.id ASC</when>
+      <when test="sort == 'actual_value'">ORDER BY d.actual_value <include refid="dealSortDirection"/>, d.id ASC</when>
+      <when test="sort == 'expected_close_date'">ORDER BY d.expected_close_date <include refid="dealSortDirection"/>, d.id ASC</when>
+      <when test="sort == 'closed_at'">ORDER BY d.closed_at <include refid="dealSortDirection"/>, d.id ASC</when>
+      <when test="sort == 'created_at'">ORDER BY d.created_at <include refid="dealSortDirection"/>, d.id ASC</when>
+      <when test="sort == 'updated_at'">ORDER BY d.updated_at <include refid="dealSortDirection"/>, d.id ASC</when>
+      <when test="sort == 'stage_id'">ORDER BY d.stage_id <include refid="dealSortDirection"/>, d.id ASC</when>
+      <when test="sort == 'position'">ORDER BY d.position <include refid="dealSortDirection"/>, d.id ASC</when>
+      <otherwise>ORDER BY d.stage_id, d.position, d.id</otherwise>
+    </choose>
+  </sql>
+
   <select id="getDealPeopleByDealId" resultMap="DealPersonResult">
     SELECT dp.person_id AS deal_person_pid,
            p.id, p.name, p.email, p.phone, p.company_id, p.title, p.created_at, p.updated_at,
@@ -112,15 +161,68 @@
   </select>
 
   <select id="getDealsPage" resultMap="DealResult">
-    SELECT <include refid="dealColumns"/>
-    FROM deal
-    WHERE workspace_id = #{workspaceId}
-    ORDER BY stage_id, position, id
+    SELECT <include refid="qualifiedDealColumns"/>
+    FROM deal d
+    <include refid="dealFilterWhere"/>
+    <include refid="dealPageOrderBy"/>
     LIMIT #{limit} OFFSET #{offset}
   </select>
 
   <select id="countDeals" resultType="long">
-    SELECT COUNT(*) FROM deal WHERE workspace_id = #{workspaceId}
+    SELECT COUNT(*)
+    FROM deal d
+    <include refid="dealFilterWhere"/>
+  </select>
+
+  <select id="dealMetrics" resultType="ooo.klae.connex.backend.dto.DealCurrencyMetricsDto">
+    SELECT d.currency AS currency,
+           COUNT(CASE WHEN d.won IS NULL THEN 1 END) AS open_count,
+           COALESCE(SUM(CASE WHEN d.won IS NULL THEN d.value END), 0) AS open_value,
+           COUNT(CASE WHEN d.won IS NOT NULL THEN 1 END) AS closed_count,
+           COALESCE(SUM(CASE WHEN d.won IS NOT NULL THEN d.value END), 0) AS closed_forecast,
+           COALESCE(SUM(CASE WHEN d.won IS NOT NULL THEN d.actual_value END), 0) AS closed_revenue,
+           COUNT(CASE WHEN d.won = TRUE THEN 1 END) AS won_count,
+           COUNT(CASE WHEN d.won = FALSE THEN 1 END) AS lost_count
+    FROM deal d
+    <include refid="dealFilterWhere"/>
+    GROUP BY d.currency
+    ORDER BY d.currency
+  </select>
+
+  <select id="countsByStatus" resultType="ooo.klae.connex.backend.dto.FacetCount">
+    SELECT CASE WHEN d.won IS NULL THEN 'open' WHEN d.won THEN 'won' ELSE 'lost' END AS `key`,
+           COUNT(*) AS count
+    FROM deal d
+    WHERE d.workspace_id = #{workspaceId}
+    GROUP BY `key`
+  </select>
+
+  <select id="countsByStage" resultType="ooo.klae.connex.backend.dto.FacetCount">
+    SELECT d.stage_id AS `key`, COUNT(*) AS count
+    FROM deal d
+    WHERE d.workspace_id = #{workspaceId}
+    GROUP BY d.stage_id
+  </select>
+
+  <select id="countsByPipeline" resultType="ooo.klae.connex.backend.dto.FacetCount">
+    SELECT d.pipeline_id AS `key`, COUNT(*) AS count
+    FROM deal d
+    WHERE d.workspace_id = #{workspaceId}
+    GROUP BY d.pipeline_id
+  </select>
+
+  <select id="countsByCompany" resultType="ooo.klae.connex.backend.dto.FacetCount">
+    SELECT d.company_id AS `key`, COUNT(*) AS count
+    FROM deal d
+    WHERE d.workspace_id = #{workspaceId} AND d.company_id IS NOT NULL
+    GROUP BY d.company_id
+  </select>
+
+  <select id="countsByCurrency" resultType="ooo.klae.connex.backend.dto.FacetCount">
+    SELECT d.currency AS `key`, COUNT(*) AS count
+    FROM deal d
+    WHERE d.workspace_id = #{workspaceId}
+    GROUP BY d.currency
   </select>
 
   <select id="getDealsByPipelineId" resultMap="DealResult">
