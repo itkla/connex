@@ -8,10 +8,10 @@ import {
     ChartContainer,
     type ChartConfig,
 } from '@/components/ui/chart';
-import { Pipeline, Stage, type Deal } from '@/app/lib/types';
+import { Pipeline, Stage, type DealStageDistribution } from '@/app/lib/types';
 import { getPipelines, getStagesByPipelineId } from '@/app/lib/api';
 import { formatCompactCurrency } from '@/app/lib/utils';
-import { classifyStage, isDealClosed, type StageClass } from './dealOutcome';
+import { classifyStage, type StageClass } from './dealOutcome';
 
 const PIPELINE_PALETTE = [
     '#0ea5e9', // sky-500
@@ -41,7 +41,7 @@ type DealStatus = 'open' | 'closed';
 type PipelineDatum = { name: string; status: DealStatus; value: number; total: number; currency: string; fill: string };
 type StageDatum = { name: string; pipelineName: string; status: DealStatus; value: number; total: number; currency: string; fill: string };
 
-export default function StageRatio({ deals }: { deals: Deal[] }) {
+export default function StageRatio({ distribution, currency }: { distribution: DealStageDistribution[]; currency: string }) {
     const t = useTranslations('DealsStageRatio');
     const [pipelines, setPipelines] = useState<Pipeline[]>([]);
     const [stagesByPipeline, setStagesByPipeline] = useState<Record<number, Stage[]>>({});
@@ -80,34 +80,26 @@ export default function StageRatio({ deals }: { deals: Deal[] }) {
         return map;
     }, [pipelines]);
 
-    const closedValue = (d: Deal) => (d.won === true ? d.actualValue : d.value) ?? 0;
+    const distByStage = useMemo(
+        () => new Map(distribution.map((d) => [d.stageId, d])),
+        [distribution],
+    );
 
     const pipelineData = useMemo<PipelineDatum[]>(
         () =>
             pipelines.flatMap((pipeline) => {
                 const base = pipelineColorById.get(pipeline.id) ?? PIPELINE_PALETTE[0];
-                const pipelineDeals = deals.filter((d) => d.pipeline === pipeline.id);
-                const currency = pipelineDeals[0]?.currency || 'USD';
-                const bucket = (open: boolean) => {
-                    const matches = pipelineDeals.filter((d) => isDealClosed(d) !== open);
-                    return {
-                        value: matches.length,
-                        total: matches.reduce(
-                            (sum, d) =>
-                                sum +
-                                (open ? (d.value ?? 0) : closedValue(d)),
-                            0,
-                        ),
-                    };
-                };
-                const openBucket = bucket(true);
-                const closedBucket = bucket(false);
+                const rows = distribution.filter((d) => d.pipelineId === pipeline.id);
+                const openCount = rows.reduce((sum, d) => sum + d.openCount, 0);
+                const openValue = rows.reduce((sum, d) => sum + d.openValue, 0);
+                const closedCount = rows.reduce((sum, d) => sum + d.closedCount, 0);
+                const closedValue = rows.reduce((sum, d) => sum + d.closedValue, 0);
                 return [
-                    { name: pipeline.name, status: 'open' as const, ...openBucket, currency, fill: base },
-                    { name: pipeline.name, status: 'closed' as const, ...closedBucket, currency, fill: fadeColor(base) },
+                    { name: pipeline.name, status: 'open' as const, value: openCount, total: openValue, currency, fill: base },
+                    { name: pipeline.name, status: 'closed' as const, value: closedCount, total: closedValue, currency, fill: fadeColor(base) },
                 ];
             }),
-        [deals, pipelines, pipelineColorById],
+        [distribution, pipelines, pipelineColorById, currency],
     );
 
     const stageData = useMemo<StageDatum[]>(
@@ -118,25 +110,20 @@ export default function StageRatio({ deals }: { deals: Deal[] }) {
                     stages.map((stage, i) => {
                         const klass = classifyStage(stage);
                         const baseColor = colorForStage(klass, i, stages.length);
-                        const matches = deals.filter(
-                            (d) => d.stage === stage.id && (status === 'closed' ? isDealClosed(d) : !isDealClosed(d)),
-                        );
+                        const row = distByStage.get(stage.id);
                         return {
                             name: stage.name,
                             pipelineName: pipeline.name,
                             status,
-                            value: matches.length,
-                            total: matches.reduce(
-                                (sum, d) => sum + (status === 'closed' ? closedValue(d) : (d.value ?? 0)),
-                                0,
-                            ),
-                            currency: matches[0]?.currency || 'USD',
+                            value: status === 'closed' ? (row?.closedCount ?? 0) : (row?.openCount ?? 0),
+                            total: status === 'closed' ? (row?.closedValue ?? 0) : (row?.openValue ?? 0),
+                            currency,
                             fill: status === 'closed' ? fadeColor(baseColor, 40) : baseColor,
                         };
                     }),
                 );
             }),
-        [deals, pipelines, stagesByPipeline],
+        [distByStage, pipelines, stagesByPipeline, currency],
     );
 
     const chartConfig = useMemo<ChartConfig>(() => {

@@ -46,6 +46,8 @@ import {
     updateDeal,
     getCompanies,
     getDealsPage,
+    getDealRevenueTimeseries,
+    getDealStageDistribution,
     getPipelines,
     getStagesByPipelineId,
     getDealPeople,
@@ -71,6 +73,8 @@ import {
     type DealRisk,
     type DealMetrics,
     type DealFacets,
+    type DealRevenueSeries,
+    type DealStageDistribution,
     type DealsPageParams,
     type Pipeline,
     type Stage,
@@ -231,7 +235,20 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
         () => deals.filter((d) => (d.currency || 'USD') === activeCurrency),
         [deals, activeCurrency],
     );
-    
+
+    const [revenueSeries, setRevenueSeries] = useState<DealRevenueSeries>({ closed: [], projected: [] });
+    const [stageDistribution, setStageDistribution] = useState<DealStageDistribution[]>([]);
+    useEffect(() => {
+        let cancelled = false;
+        getDealRevenueTimeseries(activeCurrency)
+            .then((series) => { if (!cancelled) setRevenueSeries(series); })
+            .catch(() => { if (!cancelled) setRevenueSeries({ closed: [], projected: [] }); });
+        getDealStageDistribution(activeCurrency)
+            .then((distribution) => { if (!cancelled) setStageDistribution(distribution); })
+            .catch(() => { if (!cancelled) setStageDistribution([]); });
+        return () => { cancelled = true; };
+    }, [activeCurrency]);
+
     const searchFields = useCallback((d: Deal) => [
         d.name,
         d.currency,
@@ -734,8 +751,8 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
                     <section>
                         <SectionHeader title={t('sectionPerformance')} />
                         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                            <SummaryTile className="sm:col-span-2" label={t('revenueTrend')} value={<DealsRevenueChart deals={dealsInCurrency} />} />
-                            <SummaryTile label={t('stageRatio')} value={<StageRatio deals={dealsInCurrency} />} />
+                            <SummaryTile className="sm:col-span-2" label={t('revenueTrend')} value={<DealsRevenueChart series={revenueSeries} currency={activeCurrency} />} />
+                            <SummaryTile label={t('stageRatio')} value={<StageRatio distribution={stageDistribution} currency={activeCurrency} />} />
                         </div>
                     </section>
                 </Rise>

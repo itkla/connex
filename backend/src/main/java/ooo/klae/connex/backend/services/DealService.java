@@ -33,6 +33,8 @@ import ooo.klae.connex.backend.dto.CustomFieldEntryDto;
 import ooo.klae.connex.backend.dto.DealCurrencyMetricsDto;
 import ooo.klae.connex.backend.dto.DealFacets;
 import ooo.klae.connex.backend.dto.DealMetricsDto;
+import ooo.klae.connex.backend.dto.DealRevenueSeriesDto;
+import ooo.klae.connex.backend.dto.DealStageDistributionDto;
 import ooo.klae.connex.backend.dto.DealSummaryDto;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
@@ -236,6 +238,18 @@ public class DealService {
             dealMapper.countsByCompany(workspaceId),
             dealMapper.countsByCurrency(workspaceId)
         );
+    }
+
+    public DealRevenueSeriesDto getRevenueTimeseries(String currency) {
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        return new DealRevenueSeriesDto(
+            dealMapper.revenueClosedByMonth(workspaceId, currency),
+            dealMapper.revenueProjectedByMonth(workspaceId, currency)
+        );
+    }
+
+    public List<DealStageDistributionDto> getStageDistribution(String currency) {
+        return dealMapper.stageDistribution(workspaceService.getCurrentWorkspaceId(), currency);
     }
 
     /**

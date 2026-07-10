@@ -7,6 +7,8 @@ import ooo.klae.connex.backend.beans.DealPerson;
 import ooo.klae.connex.backend.beans.DealStakeholder;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.dto.DealCurrencyMetricsDto;
+import ooo.klae.connex.backend.dto.DealMonthTotalDto;
+import ooo.klae.connex.backend.dto.DealStageDistributionDto;
 import ooo.klae.connex.backend.dto.FacetCount;
 import java.util.List;
 
@@ -48,6 +50,18 @@ public interface DealMapper {
         @Param("stageId") Integer stageId,
         @Param("companyId") Integer companyId,
         @Param("status") String status
+    );
+    List<DealMonthTotalDto> revenueClosedByMonth(
+        @Param("workspaceId") int workspaceId,
+        @Param("currency") String currency
+    );
+    List<DealMonthTotalDto> revenueProjectedByMonth(
+        @Param("workspaceId") int workspaceId,
+        @Param("currency") String currency
+    );
+    List<DealStageDistributionDto> stageDistribution(
+        @Param("workspaceId") int workspaceId,
+        @Param("currency") String currency
     );
     List<FacetCount> countsByStatus(int workspaceId);
     List<FacetCount> countsByStage(int workspaceId);

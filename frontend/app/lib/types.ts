@@ -1095,6 +1095,29 @@ export type DealFacets = {
     currencies: FacetCount[];
 };
 
+/** One month's aggregated total; {@code month} is 1-12 (MySQL MONTH()). */
+export type DealMonthTotal = {
+    year: number;
+    month: number;
+    total: number;
+};
+
+/** Server-computed monthly revenue series for the deals page trend chart. */
+export type DealRevenueSeries = {
+    closed: DealMonthTotal[];
+    projected: DealMonthTotal[];
+};
+
+/** Per-stage open/closed rollup for the deals page stage-distribution chart. */
+export type DealStageDistribution = {
+    stageId: number | null;
+    pipelineId: number | null;
+    openCount: number;
+    openValue: number;
+    closedCount: number;
+    closedValue: number;
+};
+
 export type UploadedFile = {
     url: string;
     fileName: string;

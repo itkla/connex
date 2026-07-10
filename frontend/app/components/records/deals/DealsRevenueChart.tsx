@@ -10,15 +10,15 @@ import {
     ChartLegendContent,
     type ChartConfig,
 } from '@/components/ui/chart';
-import { type Deal } from '@/app/lib/types';
-import { formatCompactCurrency, parseMysqlDateTime, pickDominantCurrency } from '@/app/lib/utils';
+import { type DealRevenueSeries } from '@/app/lib/types';
+import { formatCompactCurrency } from '@/app/lib/utils';
 
 const MONTHS_BACK = 6;
 const MONTHS_FORWARD = 6;
 
 type Bucket = { key: string; label: string; closed: number; projected: number };
 
-function buildBuckets(deals: Deal[], now: number, locale: string) {
+function buildBuckets(series: DealRevenueSeries, now: number, locale: string) {
     const start = new Date(now);
     start.setDate(1);
     start.setHours(0, 0, 0, 0);
@@ -37,7 +37,7 @@ function buildBuckets(deals: Deal[], now: number, locale: string) {
 
         // display as Month Year
         const label = d.getMonth() === 0 || i === 0 ? monthYearLabel.format(d) : monthLabel.format(d);
-        
+
         buckets.push({ key, label, closed: 0, projected: 0 });
     }
 
@@ -45,32 +45,23 @@ function buildBuckets(deals: Deal[], now: number, locale: string) {
     const todayKey = `${today.getFullYear()}-${today.getMonth()}`;
     const todayLabel = buckets[keyToIndex.get(todayKey) ?? -1]?.label ?? null;
 
-    const currency = pickDominantCurrency(deals);
-    for (const deal of deals) {
-        if ((deal.currency || 'USD') !== currency) continue;
-        const closedAt = parseMysqlDateTime(deal.closedAt);
-        const expected = parseMysqlDateTime(deal.expectedCloseDate);
-
-        if (Number.isFinite(closedAt)) {
-            const d = new Date(closedAt);
-            const idx = keyToIndex.get(`${d.getFullYear()}-${d.getMonth()}`);
-            if (idx !== undefined) buckets[idx].closed += deal.actualValue ?? 0;
-        }
-        if (Number.isFinite(expected)) {
-            const d = new Date(expected);
-            const idx = keyToIndex.get(`${d.getFullYear()}-${d.getMonth()}`);
-            if (idx !== undefined) buckets[idx].projected += deal.value ?? 0;
-        }
+    for (const point of series.closed) {
+        const idx = keyToIndex.get(`${point.year}-${point.month - 1}`);
+        if (idx !== undefined) buckets[idx].closed += point.total;
+    }
+    for (const point of series.projected) {
+        const idx = keyToIndex.get(`${point.year}-${point.month - 1}`);
+        if (idx !== undefined) buckets[idx].projected += point.total;
     }
 
-    return { data: buckets, todayLabel, currency };
+    return { data: buckets, todayLabel };
 }
 
-export default function DealsRevenueChart({ deals }: { deals: Deal[] }) {
+export default function DealsRevenueChart({ series, currency }: { series: DealRevenueSeries; currency: string }) {
     const t = useTranslations('DealsRevenueChart');
     const locale = useLocale();
     const [now] = React.useState(() => Date.now());
-    const { data, todayLabel, currency } = React.useMemo(() => buildBuckets(deals, now, locale), [deals, now, locale]);
+    const { data, todayLabel } = React.useMemo(() => buildBuckets(series, now, locale), [series, now, locale]);
     const chartConfig = React.useMemo(
         () =>
             ({

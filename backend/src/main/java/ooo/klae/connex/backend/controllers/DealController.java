@@ -31,8 +31,10 @@ import ooo.klae.connex.backend.dto.DealFacets;
 import ooo.klae.connex.backend.dto.DealMetricsDto;
 import ooo.klae.connex.backend.dto.DealMoveRequest;
 import ooo.klae.connex.backend.dto.DealOwnerDto;
+import ooo.klae.connex.backend.dto.DealRevenueSeriesDto;
 import ooo.klae.connex.backend.dto.DealRescheduleRequest;
 import ooo.klae.connex.backend.dto.DealRiskDto;
+import ooo.klae.connex.backend.dto.DealStageDistributionDto;
 import ooo.klae.connex.backend.dto.DealStageHistoryDto;
 import ooo.klae.connex.backend.dto.DealSummaryDto;
 import ooo.klae.connex.backend.dto.NoteDto;
@@ -150,6 +152,28 @@ public class DealController {
     @GetMapping("/facets")
     public DealFacets getDealFacets() {
         return dealService.getDealFacets();
+    }
+
+    /**
+     * GET endpoint for workspace-wide realized and projected deal revenue by month.
+     */
+    @GetMapping("/revenue-timeseries")
+    public DealRevenueSeriesDto getRevenueTimeseries(
+        @RequestParam(required = false) String currency
+    ) {
+        String normalizedCurrency = (currency == null || currency.isBlank()) ? null : currency;
+        return dealService.getRevenueTimeseries(normalizedCurrency);
+    }
+
+    /**
+     * GET endpoint for workspace-wide deal totals grouped by stage and pipeline.
+     */
+    @GetMapping("/stage-distribution")
+    public List<DealStageDistributionDto> getStageDistribution(
+        @RequestParam(required = false) String currency
+    ) {
+        String normalizedCurrency = (currency == null || currency.isBlank()) ? null : currency;
+        return dealService.getStageDistribution(normalizedCurrency);
     }
 
     private static String validateOptionalValue(String value, Set<String> allowed, String parameter) {
