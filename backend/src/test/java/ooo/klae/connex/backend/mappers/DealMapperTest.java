@@ -1,6 +1,8 @@
 package ooo.klae.connex.backend.mappers;
 
 import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -17,6 +19,8 @@ import ooo.klae.connex.backend.beans.Pipeline;
 import ooo.klae.connex.backend.beans.Stage;
 import ooo.klae.connex.backend.beans.Tag;
 import ooo.klae.connex.backend.beans.Workspace;
+import ooo.klae.connex.backend.dto.DealCurrencyMetricsDto;
+import ooo.klae.connex.backend.dto.FacetCount;
 
 class DealMapperTest extends AbstractMapperTest {
 
@@ -83,20 +87,142 @@ class DealMapperTest extends AbstractMapperTest {
     void getDealsPageLimitsAndCountsWorkspaceRows() {
         Workspace pageWorkspace = newWorkspace();
         Pipeline pipeline = newPipelineIn(pageWorkspace);
-        Stage stage = newStageIn(pageWorkspace, pipeline, 0);
-        Deal first = newDealIn(pageWorkspace, pipeline, stage);
-        Deal second = newDealIn(pageWorkspace, pipeline, stage);
-        Deal third = newDealIn(pageWorkspace, pipeline, stage);
+        Stage earlierStage = newStageIn(pageWorkspace, pipeline, 0);
+        Stage laterStage = newStageIn(pageWorkspace, pipeline, 1);
+        Deal laterStageDeal = newDealIn(pageWorkspace, pipeline, laterStage);
+        Deal firstTie = newDealIn(pageWorkspace, pipeline, earlierStage);
+        Deal secondTie = newDealIn(pageWorkspace, pipeline, earlierStage);
+        Deal afterTies = newDealIn(pageWorkspace, pipeline, earlierStage);
+        dealMapper.setPosition(pageWorkspace.getId(), laterStageDeal.getId(), 0);
+        dealMapper.setPosition(pageWorkspace.getId(), firstTie.getId(), 0);
+        dealMapper.setPosition(pageWorkspace.getId(), secondTie.getId(), 0);
+        dealMapper.setPosition(pageWorkspace.getId(), afterTies.getId(), 1);
         Pipeline foreignPipeline = newPipeline();
         Stage foreignStage = newStage(foreignPipeline, 0);
         Deal foreign = newDeal(foreignPipeline, foreignStage, newCompany());
 
-        List<Deal> page = dealMapper.getDealsPage(pageWorkspace.getId(), 2, 0);
+        List<Deal> page = dealMapper.getDealsPage(
+            pageWorkspace.getId(), null, null, null, null, null, null, null, null, 3, 0);
 
-        assertEquals(2, page.size());
-        assertEquals(3, dealMapper.countDeals(pageWorkspace.getId()));
+        assertEquals(3, page.size());
+        assertEquals(4, dealMapper.countDeals(
+            pageWorkspace.getId(), null, null, null, null, null, null));
         assertTrue(page.stream().noneMatch(deal -> deal.getId() == foreign.getId()));
-        assertTrue(page.stream().allMatch(deal -> List.of(first.getId(), second.getId(), third.getId()).contains(deal.getId())));
+        assertEquals(List.of(firstTie.getId(), secondTie.getId(), afterTies.getId()),
+            page.stream().map(Deal::getId).toList());
+    }
+
+    @Test
+    void dealMetricsAggregatesMatchingDealsByCurrency() {
+        workspace = newWorkspace();
+        Pipeline pipeline = newPipeline();
+        Stage firstStage = newStage(pipeline, 0);
+        Stage secondStage = newStage(pipeline, 1);
+        Company company = newCompany();
+
+        updateDeal(newDeal(pipeline, firstStage, company), "Japan Open", 100.0, 0.0, "JPY", null);
+        updateDeal(newDeal(pipeline, firstStage, company), "Japan Won", 200.0, 180.0, "JPY", true);
+        updateDeal(newDeal(pipeline, firstStage, company), "Japan Lost", 50.0, 0.0, "JPY", false);
+        updateDeal(newDeal(pipeline, secondStage, company), "United States Won", 300.0, 250.0, "USD", true);
+
+        List<DealCurrencyMetricsDto> metrics = dealMapper.dealMetrics(
+            workspace.getId(), null, null, null, null, null, null);
+
+        DealCurrencyMetricsDto jpy = metricsFor(metrics, "JPY");
+        assertEquals(1, jpy.openCount());
+        assertEquals(100.0, jpy.openValue(), 0.0001);
+        assertEquals(2, jpy.closedCount());
+        assertEquals(250.0, jpy.closedForecast(), 0.0001);
+        assertEquals(180.0, jpy.closedRevenue(), 0.0001);
+        assertEquals(1, jpy.wonCount());
+        assertEquals(1, jpy.lostCount());
+
+        DealCurrencyMetricsDto usd = metricsFor(metrics, "USD");
+        assertEquals(0, usd.openCount());
+        assertEquals(0.0, usd.openValue(), 0.0001);
+        assertEquals(1, usd.closedCount());
+        assertEquals(300.0, usd.closedForecast(), 0.0001);
+        assertEquals(250.0, usd.closedRevenue(), 0.0001);
+        assertEquals(1, usd.wonCount());
+        assertEquals(0, usd.lostCount());
+
+        List<DealCurrencyMetricsDto> filtered = dealMapper.dealMetrics(
+            workspace.getId(), "%Japan%", "JPY", pipeline.getId(), firstStage.getId(), company.getId(), "closed");
+
+        assertEquals(1, filtered.size());
+        assertEquals(0, filtered.get(0).openCount());
+        assertEquals(2, filtered.get(0).closedCount());
+        assertEquals(250.0, filtered.get(0).closedForecast(), 0.0001);
+        assertEquals(180.0, filtered.get(0).closedRevenue(), 0.0001);
+        assertEquals(1, dealMapper.countDeals(
+            workspace.getId(), null, null, null, null, null, "open"));
+        assertEquals(3, dealMapper.countDeals(
+            workspace.getId(), null, null, null, null, null, "closed"));
+        assertEquals(2, dealMapper.countDeals(
+            workspace.getId(), null, null, null, null, null, "won"));
+        assertEquals(1, dealMapper.countDeals(
+            workspace.getId(), null, null, null, null, null, "lost"));
+    }
+
+    @Test
+    void dealFacetsCountWorkspaceDeals() {
+        workspace = newWorkspace();
+        Pipeline pipeline = newPipeline();
+        Stage firstStage = newStage(pipeline, 0);
+        Stage secondStage = newStage(pipeline, 1);
+        Company company = newCompany();
+
+        updateDeal(newDeal(pipeline, firstStage, company), "Open", 100.0, 0.0, "JPY", null);
+        updateDeal(newDeal(pipeline, firstStage, company), "Won", 200.0, 180.0, "JPY", true);
+        updateDeal(newDeal(pipeline, firstStage, company), "Lost", 50.0, 0.0, "JPY", false);
+        Deal withoutCompany = updateDeal(
+            newDeal(pipeline, secondStage, company), "USD Won", 300.0, 250.0, "USD", true);
+        withoutCompany.setCompanyId(null);
+        dealMapper.update(withoutCompany);
+
+        assertEquals(Map.of("open", 1L, "won", 2L, "lost", 1L),
+            facetCounts(dealMapper.countsByStatus(workspace.getId())));
+        assertEquals(Map.of(
+            Integer.toString(firstStage.getId()), 3L,
+            Integer.toString(secondStage.getId()), 1L
+        ), facetCounts(dealMapper.countsByStage(workspace.getId())));
+        assertEquals(Map.of(Integer.toString(pipeline.getId()), 4L),
+            facetCounts(dealMapper.countsByPipeline(workspace.getId())));
+        assertEquals(Map.of(Integer.toString(company.getId()), 3L),
+            facetCounts(dealMapper.countsByCompany(workspace.getId())));
+        assertEquals(Map.of("JPY", 3L, "USD", 1L),
+            facetCounts(dealMapper.countsByCurrency(workspace.getId())));
+    }
+
+    @Test
+    void getDealsPageAndCountApplySameFiltersAndSort() {
+        workspace = newWorkspace();
+        Pipeline pipeline = newPipeline();
+        Pipeline otherPipeline = newPipeline();
+        Stage stage = newStage(pipeline, 0);
+        Stage otherStage = newStage(pipeline, 1);
+        Stage foreignPipelineStage = newStage(otherPipeline, 0);
+        Company company = newCompany();
+        Company otherCompany = newCompany();
+
+        Deal won = updateDeal(newDeal(pipeline, stage, company), "Target Won", 200.0, 180.0, "JPY", true);
+        Deal lost = updateDeal(newDeal(pipeline, stage, company), "Target Lost", 50.0, 0.0, "JPY", false);
+        updateDeal(newDeal(pipeline, stage, company), "Target Open", 500.0, 0.0, "JPY", null);
+        updateDeal(newDeal(pipeline, stage, company), "Target USD", 400.0, 350.0, "USD", true);
+        updateDeal(newDeal(pipeline, otherStage, company), "Target Other Stage", 300.0, 250.0, "JPY", true);
+        updateDeal(newDeal(pipeline, stage, otherCompany), "Target Other Company", 275.0, 225.0, "JPY", true);
+        updateDeal(newDeal(otherPipeline, foreignPipelineStage, company),
+            "Target Other Pipeline", 250.0, 200.0, "JPY", true);
+        updateDeal(newDeal(pipeline, stage, company), "Different Name", 225.0, 190.0, "JPY", true);
+
+        List<Deal> page = dealMapper.getDealsPage(
+            workspace.getId(), "%Target%", "value", "desc", "JPY", pipeline.getId(),
+            stage.getId(), company.getId(), "closed", 10, 0);
+        long count = dealMapper.countDeals(
+            workspace.getId(), "%Target%", "JPY", pipeline.getId(), stage.getId(), company.getId(), "closed");
+
+        assertEquals(2, count);
+        assertEquals(List.of(won.getId(), lost.getId()), page.stream().map(Deal::getId).toList());
     }
 
     /**
@@ -349,5 +475,28 @@ class DealMapperTest extends AbstractMapperTest {
         deal.setStageId(stage.getId());
         dealMapper.insert(deal);
         return deal;
+    }
+
+    private Deal updateDeal(Deal deal, String name, double value, double actualValue,
+            String currency, Boolean won) {
+        deal.setName(name);
+        deal.setValue(value);
+        deal.setActualValue(actualValue);
+        deal.setCurrency(currency);
+        deal.setWon(won);
+        deal.setClosedAt(won == null ? null : "2026-01-01 00:00:00");
+        dealMapper.update(deal);
+        return deal;
+    }
+
+    private DealCurrencyMetricsDto metricsFor(List<DealCurrencyMetricsDto> metrics, String currency) {
+        return metrics.stream()
+            .filter(item -> currency.equals(item.currency()))
+            .findFirst()
+            .orElseThrow();
+    }
+
+    private Map<String, Long> facetCounts(List<FacetCount> facets) {
+        return facets.stream().collect(Collectors.toMap(FacetCount::getKey, FacetCount::getCount));
     }
 }

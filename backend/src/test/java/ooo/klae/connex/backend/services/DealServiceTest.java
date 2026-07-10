@@ -1,6 +1,8 @@
 package ooo.klae.connex.backend.services;
 
 import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -19,13 +21,91 @@ import ooo.klae.connex.backend.beans.Pipeline;
 import ooo.klae.connex.backend.beans.Stage;
 import ooo.klae.connex.backend.beans.Task;
 import ooo.klae.connex.backend.beans.User;
+import ooo.klae.connex.backend.beans.Workspace;
+import ooo.klae.connex.backend.dto.DealCurrencyMetricsDto;
+import ooo.klae.connex.backend.dto.DealFacets;
+import ooo.klae.connex.backend.dto.DealMetricsDto;
 import ooo.klae.connex.backend.dto.DealSummaryDto;
+import ooo.klae.connex.backend.dto.FacetCount;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 
 class DealServiceTest extends AbstractServiceTest {
 
     @Autowired DealService dealService;
+
+    @Test
+    void aggregateReadsAreAssembledAndIsolatedByWorkspace() {
+        Workspace activeWorkspace = newWorkspace();
+        workspaceMapper.addMember(activeWorkspace.getId(), currentUser.getId(), "owner");
+        workspace = activeWorkspace;
+        authenticateAs(currentUser, workspace.getId());
+
+        Pipeline pipeline = newPipeline();
+        Stage stage = newStage(pipeline, 0);
+        Company company = newCompany();
+        updateDeal(newDeal(pipeline, stage, company), "Local Open", 100.0, 0.0, "JPY", null);
+        Deal localWon = updateDeal(
+            newDeal(pipeline, stage, company), "Local Won High", 120.0, 90.0, "JPY", true);
+        Deal localWonLower = updateDeal(
+            newDeal(pipeline, stage, company), "Local Won Low", 110.0, 80.0, "JPY", true);
+
+        Workspace otherWorkspace = newWorkspace();
+        Pipeline otherPipeline = newPipelineIn(otherWorkspace);
+        Stage otherStage = newStageIn(otherWorkspace, otherPipeline);
+        Company otherCompany = newCompanyIn(otherWorkspace);
+        Deal foreign = new Deal();
+        foreign.setWorkspaceId(otherWorkspace.getId());
+        foreign.setName("Foreign Won");
+        foreign.setValue(1000.0);
+        foreign.setActualValue(900.0);
+        foreign.setCurrency("USD");
+        foreign.setPipelineId(otherPipeline.getId());
+        foreign.setStageId(otherStage.getId());
+        foreign.setCompanyId(otherCompany.getId());
+        foreign.setWon(true);
+        foreign.setClosedAt("2026-01-01 00:00:00");
+        dealMapper.insert(foreign);
+
+        DealMetricsDto metrics = dealService.getDealMetrics(null, null, null, null, null, null);
+        DealFacets facets = dealService.getDealFacets();
+        List<Deal> page = dealService.getDealsPage(
+            null, null, null, null, null, null, null, null, 25, 0);
+        long count = dealService.countDeals(null, null, null, null, null, null);
+        List<Deal> filteredPage = dealService.getDealsPage(
+            "%Local Won%", "value", "desc", "JPY", pipeline.getId(), stage.getId(),
+            company.getId(), "won", 25, 0);
+        long filteredCount = dealService.countDeals(
+            "%Local Won%", "JPY", pipeline.getId(), stage.getId(), company.getId(), "won");
+        DealMetricsDto filteredMetrics = dealService.getDealMetrics(
+            "%Local Won%", "JPY", pipeline.getId(), stage.getId(), company.getId(), "won");
+
+        assertEquals(3, metrics.totalCount());
+        assertEquals(1, metrics.byCurrency().size());
+        DealCurrencyMetricsDto jpy = metrics.byCurrency().get(0);
+        assertEquals("JPY", jpy.currency());
+        assertEquals(1, jpy.openCount());
+        assertEquals(100.0, jpy.openValue(), 0.0001);
+        assertEquals(2, jpy.closedCount());
+        assertEquals(230.0, jpy.closedForecast(), 0.0001);
+        assertEquals(170.0, jpy.closedRevenue(), 0.0001);
+        assertEquals(2, jpy.wonCount());
+        assertEquals(0, jpy.lostCount());
+        assertEquals(Map.of("open", 1L, "won", 2L), facetCounts(facets.status()));
+        assertEquals(Map.of(Integer.toString(stage.getId()), 3L), facetCounts(facets.stages()));
+        assertEquals(Map.of(Integer.toString(pipeline.getId()), 3L), facetCounts(facets.pipelines()));
+        assertEquals(Map.of(Integer.toString(company.getId()), 3L), facetCounts(facets.companies()));
+        assertEquals(Map.of("JPY", 3L), facetCounts(facets.currencies()));
+        assertEquals(3, count);
+        assertEquals(3, page.size());
+        assertTrue(page.stream().anyMatch(deal -> deal.getId() == localWon.getId()));
+        assertTrue(page.stream().noneMatch(deal -> deal.getId() == foreign.getId()));
+        assertEquals(2, filteredCount);
+        assertEquals(List.of(localWon.getId(), localWonLower.getId()),
+            filteredPage.stream().map(Deal::getId).toList());
+        assertEquals(2, filteredMetrics.totalCount());
+        assertEquals(170.0, filteredMetrics.byCurrency().get(0).closedRevenue(), 0.0001);
+    }
 
     @Test
     void getActivitiesByDealId_returnsOnlyMatchingActivities() {
@@ -334,5 +414,55 @@ class DealServiceTest extends AbstractServiceTest {
         Company company = newCompany();
         Deal deal = newDeal(pipeline, stage, company);
         assertThrows(BadRequestException.class, () -> dealService.reschedule(deal.getId(), "9999-99-99"));
+    }
+
+    private Workspace newWorkspace() {
+        Workspace created = new Workspace();
+        created.setName("Workspace " + unique());
+        created.setSlug("workspace_" + unique());
+        workspaceMapper.insert(created);
+        return created;
+    }
+
+    private Pipeline newPipelineIn(Workspace targetWorkspace) {
+        Pipeline pipeline = new Pipeline();
+        pipeline.setName("Pipeline " + unique());
+        pipeline.setWorkspaceId(targetWorkspace.getId());
+        pipelineMapper.insertPipeline(pipeline);
+        return pipeline;
+    }
+
+    private Stage newStageIn(Workspace targetWorkspace, Pipeline pipeline) {
+        Stage stage = new Stage();
+        stage.setName("Stage " + unique());
+        stage.setPipeline(pipeline);
+        stage.setPosition(0);
+        stage.setWorkspaceId(targetWorkspace.getId());
+        pipelineMapper.insertStage(stage);
+        return stage;
+    }
+
+    private Company newCompanyIn(Workspace targetWorkspace) {
+        Company company = new Company();
+        company.setName("Company " + unique());
+        company.setWorkspaceId(targetWorkspace.getId());
+        companyMapper.insert(company);
+        return company;
+    }
+
+    private Deal updateDeal(Deal deal, String name, double value, double actualValue,
+            String currency, Boolean won) {
+        deal.setName(name);
+        deal.setValue(value);
+        deal.setActualValue(actualValue);
+        deal.setCurrency(currency);
+        deal.setWon(won);
+        deal.setClosedAt(won == null ? null : "2026-01-01 00:00:00");
+        dealMapper.update(deal);
+        return deal;
+    }
+
+    private Map<String, Long> facetCounts(List<FacetCount> facets) {
+        return facets.stream().collect(Collectors.toMap(FacetCount::getKey, FacetCount::getCount));
     }
 }

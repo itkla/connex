@@ -6,6 +6,8 @@ import ooo.klae.connex.backend.beans.Deal;
 import ooo.klae.connex.backend.beans.DealPerson;
 import ooo.klae.connex.backend.beans.DealStakeholder;
 import ooo.klae.connex.backend.beans.User;
+import ooo.klae.connex.backend.dto.DealCurrencyMetricsDto;
+import ooo.klae.connex.backend.dto.FacetCount;
 import java.util.List;
 
 /**
@@ -16,8 +18,42 @@ import java.util.List;
 
 public interface DealMapper {
     List<Deal> getAllDeals(int workspaceId);
-    List<Deal> getDealsPage(@Param("workspaceId") int workspaceId, @Param("limit") int limit, @Param("offset") int offset);
-    long countDeals(int workspaceId);
+    List<Deal> getDealsPage(
+        @Param("workspaceId") int workspaceId,
+        @Param("query") String query,
+        @Param("sort") String sort,
+        @Param("dir") String dir,
+        @Param("currency") String currency,
+        @Param("pipelineId") Integer pipelineId,
+        @Param("stageId") Integer stageId,
+        @Param("companyId") Integer companyId,
+        @Param("status") String status,
+        @Param("limit") int limit,
+        @Param("offset") int offset
+    );
+    long countDeals(
+        @Param("workspaceId") int workspaceId,
+        @Param("query") String query,
+        @Param("currency") String currency,
+        @Param("pipelineId") Integer pipelineId,
+        @Param("stageId") Integer stageId,
+        @Param("companyId") Integer companyId,
+        @Param("status") String status
+    );
+    List<DealCurrencyMetricsDto> dealMetrics(
+        @Param("workspaceId") int workspaceId,
+        @Param("query") String query,
+        @Param("currency") String currency,
+        @Param("pipelineId") Integer pipelineId,
+        @Param("stageId") Integer stageId,
+        @Param("companyId") Integer companyId,
+        @Param("status") String status
+    );
+    List<FacetCount> countsByStatus(int workspaceId);
+    List<FacetCount> countsByStage(int workspaceId);
+    List<FacetCount> countsByPipeline(int workspaceId);
+    List<FacetCount> countsByCompany(int workspaceId);
+    List<FacetCount> countsByCurrency(int workspaceId);
     List<Deal> getDealsByPipelineId(@Param("workspaceId") int workspaceId, @Param("pipelineId") int pipelineId);
     List<Deal> getDealsByStageId(@Param("workspaceId") int workspaceId, @Param("stageId") int stageId);
     List<Deal> getDealsByCompanyId(@Param("workspaceId") int workspaceId, @Param("companyId") int companyId);

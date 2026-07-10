@@ -27,6 +27,8 @@ import ooo.klae.connex.backend.dto.DealBriefDto;
 import ooo.klae.connex.backend.dto.DealCollaboratorsDto;
 import ooo.klae.connex.backend.dto.DealDto;
 import ooo.klae.connex.backend.dto.DealEvaluationDto;
+import ooo.klae.connex.backend.dto.DealFacets;
+import ooo.klae.connex.backend.dto.DealMetricsDto;
 import ooo.klae.connex.backend.dto.DealMoveRequest;
 import ooo.klae.connex.backend.dto.DealOwnerDto;
 import ooo.klae.connex.backend.dto.DealRescheduleRequest;
@@ -43,10 +45,12 @@ import ooo.klae.connex.backend.services.BulkOperationService;
 import ooo.klae.connex.backend.services.DealRiskService;
 import ooo.klae.connex.backend.services.DealService;
 import ooo.klae.connex.backend.services.WorkspaceService;
+import ooo.klae.connex.backend.util.LikePattern;
 import ooo.klae.connex.backend.util.PageBounds;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -60,6 +64,9 @@ import lombok.RequiredArgsConstructor;
 @RequestMapping("/api/deals")
 @RequiredArgsConstructor
 public class DealController {
+    private static final Set<String> DEAL_STATUSES = Set.of("open", "closed", "won", "lost");
+    private static final Set<String> SORT_DIRECTIONS = Set.of("asc", "desc");
+
     private final DealService dealService;
     private final BulkOperationService bulkOperationService;
     private final DealRiskService dealRiskService;
@@ -99,12 +106,60 @@ public class DealController {
     @GetMapping("/page")
     public PageResponse<DealDto> getDealsPage(
         @RequestParam(defaultValue = "1") int page,
-        @RequestParam(defaultValue = "25") int size
+        @RequestParam(defaultValue = "25") int size,
+        @RequestParam(required = false) String q,
+        @RequestParam(required = false) String sort,
+        @RequestParam(required = false) String dir,
+        @RequestParam(required = false) String currency,
+        @RequestParam(required = false) Integer pipelineId,
+        @RequestParam(required = false) Integer stageId,
+        @RequestParam(required = false) Integer companyId,
+        @RequestParam(required = false) String status
     ) {
         PageBounds bounds = PageBounds.of(page, size);
-        List<DealDto> items = dealService.getDealsPage(bounds.size(), bounds.offset())
+        String query = (q == null || q.isBlank()) ? null : LikePattern.containing(q);
+        String direction = validateOptionalValue(dir, SORT_DIRECTIONS, "dir");
+        String dealStatus = validateOptionalValue(status, DEAL_STATUSES, "status");
+        List<DealDto> items = dealService.getDealsPage(query, sort, direction, currency,
+            pipelineId, stageId, companyId, dealStatus, bounds.size(), bounds.offset())
             .stream().map(DealDto::from).toList();
-        return new PageResponse<>(items, dealService.countDeals());
+        return new PageResponse<>(items, dealService.countDeals(
+            query, currency, pipelineId, stageId, companyId, dealStatus));
+    }
+
+    /**
+     * GET endpoint for filtered deal summary metrics grouped by currency.
+     */
+    @GetMapping("/metrics")
+    public DealMetricsDto getDealMetrics(
+        @RequestParam(required = false) String currency,
+        @RequestParam(required = false) Integer pipelineId,
+        @RequestParam(required = false) Integer stageId,
+        @RequestParam(required = false) Integer companyId,
+        @RequestParam(required = false) String status,
+        @RequestParam(required = false) String q
+    ) {
+        String query = (q == null || q.isBlank()) ? null : LikePattern.containing(q);
+        String dealStatus = validateOptionalValue(status, DEAL_STATUSES, "status");
+        return dealService.getDealMetrics(query, currency, pipelineId, stageId, companyId, dealStatus);
+    }
+
+    /**
+     * GET endpoint for workspace-wide deal filter facets.
+     */
+    @GetMapping("/facets")
+    public DealFacets getDealFacets() {
+        return dealService.getDealFacets();
+    }
+
+    private static String validateOptionalValue(String value, Set<String> allowed, String parameter) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        if (!allowed.contains(value)) {
+            throw new BadRequestException(parameter + " must be one of: " + String.join(", ", allowed));
+        }
+        return value;
     }
 
     /**

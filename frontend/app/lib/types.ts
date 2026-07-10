@@ -1061,6 +1061,40 @@ export type AttachmentFacets = {
     totalSize: number;
 };
 
+export type DealFilterParams = {
+    status?: 'open' | 'closed' | 'won' | 'lost';
+    stageId?: number;
+    pipelineId?: number;
+    companyId?: number;
+    currency?: string;
+};
+
+export type DealsPageParams = PageParams & DealFilterParams;
+
+export type DealCurrencyMetrics = {
+    currency: string;
+    openCount: number;
+    openValue: number;
+    closedCount: number;
+    closedForecast: number;
+    closedRevenue: number;
+    wonCount: number;
+    lostCount: number;
+};
+
+export type DealMetrics = {
+    byCurrency: DealCurrencyMetrics[];
+    totalCount: number;
+};
+
+export type DealFacets = {
+    status: FacetCount[];
+    stages: FacetCount[];
+    pipelines: FacetCount[];
+    companies: FacetCount[];
+    currencies: FacetCount[];
+};
+
 export type UploadedFile = {
     url: string;
     fileName: string;
