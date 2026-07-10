@@ -70,14 +70,14 @@ Automation rules (`RuleService` CRUD + `RuleEngineService` execution, issue #54)
 2. **Curl every changed `*Controller` endpoint** at `http://localhost:8080/api/...`. Confirm status, body, and — critically — auth, tenant isolation, and RBAC behavior with real requests. Protected endpoints need a session: `POST /api/auth/login` to obtain the `JSESSIONID` cookie, `GET /api/auth/csrf` for a CSRF token, then send both on mutating calls. Exercise an unauthorized and an other-tenant caller too — prove the request is *rejected*, not just that the happy path works.
 3. **Write automated tests and make them pass:** `./gradlew test`. Cover services and mappers for new behavior; keep arch tests green.
 4. **Scrutinize intensely** for bugs and future failure modes: tenant leakage, RBAC gaps, null/edge cases, N+1 queries, transaction boundaries, migration safety and reversibility.
-5. **Independent opencode review (required).** Spawn an opencode subagent on the **gpt-5.5** model at **xhigh** reasoning effort to independently check the work for security bugs, logic flaws, and anything that could compromise the app. Run from `backend/`:
+5. **Independent codex review (required).** Use the **codex** CLI to spawn a **gpt-5.6** agent at **xhigh** reasoning effort to independently check the work for security bugs, logic flaws, and anything that could compromise the app. Run from `backend/`:
 
    ```bash
-   opencode run -m openai/gpt-5.5 --variant xhigh \
+   codex exec -m gpt-5.6 -c model_reasoning_effort=xhigh --sandbox read-only \
      "Independently review the backend changes on this branch (git diff against main). Hunt for security vulnerabilities, logic flaws, tenant-isolation and RBAC gaps, injection, auth/WebAuthn weaknesses, and anything that could compromise the app. Report findings with file:line and severity. Do not edit files."
    ```
 
-   Treat its findings as review input — triage and address them before handing back. (Adjust the `openai/` provider prefix to match your opencode config.)
+   Treat its findings as review input — triage and address them before handing back.
 6. **`/code-review` + adversarial multi-agent review.** Auth / WebAuthn / tenant / RBAC / sharing changes also get **`/security-review`**.
 
 ## Commands

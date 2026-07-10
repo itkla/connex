@@ -61,6 +61,11 @@ This repo favors **aggressive parallel fan-out**. Reach for subagents and workfl
 
 **Workflows** (the `Workflow` tool) — for larger, multi-phase, or structured work where you want deterministic orchestration: understand → design → implement → review, broad audits, migrations across many files, or adversarial verify panels. **This AGENTS.md is your standing opt-in** — you don't need to ask before running a workflow when the task warrants it. Run one phase at a time, read the result, then decide the next.
 
+**Model routing:**
+
+- **Backend work → codex.** Defer backend work to a **gpt-5.6** agent at **xhigh** reasoning effort spawned via the **codex** CLI. Claude handles the frontend and gap-filling where necessary.
+- **Fundamental changes → Fable 5 advisor.** For high-level work that involves fundamental changes, consult a **Fable 5** subagent as an advisor before acting.
+
 Default to delegating discovery, review, and any wide sweep. Keep synthesis and the actual edits coherent in one place. If you're the fork/subagent, execute directly — don't re-delegate.
 
 ## Coding conventions
@@ -115,7 +120,7 @@ A change is done only when **all** of these pass:
 2. If you touched a `*Controller`, fire real `curl` requests at `http://localhost:8080/api/...` and confirm responses (status, body, auth/tenant behavior). Protected endpoints need a session + CSRF token — see `backend/AGENTS.md` for how to authenticate, and test an other-tenant caller to prove isolation.
 3. Write automated tests and make them pass (`./gradlew test`).
 4. Scrutinize intensely for bugs and future failure modes — tenant leakage, RBAC gaps, null/edge cases, N+1 queries, migration safety.
-5. Spawn an **opencode** subagent on **gpt-5.5** at **xhigh** effort to independently hunt security bugs and logic flaws, then triage its findings (see `backend/AGENTS.md` for the exact command).
+5. Use the **codex** CLI to spawn a **gpt-5.6** agent at **xhigh** effort to independently hunt security bugs and logic flaws, then triage its findings (see `backend/AGENTS.md` for the exact command).
 
 ### Frontend verify loop (required for frontend work)
 
