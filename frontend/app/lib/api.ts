@@ -1197,6 +1197,23 @@ export function getDealFacets(init: RequestInit = {}) {
     return getJson<Types.DealFacets>(`/api/deals/facets`, init);
 }
 
+/**
+ * Server-computed monthly revenue trend (realized by close month, projected by expected-close
+ * month) over ALL deals, optionally scoped to a currency. Replaces client-side bucketing of a
+ * bounded page slice.
+ */
+export function getDealRevenueTimeseries(currency?: string, init: RequestInit = {}) {
+    return getJson<Types.DealRevenueSeries>(`/api/deals/revenue-timeseries${buildQuery({ currency })}`, init);
+}
+
+/**
+ * Server-computed per-stage open/closed rollup over ALL deals, optionally scoped to a currency.
+ * Feeds the deals page stage-distribution chart.
+ */
+export function getDealStageDistribution(currency?: string, init: RequestInit = {}) {
+    return getJson<Types.DealStageDistribution[]>(`/api/deals/stage-distribution${buildQuery({ currency })}`, init);
+}
+
 export function getDealFacetsFromCookie(cookie: string | null) {
     return getJson<Types.DealFacets>(`/api/deals/facets`, cookie ? { headers: { cookie }, cache: "no-store" } : {});
 }

@@ -25,6 +25,9 @@ import ooo.klae.connex.backend.beans.Workspace;
 import ooo.klae.connex.backend.dto.DealCurrencyMetricsDto;
 import ooo.klae.connex.backend.dto.DealFacets;
 import ooo.klae.connex.backend.dto.DealMetricsDto;
+import ooo.klae.connex.backend.dto.DealMonthTotalDto;
+import ooo.klae.connex.backend.dto.DealRevenueSeriesDto;
+import ooo.klae.connex.backend.dto.DealStageDistributionDto;
 import ooo.klae.connex.backend.dto.DealSummaryDto;
 import ooo.klae.connex.backend.dto.FacetCount;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
@@ -105,6 +108,71 @@ class DealServiceTest extends AbstractServiceTest {
             filteredPage.stream().map(Deal::getId).toList());
         assertEquals(2, filteredMetrics.totalCount());
         assertEquals(170.0, filteredMetrics.byCurrency().get(0).closedRevenue(), 0.0001);
+    }
+
+    @Test
+    void chartAggregatesAreAssembledAndIsolatedByWorkspace() {
+        Workspace activeWorkspace = newWorkspace();
+        workspaceMapper.addMember(activeWorkspace.getId(), currentUser.getId(), "owner");
+        workspace = activeWorkspace;
+        authenticateAs(currentUser, workspace.getId());
+
+        Pipeline pipeline = newPipeline();
+        Stage stage = newStage(pipeline, 0);
+        Company company = newCompany();
+        updateChartDeal(newDeal(pipeline, stage, company),
+            100.0, 0.0, "JPY", null, "2026-02-10", null);
+        updateChartDeal(newDeal(pipeline, stage, company),
+            200.0, 180.0, "JPY", true, "2026-02-15", "2026-01-10 00:00:00");
+        updateChartDeal(newDeal(pipeline, stage, company),
+            50.0, 25.0, "JPY", false, "2026-03-10", "2026-03-20 00:00:00");
+        updateChartDeal(newDeal(pipeline, stage, company),
+            400.0, 0.0, "USD", null, "2026-04-15", null);
+        updateChartDeal(newDeal(pipeline, stage, company),
+            600.0, 550.0, "USD", true, null, "2026-04-20 00:00:00");
+
+        Workspace otherWorkspace = newWorkspace();
+        Pipeline otherPipeline = newPipelineIn(otherWorkspace);
+        Stage otherStage = newStageIn(otherWorkspace, otherPipeline);
+        Deal foreign = new Deal();
+        foreign.setWorkspaceId(otherWorkspace.getId());
+        foreign.setName("Foreign Won");
+        foreign.setValue(1000.0);
+        foreign.setActualValue(900.0);
+        foreign.setCurrency("USD");
+        foreign.setPipelineId(otherPipeline.getId());
+        foreign.setStageId(otherStage.getId());
+        foreign.setExpectedCloseDate("2026-02-20");
+        foreign.setClosedAt("2026-01-25 00:00:00");
+        foreign.setWon(true);
+        dealMapper.insert(foreign);
+
+        DealRevenueSeriesDto series = dealService.getRevenueTimeseries(null);
+        List<DealStageDistributionDto> distribution = dealService.getStageDistribution(null);
+        DealRevenueSeriesDto filteredSeries = dealService.getRevenueTimeseries("JPY");
+        List<DealStageDistributionDto> filteredDistribution = dealService.getStageDistribution("JPY");
+
+        assertEquals(Map.of("2026-1", 180.0, "2026-3", 25.0, "2026-4", 550.0),
+            monthTotals(series.closed()));
+        assertEquals(Map.of("2026-2", 300.0, "2026-3", 50.0, "2026-4", 400.0),
+            monthTotals(series.projected()));
+        assertEquals(1, distribution.size());
+        DealStageDistributionDto stageTotals = distribution.get(0);
+        assertEquals(stage.getId(), stageTotals.stageId());
+        assertEquals(pipeline.getId(), stageTotals.pipelineId());
+        assertEquals(2, stageTotals.openCount());
+        assertEquals(500.0, stageTotals.openValue(), 0.0001);
+        assertEquals(3, stageTotals.closedCount());
+        assertEquals(780.0, stageTotals.closedValue(), 0.0001);
+        assertEquals(Map.of("2026-1", 180.0, "2026-3", 25.0),
+            monthTotals(filteredSeries.closed()));
+        assertEquals(Map.of("2026-2", 300.0, "2026-3", 50.0),
+            monthTotals(filteredSeries.projected()));
+        assertEquals(1, filteredDistribution.size());
+        assertEquals(1, filteredDistribution.get(0).openCount());
+        assertEquals(100.0, filteredDistribution.get(0).openValue(), 0.0001);
+        assertEquals(2, filteredDistribution.get(0).closedCount());
+        assertEquals(230.0, filteredDistribution.get(0).closedValue(), 0.0001);
     }
 
     @Test
@@ -462,7 +530,24 @@ class DealServiceTest extends AbstractServiceTest {
         return deal;
     }
 
+    private Deal updateChartDeal(Deal deal, double value, double actualValue, String currency,
+            Boolean won, String expectedCloseDate, String closedAt) {
+        deal.setValue(value);
+        deal.setActualValue(actualValue);
+        deal.setCurrency(currency);
+        deal.setWon(won);
+        deal.setExpectedCloseDate(expectedCloseDate);
+        deal.setClosedAt(closedAt);
+        dealMapper.update(deal);
+        return deal;
+    }
+
     private Map<String, Long> facetCounts(List<FacetCount> facets) {
         return facets.stream().collect(Collectors.toMap(FacetCount::getKey, FacetCount::getCount));
+    }
+
+    private Map<String, Double> monthTotals(List<DealMonthTotalDto> totals) {
+        return totals.stream().collect(Collectors.toMap(
+            total -> total.year() + "-" + total.month(), DealMonthTotalDto::total));
     }
 }

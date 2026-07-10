@@ -20,6 +20,8 @@ import ooo.klae.connex.backend.beans.Stage;
 import ooo.klae.connex.backend.beans.Tag;
 import ooo.klae.connex.backend.beans.Workspace;
 import ooo.klae.connex.backend.dto.DealCurrencyMetricsDto;
+import ooo.klae.connex.backend.dto.DealMonthTotalDto;
+import ooo.klae.connex.backend.dto.DealStageDistributionDto;
 import ooo.klae.connex.backend.dto.FacetCount;
 
 class DealMapperTest extends AbstractMapperTest {
@@ -162,6 +164,58 @@ class DealMapperTest extends AbstractMapperTest {
             workspace.getId(), null, null, null, null, null, "won"));
         assertEquals(1, dealMapper.countDeals(
             workspace.getId(), null, null, null, null, null, "lost"));
+    }
+
+    @Test
+    void dealChartAggregationsCoverAllWorkspaceDealsAndApplyCurrencyFilter() {
+        workspace = newWorkspace();
+        Pipeline firstPipeline = newPipeline();
+        Stage firstStage = newStage(firstPipeline, 0);
+        Pipeline secondPipeline = newPipeline();
+        Stage secondStage = newStage(secondPipeline, 0);
+        Company company = newCompany();
+
+        updateChartDeal(newDeal(firstPipeline, firstStage, company),
+            100.0, 0.0, "JPY", null, "2026-02-10", null);
+        updateChartDeal(newDeal(firstPipeline, firstStage, company),
+            200.0, 180.0, "JPY", true, "2026-02-15", "2026-01-10 00:00:00");
+        updateChartDeal(newDeal(firstPipeline, firstStage, company),
+            50.0, 25.0, "JPY", false, "2026-03-10", "2026-03-20 00:00:00");
+        updateChartDeal(newDeal(secondPipeline, secondStage, company),
+            300.0, 250.0, "USD", true, "2026-02-20", "2026-02-05 00:00:00");
+        updateChartDeal(newDeal(secondPipeline, secondStage, company),
+            400.0, 0.0, "USD", null, "2026-03-15", null);
+
+        assertEquals(Map.of("2026-1", 180.0, "2026-2", 250.0, "2026-3", 25.0),
+            monthTotals(dealMapper.revenueClosedByMonth(workspace.getId(), null)));
+        assertEquals(Map.of("2026-2", 600.0, "2026-3", 450.0),
+            monthTotals(dealMapper.revenueProjectedByMonth(workspace.getId(), null)));
+
+        List<DealStageDistributionDto> distribution =
+            dealMapper.stageDistribution(workspace.getId(), null);
+        DealStageDistributionDto first = distributionFor(
+            distribution, firstStage.getId(), firstPipeline.getId());
+        assertEquals(1, first.openCount());
+        assertEquals(100.0, first.openValue(), 0.0001);
+        assertEquals(2, first.closedCount());
+        assertEquals(230.0, first.closedValue(), 0.0001);
+        DealStageDistributionDto second = distributionFor(
+            distribution, secondStage.getId(), secondPipeline.getId());
+        assertEquals(1, second.openCount());
+        assertEquals(400.0, second.openValue(), 0.0001);
+        assertEquals(1, second.closedCount());
+        assertEquals(250.0, second.closedValue(), 0.0001);
+
+        assertEquals(Map.of("2026-1", 180.0, "2026-3", 25.0),
+            monthTotals(dealMapper.revenueClosedByMonth(workspace.getId(), "JPY")));
+        assertEquals(Map.of("2026-2", 300.0, "2026-3", 50.0),
+            monthTotals(dealMapper.revenueProjectedByMonth(workspace.getId(), "JPY")));
+        List<DealStageDistributionDto> filtered =
+            dealMapper.stageDistribution(workspace.getId(), "JPY");
+        assertEquals(1, filtered.size());
+        assertEquals(firstStage.getId(), filtered.get(0).stageId());
+        assertEquals(firstPipeline.getId(), filtered.get(0).pipelineId());
+        assertEquals(230.0, filtered.get(0).closedValue(), 0.0001);
     }
 
     @Test
@@ -489,6 +543,18 @@ class DealMapperTest extends AbstractMapperTest {
         return deal;
     }
 
+    private Deal updateChartDeal(Deal deal, double value, double actualValue, String currency,
+            Boolean won, String expectedCloseDate, String closedAt) {
+        deal.setValue(value);
+        deal.setActualValue(actualValue);
+        deal.setCurrency(currency);
+        deal.setWon(won);
+        deal.setExpectedCloseDate(expectedCloseDate);
+        deal.setClosedAt(closedAt);
+        dealMapper.update(deal);
+        return deal;
+    }
+
     private DealCurrencyMetricsDto metricsFor(List<DealCurrencyMetricsDto> metrics, String currency) {
         return metrics.stream()
             .filter(item -> currency.equals(item.currency()))
@@ -498,5 +564,18 @@ class DealMapperTest extends AbstractMapperTest {
 
     private Map<String, Long> facetCounts(List<FacetCount> facets) {
         return facets.stream().collect(Collectors.toMap(FacetCount::getKey, FacetCount::getCount));
+    }
+
+    private Map<String, Double> monthTotals(List<DealMonthTotalDto> totals) {
+        return totals.stream().collect(Collectors.toMap(
+            total -> total.year() + "-" + total.month(), DealMonthTotalDto::total));
+    }
+
+    private DealStageDistributionDto distributionFor(List<DealStageDistributionDto> distribution,
+            int stageId, int pipelineId) {
+        return distribution.stream()
+            .filter(item -> item.stageId() == stageId && item.pipelineId() == pipelineId)
+            .findFirst()
+            .orElseThrow();
     }
 }

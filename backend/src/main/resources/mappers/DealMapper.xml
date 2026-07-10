@@ -189,6 +189,48 @@
     ORDER BY d.currency
   </select>
 
+  <select id="revenueClosedByMonth" resultType="ooo.klae.connex.backend.dto.DealMonthTotalDto">
+    SELECT YEAR(d.closed_at) AS year,
+           MONTH(d.closed_at) AS month,
+           COALESCE(SUM(d.actual_value), 0) AS total
+    FROM deal d
+    WHERE d.workspace_id = #{workspaceId}
+    <if test="currency != null">
+      AND d.currency = #{currency}
+    </if>
+      AND d.closed_at IS NOT NULL
+    GROUP BY YEAR(d.closed_at), MONTH(d.closed_at)
+  </select>
+
+  <select id="revenueProjectedByMonth" resultType="ooo.klae.connex.backend.dto.DealMonthTotalDto">
+    SELECT YEAR(d.expected_close_date) AS year,
+           MONTH(d.expected_close_date) AS month,
+           COALESCE(SUM(d.value), 0) AS total
+    FROM deal d
+    WHERE d.workspace_id = #{workspaceId}
+    <if test="currency != null">
+      AND d.currency = #{currency}
+    </if>
+      AND d.expected_close_date IS NOT NULL
+    GROUP BY YEAR(d.expected_close_date), MONTH(d.expected_close_date)
+  </select>
+
+  <select id="stageDistribution" resultType="ooo.klae.connex.backend.dto.DealStageDistributionDto">
+    SELECT d.stage_id AS stage_id,
+           d.pipeline_id AS pipeline_id,
+           COUNT(CASE WHEN d.won IS NULL THEN 1 END) AS open_count,
+           COALESCE(SUM(CASE WHEN d.won IS NULL THEN d.value END), 0) AS open_value,
+           COUNT(CASE WHEN d.won IS NOT NULL THEN 1 END) AS closed_count,
+           COALESCE(SUM(CASE WHEN d.won IS NOT NULL
+               THEN (CASE WHEN d.won THEN d.actual_value ELSE d.value END) END), 0) AS closed_value
+    FROM deal d
+    WHERE d.workspace_id = #{workspaceId}
+    <if test="currency != null">
+      AND d.currency = #{currency}
+    </if>
+    GROUP BY d.stage_id, d.pipeline_id
+  </select>
+
   <select id="countsByStatus" resultType="ooo.klae.connex.backend.dto.FacetCount">
     SELECT CASE WHEN d.won IS NULL THEN 'open' WHEN d.won THEN 'won' ELSE 'lost' END AS `key`,
            COUNT(*) AS count

@@ -1,6 +1,7 @@
 package ooo.klae.connex.backend.controllers;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -14,6 +15,8 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import ooo.klae.connex.backend.ai.brief.DealBriefService;
+import ooo.klae.connex.backend.dto.DealRevenueSeriesDto;
+import ooo.klae.connex.backend.dto.DealStageDistributionDto;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.services.ActivityService;
 import ooo.klae.connex.backend.services.BulkOperationService;
@@ -148,6 +151,28 @@ class RecordListControllerTest {
 
         verify(dealService, never()).getDealsPage(
             null, null, null, null, null, null, null, null, 25, 0);
+    }
+
+    @Test
+    void dealChartEndpointsNormalizeAndForwardCurrency() {
+        DealController controller = new DealController(
+            dealService, bulkOperationService, dealRiskService, dealBriefService, workspaceService);
+        DealRevenueSeriesDto series = new DealRevenueSeriesDto(List.of(), List.of());
+        List<DealStageDistributionDto> distribution = List.of(
+            new DealStageDistributionDto(1, 2, 3, 4.0, 5, 6.0));
+        when(dealService.getRevenueTimeseries("JPY")).thenReturn(series);
+        when(dealService.getStageDistribution("JPY")).thenReturn(distribution);
+
+        assertSame(series, controller.getRevenueTimeseries("JPY"));
+        assertSame(distribution, controller.getStageDistribution("JPY"));
+
+        controller.getRevenueTimeseries("  ");
+        controller.getStageDistribution("");
+
+        verify(dealService).getRevenueTimeseries("JPY");
+        verify(dealService).getStageDistribution("JPY");
+        verify(dealService).getRevenueTimeseries(null);
+        verify(dealService).getStageDistribution(null);
     }
 
     @Test
