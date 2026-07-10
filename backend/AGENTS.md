@@ -66,7 +66,7 @@ Automation rules (`RuleService` CRUD + `RuleEngineService` execution, issue #54)
 
 ## AI subsystem (BYOP) — the masking boundary is load-bearing
 
-The AI foundation (issue #94; packages `ai/`, `ai/masking`, `ai/provider`, `ai/egress`, `ai/brief`) is customer-BYOP (Amazon Bedrock → Anthropic Claude v1) and **fail-closed end to end**: `connex.ai.enabled` defaults false, and `AiFeatureGate` additionally requires the actor's `Permission.AI_USE` plus a per-org provider config (`ai_provider_config`) that is enabled, credentialed (envelope-encrypted via `SecretPurpose.ORG_AI_PROVIDER_CREDENTIAL`), region-allowlisted, and no-training-attested. Editing provider settings is org-admin + step-up gated (`OrgMemberService.requireOrgAdmin` + `requireRecentAuthentication`), mirroring SSO config.
+The AI foundation (issue #94; packages `ai/`, `ai/masking`, `ai/provider`, `ai/egress`, `ai/brief`) is customer-BYOP (Amazon Bedrock → Anthropic Claude v1) and **fail-closed per organization**: `connex.ai.enabled` defaults true (the deployment offers AI, now that the #92 encryption gate is satisfied), but `AiFeatureGate` still denies every call unless it also finds the actor's `Permission.AI_USE` plus a per-org provider config (`ai_provider_config`) that is enabled, credentialed (envelope-encrypted via `SecretPurpose.ORG_AI_PROVIDER_CREDENTIAL`), region-allowlisted, and no-training-attested. Editing provider settings is org-admin + step-up gated (`OrgMemberService.requireOrgAdmin` + `requireRecentAuthentication`), mirroring SSO config.
 
 Rules for any new AI-powered feature:
 

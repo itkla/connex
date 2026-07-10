@@ -151,12 +151,13 @@ connex:
             client-id: ${CONNEX_SOCIAL_LOGIN_MICROSOFT_CLIENT_ID:}
             client-secret: ${CONNEX_SOCIAL_LOGIN_MICROSOFT_CLIENT_SECRET:}
     ai:
-        # Instance-level kill switch for all AI features (#94/#386). Default false so a
-        # deployment ships with AI dormant. The feature gate fails closed until this is
-        # true AND a tenant has a configured, enabled BYOP provider (region + no-training
-        # attestation). Enable only where BYOP AI is offered and the hard security gates
-        # (encryption at rest #92, etc.) are satisfied.
-        enabled: ${CONNEX_AI_ENABLED:false}
+        # Instance-level switch for AI features (#94/#386). Defaults true now that the
+        # encryption-at-rest hard gate (#92) is satisfied, so the deployment OFFERS AI —
+        # but the feature gate still fails closed per organization: no tenant gets AI until
+        # it configures and enables a BYOP provider (allowlisted region + no-training/
+        # no-retention attestation) and a member holds the AI_USE permission. Set
+        # CONNEX_AI_ENABLED=false to disable AI for the whole instance.
+        enabled: ${CONNEX_AI_ENABLED:true}
         connect-timeout-ms: ${CONNEX_AI_CONNECT_TIMEOUT_MS:3000}
         request-timeout-ms: ${CONNEX_AI_REQUEST_TIMEOUT_MS:60000}
         max-response-bytes: ${CONNEX_AI_MAX_RESPONSE_BYTES:2097152}
