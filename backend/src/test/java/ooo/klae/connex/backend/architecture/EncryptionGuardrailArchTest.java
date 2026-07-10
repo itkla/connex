@@ -80,6 +80,26 @@ class EncryptionGuardrailArchTest {
         Pattern.compile("hasPassword|hasClientSecret|secretId|secretCount|missingKeySecrets|disabledKeySecrets|"
             + "mismatchedSecrets|staleSecrets|totalSecrets|unsupportedAlgorithmSecrets",
             Pattern.CASE_INSENSITIVE);
+    private static final Pattern CIPHER_API_REFERENCE =
+        Pattern.compile("\\bjavax\\.crypto\\.Cipher\\b|\\bCipher\\s*\\.|"
+            + "\\bCipher\\s+[A-Za-z_$][A-Za-z0-9_$]*\\b");
+    private static final Pattern MYBATIS_TYPE_HANDLER_DECLARATION =
+        Pattern.compile("\\bimplements\\b[^\\{;]*\\bTypeHandler\\b|"
+            + "\\bextends\\b[^\\{;]*\\b(?:BaseTypeHandler|TypeReference)\\b");
+    private static final Pattern MYBATIS_TYPE_HANDLER_ANNOTATION =
+        Pattern.compile("@(?:[A-Za-z0-9_$.]+\\.)?(?:MappedTypes|MappedJdbcTypes)\\b");
+    private static final Pattern JPA_CONVERTER_REFERENCE =
+        Pattern.compile("\\bAttributeConverter\\b|"
+            + "@(?:[A-Za-z0-9_$.]+\\.)?(?:Convert|ColumnTransformer)\\b");
+    private static final Pattern TRANSPARENT_ENCRYPTION_REFERENCE =
+        Pattern.compile("\\b(?:javax\\.crypto\\.)?Cipher\\b|\\.\\s*(?:encrypt|decrypt)\\s*\\(|"
+            + "\\bSecretKeySpec\\b|secret:v1", Pattern.CASE_INSENSITIVE);
+    private static final Pattern BINARY_COLUMN_DEFINITION =
+        Pattern.compile("(?:^|,)\\s*(?:(?:ADD|MODIFY)\\s+)?(?:COLUMN\\s+)?`?([a-z0-9_]+)`?\\s+"
+            + "(?:VARBINARY|BINARY|TINYBLOB|BLOB|MEDIUMBLOB|LONGBLOB)\\b", Pattern.CASE_INSENSITIVE);
+    private static final Pattern CHANGE_BINARY_COLUMN_DEFINITION =
+        Pattern.compile("(?:^|,)\\s*CHANGE\\s+(?:COLUMN\\s+)?`?[a-z0-9_]+`?\\s+`?([a-z0-9_]+)`?\\s+"
+            + "(?:VARBINARY|BINARY|TINYBLOB|BLOB|MEDIUMBLOB|LONGBLOB)\\b", Pattern.CASE_INSENSITIVE);
 
     private static final Set<String> APPROVED_SECRET_COLUMNS = Set.of(
         "secret_value.encrypted_data_key",
@@ -87,6 +107,45 @@ class EncryptionGuardrailArchTest {
         "workspace_mail_config.password_enc",
         "sso_connection.oidc_client_secret_enc",
         "sso_connection.saml_sp_private_key_enc");
+
+    private static final Set<String> APPROVED_CIPHER_PACKAGES = Set.of(
+        "ooo/klae/connex/backend/secrets/",
+        "ooo/klae/connex/backend/sso/",
+        "ooo/klae/connex/backend/mail/");
+
+    private static final Set<String> EXPECTED_APPROVED_CIPHER_SITES = Set.of(
+        "ooo/klae/connex/backend/secrets/SecretStoreCrypto.java",
+        "ooo/klae/connex/backend/sso/AesGcm.java",
+        "ooo/klae/connex/backend/mail/SecretCipher.java");
+
+    private static final Set<String> CORE_CRM_TABLES = Set.of(
+        "person",
+        "person_share",
+        "person_tag",
+        "person_employment",
+        "person_edge",
+        "company",
+        "company_share",
+        "company_tag",
+        "deal",
+        "deal_person",
+        "deal_collaborator",
+        "deal_tag",
+        "deal_stage_history",
+        "note",
+        "note_reference",
+        "entity_reference",
+        "activity",
+        "task",
+        "pipeline",
+        "pipeline_share",
+        "stage",
+        "tag",
+        "custom_field_definition",
+        "custom_field_value",
+        "introduction");
+
+    private static final Set<String> APPROVED_CRM_BINARY_COLUMNS = Set.of();
 
     private static final Set<String> COLUMN_KEYWORDS = Set.of(
         "constraint", "primary", "unique", "key", "index", "fulltext", "spatial",
@@ -166,6 +225,107 @@ class EncryptionGuardrailArchTest {
                 + "placed in exception messages, or exposed from response DTOs: " + violations);
     }
 
+    @Test
+    void app_level_ciphers_are_confined_to_approved_encryption_packages() throws Exception {
+        List<String> violations = new ArrayList<>();
+        Set<String> seenApproved = new LinkedHashSet<>();
+        Path main = repoRoot().resolve("backend/src/main/java");
+        List<Path> javaFiles = javaSourceFiles(main);
+        assertTrue(javaFiles.size() >= 100,
+            "Only found " + javaFiles.size() + " backend Java files; the cipher scan is likely misconfigured.");
+
+        for (Path file : javaFiles) {
+            String source = Files.readString(file, StandardCharsets.UTF_8);
+            if (!CIPHER_API_REFERENCE.matcher(source).find()) {
+                continue;
+            }
+            String sourcePath = main.relativize(file).toString().replace('\\', '/');
+            if (APPROVED_CIPHER_PACKAGES.stream().anyMatch(sourcePath::startsWith)) {
+                if (EXPECTED_APPROVED_CIPHER_SITES.contains(sourcePath)) {
+                    seenApproved.add(sourcePath);
+                }
+                continue;
+            }
+            violations.add(relative(file));
+        }
+
+        List<String> missingApproved = EXPECTED_APPROVED_CIPHER_SITES.stream()
+            .filter(site -> !seenApproved.contains(site))
+            .sorted()
+            .toList();
+        assertTrue(missingApproved.isEmpty(),
+            "Expected approved Cipher sites were not scanned as Cipher users: " + missingApproved);
+        assertTrue(violations.isEmpty(),
+            "App-level Cipher use is confined to approved encryption packages. Searchable CRM data must follow "
+                + "ENCRYPTION_GUARANTEE_MATRIX.md and #375 instead of adding service, mapper, bean, or provider "
+                + "encryption: " + violations);
+    }
+
+    @Test
+    void mybatis_type_handlers_do_not_transparently_encrypt() throws Exception {
+        List<String> violations = new ArrayList<>();
+        Path main = repoRoot().resolve("backend/src/main/java");
+        List<Path> javaFiles = javaSourceFiles(main);
+        assertTrue(javaFiles.size() >= 100,
+            "Only found " + javaFiles.size() + " backend Java files; the type-handler scan is likely misconfigured.");
+
+        for (Path file : javaFiles) {
+            String source = Files.readString(file, StandardCharsets.UTF_8);
+            boolean typeHandler = file.getFileName().toString().endsWith("TypeHandler.java")
+                && MYBATIS_TYPE_HANDLER_DECLARATION.matcher(source).find();
+            typeHandler = typeHandler || MYBATIS_TYPE_HANDLER_ANNOTATION.matcher(source).find();
+            boolean converter = JPA_CONVERTER_REFERENCE.matcher(source).find();
+            if ((typeHandler || converter) && TRANSPARENT_ENCRYPTION_REFERENCE.matcher(source).find()) {
+                violations.add(relative(file));
+            }
+        }
+
+        assertTrue(violations.isEmpty(),
+            "MyBatis type handlers and JPA-style converters must not transparently encrypt database columns. "
+                + "Searchable CRM fields must use storage/database encryption per ENCRYPTION_GUARANTEE_MATRIX.md "
+                + "and #375: " + violations);
+    }
+
+    @Test
+    void core_crm_tables_have_no_unexplained_binary_columns() throws Exception {
+        Set<String> foundBinaryColumns = new LinkedHashSet<>();
+        Set<String> seenApproved = new LinkedHashSet<>();
+        List<String> violationLocations = new ArrayList<>();
+        Path migrations = repoRoot().resolve("backend/src/main/resources/db/migration");
+        List<Path> sqlFiles;
+        try (Stream<Path> files = Files.walk(migrations)) {
+            sqlFiles = files
+                .filter(path -> path.getFileName().toString().endsWith(".sql"))
+                .sorted(Comparator.comparing(Path::toString))
+                .toList();
+        }
+        assertTrue(sqlFiles.size() >= 50,
+            "Only found " + sqlFiles.size() + " migrations; the binary-column scan is likely misconfigured.");
+
+        for (Path file : sqlFiles) {
+            scanCoreCrmBinaryColumns(file, foundBinaryColumns, seenApproved, violationLocations);
+        }
+
+        if (APPROVED_CRM_BINARY_COLUMNS.isEmpty()) {
+            assertTrue(foundBinaryColumns.isEmpty(),
+                "No core CRM binary columns are approved, but the migration scan found: " + foundBinaryColumns);
+        }
+        List<String> stale = APPROVED_CRM_BINARY_COLUMNS.stream()
+            .filter(column -> !seenApproved.contains(column))
+            .sorted()
+            .toList();
+        List<String> unexplained = foundBinaryColumns.stream()
+            .filter(column -> !APPROVED_CRM_BINARY_COLUMNS.contains(column))
+            .sorted()
+            .toList();
+        assertTrue(stale.isEmpty(),
+            "These approved core CRM binary columns were not found; remove stale allowlist entries or update the "
+                + "table/column name: " + stale);
+        assertTrue(unexplained.isEmpty(),
+            "Binary columns on searchable CRM tables require storage/database encryption and explicit review, "
+                + "not an app-level blob: " + violationLocations);
+    }
+
     private void scanMigration(Path file, List<String> violations, Set<String> seenApproved) throws IOException {
         List<String> lines = Files.readAllLines(file, StandardCharsets.UTF_8);
         String table = null;
@@ -207,6 +367,45 @@ class EncryptionGuardrailArchTest {
         }
     }
 
+    private void scanCoreCrmBinaryColumns(Path file, Set<String> foundBinaryColumns, Set<String> seenApproved,
+            List<String> violationLocations) throws IOException {
+        List<String> lines = Files.readAllLines(file, StandardCharsets.UTF_8);
+        String table = null;
+        for (int i = 0; i < lines.size(); i++) {
+            String trimmed = lines.get(i).strip();
+            if (trimmed.isBlank() || trimmed.startsWith("--")) {
+                continue;
+            }
+
+            Matcher create = CREATE_TABLE.matcher(trimmed);
+            if (create.find()) {
+                table = create.group(1).toLowerCase(Locale.ROOT);
+            }
+
+            Matcher alter = ALTER_TABLE.matcher(trimmed);
+            if (alter.find()) {
+                table = alter.group(1).toLowerCase(Locale.ROOT);
+            }
+
+            if (table != null && CORE_CRM_TABLES.contains(table)) {
+                String columnScanLine = columnScanLine(trimmed, create, alter);
+                for (String columnName : binaryColumnNames(columnScanLine)) {
+                    String qualified = table + "." + columnName;
+                    foundBinaryColumns.add(qualified);
+                    if (APPROVED_CRM_BINARY_COLUMNS.contains(qualified)) {
+                        seenApproved.add(qualified);
+                    } else {
+                        violationLocations.add(relative(file) + ":" + (i + 1) + ": " + qualified);
+                    }
+                }
+            }
+
+            if (trimmed.endsWith(";")) {
+                table = null;
+            }
+        }
+    }
+
     private List<String> columnNames(String line) {
         List<String> names = new ArrayList<>();
         Matcher changed = CHANGE_COLUMN_DEFINITION.matcher(line);
@@ -214,6 +413,22 @@ class EncryptionGuardrailArchTest {
             names.add(changed.group(1).toLowerCase(Locale.ROOT));
         }
         Matcher column = COLUMN_DEFINITION.matcher(line);
+        while (column.find()) {
+            String name = column.group(1).toLowerCase(Locale.ROOT);
+            if (!names.contains(name)) {
+                names.add(name);
+            }
+        }
+        return names;
+    }
+
+    private List<String> binaryColumnNames(String line) {
+        List<String> names = new ArrayList<>();
+        Matcher changed = CHANGE_BINARY_COLUMN_DEFINITION.matcher(line);
+        while (changed.find()) {
+            names.add(changed.group(1).toLowerCase(Locale.ROOT));
+        }
+        Matcher column = BINARY_COLUMN_DEFINITION.matcher(line);
         while (column.find()) {
             String name = column.group(1).toLowerCase(Locale.ROOT);
             if (!names.contains(name)) {
@@ -390,6 +605,15 @@ class EncryptionGuardrailArchTest {
 
     private boolean secretAuditField(String fieldName) {
         return SECRET_AUDIT_FIELD.matcher(fieldName).find();
+    }
+
+    private List<Path> javaSourceFiles(Path main) throws IOException {
+        try (Stream<Path> files = Files.walk(main)) {
+            return files
+                .filter(path -> path.getFileName().toString().endsWith(".java"))
+                .sorted(Comparator.comparing(Path::toString))
+                .toList();
+        }
     }
 
     private static Path repoRoot() {
