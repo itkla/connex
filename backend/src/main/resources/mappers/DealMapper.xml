@@ -196,9 +196,11 @@
     ORDER BY d.currency
   </select>
 
+  <sql id="revenueRealizedMonth">CASE WHEN d.won = TRUE THEN COALESCE(d.expected_close_date, d.closed_at) ELSE d.closed_at END</sql>
+
   <select id="revenueClosedByMonth" resultType="ooo.klae.connex.backend.dto.DealMonthTotalDto">
-    SELECT YEAR(COALESCE(d.expected_close_date, d.closed_at)) AS year,
-           MONTH(COALESCE(d.expected_close_date, d.closed_at)) AS month,
+    SELECT YEAR(<include refid="revenueRealizedMonth"/>) AS year,
+           MONTH(<include refid="revenueRealizedMonth"/>) AS month,
            COALESCE(SUM(d.actual_value), 0) AS total
     FROM deal d
     WHERE d.workspace_id = #{workspaceId}
@@ -206,8 +208,8 @@
       AND d.currency = #{currency}
     </if>
       AND d.closed_at IS NOT NULL
-    GROUP BY YEAR(COALESCE(d.expected_close_date, d.closed_at)),
-             MONTH(COALESCE(d.expected_close_date, d.closed_at))
+    GROUP BY YEAR(<include refid="revenueRealizedMonth"/>),
+             MONTH(<include refid="revenueRealizedMonth"/>)
   </select>
 
   <select id="revenueProjectedByMonth" resultType="ooo.klae.connex.backend.dto.DealMonthTotalDto">

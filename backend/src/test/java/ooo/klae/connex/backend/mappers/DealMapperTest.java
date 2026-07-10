@@ -228,13 +228,13 @@ class DealMapperTest extends AbstractMapperTest {
         updateChartDeal(newDeal(firstPipeline, firstStage, company),
             200.0, 180.0, "JPY", true, "2026-02-15", "2026-01-10 00:00:00");
         updateChartDeal(newDeal(firstPipeline, firstStage, company),
-            50.0, 25.0, "JPY", false, "2026-03-10", "2026-03-20 00:00:00");
+            50.0, 25.0, "JPY", false, "2026-03-10", "2026-05-20 00:00:00");
         updateChartDeal(newDeal(secondPipeline, secondStage, company),
             300.0, 250.0, "USD", true, "2026-02-20", "2026-02-05 00:00:00");
         updateChartDeal(newDeal(secondPipeline, secondStage, company),
             400.0, 0.0, "USD", null, "2026-03-15", null);
 
-        assertEquals(Map.of("2026-2", 430.0, "2026-3", 25.0),
+        assertEquals(Map.of("2026-2", 430.0, "2026-5", 25.0),
             monthTotals(dealMapper.revenueClosedByMonth(workspace.getId(), null)));
         assertEquals(Map.of("2026-2", 600.0, "2026-3", 450.0),
             monthTotals(dealMapper.revenueProjectedByMonth(workspace.getId(), null)));
@@ -254,7 +254,7 @@ class DealMapperTest extends AbstractMapperTest {
         assertEquals(1, second.closedCount());
         assertEquals(250.0, second.closedValue(), 0.0001);
 
-        assertEquals(Map.of("2026-2", 180.0, "2026-3", 25.0),
+        assertEquals(Map.of("2026-2", 180.0, "2026-5", 25.0),
             monthTotals(dealMapper.revenueClosedByMonth(workspace.getId(), "JPY")));
         assertEquals(Map.of("2026-2", 300.0, "2026-3", 50.0),
             monthTotals(dealMapper.revenueProjectedByMonth(workspace.getId(), "JPY")));
