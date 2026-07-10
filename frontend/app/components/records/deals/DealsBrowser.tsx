@@ -122,6 +122,22 @@ function diffDraft(original: DealDraft, draft: DealDraft): boolean {
     );
 }
 
+/**
+ * Maps a table column key to the backend {@code sort} token accepted by
+ * {@code GET /api/deals/page}. Columns absent here are not server-sortable.
+ */
+const DEAL_SORT_TOKENS: Record<string, string> = {
+    name: 'name',
+    value: 'value',
+    actualValue: 'actual_value',
+    company: 'company',
+    pipeline: 'pipeline',
+    stage: 'stage',
+    expectedCloseDate: 'expected_close_date',
+    status: 'status',
+    updatedAt: 'updated_at',
+};
+
 export default function DealsBrowser({ deals: initialDeals, total: initialTotal, metrics, serverFacets, savedViews }: { deals: Deal[]; total: number; metrics: DealMetrics; serverFacets: DealFacets; savedViews: SavedView[] }) {
     const router = useRouter();
     const t = useTranslations('DealsBrowser');
@@ -134,14 +150,33 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
     const [page, setPage] = useState(1);
     const [size, setSize] = useState(25);
     const [loadingPage, setLoadingPage] = useState(false);
+    const [sortKey, setSortKey] = useState<string | null>(null);
+    const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
     const sizeRef = useRef(size);
     useEffect(() => {
         sizeRef.current = size;
     }, [size]);
     const statusRef = useRef<DealsPageParams['status']>(undefined);
-    const loadDealsPage = useCallback((nextPage: number, nextSize: number, status: DealsPageParams['status']) => {
+    const currencyRef = useRef<string | undefined>(undefined);
+    const sortRef = useRef<string | undefined>(undefined);
+    const dirRef = useRef<'asc' | 'desc'>('asc');
+    const loadDealsPage = useCallback((query: {
+        page: number;
+        size: number;
+        status: DealsPageParams['status'];
+        currency?: string;
+        sort?: string;
+        dir?: 'asc' | 'desc';
+    }) => {
         setLoadingPage(true);
-        getDealsPage({ page: nextPage, size: nextSize, status })
+        getDealsPage({
+            page: query.page,
+            size: query.size,
+            status: query.status,
+            currency: query.currency,
+            sort: query.sort,
+            dir: query.sort ? query.dir : undefined,
+        })
             .then((response) => {
                 setDeals(response.items);
                 setTotal(response.total);
@@ -154,15 +189,37 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
                 setLoadingPage(false);
             });
     }, []);
+    const reloadDeals = useCallback((nextPage: number) => {
+        loadDealsPage({
+            page: nextPage,
+            size: sizeRef.current,
+            status: statusRef.current,
+            currency: currencyRef.current,
+            sort: sortRef.current,
+            dir: dirRef.current,
+        });
+    }, [loadDealsPage]);
     const changePage = useCallback((nextPage: number) => {
         setPage(nextPage);
-        loadDealsPage(nextPage, sizeRef.current, statusRef.current);
-    }, [loadDealsPage]);
+        reloadDeals(nextPage);
+    }, [reloadDeals]);
     const changePageSize = useCallback((nextSize: number) => {
         setSize(nextSize);
+        sizeRef.current = nextSize;
         setPage(1);
-        loadDealsPage(1, nextSize, statusRef.current);
-    }, [loadDealsPage]);
+        reloadDeals(1);
+    }, [reloadDeals]);
+    const handleSortChange = useCallback((columnKey: string) => {
+        const token = DEAL_SORT_TOKENS[columnKey];
+        if (!token) return;
+        const nextDir: 'asc' | 'desc' = sortKey === columnKey && sortDir === 'asc' ? 'desc' : 'asc';
+        setSortKey(columnKey);
+        setSortDir(nextDir);
+        sortRef.current = token;
+        dirRef.current = nextDir;
+        setPage(1);
+        reloadDeals(1);
+    }, [sortKey, sortDir, reloadDeals]);
 
     const [companies, setCompanies] = useState<Company[]>([]);
     const [pipelines, setPipelines] = useState<Pipeline[]>([]);
@@ -231,11 +288,6 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
     const activeCurrency = selectedCurrency && currencyCounts.has(selectedCurrency)
         ? selectedCurrency
         : dominantCurrency;
-    const dealsInCurrency = useMemo(
-        () => deals.filter((d) => (d.currency || 'USD') === activeCurrency),
-        [deals, activeCurrency],
-    );
-
     const [revenueSeries, setRevenueSeries] = useState<DealRevenueSeries>({ closed: [], projected: [] });
     const [stageDistribution, setStageDistribution] = useState<DealStageDistribution[]>([]);
     useEffect(() => {
@@ -271,7 +323,7 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
         deleteDialogOpen,
         setDeleteDialogOpen,
     } = useRecordsBrowser<Deal>({
-        items: dealsInCurrency,
+        items: deals,
         storageKey: 'deals:view',
         searchFields,
     });
@@ -537,7 +589,7 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
         {
             key: 'risk',
             label: t('columnRisk'),
-            getSortValue: (d) => riskByDealId.get(d.id)?.score ?? null,
+            sortable: false,
             render: (d) => <DealRiskPill risk={riskByDealId.get(d.id)} />,
             filter: {
                 getValue: (d) => {
@@ -620,13 +672,21 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
     const didMountRef = useRef(false);
     useEffect(() => {
         statusRef.current = serverStatus;
+        currencyRef.current = activeCurrency;
         if (!didMountRef.current) {
             didMountRef.current = true;
             return;
         }
         setPage(1);
-        loadDealsPage(1, sizeRef.current, serverStatus);
-    }, [serverStatus, loadDealsPage]);
+        loadDealsPage({
+            page: 1,
+            size: sizeRef.current,
+            status: serverStatus,
+            currency: activeCurrency,
+            sort: sortRef.current,
+            dir: dirRef.current,
+        });
+    }, [serverStatus, activeCurrency, loadDealsPage]);
 
     const facets = useMemo(() => {
         const base = deriveFilterOptions(columns, filteredDeals);
@@ -879,7 +939,8 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
                         <RecordsRenderView<Deal>
                             data={visibleDeals}
                             loading={loadingPage}
-                            columns={[...columns, ...customColumns]}
+                            columns={[...columns, ...customColumns.map((c) => ({ ...c, sortable: false }))]}
+                            sortState={{ key: sortKey, direction: sortDir, onSortChange: handleSortChange }}
                             addColumnSlot={addColumnSlot}
                             renderCard={(item, { onQuickEdit, onDelete }) => (
                                 <DealCard

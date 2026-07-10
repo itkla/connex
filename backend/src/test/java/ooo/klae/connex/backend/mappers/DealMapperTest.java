@@ -115,6 +115,54 @@ class DealMapperTest extends AbstractMapperTest {
     }
 
     @Test
+    void getDealsPageSortsByRelatedNamesAndStatusWithinWorkspace() {
+        Workspace pageWorkspace = newWorkspace();
+        Pipeline zuluPipeline = newPipelineIn(pageWorkspace, "Zulu Pipeline");
+        Pipeline alphaPipeline = newPipelineIn(pageWorkspace, "Alpha Pipeline");
+        Pipeline middlePipeline = newPipelineIn(pageWorkspace, "Middle Pipeline");
+        Stage bravoStage = newStageIn(pageWorkspace, zuluPipeline, "Bravo Stage", 0);
+        Stage zuluStage = newStageIn(pageWorkspace, alphaPipeline, "Zulu Stage", 0);
+        Stage alphaStage = newStageIn(pageWorkspace, middlePipeline, "Alpha Stage", 0);
+        Company alphaCompany = newCompanyIn(pageWorkspace, "Alpha Company");
+        Company zuluCompany = newCompanyIn(pageWorkspace, "Zulu Company");
+
+        Deal open = newDealIn(pageWorkspace, zuluPipeline, bravoStage);
+        open.setCompanyId(alphaCompany.getId());
+        updateDeal(open, "Open Deal", 100.0, 0.0, "JPY", null);
+        Deal won = newDealIn(pageWorkspace, alphaPipeline, zuluStage);
+        won.setCompanyId(zuluCompany.getId());
+        updateDeal(won, "Won Deal", 200.0, 180.0, "JPY", true);
+        Deal lostWithoutCompany = updateDeal(
+            newDealIn(pageWorkspace, middlePipeline, alphaStage),
+            "Lost Deal", 50.0, 0.0, "JPY", false);
+
+        Workspace foreignWorkspace = newWorkspace();
+        Pipeline foreignPipeline = newPipelineIn(foreignWorkspace, "Aardvark Pipeline");
+        Stage foreignStage = newStageIn(foreignWorkspace, foreignPipeline, "Aardvark Stage", 0);
+        Deal foreign = newDealIn(foreignWorkspace, foreignPipeline, foreignStage);
+
+        List<Integer> companyAscending = dealPageIds(pageWorkspace, "company", "asc");
+        assertEquals(List.of(lostWithoutCompany.getId(), open.getId(), won.getId()), companyAscending);
+        assertEquals(List.of(won.getId(), open.getId(), lostWithoutCompany.getId()),
+            dealPageIds(pageWorkspace, "company", "desc"));
+        assertTrue(companyAscending.contains(lostWithoutCompany.getId()));
+        assertFalse(companyAscending.contains(foreign.getId()));
+
+        assertEquals(List.of(won.getId(), lostWithoutCompany.getId(), open.getId()),
+            dealPageIds(pageWorkspace, "pipeline", "asc"));
+        assertEquals(List.of(open.getId(), lostWithoutCompany.getId(), won.getId()),
+            dealPageIds(pageWorkspace, "pipeline", "desc"));
+        assertEquals(List.of(lostWithoutCompany.getId(), open.getId(), won.getId()),
+            dealPageIds(pageWorkspace, "stage", "asc"));
+        assertEquals(List.of(won.getId(), open.getId(), lostWithoutCompany.getId()),
+            dealPageIds(pageWorkspace, "stage", "desc"));
+        assertEquals(List.of(open.getId(), won.getId(), lostWithoutCompany.getId()),
+            dealPageIds(pageWorkspace, "status", "asc"));
+        assertEquals(List.of(won.getId(), lostWithoutCompany.getId(), open.getId()),
+            dealPageIds(pageWorkspace, "status", "desc"));
+    }
+
+    @Test
     void dealMetricsAggregatesMatchingDealsByCurrency() {
         workspace = newWorkspace();
         Pipeline pipeline = newPipeline();
@@ -502,21 +550,37 @@ class DealMapperTest extends AbstractMapperTest {
     }
 
     private Pipeline newPipelineIn(Workspace ws) {
+        return newPipelineIn(ws, "Pipeline " + unique());
+    }
+
+    private Pipeline newPipelineIn(Workspace ws, String name) {
         Pipeline pipeline = new Pipeline();
-        pipeline.setName("Pipeline " + unique());
+        pipeline.setName(name);
         pipeline.setWorkspaceId(ws.getId());
         pipelineMapper.insertPipeline(pipeline);
         return pipeline;
     }
 
     private Stage newStageIn(Workspace ws, Pipeline pipeline, int position) {
+        return newStageIn(ws, pipeline, "Stage " + unique(), position);
+    }
+
+    private Stage newStageIn(Workspace ws, Pipeline pipeline, String name, int position) {
         Stage stage = new Stage();
-        stage.setName("Stage " + unique());
+        stage.setName(name);
         stage.setPipeline(pipeline);
         stage.setPosition(position);
         stage.setWorkspaceId(ws.getId());
         pipelineMapper.insertStage(stage);
         return stage;
+    }
+
+    private Company newCompanyIn(Workspace ws, String name) {
+        Company company = new Company();
+        company.setName(name);
+        company.setWorkspaceId(ws.getId());
+        companyMapper.insert(company);
+        return company;
     }
 
     private Deal newDealIn(Workspace ws, Pipeline pipeline, Stage stage) {
@@ -529,6 +593,12 @@ class DealMapperTest extends AbstractMapperTest {
         deal.setStageId(stage.getId());
         dealMapper.insert(deal);
         return deal;
+    }
+
+    private List<Integer> dealPageIds(Workspace ws, String sort, String dir) {
+        return dealMapper.getDealsPage(
+            ws.getId(), null, sort, dir, null, null, null, null, null, 100, 0)
+            .stream().map(Deal::getId).toList();
     }
 
     private Deal updateDeal(Deal deal, String name, double value, double actualValue,
