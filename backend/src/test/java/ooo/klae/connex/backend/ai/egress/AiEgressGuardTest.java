@@ -2,6 +2,7 @@ package ooo.klae.connex.backend.ai.egress;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.net.InetAddress;
 
@@ -49,6 +50,15 @@ class AiEgressGuardTest {
     }
 
     @Test
+    void isBlocked_rejectsSpecialUseIpv4Ranges() throws Exception {
+        assertBlocked("0.1.2.3");
+        assertBlocked("192.0.0.8");
+        assertBlocked("198.18.0.1");
+        assertBlocked("198.19.255.255");
+        assertBlocked("240.0.0.1");
+    }
+
+    @Test
     void requirePublicAddresses_rejectsEmptyResolution() {
         assertThrows(AiProviderException.class,
                 () -> AiEgressGuard.requirePublicAddresses(BedrockRegion.US_EAST_1.host(), new InetAddress[0]));
@@ -56,6 +66,7 @@ class AiEgressGuardTest {
 
     private static void assertBlocked(String address) throws Exception {
         InetAddress resolved = InetAddress.getByName(address);
+        assertTrue(AiEgressGuard.isBlocked(resolved));
         assertThrows(AiProviderException.class,
                 () -> AiEgressGuard.requirePublicAddresses(BedrockRegion.US_EAST_1.host(),
                         new InetAddress[] { resolved }));

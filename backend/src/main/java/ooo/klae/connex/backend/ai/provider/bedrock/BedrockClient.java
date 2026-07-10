@@ -69,23 +69,26 @@ public class BedrockClient {
         String rawPath = "/model/" + modelId + "/invoke";
         String host = region.host();
         for (int attempt = 0; attempt < 2; attempt++) {
+            BedrockResponse response;
             try {
-                BedrockResponse response = sendOnce(host, rawPath, region.regionCode(), credentials, body);
-                if (response.statusCode() >= 200 && response.statusCode() <= 299) {
-                    return new String(response.body(), StandardCharsets.UTF_8);
-                }
-                if (attempt == 0 && retryableStatus(response.statusCode())) {
-                    continue;
-                }
-                throw new AiProviderException("Bedrock invocation failed with status " + response.statusCode());
+                response = sendOnce(host, rawPath, region.regionCode(), credentials, body);
             } catch (ResourceAccessException exception) {
                 if (attempt == 0) {
                     continue;
                 }
-                throw new AiProviderException("Bedrock invocation failed during transport", exception);
+                throw new AiProviderException("Bedrock invocation failed during transport");
             } catch (RestClientException exception) {
-                throw new AiProviderException("Bedrock invocation failed during transport", exception);
+                throw new AiProviderException("Bedrock invocation failed during transport");
+            } catch (RuntimeException exception) {
+                throw new AiProviderException("Bedrock invocation failed during transport");
             }
+            if (response.statusCode() >= 200 && response.statusCode() <= 299) {
+                return new String(response.body(), StandardCharsets.UTF_8);
+            }
+            if (attempt == 0 && retryableStatus(response.statusCode())) {
+                continue;
+            }
+            throw new AiProviderException("Bedrock invocation failed with status " + response.statusCode());
         }
         throw new AiProviderException("Bedrock invocation failed during transport");
     }

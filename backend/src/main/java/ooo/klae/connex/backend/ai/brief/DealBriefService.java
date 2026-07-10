@@ -20,6 +20,8 @@ import ooo.klae.connex.backend.ai.AiInvocation;
 import ooo.klae.connex.backend.ai.AiInvocationService;
 import ooo.klae.connex.backend.ai.masking.MaskedMessage;
 import ooo.klae.connex.backend.ai.masking.MaskedPrompt;
+import ooo.klae.connex.backend.ai.masking.MaskingContext;
+import ooo.klae.connex.backend.ai.masking.MaskingLeakException;
 import ooo.klae.connex.backend.ai.provider.AiProviderException;
 import ooo.klae.connex.backend.dto.DealBriefDto;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
@@ -59,7 +61,7 @@ public class DealBriefService {
         }
 
         BriefAssembly assembly = dealBriefAssembler.assemble(workspaceId, dealId);
-        String cacheKey = cacheKey(workspaceId, dealId, assembly.prompt());
+        String cacheKey = cacheKey(workspaceId, dealId, assembly.prompt(), assembly.context());
         Instant now = Instant.now(clock);
         DealBriefDto cached = cached(cacheKey, now);
         if (cached != null) {
@@ -74,7 +76,7 @@ public class DealBriefService {
                     dealId, outcome.text(), generatedAt.toString(), outcome.demaskWarnings());
             cache(cacheKey, brief, generatedAt.plus(CACHE_TTL));
             return brief;
-        } catch (AiProviderException exception) {
+        } catch (MaskingLeakException | AiProviderException exception) {
             return DealBriefDto.unavailable(dealId, PROVIDER_ERROR);
         } catch (ForbiddenException exception) {
             return DealBriefDto.unavailable(dealId, NOT_CONFIGURED);
@@ -105,27 +107,30 @@ public class DealBriefService {
         }
     }
 
-    private static String cacheKey(int workspaceId, int dealId, MaskedPrompt prompt) {
-        return workspaceId + ":" + dealId + ":" + contextHash(prompt);
+    private static String cacheKey(int workspaceId, int dealId, MaskedPrompt prompt, MaskingContext context) {
+        return workspaceId + ":" + dealId + ":" + contextHash(prompt, context);
     }
 
-    private static String contextHash(MaskedPrompt prompt) {
+    private static String contextHash(MaskedPrompt prompt, MaskingContext context) {
         try {
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
-            digest.update(serialized(prompt).getBytes(StandardCharsets.UTF_8));
+            digest.update(serialized(prompt, context).getBytes(StandardCharsets.UTF_8));
             return HexFormat.of().formatHex(digest.digest());
         } catch (NoSuchAlgorithmException exception) {
             throw new IllegalStateException("SHA-256 is not available", exception);
         }
     }
 
-    private static String serialized(MaskedPrompt prompt) {
+    private static String serialized(MaskedPrompt prompt, MaskingContext context) {
         StringBuilder serialized = new StringBuilder();
         appendPart(serialized, prompt.getSystemPrompt());
+        serialized.append(prompt.getMessages().size()).append(':');
         for (MaskedMessage message : prompt.getMessages()) {
             appendPart(serialized, message.getRole());
             appendPart(serialized, message.getContent());
         }
+        serialized.append(context.identifierDictionary().size()).append(':');
+        context.identifierDictionary().stream().sorted().forEach(value -> appendPart(serialized, value));
         return serialized.toString();
     }
 

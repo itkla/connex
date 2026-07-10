@@ -21,7 +21,8 @@ import ooo.klae.connex.backend.ai.provider.AiProviderException;
  * accepts no endpoint override, and implements the SigV4 primitives directly: RFC3986-style path
  * encoding, SHA-256 payload and canonical-request hashing, the AWS4 HMAC-SHA256 key derivation
  * chain, lowercase hexadecimal output, and an Authorization header over the fixed signed headers
- * used by Bedrock JSON POST requests.
+ * used by Bedrock JSON POST requests. Bedrock follows the non-S3 SigV4 rule: the canonical URI is
+ * double-encoded while the outbound wire path is encoded once.
  */
 public final class AwsSigV4Signer {
     static final String ALGORITHM = "AWS4-HMAC-SHA256";
@@ -85,13 +86,14 @@ public final class AwsSigV4Signer {
         String amzDate = AMZ_DATE_FORMAT.format(timestamp);
         String date = DATE_FORMAT.format(timestamp);
         String encodedPath = encodeCanonicalPath(rawPath);
+        String canonicalPath = encodeCanonicalPath(encodedPath);
         String payloadHash = sha256Hex(requestBody == null ? new byte[0] : requestBody);
         Map<String, String> headers = signedHeaders(host, contentType, amzDate, credentials.sessionToken());
         String canonicalHeaders = canonicalHeaders(headers);
         String signedHeaders = signedHeaderNames(headers);
         String query = canonicalQueryString == null ? "" : canonicalQueryString;
         String canonicalRequest = method + "\n"
-                + encodedPath + "\n"
+                + canonicalPath + "\n"
                 + query + "\n"
                 + canonicalHeaders + "\n"
                 + signedHeaders + "\n"
@@ -241,7 +243,7 @@ public final class AwsSigV4Signer {
      * @param canonicalRequest canonical request string
      * @param stringToSign SigV4 string-to-sign
      * @param signature lowercase hexadecimal signature
-     * @param encodedPath canonical and request path
+     * @param encodedPath single-encoded outbound wire path
      * @param signedHeaders semicolon-separated signed header names
      */
     public record SignedRequest(
@@ -253,5 +255,10 @@ public final class AwsSigV4Signer {
             String signature,
             String encodedPath,
             String signedHeaders) {
+
+        @Override
+        public String toString() {
+            return "SignedRequest[redacted]";
+        }
     }
 }

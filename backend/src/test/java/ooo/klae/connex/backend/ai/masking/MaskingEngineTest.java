@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.List;
 import java.util.Locale;
@@ -66,6 +67,41 @@ class MaskingEngineTest {
         String serialized = objectMapper.writeValueAsString(Map.of("message", "Please contact Ann Smith."));
 
         assertThrows(MaskingLeakException.class, () -> OutboundLeakScan.assertNoLeak(serialized, ctx));
+    }
+
+    @Test
+    void maskFreeText_scrubsUnregisteredStructuralPii() {
+        MaskingContext ctx = new MaskingContext();
+        String email = "jane.doe+sales@example.com";
+        String phone = "+1 (808) 555-1212";
+        String url = "https://example.com/customer?id=123";
+        String bareUrl = "www.example.org/help";
+        String accountNumber = "123456789";
+        String text = "Contact " + email + ", call " + phone + ", visit " + url + " and " + bareUrl
+                + ". Account ABC" + accountNumber + "XYZ.";
+
+        String masked = MaskingEngine.maskFreeText(text, ctx);
+
+        assertEquals("Contact [redacted], call [redacted], visit [redacted] and [redacted] Account "
+                + "ABC[redacted]XYZ.", masked);
+        assertTrue(masked.contains(MaskingEngine.REDACTED));
+        assertFalse(masked.contains(email));
+        assertFalse(masked.contains(phone));
+        assertFalse(masked.contains(url));
+        assertFalse(masked.contains(bareUrl));
+        assertFalse(masked.contains(accountNumber));
+        assertDoesNotThrow(() -> OutboundLeakScan.assertNoLeak(masked, ctx));
+    }
+
+    @Test
+    void maskFreeText_masksWhitespaceAndCompatibilityIdentifierVariants() {
+        MaskingContext ctx = new MaskingContext();
+        String company = MaskingEngine.maskField(EntityKind.COMPANY, "Acme Corp", ctx);
+
+        String masked = MaskingEngine.maskFreeText("Met Acme  Corp and Ａｃｍｅ Ｃｏｒｐ.", ctx);
+
+        assertEquals("Met " + company + " and " + company + ".", masked);
+        assertDoesNotThrow(() -> OutboundLeakScan.assertNoLeak(masked, ctx));
     }
 
     private static boolean containsIgnoreCase(String value, String needle) {

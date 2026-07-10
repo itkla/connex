@@ -15,6 +15,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.time.LocalDateTime;
+import java.util.List;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -129,6 +130,50 @@ class AiProviderConfigServiceTest {
     }
 
     @Test
+    void save_modelIdsWithSlashOrConsecutiveDots_areRejected() {
+        for (String modelId : List.of("anthropic.claude/../foo", "a/b", "anthropic..claude-v1:0")) {
+            AiProviderConfigRequest request = validRequest();
+            request.setModelId(modelId);
+
+            assertThrows(BadRequestException.class,
+                    () -> service.save(WORKSPACE_ID, ACTOR_ID, request));
+        }
+        verify(aiProviderConfigMapper, never()).upsert(any());
+    }
+
+    @Test
+    void save_supportedClaudeModelIds_areAccepted() {
+        when(aiProviderSecretCipher.encryptCredential(eq(ORG_ID), any())).thenReturn("secret:v1:valid");
+        for (String modelId : List.of(
+                "anthropic.claude-3-5-sonnet-20240620-v1:0",
+                "apac.anthropic.claude-sonnet-4-5-20250929-v1:0")) {
+            AiProviderConfigRequest request = validRequest();
+            request.setModelId(modelId);
+
+            AiProviderConfigDto result = service.save(WORKSPACE_ID, ACTOR_ID, request);
+
+            assertEquals(modelId, result.getModelId());
+        }
+    }
+
+    @Test
+    void save_credentialsWithUnsafeCharacters_areRejected() {
+        AiProviderConfigRequest invalidAccessKey = validRequest();
+        invalidAccessKey.setAccessKeyId("AKIA_TEST");
+        AiProviderConfigRequest invalidSecret = validRequest();
+        invalidSecret.setSecretAccessKey("secret value");
+        AiProviderConfigRequest invalidSessionToken = validRequest();
+        invalidSessionToken.setSessionToken("TOKEN\r\nInjected");
+
+        for (AiProviderConfigRequest request : List.of(invalidAccessKey, invalidSecret, invalidSessionToken)) {
+            BadRequestException exception = assertThrows(BadRequestException.class,
+                    () -> service.save(WORKSPACE_ID, ACTOR_ID, request));
+            assertEquals("Invalid provider credentials", exception.getMessage());
+        }
+        verify(aiProviderSecretCipher, never()).encryptCredential(eq(ORG_ID), any());
+    }
+
+    @Test
     void save_validNewCredential_encryptsAndMasks() {
         when(aiProviderSecretCipher.encryptCredential(eq(ORG_ID), any())).thenReturn("secret:v1:77");
 
@@ -138,7 +183,7 @@ class AiProviderConfigServiceTest {
         ArgumentCaptor<AiProviderConfig> configCaptor = ArgumentCaptor.forClass(AiProviderConfig.class);
         verify(aiProviderSecretCipher).encryptCredential(eq(ORG_ID), plaintextCaptor.capture());
         verify(aiProviderConfigMapper).upsert(configCaptor.capture());
-        assertTrue(plaintextCaptor.getValue().contains("\"accessKeyId\":\"AKIA_TEST\""));
+        assertTrue(plaintextCaptor.getValue().contains("\"accessKeyId\":\"AKIATEST12345678\""));
         assertTrue(plaintextCaptor.getValue().contains("\"secretAccessKey\":\"abcd1234wxyz\""));
         assertEquals("wxyz", configCaptor.getValue().getCredentialLast4());
         assertEquals("secret:v1:77", configCaptor.getValue().getCredentialRef());
@@ -263,7 +308,7 @@ class AiProviderConfigServiceTest {
         request.setProvider("bedrock");
         request.setRegion("ap-northeast-1");
         request.setModelId("anthropic.claude-3-5-sonnet-20240620-v1:0");
-        request.setAccessKeyId("AKIA_TEST");
+        request.setAccessKeyId("AKIATEST12345678");
         request.setSecretAccessKey("abcd1234wxyz");
         request.setNoTrainingAttested(true);
         request.setEnabled(true);

@@ -37,7 +37,11 @@ import tools.jackson.databind.ObjectMapper;
 public class AiProviderConfigService implements AiProviderReadiness {
     private static final String PROVIDER_BEDROCK = "bedrock";
     private static final String PROVIDER_AZURE_OPENAI = "azure_openai";
-    private static final Pattern BEDROCK_MODEL_ID = Pattern.compile("^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$");
+    private static final Pattern BEDROCK_MODEL_ID = Pattern.compile(
+            "^(?!.*\\.\\.)([a-z]{2,4}\\.)?[A-Za-z0-9]([A-Za-z0-9._-]{0,80})?(:[A-Za-z0-9.\\-]{1,20})?$");
+    private static final Pattern ACCESS_KEY_ID = Pattern.compile("^[A-Za-z0-9]{8,128}$");
+    private static final Pattern SECRET_ACCESS_KEY = Pattern.compile("^[A-Za-z0-9+/=]{1,255}$");
+    private static final Pattern SESSION_TOKEN = Pattern.compile("^[A-Za-z0-9+/=._\\-]{1,4096}$");
     private static final Set<String> BEDROCK_REGIONS = Set.of(
             "us-east-1",
             "us-west-2",
@@ -100,10 +104,12 @@ public class AiProviderConfigService implements AiProviderReadiness {
         config.setCredentialRef(existing == null ? null : existing.getCredentialRef());
         config.setCredentialLast4(existing == null ? null : existing.getCredentialLast4());
         if (suppliedCredential) {
-            String secretAccessKey = request.getSecretAccessKey().trim();
-            String accessKeyId = requireAccessKeyId(request.getAccessKeyId());
+            String secretAccessKey = request.getSecretAccessKey();
+            String accessKeyId = request.getAccessKeyId();
+            String sessionToken = isBlank(request.getSessionToken()) ? null : request.getSessionToken();
+            requireValidProviderCredentials(accessKeyId, secretAccessKey, sessionToken);
             config.setCredentialRef(aiProviderSecretCipher.encryptCredential(orgId,
-                    credentialBundleJson(accessKeyId, secretAccessKey, trimToNull(request.getSessionToken()))));
+                    credentialBundleJson(accessKeyId, secretAccessKey, sessionToken)));
             config.setCredentialLast4(last4(secretAccessKey));
         }
         config.setNoTrainingAttested(request.isNoTrainingAttested());
@@ -246,11 +252,13 @@ public class AiProviderConfigService implements AiProviderReadiness {
                 && modelId.toLowerCase(Locale.ROOT).contains("claude");
     }
 
-    private static String requireAccessKeyId(String requested) {
-        if (isBlank(requested)) {
-            throw new BadRequestException("An access key id is required when setting provider credentials");
+    private static void requireValidProviderCredentials(String accessKeyId, String secretAccessKey,
+            String sessionToken) {
+        if (isBlank(accessKeyId) || !ACCESS_KEY_ID.matcher(accessKeyId).matches()
+                || isBlank(secretAccessKey) || !SECRET_ACCESS_KEY.matcher(secretAccessKey).matches()
+                || sessionToken != null && !SESSION_TOKEN.matcher(sessionToken).matches()) {
+            throw new BadRequestException("Invalid provider credentials");
         }
-        return requested.trim();
     }
 
     private String credentialBundleJson(String accessKeyId, String secretAccessKey, String sessionToken) {

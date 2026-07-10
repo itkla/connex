@@ -59,7 +59,12 @@ public final class AiEgressGuard {
         if (bytes.length == 4) {
             int first = bytes[0] & 0xFF;
             int second = bytes[1] & 0xFF;
-            return first == 100 && second >= 64 && second <= 127;
+            int third = bytes[2] & 0xFF;
+            return first == 0
+                    || first == 100 && second >= 64 && second <= 127
+                    || first == 192 && second == 0 && third == 0
+                    || first == 198 && (second == 18 || second == 19)
+                    || first >= 240;
         }
         return (bytes[0] & 0xFE) == 0xFC;
     }

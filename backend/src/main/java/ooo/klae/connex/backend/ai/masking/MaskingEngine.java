@@ -1,8 +1,11 @@
 package ooo.klae.connex.backend.ai.masking;
 
+import java.text.Normalizer;
+import java.util.Arrays;
 import java.util.Objects;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
 /**
  * Boundary for converting raw identifiers into request-local tokens. Structured identifiers are
@@ -12,6 +15,24 @@ import java.util.regex.Pattern;
  */
 public final class MaskingEngine {
     public static final String OMITTED_BY_POLICY = "[omitted by policy]";
+    public static final String REDACTED = "[redacted]";
+
+    /** Conservative RFC-lite detector for email addresses in uncontrolled text. */
+    private static final Pattern EMAIL_ADDRESS =
+            Pattern.compile("[A-Za-z0-9._%+\\-]+@[A-Za-z0-9.\\-]+\\.[A-Za-z]{2,}");
+
+    /** Detector for HTTP(S) URLs and bare {@code www.} host references. */
+    private static final Pattern URL = Pattern.compile("(?:https?://|www\\.)\\S+", Pattern.CASE_INSENSITIVE);
+
+    /** Detector for phone-like values containing at least seven digits. */
+    private static final Pattern PHONE_LIKE_RUN =
+            Pattern.compile("(?<![\\p{L}\\p{N}])(?:[+() .-]*[0-9]){7,}(?![\\p{L}\\p{N}])");
+
+    /** Catch-all detector for long account or identifier digit runs. */
+    private static final Pattern LONG_DIGIT_RUN = Pattern.compile("(?<![0-9])[0-9]{9,}(?![0-9])");
+
+    /** Whitespace detector used to make multi-word identifier matching flexible. */
+    private static final Pattern WHITESPACE = Pattern.compile("\\s+");
 
     private MaskingEngine() {
     }
@@ -27,15 +48,20 @@ public final class MaskingEngine {
         if (text == null || text.isBlank()) {
             return "";
         }
-        SpecialCareTextScreen.ScreenVerdict verdict = SpecialCareTextScreen.screen(text);
+        String normalizedText = Normalizer.normalize(text, Normalizer.Form.NFKC);
+        SpecialCareTextScreen.ScreenVerdict verdict = SpecialCareTextScreen.screen(normalizedText);
         if (verdict.excluded()) {
             return OMITTED_BY_POLICY;
         }
-        String masked = text;
+        String masked = normalizedText;
         for (MaskingContext.IdentifierEntry entry : ctx.identifierEntriesByLongestRawValue()) {
             masked = identifierPattern(entry.rawValue()).matcher(masked)
                     .replaceAll(Matcher.quoteReplacement(entry.token()));
         }
+        masked = EMAIL_ADDRESS.matcher(masked).replaceAll(Matcher.quoteReplacement(REDACTED));
+        masked = URL.matcher(masked).replaceAll(Matcher.quoteReplacement(REDACTED));
+        masked = PHONE_LIKE_RUN.matcher(masked).replaceAll(Matcher.quoteReplacement(REDACTED));
+        masked = LONG_DIGIT_RUN.matcher(masked).replaceAll(Matcher.quoteReplacement(REDACTED));
         return masked;
     }
 
@@ -52,8 +78,11 @@ public final class MaskingEngine {
     }
 
     private static Pattern identifierPattern(String rawValue) {
-        String quoted = Pattern.quote(rawValue);
-        if (usesAsciiWordBoundary(rawValue)) {
+        String normalizedValue = Normalizer.normalize(rawValue, Normalizer.Form.NFKC).trim();
+        String quoted = Arrays.stream(WHITESPACE.split(normalizedValue))
+                .map(Pattern::quote)
+                .collect(Collectors.joining("\\s+"));
+        if (usesAsciiWordBoundary(normalizedValue)) {
             return Pattern.compile("(?<![\\p{L}\\p{N}_])" + quoted + "(?![\\p{L}\\p{N}_])",
                     Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE);
         }

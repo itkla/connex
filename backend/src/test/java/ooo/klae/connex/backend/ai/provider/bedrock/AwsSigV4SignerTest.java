@@ -56,21 +56,21 @@ class AwsSigV4SignerTest {
     }
 
     @Test
-    void bedrockPathWithColonAndSlash_isCanonicalUriEncodedOnce() {
+    void bedrockPathWithColon_isDoubleEncodedCanonicallyAndSingleEncodedOnWire() {
         AwsSigV4Signer.SignedRequest signed = AwsSigV4Signer.sign(
                 "POST",
                 "bedrock-runtime.us-east-1.amazonaws.com",
-                "/model/provider/anthropic.claude-3-sonnet-20240229-v1:0/invoke",
+                "/model/anthropic.claude-3-sonnet-20240229-v1:0/invoke",
                 "",
                 "{}".getBytes(StandardCharsets.UTF_8),
                 "us-east-1",
                 AWS_EXAMPLE_CREDENTIALS,
                 Instant.parse("2026-07-10T01:02:03Z"));
 
-        assertEquals("/model/provider/anthropic.claude-3-sonnet-20240229-v1%3A0/invoke",
+        assertEquals("/model/anthropic.claude-3-sonnet-20240229-v1%3A0/invoke",
                 signed.encodedPath());
         assertTrue(signed.canonicalRequest().startsWith("POST\n"
-                + "/model/provider/anthropic.claude-3-sonnet-20240229-v1%3A0/invoke\n\n"));
+                + "/model/anthropic.claude-3-sonnet-20240229-v1%253A0/invoke\n\n"));
         assertTrue(signed.authorization().contains("Credential=AKIDEXAMPLE/20260710/us-east-1/bedrock/aws4_request"));
     }
 
@@ -95,5 +95,6 @@ class AwsSigV4SignerTest {
         assertEquals("content-type;host;x-amz-date;x-amz-security-token", signed.signedHeaders());
         assertTrue(signed.canonicalRequest().contains("x-amz-security-token:SESSION_TOKEN\n"));
         assertTrue(signed.authorization().contains("SignedHeaders=content-type;host;x-amz-date;x-amz-security-token"));
+        assertEquals("SignedRequest[redacted]", signed.toString());
     }
 }

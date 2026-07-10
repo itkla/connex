@@ -31,6 +31,7 @@ import ooo.klae.connex.backend.ai.masking.EntityKind;
 import ooo.klae.connex.backend.ai.masking.MaskedPrompt;
 import ooo.klae.connex.backend.ai.masking.MaskingContext;
 import ooo.klae.connex.backend.ai.masking.MaskingEngine;
+import ooo.klae.connex.backend.ai.masking.MaskingLeakException;
 import ooo.klae.connex.backend.ai.masking.PromptAssembly;
 import ooo.klae.connex.backend.ai.provider.AiProviderException;
 import ooo.klae.connex.backend.dto.DealBriefDto;
@@ -117,6 +118,21 @@ class DealBriefServiceTest {
     }
 
     @Test
+    void generate_maskingLeak_returnsProviderError() {
+        when(aiFeatureGate.isAiUsable()).thenReturn(true);
+        when(dealBriefAssembler.assemble(WORKSPACE_ID, DEAL_ID)).thenReturn(assembly());
+        when(aiInvocationService.complete(any(AiInvocation.class)))
+                .thenThrow(new MaskingLeakException("blocked outbound identifier"));
+
+        DealBriefDto result = service.generate(DEAL_ID);
+
+        assertFalse(result.isAvailable());
+        assertEquals("provider_error", result.getReason());
+        assertNull(result.getBrief());
+        assertNull(result.getGeneratedAt());
+    }
+
+    @Test
     void generate_sameContextHash_reusesCachedBrief() {
         BriefAssembly assembly = assembly();
         when(aiFeatureGate.isAiUsable()).thenReturn(true);
@@ -131,9 +147,30 @@ class DealBriefServiceTest {
         verify(aiInvocationService, times(1)).complete(any(AiInvocation.class));
     }
 
+    @Test
+    void generate_changedIdentifierDictionary_doesNotReuseCachedBrief() {
+        when(aiFeatureGate.isAiUsable()).thenReturn(true);
+        when(dealBriefAssembler.assemble(WORKSPACE_ID, DEAL_ID))
+                .thenReturn(assembly("Mina Patel"), assembly("Mina Shah"));
+        when(aiInvocationService.complete(any(AiInvocation.class)))
+                .thenReturn(new AiCompletionOutcome("First brief", 0, 20, 10, "end_turn"),
+                        new AiCompletionOutcome("Second brief", 0, 20, 10, "end_turn"));
+
+        DealBriefDto first = service.generate(DEAL_ID);
+        DealBriefDto second = service.generate(DEAL_ID);
+
+        assertEquals("First brief", first.getBrief());
+        assertEquals("Second brief", second.getBrief());
+        verify(aiInvocationService, times(2)).complete(any(AiInvocation.class));
+    }
+
     private static BriefAssembly assembly() {
+        return assembly("Mina Patel");
+    }
+
+    private static BriefAssembly assembly(String personName) {
         MaskingContext context = new MaskingContext();
-        String person = MaskingEngine.maskField(EntityKind.PERSON, "Mina Patel", context);
+        String person = MaskingEngine.maskField(EntityKind.PERSON, personName, context);
         MaskedPrompt prompt = PromptAssembly.builder()
                 .system("Use only the supplied context.")
                 .userTurn("Stakeholder: " + person)
