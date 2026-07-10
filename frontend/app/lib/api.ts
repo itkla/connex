@@ -1199,6 +1199,14 @@ export function getDealRisksFromCookie(cookie: string | null) {
     return safeWithCookie<Types.DealRisk>((init) => getDealRisks(init), cookie);
 }
 
+/**
+ * AI-generated brief for a deal. Returns a graceful unavailability result (never an error) when AI
+ * is not configured for the organization; generation is slow (an LLM call), so fetch client-side.
+ */
+export function getDealBrief(id: number, init: RequestInit = {}) {
+    return getJson<Types.DealBrief>(`/api/deals/${id}/brief`, init);
+}
+
 export function createDeal(payload: Types.CreateDealPayload) {
     return postJson<Types.Deal>(`/api/deals`, payload);
 }
