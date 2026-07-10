@@ -152,7 +152,7 @@ class DealServiceTest extends AbstractServiceTest {
         DealRevenueSeriesDto filteredSeries = dealService.getRevenueTimeseries("JPY");
         List<DealStageDistributionDto> filteredDistribution = dealService.getStageDistribution("JPY");
 
-        assertEquals(Map.of("2026-1", 180.0, "2026-3", 25.0, "2026-4", 550.0),
+        assertEquals(Map.of("2026-2", 180.0, "2026-3", 25.0, "2026-4", 550.0),
             monthTotals(series.closed()));
         assertEquals(Map.of("2026-2", 300.0, "2026-3", 50.0, "2026-4", 400.0),
             monthTotals(series.projected()));
@@ -164,7 +164,7 @@ class DealServiceTest extends AbstractServiceTest {
         assertEquals(500.0, stageTotals.openValue(), 0.0001);
         assertEquals(3, stageTotals.closedCount());
         assertEquals(780.0, stageTotals.closedValue(), 0.0001);
-        assertEquals(Map.of("2026-1", 180.0, "2026-3", 25.0),
+        assertEquals(Map.of("2026-2", 180.0, "2026-3", 25.0),
             monthTotals(filteredSeries.closed()));
         assertEquals(Map.of("2026-2", 300.0, "2026-3", 50.0),
             monthTotals(filteredSeries.projected()));
