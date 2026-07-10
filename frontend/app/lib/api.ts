@@ -1206,6 +1206,47 @@ export function getDealRevenueTimeseries(currency?: string, init: RequestInit = 
     return getJson<Types.DealRevenueSeries>(`/api/deals/revenue-timeseries${buildQuery({ currency })}`, init);
 }
 
+const withCookie = (cookie: string | null): RequestInit => (cookie ? { headers: { cookie }, cache: "no-store" } : {});
+
+/**
+ * Server-computed deal KPIs over ALL deals in {@code range} (30d/90d/12m), optionally scoped to a currency.
+ * Replaces the client-side KPI/win-rate math over a bounded page slice.
+ */
+export function getDealKpis(currency?: string, range?: string, init: RequestInit = {}) {
+    return getJson<Types.DealKpis>(`/api/deals/kpis${buildQuery({ currency, range })}`, init);
+}
+
+export function getDealKpisFromCookie(cookie: string | null, currency?: string, range?: string) {
+    return getJson<Types.DealKpis>(`/api/deals/kpis${buildQuery({ currency, range })}`, withCookie(cookie));
+}
+
+/** Server-computed per-pipeline won-in-range + open rollup. */
+export function getDealPipelineValue(currency?: string, range?: string, init: RequestInit = {}) {
+    return getJson<Types.DealPipelineValue[]>(`/api/deals/pipeline-value${buildQuery({ currency, range })}`, init);
+}
+
+export function getDealPipelineValueFromCookie(cookie: string | null, currency?: string, range?: string) {
+    return getJson<Types.DealPipelineValue[]>(`/api/deals/pipeline-value${buildQuery({ currency, range })}`, withCookie(cookie));
+}
+
+/** Server-computed per-stage open-deal age buckets. */
+export function getDealAging(currency?: string, init: RequestInit = {}) {
+    return getJson<Types.DealAging[]>(`/api/deals/aging${buildQuery({ currency })}`, init);
+}
+
+export function getDealAgingFromCookie(cookie: string | null, currency?: string) {
+    return getJson<Types.DealAging[]>(`/api/deals/aging${buildQuery({ currency })}`, withCookie(cookie));
+}
+
+/** Server-computed top open/won deals, optionally scoped to a currency. */
+export function getDealTop(currency?: string, init: RequestInit = {}) {
+    return getJson<Types.DealTop>(`/api/deals/top${buildQuery({ currency })}`, init);
+}
+
+export function getDealTopFromCookie(cookie: string | null, currency?: string) {
+    return getJson<Types.DealTop>(`/api/deals/top${buildQuery({ currency })}`, withCookie(cookie));
+}
+
 /**
  * Server-computed per-stage open/closed rollup over ALL deals, optionally scoped to a currency.
  * Feeds the deals page stage-distribution chart.

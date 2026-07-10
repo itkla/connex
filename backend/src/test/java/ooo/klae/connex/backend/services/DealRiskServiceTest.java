@@ -205,6 +205,8 @@ class DealRiskServiceTest extends AbstractServiceTest {
         DealRiskDto risk = service.assessDeal(workspace.getId(), deal.getId());
 
         assertThat(risk.getLevel()).isEqualTo("low");
+        assertThat(risk.getValue()).isEqualTo(deal.getValue());
+        assertThat(risk.getCurrency()).isEqualTo(deal.getCurrency());
         assertThat(factor(risk, "no_stakeholders")).isNotNull();
     }
 
@@ -218,6 +220,8 @@ class DealRiskServiceTest extends AbstractServiceTest {
 
         DealRiskDto single = service.assessDeal(workspace.getId(), deal.getId());
         assertThat(single.getLevel()).isEqualTo("none");
+        assertThat(single.getValue()).isEqualTo(deal.getValue());
+        assertThat(single.getCurrency()).isEqualTo(deal.getCurrency());
 
         assertThat(service.assessWorkspace(workspace.getId()))
             .noneMatch(risk -> risk.getDealId() == deal.getId());
@@ -242,6 +246,9 @@ class DealRiskServiceTest extends AbstractServiceTest {
         assertThat(risks.get(0).getScore())
             .isGreaterThanOrEqualTo(risks.get(risks.size() - 1).getScore());
         assertThat(risks).anyMatch(risk -> risk.getDealId() == overdue.getId());
+        assertThat(risks).filteredOn(risk -> risk.getDealId() == overdue.getId())
+            .allMatch(risk -> risk.getValue() == overdue.getValue()
+                && overdue.getCurrency().equals(risk.getCurrency()));
         assertThat(risks).noneMatch(risk -> risk.getDealId() == healthy.getId());
     }
 
@@ -383,7 +390,10 @@ class DealRiskServiceTest extends AbstractServiceTest {
 
         assertThat(service.assessWorkspace(workspace.getId()))
             .noneMatch(risk -> risk.getDealId() == foreign.getId());
-        assertThat(service.assessDeal(workspace.getId(), foreign.getId()).getLevel()).isEqualTo("none");
+        DealRiskDto hidden = service.assessDeal(workspace.getId(), foreign.getId());
+        assertThat(hidden.getLevel()).isEqualTo("none");
+        assertThat(hidden.getValue()).isZero();
+        assertThat(hidden.getCurrency()).isNull();
     }
 
     private static int indexOfDeal(List<DealRiskDto> risks, int dealId) {

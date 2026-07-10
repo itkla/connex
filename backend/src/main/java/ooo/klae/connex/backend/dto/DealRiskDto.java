@@ -22,6 +22,10 @@ import lombok.NoArgsConstructor;
 public class DealRiskDto {
     /** Id of the assessed deal. */
     private int dealId;
+    /** Forecast value of the assessed deal. */
+    private double value;
+    /** Currency of the assessed deal, or {@code null} when the deal is not visible. */
+    private String currency;
     /** Overall risk band: {@code "high" | "medium" | "low" | "none"}. */
     private String level;
     /** Bounded 0–100 composite score used to order at-risk deals; {@code 0} when not at risk. */

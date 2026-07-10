@@ -9,8 +9,8 @@ import {
     getCompanyTemperaturesFromCookie,
     getContactTemperaturesFromCookie,
     getCurrentUserFromCookie,
+    getDealMetricsFromCookie,
     getDealRisksFromCookie,
-    getDealsFromCookie,
     getIntroSuggestionsFromCookie,
     getIntroductions,
     getNotesFromCookie,
@@ -24,7 +24,7 @@ import type {
     Activity,
     Company,
     Contact,
-    Deal,
+    DealMetrics,
     DealRisk,
     IntroSuggestion,
     IntroductionRecord,
@@ -36,6 +36,8 @@ import type {
     Task,
     User,
 } from '@/app/lib/types';
+
+const EMPTY_DEAL_METRICS: DealMetrics = { byCurrency: [], totalCount: 0 };
 import AnalyticsBoard from '@/app/components/overview/analytics/AnalyticsBoard';
 
 export const metadata: Metadata = {
@@ -55,7 +57,7 @@ export default async function AnalyticsPage() {
     const [
         companies,
         contacts,
-        deals,
+        dealMetrics,
         pipelines,
         tasks,
         activities,
@@ -68,7 +70,7 @@ export default async function AnalyticsPage() {
     ] = await Promise.all([
         getCompaniesFromCookie(cookie).catch(() => [] as Company[]),
         getContactsFromCookie(cookie).catch(() => [] as Contact[]),
-        getDealsFromCookie(cookie).catch(() => [] as Deal[]),
+        getDealMetricsFromCookie(cookie).catch(() => EMPTY_DEAL_METRICS),
         getPipelinesFromCookie(cookie).catch(() => [] as Pipeline[]),
         getTasksFromCookie(cookie).catch(() => [] as Task[]),
         getActivitiesFromCookie(cookie).catch(() => [] as Activity[]),
@@ -94,8 +96,7 @@ export default async function AnalyticsPage() {
 
     return (
         <AnalyticsBoard
-            deals={deals}
-            companies={companies}
+            dealMetrics={dealMetrics}
             pipelines={pipelines}
             stages={stages}
             activities={activities}

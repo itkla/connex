@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { motion, useReducedMotion } from 'motion/react';
 import { useLocale, useTranslations } from 'next-intl';
 import { ChevronDownIcon } from '@heroicons/react/24/outline';
@@ -14,9 +14,14 @@ import {
 
 import {
     type Activity,
-    type Company,
-    type Deal,
+    type DealAging,
+    type DealKpis,
+    type DealMetrics,
+    type DealPipelineValue,
+    type DealRevenueSeries,
     type DealRisk,
+    type DealStageDistribution,
+    type DealTop,
     type IntroSuggestion,
     type IntroductionRecord,
     type JobMove,
@@ -27,7 +32,15 @@ import {
     type Task,
     type User,
 } from '@/app/lib/types';
-import { formatCompactCurrency, pickDominantCurrency } from '@/app/lib/utils';
+import {
+    getDealAging,
+    getDealKpis,
+    getDealPipelineValue,
+    getDealRevenueTimeseries,
+    getDealStageDistribution,
+    getDealTop,
+} from '@/app/lib/api';
+import { formatCompactCurrency } from '@/app/lib/utils';
 import DealsAging from '@/app/components/records/deals/DealsAging';
 import TopDeals from '@/app/components/records/deals/TopDeals';
 
@@ -48,8 +61,29 @@ import TaskStatusDonut from '@/app/components/overview/analytics/TaskStatusDonut
 import IntroActivity from '@/app/components/overview/analytics/IntroActivity';
 import RecentMovesList from '@/app/components/overview/analytics/RecentMovesList';
 import FirstRun from '@/app/components/overview/analytics/FirstRun';
-import { computeKpis, isClosed, RANGE_DAYS, type RangeKey } from '@/app/components/overview/analytics/metrics';
-import { atRiskDealIds, warmSummary } from '@/app/components/overview/analytics/relationshipMetrics';
+import { type RangeKey } from '@/app/components/overview/analytics/metrics';
+import { warmSummary } from '@/app/components/overview/analytics/relationshipMetrics';
+
+const EMPTY_KPIS: DealKpis = {
+    wonRevenue: 0,
+    wonRevenuePrev: null,
+    newPipeline: 0,
+    newPipelinePrev: null,
+    wonCount: 0,
+    lostCount: 0,
+    wonValue: 0,
+    lostValue: 0,
+    wonCountPrev: null,
+    lostCountPrev: null,
+    avgCycleDays: 0,
+    avgCycleDaysPrev: null,
+    wonSeries: [],
+    newPipelineSeries: [],
+    winRateSeries: [],
+    avgCycleSeries: [],
+};
+
+const EMPTY_TOP: DealTop = { topOpen: [], topWon: [] };
 
 function Reveal({
     children,
@@ -75,8 +109,7 @@ function Reveal({
 }
 
 export default function AnalyticsBoard({
-    deals,
-    companies,
+    dealMetrics,
     pipelines,
     stages,
     activities,
@@ -90,8 +123,7 @@ export default function AnalyticsBoard({
     introLineage,
     recentMoves,
 }: {
-    deals: Deal[];
-    companies: Company[];
+    dealMetrics: DealMetrics;
     pipelines: Pipeline[];
     stages: Stage[];
     activities: Activity[];
@@ -113,55 +145,88 @@ export default function AnalyticsBoard({
     const locale = useLocale();
     const reduce = useReducedMotion();
     const [range, setRange] = useState<RangeKey>('90d');
-    const [now] = useState(() => Date.now());
 
     const stageById = useMemo(() => new Map(stages.map((s) => [s.id, s])), [stages]);
-    const companyById = useMemo(() => new Map(companies.map((c) => [c.id, c])), [companies]);
 
     const currencyCounts = useMemo(() => {
         const counts = new Map<string, number>();
-        for (const d of deals) {
-            const c = d.currency || 'USD';
-            counts.set(c, (counts.get(c) ?? 0) + 1);
-        }
+        for (const c of dealMetrics.byCurrency) counts.set(c.currency, c.openCount + c.closedCount);
         return counts;
-    }, [deals]);
-    const dominantCurrency = useMemo(() => pickDominantCurrency(deals), [deals]);
+    }, [dealMetrics]);
+    const dominantCurrency = useMemo(() => {
+        let best: string | null = null;
+        let bestCount = -1;
+        for (const c of dealMetrics.byCurrency) {
+            const n = c.openCount + c.closedCount;
+            if (n > bestCount) {
+                bestCount = n;
+                best = c.currency;
+            }
+        }
+        return best ?? 'USD';
+    }, [dealMetrics]);
     const [selectedCurrency, setSelectedCurrency] = useState<string | null>(null);
     const currency =
         selectedCurrency && currencyCounts.has(selectedCurrency) ? selectedCurrency : dominantCurrency;
-    const dealsInCurrency = useMemo(
-        () => deals.filter((d) => (d.currency || 'USD') === currency),
-        [deals, currency],
-    );
 
-    const kpis = useMemo(
-        () => computeKpis(dealsInCurrency, now, RANGE_DAYS[range]),
-        [dealsInCurrency, now, range],
-    );
+    const [kpis, setKpis] = useState<DealKpis>(EMPTY_KPIS);
+    const [pipelineValues, setPipelineValues] = useState<DealPipelineValue[]>([]);
+    const [aging, setAging] = useState<DealAging[]>([]);
+    const [topDeals, setTopDeals] = useState<DealTop>(EMPTY_TOP);
+    const [revenueSeries, setRevenueSeries] = useState<DealRevenueSeries>({ closed: [], projected: [] });
+    const [stageDistribution, setStageDistribution] = useState<DealStageDistribution[]>([]);
+
+    useEffect(() => {
+        let cancelled = false;
+        getDealKpis(currency, range)
+            .then((data) => { if (!cancelled) setKpis(data); })
+            .catch(() => { if (!cancelled) setKpis(EMPTY_KPIS); });
+        getDealPipelineValue(currency, range)
+            .then((data) => { if (!cancelled) setPipelineValues(data); })
+            .catch(() => { if (!cancelled) setPipelineValues([]); });
+        return () => { cancelled = true; };
+    }, [currency, range]);
+
+    useEffect(() => {
+        let cancelled = false;
+        getDealRevenueTimeseries(currency)
+            .then((data) => { if (!cancelled) setRevenueSeries(data); })
+            .catch(() => { if (!cancelled) setRevenueSeries({ closed: [], projected: [] }); });
+        getDealStageDistribution(currency)
+            .then((data) => { if (!cancelled) setStageDistribution(data); })
+            .catch(() => { if (!cancelled) setStageDistribution([]); });
+        getDealAging(currency)
+            .then((data) => { if (!cancelled) setAging(data); })
+            .catch(() => { if (!cancelled) setAging([]); });
+        getDealTop(currency)
+            .then((data) => { if (!cancelled) setTopDeals(data); })
+            .catch(() => { if (!cancelled) setTopDeals(EMPTY_TOP); });
+        return () => { cancelled = true; };
+    }, [currency]);
 
     const openPipeline = useMemo(
-        () =>
-            dealsInCurrency
-                .filter((d) => !isClosed(d))
-                .reduce((sum, d) => sum + (d.value ?? 0), 0),
-        [dealsInCurrency],
+        () => dealMetrics.byCurrency.find((c) => c.currency === currency)?.openValue ?? 0,
+        [dealMetrics, currency],
     );
 
     const warm = useMemo(() => warmSummary(contactTemps), [contactTemps]);
 
-    const dealRisksInCurrency = useMemo(() => {
-        const inCurrency = new Set(dealsInCurrency.map((d) => d.id));
-        return dealRisks.filter((r) => inCurrency.has(r.dealId));
-    }, [dealRisks, dealsInCurrency]);
+    const dealRisksInCurrency = useMemo(
+        () => dealRisks.filter((r) => r.currency === currency),
+        [dealRisks, currency],
+    );
 
     const atRisk = useMemo(() => {
-        const valueById = new Map(dealsInCurrency.map((d) => [d.id, d.value ?? 0]));
-        const ids = atRiskDealIds(dealRisksInCurrency);
         let value = 0;
-        for (const id of ids) value += valueById.get(id) ?? 0;
-        return { value, count: ids.size };
-    }, [dealRisksInCurrency, dealsInCurrency]);
+        let count = 0;
+        for (const r of dealRisksInCurrency) {
+            if (r.level !== 'none') {
+                value += r.value;
+                count += 1;
+            }
+        }
+        return { value, count };
+    }, [dealRisksInCurrency]);
 
     const relationshipKpis = useMemo(
         () => ({
@@ -175,7 +240,7 @@ export default function AnalyticsBoard({
         [warm, atRisk, introSuggestions],
     );
 
-    const hasDeals = deals.length > 0;
+    const hasDeals = dealMetrics.totalCount > 0;
     const hasRelationshipData =
         contactTemps.length > 0 ||
         companyTemps.length > 0 ||
@@ -226,7 +291,7 @@ export default function AnalyticsBoard({
                                     ))}
                             </DropdownMenuContent>
                         </DropdownMenu>
-                    ) : deals.length > 0 ? (
+                    ) : hasDeals ? (
                         <span className="rounded-full bg-muted px-3 py-1.5 text-xs font-medium text-muted-foreground ring-1 ring-border">
                             {currency}
                         </span>
@@ -263,7 +328,7 @@ export default function AnalyticsBoard({
                         </div>
                     }
                 >
-                    <RevenueTrend deals={dealsInCurrency} currency={currency} range={range} />
+                    <RevenueTrend series={revenueSeries} currency={currency} range={range} />
                 </Panel>
             </Reveal>
 
@@ -274,9 +339,8 @@ export default function AnalyticsBoard({
                     infoLabel={t('infoAria')}
                 >
                     <PipelineValue
-                        deals={dealsInCurrency}
+                        values={pipelineValues}
                         pipelines={pipelines}
-                        range={range}
                         currency={currency}
                     />
                 </Panel>
@@ -289,7 +353,7 @@ export default function AnalyticsBoard({
                     infoLabel={t('infoAria')}
                     className="lg:col-span-3"
                 >
-                    <StageFunnel deals={dealsInCurrency} pipelines={pipelines} stages={stages} currency={currency} />
+                    <StageFunnel distribution={stageDistribution} pipelines={pipelines} stages={stages} currency={currency} />
                 </Panel>
                 <Panel
                     title={t('winRateTitle')}
@@ -298,7 +362,7 @@ export default function AnalyticsBoard({
                     infoLabel={t('infoAria')}
                     className="lg:col-span-2"
                 >
-                    <WinRateDonut deals={dealsInCurrency} range={range} currency={currency} />
+                    <WinRateDonut kpis={kpis} currency={currency} />
                 </Panel>
             </Reveal>
 
@@ -336,7 +400,7 @@ export default function AnalyticsBoard({
                     infoLabel={t('infoAria')}
                     className="lg:col-span-3"
                 >
-                    <DealsAging deals={dealsInCurrency} stageById={stageById} />
+                    <DealsAging aging={aging} stageById={stageById} />
                 </Panel>
                 <Panel
                     title={t('topDealsTitle')}
@@ -344,7 +408,7 @@ export default function AnalyticsBoard({
                     infoLabel={t('infoAria')}
                     className="lg:col-span-2"
                 >
-                    <TopDeals deals={dealsInCurrency} companyById={companyById} />
+                    <TopDeals data={topDeals} />
                 </Panel>
             </Reveal>
                 </>

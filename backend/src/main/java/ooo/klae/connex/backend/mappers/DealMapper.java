@@ -6,8 +6,13 @@ import ooo.klae.connex.backend.beans.Deal;
 import ooo.klae.connex.backend.beans.DealPerson;
 import ooo.klae.connex.backend.beans.DealStakeholder;
 import ooo.klae.connex.backend.beans.User;
+import ooo.klae.connex.backend.dto.DealAgingDto;
+import ooo.klae.connex.backend.dto.DealBucketValueDto;
 import ooo.klae.connex.backend.dto.DealCurrencyMetricsDto;
+import ooo.klae.connex.backend.dto.DealKpiClosedBucketDto;
+import ooo.klae.connex.backend.dto.DealKpiPeriodDto;
 import ooo.klae.connex.backend.dto.DealMonthTotalDto;
+import ooo.klae.connex.backend.dto.DealPipelineValueDto;
 import ooo.klae.connex.backend.dto.DealStageDistributionDto;
 import ooo.klae.connex.backend.dto.FacetCount;
 import java.util.List;
@@ -60,6 +65,46 @@ public interface DealMapper {
         @Param("currency") String currency
     );
     List<DealStageDistributionDto> stageDistribution(
+        @Param("workspaceId") int workspaceId,
+        @Param("currency") String currency
+    );
+    DealKpiPeriodDto dealKpiCurrent(
+        @Param("workspaceId") int workspaceId,
+        @Param("currency") String currency,
+        @Param("days") int days
+    );
+    DealKpiPeriodDto dealKpiPrevious(
+        @Param("workspaceId") int workspaceId,
+        @Param("currency") String currency,
+        @Param("days") int days,
+        @Param("previousDays") int previousDays
+    );
+    List<DealKpiClosedBucketDto> dealKpiClosedSeries(
+        @Param("workspaceId") int workspaceId,
+        @Param("currency") String currency,
+        @Param("days") int days,
+        @Param("span") double span
+    );
+    List<DealBucketValueDto> dealKpiNewPipelineSeries(
+        @Param("workspaceId") int workspaceId,
+        @Param("currency") String currency,
+        @Param("days") int days,
+        @Param("span") double span
+    );
+    List<DealPipelineValueDto> dealPipelineValue(
+        @Param("workspaceId") int workspaceId,
+        @Param("currency") String currency,
+        @Param("days") int days
+    );
+    List<DealAgingDto> dealAging(
+        @Param("workspaceId") int workspaceId,
+        @Param("currency") String currency
+    );
+    List<Deal> topOpenDeals(
+        @Param("workspaceId") int workspaceId,
+        @Param("currency") String currency
+    );
+    List<Deal> topWonDeals(
         @Param("workspaceId") int workspaceId,
         @Param("currency") String currency
     );

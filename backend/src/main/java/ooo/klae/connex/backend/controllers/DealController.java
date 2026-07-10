@@ -23,20 +23,24 @@ import ooo.klae.connex.backend.dto.CloseDealRequest;
 import ooo.klae.connex.backend.dto.CustomFieldEntryDto;
 import ooo.klae.connex.backend.dto.CustomFieldValueRequest;
 import ooo.klae.connex.backend.dto.CustomFieldValuesRequest;
+import ooo.klae.connex.backend.dto.DealAgingDto;
 import ooo.klae.connex.backend.dto.DealBriefDto;
 import ooo.klae.connex.backend.dto.DealCollaboratorsDto;
 import ooo.klae.connex.backend.dto.DealDto;
 import ooo.klae.connex.backend.dto.DealEvaluationDto;
 import ooo.klae.connex.backend.dto.DealFacets;
+import ooo.klae.connex.backend.dto.DealKpisDto;
 import ooo.klae.connex.backend.dto.DealMetricsDto;
 import ooo.klae.connex.backend.dto.DealMoveRequest;
 import ooo.klae.connex.backend.dto.DealOwnerDto;
+import ooo.klae.connex.backend.dto.DealPipelineValueDto;
 import ooo.klae.connex.backend.dto.DealRevenueSeriesDto;
 import ooo.klae.connex.backend.dto.DealRescheduleRequest;
 import ooo.klae.connex.backend.dto.DealRiskDto;
 import ooo.klae.connex.backend.dto.DealStageDistributionDto;
 import ooo.klae.connex.backend.dto.DealStageHistoryDto;
 import ooo.klae.connex.backend.dto.DealSummaryDto;
+import ooo.klae.connex.backend.dto.DealTopDto;
 import ooo.klae.connex.backend.dto.NoteDto;
 import ooo.klae.connex.backend.dto.PageResponse;
 import ooo.klae.connex.backend.dto.TagDto;
@@ -68,6 +72,7 @@ import lombok.RequiredArgsConstructor;
 public class DealController {
     private static final Set<String> DEAL_STATUSES = Set.of("open", "closed", "won", "lost");
     private static final Set<String> SORT_DIRECTIONS = Set.of("asc", "desc");
+    private static final Set<String> ANALYTICS_RANGES = Set.of("30d", "90d", "12m");
 
     private final DealService dealService;
     private final BulkOperationService bulkOperationService;
@@ -174,6 +179,62 @@ public class DealController {
     ) {
         String normalizedCurrency = (currency == null || currency.isBlank()) ? null : currency;
         return dealService.getStageDistribution(normalizedCurrency);
+    }
+
+    /**
+     * GET endpoint for workspace-wide deal KPIs and twelve-bucket trend series.
+     */
+    @GetMapping("/kpis")
+    public DealKpisDto getDealKpis(
+        @RequestParam(required = false) String currency,
+        @RequestParam(defaultValue = "90d") String range
+    ) {
+        String normalizedCurrency = (currency == null || currency.isBlank()) ? null : currency;
+        return dealService.getDealKpis(normalizedCurrency, analyticsRangeDays(range));
+    }
+
+    /**
+     * GET endpoint for realized won and open deal value grouped by pipeline.
+     */
+    @GetMapping("/pipeline-value")
+    public List<DealPipelineValueDto> getDealPipelineValue(
+        @RequestParam(required = false) String currency,
+        @RequestParam(defaultValue = "90d") String range
+    ) {
+        String normalizedCurrency = (currency == null || currency.isBlank()) ? null : currency;
+        return dealService.getDealPipelineValue(normalizedCurrency, analyticsRangeDays(range));
+    }
+
+    /**
+     * GET endpoint for open-deal aging counts grouped by stage.
+     */
+    @GetMapping("/aging")
+    public List<DealAgingDto> getDealAging(
+        @RequestParam(required = false) String currency
+    ) {
+        String normalizedCurrency = (currency == null || currency.isBlank()) ? null : currency;
+        return dealService.getDealAging(normalizedCurrency);
+    }
+
+    /**
+     * GET endpoint for the highest-value open and won deals.
+     */
+    @GetMapping("/top")
+    public DealTopDto getTopDeals(
+        @RequestParam(required = false) String currency
+    ) {
+        String normalizedCurrency = (currency == null || currency.isBlank()) ? null : currency;
+        return dealService.getTopDeals(normalizedCurrency);
+    }
+
+    private static int analyticsRangeDays(String range) {
+        String normalizedRange = validateOptionalValue(range, ANALYTICS_RANGES, "range");
+        return switch (normalizedRange == null ? "90d" : normalizedRange) {
+            case "30d" -> 30;
+            case "90d" -> 90;
+            case "12m" -> 365;
+            default -> throw new BadRequestException("range must be one of: 30d, 90d, 12m");
+        };
     }
 
     private static String validateOptionalValue(String value, Set<String> allowed, String parameter) {

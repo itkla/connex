@@ -1,53 +1,32 @@
 'use client';
 
-import { useMemo, useState } from 'react';
 import { Pie, PieChart, ResponsiveContainer, Tooltip as RechartsTooltip } from 'recharts';
 import { useLocale, useTranslations } from 'next-intl';
 
-import { type Deal } from '@/app/lib/types';
-import { formatCompactCurrency, parseMysqlDateTime } from '@/app/lib/utils';
-import { RANGE_DAYS, type RangeKey } from '@/app/components/overview/analytics/metrics';
+import { type DealKpis } from '@/app/lib/types';
+import { formatCompactCurrency } from '@/app/lib/utils';
 
 const WON_COLOR = 'var(--chart-won)';
 const LOST_COLOR = 'var(--chart-lost)';
 
 type Slice = { key: 'won' | 'lost'; label: string; count: number; value: number; fill: string };
 
+/**
+ * Won/lost split for the KPI comparison window, read from the server-computed {@link DealKpis}
+ * (same period as the KPI cluster). Presentation-only — no client-side deal aggregation.
+ */
 export default function WinRateDonut({
-    deals,
-    range,
+    kpis,
     currency,
 }: {
-    deals: Deal[];
-    range: RangeKey;
+    kpis: DealKpis;
     currency: string;
 }) {
     const t = useTranslations('AnalyticsWinRate');
     const locale = useLocale();
-    const [now] = useState(() => Date.now());
 
-    const { won, lost } = useMemo(() => {
-        const start = now - RANGE_DAYS[range] * 86400000; // 1 day in milliseconds
-        let wonCount = 0;
-        let wonValue = 0;
-        let lostCount = 0;
-        let lostValue = 0;
-        for (const deal of deals) {
-            const closed = parseMysqlDateTime(deal.closedAt);
-            if (!Number.isFinite(closed) || closed > now || closed < start) continue;
-            if (deal.won === true) {
-                wonCount += 1;
-                wonValue += deal.actualValue ?? 0;
-            } else if (deal.won === false) {
-                lostCount += 1;
-                lostValue += deal.value ?? 0;
-            }
-        }
-        return {
-            won: { count: wonCount, value: wonValue },
-            lost: { count: lostCount, value: lostValue },
-        };
-    }, [deals, range, now]);
+    const won = { count: kpis.wonCount, value: kpis.wonValue };
+    const lost = { count: kpis.lostCount, value: kpis.lostValue };
 
     const total = won.count + lost.count;
     if (total === 0) {

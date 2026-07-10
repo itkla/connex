@@ -142,8 +142,12 @@ public class DealRiskService {
         Instant now = Instant.now(clock);
         String assessedAt = utc(now);
         Deal deal = dealMapper.getDealById(workspaceId, dealId);
-        if (deal == null || !isOpen(deal) || deal.isRiskExcluded()) {
-            return new DealRiskDto(dealId, NONE, 0, List.of(), assessedAt);
+        if (deal == null) {
+            return new DealRiskDto(dealId, 0.0, null, NONE, 0, List.of(), assessedAt);
+        }
+        if (!isOpen(deal) || deal.isRiskExcluded()) {
+            return new DealRiskDto(
+                dealId, deal.getValue(), deal.getCurrency(), NONE, 0, List.of(), assessedAt);
         }
         List<DealStakeholder> dealStakeholders = dealMapper.getDealStakeholdersByDealId(workspaceId, dealId);
         Map<Integer, List<DealStakeholder>> stakeholders = Map.of(dealId, dealStakeholders);
@@ -232,7 +236,9 @@ public class DealRiskService {
         }
 
         factors.sort(Comparator.comparingInt(f -> severityRank(f.getSeverity())));
-        return new DealRiskDto(deal.getId(), overallLevel(factors), score(factors), factors, assessedAt);
+        return new DealRiskDto(
+            deal.getId(), deal.getValue(), deal.getCurrency(),
+            overallLevel(factors), score(factors), factors, assessedAt);
     }
 
     /**

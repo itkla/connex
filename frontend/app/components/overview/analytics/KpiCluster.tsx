@@ -1,11 +1,69 @@
 'use client';
 
+import { useMemo } from 'react';
 import { useLocale, useTranslations } from 'next-intl';
 import { ArrowDownIcon, ArrowUpIcon } from '@heroicons/react/16/solid';
 
 import { formatCompactCurrency } from '@/app/lib/utils';
+import { type DealKpis } from '@/app/lib/types';
 import { type Kpi } from '@/app/components/overview/analytics/metrics';
 import InfoTip from '@/app/components/overview/analytics/InfoTip';
+
+const pctChange = (current: number, previous: number): number | null =>
+    previous === 0 ? (current === 0 ? 0 : null) : (current - previous) / previous;
+
+/**
+ * Maps the server-computed {@link DealKpis} DTO onto the four presentational KPI tiles
+ * (won revenue, new pipeline, win rate, average cycle). Deltas come from the DTO's
+ * {@code *Prev} baselines — a null baseline yields a null delta, rendered as "no baseline".
+ */
+function toTiles(kpis: DealKpis): Kpi[] {
+    const closedCount = kpis.wonCount + kpis.lostCount;
+    const winRate = closedCount > 0 ? kpis.wonCount / closedCount : 0;
+    let winRatePrev: number | null = null;
+    if (kpis.wonCountPrev != null && kpis.lostCountPrev != null) {
+        const prevClosed = kpis.wonCountPrev + kpis.lostCountPrev;
+        if (prevClosed > 0) winRatePrev = kpis.wonCountPrev / prevClosed;
+    }
+    return [
+        {
+            key: 'wonRevenue',
+            format: 'currency',
+            value: kpis.wonRevenue,
+            delta: kpis.wonRevenuePrev != null ? pctChange(kpis.wonRevenue, kpis.wonRevenuePrev) : null,
+            deltaKind: 'pct',
+            goodWhenUp: true,
+            series: kpis.wonSeries,
+        },
+        {
+            key: 'newPipeline',
+            format: 'currency',
+            value: kpis.newPipeline,
+            delta: kpis.newPipelinePrev != null ? pctChange(kpis.newPipeline, kpis.newPipelinePrev) : null,
+            deltaKind: 'pct',
+            goodWhenUp: true,
+            series: kpis.newPipelineSeries,
+        },
+        {
+            key: 'winRate',
+            format: 'percent',
+            value: winRate,
+            delta: winRatePrev != null && closedCount > 0 ? winRate - winRatePrev : null,
+            deltaKind: 'pp',
+            goodWhenUp: true,
+            series: kpis.winRateSeries,
+        },
+        {
+            key: 'avgCycle',
+            format: 'days',
+            value: kpis.avgCycleDays,
+            delta: kpis.avgCycleDaysPrev != null ? pctChange(kpis.avgCycleDays, kpis.avgCycleDaysPrev) : null,
+            deltaKind: 'pct',
+            goodWhenUp: false,
+            series: kpis.avgCycleSeries,
+        },
+    ];
+}
 
 function Sparkline({ series, positive }: { series: number[]; positive: boolean }) {
     const w = 80;
@@ -69,9 +127,15 @@ function DeltaChip({ kpi }: { kpi: Kpi }) {
     );
 }
 
-export default function KpiCluster({ kpis, currency }: { kpis: Kpi[]; currency: string }) {
+/**
+ * Renders the analytics/dashboard KPI cluster from the server-computed {@link DealKpis} DTO:
+ * won revenue, new pipeline, win rate, and average cycle, each with a 12-point sparkline and a
+ * previous-period delta chip. All aggregation happens server-side; this component only presents it.
+ */
+export default function KpiCluster({ kpis, currency }: { kpis: DealKpis; currency: string }) {
     const t = useTranslations('AnalyticsKpis');
     const locale = useLocale();
+    const tiles = useMemo(() => toTiles(kpis), [kpis]);
 
     const formatValue = (kpi: Kpi) => {
         if (kpi.format === 'currency') return formatCompactCurrency(kpi.value, currency, locale);
@@ -81,7 +145,7 @@ export default function KpiCluster({ kpis, currency }: { kpis: Kpi[]; currency: 
 
     return (
         <div className="grid grid-cols-1 gap-px overflow-hidden rounded-2xl bg-border ring-1 ring-border sm:grid-cols-2 lg:grid-cols-4">
-            {kpis.map((kpi) => (
+            {tiles.map((kpi) => (
                 <div key={kpi.key} className="flex flex-col gap-3 bg-card p-6">
                     <div className="flex items-start justify-between gap-3">
                         <div className="flex items-center gap-1.5">
