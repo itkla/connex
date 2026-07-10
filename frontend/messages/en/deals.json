@@ -12,6 +12,13 @@
     "factorStakeholderCooling": "{contact} is cooling off",
     "factorSinceContact": " — {days, plural, one {# day} other {# days}} since last contact"
   },
+  "DealBrief": {
+    "panelTitle": "AI brief",
+    "error": "Couldn't generate the brief.",
+    "retry": "Retry",
+    "attribution": "AI-generated · {time}",
+    "integrityWarning": "Some references could not be verified"
+  },
   "DealsPage": {
     "allDeals": "All Deals",
     "actual": "Actual",

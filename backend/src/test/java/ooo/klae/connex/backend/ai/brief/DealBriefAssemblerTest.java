@@ -1,0 +1,144 @@
+package ooo.klae.connex.backend.ai.brief;
+
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
+
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.stream.Collectors;
+
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
+
+import ooo.klae.connex.backend.ai.masking.MaskedMessage;
+import ooo.klae.connex.backend.ai.masking.MaskedPrompt;
+import ooo.klae.connex.backend.ai.masking.MaskingEngine;
+import ooo.klae.connex.backend.beans.Activity;
+import ooo.klae.connex.backend.beans.Deal;
+import ooo.klae.connex.backend.beans.DealPerson;
+import ooo.klae.connex.backend.beans.DealStageHistory;
+import ooo.klae.connex.backend.beans.Note;
+import ooo.klae.connex.backend.beans.Person;
+import ooo.klae.connex.backend.beans.Task;
+import ooo.klae.connex.backend.dto.DealRiskDto;
+import ooo.klae.connex.backend.dto.DealRiskFactor;
+import ooo.klae.connex.backend.dto.DealSummaryDto;
+import ooo.klae.connex.backend.dto.RelationshipTemperatureDto;
+import ooo.klae.connex.backend.services.DealRiskService;
+import ooo.klae.connex.backend.services.DealService;
+import ooo.klae.connex.backend.services.ScoringService;
+
+@ExtendWith(MockitoExtension.class)
+class DealBriefAssemblerTest {
+    private static final int WORKSPACE_ID = 13;
+    private static final int DEAL_ID = 41;
+    private static final int PERSON_ID = 73;
+
+    @Mock private DealService dealService;
+    @Mock private ScoringService scoringService;
+    @Mock private DealRiskService dealRiskService;
+
+    private DealBriefAssembler assembler;
+
+    @BeforeEach
+    void setUp() {
+        assembler = new DealBriefAssembler(dealService, scoringService, dealRiskService);
+    }
+
+    @Test
+    void assemble_masksIdentifiersExcludesContactFieldsAndOmitsSpecialCareNote() {
+        Deal deal = deal();
+        Person person = person();
+        DealPerson stakeholder = new DealPerson(person, "Decision maker");
+        DealSummaryDto summary = new DealSummaryDto(
+                DEAL_ID,
+                "Acme expansion",
+                125000,
+                "USD",
+                "open",
+                "2026-08-31",
+                "Evaluation",
+                "Enterprise",
+                "Acme",
+                "Owner Name");
+        DealStageHistory history = new DealStageHistory();
+        history.setStageName("Discovery");
+        history.setAchievedAt("2026-07-01 09:00:00");
+        Activity activity = new Activity();
+        activity.setSubject("Mina Patel met the team at Acme");
+        activity.setNotes("Budget review went well");
+        activity.setTimestamp("2026-07-08 14:00:00");
+        Note note = new Note();
+        note.setTitle("Call background");
+        note.setContent("Mina Patel discussed a diagnosis and follow-up details.");
+        note.setCreatedAt("2026-07-07 16:00:00");
+        Task task = new Task();
+        task.setDescription("Send Acme the revised proposal");
+        task.setDueDate("2026-07-10");
+        task.setCompleted(false);
+
+        RelationshipTemperatureDto temperature = new RelationshipTemperatureDto(
+                PERSON_ID, 64, "warm", "cooling", "2026-06-29 10:00:00", 10, 2, null, null);
+        DealRiskFactor riskFactor = new DealRiskFactor(
+                "stakeholder_cold",
+                "medium",
+                Map.of("person", "Mina Patel", "email", "mina.patel@acme.example"));
+        DealRiskDto risk = new DealRiskDto(
+                DEAL_ID, "medium", 25, List.of(riskFactor), "2026-07-09 18:30:00");
+
+        when(dealService.getDealById(DEAL_ID)).thenReturn(deal);
+        when(dealService.getDealSummary(DEAL_ID)).thenReturn(summary);
+        when(dealService.getStageHistory(DEAL_ID)).thenReturn(List.of(history));
+        when(dealService.getPeopleByDealId(DEAL_ID)).thenReturn(List.of(stakeholder));
+        when(dealService.getActivitiesByDealId(DEAL_ID)).thenReturn(List.of(activity));
+        when(dealService.getNotesByDealId(DEAL_ID)).thenReturn(List.of(note));
+        when(dealService.getTasksByDealId(DEAL_ID)).thenReturn(List.of(task));
+        when(scoringService.scoreContacts(WORKSPACE_ID, Set.of(PERSON_ID))).thenReturn(List.of(temperature));
+        when(dealRiskService.assessDeal(WORKSPACE_ID, DEAL_ID)).thenReturn(risk);
+
+        BriefAssembly assembly = assembler.assemble(WORKSPACE_ID, DEAL_ID);
+        String serialized = serialized(assembly.prompt());
+
+        assertTrue(serialized.contains("{{P1}}"));
+        assertTrue(serialized.contains("{{C1}}"));
+        assertTrue(serialized.contains(MaskingEngine.OMITTED_BY_POLICY));
+        assertFalse(serialized.contains("Mina Patel"));
+        assertFalse(serialized.contains("Acme"));
+        assertFalse(serialized.contains("mina.patel@acme.example"));
+        assertFalse(serialized.contains("+1 415 555 0199"));
+        assertFalse(serialized.contains("1 Market Street"));
+        verify(scoringService).scoreContacts(WORKSPACE_ID, Set.of(PERSON_ID));
+        verify(dealRiskService).assessDeal(WORKSPACE_ID, DEAL_ID);
+    }
+
+    private static Deal deal() {
+        Deal deal = new Deal();
+        deal.setId(DEAL_ID);
+        deal.setValue(125000);
+        deal.setCurrency("USD");
+        deal.setExpectedCloseDate("2026-08-31");
+        return deal;
+    }
+
+    private static Person person() {
+        Person person = new Person();
+        person.setId(PERSON_ID);
+        person.setName("Mina Patel");
+        person.setEmail("mina.patel@acme.example");
+        person.setPhone("+1 415 555 0199");
+        person.setTitle("VP Procurement, 1 Market Street");
+        return person;
+    }
+
+    private static String serialized(MaskedPrompt prompt) {
+        return prompt.getSystemPrompt() + "\n" + prompt.getMessages().stream()
+                .map(MaskedMessage::getContent)
+                .collect(Collectors.joining("\n"));
+    }
+}

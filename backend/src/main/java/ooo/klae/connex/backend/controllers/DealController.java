@@ -10,6 +10,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import ooo.klae.connex.backend.ai.brief.DealBriefService;
 import ooo.klae.connex.backend.beans.Deal;
 import ooo.klae.connex.backend.beans.DealPerson;
 import ooo.klae.connex.backend.dto.ActivityDto;
@@ -22,6 +23,7 @@ import ooo.klae.connex.backend.dto.CloseDealRequest;
 import ooo.klae.connex.backend.dto.CustomFieldEntryDto;
 import ooo.klae.connex.backend.dto.CustomFieldValueRequest;
 import ooo.klae.connex.backend.dto.CustomFieldValuesRequest;
+import ooo.klae.connex.backend.dto.DealBriefDto;
 import ooo.klae.connex.backend.dto.DealCollaboratorsDto;
 import ooo.klae.connex.backend.dto.DealDto;
 import ooo.klae.connex.backend.dto.DealEvaluationDto;
@@ -61,6 +63,7 @@ public class DealController {
     private final DealService dealService;
     private final BulkOperationService bulkOperationService;
     private final DealRiskService dealRiskService;
+    private final DealBriefService dealBriefService;
     private final WorkspaceService workspaceService;
 
     /**
@@ -124,6 +127,12 @@ public class DealController {
     @GetMapping("/{id}/risk")
     public DealRiskDto getDealRisk(@PathVariable int id) {
         return dealRiskService.assessDeal(workspaceService.getCurrentWorkspaceId(), id);
+    }
+
+    /** Returns an AI-generated before-you-call brief, or a graceful unavailability response. */
+    @GetMapping("/{id}/brief")
+    public DealBriefDto brief(@PathVariable int id) {
+        return dealBriefService.generate(id);
     }
 
     /**

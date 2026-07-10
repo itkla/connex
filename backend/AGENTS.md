@@ -64,6 +64,18 @@ Automation rules (`RuleService` CRUD + `RuleEngineService` execution, issue #54)
 - **Idempotency.** Every fire is keyed in `rule_execution` (unique `dedupe_key` per rule); time-based fires bucket by cadence. The engine never throws to its caller.
 - The engine runs **off the request thread** — pass `workspaceId`/`userId` explicitly to mappers and to the session-free `SegmentService.evaluate(workspaceId, userId, …)`; never rely on the request's tenant context there.
 
+## AI subsystem (BYOP) — the masking boundary is load-bearing
+
+The AI foundation (issue #94; packages `ai/`, `ai/masking`, `ai/provider`, `ai/egress`, `ai/brief`) is customer-BYOP (Amazon Bedrock → Anthropic Claude v1) and **fail-closed end to end**: `connex.ai.enabled` defaults false, and `AiFeatureGate` additionally requires the actor's `Permission.AI_USE` plus a per-org provider config (`ai_provider_config`) that is enabled, credentialed (envelope-encrypted via `SecretPurpose.ORG_AI_PROVIDER_CREDENTIAL`), region-allowlisted, and no-training-attested. Editing provider settings is org-admin + step-up gated (`OrgMemberService.requireOrgAdmin` + `requireRecentAuthentication`), mirroring SSO config.
+
+Rules for any new AI-powered feature:
+
+- **Every model call goes through `AiInvocationService.complete(...)`** — never call `AiProvider`/`BedrockClient` directly. That choke point enforces the gate, credential resolution, the outbound leak scan, demasking, and the metadata-only `ai.llm.call` audit (attempt/success/failure/blocked; never prompt, response, or credential content).
+- **No feature builds raw prompts.** Tokenize identifiers with `MaskingEngine.maskField` (person/company names) and route ALL free text through `MaskingEngine.maskFreeText` (special-care screen + identifier substitution); assemble via `PromptAssembly`. `MaskedPrompt` is only constructible inside `ai.masking` — by design; do not widen its constructor. Emails/phones/addresses are excluded from prompts (see `IdentifierPolicy`); `special_care` data is always excluded.
+- **The provider endpoint is constructed, never configured.** Bedrock hosts derive from the closed `BedrockRegion` enum and `AiEgressGuard` re-vets DNS before every send. Do not add an arbitrary endpoint/URL field for any provider (the #94 hard rule); new providers get their own adapter behind `AiProvider` with their own closed target model.
+- **Degrade gracefully.** Features return an explicit unavailable result (`available=false`, e.g. `DealBriefDto.unavailable`) when the gate or provider fails — deterministic features (deal risk, warmth) keep working without AI.
+- The masking map is request-scoped and never persisted; masking reduces provider exposure but does not change Connex's APPI handler status (Connex can re-identify). Keep it that way — no token vault.
+
 ## Definition of Done (backend) — the verify loop is required
 
 1. **Run a test server:** `./gradlew bootRun` (MySQL via `docker-compose up -d db`, see `docker-compose.yml` — db on `:3306`, adminer on `:9001`).
