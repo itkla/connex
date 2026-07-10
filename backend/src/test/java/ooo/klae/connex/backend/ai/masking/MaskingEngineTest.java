@@ -1,0 +1,74 @@
+package ooo.klae.connex.backend.ai.masking;
+
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+
+import org.junit.jupiter.api.Test;
+
+import tools.jackson.databind.ObjectMapper;
+
+class MaskingEngineTest {
+    private final ObjectMapper objectMapper = new ObjectMapper();
+
+    @Test
+    void masksStructuredFieldsAndFreeTextWithoutOutboundLeaks() throws Exception {
+        MaskingContext ctx = new MaskingContext();
+        String ann = MaskingEngine.maskField(EntityKind.PERSON, "Ann", ctx);
+        String annSmith = MaskingEngine.maskField(EntityKind.PERSON, "Ann Smith", ctx);
+        String company = MaskingEngine.maskField(EntityKind.COMPANY, "Acme (Japan) [R&D]", ctx);
+        String japaneseName = MaskingEngine.maskField(EntityKind.PERSON, "山田太郎", ctx);
+        String email = MaskingEngine.maskField(EntityKind.EMAIL, "ann.smith+vip@example.com", ctx);
+        String phone = MaskingEngine.maskField(EntityKind.PHONE, "+81-3-1234-5678", ctx);
+
+        assertEquals("{{P1}}", ann);
+        assertEquals("{{P2}}", annSmith);
+        assertEquals("{{C1}}", company);
+        assertEquals("{{P3}}", japaneseName);
+        assertEquals("{{E1}}", email);
+        assertEquals("{{H1}}", phone);
+
+        String note = """
+                Ann Smith met ANN at Acme (Japan) [R&D].
+                Follow up with 山田太郎 via ann.smith+vip@example.com or +81-3-1234-5678.
+                """;
+        String maskedNote = MaskingEngine.maskFreeText(note, ctx);
+
+        assertFalse(containsIgnoreCase(maskedNote, "Ann Smith"));
+        assertFalse(containsIgnoreCase(maskedNote, "Ann"));
+        assertFalse(containsIgnoreCase(maskedNote, "Acme (Japan) [R&D]"));
+        assertFalse(maskedNote.contains("山田太郎"));
+        assertFalse(containsIgnoreCase(maskedNote, "ann.smith+vip@example.com"));
+        assertFalse(maskedNote.contains("+81-3-1234-5678"));
+        assertEquals("[omitted by policy]", MaskingEngine.maskFreeText("The contact discussed a diagnosis.", ctx));
+
+        String serialized = objectMapper.writeValueAsString(Map.of(
+                "tokens", List.of(ann, annSmith, company, japaneseName, email, phone),
+                "note", maskedNote,
+                "warmth", "hot",
+                "stage", "renewal"));
+
+        assertDoesNotThrow(() -> OutboundLeakScan.assertNoLeak(serialized, ctx));
+        for (String rawValue : ctx.identifierDictionary()) {
+            assertFalse(containsIgnoreCase(serialized, rawValue), rawValue);
+        }
+    }
+
+    @Test
+    void leakScanThrowsWhenSerializedPayloadContainsRawIdentifier() throws Exception {
+        MaskingContext ctx = new MaskingContext();
+        MaskingEngine.maskField(EntityKind.PERSON, "Ann Smith", ctx);
+        String serialized = objectMapper.writeValueAsString(Map.of("message", "Please contact Ann Smith."));
+
+        assertThrows(MaskingLeakException.class, () -> OutboundLeakScan.assertNoLeak(serialized, ctx));
+    }
+
+    private static boolean containsIgnoreCase(String value, String needle) {
+        return value.toLowerCase(Locale.ROOT).contains(needle.toLowerCase(Locale.ROOT));
+    }
+}
