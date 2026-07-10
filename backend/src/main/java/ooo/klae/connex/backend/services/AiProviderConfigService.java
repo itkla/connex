@@ -14,6 +14,9 @@ import org.springframework.transaction.annotation.Transactional;
 import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.ai.AiProviderReadiness;
 import ooo.klae.connex.backend.ai.AiProviderSecretCipher;
+import ooo.klae.connex.backend.ai.provider.AiCredentials;
+import ooo.klae.connex.backend.ai.provider.AiProviderException;
+import ooo.klae.connex.backend.ai.provider.ResolvedAiProvider;
 import ooo.klae.connex.backend.beans.AiProviderConfig;
 import ooo.klae.connex.backend.dto.AiProviderConfigDto;
 import ooo.klae.connex.backend.dto.AiProviderConfigRequest;
@@ -135,13 +138,58 @@ public class AiProviderConfigService implements AiProviderReadiness {
     @Override
     public boolean isReadyForOrg(int orgId) {
         AiProviderConfig config = aiProviderConfigMapper.findByOrg(orgId);
+        return isReady(config);
+    }
+
+    /**
+     * Resolves the configured organization provider and decrypts credentials for provider use.
+     * @param orgId the organization
+     * @return resolved provider configuration with decrypted credentials
+     */
+    public ResolvedAiProvider resolveForOrg(int orgId) {
+        AiProviderConfig config = aiProviderConfigMapper.findByOrg(orgId);
+        if (!isReady(config)) {
+            throw new ForbiddenException("AI provider is not available for this organization");
+        }
+        return new ResolvedAiProvider(config.getProvider(), config.getRegion(), config.getModelId(),
+                decryptCredentials(orgId, config.getCredentialRef()));
+    }
+
+    private boolean isReady(AiProviderConfig config) {
         return config != null
                 && PROVIDER_BEDROCK.equals(config.getProvider())
                 && config.isEnabled()
                 && !isBlank(config.getCredentialRef())
                 && config.isNoTrainingAttested()
                 && BEDROCK_REGIONS.contains(config.getRegion())
+                && isSupportedBedrockClaudeModelId(config.getModelId())
                 && aiProviderSecretCipher.isAvailable();
+    }
+
+    private AiCredentials decryptCredentials(int orgId, String credentialRef) {
+        try {
+            String bundleJson = aiProviderSecretCipher.decryptCredential(orgId, credentialRef);
+            if (isBlank(bundleJson)) {
+                throw new AiProviderException("AI provider credentials are invalid");
+            }
+            CredentialBundle bundle = objectMapper.readValue(bundleJson, CredentialBundle.class);
+            return new AiCredentials(requireCredentialValue(bundle.accessKeyId()),
+                    requireCredentialValue(bundle.secretAccessKey()), trimToNull(bundle.sessionToken()));
+        } catch (AiProviderException exception) {
+            throw exception;
+        } catch (Exception exception) {
+            throw new AiProviderException("AI provider credentials are invalid");
+        }
+    }
+
+    private static String requireCredentialValue(String value) {
+        if (isBlank(value)) {
+            throw new AiProviderException("AI provider credentials are invalid");
+        }
+        return value.trim();
+    }
+
+    private record CredentialBundle(String accessKeyId, String secretAccessKey, String sessionToken) {
     }
 
     private int requireAdministrableOrg(int workspaceId, int actorId) {
@@ -190,6 +238,12 @@ public class AiProviderConfigService implements AiProviderReadiness {
             throw new BadRequestException("The Bedrock provider supports Claude models only");
         }
         return modelId;
+    }
+
+    private static boolean isSupportedBedrockClaudeModelId(String modelId) {
+        return !isBlank(modelId)
+                && BEDROCK_MODEL_ID.matcher(modelId).matches()
+                && modelId.toLowerCase(Locale.ROOT).contains("claude");
     }
 
     private static String requireAccessKeyId(String requested) {

@@ -24,6 +24,8 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import ooo.klae.connex.backend.ai.AiProviderSecretCipher;
+import ooo.klae.connex.backend.ai.provider.AiProviderException;
+import ooo.klae.connex.backend.ai.provider.ResolvedAiProvider;
 import ooo.klae.connex.backend.beans.AiProviderConfig;
 import ooo.klae.connex.backend.dto.AiProviderConfigDto;
 import ooo.klae.connex.backend.dto.AiProviderConfigRequest;
@@ -199,12 +201,61 @@ class AiProviderConfigServiceTest {
         assertFalse(service.isReadyForOrg(ORG_ID));
 
         stored = readyConfig();
+        stored.setModelId(null);
+        assertFalse(service.isReadyForOrg(ORG_ID));
+
+        stored = readyConfig();
         when(aiProviderSecretCipher.isAvailable()).thenReturn(false);
         assertFalse(service.isReadyForOrg(ORG_ID));
 
         stored = readyConfig();
         when(aiProviderSecretCipher.isAvailable()).thenReturn(true);
         assertTrue(service.isReadyForOrg(ORG_ID));
+    }
+
+    @Test
+    void resolveForOrg_decryptsAndParsesCredentials() {
+        stored = readyConfig();
+        when(aiProviderSecretCipher.decryptCredential(ORG_ID, "secret:v1:88"))
+                .thenReturn("""
+                        {
+                          "accessKeyId": "AKIA_TEST",
+                          "secretAccessKey": "SECRET_ACCESS_KEY",
+                          "sessionToken": "SESSION_TOKEN"
+                        }
+                        """);
+
+        ResolvedAiProvider resolved = service.resolveForOrg(ORG_ID);
+
+        assertEquals("bedrock", resolved.provider());
+        assertEquals("ap-northeast-1", resolved.region());
+        assertEquals("anthropic.claude-3-5-sonnet-20240620-v1:0", resolved.modelId());
+        assertEquals("AKIA_TEST", resolved.credentials().accessKeyId());
+        assertEquals("SECRET_ACCESS_KEY", resolved.credentials().secretAccessKey());
+        assertEquals("SESSION_TOKEN", resolved.credentials().sessionToken());
+        assertFalse(resolved.toString().contains("SECRET_ACCESS_KEY"));
+        assertFalse(resolved.toString().contains("SESSION_TOKEN"));
+    }
+
+    @Test
+    void resolveForOrg_notReady_isForbidden() {
+        stored = readyConfig();
+        stored.setEnabled(false);
+
+        assertThrows(ForbiddenException.class, () -> service.resolveForOrg(ORG_ID));
+        verify(aiProviderSecretCipher, never()).decryptCredential(eq(ORG_ID), any());
+    }
+
+    @Test
+    void resolveForOrg_malformedBundle_throwsWithoutLeakingBundle() {
+        stored = readyConfig();
+        when(aiProviderSecretCipher.decryptCredential(ORG_ID, "secret:v1:88"))
+                .thenReturn("{\"accessKeyId\":\"AKIA_TEST\",\"secretAccessKey\":\"SUPER_SECRET\"");
+
+        AiProviderException exception = assertThrows(AiProviderException.class, () -> service.resolveForOrg(ORG_ID));
+
+        assertFalse(exception.getMessage().contains("SUPER_SECRET"));
+        assertFalse(String.valueOf(exception).contains("SUPER_SECRET"));
     }
 
     private static AiProviderConfigRequest validRequest() {
