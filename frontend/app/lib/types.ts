@@ -1140,6 +1140,7 @@ export type DealKpis = {
     avgCycleDaysPrev: number | null;
     wonSeries: number[];
     newPipelineSeries: number[];
+    /** Win-rate per bucket as a 0–100 percent (note: the {@link DealKpis} scalar win rate is derived from wonCount/lostCount, not this series). */
     winRateSeries: number[];
     avgCycleSeries: number[];
 };

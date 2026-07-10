@@ -36,9 +36,9 @@ import type {
     Task,
     User,
 } from '@/app/lib/types';
+import AnalyticsBoard from '@/app/components/overview/analytics/AnalyticsBoard';
 
 const EMPTY_DEAL_METRICS: DealMetrics = { byCurrency: [], totalCount: 0 };
-import AnalyticsBoard from '@/app/components/overview/analytics/AnalyticsBoard';
 
 export const metadata: Metadata = {
     title: 'Analytics',

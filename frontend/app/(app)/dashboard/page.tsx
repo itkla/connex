@@ -54,24 +54,6 @@ import type {
     User,
 } from '@/app/lib/types';
 
-const EMPTY_DEAL_KPIS: DealKpis = {
-    wonRevenue: 0,
-    wonRevenuePrev: null,
-    newPipeline: 0,
-    newPipelinePrev: null,
-    wonCount: 0,
-    lostCount: 0,
-    wonValue: 0,
-    lostValue: 0,
-    wonCountPrev: null,
-    lostCountPrev: null,
-    avgCycleDays: 0,
-    avgCycleDaysPrev: null,
-    wonSeries: [],
-    newPipelineSeries: [],
-    winRateSeries: [],
-    avgCycleSeries: [],
-};
 import { startOfLocalDay, timeOf } from '@/app/lib/utils';
 
 import AtRiskDeals, { type AtRiskItem } from '@/app/components/dashboard/AtRiskDeals';
@@ -101,6 +83,25 @@ import StageFunnel from '@/app/components/overview/analytics/StageFunnel';
 import ActivityVolume from '@/app/components/overview/analytics/ActivityVolume';
 import TeamLeaderboard from '@/app/components/overview/analytics/TeamLeaderboard';
 import type { RangeKey } from '@/app/components/overview/analytics/metrics';
+
+const EMPTY_DEAL_KPIS: DealKpis = {
+    wonRevenue: 0,
+    wonRevenuePrev: null,
+    newPipeline: 0,
+    newPipelinePrev: null,
+    wonCount: 0,
+    lostCount: 0,
+    wonValue: 0,
+    lostValue: 0,
+    wonCountPrev: null,
+    lostCountPrev: null,
+    avgCycleDays: 0,
+    avgCycleDaysPrev: null,
+    wonSeries: [],
+    newPipelineSeries: [],
+    winRateSeries: [],
+    avgCycleSeries: [],
+};
 
 const DASHBOARD_RANGE: RangeKey = '90d';
 
