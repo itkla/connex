@@ -63,7 +63,13 @@
     "toastTagRemovedPartial": "Removed tag from {succeeded} of {total} companies",
     "toastTagFailed": "Couldn't update {failed} companies",
     "toastContactsPartial": "Added {succeeded} of {total} people",
-    "toastContactsAllFailed": "Company created, but couldn't add {count} people"
+    "toastContactsAllFailed": "Company created, but couldn't add {count} people",
+    "toastSelectAllFailed": "Couldn't select all matching companies",
+    "allMatchingSelected": "All {total} companies selected.",
+    "clearSelection": "Clear selection",
+    "pageSelected": "All {count} on this page selected.",
+    "selecting": "Selecting…",
+    "selectAllMatching": "Select all {total}"
   },
   "CompaniesActionsMenu": {
     "edit": "Edit",

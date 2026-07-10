@@ -7,6 +7,11 @@
     id, workspace_id, name, website, industry, phone, address, created_at, updated_at, logo_url
   </sql>
 
+  <sql id="qualifiedCompanyColumns">
+    c.id, c.workspace_id, c.name, c.website, c.industry, c.phone, c.address,
+    c.created_at, c.updated_at, c.logo_url
+  </sql>
+
   <resultMap id="CompanyFullResult" type="Company">
     <id property="id" column="id"/>
     <result property="workspaceId" column="workspace_id"/>
@@ -26,28 +31,98 @@
        workspace it has been shared with (company_share). The share branch carries the same-org
        ceiling the write path enforces (owner and grantee workspaces must share an organization),
        so a share row that spans an org boundary grants no read visibility. Writes stay
-       owned-only. -->
+       owned-only. Requires the table aliased `c`. -->
   <sql id="visible">
-    (company.workspace_id = #{workspaceId}
+    (c.workspace_id = #{workspaceId}
      OR EXISTS (SELECT 1 FROM company_share cs
         JOIN workspace vws ON vws.id = cs.workspace_id
-        JOIN workspace ows ON ows.id = company.workspace_id AND ows.org_id = vws.org_id
-        WHERE cs.company_id = company.id AND cs.workspace_id = #{workspaceId}))
+        JOIN workspace ows ON ows.id = c.workspace_id AND ows.org_id = vws.org_id
+        WHERE cs.company_id = c.id AND cs.workspace_id = #{workspaceId}))
   </sql>
 
   <select id="getAllCompanies" resultType="Company">
-    SELECT <include refid="companyColumns"/> FROM company WHERE <include refid="visible"/> ORDER BY name, id
+    SELECT <include refid="qualifiedCompanyColumns"/>
+    FROM company c
+    WHERE <include refid="visible"/>
+    ORDER BY c.name, c.id
   </select>
 
+  <sql id="pageWhere">
+    <where>
+      AND <include refid="visible"/>
+      <if test="query != null">
+        AND (c.name LIKE #{query} OR c.website LIKE #{query} OR c.industry LIKE #{query}
+          OR c.phone LIKE #{query} OR c.address LIKE #{query})
+      </if>
+      <if test="(industry != null and industry.size() > 0) or noIndustry">
+        AND (
+          <trim prefixOverrides="OR ">
+            <if test="industry != null and industry.size() > 0">
+              c.industry IN
+              <foreach item="value" collection="industry" open="(" separator="," close=")">#{value}</foreach>
+            </if>
+            <if test="noIndustry">OR (c.industry IS NULL OR c.industry = '')</if>
+          </trim>
+        )
+      </if>
+      <if test="ids != null and ids.size() > 0">
+        AND c.id IN
+        <foreach item="id" collection="ids" open="(" separator="," close=")">#{id}</foreach>
+      </if>
+    </where>
+  </sql>
+
+  <sql id="pageOrderBy">
+    ORDER BY
+    <choose>
+      <when test="sort == 'name'">c.name</when>
+      <when test="sort == 'website'">c.website</when>
+      <when test="sort == 'industry'">c.industry</when>
+      <when test="sort == 'phone'">c.phone</when>
+      <when test="sort == 'address'">c.address</when>
+      <when test="sort == 'createdAt'">c.created_at</when>
+      <when test="sort == 'updatedAt'">c.updated_at</when>
+      <otherwise>c.name</otherwise>
+    </choose>
+    <choose><when test="dir == 'desc'">DESC</when><otherwise>ASC</otherwise></choose>
+    , c.id ASC
+  </sql>
+
   <select id="getCompaniesPage" resultType="Company">
-    SELECT <include refid="companyColumns"/> FROM company
-    WHERE <include refid="visible"/>
-    ORDER BY name, id
+    SELECT <include refid="qualifiedCompanyColumns"/>
+    FROM company c
+    <include refid="pageWhere"/>
+    <include refid="pageOrderBy"/>
     LIMIT #{limit} OFFSET #{offset}
   </select>
 
   <select id="countCompanies" resultType="long">
-    SELECT COUNT(*) FROM company WHERE <include refid="visible"/>
+    SELECT COUNT(*)
+    FROM company c
+    <include refid="pageWhere"/>
+  </select>
+
+  <select id="getCompanyIdsFiltered" resultType="int">
+    SELECT c.id
+    FROM company c
+    <include refid="pageWhere"/>
+    ORDER BY c.id
+    LIMIT #{limit}
+  </select>
+
+  <select id="distinctIndustries" resultType="string">
+    SELECT DISTINCT c.industry
+    FROM company c
+    WHERE <include refid="visible"/> AND c.industry IS NOT NULL AND c.industry &lt;&gt; ''
+    ORDER BY c.industry
+  </select>
+
+  <select id="hasCompanyWithoutIndustry" resultType="boolean">
+    SELECT EXISTS(
+      SELECT 1
+      FROM company c
+      WHERE <include refid="visible"/> AND (c.industry IS NULL OR c.industry = '')
+    )
   </select>
 
   <select id="getCompaniesByTagId" resultType="Company">
@@ -65,8 +140,8 @@
   </select>
 
   <select id="getCompanyById" resultMap="CompanyFullResult">
-    SELECT <include refid="companyColumns"/>, #{workspaceId} AS req_workspace_id
-    FROM company WHERE <include refid="visible"/> AND id = #{id}
+    SELECT <include refid="qualifiedCompanyColumns"/>, #{workspaceId} AS req_workspace_id
+    FROM company c WHERE <include refid="visible"/> AND c.id = #{id}
   </select>
 
   <select id="getCompaniesWithWebsite" resultType="Company">
@@ -86,7 +161,7 @@
 
   <select id="exists" resultType="boolean">
     SELECT EXISTS(
-      SELECT 1 FROM company WHERE <include refid="visible"/> AND id = #{id}
+      SELECT 1 FROM company c WHERE <include refid="visible"/> AND c.id = #{id}
     )
   </select>
   <select id="existsOwned" resultType="boolean">
@@ -94,10 +169,10 @@
   </select>
 
   <select id="search" resultType="Company">
-    SELECT <include refid="companyColumns"/> FROM company
+    SELECT <include refid="qualifiedCompanyColumns"/> FROM company c
     WHERE <include refid="visible"/>
-      AND (name LIKE #{query} OR website LIKE #{query} OR industry LIKE #{query} OR phone LIKE #{query} OR address LIKE #{query})
-    ORDER BY name, id
+      AND (c.name LIKE #{query} OR c.website LIKE #{query} OR c.industry LIKE #{query} OR c.phone LIKE #{query} OR c.address LIKE #{query})
+    ORDER BY c.name, c.id
     LIMIT 10
   </select>
 
