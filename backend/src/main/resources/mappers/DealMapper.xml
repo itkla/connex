@@ -197,8 +197,8 @@
   </select>
 
   <select id="revenueClosedByMonth" resultType="ooo.klae.connex.backend.dto.DealMonthTotalDto">
-    SELECT YEAR(d.closed_at) AS year,
-           MONTH(d.closed_at) AS month,
+    SELECT YEAR(COALESCE(d.expected_close_date, d.closed_at)) AS year,
+           MONTH(COALESCE(d.expected_close_date, d.closed_at)) AS month,
            COALESCE(SUM(d.actual_value), 0) AS total
     FROM deal d
     WHERE d.workspace_id = #{workspaceId}
@@ -206,7 +206,8 @@
       AND d.currency = #{currency}
     </if>
       AND d.closed_at IS NOT NULL
-    GROUP BY YEAR(d.closed_at), MONTH(d.closed_at)
+    GROUP BY YEAR(COALESCE(d.expected_close_date, d.closed_at)),
+             MONTH(COALESCE(d.expected_close_date, d.closed_at))
   </select>
 
   <select id="revenueProjectedByMonth" resultType="ooo.klae.connex.backend.dto.DealMonthTotalDto">
