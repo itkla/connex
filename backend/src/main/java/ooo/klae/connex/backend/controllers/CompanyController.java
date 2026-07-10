@@ -15,6 +15,7 @@ import ooo.klae.connex.backend.dto.BulkDeleteRequest;
 import ooo.klae.connex.backend.dto.BulkOperationResult;
 import ooo.klae.connex.backend.dto.BulkTagRequest;
 import ooo.klae.connex.backend.dto.CompanyDto;
+import ooo.klae.connex.backend.dto.CompanyFacets;
 import ooo.klae.connex.backend.dto.CustomFieldEntryDto;
 import ooo.klae.connex.backend.dto.CustomFieldValueRequest;
 import ooo.klae.connex.backend.dto.CustomFieldValuesRequest;
@@ -25,6 +26,7 @@ import ooo.klae.connex.backend.dto.TagDto;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.services.BulkOperationService;
 import ooo.klae.connex.backend.services.CompanyService;
+import ooo.klae.connex.backend.util.LikePattern;
 import ooo.klae.connex.backend.util.PageBounds;
 
 import java.util.List;
@@ -59,17 +61,57 @@ public class CompanyController {
     }
 
     /**
-     * Retrieves a bounded, paginated slice of companies visible to the active workspace.
+     * Retrieves a bounded, paginated, searchable, and sortable slice of companies visible to the
+     * active workspace.
      */
     @GetMapping("/page")
     public PageResponse<CompanyDto> getCompaniesPage(
         @RequestParam(defaultValue = "1") int page,
-        @RequestParam(defaultValue = "25") int size
+        @RequestParam(defaultValue = "25") int size,
+        @RequestParam(required = false) String q,
+        @RequestParam(required = false) String sort,
+        @RequestParam(required = false) String dir,
+        @RequestParam(required = false) List<String> industry,
+        @RequestParam(defaultValue = "false") boolean noIndustry,
+        @RequestParam(required = false) List<Integer> ids
     ) {
         PageBounds bounds = PageBounds.of(page, size);
-        List<CompanyDto> items = companyService.getCompaniesPage(bounds.size(), bounds.offset())
+        String query = (q == null || q.isBlank()) ? null : LikePattern.containing(q);
+        List<CompanyDto> items = companyService.getCompaniesPage(
+            query, sort, dir, industry, noIndustry, ids, bounds.size(), bounds.offset())
             .stream().map(CompanyDto::from).toList();
-        return new PageResponse<>(items, companyService.countCompanies());
+        return new PageResponse<>(items, companyService.countCompanies(query, industry, noIndustry, ids));
+    }
+
+    /**
+     * Retrieves the ids of every company matching at least one supplied filter.
+     */
+    @GetMapping("/ids")
+    public List<Integer> getCompanyIds(
+        @RequestParam(required = false) String q,
+        @RequestParam(required = false) List<String> industry,
+        @RequestParam(defaultValue = "false") boolean noIndustry,
+        @RequestParam(required = false) List<Integer> ids
+    ) {
+        String query = (q == null || q.isBlank()) ? null : LikePattern.containing(q);
+        if (query == null
+            && (industry == null || industry.isEmpty())
+            && !noIndustry
+            && (ids == null || ids.isEmpty())) {
+            throw new BadRequestException("At least one filter is required before selecting matching company ids");
+        }
+        return companyService.getMatchingCompanyIds(query, industry, noIndustry, ids);
+    }
+
+    /**
+     * Retrieves the distinct industry facets across companies visible to the active workspace.
+     */
+    @GetMapping("/facets")
+    public CompanyFacets getCompanyFacets() {
+        return new CompanyFacets(
+            companyService.distinctIndustries(),
+            companyService.hasCompanyWithoutIndustry()
+        );
     }
 
     /**

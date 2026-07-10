@@ -12,6 +12,7 @@ import ooo.klae.connex.backend.beans.Deal;
 import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.beans.Tag;
 import ooo.klae.connex.backend.dto.CustomFieldEntryDto;
+import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.exceptions.DuplicateResourceException;
 import ooo.klae.connex.backend.tenant.Permission;
@@ -45,6 +46,8 @@ public class CompanyService {
     private static final Set<String> AUDIT_FIELDS =
         Set.of("name", "website", "industry", "phone", "address", "logoUrl");
 
+    private static final int MAX_MATCHING_IDS = 1000;
+
     /**
      * Retrieves all {@code Company} records in the active workspace.
      */
@@ -52,12 +55,49 @@ public class CompanyService {
         return companyMapper.getAllCompanies(workspaceService.getCurrentWorkspaceId());
     }
 
-    public List<Company> getCompaniesPage(int limit, int offset) {
-        return companyMapper.getCompaniesPage(workspaceService.getCurrentWorkspaceId(), limit, offset);
+    public List<Company> getCompaniesPage(String query, String sort, String dir, List<String> industry,
+            boolean noIndustry, List<Integer> ids, int limit, int offset) {
+        return companyMapper.getCompaniesPage(workspaceService.getCurrentWorkspaceId(), query, sort, dir,
+            industry, noIndustry, ids, limit, offset);
     }
 
-    public long countCompanies() {
-        return companyMapper.countCompanies(workspaceService.getCurrentWorkspaceId());
+    public long countCompanies(String query, List<String> industry, boolean noIndustry, List<Integer> ids) {
+        return companyMapper.countCompanies(
+            workspaceService.getCurrentWorkspaceId(), query, industry, noIndustry, ids);
+    }
+
+    /**
+     * Retrieves every matching company id in the active workspace, rejecting unfiltered or overly
+     * broad requests before loading the ids.
+     */
+    public List<Integer> getMatchingCompanyIds(String query, List<String> industry, boolean noIndustry,
+            List<Integer> ids) {
+        if (!hasMatchingIdFilter(query, industry, noIndustry, ids)) {
+            throw new BadRequestException("At least one filter is required before selecting matching company ids");
+        }
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        long total = companyMapper.countCompanies(workspaceId, query, industry, noIndustry, ids);
+        if (total > MAX_MATCHING_IDS) {
+            throw new BadRequestException("Too many matching companies; narrow the filters before selecting all");
+        }
+        return companyMapper.getCompanyIdsFiltered(
+            workspaceId, query, industry, noIndustry, ids, MAX_MATCHING_IDS);
+    }
+
+    private static boolean hasMatchingIdFilter(String query, List<String> industry, boolean noIndustry,
+            List<Integer> ids) {
+        return query != null
+            || (industry != null && !industry.isEmpty())
+            || noIndustry
+            || (ids != null && !ids.isEmpty());
+    }
+
+    public List<String> distinctIndustries() {
+        return companyMapper.distinctIndustries(workspaceService.getCurrentWorkspaceId());
+    }
+
+    public boolean hasCompanyWithoutIndustry() {
+        return companyMapper.hasCompanyWithoutIndustry(workspaceService.getCurrentWorkspaceId());
     }
 
     public List<Company> getCompaniesByTagId(int tagId) {

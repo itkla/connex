@@ -1,6 +1,9 @@
 package ooo.klae.connex.backend.mappers;
 
+import java.sql.Timestamp;
 import java.util.List;
+
+import javax.sql.DataSource;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -9,12 +12,16 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.jdbc.core.JdbcTemplate;
 
 import ooo.klae.connex.backend.beans.Company;
 import ooo.klae.connex.backend.beans.Tag;
 import ooo.klae.connex.backend.beans.Workspace;
 
 class CompanyMapperTest extends AbstractMapperTest {
+
+    @Autowired private DataSource dataSource;
 
     /**
      * Inserts a new company and checks if the generated ID is not zero.
@@ -77,13 +84,130 @@ class CompanyMapperTest extends AbstractMapperTest {
         companyMapper.update(first);
         companyMapper.update(second);
         companyMapper.update(third);
+        setTimestamps(first, "2026-01-01 00:00:00", "2026-02-01 00:00:00");
+        setTimestamps(second, "2026-01-01 00:00:00", "2026-02-01 00:00:00");
+        setTimestamps(third, "2026-01-01 00:00:00", "2026-02-01 00:00:00");
         Company foreign = newCompany();
 
-        List<Company> page = companyMapper.getCompaniesPage(pageWorkspace.getId(), 2, 0);
+        List<Company> page = companyMapper.getCompaniesPage(
+            pageWorkspace.getId(), null, null, null, null, false, null, 2, 0);
 
         assertEquals(List.of(first.getId(), second.getId()), page.stream().map(Company::getId).toList());
-        assertEquals(3, companyMapper.countCompanies(pageWorkspace.getId()));
+        List<Integer> stableIds = List.of(first.getId(), second.getId(), third.getId());
+        for (String sort : List.of("name", "website", "industry", "phone", "address", "createdAt", "updatedAt")) {
+            assertEquals(stableIds, companyPageIds(pageWorkspace, sort, "asc"));
+            assertEquals(stableIds, companyPageIds(pageWorkspace, sort, "desc"));
+        }
+        assertEquals(3, companyMapper.countCompanies(pageWorkspace.getId(), null, null, false, null));
         assertTrue(page.stream().noneMatch(company -> company.getId() == foreign.getId()));
+    }
+
+    @Test
+    void getCompaniesPageSortsByEveryWhitelistedFieldInBothDirections() {
+        Workspace pageWorkspace = newWorkspace();
+        Company alpha = newCompanyIn(pageWorkspace, "Alpha", "https://charlie.example.com", "Zulu", "300", "Bravo");
+        Company bravo = newCompanyIn(pageWorkspace, "Bravo", "https://alpha.example.com", "Mike", "100", "Charlie");
+        Company charlie = newCompanyIn(pageWorkspace, "Charlie", "https://bravo.example.com", "Alpha", "200", "Alpha");
+        setTimestamps(alpha, "2026-01-03 00:00:00", "2026-02-01 00:00:00");
+        setTimestamps(bravo, "2026-01-01 00:00:00", "2026-02-03 00:00:00");
+        setTimestamps(charlie, "2026-01-02 00:00:00", "2026-02-02 00:00:00");
+
+        assertSort(pageWorkspace, "name", alpha, bravo, charlie);
+        assertSort(pageWorkspace, "website", bravo, charlie, alpha);
+        assertSort(pageWorkspace, "industry", charlie, bravo, alpha);
+        assertSort(pageWorkspace, "phone", bravo, charlie, alpha);
+        assertSort(pageWorkspace, "address", charlie, alpha, bravo);
+        assertSort(pageWorkspace, "createdAt", bravo, charlie, alpha);
+        assertSort(pageWorkspace, "updatedAt", alpha, charlie, bravo);
+        assertEquals(List.of(alpha.getId(), bravo.getId(), charlie.getId()),
+            companyPageIds(pageWorkspace, null, "asc"));
+    }
+
+    @Test
+    void getCompaniesPageSearchesEveryBrowserFieldWithinWorkspace() {
+        Workspace pageWorkspace = newWorkspace();
+        Company name = newCompanyIn(pageWorkspace, "NameMarker", "https://one.example.com", "One", "101", "One Road");
+        Company website = newCompanyIn(pageWorkspace, "Two", "https://website-marker.example.com", "Two", "202", "Two Road");
+        Company industry = newCompanyIn(pageWorkspace, "Three", "https://three.example.com", "IndustryMarker", "303", "Three Road");
+        Company phone = newCompanyIn(pageWorkspace, "Four", "https://four.example.com", "Four", "PhoneMarker", "Four Road");
+        Company address = newCompanyIn(pageWorkspace, "Five", "https://five.example.com", "Five", "505", "Address Marker");
+        newCompanyIn(pageWorkspace, "Unmatched", "https://unmatched.example.com", "Other", "606", "Elsewhere");
+        newCompanyIn(newWorkspace(), "NameMarker", "https://foreign.example.com", "Foreign", "707", "Foreign Road");
+
+        assertEquals(List.of(name.getId()), companySearchIds(pageWorkspace, "%NameMarker%"));
+        assertEquals(List.of(website.getId()), companySearchIds(pageWorkspace, "%website-marker%"));
+        assertEquals(List.of(industry.getId()), companySearchIds(pageWorkspace, "%IndustryMarker%"));
+        assertEquals(List.of(phone.getId()), companySearchIds(pageWorkspace, "%PhoneMarker%"));
+        assertEquals(List.of(address.getId()), companySearchIds(pageWorkspace, "%Address Marker%"));
+    }
+
+    @Test
+    void companyFiltersSupportIndustryMissingIndustryAndIdsWithinWorkspace() {
+        Workspace pageWorkspace = newWorkspace();
+        Company finance = newCompanyIn(pageWorkspace, "Finance", "https://finance.example.com", "Finance", "100", "A");
+        Company technology = newCompanyIn(pageWorkspace, "Technology", "https://technology.example.com", "Technology", "200", "B");
+        Company noIndustry = newCompanyIn(pageWorkspace, "No Industry", "https://none.example.com", null, "300", "C");
+        Company emptyIndustry = newCompanyIn(pageWorkspace, "Empty Industry", "https://empty.example.com", "", "400", "D");
+        Company other = newCompanyIn(pageWorkspace, "Other", "https://other.example.com", "Other", "500", "E");
+        Company foreign = newCompanyIn(newWorkspace(), "Foreign Finance", "https://foreign.example.com", "Finance", "600", "F");
+
+        assertEquals(List.of(finance.getId(), technology.getId()),
+            filteredCompanyIds(pageWorkspace, null, List.of("Finance", "Technology"), false, null));
+        assertEquals(List.of(emptyIndustry.getId(), noIndustry.getId()),
+            filteredCompanyIds(pageWorkspace, null, null, true, null));
+        assertEquals(List.of(emptyIndustry.getId(), noIndustry.getId(), technology.getId()),
+            filteredCompanyIds(pageWorkspace, null, List.of("Technology"), true, null));
+        assertEquals(List.of(finance.getId(), noIndustry.getId()),
+            companyMapper.getCompanyIdsFiltered(pageWorkspace.getId(), null, null, false,
+                List.of(noIndustry.getId(), finance.getId(), foreign.getId()), 100));
+        assertEquals(2, companyMapper.countCompanies(pageWorkspace.getId(), null, null, false,
+            List.of(noIndustry.getId(), finance.getId(), foreign.getId())));
+        assertFalse(filteredCompanyIds(pageWorkspace, null, List.of("Finance"), false, null)
+            .contains(foreign.getId()));
+        assertFalse(filteredCompanyIds(pageWorkspace, null, null, false, List.of(other.getId()))
+            .contains(technology.getId()));
+    }
+
+    @Test
+    void pageCountAndIdsApplyTheSameCombinedFilters() {
+        Workspace pageWorkspace = newWorkspace();
+        Company alpha = newCompanyIn(pageWorkspace, "Target Alpha", "https://alpha.example.com", "Technology", "100", "A");
+        Company bravo = newCompanyIn(pageWorkspace, "Target Bravo", "https://bravo.example.com", "Technology", "200", "B");
+        Company finance = newCompanyIn(pageWorkspace, "Target Finance", "https://finance.example.com", "Finance", "300", "C");
+        Company different = newCompanyIn(pageWorkspace, "Different", "https://different.example.com", "Technology", "400", "D");
+        Company foreign = newCompanyIn(newWorkspace(), "Target Foreign", "https://foreign.example.com", "Technology", "500", "E");
+        List<Integer> ids = List.of(alpha.getId(), bravo.getId(), finance.getId(), different.getId(), foreign.getId());
+
+        List<Company> page = companyMapper.getCompaniesPage(
+            pageWorkspace.getId(), "%Target%", "name", "asc", List.of("Technology"), false, ids, 100, 0);
+        long count = companyMapper.countCompanies(
+            pageWorkspace.getId(), "%Target%", List.of("Technology"), false, ids);
+        List<Integer> matchingIds = companyMapper.getCompanyIdsFiltered(
+            pageWorkspace.getId(), "%Target%", List.of("Technology"), false, ids, 100);
+
+        assertEquals(List.of(alpha.getId(), bravo.getId()), page.stream().map(Company::getId).toList());
+        assertEquals(2, count);
+        assertEquals(List.of(alpha.getId(), bravo.getId()), matchingIds);
+    }
+
+    @Test
+    void companyFacetsAreDistinctOrderedAndWorkspaceScoped() {
+        Workspace facetWorkspace = newWorkspace();
+        newCompanyIn(facetWorkspace, "Alpha One", "https://alpha-one.example.com", "Alpha", "100", "A");
+        newCompanyIn(facetWorkspace, "Alpha Two", "https://alpha-two.example.com", "Alpha", "200", "B");
+        newCompanyIn(facetWorkspace, "Zulu", "https://zulu.example.com", "Zulu", "300", "C");
+        newCompanyIn(facetWorkspace, "No Industry", "https://none.example.com", null, "400", "D");
+        newCompanyIn(facetWorkspace, "Empty Industry", "https://empty.example.com", "", "500", "E");
+        Workspace completeWorkspace = newWorkspace();
+        newCompanyIn(completeWorkspace, "Complete", "https://complete.example.com", "Complete", "600", "F");
+        Workspace foreignWorkspace = newWorkspace();
+        newCompanyIn(foreignWorkspace, "Foreign", "https://foreign.example.com", "ForeignOnly", "700", "G");
+        newCompanyIn(foreignWorkspace, "Foreign Missing", "https://foreign-missing.example.com", null, "800", "H");
+
+        assertEquals(List.of("Alpha", "Zulu"), companyMapper.distinctIndustries(facetWorkspace.getId()));
+        assertTrue(companyMapper.hasCompanyWithoutIndustry(facetWorkspace.getId()));
+        assertEquals(List.of("Complete"), companyMapper.distinctIndustries(completeWorkspace.getId()));
+        assertFalse(companyMapper.hasCompanyWithoutIndustry(completeWorkspace.getId()));
     }
 
     /**
@@ -237,5 +361,48 @@ class CompanyMapperTest extends AbstractMapperTest {
         company.setWorkspaceId(ws.getId());
         companyMapper.insert(company);
         return company;
+    }
+
+    private Company newCompanyIn(Workspace ws, String name, String website, String industry,
+            String phone, String address) {
+        Company company = new Company();
+        company.setName(name);
+        company.setWebsite(website);
+        company.setIndustry(industry);
+        company.setPhone(phone);
+        company.setAddress(address);
+        company.setWorkspaceId(ws.getId());
+        companyMapper.insert(company);
+        return company;
+    }
+
+    private List<Integer> companyPageIds(Workspace ws, String sort, String dir) {
+        return companyMapper.getCompaniesPage(
+            ws.getId(), null, sort, dir, null, false, null, 100, 0)
+            .stream().map(Company::getId).toList();
+    }
+
+    private List<Integer> companySearchIds(Workspace ws, String query) {
+        return companyMapper.getCompaniesPage(
+            ws.getId(), query, "name", "asc", null, false, null, 100, 0)
+            .stream().map(Company::getId).toList();
+    }
+
+    private List<Integer> filteredCompanyIds(Workspace ws, String query, List<String> industry,
+            boolean noIndustry, List<Integer> ids) {
+        return companyMapper.getCompaniesPage(
+            ws.getId(), query, "name", "asc", industry, noIndustry, ids, 100, 0)
+            .stream().map(Company::getId).toList();
+    }
+
+    private void assertSort(Workspace ws, String sort, Company first, Company second, Company third) {
+        assertEquals(List.of(first.getId(), second.getId(), third.getId()), companyPageIds(ws, sort, "asc"));
+        assertEquals(List.of(third.getId(), second.getId(), first.getId()), companyPageIds(ws, sort, "desc"));
+    }
+
+    private void setTimestamps(Company company, String createdAt, String updatedAt) {
+        new JdbcTemplate(dataSource).update(
+            "UPDATE company SET created_at = ?, updated_at = ? WHERE id = ?",
+            Timestamp.valueOf(createdAt), Timestamp.valueOf(updatedAt), company.getId());
     }
 }

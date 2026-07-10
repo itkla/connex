@@ -19,6 +19,12 @@ export type ContactsPageParams = PageParams & {
     noCompany?: boolean;
 };
 
+export type CompaniesPageParams = PageParams & {
+    industry?: string[];
+    noIndustry?: boolean;
+    ids?: number[];
+};
+
 export type ActivitiesPageParams = PageParams & {
     personId?: number;
     dealId?: number;
@@ -92,6 +98,11 @@ export type PersonFacets = {
     companies: string[];
     titles: string[];
     hasNoCompany: boolean;
+};
+
+export type CompanyFacets = {
+    industries: string[];
+    hasNoIndustry: boolean;
 };
 
 export type TemperatureBand = 'hot' | 'warm' | 'cool' | 'cold';

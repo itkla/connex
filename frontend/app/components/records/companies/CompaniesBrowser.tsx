@@ -27,18 +27,18 @@ import RecordsFilterPills from '@/app/components/records/RecordsFilterPills';
 import { SearchField, FilterBar, SegmentedToggle, type FilterChipData } from '@/app/components/filters';
 import DeleteRecordDialog from '@/app/components/records/DeleteRecordDialog';
 import { useRecordsBrowser } from '@/app/hooks/useRecordsBrowser';
-import { useRecordsSort } from '@/app/hooks/useRecordsSort';
-import { type ColumnDef, applyRecordFilters, deriveFilterOptions, facetChips, countActiveFilters } from '@/app/components/records/types';
+import { useServerRecords } from '@/app/hooks/useServerRecords';
+import { type ColumnDef, type ColumnFilterFacet, type SelectionId, FILTER_EMPTY, facetChips, countActiveFilters } from '@/app/components/records/types';
 import CompanyCard from '@/app/components/records/companies/CompanyCard';
 import CompanyAvatar from '@/app/components/records/companies/CompanyAvatar';
 import NewCompanyDialog from '@/app/components/records/companies/NewCompanyDialog';
 import { type PendingContact, type PendingContactDraft } from '@/app/components/records/companies/CompanyContactsField';
 import QuickEditCompanySheet, { type CompanyDraft } from '@/app/components/records/companies/QuickEditCompanySheet';
-import { createCompany, createContact, updateContact, getUsers, getTasks, getDeals, updateCompany, getActivities, getNotes, getCompaniesPage, getCompanyTemperatures, isFieldError, evaluateSegments, getSegmentFields, getTags, bulkAddTagToCompanies, bulkRemoveTagFromCompanies, bulkDeleteCompanies } from '@/app/lib/api';
+import { createCompany, createContact, updateContact, getUsers, getTasks, getDeals, updateCompany, getActivities, getNotes, getCompaniesPage, getCompanyFacets, getCompanyIds, getCompanyTemperatures, isFieldError, evaluateSegments, getSegmentFields, getTags, bulkAddTagToCompanies, bulkRemoveTagFromCompanies, bulkDeleteCompanies } from '@/app/lib/api';
 import BulkTagDialog from '@/app/components/records/BulkTagDialog';
 import { notifyBulkResult } from '@/app/lib/bulkToast';
 import { uploadCompanyLogo, uploadContactPicture, pickDominantCurrency, parseMysqlDateTime } from '@/app/lib/utils';
-import { type Company, type CreateCompanyPayload, type UpdateCompanyPayload, type Contact, type Activity, type Note, type Task, type User, type Deal, type CompanyMetrics, type LoadStatus, type RelationshipTemperature, type SavedView, type SavedViewConfig, type SegmentDefinition, type SegmentFields, type Tag } from '@/app/lib/types';
+import { type Company, type CompaniesPageParams, type CompanyFacets, type CreateCompanyPayload, type UpdateCompanyPayload, type Contact, type Activity, type Note, type Task, type User, type Deal, type CompanyMetrics, type LoadStatus, type RelationshipTemperature, type SavedView, type SavedViewConfig, type SegmentDefinition, type SegmentFields, type Tag } from '@/app/lib/types';
 import { getContacts } from '@/app/lib/api';
 import TemperaturePill from '@/app/components/records/TemperaturePill';
 import { isDealClosed } from '@/app/components/records/deals/dealOutcome';
@@ -65,6 +65,8 @@ function diffDraft(original: CompanyDraft, draft: CompanyDraft): boolean {
 
 const searchFields = (c: Company) => [c.name, c.website, c.industry, c.phone, c.address];
 
+const NO_ITEMS: Company[] = [];
+
 function cleanCompanyPayload(payload: CreateCompanyPayload): CreateCompanyPayload {
     return {
         name: payload.name.trim(),
@@ -75,60 +77,114 @@ function cleanCompanyPayload(payload: CreateCompanyPayload): CreateCompanyPayloa
     };
 }
 
-export default function CompaniesBrowser({ companies: initialCompanies, total: initialTotal, savedViews }: { companies: Company[]; total: number; savedViews: SavedView[] }) {
+export default function CompaniesBrowser({ savedViews }: { savedViews: SavedView[] }) {
     const router = useRouter();
     const t = useTranslations('CompaniesBrowser');
     const tf = useTranslations('Filters');
     const tSeg = useTranslations('SmartSegments');
     const reduce = useReducedMotion() ?? false;
-    const [companies, setCompanies] = useState(initialCompanies);
-    const [total, setTotal] = useState(initialTotal);
-    const [page, setPage] = useState(1);
-    const [size, setSize] = useState(25);
-    const [loadingPage, setLoadingPage] = useState(false);
-    const loadCompaniesPage = useCallback((nextPage: number, nextSize: number) => {
-        setLoadingPage(true);
-        getCompaniesPage({ page: nextPage, size: nextSize })
-            .then((response) => {
-                setCompanies(response.items);
-                setTotal(response.total);
-            })
-            .catch(() => {
-                setCompanies([]);
-                setTotal(0);
-            })
-            .finally(() => {
-                setLoadingPage(false);
-            });
-    }, []);
-    const changePage = useCallback((nextPage: number) => {
-        setPage(nextPage);
-        loadCompaniesPage(nextPage, size);
-    }, [loadCompaniesPage, size]);
-    const changePageSize = useCallback((nextSize: number) => {
-        setSize(nextSize);
-        setPage(1);
-        loadCompaniesPage(1, nextSize);
-    }, [loadCompaniesPage]);
+
     const {
         displayMode,
         setDisplayMode,
-        query,
-        setQuery,
         filterState,
         setFilterState,
         selectedIds,
         setSelectedIds,
-        filteredItems: filteredCompanies,
-        selectedItems: selectedCompanies,
         deleteDialogOpen,
         setDeleteDialogOpen,
-    } = useRecordsBrowser<Company>({
+    } = useRecordsBrowser<Company>({ items: NO_ITEMS, storageKey: 'companies:view', searchFields });
+
+    const [definition, setDefinition] = useState<SegmentDefinition>(EMPTY_DEFINITION);
+    const [segmentFields, setSegmentFields] = useState<SegmentFields | null>(null);
+    const [segmentResult, setSegmentResult] = useState<{ key: string; ids: Set<number> | null } | null>(null);
+    const evaluable = useMemo<SegmentDefinition>(
+        () => ({
+            match: definition.match,
+            conditions: definition.conditions.filter((condition) => condition.type === 'predicate' || (condition.value ?? '').trim() !== ''),
+        }),
+        [definition],
+    );
+    const segmentsKey = useMemo(() => JSON.stringify(evaluable), [evaluable]);
+    useEffect(() => {
+        getSegmentFields('company').then(setSegmentFields).catch(() => { setSegmentFields(null); toastError(tSeg('fieldsFailed')); });
+    }, [tSeg]);
+    useEffect(() => {
+        if (evaluable.conditions.length === 0) return;
+        if (segmentResult?.key === segmentsKey) return;
+        let active = true;
+        const timer = setTimeout(() => {
+            evaluateSegments('company', evaluable)
+                .then((result) => { if (active) setSegmentResult({ key: segmentsKey, ids: new Set(result.ids) }); })
+                .catch(() => { if (active) { setSegmentResult({ key: segmentsKey, ids: null }); toastError(tSeg('evaluateFailed')); } });
+        }, 300);
+        return () => { active = false; clearTimeout(timer); };
+    }, [evaluable, segmentsKey, segmentResult, tSeg]);
+    const activeSegmentIds = evaluable.conditions.length > 0 && segmentResult?.key === segmentsKey ? segmentResult.ids : null;
+    const segmentsLoading = evaluable.conditions.length > 0 && segmentResult?.key !== segmentsKey;
+
+    const filterParams = useMemo<{ industry?: string[]; noIndustry?: boolean; ids?: number[] }>(() => {
+        const industryFilter = filterState.industry ?? [];
+        const industries = industryFilter.filter((k) => k !== FILTER_EMPTY);
+        const params: { industry?: string[]; noIndustry?: boolean; ids?: number[] } = {};
+        if (industries.length) params.industry = industries;
+        if (industryFilter.includes(FILTER_EMPTY)) params.noIndustry = true;
+        if (evaluable.conditions.length > 0) {
+            params.ids = activeSegmentIds ? (activeSegmentIds.size ? Array.from(activeSegmentIds) : [0]) : [0];
+        }
+        return params;
+    }, [filterState, evaluable, activeSegmentIds]);
+
+    const {
         items: companies,
-        storageKey: 'companies:view',
-        searchFields,
-    });
-    const { sortKey, sortDirection, onSortChange, applySort, sortState } = useRecordsSort();
+        total,
+        loading,
+        page,
+        setPage,
+        size,
+        setSize,
+        query,
+        setQuery,
+        applyQuery,
+        sortKey,
+        sortDirection,
+        onSortChange,
+        applySort,
+        reload,
+    } = useServerRecords<Company, CompaniesPageParams>(getCompaniesPage, filterParams);
+
+    const selectedCompanies = useMemo(() => companies.filter((c) => selectedIds.has(c.id)), [companies, selectedIds]);
+    const selectedCompanyIds = useMemo(() => Array.from(selectedIds).map(Number), [selectedIds]);
+
+    const filterSignature = useMemo(() => JSON.stringify([filterParams, query]), [filterParams, query]);
+    const [matchedSignature, setMatchedSignature] = useState<string | null>(null);
+    const allMatchingActive = matchedSignature === filterSignature;
+    const handleSelectedIdsChange = useCallback((ids: Set<SelectionId>) => {
+        if (ids.size === 0) setMatchedSignature(null);
+        setSelectedIds(ids);
+    }, [setSelectedIds]);
+    useEffect(() => { if (!allMatchingActive) setSelectedIds(new Set()); }, [companies, allMatchingActive, setSelectedIds]);
+
+    const [companyFacets, setCompanyFacets] = useState<CompanyFacets | null>(null);
+    const loadFacets = useCallback(() => {
+        getCompanyFacets().then(setCompanyFacets).catch(() => setCompanyFacets(null));
+    }, []);
+    useEffect(() => { loadFacets(); }, [loadFacets]);
+    const refresh = useCallback(() => { reload(); loadFacets(); }, [reload, loadFacets]);
+
+    const [selectingAll, setSelectingAll] = useState(false);
+    const selectAllMatching = useCallback(async () => {
+        setSelectingAll(true);
+        try {
+            const ids = await getCompanyIds({ ...filterParams, q: query || undefined });
+            setSelectedIds(new Set(ids));
+            setMatchedSignature(filterSignature);
+        } catch (err) {
+            toastError(err instanceof Error ? err.message : t('toastSelectAllFailed'));
+        } finally {
+            setSelectingAll(false);
+        }
+    }, [filterParams, query, filterSignature, setSelectedIds, t]);
 
     const [isDeleting, setIsDeleting] = useState(false);
     const [editSheetOpen, setEditSheetOpen] = useState(false);
@@ -174,31 +230,6 @@ export default function CompaniesBrowser({ companies: initialCompanies, total: i
     const [metricsStatus, setMetricsStatus] = useState<LoadStatus>('idle');
 
     const [tempByCompanyId, setTempByCompanyId] = useState<Map<number, RelationshipTemperature>>(new Map());
-    const [definition, setDefinition] = useState<SegmentDefinition>(EMPTY_DEFINITION);
-    const [segmentFields, setSegmentFields] = useState<SegmentFields | null>(null);
-    const [segmentResult, setSegmentResult] = useState<{ key: string; ids: Set<number> | null } | null>(null);
-    const evaluable = useMemo<SegmentDefinition>(
-        () => ({
-            match: definition.match,
-            conditions: definition.conditions.filter((condition) => condition.type === 'predicate' || (condition.value ?? '').trim() !== ''),
-        }),
-        [definition],
-    );
-    const segmentsKey = useMemo(() => JSON.stringify(evaluable), [evaluable]);
-    useEffect(() => {
-        getSegmentFields('company').then(setSegmentFields).catch(() => { setSegmentFields(null); toastError(tSeg('fieldsFailed')); });
-    }, [tSeg]);
-    useEffect(() => {
-        if (evaluable.conditions.length === 0) return;
-        if (segmentResult?.key === segmentsKey) return;
-        let active = true;
-        const timer = setTimeout(() => {
-            evaluateSegments('company', evaluable)
-                .then((result) => { if (active) setSegmentResult({ key: segmentsKey, ids: new Set(result.ids) }); })
-                .catch(() => { if (active) { setSegmentResult({ key: segmentsKey, ids: null }); toastError(tSeg('evaluateFailed')); } });
-        }, 300);
-        return () => { active = false; clearTimeout(timer); };
-    }, [evaluable, segmentsKey, segmentResult, tSeg]);
     useEffect(() => {
         getCompanyTemperatures(companies.map((company) => company.id))
             .then((temps) => setTempByCompanyId(new Map(temps.map((temp) => [temp.id, temp]))))
@@ -258,7 +289,7 @@ export default function CompaniesBrowser({ companies: initialCompanies, total: i
             setCreationSucceeded(true);
             setTimeout(() => {
                 closeNewDialog(false);
-                router.refresh();
+                refresh();
             }, 850);
         } catch (err) {
             if (isFieldError(err)) {
@@ -319,7 +350,7 @@ export default function CompaniesBrowser({ companies: initialCompanies, total: i
                 changed.length === 1 ? t('toastCompanyUpdated') : t('toastCompaniesUpdated', { count: changed.length }),
             );
             setEditSheetOpen(false);
-            router.refresh();
+            refresh();
         } catch (err) {
             toastError(err instanceof Error ? err.message : t('toastSaveFailed'));
         } finally {
@@ -338,8 +369,6 @@ export default function CompaniesBrowser({ companies: initialCompanies, total: i
         setDeleteDialogOpen(true);
     }, [setSelectedIds, setDeleteDialogOpen]);
 
-    const selectedCompanyIds = useMemo(() => selectedCompanies.map((c) => c.id), [selectedCompanies]);
-
     const confirmDelete = async () => {
         if (selectedCompanyIds.length === 0) return;
         setIsDeleting(true);
@@ -353,7 +382,7 @@ export default function CompaniesBrowser({ companies: initialCompanies, total: i
             setDeleteDialogOpen(false);
             if (anySucceeded) {
                 setSelectedIds(new Set());
-                router.refresh();
+                refresh();
             }
         } catch (err) {
             toastError(err instanceof Error ? err.message : t('toastDeleteFailed'));
@@ -370,7 +399,7 @@ export default function CompaniesBrowser({ companies: initialCompanies, total: i
             ? bulkAddTagToCompanies(selectedCompanyIds, tagId)
             : bulkRemoveTagFromCompanies(selectedCompanyIds, tagId);
     }, [bulkTag.mode, selectedCompanyIds]);
-    const onBulkTagSuccess = useCallback(() => { setSelectedIds(new Set()); router.refresh(); }, [setSelectedIds, router]);
+    const onBulkTagSuccess = useCallback(() => { setSelectedIds(new Set()); refresh(); }, [setSelectedIds, refresh]);
 
     const viewSelected = () => {
         if (selectedCompanies.length === 1) {
@@ -399,7 +428,6 @@ export default function CompaniesBrowser({ companies: initialCompanies, total: i
             key: 'industry',
             label: t('columnIndustry'),
             getSortValue: (c) => c.industry ?? null,
-            filter: { getValue: (c) => c.industry ?? null, emptyLabel: t('filterNoIndustry') },
         },
         {
             key: 'phone',
@@ -427,19 +455,14 @@ export default function CompaniesBrowser({ companies: initialCompanies, total: i
         },
     ], [t, tempByCompanyId]);
 
-    const activeSegmentIds = evaluable.conditions.length > 0 && segmentResult?.key === segmentsKey ? segmentResult.ids : null;
-    const segmentsLoading = evaluable.conditions.length > 0 && segmentResult?.key !== segmentsKey;
-    const visibleCompanies = useMemo(
-        () => {
-            const filtered = applyRecordFilters(filteredCompanies, columns, filterState);
-            return activeSegmentIds ? filtered.filter((company) => activeSegmentIds.has(company.id)) : filtered;
-        },
-        [filteredCompanies, columns, filterState, activeSegmentIds],
-    );
+    const { columns: customColumns, addColumnSlot } = useCustomFieldColumns('company', companies);
 
-    const { columns: customColumns, addColumnSlot } = useCustomFieldColumns('company', visibleCompanies);
-
-    const facets = useMemo(() => deriveFilterOptions(columns, filteredCompanies), [columns, filteredCompanies]);
+    const facets = useMemo<ColumnFilterFacet[]>(() => {
+        if (!companyFacets) return [];
+        const options = companyFacets.industries.map((name) => ({ key: name, label: name }));
+        if (companyFacets.hasNoIndustry) options.push({ key: FILTER_EMPTY, label: t('filterNoIndustry') });
+        return options.length ? [{ key: 'industry', label: t('columnIndustry'), options }] : [];
+    }, [companyFacets, t]);
     const hasActiveFilters = query.trim() !== '' || countActiveFilters(filterState) > 0 || evaluable.conditions.length > 0;
     const clearAll = useCallback(() => { setQuery(''); setFilterState({}); setDefinition(EMPTY_DEFINITION); }, [setQuery, setFilterState]);
     const resolveTagName = useCallback(
@@ -568,17 +591,17 @@ export default function CompaniesBrowser({ companies: initialCompanies, total: i
     );
 
     const currentConfig: SavedViewConfig = useMemo(
-        () => ({ filters: filterState, query, sortKey, sortDirection, segments: definition }),
+        () => ({ filters: filterState, query, sortKey: sortKey === 'warmth' ? null : sortKey, sortDirection, segments: definition }),
         [filterState, query, sortKey, sortDirection, definition],
     );
     const applyView = useCallback(
         (config: SavedViewConfig) => {
             setFilterState(config.filters ?? {});
-            setQuery(config.query ?? '');
-            applySort(config.sortKey ?? null, config.sortDirection ?? 'asc');
+            applyQuery(config.query ?? '');
+            applySort(config.sortKey === 'warmth' ? null : config.sortKey ?? null, config.sortDirection ?? 'asc');
             setDefinition(isSegmentDefinition(config.segments) ? config.segments : EMPTY_DEFINITION);
         },
-        [setFilterState, setQuery, applySort],
+        [setFilterState, applyQuery, applySort],
     );
 
     return (
@@ -593,8 +616,8 @@ export default function CompaniesBrowser({ companies: initialCompanies, total: i
                                 onNew={() => setNewDialogOpen(true)}
                                 newLabel={t('new')}
                                 newAriaLabel={t('addCompanyAriaLabel')}
-                                onImported={() => router.refresh()}
-                                exportIds={visibleCompanies.map((c) => c.id)}
+                                onImported={refresh}
+                                exportIds={companies.map((c) => c.id)}
                             />
                         </div>
                     </div>
@@ -657,11 +680,42 @@ export default function CompaniesBrowser({ companies: initialCompanies, total: i
                     </FilterBar>
                 </Rise>
 
+                {(() => {
+                    const pageFullySelected = companies.length > 0 && selectedCompanyIds.length >= companies.length;
+                    const allMatchingSelected = total > companies.length && selectedCompanyIds.length >= total;
+                    const canSelectAllMatching = hasActiveFilters && pageFullySelected && total > companies.length && selectedCompanyIds.length < total;
+                    if (!canSelectAllMatching && !allMatchingSelected) return null;
+                    return (
+                        <div className="flex flex-wrap items-center justify-center gap-x-2 gap-y-1 rounded-lg bg-muted px-4 py-2 text-sm text-muted-foreground ring-1 ring-border">
+                            {allMatchingSelected ? (
+                                <>
+                                    <span>{t('allMatchingSelected', { total })}</span>
+                                    <button type="button" onClick={() => { setSelectedIds(new Set()); setMatchedSignature(null); }} className="font-medium text-brand transition hover:underline">
+                                        {t('clearSelection')}
+                                    </button>
+                                </>
+                            ) : (
+                                <>
+                                    <span>{t('pageSelected', { count: selectedCompanyIds.length })}</span>
+                                    <button
+                                        type="button"
+                                        onClick={selectAllMatching}
+                                        disabled={selectingAll || loading}
+                                        className="font-medium text-brand transition hover:underline disabled:opacity-50"
+                                    >
+                                        {selectingAll ? t('selecting') : t('selectAllMatching', { total })}
+                                    </button>
+                                </>
+                            )}
+                        </div>
+                    );
+                })()}
+
                 <Rise delay={0.18}>
                     <RecordsRenderView<Company>
-                        data={visibleCompanies}
-                        loading={loadingPage || segmentsLoading}
-                        columns={[...columns, ...customColumns]}
+                        data={companies}
+                        loading={loading || segmentsLoading}
+                        columns={[...columns, ...customColumns.map((c) => ({ ...c, sortable: false }))]}
                         addColumnSlot={addColumnSlot}
                         renderCard={(item, { onQuickEdit, onDelete }) => (
                             <CompanyCard
@@ -677,20 +731,14 @@ export default function CompaniesBrowser({ companies: initialCompanies, total: i
                         detailPath={(item) => `/records/companies/${item.id}`}
                         displayMode={displayMode}
                         selectedIds={selectedIds}
-                        onSelectedIdsChange={setSelectedIds}
+                        onSelectedIdsChange={handleSelectedIdsChange}
                         onQuickEdit={quickEditOne}
                         onDelete={deleteOne}
                         gridClassName="grid grid-cols-1 gap-3"
                         entityLabel={t('entityLabel')}
                         selectionActions={selectionActions}
-                        sortState={sortState}
-                        pagination={{
-                            page,
-                            pageSize: size,
-                            total,
-                            onPageChange: changePage,
-                            onPageSizeChange: changePageSize,
-                        }}
+                        sortState={{ key: sortKey, direction: sortDirection, onSortChange }}
+                        pagination={{ page, pageSize: size, total, onPageChange: setPage, onPageSizeChange: setSize }}
                     />
                 </Rise>
 

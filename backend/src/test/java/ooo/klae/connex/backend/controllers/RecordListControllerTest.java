@@ -3,6 +3,7 @@ package ooo.klae.connex.backend.controllers;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.Mockito.never;
@@ -109,13 +110,68 @@ class RecordListControllerTest {
     @Test
     void companiesPageClampsSize() {
         CompanyController controller = new CompanyController(companyService, bulkOperationService);
-        when(companyService.getCompaniesPage(100, 0)).thenReturn(List.of());
-        when(companyService.countCompanies()).thenReturn(0L);
+        when(companyService.getCompaniesPage(null, null, null, null, false, null, 100, 0))
+            .thenReturn(List.of());
+        when(companyService.countCompanies(null, null, false, null)).thenReturn(0L);
 
-        var response = controller.getCompaniesPage(0, 500);
+        var response = controller.getCompaniesPage(0, 500, null, null, null, null, false, null);
 
         assertEquals(0, response.total());
-        verify(companyService).getCompaniesPage(100, 0);
+        verify(companyService).getCompaniesPage(null, null, null, null, false, null, 100, 0);
+        verify(companyService).countCompanies(null, null, false, null);
+    }
+
+    @Test
+    void companiesPageNormalizesQueryAndForwardsFilters() {
+        CompanyController controller = new CompanyController(companyService, bulkOperationService);
+        List<String> industries = List.of("Technology", "Finance");
+        List<Integer> ids = List.of(3, 5);
+        String query = "%50\\%\\_Company%";
+        when(companyService.getCompaniesPage(
+            query, "industry", "desc", industries, true, ids, 25, 25)).thenReturn(List.of());
+        when(companyService.countCompanies(query, industries, true, ids)).thenReturn(7L);
+
+        var response = controller.getCompaniesPage(
+            2, 25, "50%_Company", "industry", "desc", industries, true, ids);
+
+        assertEquals(7, response.total());
+        verify(companyService).getCompaniesPage(
+            query, "industry", "desc", industries, true, ids, 25, 25);
+        verify(companyService).countCompanies(query, industries, true, ids);
+    }
+
+    @Test
+    void companyIdsWithoutFilterRequireFilter() {
+        CompanyController controller = new CompanyController(companyService, bulkOperationService);
+
+        assertThrows(BadRequestException.class,
+            () -> controller.getCompanyIds(" ", List.of(), false, List.of()));
+
+        verify(companyService, never()).getMatchingCompanyIds(null, List.of(), false, List.of());
+    }
+
+    @Test
+    void companyIdsAcceptIdsAsTheOnlyFilter() {
+        CompanyController controller = new CompanyController(companyService, bulkOperationService);
+        List<Integer> ids = List.of(3, 5);
+        when(companyService.getMatchingCompanyIds(null, null, false, ids)).thenReturn(ids);
+
+        assertSame(ids, controller.getCompanyIds(null, null, false, ids));
+
+        verify(companyService).getMatchingCompanyIds(null, null, false, ids);
+    }
+
+    @Test
+    void companyFacetsAreAssembledFromServiceValues() {
+        CompanyController controller = new CompanyController(companyService, bulkOperationService);
+        List<String> industries = List.of("Finance", "Technology");
+        when(companyService.distinctIndustries()).thenReturn(industries);
+        when(companyService.hasCompanyWithoutIndustry()).thenReturn(true);
+
+        var facets = controller.getCompanyFacets();
+
+        assertSame(industries, facets.industries());
+        assertTrue(facets.hasNoIndustry());
     }
 
     @Test
