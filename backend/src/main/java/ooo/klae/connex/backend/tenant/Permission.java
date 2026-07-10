@@ -41,6 +41,12 @@ public enum Permission {
     WORKSPACE_SETTINGS,
     RULE_MANAGE,
     /**
+     * Permission to invoke AI-powered features (e.g. account/meeting briefs).
+     * Grantable; the instance flag and per-org BYOP provider config additionally
+     * gate actual invocation via {@code AiFeatureGate}.
+     */
+    AI_USE,
+    /**
      * Inert. SSO is org-scoped configuration, authorized against org membership
      * (see {@code OrgMemberService.requireOrgAdmin}), not this workspace-level
      * permission. Retained only so stored custom-role rows referencing it still

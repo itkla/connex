@@ -193,6 +193,23 @@ export type DealRisk = {
     assessedAt: string;
 };
 
+/** Why an AI deal brief is unavailable: AI is not configured for the org, or the provider call failed. */
+export type DealBriefUnavailableReason = 'not_configured' | 'provider_error';
+
+/**
+ * AI-generated "before you call" brief for a deal, or a graceful unavailability result. Presentation-only:
+ * the deterministic risk/warmth signals remain the source of truth. {@code warnings} counts demasking
+ * integrity warnings; nonzero means parts of the brief may reference unknown placeholders.
+ */
+export type DealBrief = {
+    dealId: number;
+    available: boolean;
+    brief?: string | null;
+    generatedAt?: string | null;
+    warnings: number;
+    reason?: DealBriefUnavailableReason | null;
+};
+
 /** One stint in a contact's employment history. The row with {@code current} is the present company. */
 export type PersonEmployment = {
     id: number;

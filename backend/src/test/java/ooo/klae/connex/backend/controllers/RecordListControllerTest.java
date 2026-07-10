@@ -13,6 +13,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import ooo.klae.connex.backend.ai.brief.DealBriefService;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.services.ActivityService;
 import ooo.klae.connex.backend.services.BulkOperationService;
@@ -36,6 +37,7 @@ class RecordListControllerTest {
     @Mock private CompanyService companyService;
     @Mock private DealService dealService;
     @Mock private DealRiskService dealRiskService;
+    @Mock private DealBriefService dealBriefService;
     @Mock private WorkspaceService workspaceService;
     @Mock private NoteService noteService;
     @Mock private TaskService taskService;
@@ -110,7 +112,7 @@ class RecordListControllerTest {
     @Test
     void dealsWithoutFilterRequirePageEndpoint() {
         DealController controller = new DealController(
-            dealService, bulkOperationService, dealRiskService, workspaceService);
+            dealService, bulkOperationService, dealRiskService, dealBriefService, workspaceService);
 
         assertThrows(BadRequestException.class, () -> controller.getDeals(null, null, null, null, null));
 
@@ -120,7 +122,7 @@ class RecordListControllerTest {
     @Test
     void dealsPageClampsSize() {
         DealController controller = new DealController(
-            dealService, bulkOperationService, dealRiskService, workspaceService);
+            dealService, bulkOperationService, dealRiskService, dealBriefService, workspaceService);
         when(dealService.getDealsPage(
             null, null, null, null, null, null, null, null, 100, 0)).thenReturn(List.of());
         when(dealService.countDeals(null, null, null, null, null, null)).thenReturn(37L);
@@ -137,7 +139,7 @@ class RecordListControllerTest {
     @Test
     void dealsPageRejectsInvalidStatusAndDirection() {
         DealController controller = new DealController(
-            dealService, bulkOperationService, dealRiskService, workspaceService);
+            dealService, bulkOperationService, dealRiskService, dealBriefService, workspaceService);
 
         assertThrows(BadRequestException.class, () -> controller.getDealsPage(
             1, 25, null, null, "sideways", null, null, null, null, null));

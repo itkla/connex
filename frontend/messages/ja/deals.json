@@ -12,6 +12,13 @@
     "factorStakeholderCooling": "{contact}との関係が冷めつつあります",
     "factorSinceContact": " — 最終接触から{days}日"
   },
+  "DealBrief": {
+    "panelTitle": "AIブリーフ",
+    "error": "ブリーフを生成できませんでした。",
+    "retry": "再試行",
+    "attribution": "AI生成 · {time}",
+    "integrityWarning": "一部の参照を確認できませんでした"
+  },
   "DealsPage": {
     "allDeals": "案件一覧",
     "actual": "実績",
