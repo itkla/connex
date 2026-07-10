@@ -157,6 +157,9 @@ connex:
         # attestation). Enable only where BYOP AI is offered and the hard security gates
         # (encryption at rest #92, etc.) are satisfied.
         enabled: ${CONNEX_AI_ENABLED:false}
+        connect-timeout-ms: ${CONNEX_AI_CONNECT_TIMEOUT_MS:3000}
+        request-timeout-ms: ${CONNEX_AI_REQUEST_TIMEOUT_MS:60000}
+        max-response-bytes: ${CONNEX_AI_MAX_RESPONSE_BYTES:2097152}
     sharing:
         # Gates the cross-workspace share/unshare API. The owned-or-shared read predicate is always
         # applied (harmless when no shares exist).

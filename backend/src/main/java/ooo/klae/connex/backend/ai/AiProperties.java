@@ -22,4 +22,21 @@ public class AiProperties {
      * features fail closed.
      */
     private boolean enabled = false;
+
+    /**
+     * Bedrock outbound TCP connect timeout in milliseconds. Kept short by default so AI egress
+     * fails closed instead of pinning request threads on unreachable provider networks.
+     */
+    private long connectTimeoutMs = 3000;
+
+    /**
+     * Bedrock outbound request timeout in milliseconds, covering response wait and body read.
+     */
+    private long requestTimeoutMs = 60000;
+
+    /**
+     * Maximum Bedrock response body size in bytes. Oversized responses are rejected rather than
+     * truncated so downstream JSON parsing never sees partial provider output.
+     */
+    private int maxResponseBytes = 2097152;
 }
