@@ -13,8 +13,19 @@ import java.util.List;
 
 public interface CompanyMapper {
     List<Company> getAllCompanies(int workspaceId);
-    List<Company> getCompaniesPage(@Param("workspaceId") int workspaceId, @Param("limit") int limit, @Param("offset") int offset);
-    long countCompanies(int workspaceId);
+    List<Company> getCompaniesPage(@Param("workspaceId") int workspaceId, @Param("query") String query,
+            @Param("sort") String sort, @Param("dir") String dir,
+            @Param("industry") List<String> industry, @Param("noIndustry") boolean noIndustry,
+            @Param("ids") List<Integer> ids, @Param("limit") int limit, @Param("offset") int offset);
+    long countCompanies(@Param("workspaceId") int workspaceId, @Param("query") String query,
+            @Param("industry") List<String> industry, @Param("noIndustry") boolean noIndustry,
+            @Param("ids") List<Integer> ids);
+    /** Ids only for the same filter predicates as {@code getCompaniesPage}; backs "select all matching". */
+    List<Integer> getCompanyIdsFiltered(@Param("workspaceId") int workspaceId, @Param("query") String query,
+            @Param("industry") List<String> industry, @Param("noIndustry") boolean noIndustry,
+            @Param("ids") List<Integer> ids, @Param("limit") int limit);
+    List<String> distinctIndustries(int workspaceId);
+    boolean hasCompanyWithoutIndustry(int workspaceId);
     List<Company> getCompaniesByTagId(@Param("workspaceId") int workspaceId, @Param("tagId") int tagId);
     Company getCompanyById(@Param("workspaceId") int workspaceId, @Param("id") int id);
     List<Company> getCompaniesWithWebsite(int workspaceId);

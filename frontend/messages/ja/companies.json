@@ -63,7 +63,13 @@
     "toastTagRemovedPartial": "{total}件中{succeeded}件の会社からタグを削除しました",
     "toastTagFailed": "{failed}件の会社を更新できませんでした",
     "toastContactsPartial": "{total}人中{succeeded}人を追加しました",
-    "toastContactsAllFailed": "企業は作成しましたが、{count}人を追加できませんでした"
+    "toastContactsAllFailed": "企業は作成しましたが、{count}人を追加できませんでした",
+    "toastSelectAllFailed": "一致するすべての会社を選択できませんでした",
+    "allMatchingSelected": "{total}件の会社をすべて選択しました。",
+    "clearSelection": "選択を解除",
+    "pageSelected": "このページの{count}件をすべて選択しました。",
+    "selecting": "選択中…",
+    "selectAllMatching": "{total}件すべてを選択"
   },
   "CompaniesActionsMenu": {
     "edit": "編集",

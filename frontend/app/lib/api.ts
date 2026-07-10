@@ -762,11 +762,24 @@ export function deleteNote(id: number, init: RequestInit = {}) {
 */
 
 export function getCompanies(init: RequestInit = {}) {
-    return getBoundedPageItems<Types.Company>(getCompaniesPage, init);
+    return getBoundedPageItems<Types.Company>(
+        (params, requestInit) => getCompaniesPage(params, requestInit),
+        init,
+    );
 }
 
-export function getCompaniesPage(params: Types.PageParams = {}, init: RequestInit = {}) {
+export function getCompaniesPage(params: Types.CompaniesPageParams = {}, init: RequestInit = {}) {
     return getJson<Types.Page<Types.Company>>(`/api/companies/page${buildQuery(params)}`, init);
+}
+
+export function getCompanyFacets(init: RequestInit = {}) {
+    return getJson<Types.CompanyFacets>(`/api/companies/facets`, init);
+}
+
+/** Ids of every company matching an active filter, capped by the backend bulk-operation limit. */
+export function getCompanyIds(params: Types.CompaniesPageParams = {}, init: RequestInit = {}) {
+    const query = buildQuery({ q: params.q, industry: params.industry, noIndustry: params.noIndustry, ids: params.ids });
+    return getJson<number[]>(`/api/companies/ids${query}`, init);
 }
 
 export function getCompaniesFromCookie(cookie: string | null) {
