@@ -4,6 +4,7 @@ import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
 import java.util.HashSet;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 
 import org.springframework.boot.EnvironmentPostProcessor;
@@ -11,16 +12,37 @@ import org.springframework.boot.SpringApplication;
 import org.springframework.core.Ordered;
 import org.springframework.core.env.ConfigurableEnvironment;
 import org.springframework.core.env.EnumerablePropertySource;
+import org.springframework.core.env.MapPropertySource;
+import org.springframework.core.env.MutablePropertySources;
 import org.springframework.core.env.PropertySource;
 import org.springframework.core.env.Profiles;
+import org.springframework.core.env.StandardEnvironment;
 import org.springframework.util.StringUtils;
 
 /**
- * Fails deployed startup before datasource creation when the database transport is not verified TLS.
+ * Fails deployed startup before datasource creation when the database transport is not verified TLS, while preserving
+ * localhost-only settings for the systemd-controlled local staging checkout.
  */
 public class DatabaseTransportSecurityEnvironmentPostProcessor implements EnvironmentPostProcessor, Ordered {
 
     private static final Set<String> VERIFIED_SSL_MODES = Set.of("verify_ca", "verify_identity");
+    private static final Set<String> LOCAL_PLAINTEXT_SSL_MODES = Set.of("disabled");
+    private static final String MYSQL_SIMPLE_URL_PREFIX = "jdbc:mysql://";
+    private static final String LOCAL_SYSTEMD_STAGING_WORKING_DIRECTORY = "/opt/connex-staging/backend";
+    private static final String SYSTEMD_INVOCATION_ID_PROPERTY = "INVOCATION_ID";
+    private static final String LOCAL_SYSTEMD_STAGING_PROPERTY_SOURCE = "connexLocalSystemdStaging";
+    private static final Map<String, Object> LOCAL_SYSTEMD_STAGING_DEFAULTS = Map.of(
+        "CONNEX_SESSION_COOKIE_SECURE",
+        "false",
+        "CONNEX_WORKSPACE_COOKIE_SECURE",
+        "false",
+        "CONNEX_CORS_ALLOWED_ORIGINS",
+        "http://localhost:3001",
+        "CONNEX_WEBAUTHN_ALLOWED_ORIGINS",
+        "http://localhost:3001",
+        "CONNEX_WEBAUTHN_RP_ID",
+        "localhost"
+    );
     private static final Set<String> HIKARI_JDBC_URL_PROPERTIES = Set.of("springdatasourcehikarijdbcurl");
     private static final Set<String> DATASOURCE_IMPLEMENTATION_OVERRIDE_PROPERTIES = Set.of(
         "springdatasourcetype",
@@ -56,6 +78,12 @@ public class DatabaseTransportSecurityEnvironmentPostProcessor implements Enviro
 
     @Override
     public void postProcessEnvironment(ConfigurableEnvironment environment, SpringApplication application) {
+        applyLocalSystemdStagingDefaults(environment);
+
+        if (isLocalSystemdStaging(environment) && environment.acceptsProfiles(Profiles.of("dev", "test"))) {
+            throw new IllegalStateException("Local systemd staging must not run with dev or test profiles active");
+        }
+
         if (environment.acceptsProfiles(Profiles.of("dev", "test"))) {
             return;
         }
@@ -64,7 +92,9 @@ public class DatabaseTransportSecurityEnvironmentPostProcessor implements Enviro
         requiredProperty(environment, "spring.datasource.username", "CONNEX_DB_USERNAME");
         requiredProperty(environment, "spring.datasource.password", "CONNEX_DB_PASSWORD");
 
-        validateVerifiedMysqlUrl(url, "CONNEX_DB_URL");
+        if (!allowsLocalSystemdStagingPlaintextMysqlUrl(environment, url)) {
+            validateVerifiedMysqlUrl(url, "CONNEX_DB_URL");
+        }
         validateOverridingDatasourceConfiguration(environment);
     }
 
@@ -100,7 +130,7 @@ public class DatabaseTransportSecurityEnvironmentPostProcessor implements Enviro
                         );
                     }
                     if (HIKARI_JDBC_URL_PROPERTIES.contains(canonicalName)) {
-                        validateOptionalHikariUrl(propertyName, propertySource.getProperty(propertyName));
+                        validateOptionalHikariUrl(environment, propertyName, propertySource.getProperty(propertyName));
                         checkedHikariUrlProperties.add(canonicalName);
                     }
                     if (isHikariTlsModeProperty(canonicalName)) {
@@ -131,7 +161,7 @@ public class DatabaseTransportSecurityEnvironmentPostProcessor implements Enviro
         for (String propertyName : DIRECT_HIKARI_JDBC_URL_PROPERTIES) {
             String canonicalName = canonicalize(propertyName);
             if (!checkedHikariUrlProperties.contains(canonicalName)) {
-                validateOptionalHikariUrl(propertyName, optionalProperty(environment, propertyName));
+                validateOptionalHikariUrl(environment, propertyName, optionalProperty(environment, propertyName));
             }
         }
 
@@ -151,7 +181,7 @@ public class DatabaseTransportSecurityEnvironmentPostProcessor implements Enviro
         }
     }
 
-    private static void validateOptionalHikariUrl(String propertyName, Object value) {
+    private static void validateOptionalHikariUrl(ConfigurableEnvironment environment, String propertyName, Object value) {
         if (value == null) {
             return;
         }
@@ -159,7 +189,10 @@ public class DatabaseTransportSecurityEnvironmentPostProcessor implements Enviro
         if (!StringUtils.hasText(url)) {
             throw new IllegalStateException(propertyName + " must not be blank outside dev/test");
         }
-        validateVerifiedMysqlUrl(url.strip(), propertyName);
+        String strippedUrl = url.strip();
+        if (!allowsLocalSystemdStagingPlaintextMysqlUrl(environment, strippedUrl)) {
+            validateVerifiedMysqlUrl(strippedUrl, propertyName);
+        }
     }
 
     private static void validateVerifiedMysqlUrl(String url, String propertyName) {
@@ -174,6 +207,43 @@ public class DatabaseTransportSecurityEnvironmentPostProcessor implements Enviro
     }
 
     private static boolean hasVerifiedSslMode(String url) {
+        return hasAllowedSslMode(url, VERIFIED_SSL_MODES);
+    }
+
+    private static boolean allowsLocalSystemdStagingPlaintextMysqlUrl(ConfigurableEnvironment environment, String url) {
+        return isLocalSystemdStaging(environment)
+            && hasLoopbackMysqlHost(url)
+            && hasAllowedSslMode(url, LOCAL_PLAINTEXT_SSL_MODES);
+    }
+
+    private static void applyLocalSystemdStagingDefaults(ConfigurableEnvironment environment) {
+        if (!isLocalSystemdStaging(environment)) {
+            return;
+        }
+
+        MutablePropertySources propertySources = environment.getPropertySources();
+        if (propertySources.contains(LOCAL_SYSTEMD_STAGING_PROPERTY_SOURCE)) {
+            return;
+        }
+
+        MapPropertySource propertySource =
+            new MapPropertySource(LOCAL_SYSTEMD_STAGING_PROPERTY_SOURCE, LOCAL_SYSTEMD_STAGING_DEFAULTS);
+        if (propertySources.contains(StandardEnvironment.SYSTEM_ENVIRONMENT_PROPERTY_SOURCE_NAME)) {
+            propertySources.addAfter(StandardEnvironment.SYSTEM_ENVIRONMENT_PROPERTY_SOURCE_NAME, propertySource);
+        } else if (propertySources.contains(StandardEnvironment.SYSTEM_PROPERTIES_PROPERTY_SOURCE_NAME)) {
+            propertySources.addAfter(StandardEnvironment.SYSTEM_PROPERTIES_PROPERTY_SOURCE_NAME, propertySource);
+        } else {
+            propertySources.addFirst(propertySource);
+        }
+    }
+
+    private static boolean isLocalSystemdStaging(ConfigurableEnvironment environment) {
+        String userDir = optionalProperty(environment, "user.dir");
+        String invocationId = optionalProperty(environment, SYSTEMD_INVOCATION_ID_PROPERTY);
+        return LOCAL_SYSTEMD_STAGING_WORKING_DIRECTORY.equals(userDir) && StringUtils.hasText(invocationId);
+    }
+
+    private static boolean hasAllowedSslMode(String url, Set<String> allowedSslModes) {
         int queryStart = url.indexOf('?');
         if (queryStart < 0 || queryStart == url.length() - 1) {
             return false;
@@ -202,7 +272,92 @@ public class DatabaseTransportSecurityEnvironmentPostProcessor implements Enviro
             }
             sslMode = decode(pair.substring(separator + 1)).toLowerCase(Locale.ROOT);
         }
-        return sslMode != null && VERIFIED_SSL_MODES.contains(sslMode);
+        return sslMode != null && allowedSslModes.contains(sslMode);
+    }
+
+    private static boolean hasLoopbackMysqlHost(String url) {
+        if (!url.startsWith(MYSQL_SIMPLE_URL_PREFIX)) {
+            return false;
+        }
+
+        int authorityStart = MYSQL_SIMPLE_URL_PREFIX.length();
+        int authorityEnd = url.length();
+        int pathStart = url.indexOf('/', authorityStart);
+        if (pathStart >= 0) {
+            authorityEnd = pathStart;
+        }
+        int queryStart = url.indexOf('?', authorityStart);
+        if (queryStart >= 0 && queryStart < authorityEnd) {
+            authorityEnd = queryStart;
+        }
+
+        String authority = url.substring(authorityStart, authorityEnd);
+        if (!isSimpleMysqlAuthority(authority)) {
+            return false;
+        }
+
+        String host = extractHost(authority);
+        String decodedHost = decode(host).toLowerCase(Locale.ROOT);
+        return "localhost".equals(decodedHost)
+            || "127.0.0.1".equals(decodedHost)
+            || "::1".equals(decodedHost)
+            || "0:0:0:0:0:0:0:1".equals(decodedHost);
+    }
+
+    private static boolean isSimpleMysqlAuthority(String authority) {
+        if (!StringUtils.hasText(authority)
+            || authority.contains(",")
+            || authority.contains("@")
+            || authority.contains("%")
+            || authority.startsWith("address=")) {
+            return false;
+        }
+
+        if (authority.startsWith("[")) {
+            int bracketEnd = authority.indexOf(']');
+            if (bracketEnd <= 1) {
+                return false;
+            }
+            String rest = authority.substring(bracketEnd + 1);
+            return rest.isEmpty() || (rest.startsWith(":") && isPort(rest.substring(1)));
+        }
+
+        int firstColon = authority.indexOf(':');
+        if (firstColon < 0) {
+            return true;
+        }
+        if (authority.indexOf(':', firstColon + 1) >= 0) {
+            return false;
+        }
+        return firstColon > 0 && isPort(authority.substring(firstColon + 1));
+    }
+
+    private static boolean isPort(String value) {
+        if (!StringUtils.hasText(value)) {
+            return false;
+        }
+        for (int i = 0; i < value.length(); i++) {
+            if (!Character.isDigit(value.charAt(i))) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static String extractHost(String authority) {
+        if (authority.startsWith("[")) {
+            int bracketEnd = authority.indexOf(']');
+            if (bracketEnd > 1) {
+                return authority.substring(1, bracketEnd);
+            }
+            return "";
+        }
+
+        int portStart = authority.indexOf(':');
+        if (portStart < 0) {
+            return authority;
+        }
+        return authority.substring(0, portStart);
     }
 
     private static String decode(String value) {
