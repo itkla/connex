@@ -14,6 +14,24 @@ function statusParam(raw: string | string[] | undefined): 'open' | 'closed' | un
     return value === 'open' || value === 'closed' ? value : undefined;
 }
 
+/**
+ * Picks the currency with the most deals so the initial server render loads that currency's
+ * page (matching the client's default currency selection), rather than an all-currency page
+ * the client would then re-filter and under-fill.
+ */
+function dominantCurrency(metrics: DealMetrics): string | undefined {
+    let best: string | undefined;
+    let bestCount = -1;
+    for (const c of metrics.byCurrency) {
+        const n = c.openCount + c.closedCount;
+        if (n > bestCount) {
+            bestCount = n;
+            best = c.currency;
+        }
+    }
+    return best;
+}
+
 export default async function DealsPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
     const cookie = (await headers()).get('cookie');
     const user = await getCurrentUserFromCookie(cookie);
@@ -24,12 +42,12 @@ export default async function DealsPage({ searchParams }: { searchParams: Promis
 
     const status = statusParam((await searchParams).status);
     const init = { headers: { cookie: cookie ?? '' } } as const;
-    const [dealsPage, metrics, facets, savedViews]: [Page<Deal>, DealMetrics, DealFacets, SavedView[]] = await Promise.all([
-        getDealsPage({ page: 1, size: 25, status }, init),
+    const [metrics, facets, savedViews]: [DealMetrics, DealFacets, SavedView[]] = await Promise.all([
         getDealMetricsFromCookie(cookie),
         getDealFacetsFromCookie(cookie),
         getSavedViewsFromCookie("deal", cookie),
     ]);
+    const dealsPage: Page<Deal> = await getDealsPage({ page: 1, size: 25, status, currency: dominantCurrency(metrics) }, init);
 
     return <DealsBrowser deals={dealsPage.items} total={dealsPage.total} metrics={metrics} serverFacets={facets} savedViews={savedViews} />;
 }

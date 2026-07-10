@@ -112,6 +112,10 @@
       <when test="sort == 'updated_at'">ORDER BY d.updated_at <include refid="dealSortDirection"/>, d.id ASC</when>
       <when test="sort == 'stage_id'">ORDER BY d.stage_id <include refid="dealSortDirection"/>, d.id ASC</when>
       <when test="sort == 'position'">ORDER BY d.position <include refid="dealSortDirection"/>, d.id ASC</when>
+      <when test="sort == 'company'">ORDER BY c.name <include refid="dealSortDirection"/>, d.id ASC</when>
+      <when test="sort == 'pipeline'">ORDER BY p.name <include refid="dealSortDirection"/>, d.id ASC</when>
+      <when test="sort == 'stage'">ORDER BY s.name <include refid="dealSortDirection"/>, d.id ASC</when>
+      <when test="sort == 'status'">ORDER BY (d.won IS NOT NULL) <include refid="dealSortDirection"/>, d.id ASC</when>
       <otherwise>ORDER BY d.stage_id, d.position, d.id</otherwise>
     </choose>
   </sql>
@@ -163,6 +167,9 @@
   <select id="getDealsPage" resultMap="DealResult">
     SELECT <include refid="qualifiedDealColumns"/>
     FROM deal d
+    LEFT JOIN company c ON c.id = d.company_id
+    LEFT JOIN pipeline p ON p.id = d.pipeline_id
+    LEFT JOIN stage s ON s.id = d.stage_id
     <include refid="dealFilterWhere"/>
     <include refid="dealPageOrderBy"/>
     LIMIT #{limit} OFFSET #{offset}
