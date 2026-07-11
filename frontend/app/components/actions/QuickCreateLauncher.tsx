@@ -100,13 +100,14 @@ export default function QuickCreateLauncher() {
     const [anchor, setAnchor] = useState<Anchor | null>(null);
 
     const triggerRef = useRef<HTMLButtonElement>(null);
+    const rootRef = useRef<HTMLDivElement>(null);
     const panelRef = useRef<HTMLDivElement>(null);
     const titleId = useId();
 
     const currentUserId = context.user?.id ?? null;
 
     const computeAnchor = useCallback((): Anchor | null => {
-        const rect = triggerRef.current?.getBoundingClientRect();
+        const rect = rootRef.current?.getBoundingClientRect();
         if (!rect) return null;
         const top = rect.top;
         return {
@@ -218,7 +219,7 @@ export default function QuickCreateLauncher() {
     );
 
     return (
-        <div className="mb-5 shrink-0">
+        <div ref={rootRef} className="mb-5 shrink-0">
             <motion.button
                 ref={triggerRef}
                 type="button"
@@ -370,7 +371,7 @@ function QuickCreatePanelBody({
             ) : null}
 
             <div className="min-h-0 overflow-y-auto p-4">
-                <AnimatePresence mode="wait" initial={false}>
+                <AnimatePresence mode="wait">
                     <motion.div
                         key={view}
                         initial={reduceMotion ? { opacity: 0 } : { opacity: 0, y: 4 }}
