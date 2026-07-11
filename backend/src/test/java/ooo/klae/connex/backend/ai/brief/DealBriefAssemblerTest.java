@@ -16,6 +16,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import ooo.klae.connex.backend.ai.AiRelationshipContext;
 import ooo.klae.connex.backend.ai.masking.MaskedMessage;
 import ooo.klae.connex.backend.ai.masking.MaskedPrompt;
 import ooo.klae.connex.backend.ai.masking.MaskingEngine;
@@ -43,12 +44,13 @@ class DealBriefAssemblerTest {
     @Mock private DealService dealService;
     @Mock private ScoringService scoringService;
     @Mock private DealRiskService dealRiskService;
+    @Mock private AiRelationshipContext aiRelationshipContext;
 
     private DealBriefAssembler assembler;
 
     @BeforeEach
     void setUp() {
-        assembler = new DealBriefAssembler(dealService, scoringService, dealRiskService);
+        assembler = new DealBriefAssembler(dealService, scoringService, dealRiskService, aiRelationshipContext);
     }
 
     @Test

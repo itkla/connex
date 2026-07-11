@@ -15,6 +15,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import ooo.klae.connex.backend.ai.AiRelationshipContext;
 import ooo.klae.connex.backend.ai.masking.MaskedMessage;
 import ooo.klae.connex.backend.ai.masking.MaskedPrompt;
 import ooo.klae.connex.backend.beans.DealPerson;
@@ -23,6 +24,7 @@ import ooo.klae.connex.backend.dto.DealRiskDto;
 import ooo.klae.connex.backend.dto.DealRiskFactor;
 import ooo.klae.connex.backend.dto.DealSummaryDto;
 import ooo.klae.connex.backend.services.DealService;
+import ooo.klae.connex.backend.services.ScoringService;
 
 @ExtendWith(MockitoExtension.class)
 class DealRiskRationaleAssemblerTest {
@@ -31,12 +33,14 @@ class DealRiskRationaleAssemblerTest {
     private static final int PERSON_ID = 73;
 
     @Mock private DealService dealService;
+    @Mock private ScoringService scoringService;
+    @Mock private AiRelationshipContext aiRelationshipContext;
 
     private DealRiskRationaleAssembler assembler;
 
     @BeforeEach
     void setUp() {
-        assembler = new DealRiskRationaleAssembler(dealService);
+        assembler = new DealRiskRationaleAssembler(dealService, scoringService, aiRelationshipContext);
     }
 
     @Test
