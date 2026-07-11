@@ -45,7 +45,7 @@ function PaginationLink({ className, isActive, size = "icon", ...props }: Pagina
       className={cn(
         buttonVariants({ variant: "ghost", size }),
         "rounded-full",
-        isActive && "bg-brand text-white shadow-sm hover:bg-brand-dark hover:text-white",
+        isActive && "bg-brand text-brand-foreground shadow-sm hover:bg-brand-hover hover:text-brand-foreground",
         className,
       )}
       {...props}

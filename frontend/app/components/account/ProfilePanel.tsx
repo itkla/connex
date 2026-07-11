@@ -286,9 +286,9 @@ export default function ProfilePanel({ user }: Props) {
                         )}
                         <Button
                             type="submit"
+                            variant="brand"
                             disabled={!dirty || submitting}
                             aria-busy={submitting}
-                            className="bg-brand text-white hover:bg-brand-hover"
                         >
                             {submitting ? <Loader2Icon className="size-4 animate-spin" /> : null}
                             {submitting ? t("saving") : t("save")}

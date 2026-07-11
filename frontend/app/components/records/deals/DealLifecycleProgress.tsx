@@ -183,9 +183,9 @@ export default async function DealLifecycleProgress({
                         : lostAchieved
                             ? 'bg-red-500 text-white ring-4 ring-red-100'
                             : isCurrent
-                                ? 'bg-brand text-white ring-4 ring-brand-light'
+                                ? 'bg-brand text-brand-foreground ring-4 ring-brand-light'
                                 : isPast
-                                    ? 'bg-brand text-white'
+                                    ? 'bg-brand text-brand-foreground'
                                     : isWonStage
                                         ? 'bg-background text-green-600 ring-1 ring-green-300 dark:text-green-300 dark:ring-green-400/30'
                                         : isLostStage

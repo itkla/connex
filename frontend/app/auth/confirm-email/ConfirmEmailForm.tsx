@@ -100,7 +100,7 @@ export function ConfirmEmailForm({ token }: { token: string | null }) {
                                 </p>
                                 <Link
                                     href="/auth/login"
-                                    className="mt-8 inline-flex items-center justify-center gap-2 rounded-full bg-brand px-6 py-3.5 text-base font-semibold text-neutral-950 transition-[transform,background-color] duration-150 ease-out hover:bg-brand-hover active:scale-[0.98]"
+                                    className="mt-8 inline-flex items-center justify-center gap-2 rounded-full bg-brand px-6 py-3.5 text-base font-semibold text-brand-foreground transition-[transform,background-color] duration-150 ease-out hover:bg-brand-hover active:scale-[0.98]"
                                 >
                                     {t("backToLogin")}
                                     <ArrowRightIcon className="size-4" />
@@ -124,7 +124,7 @@ export function ConfirmEmailForm({ token }: { token: string | null }) {
                                     onClick={onConfirm}
                                     disabled={submitting}
                                     style={{ animationDelay: "120ms" }}
-                                    className="connex-rise mt-9 flex w-full items-center justify-center gap-2 rounded-full bg-brand px-6 py-3.5 text-base font-semibold text-neutral-950 transition-[transform,background-color,opacity] duration-150 ease-out hover:bg-brand-hover active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-70"
+                                    className="connex-rise mt-9 flex w-full items-center justify-center gap-2 rounded-full bg-brand px-6 py-3.5 text-base font-semibold text-brand-foreground transition-[transform,background-color,opacity] duration-150 ease-out hover:bg-brand-hover active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-70"
                                 >
                                     {submitting ? (
                                         <>
@@ -152,7 +152,7 @@ export function ConfirmEmailForm({ token }: { token: string | null }) {
                                 </p>
                                 <Link
                                     href="/dashboard"
-                                    className="mt-8 inline-flex items-center justify-center gap-2 rounded-full bg-brand px-6 py-3.5 text-base font-semibold text-neutral-950 transition-[transform,background-color] duration-150 ease-out hover:bg-brand-hover active:scale-[0.98]"
+                                    className="mt-8 inline-flex items-center justify-center gap-2 rounded-full bg-brand px-6 py-3.5 text-base font-semibold text-brand-foreground transition-[transform,background-color] duration-150 ease-out hover:bg-brand-hover active:scale-[0.98]"
                                 >
                                     {t("continue")}
                                     <ArrowRightIcon className="size-4" />

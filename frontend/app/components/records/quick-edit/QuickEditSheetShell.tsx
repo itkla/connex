@@ -79,8 +79,9 @@ export function QuickEditSheetShell({
                     </DrawerClose>
                     <Button
                         onClick={onSave}
+                        variant="brand"
                         disabled={isSaving}
-                        className="min-w-24 bg-brand text-brand-foreground hover:bg-brand-hover"
+                        className="min-w-24"
                     >
                         {isSaving ? <Loader2Icon className="size-4 animate-spin" /> : null}
                         {saveLabel}

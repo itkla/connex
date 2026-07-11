@@ -517,8 +517,9 @@ export default function NewCompanyDialog({
                                     <Button
                                         type="submit"
                                         form="new-company-form"
+                                        variant="brand"
                                         disabled={isCreating || hasErrors || isSuccess || websiteBlocked}
-                                        className="min-w-24 bg-brand text-white shadow-sm transition hover:bg-brand-hover hover:shadow-md"
+                                        className="min-w-24 shadow-sm transition hover:shadow-md"
                                     >
                                         {isCreating ? (
                                             <>
@@ -559,5 +560,4 @@ export default function NewCompanyDialog({
         </Dialog>
     );
 }
-
 

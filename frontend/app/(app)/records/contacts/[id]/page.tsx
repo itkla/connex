@@ -109,7 +109,7 @@ export default async function ContactPage({ params }: { params: { id: number } }
                                 </div>
                                 <h3 className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
                                     {contact.title ? (
-                                        <Link href={`/records/contacts?title=${contact.title}`} className="rounded-md bg-muted px-2 py-1 text-muted-foreground transition-colors duration-200 hover:bg-brand-hover hover:text-white">
+                                        <Link href={`/records/contacts?title=${contact.title}`} className="rounded-md bg-muted px-2 py-1 text-muted-foreground transition-colors duration-200 hover:bg-brand-hover hover:text-brand-foreground">
                                             {contact.title}
                                         </Link>
                                     ) : null}
@@ -118,7 +118,7 @@ export default async function ContactPage({ params }: { params: { id: number } }
                                             <span>@</span>
                                             <Link
                                                 href={`/records/companies/${contact.company.id}`}
-                                                className="rounded-md bg-muted px-2 py-1 text-muted-foreground transition-colors duration-200 hover:bg-brand-hover hover:text-white"
+                                                className="rounded-md bg-muted px-2 py-1 text-muted-foreground transition-colors duration-200 hover:bg-brand-hover hover:text-brand-foreground"
                                             >
                                                 {contact.company.name}
                                             </Link>

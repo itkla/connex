@@ -143,7 +143,7 @@ export default function TagsBrowser({ tags: initialTags }: Props) {
                     </div>
                     {hasTags && (
                         <Button
-                            className="bg-brand text-white hover:bg-brand-dark"
+                            variant="brand"
                             aria-label={t('newAria')}
                             onClick={openCreate}
                         >
@@ -397,7 +397,7 @@ function EmptyState({
             </div>
             <h2 className="mt-5 text-lg font-semibold text-foreground">{title}</h2>
             <p className="mx-auto mt-1.5 max-w-sm text-sm text-muted-foreground">{body}</p>
-            <Button onClick={onCreate} className="mt-6 bg-brand text-white hover:bg-brand-dark">
+            <Button onClick={onCreate} variant="brand" className="mt-6">
                 <PlusIcon strokeWidth={2.5} />
                 {cta}
             </Button>

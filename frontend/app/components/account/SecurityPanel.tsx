@@ -201,9 +201,9 @@ export default function SecurityPanel() {
     const addButton = (
         <Button
             onClick={addPasskey}
+            variant="brand"
             disabled={adding || !supported}
             aria-busy={adding}
-            className="bg-brand text-white hover:bg-brand-hover"
         >
             {adding ? <Loader2Icon className="size-4 animate-spin" /> : <PlusIcon className="size-4" />}
             {adding ? t("adding") : t("add")}
@@ -336,8 +336,8 @@ export default function SecurityPanel() {
                             </DialogClose>
                             <Button
                                 type="submit"
+                                variant="brand"
                                 disabled={isRenaming || !renameValue.trim()}
-                                className="bg-brand text-white hover:bg-brand-hover"
                             >
                                 {isRenaming ? <Loader2Icon className="size-4 animate-spin" /> : t("save")}
                             </Button>

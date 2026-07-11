@@ -35,7 +35,7 @@ function DayNumber({
             <span
                 className={cn(
                     'relative z-10 text-sm tabular-nums',
-                    isSelected ? 'font-semibold text-white' : isToday ? 'font-semibold text-brand-dark' : 'text-foreground',
+                    isSelected ? 'font-semibold text-brand-foreground' : isToday ? 'font-semibold text-brand-dark' : 'text-foreground',
                 )}
             >
                 {day.getDate()}

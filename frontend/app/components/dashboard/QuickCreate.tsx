@@ -36,7 +36,7 @@ export default function QuickCreate() {
             <DropdownMenuTrigger asChild>
                 <button
                     type="button"
-                    className="inline-flex items-center gap-1.5 rounded-full bg-brand px-4 py-2 text-sm font-semibold text-neutral-950 transition-[transform,background-color] duration-150 ease-out hover:bg-brand-hover active:scale-[0.97] motion-reduce:transition-none motion-reduce:active:scale-100"
+                    className="inline-flex items-center gap-1.5 rounded-full bg-brand px-4 py-2 text-sm font-semibold text-brand-foreground transition-[transform,background-color] duration-150 ease-out hover:bg-brand-hover active:scale-[0.97] motion-reduce:transition-none motion-reduce:active:scale-100"
                 >
                     <PlusIcon className="size-4" />
                     {t('new')}

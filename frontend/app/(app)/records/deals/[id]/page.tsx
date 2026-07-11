@@ -194,7 +194,7 @@ export default async function DealPage({ params }: { params: { id: number } }) {
                                 {company ? (
                                     <Link
                                         href={`/records/companies/${company.id}`}
-                                        className="inline-flex items-center gap-1 rounded-md bg-muted px-2 py-1 transition-colors duration-200 hover:bg-brand-hover hover:text-white"
+                                        className="inline-flex items-center gap-1 rounded-md bg-muted px-2 py-1 transition-colors duration-200 hover:bg-brand-hover hover:text-brand-foreground"
                                     >
                                         <BuildingOffice2Icon className="size-3.5" />
                                         {company.name}
@@ -487,7 +487,7 @@ function StatusPill({ outcome, t }: { outcome: DealOutcome; t: (key: string) => 
         );
     }
     return (
-        <span className="rounded-full bg-brand px-2.5 py-0.5 text-[10px] font-medium uppercase tracking-wider text-white">
+        <span className="rounded-full bg-brand px-2.5 py-0.5 text-[10px] font-medium uppercase tracking-wider text-brand-foreground">
             {t('statusOpen')}
         </span>
     );

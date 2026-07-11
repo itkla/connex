@@ -223,7 +223,7 @@ export default function EditTaskSheet({
                                 id="task-completed"
                                 checked={draft.completed}
                                 onCheckedChange={(checked) => setDraft((d) => ({ ...d, completed: checked === true }))}
-                                className="size-[18px] rounded-full border-border data-[state=checked]:border-brand data-[state=checked]:bg-brand data-[state=checked]:text-white"
+                                className="size-[18px] rounded-full border-border data-[state=checked]:border-brand data-[state=checked]:bg-brand data-[state=checked]:text-brand-foreground"
                             />
                             <Label
                                 htmlFor="task-completed"
@@ -241,8 +241,9 @@ export default function EditTaskSheet({
                     </DrawerClose>
                     <Button
                         onClick={saveUpdates}
+                        variant="brand"
                         disabled={isSaving}
-                        className="bg-brand text-white transition-transform hover:bg-brand-dark active:scale-[0.98]"
+                        className="transition-transform active:scale-[0.98]"
                     >
                         {isSaving ? <Loader2Icon className="size-4 animate-spin" /> : t('save')}
                     </Button>

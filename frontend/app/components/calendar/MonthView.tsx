@@ -286,7 +286,7 @@ function MonthCell({
                             className={cn(
                                 'relative z-10 text-xs tabular-nums',
                                 isSelected
-                                    ? 'font-semibold text-white'
+                                    ? 'font-semibold text-brand-foreground'
                                     : isToday
                                       ? 'font-semibold text-brand-dark'
                                       : inMonth

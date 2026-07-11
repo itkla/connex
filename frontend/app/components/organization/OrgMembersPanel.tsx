@@ -282,8 +282,9 @@ export default function OrgMembersPanel({ currentUserId }: { currentUserId: numb
                         </Select>
                         <Button
                             type="submit"
+                            variant="brand"
                             disabled={adding || email.trim().length === 0}
-                            className="min-w-36 bg-brand text-white hover:bg-brand-hover"
+                            className="min-w-36"
                         >
                             {adding ? <Loader2Icon className="size-4 animate-spin" /> : t("addButton")}
                         </Button>

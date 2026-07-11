@@ -103,7 +103,7 @@ export default async function MapPage({ searchParams }: { searchParams: Promise<
                         <p className="mt-2 text-sm text-muted-foreground">{t("emptyBody")}</p>
                         <Link
                             href="/records/companies"
-                            className="mt-6 inline-flex items-center rounded-lg bg-brand px-4 py-2 text-sm font-medium text-white transition hover:bg-brand-hover"
+                            className="mt-6 inline-flex items-center rounded-lg bg-brand px-4 py-2 text-sm font-medium text-brand-foreground transition hover:bg-brand-hover"
                         >
                             {t("emptyCta")}
                         </Link>

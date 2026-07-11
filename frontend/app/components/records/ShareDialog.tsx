@@ -147,8 +147,9 @@ export default function ShareDialog({ type, entityId, entityName, open, onOpenCh
                         </select>
                         <Button
                             onClick={share}
+                            variant="brand"
                             disabled={sharing || !target}
-                            className="min-w-20 bg-brand text-white shadow-sm transition hover:bg-brand-hover"
+                            className="min-w-20 shadow-sm transition"
                         >
                             {sharing ? <Loader2Icon className="size-4 animate-spin" /> : t('shareButton')}
                         </Button>

@@ -30,8 +30,9 @@ export default function AcceptInviteLink({ token }: { token: string }) {
     return (
         <Button
             onClick={accept}
+            variant="brand"
             disabled={busy}
-            className="h-11 w-full bg-brand text-white shadow-sm transition hover:bg-brand-hover hover:shadow-md"
+            className="h-11 w-full shadow-sm transition hover:shadow-md"
         >
             {busy ? <Loader2Icon className="size-4 animate-spin" /> : t("accept")}
         </Button>

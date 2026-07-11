@@ -23,7 +23,7 @@ function Glyph({ name, size = "trigger" }: { name: string; size?: "trigger" | "i
             aria-hidden="true"
             className={
                 trigger
-                    ? "flex aspect-square size-8 shrink-0 items-center justify-center rounded-lg bg-brand text-sm font-semibold leading-none text-neutral-950"
+                    ? "flex aspect-square size-8 shrink-0 items-center justify-center rounded-lg bg-brand text-sm font-semibold leading-none text-brand-foreground"
                     : "flex aspect-square size-6 shrink-0 items-center justify-center rounded-md border text-xs font-semibold leading-none"
             }
         >

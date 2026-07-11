@@ -63,7 +63,7 @@ export function MultiSelectFilter({
                 <button type="button" aria-label={ariaLabel} aria-pressed={active} className={pillClass(active)}>
                     <span>{label}</span>
                     {active && (
-                        <span className="grid size-4 place-items-center rounded-full bg-brand-dark text-[10px] font-semibold leading-none text-white tabular-nums">
+                        <span className="grid size-4 place-items-center rounded-full bg-brand text-[10px] font-semibold leading-none text-brand-foreground tabular-nums">
                             {selected.size}
                         </span>
                     )}

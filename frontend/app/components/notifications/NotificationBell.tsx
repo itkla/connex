@@ -206,7 +206,7 @@ export default function NotificationBell() {
                                                     if (value === true) void completeFromInbox(item);
                                                 }}
                                                 aria-label={t("completeTask")}
-                                                className="size-[18px] rounded-full border-border transition data-[state=checked]:border-brand data-[state=checked]:bg-brand data-[state=checked]:text-white"
+                                                className="size-[18px] rounded-full border-border transition data-[state=checked]:border-brand data-[state=checked]:bg-brand data-[state=checked]:text-brand-foreground"
                                             />
                                         </div>
                                     ) : (

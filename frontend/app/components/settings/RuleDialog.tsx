@@ -75,6 +75,7 @@ type Props = {
     editing: Rule | null;
     fields: SegmentFields | null;
     options: RuleBuilderOptions | null;
+    canRunAsSystem: boolean;
     onSubmit: (payload: RuleRequest) => Promise<void>;
 };
 
@@ -82,7 +83,7 @@ type Props = {
  * Create/edit dialog for an automation rule. The field state lives in {@link RuleForm}, remounted per
  * target via {@code key} so it initializes from props without an effect; the save lifecycle lives here.
  */
-export default function RuleDialog({ open, onOpenChange, editing, fields, options, onSubmit }: Props) {
+export default function RuleDialog({ open, onOpenChange, editing, fields, options, canRunAsSystem, onSubmit }: Props) {
     const [isSaving, setIsSaving] = useState(false);
 
     const handleOpenChange = (next: boolean) => {
@@ -110,6 +111,7 @@ export default function RuleDialog({ open, onOpenChange, editing, fields, option
                         editing={editing}
                         fields={fields}
                         options={options}
+                        canRunAsSystem={canRunAsSystem}
                         isSaving={isSaving}
                         onSubmit={handleSubmit}
                     />
@@ -123,12 +125,14 @@ function RuleForm({
     editing,
     fields,
     options,
+    canRunAsSystem,
     isSaving,
     onSubmit,
 }: {
     editing: Rule | null;
     fields: SegmentFields | null;
     options: RuleBuilderOptions | null;
+    canRunAsSystem: boolean;
     isSaving: boolean;
     onSubmit: (payload: RuleRequest) => void;
 }) {
@@ -201,6 +205,10 @@ function RuleForm({
 
     const submit = () => {
         setError(null);
+        if (executionMode === "system" && !canRunAsSystem) {
+            setError(t("systemRunAsRestricted"));
+            return;
+        }
         if (!name.trim()) {
             setError(t("nameRequired"));
             return;
@@ -454,16 +462,21 @@ function RuleForm({
                         {EXECUTION_MODES.map((mode) => {
                             const Icon = mode === "system" ? BoltIcon : UserIcon;
                             const selected = executionMode === mode;
+                            const restricted = mode === "system" && !canRunAsSystem;
                             return (
                                 <button
                                     key={mode}
                                     type="button"
                                     role="radio"
                                     aria-checked={selected}
+                                    disabled={restricted}
                                     onClick={() => setExecutionMode(mode)}
                                     className={cn(
-                                        "flex items-start gap-2.5 rounded-xl p-3 text-left ring-1 transition active:scale-[0.99] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                                        selected ? "bg-brand/5 ring-brand" : "bg-card ring-border hover:bg-muted/40",
+                                        "flex items-start gap-2.5 rounded-xl p-3 text-left ring-1 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50",
+                                        !restricted && "active:scale-[0.99]",
+                                        selected
+                                            ? "bg-brand/5 ring-brand"
+                                            : cn("bg-card ring-border", !restricted && "hover:bg-muted/40"),
                                     )}
                                 >
                                     <Icon aria-hidden className={cn("mt-0.5 size-4 shrink-0", selected ? "text-brand" : "text-muted-foreground")} />
@@ -484,7 +497,7 @@ function RuleForm({
                 <DialogClose asChild>
                     <Button variant="outline" disabled={isSaving}>{t("cancel")}</Button>
                 </DialogClose>
-                <Button onClick={submit} disabled={isSaving} className="bg-brand text-white hover:bg-brand-hover">
+                <Button onClick={submit} variant="brand" disabled={isSaving}>
                     {isSaving ? t("saving") : t("save")}
                 </Button>
             </DialogFooter>

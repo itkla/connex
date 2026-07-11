@@ -145,8 +145,9 @@ export default function BulkChangeStageDialog({ open, onOpenChange, count, stage
                                 </DialogClose>
                                 <Button
                                     type="submit"
+                                    variant="brand"
                                     disabled={isSaving || succeeded || !selected}
-                                    className="min-w-24 bg-brand text-white shadow-sm transition hover:bg-brand-hover hover:shadow-md"
+                                    className="min-w-24 shadow-sm transition hover:shadow-md"
                                 >
                                     {isSaving ? <Loader2Icon className="size-4 animate-spin" /> : t('apply')}
                                 </Button>

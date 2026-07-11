@@ -227,6 +227,8 @@
     "pickTag": "Choose a tag",
     "removeAction": "Remove action",
     "runAsLabel": "Run as",
+    "systemRunAsRestricted": "Choose Me to save this rule. Only workspace owners and admins can run rules as Automation.",
+    "systemToggleRestricted": "Only workspace owners and admins can enable or disable Automation rules.",
     "nameRequired": "Enter a rule name",
     "eventsRequired": "Pick at least one event",
     "conditionRequired": "A scheduled rule needs at least one condition",
@@ -286,7 +288,7 @@
       },
       "system": {
         "title": "Automation",
-        "hint": "Runs as the workspace (admin only)"
+        "hint": "Runs as the workspace (owners and admins only)"
       }
     },
     "summaryEntity": "When a {record} — {events}",

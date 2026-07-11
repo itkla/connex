@@ -101,7 +101,7 @@ export function ForgotPasswordForm() {
                                         type="submit"
                                         disabled={submitting}
                                         style={{ animationDelay: "180ms" }}
-                                        className="connex-rise mt-2 flex w-full items-center justify-center gap-2 rounded-full bg-brand px-6 py-3.5 text-base font-semibold text-neutral-950 transition-[transform,background-color,opacity] duration-150 ease-out hover:bg-brand-hover active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-70"
+                                        className="connex-rise mt-2 flex w-full items-center justify-center gap-2 rounded-full bg-brand px-6 py-3.5 text-base font-semibold text-brand-foreground transition-[transform,background-color,opacity] duration-150 ease-out hover:bg-brand-hover active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-70"
                                     >
                                         {submitting ? (
                                             <>

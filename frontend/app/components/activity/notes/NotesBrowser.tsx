@@ -169,7 +169,7 @@ export default function NotesBrowser({ notes, persons, deals, users }: Props) {
                             </p>
                         </div>
                         <Button
-                            className="bg-brand text-white hover:bg-brand-dark"
+                            variant="brand"
                             onClick={() => router.push('/activity/notes/new')}
                         >
                             <PlusIcon strokeWidth={2.5} />
@@ -236,7 +236,8 @@ export default function NotesBrowser({ notes, persons, deals, users }: Props) {
                             {notes.length === 0 && (
                                 <Button
                                     onClick={() => router.push('/activity/notes/new')}
-                                    className="mt-6 bg-brand text-white hover:bg-brand-dark"
+                                    variant="brand"
+                                    className="mt-6"
                                 >
                                     <PlusIcon strokeWidth={2.5} />
                                     {t('new')}
