@@ -113,4 +113,17 @@
     WHERE s.pipeline_id = #{id}
     ORDER BY w.name
   </select>
+
+  <update id="clearCompanyShareGrantedByAnywhere">
+    UPDATE company_share SET granted_by = NULL WHERE granted_by = #{userId}
+  </update>
+
+  <update id="clearPersonShareGrantedByAnywhere">
+    UPDATE person_share SET granted_by = NULL WHERE granted_by = #{userId}
+  </update>
+
+  <update id="clearPipelineShareGrantedByAnywhere">
+    UPDATE pipeline_share SET granted_by = NULL WHERE granted_by = #{userId}
+  </update>
+
 </mapper>

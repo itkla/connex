@@ -256,4 +256,9 @@
     )
   </select>
 
+
+  <update id="clearUploaderAnywhere">
+    UPDATE attachment SET uploaded_by_id = NULL WHERE uploaded_by_id = #{userId}
+  </update>
+
 </mapper>

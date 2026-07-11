@@ -40,6 +40,7 @@ public class UserService implements UserDetailsService {
     private final OrgMemberService orgMemberService;
     private final NotificationChangePublisher notificationChanges;
     private final ReferenceService referenceService;
+    private final UserOffboardingService userOffboardingService;
 
     private static final Set<String> AUDIT_FIELDS =
         Set.of("username", "displayName", "email", "department", "title",
@@ -116,12 +117,20 @@ public class UserService implements UserDetailsService {
         return user;
     }
 
+    /**
+     * Deletes the caller's own account. Org-data references are guarded and
+     * erased in the service layer ({@link UserOffboardingService}) rather than
+     * by cross-plane foreign keys (#440 increment 3); control-plane rows
+     * (memberships, credentials, sessions) still cascade from {@code app_user}.
+     */
     @Transactional
     public void delete(int id) {
         workspaceService.requireSelf(id);
         workspaceService.assertNotSoleOwnerOfAnyWorkspace(id);
         orgMemberService.assertNotSoleOwnerOfAnyOrg(id);
+        userOffboardingService.assertNoAuthoredContent(id);
         User before = getUserById(id);
+        userOffboardingService.eraseOrgDataReferences(id);
         userMapper.delete(id);
         auditService.record("user.delete", "user", id, before.getUsername(),
             "Deleted user " + before.getUsername(),

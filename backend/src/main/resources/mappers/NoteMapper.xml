@@ -196,4 +196,9 @@
   </update>
 
   <delete id="delete">DELETE FROM note WHERE workspace_id = #{workspaceId} AND id = #{id}</delete>
+
+  <select id="countAuthoredAnywhere" resultType="int">
+    SELECT COUNT(*) FROM note WHERE author_id = #{userId}
+  </select>
+
 </mapper>

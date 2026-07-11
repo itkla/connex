@@ -206,4 +206,9 @@
     )
   </select>
 
+
+  <select id="countCreatedAnywhere" resultType="int">
+    SELECT COUNT(*) FROM activity WHERE created_by_id = #{userId}
+  </select>
+
 </mapper>

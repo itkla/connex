@@ -14,4 +14,12 @@ public interface UserDashboardMapper {
     UserDashboard getByWorkspaceAndUser(@Param("workspaceId") int workspaceId, @Param("userId") int userId);
     int upsert(UserDashboard dashboard);
     int deleteByWorkspaceAndUser(@Param("workspaceId") int workspaceId, @Param("userId") int userId);
+
+    /**
+     * Deletes every dashboard layout owned by a user across all workspaces.
+     * Offboarding replacement for the {@code user_dashboard.user_id} ON DELETE
+     * CASCADE (#440 increment 3); personal data erased on account deletion.
+     */
+    void deleteForUserAnywhere(@Param("userId") int userId);
+
 }

@@ -136,4 +136,26 @@ public interface NotificationMapper {
         @Param("workspaceId") int workspaceId,
         @Param("cutoff") String cutoff
     );
+
+    /**
+     * Deletes every notification addressed to a recipient in one workspace.
+     * Offboarding replacement for the {@code notification -> workspace_member}
+     * CASCADE (#440 increment 3); called when a membership is removed.
+     */
+    void deleteAllForRecipient(@Param("workspaceId") int workspaceId, @Param("recipientId") int recipientId);
+
+    /**
+     * Deletes every notification addressed to a recipient across all workspaces.
+     * Offboarding replacement for the DB-level cascade chain on account deletion
+     * (#440 increment 3); spans workspaces the user has already left.
+     */
+    void deleteAllForRecipientAnywhere(@Param("recipientId") int recipientId);
+
+    /**
+     * Nulls the actor reference on every notification produced by a user.
+     * Offboarding replacement for the {@code notification.actor_id} ON DELETE
+     * SET NULL (#440 increment 3).
+     */
+    void clearActorAnywhere(@Param("userId") int userId);
+
 }

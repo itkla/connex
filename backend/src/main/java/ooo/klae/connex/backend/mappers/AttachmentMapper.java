@@ -39,4 +39,12 @@ public interface AttachmentMapper {
     int removeTag(@Param("workspaceId") int workspaceId, @Param("attachmentId") int attachmentId, @Param("tagId") int tagId);
     int clearTags(@Param("workspaceId") int workspaceId, @Param("attachmentId") int attachmentId);
     int insertTags(@Param("workspaceId") int workspaceId, @Param("attachmentId") int attachmentId, @Param("tagIds") List<Integer> tagIds);
+
+    /**
+     * Nulls the uploader reference on every attachment a user uploaded.
+     * Offboarding replacement for the {@code attachment.uploaded_by_id}
+     * ON DELETE SET NULL (#440 increment 3).
+     */
+    void clearUploaderAnywhere(@Param("userId") int userId);
+
 }

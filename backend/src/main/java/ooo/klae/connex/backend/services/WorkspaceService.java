@@ -27,7 +27,10 @@ import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.notifications.NotificationDelivery;
+import ooo.klae.connex.backend.mappers.DealMapper;
+import ooo.klae.connex.backend.mappers.NotificationMapper;
 import ooo.klae.connex.backend.mappers.OrganizationMapper;
+import ooo.klae.connex.backend.mappers.TaskMapper;
 import ooo.klae.connex.backend.mappers.RoleMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
 import ooo.klae.connex.backend.tenant.Permission;
@@ -47,6 +50,9 @@ public class WorkspaceService {
     private final OrgMemberService orgMemberService;
     private final OrgAllowedDomainService orgAllowedDomainService;
     private final RoleMapper roleMapper;
+    private final TaskMapper taskMapper;
+    private final DealMapper dealMapper;
+    private final NotificationMapper notificationMapper;
     private final NotificationDelivery notificationDelivery;
     private final TenantContext tenantContext;
     private final AuditService auditService;
@@ -478,6 +484,20 @@ public class WorkspaceService {
     }
 
     /**
+     * Detaches a departing member's workspace content the way the dropped
+     * cross-plane constraints used to (#440 increment 3): tasks are unassigned
+     * and deal ownership cleared (SET NULL) so authored history survives, while
+     * the member's notifications and deal-collaborator seats are deleted
+     * (CASCADE). Runs inside the caller's removal transaction.
+     */
+    private void cleanUpMemberContent(int workspaceId, int userId) {
+        taskMapper.unassignMemberTasks(workspaceId, userId);
+        dealMapper.clearMemberDealOwnership(workspaceId, userId);
+        dealMapper.removeCollaboratorFromWorkspace(workspaceId, userId);
+        notificationMapper.deleteAllForRecipient(workspaceId, userId);
+    }
+
+    /**
      * Removes a member, unassigning their tasks and clearing their deal ownership
      * first so authored history survives. Only an owner may remove an owner, and
      * never the last one.
@@ -496,8 +516,7 @@ public class WorkspaceService {
                 throw new BadRequestException("A workspace must keep at least one owner");
             }
         }
-        workspaceMapper.unassignMemberTasks(workspaceId, targetUserId);
-        workspaceMapper.clearMemberDealOwnership(workspaceId, targetUserId);
+        cleanUpMemberContent(workspaceId, targetUserId);
         workspaceMapper.removeMember(workspaceId, targetUserId);
         auditService.record("workspace.member.remove", "workspace", workspaceId, target.getDisplayName(),
                 "Removed " + target.getDisplayName() + " from the workspace", null);
@@ -557,12 +576,14 @@ public class WorkspaceService {
             .orElseThrow(() -> new ResourceNotFoundException("Membership not found"));
     }
 
-    /** The user declines a pending invitation; the row (and its notification) is removed. */
+    /** The user declines a pending invitation; the row and its notifications are removed. */
+    @Transactional
     public void declineMembership(int workspaceId, int userId) {
         MemberDto member = workspaceMapper.getMember(workspaceId, userId);
         if (member == null || !"pending".equals(member.getStatus())) {
             throw new ResourceNotFoundException("No pending invitation for this workspace");
         }
+        notificationMapper.deleteAllForRecipient(workspaceId, userId);
         workspaceMapper.removeMember(workspaceId, userId);
         auditService.record("workspace.member.decline", "workspace", workspaceId, null, "Declined invitation", null);
     }
@@ -577,8 +598,7 @@ public class WorkspaceService {
         if ("owner".equals(role) && workspaceMapper.lockOwnerIds(workspaceId).size() <= 1) {
             throw new BadRequestException("Transfer ownership before leaving; a workspace must keep an owner");
         }
-        workspaceMapper.unassignMemberTasks(workspaceId, userId);
-        workspaceMapper.clearMemberDealOwnership(workspaceId, userId);
+        cleanUpMemberContent(workspaceId, userId);
         workspaceMapper.removeMember(workspaceId, userId);
         auditService.record("workspace.member.leave", "workspace", workspaceId, null, "Left the workspace", null);
     }

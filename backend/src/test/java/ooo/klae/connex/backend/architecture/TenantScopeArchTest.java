@@ -52,7 +52,9 @@ class TenantScopeArchTest {
      * it binds {@code #{recipientId}}), the two scheduler helpers only enumerate
      * workspace ids for per-workspace background fan-out (they return no tenant rows),
      * and the org-scoped audit reads are org-filtered ({@code #{orgId}}) and gated by
-     * org membership (MULTITENANCY_PLAN §0.6).
+     * org membership (MULTITENANCY_PLAN §0.6). The {@code count*Anywhere} selects are
+     * the account-offboarding guards (#440 increment 3): identity-scoped counts that
+     * mirror the dropped RESTRICT constraints across every workspace.
      */
     private static final Set<String> EXEMPT_SELECTS = Set.of(
         "ooo.klae.connex.backend.mappers.NotificationMapper.findPage",
@@ -62,7 +64,10 @@ class TenantScopeArchTest {
         "ooo.klae.connex.backend.mappers.NotificationMapper.findWorkspaceIds",
         "ooo.klae.connex.backend.mappers.RuleMapper.workspaceIdsWithEnabledScheduleRules",
         "ooo.klae.connex.backend.mappers.AuditLogMapper.findRecentByOrg",
-        "ooo.klae.connex.backend.mappers.AuditLogMapper.findOrgExport"
+        "ooo.klae.connex.backend.mappers.AuditLogMapper.findOrgExport",
+        "ooo.klae.connex.backend.mappers.NoteMapper.countAuthoredAnywhere",
+        "ooo.klae.connex.backend.mappers.ActivityMapper.countCreatedAnywhere",
+        "ooo.klae.connex.backend.mappers.IntroductionMapper.countIntroducedAnywhere"
     );
 
     /**
@@ -72,6 +77,10 @@ class TenantScopeArchTest {
      * exemption in {@link TenantScopeInterceptor}). The notification mutations are
      * recipient-scoped across every membership by design (MULTITENANCY_PLAN §0.3 — they
      * bind {@code #{recipientId}}), exactly like the exempt notification selects above.
+     * The {@code *Anywhere} writes are the account-offboarding erasures (#440
+     * increment 3): they replace the dropped cross-plane foreign keys, are
+     * identity-scoped ({@code #{userId}}), and deliberately span every workspace —
+     * including ones the departing user has already left.
      */
     private static final Set<String> EXEMPT_WRITES = Set.of(
         "ooo.klae.connex.backend.mappers.AuditLogMapper.insert",
@@ -80,7 +89,20 @@ class TenantScopeArchTest {
         "ooo.klae.connex.backend.mappers.NotificationMapper.dismiss",
         "ooo.klae.connex.backend.mappers.NotificationMapper.restore",
         "ooo.klae.connex.backend.mappers.NotificationMapper.snooze",
-        "ooo.klae.connex.backend.mappers.NotificationMapper.markAllRead"
+        "ooo.klae.connex.backend.mappers.NotificationMapper.markAllRead",
+        "ooo.klae.connex.backend.mappers.NotificationMapper.deleteAllForRecipientAnywhere",
+        "ooo.klae.connex.backend.mappers.NotificationMapper.clearActorAnywhere",
+        "ooo.klae.connex.backend.mappers.DealMapper.clearOwnershipAnywhere",
+        "ooo.klae.connex.backend.mappers.DealMapper.removeCollaboratorAnywhere",
+        "ooo.klae.connex.backend.mappers.TaskMapper.unassignAnywhere",
+        "ooo.klae.connex.backend.mappers.AttachmentMapper.clearUploaderAnywhere",
+        "ooo.klae.connex.backend.mappers.RuleMapper.clearRunAsAnywhere",
+        "ooo.klae.connex.backend.mappers.RuleMapper.clearCreatedByAnywhere",
+        "ooo.klae.connex.backend.mappers.ShareMapper.clearCompanyShareGrantedByAnywhere",
+        "ooo.klae.connex.backend.mappers.ShareMapper.clearPersonShareGrantedByAnywhere",
+        "ooo.klae.connex.backend.mappers.ShareMapper.clearPipelineShareGrantedByAnywhere",
+        "ooo.klae.connex.backend.mappers.SavedViewMapper.deleteForUserAnywhere",
+        "ooo.klae.connex.backend.mappers.UserDashboardMapper.deleteForUserAnywhere"
     );
 
     /**
