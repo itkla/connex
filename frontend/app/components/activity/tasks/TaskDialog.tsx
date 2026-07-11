@@ -46,6 +46,8 @@ type Props = {
     defaultDeal?: Deal | null;
     /** Prefills the due date (a `YYYY-MM-DD` value), e.g. the day tapped in the calendar. */
     defaultDueDate?: string;
+    /** Prefills the description, e.g. text carried over from the Quick Create panel. */
+    defaultDescription?: string;
 };
 
 export default function TaskDialog({
@@ -58,6 +60,7 @@ export default function TaskDialog({
     defaultPerson = null,
     defaultDeal = null,
     defaultDueDate = '',
+    defaultDescription = '',
 }: Props) {
     const submittingRef = useRef(false);
 
@@ -77,6 +80,7 @@ export default function TaskDialog({
                     defaultPerson={defaultPerson}
                     defaultDeal={defaultDeal}
                     defaultDueDate={defaultDueDate}
+                    defaultDescription={defaultDescription}
                     onSubmittingChange={(value) => {
                         submittingRef.current = value;
                     }}
@@ -95,6 +99,7 @@ type TaskDialogFormProps = {
     defaultPerson: Contact | null;
     defaultDeal: Deal | null;
     defaultDueDate: string;
+    defaultDescription: string;
     onSubmittingChange: (submitting: boolean) => void;
     onClose: () => void;
 };
@@ -111,13 +116,14 @@ function TaskDialogForm({
     defaultPerson,
     defaultDeal,
     defaultDueDate,
+    defaultDescription,
     onSubmittingChange,
     onClose,
 }: TaskDialogFormProps) {
     const router = useRouter();
     const t = useTranslations('ActivityTasksDialog');
 
-    const [description, setDescription] = useState('');
+    const [description, setDescription] = useState(() => defaultDescription);
     const [dueDate, setDueDate] = useState(() => defaultDueDate);
     const [assignee, setAssignee] = useState<User | null>(() => users.find((u) => u.id === currentUserId) ?? null);
     const [selectedPerson, setSelectedPerson] = useState<Contact | null>(() => defaultPerson);

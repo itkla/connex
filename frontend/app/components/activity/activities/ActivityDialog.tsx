@@ -58,6 +58,12 @@ type Props = {
     defaultDeal?: Deal | null;
     /** Prefills the timestamp (a `datetime-local` value); defaults to now when omitted. */
     defaultTimestamp?: string;
+    /** Prefills the activity type, e.g. carried over from the Quick Create panel. */
+    defaultType?: ActivityType;
+    /** Prefills the subject, e.g. carried over from the Quick Create panel. */
+    defaultSubject?: string;
+    /** Prefills the notes, e.g. carried over from the Quick Create panel. */
+    defaultNotes?: string;
 };
 
 function nowLocalValue(): string {
@@ -75,6 +81,9 @@ export default function ActivityDialog({
     defaultPerson = null,
     defaultDeal = null,
     defaultTimestamp,
+    defaultType,
+    defaultSubject = '',
+    defaultNotes = '',
 }: Props) {
     const router = useRouter();
     const t = useTranslations('ActivityCreateDialog');
@@ -92,14 +101,14 @@ export default function ActivityDialog({
     useEffect(() => {
         if (!open) return;
         // eslint-disable-next-line react-hooks/set-state-in-effect
-        setType(ACTIVITY_TYPES[0]);
-        setSubject('');
-        setNotes('');
+        setType(defaultType ?? ACTIVITY_TYPES[0]);
+        setSubject(defaultSubject);
+        setNotes(defaultNotes);
         setWhen(defaultTimestamp ?? nowLocalValue());
         setSelectedPerson(defaultPerson ?? null);
         setSelectedDeal(defaultDeal ?? null);
         resetFieldErrors();
-    }, [open, defaultPerson, defaultDeal, defaultTimestamp, resetFieldErrors]);
+    }, [open, defaultPerson, defaultDeal, defaultTimestamp, defaultType, defaultSubject, defaultNotes, resetFieldErrors]);
 
     const handleListWheel = (e: WheelEvent<HTMLDivElement>) => {
         const lineHeightPx = 16;

@@ -61,11 +61,34 @@ export type ActionContext = {
     can: PermissionCheck;
 };
 
+/**
+ * Context-aware prefills carried into a create overlay. Every field is optional and always remains
+ * user-editable; the shell never silently carries defaults across workspaces. Ids pair with a label so
+ * a form can render a selected option without first fetching the full reference list.
+ */
+export type CreateDefaults = {
+    companyId?: number;
+    companyLabel?: string;
+    personId?: number;
+    personLabel?: string;
+    dealId?: number;
+    dealLabel?: string;
+    pipelineId?: number;
+};
+
+/** Values typed into a quick-create form, carried into the full dialog when the user asks for more detail. */
+export type TaskDraft = { description?: string; dueDate?: string };
+export type NoteDraft = { content?: string };
+export type ActivityDraft = { type?: string; subject?: string; notes?: string };
+
 /** A shell-owned overlay an action can open. The union is closed; later work extends it additively. */
 export type OverlayRequest =
-    | { kind: "create-task" }
-    | { kind: "create-note" }
-    | { kind: "create-activity" };
+    | { kind: "create-task"; defaults?: CreateDefaults; draft?: TaskDraft }
+    | { kind: "create-note"; defaults?: CreateDefaults; draft?: NoteDraft }
+    | { kind: "create-activity"; defaults?: CreateDefaults; draft?: ActivityDraft }
+    | { kind: "create-company"; defaults?: CreateDefaults }
+    | { kind: "create-person"; defaults?: CreateDefaults }
+    | { kind: "create-deal"; defaults?: CreateDefaults };
 
 /**
  * The imperative capabilities handed to {@link AppAction.execute}. Kept out of {@link ActionContext}

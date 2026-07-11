@@ -44,6 +44,8 @@ type Props = {
     currentUserId: number;
     defaultPerson?: Contact | null;
     defaultDeal?: Deal | null;
+    /** Prefills the note content, e.g. text carried over from the Quick Create panel. */
+    defaultContent?: string;
 };
 
 export default function NoteDialog({
@@ -55,6 +57,7 @@ export default function NoteDialog({
     currentUserId,
     defaultPerson = null,
     defaultDeal = null,
+    defaultContent = '',
 }: Props) {
     const submittingRef = useRef(false);
 
@@ -73,6 +76,7 @@ export default function NoteDialog({
                     currentUserId={currentUserId}
                     defaultPerson={defaultPerson}
                     defaultDeal={defaultDeal}
+                    defaultContent={defaultContent}
                     onSubmittingChange={(value) => {
                         submittingRef.current = value;
                     }}
@@ -90,6 +94,7 @@ type FormProps = {
     currentUserId: number;
     defaultPerson: Contact | null;
     defaultDeal: Deal | null;
+    defaultContent: string;
     onSubmittingChange: (value: boolean) => void;
     onClose: () => void;
 };
@@ -105,6 +110,7 @@ function NoteDialogForm({
     currentUserId,
     defaultPerson,
     defaultDeal,
+    defaultContent,
     onSubmittingChange,
     onClose,
 }: FormProps) {
@@ -112,7 +118,7 @@ function NoteDialogForm({
     const t = useTranslations('ActivityNotesDialog');
     const isEdit = note !== null;
 
-    const [content, setContent] = useState(() => note?.content ?? '');
+    const [content, setContent] = useState(() => note?.content ?? defaultContent);
     const [selectedPerson, setSelectedPerson] = useState<Contact | null>(() =>
         note ? persons.find((p) => p.id === note.person) ?? null : defaultPerson,
     );
