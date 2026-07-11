@@ -4,10 +4,12 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.List;
+import java.util.Locale;
 import java.util.stream.Collectors;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.context.i18n.LocaleContextHolder;
 
 import ooo.klae.connex.backend.ai.masking.MaskedMessage;
 import ooo.klae.connex.backend.ai.masking.MaskedPrompt;
@@ -65,6 +67,49 @@ class IntroRationaleAssemblerTest {
         assertFalse(serialized.contains("alice.ng@atlas.example"));
         assertFalse(serialized.contains("https://cdn.example/alice.png"));
         assertFalse(serialized.contains("https://cdn.example/bob.png"));
+    }
+
+    @Test
+    void assemble_omitsDelimiterOnlyIdentifierWithoutCorruptingFreeText() {
+        IntroSuggestionDto suggestion = new IntroSuggestionDto();
+        suggestion.setPersonAId(41);
+        suggestion.setPersonAName("Alice Ng");
+        suggestion.setPersonATitle("Head of Sales");
+        suggestion.setPersonACompany("{{}}");
+        suggestion.setPersonAWarmth("warm");
+        suggestion.setPersonBId(73);
+        suggestion.setPersonBName("Bob Lee");
+        suggestion.setPersonBCompany("Beacon Labs");
+        suggestion.setPersonBWarmth("hot");
+        suggestion.setScore(50);
+        suggestion.setReasons(List.of("mutual_connections"));
+        suggestion.setMutualConnections(2);
+
+        String serialized = serialized(assembler.assemble(WORKSPACE_ID, suggestion).prompt());
+
+        assertTrue(serialized.contains("Title: Head of Sales"));
+        assertFalse(serialized.contains("Company: {{}}"));
+    }
+
+    @Test
+    void assemble_threadsRequestLocaleIntoSystemPrompt() {
+        LocaleContextHolder.setLocale(Locale.JAPANESE);
+        try {
+            IntroSuggestionDto suggestion = new IntroSuggestionDto();
+            suggestion.setPersonAId(1);
+            suggestion.setPersonAName("Alice Ng");
+            suggestion.setPersonBId(2);
+            suggestion.setPersonBName("Bob Lee");
+            suggestion.setScore(40);
+            suggestion.setReasons(List.of("mutual_connections"));
+            suggestion.setMutualConnections(1);
+
+            String systemPrompt = assembler.assemble(WORKSPACE_ID, suggestion).prompt().getSystemPrompt();
+
+            assertTrue(systemPrompt.contains("Japanese"));
+        } finally {
+            LocaleContextHolder.resetLocaleContext();
+        }
     }
 
     private static String serialized(MaskedPrompt prompt) {

@@ -123,6 +123,16 @@ class MaskingEngineTest {
     }
 
     @Test
+    void maskFreeText_ignoresDelimiterOnlyRegisteredIdentifier() {
+        MaskingContext ctx = new MaskingContext();
+        MaskingEngine.maskField(EntityKind.COMPANY, "{{}}", ctx);
+
+        String masked = MaskingEngine.maskFreeText("Deal closes soon", ctx);
+
+        assertEquals("Deal closes soon", masked);
+    }
+
+    @Test
     void maskFreeText_normalizesUnicodeLineSeparators() {
         MaskingContext ctx = new MaskingContext();
 

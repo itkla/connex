@@ -85,6 +85,9 @@ public final class MaskingContext {
     List<IdentifierEntry> identifierEntriesByLongestRawValue() {
         List<IdentifierEntry> entries = new ArrayList<>();
         for (Map.Entry<String, String> entry : rawIdentifierToToken.entrySet()) {
+            if (entry.getKey().isBlank()) {
+                continue;
+            }
             entries.add(new IdentifierEntry(entry.getKey(), entry.getValue()));
         }
         entries.sort(Comparator.comparingInt((IdentifierEntry entry) -> entry.rawValue().length()).reversed());

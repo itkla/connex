@@ -2,8 +2,10 @@ package ooo.klae.connex.backend.ai.introrationale;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Objects;
 
+import org.springframework.context.i18n.LocaleContextHolder;
 import org.springframework.stereotype.Service;
 
 import ooo.klae.connex.backend.ai.masking.EntityKind;
@@ -63,7 +65,7 @@ public class IntroRationaleAssembler {
                 reasonCodes,
                 sharedCompany);
         MaskedPrompt prompt = PromptAssembly.builder()
-                .system(SYSTEM_PROMPT)
+                .system(SYSTEM_PROMPT + languageDirective())
                 .userTurn(userPrompt)
                 .build();
         return new IntroRationaleAssembly(context, prompt);
@@ -110,8 +112,13 @@ public class IntroRationaleAssembler {
         return String.join(", ", maskedReasons);
     }
 
+    private static String languageDirective() {
+        String language = LocaleContextHolder.getLocale().getDisplayLanguage(Locale.ENGLISH);
+        return "\nWrite the rationale in " + (language.isBlank() ? "English" : language) + ".";
+    }
+
     private static String identifierToken(EntityKind kind, String value, MaskingContext context) {
-        if (isBlank(value)) {
+        if (isBlank(value) || value.replace("{{", "").replace("}}", "").isBlank()) {
             return null;
         }
         return MaskingEngine.maskField(kind, value, context);
