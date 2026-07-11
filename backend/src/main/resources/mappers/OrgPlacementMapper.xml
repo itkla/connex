@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="ooo.klae.connex.backend.mappers.OrgPlacementMapper">
+
+  <resultMap id="OrgPlacementResult" type="OrgPlacement">
+    <id property="orgId" column="org_id"/>
+    <result property="placementMode" column="placement_mode"/>
+    <result property="databaseHandle" column="database_handle"/>
+    <result property="storageEncryptionMode" column="storage_encryption_mode"/>
+    <result property="keyController" column="key_controller"/>
+    <result property="kmsProvider" column="kms_provider"/>
+    <result property="kmsKeyRef" column="kms_key_ref"/>
+    <result property="kmsKeyRegion" column="kms_key_region"/>
+    <result property="revocationSupported" column="revocation_supported"/>
+    <result property="revocationEffect" column="revocation_effect"/>
+    <result property="backupEncryptionMode" column="backup_encryption_mode"/>
+    <result property="snapshotCopyPolicy" column="snapshot_copy_policy"/>
+    <result property="restoreValidationState" column="restore_validation_state"/>
+    <result property="evidenceCheckedAt" column="evidence_checked_at"/>
+    <result property="createdAt" column="created_at"/>
+    <result property="updatedAt" column="updated_at"/>
+  </resultMap>
+
+  <sql id="columns">
+    org_id, placement_mode, database_handle, storage_encryption_mode, key_controller,
+    kms_provider, kms_key_ref, kms_key_region, revocation_supported, revocation_effect,
+    backup_encryption_mode, snapshot_copy_policy, restore_validation_state,
+    evidence_checked_at, created_at, updated_at
+  </sql>
+
+  <select id="findByOrg" resultMap="OrgPlacementResult">
+    SELECT <include refid="columns"/>
+    FROM org_placement
+    WHERE org_id = #{orgId}
+  </select>
+
+  <insert id="insert">
+    INSERT INTO org_placement
+      (org_id, placement_mode, database_handle, storage_encryption_mode, key_controller,
+       kms_provider, kms_key_ref, kms_key_region, revocation_supported, revocation_effect,
+       backup_encryption_mode, snapshot_copy_policy, restore_validation_state, evidence_checked_at)
+    VALUES
+      (#{orgId}, #{placementMode}, #{databaseHandle}, #{storageEncryptionMode}, #{keyController},
+       #{kmsProvider}, #{kmsKeyRef}, #{kmsKeyRegion}, #{revocationSupported}, #{revocationEffect},
+       #{backupEncryptionMode}, #{snapshotCopyPolicy}, #{restoreValidationState}, #{evidenceCheckedAt})
+  </insert>
+</mapper>
