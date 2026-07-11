@@ -1,7 +1,6 @@
 package ooo.klae.connex.backend.ai.masking;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNull;
 
 import org.junit.jupiter.api.Test;
 
@@ -74,17 +73,16 @@ class DemaskerTest {
     }
 
     @Test
-    void demaskTreeReidentifiesPropertyNames() {
+    void demaskTreeLeavesPropertyNamesButDemasksTheirValues() {
         MaskingContext ctx = new MaskingContext();
         String person = MaskingEngine.maskField(EntityKind.PERSON, "Mina Patel", ctx);
 
         ObjectNode root = mapper.createObjectNode();
-        root.put(person, "primary owner");
+        root.put(person, "owned by " + person);
 
         int warnings = Demasker.demaskTree(root, ctx);
 
         assertEquals(0, warnings);
-        assertEquals("primary owner", root.get("Mina Patel").asString());
-        assertNull(root.get(person));
+        assertEquals("owned by Mina Patel", root.get(person).asString());
     }
 }

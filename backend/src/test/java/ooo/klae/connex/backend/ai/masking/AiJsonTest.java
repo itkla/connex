@@ -68,6 +68,11 @@ class AiJsonTest {
     }
 
     @Test
+    void returnsNullForOversizedBraceHeavyInputWithoutBlowup() {
+        assertNull(AiJson.extractObject("{".repeat(200_000), mapper));
+    }
+
+    @Test
     void returnsFirstOfTwoObjects() {
         String text = "{\"rationale\":\"first\"} then {\"rationale\":\"second\"}";
 

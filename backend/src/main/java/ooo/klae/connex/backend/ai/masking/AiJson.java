@@ -16,11 +16,17 @@ import tools.jackson.databind.node.ObjectNode;
  * placeholder tokens such as {@code {{P1}}} can never confuse the boundary detection.
  */
 public final class AiJson {
+    private static final int MAX_SCAN_CHARS = 100_000;
+    private static final int MAX_CANDIDATES = 256;
+
     private AiJson() {
     }
 
     /**
-     * Returns the first substring of {@code text} that parses as a complete JSON object.
+     * Returns the first substring of {@code text} that parses as a complete JSON object. To keep the
+     * scan linear against adversarial provider output, only the first {@value #MAX_SCAN_CHARS}
+     * characters are considered and at most {@value #MAX_CANDIDATES} candidate positions are tried;
+     * legitimate output is far smaller (bounded by the invocation token cap).
      * @param text provider completion text
      * @param mapper configured object mapper
      * @return the parsed object node, or {@code null} when no complete JSON object is present
@@ -30,18 +36,20 @@ public final class AiJson {
         if (text == null || text.isBlank()) {
             return null;
         }
+        String scan = text.length() > MAX_SCAN_CHARS ? text.substring(0, MAX_SCAN_CHARS) : text;
         int from = 0;
-        while (true) {
-            int brace = text.indexOf('{', from);
+        for (int attempt = 0; attempt < MAX_CANDIDATES; attempt++) {
+            int brace = scan.indexOf('{', from);
             if (brace < 0) {
                 return null;
             }
-            ObjectNode object = tryParseObject(text.substring(brace), mapper);
+            ObjectNode object = tryParseObject(scan.substring(brace), mapper);
             if (object != null) {
                 return object;
             }
             from = brace + 1;
         }
+        return null;
     }
 
     private static ObjectNode tryParseObject(String candidate, ObjectMapper mapper) {

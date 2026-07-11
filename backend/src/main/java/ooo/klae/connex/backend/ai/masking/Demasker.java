@@ -1,7 +1,6 @@
 package ooo.klae.connex.backend.ai.masking;
 
 import java.util.ArrayList;
-import java.util.List;
 import java.util.Objects;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -50,9 +49,11 @@ public final class Demasker {
     }
 
     /**
-     * Demasks every textual value and property name in a parsed JSON tree in place. Operating on the
-     * parsed tree rather than the raw string keeps re-identification escape-safe: an original value
-     * containing a {@code "} or {@code \} can never corrupt the surrounding JSON.
+     * Demasks every textual value in a parsed JSON tree in place. Operating on the parsed tree rather
+     * than the raw string keeps re-identification escape-safe: an original value containing a
+     * {@code "} or {@code \} can never corrupt the surrounding JSON. Property names are left
+     * untouched: feature content binds to a fixed schema, so a placeholder that appears as a key is
+     * an unknown property that binding discards rather than a value that reaches a user.
      * @param node parsed JSON node, mutated in place
      * @param ctx request-local masking context
      * @return total number of unknown placeholder references encountered across the tree
@@ -64,8 +65,7 @@ public final class Demasker {
         }
         int warnings = 0;
         if (node instanceof ObjectNode object) {
-            List<String> names = new ArrayList<>(object.propertyNames());
-            for (String name : names) {
+            for (String name : new ArrayList<>(object.propertyNames())) {
                 JsonNode child = object.get(name);
                 if (child != null && child.isString()) {
                     DemaskResult value = demaskString(child.asString(), ctx);
@@ -73,11 +73,6 @@ public final class Demasker {
                     object.put(name, value.text());
                 } else {
                     warnings += demaskTree(child, ctx);
-                }
-                DemaskResult renamed = demaskString(name, ctx);
-                if (!renamed.text().equals(name)) {
-                    object.set(renamed.text(), object.remove(name));
-                    warnings += renamed.warnings();
                 }
             }
         } else if (node instanceof ArrayNode array) {
