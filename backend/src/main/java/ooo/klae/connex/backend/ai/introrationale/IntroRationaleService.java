@@ -4,6 +4,7 @@ import java.time.Clock;
 import java.time.Instant;
 import java.util.Optional;
 
+import org.springframework.context.i18n.LocaleContextHolder;
 import org.springframework.stereotype.Service;
 
 import lombok.RequiredArgsConstructor;
@@ -69,8 +70,9 @@ public class IntroRationaleService {
         }
 
         IntroRationaleAssembly assembly = introRationaleAssembler.assemble(workspaceId, suggestion);
+        String cacheFeature = cacheFeature();
         String contentHash = aiOutputCacheStore.contentHash(assembly.prompt(), assembly.context());
-        IntroRationaleDto cached = cached(workspaceId, lo, hi, contentHash);
+        IntroRationaleDto cached = cached(workspaceId, cacheFeature, lo, hi, contentHash);
         if (cached != null) {
             return cached;
         }
@@ -88,7 +90,7 @@ public class IntroRationaleService {
             }
             String rationale = truncate(content.rationale().strip(), MAX_RATIONALE_CHARS);
             String generatedAt = Instant.now(clock).toString();
-            aiOutputCacheStore.save(workspaceId, FEATURE, lo, hi,
+            aiOutputCacheStore.save(workspaceId, cacheFeature, lo, hi,
                     contentHash, new IntroRationaleContent(rationale), parsed.demaskWarnings(), generatedAt);
             return IntroRationaleDto.of(lo, hi, rationale, generatedAt, parsed.demaskWarnings());
         } catch (MaskingLeakException | AiProviderException exception) {
@@ -98,8 +100,8 @@ public class IntroRationaleService {
         }
     }
 
-    private IntroRationaleDto cached(int workspaceId, int lo, int hi, String contentHash) {
-        Optional<AiOutputCache> row = aiOutputCacheStore.find(workspaceId, FEATURE, lo, hi);
+    private IntroRationaleDto cached(int workspaceId, String cacheFeature, int lo, int hi, String contentHash) {
+        Optional<AiOutputCache> row = aiOutputCacheStore.find(workspaceId, cacheFeature, lo, hi);
         if (row.isEmpty() || !contentHash.equals(row.get().getContentHash())) {
             return null;
         }
@@ -114,6 +116,11 @@ public class IntroRationaleService {
                 truncate(content.get().rationale().strip(), MAX_RATIONALE_CHARS),
                 row.get().getGeneratedAt(),
                 row.get().getWarnings());
+    }
+
+    private static String cacheFeature() {
+        String language = LocaleContextHolder.getLocale().getLanguage();
+        return FEATURE + ':' + (language.isBlank() ? "en" : language);
     }
 
     private static String truncate(String value, int maxCodePoints) {

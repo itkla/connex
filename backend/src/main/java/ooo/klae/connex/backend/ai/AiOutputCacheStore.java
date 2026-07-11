@@ -33,6 +33,13 @@ public class AiOutputCacheStore {
     /** Sentinel used for {@code subjectBId} on single-subject (deal-scoped) features. */
     public static final int NO_SUBJECT = 0;
 
+    /**
+     * Folded into every content hash so that changes to how output is generated or displayed — which
+     * a purely prompt-derived hash would not otherwise reflect — invalidate previously stored rows on
+     * deploy. Bump this when output-shaping logic changes without a corresponding prompt change.
+     */
+    private static final String HASH_VERSION = "v1";
+
     private final AiOutputCacheMapper aiOutputCacheMapper;
     private final ObjectMapper objectMapper;
 
@@ -66,7 +73,8 @@ public class AiOutputCacheStore {
     }
 
     /**
-     * Upserts the stored output for a subject.
+     * Upserts the stored output for a subject. A serialization failure skips persistence rather than
+     * failing the caller, since a cache write must never break the user-facing response.
      * @param workspaceId active workspace
      * @param feature feature key
      * @param subjectAId primary subject id
@@ -78,13 +86,19 @@ public class AiOutputCacheStore {
      */
     public void save(int workspaceId, String feature, int subjectAId, int subjectBId, String contentHash,
             Object content, int warnings, String generatedAt) {
+        String payload;
+        try {
+            payload = objectMapper.writeValueAsString(content);
+        } catch (JacksonException exception) {
+            return;
+        }
         AiOutputCache entry = new AiOutputCache();
         entry.setWorkspaceId(workspaceId);
         entry.setFeature(feature);
         entry.setSubjectAId(subjectAId);
         entry.setSubjectBId(subjectBId);
         entry.setContentHash(contentHash);
-        entry.setPayload(objectMapper.writeValueAsString(content));
+        entry.setPayload(payload);
         entry.setWarnings(warnings);
         entry.setGeneratedAt(generatedAt);
         aiOutputCacheMapper.upsert(entry);
@@ -112,6 +126,7 @@ public class AiOutputCacheStore {
         Objects.requireNonNull(prompt, "prompt");
         Objects.requireNonNull(context, "context");
         StringBuilder serialized = new StringBuilder();
+        appendPart(serialized, HASH_VERSION);
         appendPart(serialized, prompt.getSystemPrompt());
         serialized.append(prompt.getMessages().size()).append(':');
         for (MaskedMessage message : prompt.getMessages()) {

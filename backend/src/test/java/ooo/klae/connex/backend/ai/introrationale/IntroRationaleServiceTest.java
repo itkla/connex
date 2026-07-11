@@ -15,14 +15,17 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.List;
+import java.util.Locale;
 import java.util.Optional;
 
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.context.i18n.LocaleContextHolder;
 
 import ooo.klae.connex.backend.ai.AiFeatureGate;
 import ooo.klae.connex.backend.ai.AiInvocation;
@@ -49,6 +52,7 @@ class IntroRationaleServiceTest {
     private static final int PERSON_A_ID = 29;
     private static final int PERSON_B_ID = 41;
     private static final String FEATURE = "intro.rationale";
+    private static final String CACHE_FEATURE = "intro.rationale:en";
     private static final String HASH = "content-hash-1";
     private static final Instant NOW = Instant.parse("2026-07-09T18:30:00Z");
 
@@ -72,6 +76,12 @@ class IntroRationaleServiceTest {
                 workspaceService,
                 Clock.fixed(NOW, ZoneOffset.UTC));
         when(workspaceService.getCurrentWorkspaceId()).thenReturn(WORKSPACE_ID);
+        LocaleContextHolder.setLocale(Locale.ENGLISH);
+    }
+
+    @AfterEach
+    void tearDown() {
+        LocaleContextHolder.resetLocaleContext();
     }
 
     @Test
@@ -122,7 +132,7 @@ class IntroRationaleServiceTest {
         verify(aiInvocationService).completeStructured(invocation.capture(), eq(IntroRationaleContent.class));
         assertEquals(FEATURE, invocation.getValue().feature());
         assertEquals(IntroRationaleService.MAX_TOKENS, invocation.getValue().maxTokens());
-        verify(aiOutputCacheStore).save(eq(WORKSPACE_ID), eq(FEATURE), eq(PERSON_A_ID), eq(PERSON_B_ID),
+        verify(aiOutputCacheStore).save(eq(WORKSPACE_ID), eq(CACHE_FEATURE), eq(PERSON_A_ID), eq(PERSON_B_ID),
                 eq(HASH), any(IntroRationaleContent.class), eq(2), eq(NOW.toString()));
     }
 
@@ -135,7 +145,7 @@ class IntroRationaleServiceTest {
                 .thenReturn(List.of(suggestion));
         when(introRationaleAssembler.assemble(WORKSPACE_ID, suggestion)).thenReturn(assembly);
         when(aiOutputCacheStore.contentHash(assembly.prompt(), assembly.context())).thenReturn(HASH);
-        when(aiOutputCacheStore.find(WORKSPACE_ID, FEATURE, PERSON_A_ID, PERSON_B_ID))
+        when(aiOutputCacheStore.find(WORKSPACE_ID, CACHE_FEATURE, PERSON_A_ID, PERSON_B_ID))
                 .thenReturn(Optional.of(row(HASH, 1, "2026-07-01T09:00:00Z")));
         when(aiOutputCacheStore.read("payload", IntroRationaleContent.class))
                 .thenReturn(Optional.of(new IntroRationaleContent("Stored rationale.")));
@@ -159,7 +169,7 @@ class IntroRationaleServiceTest {
                 .thenReturn(List.of(suggestion));
         when(introRationaleAssembler.assemble(WORKSPACE_ID, suggestion)).thenReturn(assembly);
         when(aiOutputCacheStore.contentHash(assembly.prompt(), assembly.context())).thenReturn(HASH);
-        when(aiOutputCacheStore.find(WORKSPACE_ID, FEATURE, PERSON_A_ID, PERSON_B_ID))
+        when(aiOutputCacheStore.find(WORKSPACE_ID, CACHE_FEATURE, PERSON_A_ID, PERSON_B_ID))
                 .thenReturn(Optional.of(row("stale-hash", 0, "2026-07-01T09:00:00Z")));
         when(aiInvocationService.completeStructured(any(AiInvocation.class), eq(IntroRationaleContent.class)))
                 .thenReturn(new AiStructuredOutcome.Parsed<>(new IntroRationaleContent("Fresh."), 0, 20, 10, "end_turn"));
@@ -169,7 +179,7 @@ class IntroRationaleServiceTest {
         assertEquals("Fresh.", result.getRationale());
         assertEquals(NOW.toString(), result.getGeneratedAt());
         verify(aiInvocationService).completeStructured(any(AiInvocation.class), eq(IntroRationaleContent.class));
-        verify(aiOutputCacheStore).save(eq(WORKSPACE_ID), eq(FEATURE), eq(PERSON_A_ID), eq(PERSON_B_ID),
+        verify(aiOutputCacheStore).save(eq(WORKSPACE_ID), eq(CACHE_FEATURE), eq(PERSON_A_ID), eq(PERSON_B_ID),
                 eq(HASH), any(IntroRationaleContent.class), eq(0), eq(NOW.toString()));
     }
 
@@ -226,7 +236,7 @@ class IntroRationaleServiceTest {
                 .thenReturn(List.of(suggestion));
         when(introRationaleAssembler.assemble(WORKSPACE_ID, suggestion)).thenReturn(assembly);
         when(aiOutputCacheStore.contentHash(assembly.prompt(), assembly.context())).thenReturn(HASH);
-        when(aiOutputCacheStore.find(WORKSPACE_ID, FEATURE, PERSON_A_ID, PERSON_B_ID))
+        when(aiOutputCacheStore.find(WORKSPACE_ID, CACHE_FEATURE, PERSON_A_ID, PERSON_B_ID))
                 .thenReturn(Optional.empty());
     }
 
