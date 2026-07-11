@@ -58,7 +58,8 @@ public interface DealMapper {
     );
     List<DealMonthTotalDto> revenueClosedByMonth(
         @Param("workspaceId") int workspaceId,
-        @Param("currency") String currency
+        @Param("currency") String currency,
+        @Param("tzOffset") String tzOffset
     );
     List<DealMonthTotalDto> revenueProjectedByMonth(
         @Param("workspaceId") int workspaceId,

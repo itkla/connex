@@ -59,6 +59,7 @@ import ooo.klae.connex.backend.util.PageBounds;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.regex.Pattern;
 
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -74,6 +75,7 @@ import lombok.RequiredArgsConstructor;
 public class DealController {
     private static final Set<String> DEAL_STATUSES = Set.of("open", "closed", "won", "lost");
     private static final Set<String> SORT_DIRECTIONS = Set.of("asc", "desc");
+    private static final Pattern TZ_OFFSET = Pattern.compile("^[+-]\\d{2}:\\d{2}$");
     private static final Set<String> ANALYTICS_RANGES = Set.of("30d", "90d", "12m");
 
     private final DealService dealService;
@@ -167,10 +169,11 @@ public class DealController {
      */
     @GetMapping("/revenue-timeseries")
     public DealRevenueSeriesDto getRevenueTimeseries(
-        @RequestParam(required = false) String currency
+        @RequestParam(required = false) String currency,
+        @RequestParam(required = false) String tzOffset
     ) {
         String normalizedCurrency = (currency == null || currency.isBlank()) ? null : currency;
-        return dealService.getRevenueTimeseries(normalizedCurrency);
+        return dealService.getRevenueTimeseries(normalizedCurrency, validateTzOffset(tzOffset));
     }
 
     /**
@@ -246,6 +249,16 @@ public class DealController {
         }
         if (!allowed.contains(value)) {
             throw new BadRequestException(parameter + " must be one of: " + String.join(", ", allowed));
+        }
+        return value;
+    }
+
+    private static String validateTzOffset(String value) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        if (!TZ_OFFSET.matcher(value).matches()) {
+            throw new BadRequestException("tzOffset must be a UTC offset like +09:00 or -05:00");
         }
         return value;
     }

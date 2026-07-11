@@ -217,7 +217,7 @@ export default async function Dashboard() {
     const [dealKpis, pipelineValues, revenueSeries, stageDistribution] = await Promise.all([
         getDealKpisFromCookie(cookie, currency, DASHBOARD_RANGE).catch(() => EMPTY_DEAL_KPIS),
         getDealPipelineValueFromCookie(cookie, currency, DASHBOARD_RANGE).catch(() => [] as DealPipelineValue[]),
-        getDealRevenueTimeseries(currency, init).catch(() => ({ closed: [], projected: [] }) as DealRevenueSeries),
+        getDealRevenueTimeseries(currency, undefined, init).catch(() => ({ closed: [], projected: [] }) as DealRevenueSeries),
         getDealStageDistribution(currency, init).catch(() => [] as DealStageDistribution[]),
     ]);
 

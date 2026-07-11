@@ -196,7 +196,8 @@
     ORDER BY d.currency
   </select>
 
-  <sql id="revenueRealizedMonth">CASE WHEN d.won = TRUE THEN COALESCE(d.expected_close_date, d.closed_at) ELSE d.closed_at END</sql>
+  <sql id="realizedClosedAt"><choose><when test="tzOffset != null">CONVERT_TZ(d.closed_at, '+00:00', #{tzOffset})</when><otherwise>d.closed_at</otherwise></choose></sql>
+  <sql id="revenueRealizedMonth">CASE WHEN d.won = TRUE THEN COALESCE(d.expected_close_date, <include refid="realizedClosedAt"/>) ELSE <include refid="realizedClosedAt"/> END</sql>
 
   <select id="revenueClosedByMonth" resultType="ooo.klae.connex.backend.dto.DealMonthTotalDto">
     SELECT YEAR(<include refid="revenueRealizedMonth"/>) AS year,
