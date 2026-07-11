@@ -132,6 +132,16 @@ sub-partitions inside an org. Decisions locked 2026-07-03 (recorded on #313):
   `DEDICATED_SAAS_CMK_FEASIBILITY.md`, remain distinct from hosted SaaS plaintext-access claims, and
   carry the future placement registry fields for storage encryption mode, key controller, KMS reference,
   backup encryption mode, restore validation, and revocation semantics (#369/#376).
+- **Deployment ladder (corrected 2026-07-10, #313/#100).** Four tiers, broad to deep-trust: pooled SaaS →
+  dedicated per-org database (both on the shared app fleet, logical isolation) → **Connex-operated dedicated
+  silo** → customer-operated on-prem. A silo is the *same* single-tenant deployable as on-prem (single-database
+  mode, one org), operated and hosted by Connex; it differs from on-prem only by operator, key custody, and
+  hosting, and from the dedicated-DB tier by running dedicated single-tenant infrastructure — which is what
+  makes customer-managed keys feasible (`DEDICATED_SAAS_CMK_FEASIBILITY.md`). One codebase still holds: the
+  shared-fleet path (pooled/dedicated-DB) uses placement routing (Phase 3/4); the silo/on-prem path is the
+  single-tenant deployable. Because a silo is Connex-operated, Connex can still reach silo data — the deep-trust
+  "Connex-blind" guarantee stays on-prem (`ENCRYPTION_GUARANTEE_MATRIX.md`). This reinstates the silo tier that
+  the 2026-07-03 record on #313 had dropped; #100 tracks it.
 - **Enforced seams:** (1) share grants are `INSERT..SELECT` with an ownership + same-org ceiling in SQL —
   0 affected rows means structurally refused (`ShareMapperTest`), and `ShareService` additionally throws;
   (2) **workspace→org placement**: a new workspace joins the active workspace's org only when its creator
@@ -272,6 +282,10 @@ snapshot — `findTaskReminderCandidates` joins `person` with no workspace predi
 
 **Shared-database, shared-schema** with a single `workspace_id` integer discriminator. Every business
 row belongs to exactly one workspace. Three classification rules:
+
+> This describes the **shared-fleet path** (pooled and dedicated-per-org-database tiers). The
+> Connex-operated silo and customer-operated on-prem tiers run this same schema as a single-tenant
+> deployment (one org, single database) — see the deployment ladder in §0.5.
 
 - **Directly-scoped** — the row *is* tenant data (top-level aggregate or polymorphic owner). Carries
   `workspace_id NOT NULL`, exposes `UNIQUE KEY uq_<t>_workspace_id (workspace_id, id)` so children can
