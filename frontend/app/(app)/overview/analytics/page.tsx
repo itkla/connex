@@ -11,7 +11,9 @@ import {
     getPipelinesFromCookie,
     getRecentMovesFromCookie,
     getStagesByPipelineId,
+    getTaskSummaryFromCookie,
     getUsers,
+    getWarmthSummaryFromCookie,
 } from '@/app/lib/api';
 import type {
     DealMetrics,
@@ -21,11 +23,20 @@ import type {
     JobMove,
     Pipeline,
     Stage,
+    TaskSummary,
     User,
+    WarmthSummary,
 } from '@/app/lib/types';
 import AnalyticsBoard from '@/app/components/overview/analytics/AnalyticsBoard';
 
 const EMPTY_DEAL_METRICS: DealMetrics = { byCurrency: [], totalCount: 0 };
+const EMPTY_TASK_SUMMARY: TaskSummary = { todo: 0, inProgress: 0, done: 0, overdue: 0, dueSoon: 0 };
+const EMPTY_WARMTH_SUMMARY: WarmthSummary = {
+    contacts: { hot: 0, warm: 0, cool: 0, cold: 0 },
+    companies: { hot: 0, warm: 0, cool: 0, cold: 0 },
+    contactTrends: { rising: 0, steady: 0, cooling: 0 },
+    contactDecay: { soon: 0, mid: 0, later: 0 },
+};
 
 export const metadata: Metadata = {
     title: 'Analytics',
@@ -49,6 +60,8 @@ export default async function AnalyticsPage() {
         introSuggestions,
         recentMoves,
         introLineage,
+        taskSummary,
+        warmth,
     ] = await Promise.all([
         getDealMetricsFromCookie(cookie).catch(() => EMPTY_DEAL_METRICS),
         getPipelinesFromCookie(cookie).catch(() => [] as Pipeline[]),
@@ -59,6 +72,8 @@ export default async function AnalyticsPage() {
         getIntroductions({ size: 500 }, init)
             .then((page) => page.items)
             .catch(() => [] as IntroductionRecord[]),
+        getTaskSummaryFromCookie(cookie).catch(() => EMPTY_TASK_SUMMARY),
+        getWarmthSummaryFromCookie(cookie).catch(() => EMPTY_WARMTH_SUMMARY),
     ]);
 
     const stageLists = await Promise.all(
@@ -76,6 +91,8 @@ export default async function AnalyticsPage() {
             introSuggestions={introSuggestions}
             introLineage={introLineage}
             recentMoves={recentMoves}
+            taskSummary={taskSummary}
+            warmth={warmth}
         />
     );
 }

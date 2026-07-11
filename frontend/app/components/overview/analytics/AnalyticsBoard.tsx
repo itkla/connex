@@ -40,9 +40,7 @@ import {
     getDealRevenueTimeseries,
     getDealStageDistribution,
     getDealTop,
-    getTaskSummary,
     getTeamLeaderboard,
-    getWarmthSummary,
 } from '@/app/lib/api';
 import { formatCompactCurrency } from '@/app/lib/utils';
 import DealsAging from '@/app/components/records/deals/DealsAging';
@@ -88,21 +86,6 @@ const EMPTY_KPIS: DealKpis = {
 
 const EMPTY_TOP: DealTop = { topOpen: [], topWon: [] };
 
-const EMPTY_TASK_SUMMARY: TaskSummary = {
-    todo: 0,
-    inProgress: 0,
-    done: 0,
-    overdue: 0,
-    dueSoon: 0,
-};
-
-const EMPTY_WARMTH_SUMMARY: WarmthSummary = {
-    contacts: { hot: 0, warm: 0, cool: 0, cold: 0 },
-    companies: { hot: 0, warm: 0, cool: 0, cold: 0 },
-    contactTrends: { rising: 0, steady: 0, cooling: 0 },
-    contactDecay: { soon: 0, mid: 0, later: 0 },
-};
-
 function Reveal({
     children,
     index,
@@ -135,6 +118,8 @@ export default function AnalyticsBoard({
     introSuggestions,
     introLineage,
     recentMoves,
+    taskSummary,
+    warmth,
 }: {
     dealMetrics: DealMetrics;
     pipelines: Pipeline[];
@@ -144,6 +129,8 @@ export default function AnalyticsBoard({
     introSuggestions: IntroSuggestion[];
     introLineage: IntroductionRecord[];
     recentMoves: JobMove[];
+    taskSummary: TaskSummary;
+    warmth: WarmthSummary;
 }) {
     const t = useTranslations('AnalyticsPage');
     const tRevenue = useTranslations('AnalyticsRevenue');
@@ -185,8 +172,6 @@ export default function AnalyticsBoard({
     const [stageDistribution, setStageDistribution] = useState<DealStageDistribution[]>([]);
     const [activityBuckets, setActivityBuckets] = useState<ActivityVolumeBucket[]>([]);
     const [leaderboard, setLeaderboard] = useState<TeamLeaderboardEntry[]>([]);
-    const [taskSummary, setTaskSummary] = useState<TaskSummary>(EMPTY_TASK_SUMMARY);
-    const [warmth, setWarmth] = useState<WarmthSummary>(EMPTY_WARMTH_SUMMARY);
 
     useEffect(() => {
         let cancelled = false;
@@ -226,17 +211,6 @@ export default function AnalyticsBoard({
             .catch(() => { if (!cancelled) setLeaderboard([]); });
         return () => { cancelled = true; };
     }, [range]);
-
-    useEffect(() => {
-        let cancelled = false;
-        getTaskSummary()
-            .then((data) => { if (!cancelled) setTaskSummary(data); })
-            .catch(() => { if (!cancelled) setTaskSummary(EMPTY_TASK_SUMMARY); });
-        getWarmthSummary()
-            .then((data) => { if (!cancelled) setWarmth(data); })
-            .catch(() => { if (!cancelled) setWarmth(EMPTY_WARMTH_SUMMARY); });
-        return () => { cancelled = true; };
-    }, []);
 
     const openPipeline = useMemo(
         () => dealMetrics.byCurrency.find((c) => c.currency === currency)?.openValue ?? 0,
