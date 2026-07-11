@@ -1,16 +1,8 @@
 package ooo.klae.connex.backend.ai.introrationale;
 
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.time.Clock;
-import java.time.Duration;
 import java.time.Instant;
-import java.util.Comparator;
-import java.util.HexFormat;
-import java.util.List;
-import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
+import java.util.Optional;
 
 import org.springframework.stereotype.Service;
 
@@ -18,12 +10,11 @@ import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.ai.AiFeatureGate;
 import ooo.klae.connex.backend.ai.AiInvocation;
 import ooo.klae.connex.backend.ai.AiInvocationService;
+import ooo.klae.connex.backend.ai.AiOutputCacheStore;
 import ooo.klae.connex.backend.ai.AiStructuredOutcome;
-import ooo.klae.connex.backend.ai.masking.MaskedMessage;
-import ooo.klae.connex.backend.ai.masking.MaskedPrompt;
-import ooo.klae.connex.backend.ai.masking.MaskingContext;
 import ooo.klae.connex.backend.ai.masking.MaskingLeakException;
 import ooo.klae.connex.backend.ai.provider.AiProviderException;
+import ooo.klae.connex.backend.beans.AiOutputCache;
 import ooo.klae.connex.backend.dto.IntroRationaleDto;
 import ooo.klae.connex.backend.dto.IntroSuggestionDto;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
@@ -31,7 +22,8 @@ import ooo.klae.connex.backend.services.IntroductionService;
 import ooo.klae.connex.backend.services.WorkspaceService;
 
 /**
- * Generates presentation-only introduction rationales through the audited AI invocation boundary.
+ * Generates presentation-only introduction rationales through the audited AI invocation boundary,
+ * reusing a persisted output while the suggestion's assembled context is unchanged.
  */
 @Service
 @RequiredArgsConstructor
@@ -39,8 +31,6 @@ public class IntroRationaleService {
     static final int MAX_TOKENS = 512;
     static final int MAX_RATIONALE_CHARS = 400;
     static final double TEMPERATURE = 0.2;
-    static final int MAX_CACHE_ENTRIES = 256;
-    static final Duration CACHE_TTL = Duration.ofMinutes(30);
     static final int RESOLVE_LIMIT = 50;
 
     private static final String FEATURE = "intro.rationale";
@@ -52,9 +42,9 @@ public class IntroRationaleService {
     private final AiInvocationService aiInvocationService;
     private final AiFeatureGate aiFeatureGate;
     private final IntroductionService introductionService;
+    private final AiOutputCacheStore aiOutputCacheStore;
     private final WorkspaceService workspaceService;
     private final Clock clock;
-    private final ConcurrentHashMap<String, CachedRationale> cache = new ConcurrentHashMap<>();
 
     /**
      * Generates or reuses a fresh rationale for a workspace-scoped introduction suggestion.
@@ -79,9 +69,8 @@ public class IntroRationaleService {
         }
 
         IntroRationaleAssembly assembly = introRationaleAssembler.assemble(workspaceId, suggestion);
-        String cacheKey = cacheKey(workspaceId, lo, hi, assembly.prompt(), assembly.context());
-        Instant now = Instant.now(clock);
-        IntroRationaleDto cached = cached(cacheKey, now);
+        String contentHash = aiOutputCacheStore.contentHash(assembly.prompt(), assembly.context());
+        IntroRationaleDto cached = cached(workspaceId, lo, hi, contentHash);
         if (cached != null) {
             return cached;
         }
@@ -97,17 +86,34 @@ public class IntroRationaleService {
             if (content == null || isBlank(content.rationale())) {
                 return IntroRationaleDto.unavailable(lo, hi, PROVIDER_ERROR);
             }
-            Instant generatedAt = Instant.now(clock);
-            IntroRationaleDto rationale = IntroRationaleDto.of(
-                    lo, hi, truncate(content.rationale().strip(), MAX_RATIONALE_CHARS),
-                    generatedAt.toString(), parsed.demaskWarnings());
-            cache(cacheKey, rationale, generatedAt.plus(CACHE_TTL));
-            return rationale;
+            String rationale = truncate(content.rationale().strip(), MAX_RATIONALE_CHARS);
+            String generatedAt = Instant.now(clock).toString();
+            aiOutputCacheStore.save(workspaceId, FEATURE, lo, hi,
+                    contentHash, new IntroRationaleContent(rationale), parsed.demaskWarnings(), generatedAt);
+            return IntroRationaleDto.of(lo, hi, rationale, generatedAt, parsed.demaskWarnings());
         } catch (MaskingLeakException | AiProviderException exception) {
             return IntroRationaleDto.unavailable(lo, hi, PROVIDER_ERROR);
         } catch (ForbiddenException exception) {
             return IntroRationaleDto.unavailable(lo, hi, NOT_CONFIGURED);
         }
+    }
+
+    private IntroRationaleDto cached(int workspaceId, int lo, int hi, String contentHash) {
+        Optional<AiOutputCache> row = aiOutputCacheStore.find(workspaceId, FEATURE, lo, hi);
+        if (row.isEmpty() || !contentHash.equals(row.get().getContentHash())) {
+            return null;
+        }
+        Optional<IntroRationaleContent> content = aiOutputCacheStore.read(
+                row.get().getPayload(), IntroRationaleContent.class);
+        if (content.isEmpty() || isBlank(content.get().rationale())) {
+            return null;
+        }
+        return IntroRationaleDto.of(
+                lo,
+                hi,
+                truncate(content.get().rationale().strip(), MAX_RATIONALE_CHARS),
+                row.get().getGeneratedAt(),
+                row.get().getWarnings());
     }
 
     private static String truncate(String value, int maxCodePoints) {
@@ -121,76 +127,5 @@ public class IntroRationaleService {
 
     private static boolean isBlank(String value) {
         return value == null || value.isBlank();
-    }
-
-    private IntroRationaleDto cached(String key, Instant now) {
-        CachedRationale cached = cache.get(key);
-        if (cached == null) {
-            return null;
-        }
-        if (now.isBefore(cached.expiresAt())) {
-            return cached.rationale();
-        }
-        cache.remove(key, cached);
-        return null;
-    }
-
-    private void cache(String key, IntroRationaleDto rationale, Instant expiresAt) {
-        synchronized (cache) {
-            cache.entrySet().removeIf(entry -> !Instant.now(clock).isBefore(entry.getValue().expiresAt()));
-            if (!cache.containsKey(key) && cache.size() >= MAX_CACHE_ENTRIES) {
-                cache.entrySet().stream()
-                        .min(Map.Entry.comparingByValue(Comparator.comparing(CachedRationale::expiresAt)))
-                        .ifPresent(entry -> cache.remove(entry.getKey(), entry.getValue()));
-            }
-            cache.put(key, new CachedRationale(rationale, expiresAt));
-        }
-    }
-
-    private static String cacheKey(
-            int workspaceId,
-            int personAId,
-            int personBId,
-            MaskedPrompt prompt,
-            MaskingContext context) {
-        return workspaceId + ":" + personAId + ":" + personBId + ":" + contextHash(prompt, context);
-    }
-
-    private static String contextHash(MaskedPrompt prompt, MaskingContext context) {
-        try {
-            MessageDigest digest = MessageDigest.getInstance("SHA-256");
-            digest.update(serialized(prompt, context).getBytes(StandardCharsets.UTF_8));
-            return HexFormat.of().formatHex(digest.digest());
-        } catch (NoSuchAlgorithmException exception) {
-            throw new IllegalStateException("SHA-256 is not available", exception);
-        }
-    }
-
-    private static String serialized(MaskedPrompt prompt, MaskingContext context) {
-        StringBuilder serialized = new StringBuilder();
-        appendPart(serialized, prompt.getSystemPrompt());
-        serialized.append(prompt.getMessages().size()).append(':');
-        for (MaskedMessage message : prompt.getMessages()) {
-            appendPart(serialized, message.getRole());
-            appendPart(serialized, message.getContent());
-        }
-        List<Map.Entry<String, String>> bindings = context.tokenBindings();
-        serialized.append(bindings.size()).append(':');
-        for (Map.Entry<String, String> binding : bindings) {
-            appendPart(serialized, binding.getKey());
-            appendPart(serialized, binding.getValue());
-        }
-        return serialized.toString();
-    }
-
-    private static void appendPart(StringBuilder serialized, String value) {
-        if (value == null) {
-            serialized.append("-1:");
-            return;
-        }
-        serialized.append(value.length()).append(':').append(value);
-    }
-
-    private record CachedRationale(IntroRationaleDto rationale, Instant expiresAt) {
     }
 }

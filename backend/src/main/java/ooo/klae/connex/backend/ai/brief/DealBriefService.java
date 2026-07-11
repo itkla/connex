@@ -1,17 +1,10 @@
 package ooo.klae.connex.backend.ai.brief;
 
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.time.Clock;
-import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
-import java.util.Comparator;
-import java.util.HexFormat;
 import java.util.List;
-import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
+import java.util.Optional;
 
 import org.springframework.stereotype.Service;
 
@@ -19,18 +12,18 @@ import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.ai.AiFeatureGate;
 import ooo.klae.connex.backend.ai.AiInvocation;
 import ooo.klae.connex.backend.ai.AiInvocationService;
+import ooo.klae.connex.backend.ai.AiOutputCacheStore;
 import ooo.klae.connex.backend.ai.AiStructuredOutcome;
-import ooo.klae.connex.backend.ai.masking.MaskedMessage;
-import ooo.klae.connex.backend.ai.masking.MaskedPrompt;
-import ooo.klae.connex.backend.ai.masking.MaskingContext;
 import ooo.klae.connex.backend.ai.masking.MaskingLeakException;
 import ooo.klae.connex.backend.ai.provider.AiProviderException;
+import ooo.klae.connex.backend.beans.AiOutputCache;
 import ooo.klae.connex.backend.dto.DealBriefDto;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.services.WorkspaceService;
 
 /**
- * Generates presentation-only deal briefs through the audited AI invocation boundary.
+ * Generates presentation-only deal briefs through the audited AI invocation boundary, reusing a
+ * persisted output while the deal's assembled context is unchanged.
  */
 @Service
 @RequiredArgsConstructor
@@ -40,8 +33,6 @@ public class DealBriefService {
     static final int MAX_TITLE_CHARS = 160;
     static final int MAX_BODY_CHARS = 2000;
     static final double TEMPERATURE = 0.2;
-    static final int MAX_CACHE_ENTRIES = 256;
-    static final Duration CACHE_TTL = Duration.ofMinutes(30);
 
     private static final String FEATURE = "deal.brief";
     private static final String NOT_CONFIGURED = "not_configured";
@@ -50,9 +41,9 @@ public class DealBriefService {
     private final DealBriefAssembler dealBriefAssembler;
     private final AiInvocationService aiInvocationService;
     private final AiFeatureGate aiFeatureGate;
+    private final AiOutputCacheStore aiOutputCacheStore;
     private final WorkspaceService workspaceService;
     private final Clock clock;
-    private final ConcurrentHashMap<String, CachedBrief> cache = new ConcurrentHashMap<>();
 
     /**
      * Generates or reuses a fresh brief for a workspace-scoped deal.
@@ -66,9 +57,8 @@ public class DealBriefService {
         }
 
         BriefAssembly assembly = dealBriefAssembler.assemble(workspaceId, dealId);
-        String cacheKey = cacheKey(workspaceId, dealId, assembly.prompt(), assembly.context());
-        Instant now = Instant.now(clock);
-        DealBriefDto cached = cached(cacheKey, now);
+        String contentHash = aiOutputCacheStore.contentHash(assembly.prompt(), assembly.context());
+        DealBriefDto cached = cached(workspaceId, dealId, contentHash);
         if (cached != null) {
             return cached;
         }
@@ -80,15 +70,14 @@ public class DealBriefService {
             if (!(outcome instanceof AiStructuredOutcome.Parsed<DealBriefContent> parsed)) {
                 return DealBriefDto.unavailable(dealId, PROVIDER_ERROR);
             }
-            List<DealBriefDto.Section> sections = sections(parsed.value());
+            List<DealBriefContent.Section> sections = sections(parsed.value());
             if (sections.isEmpty()) {
                 return DealBriefDto.unavailable(dealId, PROVIDER_ERROR);
             }
-            Instant generatedAt = Instant.now(clock);
-            DealBriefDto brief = DealBriefDto.of(
-                    dealId, sections, generatedAt.toString(), parsed.demaskWarnings());
-            cache(cacheKey, brief, generatedAt.plus(CACHE_TTL));
-            return brief;
+            String generatedAt = Instant.now(clock).toString();
+            aiOutputCacheStore.save(workspaceId, FEATURE, dealId, AiOutputCacheStore.NO_SUBJECT,
+                    contentHash, new DealBriefContent(sections), parsed.demaskWarnings(), generatedAt);
+            return DealBriefDto.of(dealId, toDtoSections(sections), generatedAt, parsed.demaskWarnings());
         } catch (MaskingLeakException | AiProviderException exception) {
             return DealBriefDto.unavailable(dealId, PROVIDER_ERROR);
         } catch (ForbiddenException exception) {
@@ -96,16 +85,34 @@ public class DealBriefService {
         }
     }
 
-    private static List<DealBriefDto.Section> sections(DealBriefContent content) {
+    private DealBriefDto cached(int workspaceId, int dealId, String contentHash) {
+        Optional<AiOutputCache> row = aiOutputCacheStore.find(
+                workspaceId, FEATURE, dealId, AiOutputCacheStore.NO_SUBJECT);
+        if (row.isEmpty() || !contentHash.equals(row.get().getContentHash())) {
+            return null;
+        }
+        Optional<DealBriefContent> content = aiOutputCacheStore.read(row.get().getPayload(), DealBriefContent.class);
+        if (content.isEmpty()) {
+            return null;
+        }
+        List<DealBriefContent.Section> sections = sections(content.get());
+        if (sections.isEmpty()) {
+            return null;
+        }
+        return DealBriefDto.of(
+                dealId, toDtoSections(sections), row.get().getGeneratedAt(), row.get().getWarnings());
+    }
+
+    private static List<DealBriefContent.Section> sections(DealBriefContent content) {
         if (content == null || content.sections() == null) {
             return List.of();
         }
-        List<DealBriefDto.Section> sections = new ArrayList<>();
+        List<DealBriefContent.Section> sections = new ArrayList<>();
         for (DealBriefContent.Section section : content.sections()) {
             if (section == null || isBlank(section.title()) || isBlank(section.body())) {
                 continue;
             }
-            sections.add(new DealBriefDto.Section(
+            sections.add(new DealBriefContent.Section(
                     truncate(section.title().strip(), MAX_TITLE_CHARS),
                     truncate(section.body().strip(), MAX_BODY_CHARS)));
             if (sections.size() == MAX_SECTIONS) {
@@ -113,6 +120,12 @@ public class DealBriefService {
             }
         }
         return List.copyOf(sections);
+    }
+
+    private static List<DealBriefDto.Section> toDtoSections(List<DealBriefContent.Section> sections) {
+        return sections.stream()
+                .map(section -> new DealBriefDto.Section(section.title(), section.body()))
+                .toList();
     }
 
     private static String truncate(String value, int maxCodePoints) {
@@ -126,71 +139,5 @@ public class DealBriefService {
 
     private static boolean isBlank(String value) {
         return value == null || value.isBlank();
-    }
-
-    private DealBriefDto cached(String key, Instant now) {
-        CachedBrief cached = cache.get(key);
-        if (cached == null) {
-            return null;
-        }
-        if (now.isBefore(cached.expiresAt())) {
-            return cached.brief();
-        }
-        cache.remove(key, cached);
-        return null;
-    }
-
-    private void cache(String key, DealBriefDto brief, Instant expiresAt) {
-        synchronized (cache) {
-            cache.entrySet().removeIf(entry -> !Instant.now(clock).isBefore(entry.getValue().expiresAt()));
-            if (!cache.containsKey(key) && cache.size() >= MAX_CACHE_ENTRIES) {
-                cache.entrySet().stream()
-                        .min(Map.Entry.comparingByValue(Comparator.comparing(CachedBrief::expiresAt)))
-                        .ifPresent(entry -> cache.remove(entry.getKey(), entry.getValue()));
-            }
-            cache.put(key, new CachedBrief(brief, expiresAt));
-        }
-    }
-
-    private static String cacheKey(int workspaceId, int dealId, MaskedPrompt prompt, MaskingContext context) {
-        return workspaceId + ":" + dealId + ":" + contextHash(prompt, context);
-    }
-
-    private static String contextHash(MaskedPrompt prompt, MaskingContext context) {
-        try {
-            MessageDigest digest = MessageDigest.getInstance("SHA-256");
-            digest.update(serialized(prompt, context).getBytes(StandardCharsets.UTF_8));
-            return HexFormat.of().formatHex(digest.digest());
-        } catch (NoSuchAlgorithmException exception) {
-            throw new IllegalStateException("SHA-256 is not available", exception);
-        }
-    }
-
-    private static String serialized(MaskedPrompt prompt, MaskingContext context) {
-        StringBuilder serialized = new StringBuilder();
-        appendPart(serialized, prompt.getSystemPrompt());
-        serialized.append(prompt.getMessages().size()).append(':');
-        for (MaskedMessage message : prompt.getMessages()) {
-            appendPart(serialized, message.getRole());
-            appendPart(serialized, message.getContent());
-        }
-        List<Map.Entry<String, String>> bindings = context.tokenBindings();
-        serialized.append(bindings.size()).append(':');
-        for (Map.Entry<String, String> binding : bindings) {
-            appendPart(serialized, binding.getKey());
-            appendPart(serialized, binding.getValue());
-        }
-        return serialized.toString();
-    }
-
-    private static void appendPart(StringBuilder serialized, String value) {
-        if (value == null) {
-            serialized.append("-1:");
-            return;
-        }
-        serialized.append(value.length()).append(':').append(value);
-    }
-
-    private record CachedBrief(DealBriefDto brief, Instant expiresAt) {
     }
 }
