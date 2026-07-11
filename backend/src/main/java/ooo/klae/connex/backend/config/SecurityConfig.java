@@ -5,6 +5,8 @@ import static org.springframework.security.config.Customizer.withDefaults;
 import java.util.List;
 
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.servlet.filter.OrderedFormContentFilter;
+import org.springframework.boot.web.servlet.FilterRegistrationBean;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.convert.converter.Converter;
@@ -134,12 +136,10 @@ public class SecurityConfig {
             SocialLoginClientRegistrations socialLoginClientRegistrations,
             DbRelyingPartyRegistrationRepository dbRelyingPartyRegistrationRepository,
             SsoAuthenticationSuccessHandler ssoAuthenticationSuccessHandler,
-            RequestBodySizeProperties requestBodySizeProperties,
             SessionSecurityService sessionSecurityService,
             @Value("${connex.security.csrf-enabled:true}") boolean csrfEnabled,
             @Value("${connex.sso.enabled:false}") boolean ssoEnabled) throws Exception {
         boolean oauthEnabled = ssoEnabled || socialLoginClientRegistrations.anyEnabled();
-        http.addFilterBefore(new ApiRequestBodySizeFilter(requestBodySizeProperties), SecurityContextHolderFilter.class);
         http.addFilterAfter(new AbsoluteSessionTimeoutFilter(sessionSecurityService), SecurityContextHolderFilter.class);
         http.cors(withDefaults());
         if (csrfEnabled) {
@@ -222,6 +222,15 @@ public class SecurityConfig {
             );
         }
         return http.build();
+    }
+
+    @Bean
+    FilterRegistrationBean<ApiRequestBodySizeFilter> apiRequestBodySizeFilterRegistration(
+            RequestBodySizeProperties requestBodySizeProperties) {
+        FilterRegistrationBean<ApiRequestBodySizeFilter> registration =
+            new FilterRegistrationBean<>(new ApiRequestBodySizeFilter(requestBodySizeProperties));
+        registration.setOrder(OrderedFormContentFilter.DEFAULT_ORDER - 1);
+        return registration;
     }
 
     /**

@@ -14,6 +14,7 @@ import ooo.klae.connex.backend.beans.AppiIncident;
 import ooo.klae.connex.backend.dto.AppiIncidentDto;
 import ooo.klae.connex.backend.dto.AppiIncidentRequest;
 import ooo.klae.connex.backend.dto.AppiIncidentScopeDto;
+import ooo.klae.connex.backend.dto.PageResponse;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.AppiIncidentMapper;
@@ -23,7 +24,6 @@ import ooo.klae.connex.backend.mappers.AppiIncidentMapper;
 public class AppiIncidentService {
     private static final int MAX_LIMIT = 200;
     private static final int MAX_OFFSET = 100_000;
-    private static final int SCOPE_LIMIT = 200;
     private static final Set<String> STATUSES = Set.of("triage", "contained", "notifiable", "notified", "closed");
     private static final Set<String> SEVERITIES = Set.of("undetermined", "low", "medium", "high", "critical");
 
@@ -70,10 +70,16 @@ public class AppiIncidentService {
         return AppiIncidentDto.from(findIncident(orgId, incidentId));
     }
 
-    public List<AppiIncidentScopeDto> scope(int orgId, long incidentId, int actorId) {
+    public PageResponse<AppiIncidentScopeDto> scope(int orgId, long incidentId, int actorId, int page, int size) {
         orgMemberService.requireOrgAdmin(orgId, actorId);
         AppiIncident incident = findIncident(orgId, incidentId);
-        return appiIncidentMapper.scopeFromAudit(orgId, incident.getOccurredFrom(), incident.getOccurredTo(), SCOPE_LIMIT);
+        requireScopeWindow(incident.getOccurredFrom(), incident.getOccurredTo());
+        ScopeBounds bounds = ScopeBounds.of(page, size);
+        List<AppiIncidentScopeDto> items = appiIncidentMapper.scopeFromAudit(orgId,
+            incident.getOccurredFrom(), incident.getOccurredTo(), bounds.size(), bounds.offset());
+        long total = appiIncidentMapper.countScopeFromAudit(orgId,
+            incident.getOccurredFrom(), incident.getOccurredTo());
+        return new PageResponse<>(items, total);
     }
 
     private AppiIncident findIncident(int orgId, long incidentId) {
@@ -87,14 +93,15 @@ public class AppiIncidentService {
     private void apply(AppiIncident incident, int orgId, int actorId, AppiIncidentRequest request, boolean create) {
         LocalDateTime occurredFrom = request.getOccurredFrom();
         LocalDateTime occurredTo = request.getOccurredTo();
-        if (occurredFrom != null && occurredTo != null && occurredFrom.isAfter(occurredTo)) {
-            throw new BadRequestException("occurredFrom must be before occurredTo");
-        }
+        validateWindow(occurredFrom, occurredTo);
         incident.setOrgId(orgId);
         incident.setTitle(requiredTitle(request.getTitle()));
-        incident.setStatus(normalize(request.getStatus(), "triage", STATUSES, "status"));
-        incident.setSeverity(normalize(request.getSeverity(), "undetermined", SEVERITIES, "severity"));
-        incident.setReportable(Boolean.TRUE.equals(request.getReportable()));
+        incident.setStatus(normalize(request.getStatus(), create ? "triage" : incident.getStatus(), STATUSES, "status"));
+        incident.setSeverity(normalize(request.getSeverity(), create ? "undetermined" : incident.getSeverity(),
+            SEVERITIES, "severity"));
+        incident.setReportable(request.getReportable() == null
+            ? !create && incident.isReportable()
+            : request.getReportable());
         incident.setOccurredFrom(occurredFrom);
         incident.setOccurredTo(occurredTo);
         incident.setDetectedAt(request.getDetectedAt());
@@ -121,6 +128,19 @@ public class AppiIncidentService {
         return value == null || value.isBlank() ? null : value.trim();
     }
 
+    private static void validateWindow(LocalDateTime occurredFrom, LocalDateTime occurredTo) {
+        if (occurredFrom != null && occurredTo != null && occurredFrom.isAfter(occurredTo)) {
+            throw new BadRequestException("occurredFrom must be before or equal to occurredTo");
+        }
+    }
+
+    private static void requireScopeWindow(LocalDateTime occurredFrom, LocalDateTime occurredTo) {
+        if (occurredFrom == null || occurredTo == null) {
+            throw new BadRequestException("occurredFrom and occurredTo are required before incident scope can be queried");
+        }
+        validateWindow(occurredFrom, occurredTo);
+    }
+
     private static String requiredTitle(String value) {
         if (value == null || value.isBlank()) {
             throw new BadRequestException("title is required");
@@ -138,5 +158,14 @@ public class AppiIncidentService {
 
     private static String incidentLabel(long incidentId) {
         return "Incident " + incidentId;
+    }
+
+    private record ScopeBounds(int size, long offset) {
+        private static ScopeBounds of(int page, int size) {
+            int normalizedPage = Math.max(page, 1);
+            int normalizedSize = Math.min(Math.max(size, 1), 100);
+            long normalizedOffset = (long) (normalizedPage - 1) * normalizedSize;
+            return new ScopeBounds(normalizedSize, normalizedOffset);
+        }
     }
 }

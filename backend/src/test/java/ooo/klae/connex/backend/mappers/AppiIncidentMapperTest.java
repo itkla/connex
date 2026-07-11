@@ -50,9 +50,11 @@ class AppiIncidentMapperTest extends AbstractMapperTest {
         insertAudit(other.getId(), otherWorkspace.getId(), "person", "person.read", "success");
 
         List<AppiIncidentScopeDto> rows = appiIncidentMapper.scopeFromAudit(mine.getId(),
-            LocalDateTime.now().minusDays(1), LocalDateTime.now().plusDays(1), 50);
+            LocalDateTime.now().minusDays(1), LocalDateTime.now().plusDays(1), 50, 0);
 
         assertEquals(2, rows.size());
+        assertEquals(2, appiIncidentMapper.countScopeFromAudit(mine.getId(),
+            LocalDateTime.now().minusDays(1), LocalDateTime.now().plusDays(1)));
         assertEquals(3, rows.stream().mapToLong(AppiIncidentScopeDto::getEventCount).sum());
         assertTrue(rows.stream().noneMatch(row -> Integer.valueOf(otherWorkspace.getId()).equals(row.getWorkspaceId())));
         assertTrue(rows.stream().anyMatch(row -> row.getWorkspaceId() == null
@@ -71,12 +73,33 @@ class AppiIncidentMapperTest extends AbstractMapperTest {
         insertAudit(mine.getId(), otherWorkspace.getId(), "person", "person.read", "success");
 
         List<AppiIncidentScopeDto> rows = appiIncidentMapper.scopeFromAudit(mine.getId(),
-            LocalDateTime.now().minusDays(1), LocalDateTime.now().plusDays(1), 50);
+            LocalDateTime.now().minusDays(1), LocalDateTime.now().plusDays(1), 50, 0);
 
         assertEquals(1, rows.size());
         assertNull(rows.getFirst().getWorkspaceId());
         assertNull(rows.getFirst().getWorkspaceName());
         assertEquals(1, rows.getFirst().getEventCount());
+    }
+
+    @Test
+    void scopeFromAuditSupportsCompletePagination() {
+        Organization org = newOrg();
+        Workspace workspace = newWorkspace(org.getId());
+        insertAudit(org.getId(), workspace.getId(), "person", "person.read", "success");
+        insertAudit(org.getId(), workspace.getId(), "company", "company.read", "success");
+        insertAudit(org.getId(), workspace.getId(), "deal", "deal.read", "success");
+        LocalDateTime from = LocalDateTime.now().minusDays(1);
+        LocalDateTime to = LocalDateTime.now().plusDays(1);
+
+        List<AppiIncidentScopeDto> first = appiIncidentMapper.scopeFromAudit(org.getId(), from, to, 2, 0);
+        List<AppiIncidentScopeDto> second = appiIncidentMapper.scopeFromAudit(org.getId(), from, to, 2, 2);
+
+        assertEquals(3, appiIncidentMapper.countScopeFromAudit(org.getId(), from, to));
+        assertEquals(2, first.size());
+        assertEquals(1, second.size());
+        assertTrue(first.stream().noneMatch(firstRow -> second.stream().anyMatch(secondRow ->
+            firstRow.getEntityType().equals(secondRow.getEntityType())
+                && firstRow.getAction().equals(secondRow.getAction()))));
     }
 
     @Test

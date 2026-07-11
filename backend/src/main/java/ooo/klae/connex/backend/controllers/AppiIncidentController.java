@@ -19,6 +19,7 @@ import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.dto.AppiIncidentDto;
 import ooo.klae.connex.backend.dto.AppiIncidentRequest;
 import ooo.klae.connex.backend.dto.AppiIncidentScopeDto;
+import ooo.klae.connex.backend.dto.PageResponse;
 import ooo.klae.connex.backend.services.AppiIncidentService;
 import ooo.klae.connex.backend.services.AuthService;
 
@@ -54,7 +55,9 @@ public class AppiIncidentController {
     }
 
     @GetMapping("/{incidentId}/scope")
-    public List<AppiIncidentScopeDto> scope(@PathVariable int orgId, @PathVariable long incidentId) {
-        return appiIncidentService.scope(orgId, incidentId, authService.getCurrentUser().getId());
+    public PageResponse<AppiIncidentScopeDto> scope(@PathVariable int orgId, @PathVariable long incidentId,
+            @RequestParam(defaultValue = "1") int page,
+            @RequestParam(defaultValue = "50") int size) {
+        return appiIncidentService.scope(orgId, incidentId, authService.getCurrentUser().getId(), page, size);
     }
 }
