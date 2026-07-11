@@ -2,6 +2,7 @@ package ooo.klae.connex.backend.services;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.anyInt;
 import static org.mockito.Mockito.doReturn;
@@ -17,6 +18,8 @@ import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.stream.Collectors;
+import java.util.stream.IntStream;
 
 import org.junit.jupiter.api.Test;
 
@@ -120,11 +123,10 @@ class ScoringServiceTest {
         Person person = person(1, null);
         Activity activity = activity(person, "meeting", "2026-06-29 12:00:00");
         activity.setId(10);
-        when(personMapper.exists(WS, 1)).thenReturn(true);
-        when(personMapper.exists(WS, 2)).thenReturn(false);
-        when(activityMapper.getActivitiesByPersonId(WS, 1)).thenReturn(List.of(activity));
-        when(noteMapper.getNotesByPersonId(WS, 1)).thenReturn(List.of());
-        when(taskMapper.getTasksByPersonId(WS, 1)).thenReturn(List.of());
+        when(personMapper.getExistingPersonIds(WS, List.of(1, 2))).thenReturn(List.of(1));
+        when(activityMapper.getActivitiesByPersonIds(WS, List.of(1, 2))).thenReturn(List.of(activity));
+        when(noteMapper.getNotesByPersonIds(WS, List.of(1, 2))).thenReturn(List.of());
+        when(taskMapper.getTasksByPersonIds(WS, List.of(1, 2))).thenReturn(List.of());
         ScoringService service = new ScoringService(personMapper, companyMapper, dealMapper,
             activityMapper, noteMapper, taskMapper, Clock.fixed(NOW, ZoneOffset.UTC));
 
@@ -134,6 +136,25 @@ class ScoringServiceTest {
         assertNotEquals("cold", scores.getFirst().getBand());
         verify(personMapper, never()).getAllPersons(anyInt());
         verify(activityMapper, never()).getAllActivities(anyInt());
+        verify(personMapper, never()).exists(anyInt(), anyInt());
+    }
+
+    @Test
+    void scoreContactsSubsetRejectsAnUnboundedStakeholderSetBeforeQuerying() {
+        PersonMapper personMapper = mock(PersonMapper.class);
+        ActivityMapper activityMapper = mock(ActivityMapper.class);
+        ScoringService service = new ScoringService(
+            personMapper, mock(CompanyMapper.class), mock(DealMapper.class), activityMapper,
+            mock(NoteMapper.class), mock(TaskMapper.class), Clock.fixed(NOW, ZoneOffset.UTC));
+        LinkedHashSet<Integer> ids = IntStream.rangeClosed(1, 1_001)
+            .boxed()
+            .collect(Collectors.toCollection(LinkedHashSet::new));
+
+        assertThrows(ooo.klae.connex.backend.exceptions.BadRequestException.class,
+            () -> service.scoreContacts(WS, ids));
+
+        verify(personMapper, never()).getExistingPersonIds(anyInt(), org.mockito.ArgumentMatchers.anyList());
+        verify(activityMapper, never()).getActivitiesByPersonIds(anyInt(), org.mockito.ArgumentMatchers.anyList());
     }
 
     @Test

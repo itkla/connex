@@ -102,12 +102,44 @@
     <include refid="pageWhere"/>
   </select>
 
+  <select id="getCompanyEngagementTouches"
+          resultType="ooo.klae.connex.backend.dto.CompanyEngagementTouchDto">
+    SELECT touch.kind, touch.touched_at, touch.user_id
+    FROM (
+      SELECT 'activities' AS kind, a.timestamp AS touched_at, a.created_by_id AS user_id
+      FROM activity a
+      WHERE a.workspace_id = #{workspaceId}
+        AND (EXISTS (SELECT 1 FROM person p
+              WHERE p.workspace_id = #{workspaceId} AND p.id = a.person_id AND p.company_id = #{companyId})
+          OR EXISTS (SELECT 1 FROM deal d
+              WHERE d.workspace_id = #{workspaceId} AND d.id = a.deal_id AND d.company_id = #{companyId}))
+      UNION ALL
+      SELECT 'tasks' AS kind, t.created_at AS touched_at, t.assigned_to_id AS user_id
+      FROM task t
+      WHERE t.workspace_id = #{workspaceId}
+        AND (EXISTS (SELECT 1 FROM person p
+              WHERE p.workspace_id = #{workspaceId} AND p.id = t.person_id AND p.company_id = #{companyId})
+          OR EXISTS (SELECT 1 FROM deal d
+              WHERE d.workspace_id = #{workspaceId} AND d.id = t.deal_id AND d.company_id = #{companyId}))
+      UNION ALL
+      SELECT 'notes' AS kind, n.created_at AS touched_at, n.author_id AS user_id
+      FROM note n
+      WHERE n.workspace_id = #{workspaceId}
+        AND (n.visibility = 'workspace' OR n.author_id = #{currentUserId})
+        AND (EXISTS (SELECT 1 FROM person p
+              WHERE p.workspace_id = #{workspaceId} AND p.id = n.person_id AND p.company_id = #{companyId})
+          OR EXISTS (SELECT 1 FROM deal d
+              WHERE d.workspace_id = #{workspaceId} AND d.id = n.deal_id AND d.company_id = #{companyId}))
+    ) touch
+    ORDER BY touch.touched_at, touch.kind, touch.user_id
+  </select>
+
   <select id="getCompanyIdsFiltered" resultType="int">
     SELECT c.id
     FROM company c
     <include refid="pageWhere"/>
     ORDER BY c.id
-    LIMIT #{limit}
+    LIMIT #{limit} OFFSET #{offset}
   </select>
 
   <select id="distinctIndustries" resultType="string">

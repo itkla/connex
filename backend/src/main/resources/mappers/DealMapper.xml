@@ -67,6 +67,33 @@
     d.closed_reason, d.won, d.risk_excluded, d.created_at, d.updated_at
   </sql>
 
+  <sql id="visibleCompanyJoin">
+    (c.workspace_id = #{workspaceId}
+     OR EXISTS (SELECT 1 FROM company_share cs
+        JOIN workspace vws ON vws.id = cs.workspace_id
+        JOIN workspace ows ON ows.id = c.workspace_id AND ows.org_id = vws.org_id
+        WHERE cs.company_id = c.id AND cs.workspace_id = #{workspaceId}))
+  </sql>
+
+  <sql id="visiblePipelineJoin">
+    (p.workspace_id = #{workspaceId}
+     OR EXISTS (SELECT 1 FROM pipeline_share ps
+        JOIN workspace vws ON vws.id = ps.workspace_id
+        JOIN workspace ows ON ows.id = p.workspace_id AND ows.org_id = vws.org_id
+        WHERE ps.pipeline_id = p.id AND ps.workspace_id = #{workspaceId}))
+  </sql>
+
+  <sql id="visibleStageJoin">
+    EXISTS (SELECT 1
+      FROM pipeline sp
+      WHERE sp.id = s.pipeline_id AND sp.workspace_id = s.workspace_id
+        AND (sp.workspace_id = #{workspaceId}
+          OR EXISTS (SELECT 1 FROM pipeline_share ps
+            JOIN workspace vws ON vws.id = ps.workspace_id
+            JOIN workspace ows ON ows.id = sp.workspace_id AND ows.org_id = vws.org_id
+            WHERE ps.pipeline_id = sp.id AND ps.workspace_id = #{workspaceId})))
+  </sql>
+
   <sql id="dealFilterWhere">
     <where>
       AND d.workspace_id = #{workspaceId}
@@ -91,6 +118,50 @@
         <when test="status == 'won'">AND d.won = TRUE</when>
         <when test="status == 'lost'">AND d.won = FALSE</when>
       </choose>
+    </where>
+  </sql>
+
+  <sql id="dealListFilterWhere">
+    <where>
+      AND d.workspace_id = #{workspaceId}
+      <if test="query != null">
+        AND (d.name LIKE #{query}
+          OR d.currency LIKE #{query}
+          OR c.name LIKE #{query}
+          OR p.name LIKE #{query}
+          OR s.name LIKE #{query})
+      </if>
+      <if test="currency != null">
+        AND d.currency = #{currency}
+      </if>
+      <if test="pipelineIds != null and pipelineIds.size() > 0">
+        AND d.pipeline_id IN
+        <foreach item="id" collection="pipelineIds" open="(" separator="," close=")">#{id}</foreach>
+      </if>
+      <if test="stageIds != null and stageIds.size() > 0">
+        AND d.stage_id IN
+        <foreach item="id" collection="stageIds" open="(" separator="," close=")">#{id}</foreach>
+      </if>
+      <if test="(companyIds != null and companyIds.size() > 0) or noCompany">
+        AND (
+          <if test="companyIds != null and companyIds.size() > 0">
+            d.company_id IN
+            <foreach item="id" collection="companyIds" open="(" separator="," close=")">#{id}</foreach>
+          </if>
+          <if test="noCompany">
+            <if test="companyIds != null and companyIds.size() > 0">OR</if>
+            d.company_id IS NULL
+          </if>
+        )
+      </if>
+      <if test="statuses != null and statuses.size() > 0">
+        AND CASE WHEN d.won IS NULL THEN 'open' WHEN d.won THEN 'won' ELSE 'lost' END IN
+        <foreach item="value" collection="statuses" open="(" separator="," close=")">#{value}</foreach>
+      </if>
+      <if test="riskIds != null and riskIds.size() > 0">
+        AND d.id IN
+        <foreach item="id" collection="riskIds" open="(" separator="," close=")">#{id}</foreach>
+      </if>
     </where>
   </sql>
 
@@ -157,6 +228,48 @@
     ORDER BY p.name
   </select>
 
+  <select id="getDealStakeholdersByDealIds" resultMap="DealStakeholderResult">
+    SELECT dp.deal_id AS deal_id,
+           p.id AS person_id,
+           p.name AS person_label,
+           dp.role AS role,
+           p.risk_excluded AS person_risk_excluded
+    FROM deal_person dp
+    JOIN deal d ON d.id = dp.deal_id AND d.workspace_id = #{workspaceId}
+    JOIN person p ON p.id = dp.person_id AND p.workspace_id = d.workspace_id
+    WHERE d.workspace_id = #{workspaceId}
+      AND dp.deal_id IN
+      <foreach item="id" collection="dealIds" open="(" separator="," close=")">#{id}</foreach>
+    ORDER BY dp.deal_id, p.name
+  </select>
+
+  <select id="getLatestDealTouches" resultType="ooo.klae.connex.backend.dto.DealTouchDto">
+    SELECT touches.deal_id AS deal_id, MAX(touches.touched_at) AS touched_at
+    FROM (
+      SELECT a.deal_id, a.timestamp AS touched_at
+      FROM activity a
+      WHERE a.workspace_id = #{workspaceId}
+        AND a.deal_id IN
+        <foreach item="id" collection="dealIds" open="(" separator="," close=")">#{id}</foreach>
+        AND a.timestamp &lt;= #{now}
+      UNION ALL
+      SELECT n.deal_id, n.created_at AS touched_at
+      FROM note n
+      WHERE n.workspace_id = #{workspaceId}
+        AND n.deal_id IN
+        <foreach item="id" collection="dealIds" open="(" separator="," close=")">#{id}</foreach>
+        AND n.created_at &lt;= #{now}
+      UNION ALL
+      SELECT t.deal_id, t.created_at AS touched_at
+      FROM task t
+      WHERE t.workspace_id = #{workspaceId}
+        AND t.deal_id IN
+        <foreach item="id" collection="dealIds" open="(" separator="," close=")">#{id}</foreach>
+        AND t.created_at &lt;= #{now}
+    ) touches
+    GROUP BY touches.deal_id
+  </select>
+
   <select id="getAllDeals" resultMap="DealResult">
     SELECT <include refid="dealColumns"/>
     FROM deal
@@ -194,6 +307,59 @@
     <include refid="dealFilterWhere"/>
     GROUP BY d.currency
     ORDER BY d.currency
+  </select>
+
+  <select id="getDealsPageFiltered" resultMap="DealResult">
+    SELECT <include refid="qualifiedDealColumns"/>
+    FROM deal d
+    LEFT JOIN company c ON c.id = d.company_id AND <include refid="visibleCompanyJoin"/>
+    LEFT JOIN pipeline p ON p.id = d.pipeline_id AND <include refid="visiblePipelineJoin"/>
+    LEFT JOIN stage s ON s.id = d.stage_id AND s.pipeline_id = d.pipeline_id
+      AND <include refid="visibleStageJoin"/>
+    <include refid="dealListFilterWhere"/>
+    <include refid="dealPageOrderBy"/>
+    LIMIT #{limit} OFFSET #{offset}
+  </select>
+
+  <select id="countDealsFiltered" resultType="long">
+    SELECT COUNT(*)
+    FROM deal d
+    LEFT JOIN company c ON c.id = d.company_id AND <include refid="visibleCompanyJoin"/>
+    LEFT JOIN pipeline p ON p.id = d.pipeline_id AND <include refid="visiblePipelineJoin"/>
+    LEFT JOIN stage s ON s.id = d.stage_id AND s.pipeline_id = d.pipeline_id
+      AND <include refid="visibleStageJoin"/>
+    <include refid="dealListFilterWhere"/>
+  </select>
+
+  <select id="dealMetricsFiltered" resultType="ooo.klae.connex.backend.dto.DealCurrencyMetricsDto">
+    SELECT d.currency AS currency,
+           COUNT(CASE WHEN d.won IS NULL THEN 1 END) AS open_count,
+           COALESCE(SUM(CASE WHEN d.won IS NULL THEN d.value END), 0) AS open_value,
+           COUNT(CASE WHEN d.won IS NOT NULL THEN 1 END) AS closed_count,
+           COALESCE(SUM(CASE WHEN d.won IS NOT NULL THEN d.value END), 0) AS closed_forecast,
+           COALESCE(SUM(CASE WHEN d.won IS NOT NULL THEN d.actual_value END), 0) AS closed_revenue,
+           COUNT(CASE WHEN d.won = TRUE THEN 1 END) AS won_count,
+           COUNT(CASE WHEN d.won = FALSE THEN 1 END) AS lost_count
+    FROM deal d
+    LEFT JOIN company c ON c.id = d.company_id AND <include refid="visibleCompanyJoin"/>
+    LEFT JOIN pipeline p ON p.id = d.pipeline_id AND <include refid="visiblePipelineJoin"/>
+    LEFT JOIN stage s ON s.id = d.stage_id AND s.pipeline_id = d.pipeline_id
+      AND <include refid="visibleStageJoin"/>
+    <include refid="dealListFilterWhere"/>
+    GROUP BY d.currency
+    ORDER BY d.currency
+  </select>
+
+  <select id="getFilteredDealIds" resultType="int">
+    SELECT d.id
+    FROM deal d
+    LEFT JOIN company c ON c.id = d.company_id AND <include refid="visibleCompanyJoin"/>
+    LEFT JOIN pipeline p ON p.id = d.pipeline_id AND <include refid="visiblePipelineJoin"/>
+    LEFT JOIN stage s ON s.id = d.stage_id AND s.pipeline_id = d.pipeline_id
+      AND <include refid="visibleStageJoin"/>
+    <include refid="dealListFilterWhere"/>
+    ORDER BY d.id
+    LIMIT #{limit}
   </select>
 
   <sql id="realizedClosedAt"><choose><when test="tzOffset != null">CONVERT_TZ(d.closed_at, '+00:00', #{tzOffset})</when><otherwise>d.closed_at</otherwise></choose></sql>
@@ -383,6 +549,18 @@
       AND d.expected_close_date &lt;= DATE_ADD(CURDATE(), INTERVAL #{days} DAY)
   </select>
 
+  <select id="closingSoonDeals" resultMap="DealResult">
+    SELECT <include refid="qualifiedDealColumns"/>
+    FROM deal d
+    WHERE d.workspace_id = #{workspaceId}
+      AND d.won IS NULL
+      AND d.closed_at IS NULL
+      AND d.expected_close_date &gt;= CURDATE()
+      AND d.expected_close_date &lt;= DATE_ADD(CURDATE(), INTERVAL #{days} DAY)
+    ORDER BY d.expected_close_date, d.id
+    LIMIT #{limit}
+  </select>
+
   <select id="topOpenDeals" resultMap="DealResult">
     SELECT <include refid="qualifiedDealColumns"/>
     FROM deal d
@@ -430,10 +608,15 @@
   </select>
 
   <select id="countsByCompany" resultType="ooo.klae.connex.backend.dto.FacetCount">
-    SELECT d.company_id AS `key`, COUNT(*) AS count
+    SELECT CAST(d.company_id AS CHAR) AS `key`, COUNT(*) AS count
     FROM deal d
     WHERE d.workspace_id = #{workspaceId} AND d.company_id IS NOT NULL
     GROUP BY d.company_id
+    UNION ALL
+    SELECT '__empty__' AS `key`, COUNT(*) AS count
+    FROM deal d
+    WHERE d.workspace_id = #{workspaceId} AND d.company_id IS NULL
+    HAVING COUNT(*) &gt; 0
   </select>
 
   <select id="countsByCurrency" resultType="ooo.klae.connex.backend.dto.FacetCount">
@@ -448,6 +631,11 @@
     FROM deal
     WHERE workspace_id = #{workspaceId} AND pipeline_id = #{pipelineId}
     ORDER BY stage_id, position, id
+  </select>
+
+  <select id="countDealsByPipelineId" resultType="long">
+    SELECT COUNT(*) FROM deal
+    WHERE workspace_id = #{workspaceId} AND pipeline_id = #{pipelineId}
   </select>
 
   <select id="getDealsByStageId" resultMap="DealResult">

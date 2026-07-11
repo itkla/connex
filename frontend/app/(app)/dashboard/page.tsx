@@ -14,14 +14,17 @@ import {
     getActivityVolumeFromCookie,
     getAttachmentFacets,
     getAttachmentsPage,
-    getCompaniesFromCookie,
+    getCompanyById,
     getCompaniesPage,
-    getCompanyTemperaturesFromCookie,
+    getCoolingCompanyTemperaturesFromCookie,
+    getCoolingContactTemperaturesFromCookie,
+    getContactById,
     getContactsFromCookie,
     getContactsPage,
-    getContactTemperaturesFromCookie,
     getCurrentUserFromCookie,
     getDashboardLayoutFromCookie,
+    getDealById,
+    getDealClosingSoonFromCookie,
     getDealClosingSoonCountFromCookie,
     getDealKpisFromCookie,
     getDealMetricsFromCookie,
@@ -51,6 +54,7 @@ import type {
     Contact,
     Count,
     DashboardWidgetType,
+    Deal,
     DealKpis,
     DealMetrics,
     DealPipelineValue,
@@ -58,14 +62,13 @@ import type {
     DealStageDistribution,
     Notification,
     Page,
+    RelationshipTemperature,
     Stage,
     TaskSummary as TaskSummaryCounts,
     TeamLeaderboardEntry,
     User,
     WarmthSummary,
 } from '@/app/lib/types';
-
-import { startOfLocalDay, timeOf } from '@/app/lib/utils';
 
 import AtRiskDeals, { type AtRiskItem } from '@/app/components/dashboard/AtRiskDeals';
 import CoolingRelationships, { type CoolingItem } from '@/app/components/dashboard/CoolingRelationships';
@@ -131,8 +134,6 @@ const EMPTY_WARMTH_SUMMARY: WarmthSummary = {
 
 const DASHBOARD_RANGE: RangeKey = '90d';
 
-const DAY = 1000 * 60 * 60 * 24;
-
 /**
  * Picks the currency with the most deals from the server-computed {@link DealMetrics}, so the
  * dashboard's aggregate widgets scope to the workspace's dominant currency rather than the
@@ -151,6 +152,10 @@ function dominantCurrency(metrics: DealMetrics): string {
     return best;
 }
 
+function present<T>(value: T | null): value is T {
+    return value != null;
+}
+
 export default async function Dashboard() {
     const t = await getTranslations('DashboardPage');
 
@@ -163,9 +168,8 @@ export default async function Dashboard() {
 
     const init = { headers: { cookie: cookie ?? '' } } as const;
     const emptyFacets: AttachmentFacets = { sources: [], kinds: [], tags: [], orphaned: 0, total: 0, totalSize: 0 };
-    const [companies, contacts, deals, pipelines, tasks, activities, notes, users, recentFiles, fileFacets, recentMoves, introSuggestions, dealRisks, layoutResponse, notifications, dealMetrics, companiesPage, contactsPage, activityVolume, leaderboard, taskSummary, upcomingActivityCount, closingSoonCount, warmthSummary] =
+    const [contacts, deals, pipelines, tasks, activities, notes, users, recentFiles, fileFacets, recentMoves, introSuggestions, dealRisks, layoutResponse, notifications, dealMetrics, companiesPage, contactsPage, activityVolume, leaderboard, taskSummary, upcomingActivityCount, closingSoonCount, warmthSummary, coolingContactTemps, coolingCompanyTemps, closingSoonDeals] =
         await Promise.all([
-            getCompaniesFromCookie(cookie),
             getContactsFromCookie(cookie),
             getDealsFromCookie(cookie),
             getPipelinesFromCookie(cookie),
@@ -193,38 +197,63 @@ export default async function Dashboard() {
             getUpcomingActivityCountFromCookie(cookie, 7).catch(() => ({ count: 0 }) as Count),
             getDealClosingSoonCountFromCookie(cookie, 7).catch(() => ({ count: 0 }) as Count),
             getWarmthSummaryFromCookie(cookie).catch(() => EMPTY_WARMTH_SUMMARY),
+            getCoolingContactTemperaturesFromCookie(cookie, 6).catch(
+                () => [] as RelationshipTemperature[],
+            ),
+            getCoolingCompanyTemperaturesFromCookie(cookie, 6).catch(
+                () => [] as RelationshipTemperature[],
+            ),
+            getDealClosingSoonFromCookie(cookie, 7, 6).catch(() => [] as Deal[]),
         ]);
 
-    const [contactTemps, companyTemps] = await Promise.all([
-        getContactTemperaturesFromCookie(cookie, contacts.map((contact) => contact.id)),
-        getCompanyTemperaturesFromCookie(cookie, companies.map((company) => company.id)),
+    const topRisks = dealRisks.slice(0, 6);
+    const [riskDeals, coolingContactRecords, coolingCompanyRecords] = await Promise.all([
+        Promise.all(topRisks.map((risk) => getDealById(risk.dealId, init).catch(() => null))).then(
+            (items) => items.filter(present),
+        ),
+        Promise.all(coolingContactTemps.map((temp) => getContactById(temp.id, init).catch(() => null))).then(
+            (items) => items.filter(present),
+        ),
+        Promise.all(coolingCompanyTemps.map((temp) => getCompanyById(temp.id, init).catch(() => null))).then(
+            (items) => items.filter(present),
+        ),
     ]);
+
+    const relatedCompanyIds = new Set(
+        [...riskDeals, ...closingSoonDeals]
+            .map((deal) => deal.company)
+            .filter((companyId): companyId is number => companyId != null),
+    );
+    const loadedCoolingCompanyIds = new Set(coolingCompanyRecords.map((company) => company.id));
+    const relatedCompanies = await Promise.all(
+        [...relatedCompanyIds]
+            .filter((companyId) => !loadedCoolingCompanyIds.has(companyId))
+            .map((companyId) => getCompanyById(companyId, init).catch(() => null)),
+    ).then((items) => items.filter(present));
 
     const stages = (
         await Promise.all(pipelines.map((pipeline) => getStagesByPipelineId(pipeline.id, init).catch(() => [] as Stage[])))
     ).flat();
 
-    const companyById = new Map(companies.map((company) => [company.id, company]));
-    const dealById = new Map(deals.map((deal) => [deal.id, deal]));
-    const atRiskDeals: AtRiskItem[] = dealRisks
+    const companyById = new Map(
+        [...coolingCompanyRecords, ...relatedCompanies].map((company) => [company.id, company]),
+    );
+    const dealById = new Map(riskDeals.map((deal) => [deal.id, deal]));
+    const atRiskDeals: AtRiskItem[] = topRisks
         .map((risk) => ({ risk, deal: dealById.get(risk.dealId) }))
-        .filter((entry): entry is { risk: (typeof dealRisks)[number]; deal: (typeof deals)[number] } => entry.deal != null)
-        .slice(0, 6)
+        .filter((entry): entry is { risk: (typeof dealRisks)[number]; deal: Deal } => entry.deal != null)
         .map(({ risk, deal }) => ({
             risk,
             deal,
             company: deal.company != null ? companyById.get(deal.company) : undefined,
         }));
 
-    const tempByContactId = new Map(contactTemps.map((temp) => [temp.id, temp]));
-    const coolingContacts: CoolingItem[] = contacts
-        .map((contact) => ({ contact, temp: tempByContactId.get(contact.id) }))
-        .filter((item): item is CoolingItem => item.temp != null && item.temp.trend === 'cooling')
-        .sort((a, b) => (b.temp.daysSinceTouch ?? 0) - (a.temp.daysSinceTouch ?? 0))
-        .slice(0, 6);
+    const coolingContactById = new Map(coolingContactRecords.map((contact) => [contact.id, contact]));
+    const coolingContacts: CoolingItem[] = coolingContactTemps.flatMap((temp) => {
+        const contact = coolingContactById.get(temp.id);
+        return contact ? [{ contact, temp }] : [];
+    });
 
-    const now = new Date().getTime();
-    const todayStart = startOfLocalDay(now);
     const overdueTasks = taskSummary.overdue;
     const dueSoon = taskSummary.dueSoon;
     const closingSoon = closingSoonCount.count;
@@ -238,21 +267,12 @@ export default async function Dashboard() {
         getDealStageDistribution(currency, init).catch(() => [] as DealStageDistribution[]),
     ]);
 
-    const tempByCompanyId = new Map(companyTemps.map((temp) => [temp.id, temp]));
-    const companyWarmthItems: CompanyWarmthItem[] = companies
-        .map((company) => ({ company, temp: tempByCompanyId.get(company.id) }))
-        .filter((item): item is CompanyWarmthItem => item.temp != null && item.temp.trend === 'cooling')
-        .sort((a, b) => (b.temp.daysSinceTouch ?? 0) - (a.temp.daysSinceTouch ?? 0))
-        .slice(0, 6);
+    const companyWarmthItems: CompanyWarmthItem[] = coolingCompanyTemps.flatMap((temp) => {
+        const company = companyById.get(temp.id);
+        return company ? [{ company, temp }] : [];
+    });
 
-    const closingSoonItems: ClosingSoonItem[] = deals
-        .filter((deal) => {
-            if (deal.closedAt) return false;
-            const close = timeOf(deal.expectedCloseDate);
-            return close >= todayStart && close - todayStart <= 7 * DAY;
-        })
-        .sort((a, b) => timeOf(a.expectedCloseDate) - timeOf(b.expectedCloseDate))
-        .slice(0, 6)
+    const closingSoonItems: ClosingSoonItem[] = closingSoonDeals
         .map((deal) => ({ deal, company: deal.company != null ? companyById.get(deal.company) : undefined }));
 
     const chartCard = (child: ReactNode) => (

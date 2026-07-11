@@ -16,12 +16,24 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
 
 import ooo.klae.connex.backend.beans.Company;
+import ooo.klae.connex.backend.beans.Activity;
+import ooo.klae.connex.backend.beans.Deal;
+import ooo.klae.connex.backend.beans.Note;
+import ooo.klae.connex.backend.beans.Person;
+import ooo.klae.connex.backend.beans.Pipeline;
+import ooo.klae.connex.backend.beans.Stage;
 import ooo.klae.connex.backend.beans.Tag;
+import ooo.klae.connex.backend.beans.Task;
+import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.beans.Workspace;
+import ooo.klae.connex.backend.dto.CompanyEngagementTouchDto;
 
 class CompanyMapperTest extends AbstractMapperTest {
 
     @Autowired private DataSource dataSource;
+    @Autowired private ActivityMapper activityMapper;
+    @Autowired private NoteMapper noteMapper;
+    @Autowired private TaskMapper taskMapper;
 
     /**
      * Inserts a new company and checks if the generated ID is not zero.
@@ -159,7 +171,7 @@ class CompanyMapperTest extends AbstractMapperTest {
             filteredCompanyIds(pageWorkspace, null, List.of("Technology"), true, null));
         assertEquals(List.of(finance.getId(), noIndustry.getId()),
             companyMapper.getCompanyIdsFiltered(pageWorkspace.getId(), null, null, false,
-                List.of(noIndustry.getId(), finance.getId(), foreign.getId()), 100));
+                List.of(noIndustry.getId(), finance.getId(), foreign.getId()), 100, 0));
         assertEquals(2, companyMapper.countCompanies(pageWorkspace.getId(), null, null, false,
             List.of(noIndustry.getId(), finance.getId(), foreign.getId())));
         assertFalse(filteredCompanyIds(pageWorkspace, null, List.of("Finance"), false, null)
@@ -183,7 +195,7 @@ class CompanyMapperTest extends AbstractMapperTest {
         long count = companyMapper.countCompanies(
             pageWorkspace.getId(), "%Target%", List.of("Technology"), false, ids);
         List<Integer> matchingIds = companyMapper.getCompanyIdsFiltered(
-            pageWorkspace.getId(), "%Target%", List.of("Technology"), false, ids, 100);
+            pageWorkspace.getId(), "%Target%", List.of("Technology"), false, ids, 100, 0);
 
         assertEquals(List.of(alpha.getId(), bravo.getId()), page.stream().map(Company::getId).toList());
         assertEquals(2, count);
@@ -345,6 +357,61 @@ class CompanyMapperTest extends AbstractMapperTest {
         // cross-workspace mutation affects zero rows; the foreign row survives
         assertEquals(0, companyMapper.delete(workspace.getId(), foreign.getId()));
         assertTrue(companyMapper.exists(foreign.getWorkspaceId(), foreign.getId()));
+    }
+
+    @Test
+    void companyEngagementTouchesAreScopedAndHideOtherAuthorsPrivateNotes() {
+        Company company = newCompany();
+        Person person = newPerson(company);
+        Pipeline pipeline = newPipeline();
+        Stage stage = newStage(pipeline, 0);
+        Deal deal = newDeal(pipeline, stage, company);
+        User current = newUser();
+        User other = newUser();
+        Activity activity = new Activity();
+        activity.setWorkspaceId(workspace.getId());
+        activity.setType("meeting");
+        activity.setSubject("Company meeting");
+        activity.setPerson(person);
+        activity.setDeal(deal);
+        activity.setCreatedBy(current);
+        activity.setTimestamp("2026-07-01 10:00:00");
+        activityMapper.insert(activity);
+        Task task = new Task();
+        task.setWorkspaceId(workspace.getId());
+        task.setDescription("Company task");
+        task.setStatus("todo");
+        task.setAssignedTo(current);
+        task.setPerson(person);
+        task.setDeal(deal);
+        taskMapper.insert(task);
+        Note visible = new Note();
+        visible.setWorkspaceId(workspace.getId());
+        visible.setContent("Visible");
+        visible.setAuthor(current);
+        visible.setPerson(person);
+        noteMapper.insert(visible);
+        Note ownPrivate = new Note();
+        ownPrivate.setWorkspaceId(workspace.getId());
+        ownPrivate.setContent("Own private");
+        ownPrivate.setVisibility("private");
+        ownPrivate.setAuthor(current);
+        ownPrivate.setDeal(deal);
+        noteMapper.insert(ownPrivate);
+        Note otherPrivate = new Note();
+        otherPrivate.setWorkspaceId(workspace.getId());
+        otherPrivate.setContent("Other private");
+        otherPrivate.setVisibility("private");
+        otherPrivate.setAuthor(other);
+        otherPrivate.setPerson(person);
+        noteMapper.insert(otherPrivate);
+
+        List<CompanyEngagementTouchDto> touches = companyMapper.getCompanyEngagementTouches(
+            workspace.getId(), company.getId(), current.getId());
+
+        assertEquals(List.of("activities", "notes", "notes", "tasks"),
+            touches.stream().map(CompanyEngagementTouchDto::kind).sorted().toList());
+        assertTrue(touches.stream().noneMatch(touch -> touch.userId() != null && touch.userId() == other.getId()));
     }
 
     private Workspace newWorkspace() {

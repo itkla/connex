@@ -12,12 +12,18 @@ import ooo.klae.connex.backend.beans.Deal;
 import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.beans.Tag;
 import ooo.klae.connex.backend.dto.CustomFieldEntryDto;
+import ooo.klae.connex.backend.dto.CompanyEngagementDto;
+import ooo.klae.connex.backend.dto.DealDto;
+import ooo.klae.connex.backend.dto.PageResponse;
+import ooo.klae.connex.backend.dto.PersonDto;
+import ooo.klae.connex.backend.dto.SegmentDefinition;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.exceptions.DuplicateResourceException;
 import ooo.klae.connex.backend.tenant.Permission;
 import ooo.klae.connex.backend.tenant.RequirePermission;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -42,17 +48,44 @@ public class CompanyService {
     private final RuleTriggerPublisher ruleTriggers;
     private final WorkspaceService workspaceService;
     private final CustomFieldValueService customFieldValueService;
+    private final SegmentService segmentService;
+    private final AuthService authService;
 
     private static final Set<String> AUDIT_FIELDS =
         Set.of("name", "website", "industry", "phone", "address", "logoUrl");
 
     private static final int MAX_MATCHING_IDS = 1000;
+    private static final int MAX_CATALOG_COMPANIES = 5_000;
 
     /**
      * Retrieves all {@code Company} records in the active workspace.
      */
     public List<Company> getAllCompanies() {
         return companyMapper.getAllCompanies(workspaceService.getCurrentWorkspaceId());
+    }
+
+    public List<Company> getCompanyCatalog() {
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        long total = companyMapper.countCompanies(workspaceId, null, null, false, null);
+        if (total > MAX_CATALOG_COMPANIES) {
+            throw new BadRequestException(
+                "The company catalog is too large to load at once; narrow the record search instead");
+        }
+        return companyMapper.getCompaniesPage(
+            workspaceId, null, "name", "asc", null, false, null, MAX_CATALOG_COMPANIES, 0);
+    }
+
+    public CompanyEngagementDto getCompanyEngagement(int companyId) {
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        if (!companyMapper.exists(workspaceId, companyId)) {
+            throw new ResourceNotFoundException("Company not found with id: " + companyId);
+        }
+        int currentUserId = authService.getCurrentUser().getId();
+        return new CompanyEngagementDto(
+            personMapper.getPersonsByCompanyId(workspaceId, companyId).stream().map(PersonDto::from).toList(),
+            dealMapper.getDealsByCompanyId(workspaceId, companyId).stream().map(DealDto::from).toList(),
+            companyMapper.getCompanyEngagementTouches(workspaceId, companyId, currentUserId)
+        );
     }
 
     public List<Company> getCompaniesPage(String query, String sort, String dir, List<String> industry,
@@ -64,6 +97,69 @@ public class CompanyService {
     public long countCompanies(String query, List<String> industry, boolean noIndustry, List<Integer> ids) {
         return companyMapper.countCompanies(
             workspaceService.getCurrentWorkspaceId(), query, industry, noIndustry, ids);
+    }
+
+    /**
+     * Evaluates a company segment within the active workspace and returns one filtered page without
+     * exposing the evaluated id set to the client.
+     */
+    public PageResponse<Company> getSegmentCompaniesPage(SegmentDefinition definition, String query,
+            String sort, String dir, List<String> industry, boolean noIndustry, int limit, int offset) {
+        List<Integer> ids = segmentService.evaluate("company", definition);
+        if (ids.isEmpty()) {
+            return new PageResponse<>(List.of(), 0);
+        }
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        Set<Integer> segmentIds = Set.copyOf(ids);
+        List<Company> items = new ArrayList<>(limit);
+        long matched = 0;
+        int scanOffset = 0;
+        List<Company> batch;
+        do {
+            batch = companyMapper.getCompaniesPage(
+                workspaceId, query, sort, dir, industry, noIndustry, null, 250, scanOffset);
+            for (Company company : batch) {
+                if (!segmentIds.contains(company.getId())) continue;
+                if (matched >= offset && items.size() < limit) {
+                    items.add(company);
+                }
+                matched++;
+            }
+            scanOffset += batch.size();
+        } while (!batch.isEmpty());
+        return new PageResponse<>(items, matched);
+    }
+
+    /**
+     * Retrieves every company id matching a segment and the supplied company filters, subject to
+     * the bulk-operation limit.
+     */
+    public List<Integer> getMatchingSegmentCompanyIds(SegmentDefinition definition, String query,
+            List<String> industry, boolean noIndustry) {
+        List<Integer> ids = segmentService.evaluate("company", definition);
+        if (ids.isEmpty()) {
+            return List.of();
+        }
+        Set<Integer> segmentIds = Set.copyOf(ids);
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        List<Integer> matches = new ArrayList<>();
+        int offset = 0;
+        List<Integer> batch;
+        do {
+            batch = companyMapper.getCompanyIdsFiltered(
+                workspaceId, query, industry, noIndustry, null, 250, offset);
+            for (Integer id : batch) {
+                if (segmentIds.contains(id)) {
+                    matches.add(id);
+                    if (matches.size() > MAX_MATCHING_IDS) {
+                        throw new BadRequestException(
+                            "Too many matching companies; narrow the filters before selecting all");
+                    }
+                }
+            }
+            offset += batch.size();
+        } while (!batch.isEmpty());
+        return matches;
     }
 
     /**
@@ -81,7 +177,7 @@ public class CompanyService {
             throw new BadRequestException("Too many matching companies; narrow the filters before selecting all");
         }
         return companyMapper.getCompanyIdsFiltered(
-            workspaceId, query, industry, noIndustry, ids, MAX_MATCHING_IDS);
+            workspaceId, query, industry, noIndustry, ids, MAX_MATCHING_IDS, 0);
     }
 
     private static boolean hasMatchingIdFilter(String query, List<String> industry, boolean noIndustry,

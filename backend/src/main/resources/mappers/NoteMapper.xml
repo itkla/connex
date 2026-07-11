@@ -40,6 +40,14 @@
     WHERE workspace_id = #{workspaceId} AND person_id = #{personId} ORDER BY created_at DESC, id DESC
   </select>
 
+  <select id="getNotesByPersonIds" resultMap="NoteResult">
+    SELECT <include refid="noteColumns"/> FROM note
+    WHERE workspace_id = #{workspaceId}
+      AND person_id IN
+      <foreach item="personId" collection="personIds" open="(" separator="," close=")">#{personId}</foreach>
+    ORDER BY created_at DESC, id DESC
+  </select>
+
   <select id="getNotesByDealId" resultMap="NoteResult">
     SELECT <include refid="noteColumns"/> FROM note
     WHERE workspace_id = #{workspaceId} AND deal_id = #{dealId} ORDER BY created_at DESC, id DESC

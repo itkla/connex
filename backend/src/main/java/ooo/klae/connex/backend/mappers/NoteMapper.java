@@ -14,6 +14,8 @@ import java.util.List;
 public interface NoteMapper {
     List<Note> getAllNotes(int workspaceId);
     List<Note> getNotesByPersonId(@Param("workspaceId") int workspaceId, @Param("personId") int personId);
+    List<Note> getNotesByPersonIds(@Param("workspaceId") int workspaceId,
+            @Param("personIds") List<Integer> personIds);
     List<Note> getNotesByDealId(@Param("workspaceId") int workspaceId, @Param("dealId") int dealId);
     List<Note> getNotesByAuthorId(@Param("workspaceId") int workspaceId, @Param("authorId") int authorId);
     Note getNoteById(@Param("workspaceId") int workspaceId, @Param("id") int id);

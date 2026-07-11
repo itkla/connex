@@ -15,7 +15,9 @@ import ooo.klae.connex.backend.dto.BulkDeleteRequest;
 import ooo.klae.connex.backend.dto.BulkOperationResult;
 import ooo.klae.connex.backend.dto.BulkTagRequest;
 import ooo.klae.connex.backend.dto.CompanyDto;
+import ooo.klae.connex.backend.dto.CompanyEngagementDto;
 import ooo.klae.connex.backend.dto.CompanyFacets;
+import ooo.klae.connex.backend.dto.CompanySegmentQueryRequest;
 import ooo.klae.connex.backend.dto.CustomFieldEntryDto;
 import ooo.klae.connex.backend.dto.CustomFieldValueRequest;
 import ooo.klae.connex.backend.dto.CustomFieldValuesRequest;
@@ -83,6 +85,35 @@ public class CompanyController {
         return new PageResponse<>(items, companyService.countCompanies(query, industry, noIndustry, ids));
     }
 
+    /** Returns a lightweight, explicitly bounded company catalog for record selectors. */
+    @GetMapping("/catalog")
+    public List<CompanyDto> getCompanyCatalog() {
+        return companyService.getCompanyCatalog().stream().map(CompanyDto::from).toList();
+    }
+
+    /** Returns complete company-scoped engagement inputs for one expanded company card. */
+    @GetMapping("/{id}/engagement")
+    public CompanyEngagementDto getCompanyEngagement(@PathVariable int id) {
+        return companyService.getCompanyEngagement(id);
+    }
+
+    /**
+     * Retrieves a company page matching a smart segment without accepting an expanded id list in
+     * the URL.
+     */
+    @PostMapping("/segment/page")
+    public PageResponse<CompanyDto> getSegmentCompaniesPage(
+            @Valid @RequestBody CompanySegmentQueryRequest request) {
+        PageBounds bounds = PageBounds.of(request.getPage(), request.getSize());
+        String query = request.getQ() == null || request.getQ().isBlank()
+            ? null
+            : LikePattern.containing(request.getQ());
+        PageResponse<Company> result = companyService.getSegmentCompaniesPage(
+            request.getDefinition(), query, request.getSort(), request.getDir(), request.getIndustry(),
+            request.isNoIndustry(), bounds.size(), bounds.offset());
+        return new PageResponse<>(result.items().stream().map(CompanyDto::from).toList(), result.total());
+    }
+
     /**
      * Retrieves the ids of every company matching at least one supplied filter.
      */
@@ -101,6 +132,18 @@ public class CompanyController {
             throw new BadRequestException("At least one filter is required before selecting matching company ids");
         }
         return companyService.getMatchingCompanyIds(query, industry, noIndustry, ids);
+    }
+
+    /**
+     * Retrieves the bounded id set matching a smart segment and optional company filters.
+     */
+    @PostMapping("/segment/ids")
+    public List<Integer> getSegmentCompanyIds(@Valid @RequestBody CompanySegmentQueryRequest request) {
+        String query = request.getQ() == null || request.getQ().isBlank()
+            ? null
+            : LikePattern.containing(request.getQ());
+        return companyService.getMatchingSegmentCompanyIds(
+            request.getDefinition(), query, request.getIndustry(), request.isNoIndustry());
     }
 
     /**

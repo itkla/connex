@@ -89,6 +89,14 @@ class DealServiceTest extends AbstractServiceTest {
             "%Local Won%", "JPY", pipeline.getId(), stage.getId(), company.getId(), "won");
         DealMetricsDto filteredMetrics = dealService.getDealMetrics(
             "%Local Won%", "JPY", pipeline.getId(), stage.getId(), company.getId(), "won");
+        var multiFilteredPage = dealService.queryDealsPage(
+            "%Local Won%", "value", "desc", "JPY",
+            List.of(pipeline.getId()), List.of(stage.getId()), List.of(company.getId()),
+            false, List.of("won", "lost"), null, 25, 0);
+        DealMetricsDto multiFilteredMetrics = dealService.queryDealMetrics(
+            "%Local Won%", "JPY",
+            List.of(pipeline.getId()), List.of(stage.getId()), List.of(company.getId()),
+            false, List.of("won", "lost"), null);
 
         assertEquals(3, metrics.totalCount());
         assertEquals(1, metrics.byCurrency().size());
@@ -115,6 +123,11 @@ class DealServiceTest extends AbstractServiceTest {
             filteredPage.stream().map(Deal::getId).toList());
         assertEquals(2, filteredMetrics.totalCount());
         assertEquals(170.0, filteredMetrics.byCurrency().get(0).closedRevenue(), 0.0001);
+        assertEquals(2, multiFilteredPage.total());
+        assertEquals(List.of(localWon.getId(), localWonLower.getId()),
+            multiFilteredPage.items().stream().map(Deal::getId).toList());
+        assertEquals(2, multiFilteredMetrics.totalCount());
+        assertEquals(3, dealService.getDealBoard(pipeline.getId()).size());
     }
 
     @Test
@@ -617,6 +630,11 @@ class DealServiceTest extends AbstractServiceTest {
 
     @Test
     void closingSoonCountUsesTheActiveWorkspace() {
+        Workspace activeWorkspace = newWorkspace();
+        workspaceMapper.addMember(activeWorkspace.getId(), currentUser.getId(), "owner");
+        workspace = activeWorkspace;
+        authenticateAs(currentUser, workspace.getId());
+
         Pipeline pipeline = newPipeline();
         Stage stage = newStage(pipeline, 0);
         Company company = newCompany();
@@ -635,6 +653,8 @@ class DealServiceTest extends AbstractServiceTest {
         jdbcTemplate.update("UPDATE deal SET expected_close_date = CURDATE() WHERE id = ?", foreign.getId());
 
         assertEquals(1, dealService.getClosingSoonCount(7).count());
+        assertEquals(List.of(closing.getId()),
+            dealService.getClosingSoonDeals(7, 6).stream().map(Deal::getId).toList());
     }
 
     private Workspace newWorkspace() {

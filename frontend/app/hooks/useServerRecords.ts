@@ -26,6 +26,7 @@ export function useServerRecords<T, P extends PageParams = PageParams>(
     const [debouncedQuery, setDebouncedQuery] = useState('');
     const [sortKey, setSortKey] = useState<string | null>(null);
     const [sortDirection, setSortDirection] = useState<SortDir>('asc');
+    const [revision, setRevision] = useState(0);
 
     const extraKey = JSON.stringify(extraParams);
 
@@ -54,7 +55,9 @@ export function useServerRecords<T, P extends PageParams = PageParams>(
     }, [fetcher, page, size, debouncedQuery, sortKey, sortDirection, extraKey]);
 
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    useEffect(() => load(), [load]);
+    useEffect(() => load(), [load, revision]);
+
+    const reload = useCallback(() => setRevision((value) => value + 1), []);
 
     const changeSize = useCallback((next: number) => { setSize(next); setPage(1); }, []);
 
@@ -82,6 +85,6 @@ export function useServerRecords<T, P extends PageParams = PageParams>(
         size, setSize: changeSize,
         query, setQuery, applyQuery,
         sortKey, sortDirection, onSortChange, applySort,
-        reload: load,
+        revision, reload,
     };
 }

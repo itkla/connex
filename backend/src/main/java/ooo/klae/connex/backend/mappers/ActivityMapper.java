@@ -40,6 +40,8 @@ public interface ActivityMapper {
     );
     long upcomingCount(@Param("workspaceId") int workspaceId, @Param("days") int days);
     List<Activity> getActivitiesByPersonId(@Param("workspaceId") int workspaceId, @Param("personId") int personId);
+    List<Activity> getActivitiesByPersonIds(@Param("workspaceId") int workspaceId,
+            @Param("personIds") List<Integer> personIds);
     List<Activity> getActivitiesByDealId(@Param("workspaceId") int workspaceId, @Param("dealId") int dealId);
     List<Activity> getActivitiesByCreatedById(@Param("workspaceId") int workspaceId, @Param("createdById") int createdById);
     Activity getActivityById(@Param("workspaceId") int workspaceId, @Param("id") int id);

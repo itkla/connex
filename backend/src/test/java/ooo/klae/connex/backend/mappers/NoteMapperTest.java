@@ -107,6 +107,22 @@ class NoteMapperTest extends AbstractMapperTest {
     }
 
     @Test
+    void getNotesByPersonIdsBatchesOnlyRequestedWorkspaceContacts() {
+        User user = newUser();
+        Person included = newPerson(newCompany());
+        Person excluded = newPerson(newCompany());
+        Note includedNote = build("included", user, included, null);
+        Note excludedNote = build("excluded", user, excluded, null);
+        noteMapper.insert(includedNote);
+        noteMapper.insert(excludedNote);
+
+        List<Note> notes = noteMapper.getNotesByPersonIds(
+            workspace.getId(), List.of(included.getId()));
+
+        assertEquals(List.of(includedNote.getId()), notes.stream().map(Note::getId).toList());
+    }
+
+    @Test
     void getVisibleNotesPageLimitsAndCountsOnlyVisibleRows() {
         Workspace pageWorkspace = newWorkspace();
         User current = newUser();

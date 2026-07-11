@@ -140,6 +140,14 @@
     WHERE workspace_id = #{workspaceId} AND person_id = #{personId} ORDER BY timestamp DESC, id DESC
   </select>
 
+  <select id="getActivitiesByPersonIds" resultMap="ActivityResult">
+    SELECT <include refid="activityColumns"/> FROM activity
+    WHERE workspace_id = #{workspaceId}
+      AND person_id IN
+      <foreach item="personId" collection="personIds" open="(" separator="," close=")">#{personId}</foreach>
+    ORDER BY timestamp DESC, id DESC
+  </select>
+
   <select id="getActivitiesByDealId" resultMap="ActivityResult">
     SELECT <include refid="activityColumns"/> FROM activity
     WHERE workspace_id = #{workspaceId} AND deal_id = #{dealId} ORDER BY timestamp DESC, id DESC

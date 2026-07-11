@@ -35,10 +35,26 @@ public class ScoringController {
         return scoringService.scoreContacts(workspaceService.getCurrentWorkspaceId(), boundedIds(ids));
     }
 
+    /** Highest-priority cooling contacts for dashboard cards. */
+    @GetMapping("/contacts/cooling")
+    public List<RelationshipTemperatureDto> coolingContacts(
+            @RequestParam(defaultValue = "6") int limit) {
+        return scoringService.coolingContacts(
+            workspaceService.getCurrentWorkspaceId(), boundedLimit(limit));
+    }
+
     /** Warmth for up to {@link PageBounds#MAX_SIZE} visible companies in the active workspace. */
     @GetMapping("/companies")
     public List<RelationshipTemperatureDto> companies(@RequestParam(required = false) List<Integer> ids) {
         return scoringService.scoreCompanies(workspaceService.getCurrentWorkspaceId(), boundedIds(ids));
+    }
+
+    /** Highest-priority cooling companies for dashboard cards. */
+    @GetMapping("/companies/cooling")
+    public List<RelationshipTemperatureDto> coolingCompanies(
+            @RequestParam(defaultValue = "6") int limit) {
+        return scoringService.coolingCompanies(
+            workspaceService.getCurrentWorkspaceId(), boundedLimit(limit));
     }
 
     /** Workspace-wide warmth bands, contact trends, and predicted contact decay counts. */
@@ -62,5 +78,12 @@ public class ScoringController {
             out.add(id);
         }
         return out;
+    }
+
+    private int boundedLimit(int limit) {
+        if (limit < 1 || limit > PageBounds.MAX_SIZE) {
+            throw new BadRequestException("limit must be between 1 and " + PageBounds.MAX_SIZE);
+        }
+        return limit;
     }
 }

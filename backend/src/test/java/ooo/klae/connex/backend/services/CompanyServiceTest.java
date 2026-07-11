@@ -83,14 +83,14 @@ class CompanyServiceTest extends AbstractServiceTest {
         List<Integer> matchingIds = List.of(3);
         when(workspaceService.getCurrentWorkspaceId()).thenReturn(7);
         when(mapper.countCompanies(7, "%Target%", industry, true, requestedIds)).thenReturn(1L);
-        when(mapper.getCompanyIdsFiltered(7, "%Target%", industry, true, requestedIds, 1000))
+        when(mapper.getCompanyIdsFiltered(7, "%Target%", industry, true, requestedIds, 1000, 0))
             .thenReturn(matchingIds);
 
         assertEquals(matchingIds,
             service.getMatchingCompanyIds("%Target%", industry, true, requestedIds));
 
         verify(mapper).countCompanies(7, "%Target%", industry, true, requestedIds);
-        verify(mapper).getCompanyIdsFiltered(7, "%Target%", industry, true, requestedIds, 1000);
+        verify(mapper).getCompanyIdsFiltered(7, "%Target%", industry, true, requestedIds, 1000, 0);
     }
 
     @Test
@@ -104,7 +104,7 @@ class CompanyServiceTest extends AbstractServiceTest {
         assertThrows(BadRequestException.class,
             () -> service.getMatchingCompanyIds("%Target%", null, false, null));
 
-        verify(mapper, never()).getCompanyIdsFiltered(7, "%Target%", null, false, null, 1000);
+        verify(mapper, never()).getCompanyIdsFiltered(7, "%Target%", null, false, null, 1000, 0);
     }
 
     private CompanyService companyService(CompanyMapper mapper, WorkspaceService workspaceService) {
@@ -116,7 +116,9 @@ class CompanyServiceTest extends AbstractServiceTest {
             mock(AuditService.class),
             mock(RuleTriggerPublisher.class),
             workspaceService,
-            mock(CustomFieldValueService.class)
+            mock(CustomFieldValueService.class),
+            mock(SegmentService.class),
+            mock(AuthService.class)
         );
     }
 }

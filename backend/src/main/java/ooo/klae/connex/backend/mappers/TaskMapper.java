@@ -23,6 +23,8 @@ public interface TaskMapper {
         @Param("assignedToId") int assignedToId
     );
     List<Task> getTasksByPersonId(@Param("workspaceId") int workspaceId, @Param("personId") int personId);
+    List<Task> getTasksByPersonIds(@Param("workspaceId") int workspaceId,
+            @Param("personIds") List<Integer> personIds);
     List<Task> getTasksByDealId(@Param("workspaceId") int workspaceId, @Param("dealId") int dealId);
     Task getTaskById(@Param("workspaceId") int workspaceId, @Param("id") int id);
     boolean exists(@Param("workspaceId") int workspaceId, @Param("id") int id);

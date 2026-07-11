@@ -29,6 +29,7 @@ import ooo.klae.connex.backend.beans.Note;
 import ooo.klae.connex.backend.beans.Task;
 import ooo.klae.connex.backend.dto.DealRiskDto;
 import ooo.klae.connex.backend.dto.DealRiskFactor;
+import ooo.klae.connex.backend.dto.DealTouchDto;
 import ooo.klae.connex.backend.dto.RelationshipTemperatureDto;
 import ooo.klae.connex.backend.mappers.ActivityMapper;
 import ooo.klae.connex.backend.mappers.DealMapper;
@@ -132,6 +133,51 @@ public class DealRiskService {
         }
         out.sort(Comparator.comparingInt(DealRiskDto::getScore).reversed());
         return out;
+    }
+
+    /**
+     * Assesses only the requested workspace-owned deals with batched, deal-scoped interaction and
+     * stakeholder reads.
+     * @param workspaceId active workspace
+     * @param dealIds bounded deal ids
+     * @return at-risk assessments ordered by descending score
+     */
+    public List<DealRiskDto> assessDeals(int workspaceId, List<Integer> dealIds) {
+        if (dealIds == null || dealIds.isEmpty()) {
+            return List.of();
+        }
+        Instant now = Instant.now(clock);
+        String assessedAt = utc(now);
+        List<Deal> open = dealMapper.getByIds(workspaceId, dealIds).stream()
+            .filter(deal -> isOpen(deal) && !deal.isRiskExcluded())
+            .toList();
+        if (open.isEmpty()) {
+            return List.of();
+        }
+        List<Integer> openIds = open.stream().map(Deal::getId).toList();
+        Map<Integer, Long> lastTouch = new HashMap<>();
+        for (Deal deal : open) {
+            merge(lastTouch, deal.getId(), notFuture(epoch(deal.getCreatedAt()), now.toEpochMilli()));
+        }
+        for (DealTouchDto touch : dealMapper.getLatestDealTouches(workspaceId, openIds, assessedAt)) {
+            merge(lastTouch, touch.dealId(), epoch(touch.touchedAt()));
+        }
+        Map<Integer, List<DealStakeholder>> stakeholders = new HashMap<>();
+        Set<Integer> personIds = new HashSet<>();
+        for (DealStakeholder stakeholder : dealMapper.getDealStakeholdersByDealIds(workspaceId, openIds)) {
+            stakeholders.computeIfAbsent(stakeholder.getDealId(), key -> new ArrayList<>()).add(stakeholder);
+            personIds.add(stakeholder.getPersonId());
+        }
+        Map<Integer, RelationshipTemperatureDto> warmth = warmthFor(workspaceId, personIds);
+        List<DealRiskDto> assessments = new ArrayList<>();
+        for (Deal deal : open) {
+            DealRiskDto assessment = assess(deal, now, lastTouch, stakeholders, warmth, assessedAt);
+            if (!assessment.getFactors().isEmpty()) {
+                assessments.add(assessment);
+            }
+        }
+        assessments.sort(Comparator.comparingInt(DealRiskDto::getScore).reversed());
+        return assessments;
     }
 
     /**

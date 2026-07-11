@@ -248,6 +248,8 @@ function buildQuery(params: Record<string, unknown>): string {
 }
 
 const WORKSPACE_LIST_PAGE_SIZE = 100;
+const RELATIONSHIP_MAP_RECORD_LIMIT = 2_000;
+const RELATIONSHIP_MAP_TOUCH_LIMIT = 4_000;
 
 function hasQueryValues(params: Record<string, unknown>): boolean {
     return Object.values(params).some((value) => {
@@ -264,6 +266,52 @@ async function getBoundedPageItems<T>(
 ): Promise<T[]> {
     const response = await fetchPage({ page: 1, size: WORKSPACE_LIST_PAGE_SIZE }, init);
     return response.items;
+}
+
+async function getCompleteKnownPage<T>(
+    firstPage: Types.Page<T>,
+    fetchPage: (params: Types.PageParams, init: RequestInit) => Promise<Types.Page<T>>,
+    init: RequestInit,
+): Promise<T[]> {
+    const pageCount = Math.ceil(firstPage.total / WORKSPACE_LIST_PAGE_SIZE);
+    if (pageCount <= 1) return firstPage.items;
+    const remaining = await Promise.all(
+        Array.from({ length: pageCount - 1 }, (_, index) =>
+            fetchPage({ page: index + 2, size: WORKSPACE_LIST_PAGE_SIZE }, init)),
+    );
+    return [firstPage, ...remaining].flatMap((page) => page.items);
+}
+
+/** Complete, explicitly capped inputs for the relationship graph. */
+export async function getRelationshipMapData(init: RequestInit = {}) {
+    const [companies, contacts, deals, activities, tasks, notes] = await Promise.all([
+        getCompaniesPage({ page: 1, size: WORKSPACE_LIST_PAGE_SIZE }, init),
+        getContactsPage({ page: 1, size: WORKSPACE_LIST_PAGE_SIZE }, init),
+        getDealsPage({ page: 1, size: WORKSPACE_LIST_PAGE_SIZE }, init),
+        getActivitiesPage({ page: 1, size: WORKSPACE_LIST_PAGE_SIZE }, init),
+        getTasksPage({ page: 1, size: WORKSPACE_LIST_PAGE_SIZE }, init),
+        getNotesPage({ page: 1, size: WORKSPACE_LIST_PAGE_SIZE }, init),
+    ]);
+    if (companies.total + contacts.total + deals.total > RELATIONSHIP_MAP_RECORD_LIMIT
+        || activities.total + tasks.total + notes.total > RELATIONSHIP_MAP_TOUCH_LIMIT) {
+        throw new Error('The relationship map exceeds its safe rendering limit');
+    }
+    const [allCompanies, allContacts, allDeals, allActivities, allTasks, allNotes] = await Promise.all([
+        getCompleteKnownPage(companies, getCompaniesPage, init),
+        getCompleteKnownPage(contacts, getContactsPage, init),
+        getCompleteKnownPage(deals, getDealsPage, init),
+        getCompleteKnownPage(activities, getActivitiesPage, init),
+        getCompleteKnownPage(tasks, getTasksPage, init),
+        getCompleteKnownPage(notes, getNotesPage, init),
+    ]);
+    return {
+        companies: allCompanies,
+        contacts: allContacts,
+        deals: allDeals,
+        activities: allActivities,
+        tasks: allTasks,
+        notes: allNotes,
+    };
 }
 
 /*
@@ -791,6 +839,15 @@ export function getCompaniesPage(params: Types.CompaniesPageParams = {}, init: R
     return getJson<Types.Page<Types.Company>>(`/api/companies/page${buildQuery(params)}`, init);
 }
 
+/** Complete server-bounded company catalog for selectors and related-record labels. */
+export function getCompanyCatalog(init: RequestInit = {}) {
+    return getJson<Types.Company[]>(`/api/companies/catalog`, init);
+}
+
+export function getCompaniesSegmentPage(params: Types.CompanySegmentPageParams, init: RequestInit = {}) {
+    return postJson<Types.Page<Types.Company>>(`/api/companies/segment/page`, params, init);
+}
+
 export function getCompanyFacets(init: RequestInit = {}) {
     return getJson<Types.CompanyFacets>(`/api/companies/facets`, init);
 }
@@ -799,6 +856,10 @@ export function getCompanyFacets(init: RequestInit = {}) {
 export function getCompanyIds(params: Types.CompaniesPageParams = {}, init: RequestInit = {}) {
     const query = buildQuery({ q: params.q, industry: params.industry, noIndustry: params.noIndustry, ids: params.ids });
     return getJson<number[]>(`/api/companies/ids${query}`, init);
+}
+
+export function getCompanySegmentIds(params: Types.CompanySegmentPageParams, init: RequestInit = {}) {
+    return postJson<number[]>(`/api/companies/segment/ids`, params, init);
 }
 
 export function getCompaniesFromCookie(cookie: string | null) {
@@ -827,6 +888,10 @@ export function getCompanyPeople(id: number, init: RequestInit = {}) {
 
 export function getCompanyDeals(id: number, init: RequestInit = {}) {
     return getJson<Types.Deal[]>(`/api/companies/${id}/deals`, init);
+}
+
+export function getCompanyEngagement(id: number, init: RequestInit = {}) {
+    return getJson<Types.CompanyEngagement>(`/api/companies/${id}/engagement`, init);
 }
 
 export function getCompanyTags(id: number, init: RequestInit = {}) {
@@ -1038,9 +1103,18 @@ export function getContactIntroPath(id: number, init: RequestInit = {}) {
 * == Relationship temperature (warmth) scoring
 */
 
-export function getContactTemperatures(ids: number[], init: RequestInit = {}) {
+export async function getContactTemperatures(ids: number[], init: RequestInit = {}) {
     if (ids.length === 0) return Promise.resolve([] as Types.RelationshipTemperature[]);
-    return getJson<Types.RelationshipTemperature[]>(`/api/scoring/contacts${buildQuery({ ids })}`, init);
+    const batches = await Promise.all(
+        Array.from({ length: Math.ceil(ids.length / WORKSPACE_LIST_PAGE_SIZE) }, (_, index) =>
+            getJson<Types.RelationshipTemperature[]>(
+                `/api/scoring/contacts${buildQuery({
+                    ids: ids.slice(index * WORKSPACE_LIST_PAGE_SIZE, (index + 1) * WORKSPACE_LIST_PAGE_SIZE),
+                })}`,
+                init,
+            )),
+    );
+    return batches.flat();
 }
 
 export function getContactTemperaturesFromCookie(cookie: string | null, ids: number[]) {
@@ -1048,14 +1122,37 @@ export function getContactTemperaturesFromCookie(cookie: string | null, ids: num
     return safeWithCookie<Types.RelationshipTemperature>((init) => getContactTemperatures(ids, init), cookie);
 }
 
-export function getCompanyTemperatures(ids: number[], init: RequestInit = {}) {
+export function getCoolingContactTemperaturesFromCookie(cookie: string | null, limit = 6) {
+    return getJson<Types.RelationshipTemperature[]>(
+        `/api/scoring/contacts/cooling${buildQuery({ limit })}`,
+        withCookie(cookie),
+    );
+}
+
+export async function getCompanyTemperatures(ids: number[], init: RequestInit = {}) {
     if (ids.length === 0) return Promise.resolve([] as Types.RelationshipTemperature[]);
-    return getJson<Types.RelationshipTemperature[]>(`/api/scoring/companies${buildQuery({ ids })}`, init);
+    const batches = await Promise.all(
+        Array.from({ length: Math.ceil(ids.length / WORKSPACE_LIST_PAGE_SIZE) }, (_, index) =>
+            getJson<Types.RelationshipTemperature[]>(
+                `/api/scoring/companies${buildQuery({
+                    ids: ids.slice(index * WORKSPACE_LIST_PAGE_SIZE, (index + 1) * WORKSPACE_LIST_PAGE_SIZE),
+                })}`,
+                init,
+            )),
+    );
+    return batches.flat();
 }
 
 export function getCompanyTemperaturesFromCookie(cookie: string | null, ids: number[]) {
     if (ids.length === 0) return Promise.resolve([] as Types.RelationshipTemperature[]);
     return safeWithCookie<Types.RelationshipTemperature>((init) => getCompanyTemperatures(ids, init), cookie);
+}
+
+export function getCoolingCompanyTemperaturesFromCookie(cookie: string | null, limit = 6) {
+    return getJson<Types.RelationshipTemperature[]>(
+        `/api/scoring/companies/cooling${buildQuery({ limit })}`,
+        withCookie(cookie),
+    );
 }
 
 /*
@@ -1212,6 +1309,11 @@ export function getDealsPage(params: Types.DealsPageParams = {}, init: RequestIn
     return getJson<Types.Page<Types.Deal>>(`/api/deals/page${buildQuery(params)}`, init);
 }
 
+/** Returns one complete, server-bounded pipeline board for absolute Kanban ordering. */
+export function getDealBoard(pipelineId: number, init: RequestInit = {}) {
+    return getJson<Types.Deal[]>(`/api/deals/board${buildQuery({ pipelineId })}`, init);
+}
+
 export function getDealsFromCookie(cookie: string | null) {
     return safeWithCookie<Types.Deal>((init) => getDeals(init), cookie);
 }
@@ -1300,6 +1402,13 @@ export function getDealClosingSoonCountFromCookie(cookie: string | null, days?: 
     return getJson<Types.Count>(`/api/deals/closing-soon-count${buildQuery({ days })}`, withCookie(cookie));
 }
 
+export function getDealClosingSoonFromCookie(cookie: string | null, days = 7, limit = 6) {
+    return getJson<Types.Deal[]>(
+        `/api/deals/closing-soon${buildQuery({ days, limit })}`,
+        withCookie(cookie),
+    );
+}
+
 /** Server-computed activity counts by type per time bucket over {@code range} (30d/90d/12m). */
 export function getActivityVolume(range?: string, init: RequestInit = {}) {
     return getJson<Types.ActivityVolumeBucket[]>(`/api/activities/volume${buildQuery({ range })}`, init);
@@ -1371,8 +1480,8 @@ export function getDealStageHistory(id: number, init: RequestInit = {}) {
 }
 
 /** Risk assessment for every at-risk open deal in the active workspace, highest risk first. */
-export function getDealRisks(init: RequestInit = {}) {
-    return getJson<Types.DealRisk[]>(`/api/deals/risk`, init);
+export function getDealRisks(ids?: number[], init: RequestInit = {}) {
+    return getJson<Types.DealRisk[]>(`/api/deals/risk${buildQuery({ ids })}`, init);
 }
 
 /** Risk assessment for a single deal; {@code level} is {@code "none"} when it is not at risk. */
@@ -1381,7 +1490,7 @@ export function getDealRisk(id: number, init: RequestInit = {}) {
 }
 
 export function getDealRisksFromCookie(cookie: string | null) {
-    return safeWithCookie<Types.DealRisk>((init) => getDealRisks(init), cookie);
+    return safeWithCookie<Types.DealRisk>((init) => getDealRisks(undefined, init), cookie);
 }
 
 /**

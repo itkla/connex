@@ -115,6 +115,22 @@ class TaskMapperTest extends AbstractMapperTest {
     }
 
     @Test
+    void getTasksByPersonIdsBatchesOnlyRequestedWorkspaceContacts() {
+        User user = newUser();
+        Person included = newPerson(newCompany());
+        Person excluded = newPerson(newCompany());
+        Task includedTask = build("included", user, included, null);
+        Task excludedTask = build("excluded", user, excluded, null);
+        taskMapper.insert(includedTask);
+        taskMapper.insert(excludedTask);
+
+        List<Task> tasks = taskMapper.getTasksByPersonIds(
+            workspace.getId(), List.of(included.getId()));
+
+        assertEquals(List.of(includedTask.getId()), tasks.stream().map(Task::getId).toList());
+    }
+
+    @Test
     void getTasksPageLimitsAndCountsWorkspaceRows() {
         Workspace pageWorkspace = newWorkspace();
         User user = newUser();

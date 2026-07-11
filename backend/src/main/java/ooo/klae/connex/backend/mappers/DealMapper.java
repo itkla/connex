@@ -14,6 +14,7 @@ import ooo.klae.connex.backend.dto.DealKpiPeriodDto;
 import ooo.klae.connex.backend.dto.DealMonthTotalDto;
 import ooo.klae.connex.backend.dto.DealPipelineValueDto;
 import ooo.klae.connex.backend.dto.DealStageDistributionDto;
+import ooo.klae.connex.backend.dto.DealTouchDto;
 import ooo.klae.connex.backend.dto.FacetCount;
 import java.util.List;
 
@@ -55,6 +56,55 @@ public interface DealMapper {
         @Param("stageId") Integer stageId,
         @Param("companyId") Integer companyId,
         @Param("status") String status
+    );
+    List<Deal> getDealsPageFiltered(
+        @Param("workspaceId") int workspaceId,
+        @Param("query") String query,
+        @Param("sort") String sort,
+        @Param("dir") String dir,
+        @Param("currency") String currency,
+        @Param("pipelineIds") List<Integer> pipelineIds,
+        @Param("stageIds") List<Integer> stageIds,
+        @Param("companyIds") List<Integer> companyIds,
+        @Param("noCompany") boolean noCompany,
+        @Param("statuses") List<String> statuses,
+        @Param("riskIds") List<Integer> riskIds,
+        @Param("limit") int limit,
+        @Param("offset") int offset
+    );
+    long countDealsFiltered(
+        @Param("workspaceId") int workspaceId,
+        @Param("query") String query,
+        @Param("currency") String currency,
+        @Param("pipelineIds") List<Integer> pipelineIds,
+        @Param("stageIds") List<Integer> stageIds,
+        @Param("companyIds") List<Integer> companyIds,
+        @Param("noCompany") boolean noCompany,
+        @Param("statuses") List<String> statuses,
+        @Param("riskIds") List<Integer> riskIds
+    );
+    List<DealCurrencyMetricsDto> dealMetricsFiltered(
+        @Param("workspaceId") int workspaceId,
+        @Param("query") String query,
+        @Param("currency") String currency,
+        @Param("pipelineIds") List<Integer> pipelineIds,
+        @Param("stageIds") List<Integer> stageIds,
+        @Param("companyIds") List<Integer> companyIds,
+        @Param("noCompany") boolean noCompany,
+        @Param("statuses") List<String> statuses,
+        @Param("riskIds") List<Integer> riskIds
+    );
+    List<Integer> getFilteredDealIds(
+        @Param("workspaceId") int workspaceId,
+        @Param("query") String query,
+        @Param("currency") String currency,
+        @Param("pipelineIds") List<Integer> pipelineIds,
+        @Param("stageIds") List<Integer> stageIds,
+        @Param("companyIds") List<Integer> companyIds,
+        @Param("noCompany") boolean noCompany,
+        @Param("statuses") List<String> statuses,
+        @Param("riskIds") List<Integer> riskIds,
+        @Param("limit") int limit
     );
     List<DealMonthTotalDto> revenueClosedByMonth(
         @Param("workspaceId") int workspaceId,
@@ -102,6 +152,8 @@ public interface DealMapper {
         @Param("currency") String currency
     );
     long closingSoonCount(@Param("workspaceId") int workspaceId, @Param("days") int days);
+    List<Deal> closingSoonDeals(@Param("workspaceId") int workspaceId,
+            @Param("days") int days, @Param("limit") int limit);
     List<Deal> topOpenDeals(
         @Param("workspaceId") int workspaceId,
         @Param("currency") String currency
@@ -116,6 +168,7 @@ public interface DealMapper {
     List<FacetCount> countsByCompany(int workspaceId);
     List<FacetCount> countsByCurrency(int workspaceId);
     List<Deal> getDealsByPipelineId(@Param("workspaceId") int workspaceId, @Param("pipelineId") int pipelineId);
+    long countDealsByPipelineId(@Param("workspaceId") int workspaceId, @Param("pipelineId") int pipelineId);
     List<Deal> getDealsByStageId(@Param("workspaceId") int workspaceId, @Param("stageId") int stageId);
     List<Deal> getDealsByCompanyId(@Param("workspaceId") int workspaceId, @Param("companyId") int companyId);
     List<Deal> getDealsByPersonId(@Param("workspaceId") int workspaceId, @Param("personId") int personId);
@@ -168,6 +221,15 @@ public interface DealMapper {
     );
     /** Every deal stakeholder in the workspace as {@code (dealId, personId, name, role)} rows; for deal-risk scoring. */
     List<DealStakeholder> getAllDealStakeholders(int workspaceId);
+    List<DealStakeholder> getDealStakeholdersByDealIds(
+        @Param("workspaceId") int workspaceId,
+        @Param("dealIds") List<Integer> dealIds
+    );
+    List<DealTouchDto> getLatestDealTouches(
+        @Param("workspaceId") int workspaceId,
+        @Param("dealIds") List<Integer> dealIds,
+        @Param("now") String now
+    );
     /** Stakeholders for a single deal; the single-deal risk path scopes to this rather than the whole workspace. */
     List<DealStakeholder> getDealStakeholdersByDealId(
         @Param("workspaceId") int workspaceId,

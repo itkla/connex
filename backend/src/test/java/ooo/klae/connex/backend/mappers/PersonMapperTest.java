@@ -98,6 +98,18 @@ class PersonMapperTest extends AbstractMapperTest {
     }
 
     @Test
+    void getExistingPersonIdsIsWorkspaceScopedAndIgnoresMissingIds() {
+        Person included = newPerson(newCompany());
+        Workspace other = newWorkspace();
+        Person foreign = newPersonIn(other);
+
+        List<Integer> ids = personMapper.getExistingPersonIds(
+            workspace.getId(), List.of(included.getId(), foreign.getId(), Integer.MAX_VALUE));
+
+        assertEquals(List.of(included.getId()), ids);
+    }
+
+    @Test
     void getPersonsPageLimitsAndCountsWorkspaceRows() {
         Workspace pageWorkspace = newWorkspace();
         Person first = newPersonIn(pageWorkspace);

@@ -25,6 +25,10 @@ export type CompaniesPageParams = PageParams & {
     ids?: number[];
 };
 
+export type CompanySegmentPageParams = Omit<CompaniesPageParams, 'ids'> & {
+    definition: SegmentDefinition;
+};
+
 export type ActivitiesPageParams = PageParams & {
     personId?: number;
     dealId?: number;
@@ -1119,10 +1123,13 @@ export type AttachmentFacets = {
 };
 
 export type DealFilterParams = {
-    status?: 'open' | 'closed' | 'won' | 'lost';
-    stageId?: number;
-    pipelineId?: number;
-    companyId?: number;
+    q?: string;
+    status?: Array<'open' | 'closed' | 'won' | 'lost'>;
+    risk?: Array<'high' | 'medium' | 'low' | 'none'>;
+    stageId?: number[];
+    pipelineId?: number[];
+    companyId?: number[];
+    noCompany?: boolean;
     currency?: string;
 };
 
@@ -1150,6 +1157,17 @@ export type DealFacets = {
     pipelines: FacetCount[];
     companies: FacetCount[];
     currencies: FacetCount[];
+    risk: FacetCount[];
+};
+
+export type CompanyEngagement = {
+    persons: Contact[];
+    deals: Deal[];
+    touches: Array<{
+        kind: 'activities' | 'tasks' | 'notes';
+        touchedAt: string;
+        userId?: number;
+    }>;
 };
 
 /** One month's aggregated total; {@code month} is 1-12 (MySQL MONTH()). */

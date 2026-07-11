@@ -28,6 +28,7 @@ import ooo.klae.connex.backend.dto.DecayCounts;
 import ooo.klae.connex.backend.dto.RelationshipTemperatureDto;
 import ooo.klae.connex.backend.dto.TrendCounts;
 import ooo.klae.connex.backend.dto.WarmthSummaryDto;
+import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.mappers.ActivityMapper;
 import ooo.klae.connex.backend.mappers.CompanyMapper;
 import ooo.klae.connex.backend.mappers.DealMapper;
@@ -78,6 +79,7 @@ public class ScoringService {
 
     private static final double NOTE_WEIGHT = 0.4;
     private static final double TASK_WEIGHT = 0.3;
+    private static final int MAX_BATCH_CONTACTS = 1_000;
 
     private static final DateTimeFormatter MYSQL_DATETIME =
         DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
@@ -90,6 +92,16 @@ public class ScoringService {
      */
     public List<RelationshipTemperatureDto> scoreContacts(int workspaceId) {
         return computeContactScores(workspaceId, Instant.now(clock).toEpochMilli(), Long.MAX_VALUE);
+    }
+
+    public List<RelationshipTemperatureDto> coolingContacts(int workspaceId, int limit) {
+        return scoreContacts(workspaceId).stream()
+            .filter(temperature -> "cooling".equals(temperature.getTrend()))
+            .sorted((left, right) -> Integer.compare(
+                right.getDaysSinceTouch() == null ? 0 : right.getDaysSinceTouch(),
+                left.getDaysSinceTouch() == null ? 0 : left.getDaysSinceTouch()))
+            .limit(limit)
+            .toList();
     }
 
     /**
@@ -112,31 +124,48 @@ public class ScoringService {
      * @return warmth for the requested contacts (unknown/quiet ids yield a cold score)
      */
     public List<RelationshipTemperatureDto> scoreContacts(int workspaceId, Set<Integer> personIds) {
+        List<Integer> requested = personIds.stream()
+            .filter(java.util.Objects::nonNull)
+            .distinct()
+            .toList();
+        if (requested.size() > MAX_BATCH_CONTACTS) {
+            throw new BadRequestException(
+                "At most " + MAX_BATCH_CONTACTS + " contacts may be scored in one request");
+        }
+        if (requested.isEmpty()) {
+            return List.of();
+        }
         long reference = Instant.now(clock).toEpochMilli();
-        List<RelationshipTemperatureDto> out = new ArrayList<>(personIds.size());
-        for (Integer personId : personIds) {
-            if (personId != null && personMapper.exists(workspaceId, personId)) {
-                out.add(temperature(personId, touchesForPerson(workspaceId, personId), reference, Long.MAX_VALUE));
+        Set<Integer> existing = new HashSet<>(personMapper.getExistingPersonIds(workspaceId, requested));
+        Map<Integer, List<Touch>> touches = new HashMap<>();
+        for (Activity activity : activityMapper.getActivitiesByPersonIds(workspaceId, requested)) {
+            Integer personId = personId(activity.getPerson());
+            Long timestamp = epoch(activity.getTimestamp());
+            if (personId != null && timestamp != null) {
+                add(touches, personId, new Touch(timestamp, activityWeight(activity.getType())));
+            }
+        }
+        for (Note note : noteMapper.getNotesByPersonIds(workspaceId, requested)) {
+            Integer personId = personId(note.getPerson());
+            Long timestamp = epoch(note.getCreatedAt());
+            if (personId != null && timestamp != null) {
+                add(touches, personId, new Touch(timestamp, NOTE_WEIGHT));
+            }
+        }
+        for (Task task : taskMapper.getTasksByPersonIds(workspaceId, requested)) {
+            Integer personId = personId(task.getPerson());
+            Long timestamp = epoch(task.getCreatedAt());
+            if (personId != null && timestamp != null) {
+                add(touches, personId, new Touch(timestamp, TASK_WEIGHT));
+            }
+        }
+        List<RelationshipTemperatureDto> out = new ArrayList<>(existing.size());
+        for (Integer personId : requested) {
+            if (existing.contains(personId)) {
+                out.add(temperature(personId, touches.getOrDefault(personId, List.of()), reference, Long.MAX_VALUE));
             }
         }
         return out;
-    }
-
-    private List<Touch> touchesForPerson(int workspaceId, int personId) {
-        List<Touch> touches = new ArrayList<>();
-        for (Activity a : activityMapper.getActivitiesByPersonId(workspaceId, personId)) {
-            Long ts = epoch(a.getTimestamp());
-            if (ts != null) touches.add(new Touch(ts, activityWeight(a.getType())));
-        }
-        for (Note n : noteMapper.getNotesByPersonId(workspaceId, personId)) {
-            Long ts = epoch(n.getCreatedAt());
-            if (ts != null) touches.add(new Touch(ts, NOTE_WEIGHT));
-        }
-        for (Task t : taskMapper.getTasksByPersonId(workspaceId, personId)) {
-            Long ts = epoch(t.getCreatedAt());
-            if (ts != null) touches.add(new Touch(ts, TASK_WEIGHT));
-        }
-        return touches;
     }
 
     private List<RelationshipTemperatureDto> computeContactScores(int workspaceId, long reference, long cutoff) {
@@ -177,6 +206,16 @@ public class ScoringService {
      */
     public List<RelationshipTemperatureDto> scoreCompanies(int workspaceId) {
         return computeCompanyScores(workspaceId, Instant.now(clock).toEpochMilli(), Long.MAX_VALUE);
+    }
+
+    public List<RelationshipTemperatureDto> coolingCompanies(int workspaceId, int limit) {
+        return scoreCompanies(workspaceId).stream()
+            .filter(temperature -> "cooling".equals(temperature.getTrend()))
+            .sorted((left, right) -> Integer.compare(
+                right.getDaysSinceTouch() == null ? 0 : right.getDaysSinceTouch(),
+                left.getDaysSinceTouch() == null ? 0 : left.getDaysSinceTouch()))
+            .limit(limit)
+            .toList();
     }
 
     /**

@@ -10,5 +10,6 @@ public record DealFacets(
     List<FacetCount> stages,
     List<FacetCount> pipelines,
     List<FacetCount> companies,
-    List<FacetCount> currencies
+    List<FacetCount> currencies,
+    List<FacetCount> risk
 ) {}

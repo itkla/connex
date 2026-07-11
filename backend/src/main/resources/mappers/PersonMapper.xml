@@ -99,6 +99,13 @@
     WHERE <include refid="visible"/> AND p.id = #{id}
   </select>
 
+  <select id="getExistingPersonIds" resultType="int">
+    SELECT id FROM person
+    WHERE workspace_id = #{workspaceId}
+      AND id IN
+      <foreach item="id" collection="ids" open="(" separator="," close=")">#{id}</foreach>
+  </select>
+
   <select id="exists" resultType="boolean">
     SELECT EXISTS(
       SELECT 1 FROM person

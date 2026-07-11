@@ -76,6 +76,15 @@
     ORDER BY due_date IS NULL, due_date, id
   </select>
 
+  <select id="getTasksByPersonIds" resultMap="TaskResult">
+    SELECT <include refid="taskColumns"/>
+    FROM task
+    WHERE workspace_id = #{workspaceId}
+      AND person_id IN
+      <foreach item="personId" collection="personIds" open="(" separator="," close=")">#{personId}</foreach>
+    ORDER BY due_date IS NULL, due_date, id
+  </select>
+
   <select id="getTasksByDealId" resultMap="TaskResult">
     SELECT <include refid="taskColumns"/>
     FROM task

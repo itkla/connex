@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { useReducedMotion } from 'motion/react';
@@ -34,12 +34,11 @@ import CompanyAvatar from '@/app/components/records/companies/CompanyAvatar';
 import NewCompanyDialog from '@/app/components/records/companies/NewCompanyDialog';
 import { type PendingContact, type PendingContactDraft } from '@/app/components/records/companies/CompanyContactsField';
 import QuickEditCompanySheet, { type CompanyDraft } from '@/app/components/records/companies/QuickEditCompanySheet';
-import { createCompany, createContact, updateContact, getUsers, getTasks, getDeals, updateCompany, getActivities, getNotes, getCompaniesPage, getCompanyFacets, getCompanyIds, getCompanyTemperatures, isFieldError, evaluateSegments, getSegmentFields, getTags, bulkAddTagToCompanies, bulkRemoveTagFromCompanies, bulkDeleteCompanies } from '@/app/lib/api';
+import { createCompany, createContact, updateContact, getUsers, updateCompany, getCompaniesPage, getCompaniesSegmentPage, getCompanyEngagement, getCompanyFacets, getCompanyIds, getCompanySegmentIds, getCompanyTemperatures, isFieldError, getSegmentFields, getTags, bulkAddTagToCompanies, bulkRemoveTagFromCompanies, bulkDeleteCompanies } from '@/app/lib/api';
 import BulkTagDialog from '@/app/components/records/BulkTagDialog';
 import { notifyBulkResult } from '@/app/lib/bulkToast';
 import { uploadCompanyLogo, uploadContactPicture, pickDominantCurrency, parseMysqlDateTime } from '@/app/lib/utils';
-import { type Company, type CompaniesPageParams, type CompanyFacets, type CreateCompanyPayload, type UpdateCompanyPayload, type Contact, type Activity, type Note, type Task, type User, type Deal, type CompanyMetrics, type LoadStatus, type RelationshipTemperature, type SavedView, type SavedViewConfig, type SegmentDefinition, type SegmentFields, type Tag } from '@/app/lib/types';
-import { getContacts } from '@/app/lib/api';
+import { type Company, type CompaniesPageParams, type CompanyEngagement, type CompanyFacets, type CreateCompanyPayload, type UpdateCompanyPayload, type User, type CompanyMetrics, type LoadStatus, type RelationshipTemperature, type SavedView, type SavedViewConfig, type SegmentDefinition, type SegmentFields, type Tag } from '@/app/lib/types';
 import TemperaturePill from '@/app/components/records/TemperaturePill';
 import { isDealClosed } from '@/app/components/records/deals/dealOutcome';
 
@@ -61,6 +60,51 @@ function diffDraft(original: CompanyDraft, draft: CompanyDraft): boolean {
         original.phone !== draft.phone ||
         original.address !== draft.address
     );
+}
+
+function metricsFromEngagement(engagement: CompanyEngagement, users: User[], now: number): CompanyMetrics {
+    const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
+    const firstWeekStart = now - 11 * WEEK_MS;
+    const weeklyEngagement = Array.from({ length: 12 }, (_, index) => ({
+        weekStart: firstWeekStart + index * WEEK_MS,
+        count: 0,
+        activities: 0,
+        tasks: 0,
+        notes: 0,
+    }));
+    const relatedUserIds = new Set<number>();
+    for (const touch of engagement.touches) {
+        const timestamp = parseMysqlDateTime(touch.touchedAt);
+        const index = Math.floor((timestamp - firstWeekStart) / WEEK_MS);
+        if (Number.isFinite(timestamp) && index >= 0 && index < weeklyEngagement.length) {
+            weeklyEngagement[index][touch.kind]++;
+            weeklyEngagement[index].count++;
+        }
+        if (touch.userId != null) relatedUserIds.add(touch.userId);
+    }
+    const currency = pickDominantCurrency(engagement.deals);
+    let pastRevenue = 0;
+    let projectedRevenue = 0;
+    for (const deal of engagement.deals) {
+        if ((deal.currency || 'USD') !== currency) continue;
+        if (isDealClosed(deal)) {
+            pastRevenue += deal.value ?? 0;
+        } else {
+            projectedRevenue += deal.value ?? 0;
+        }
+    }
+    return {
+        persons: engagement.persons,
+        relatedUsers: users.filter((user) => relatedUserIds.has(user.id)),
+        pastRevenue,
+        projectedRevenue,
+        currency,
+        numDeals: engagement.deals.length,
+        numTasks: engagement.touches.filter((touch) => touch.kind === 'tasks').length,
+        numActivities: engagement.touches.filter((touch) => touch.kind === 'activities').length,
+        numNotes: engagement.touches.filter((touch) => touch.kind === 'notes').length,
+        weeklyEngagement,
+    };
 }
 
 const searchFields = (c: Company) => [c.name, c.website, c.industry, c.phone, c.address];
@@ -97,7 +141,6 @@ export default function CompaniesBrowser({ savedViews }: { savedViews: SavedView
 
     const [definition, setDefinition] = useState<SegmentDefinition>(EMPTY_DEFINITION);
     const [segmentFields, setSegmentFields] = useState<SegmentFields | null>(null);
-    const [segmentResult, setSegmentResult] = useState<{ key: string; ids: Set<number> | null } | null>(null);
     const evaluable = useMemo<SegmentDefinition>(
         () => ({
             match: definition.match,
@@ -106,34 +149,41 @@ export default function CompaniesBrowser({ savedViews }: { savedViews: SavedView
         [definition],
     );
     const segmentsKey = useMemo(() => JSON.stringify(evaluable), [evaluable]);
+    const hasSegments = evaluable.conditions.length > 0;
+    const failedSegmentKeyRef = useRef<string | null>(null);
+    const [segmentErrorKey, setSegmentErrorKey] = useState<string | null>(null);
     useEffect(() => {
         getSegmentFields('company').then(setSegmentFields).catch(() => { setSegmentFields(null); toastError(tSeg('fieldsFailed')); });
     }, [tSeg]);
-    useEffect(() => {
-        if (evaluable.conditions.length === 0) return;
-        if (segmentResult?.key === segmentsKey) return;
-        let active = true;
-        const timer = setTimeout(() => {
-            evaluateSegments('company', evaluable)
-                .then((result) => { if (active) setSegmentResult({ key: segmentsKey, ids: new Set(result.ids) }); })
-                .catch(() => { if (active) { setSegmentResult({ key: segmentsKey, ids: null }); toastError(tSeg('evaluateFailed')); } });
-        }, 300);
-        return () => { active = false; clearTimeout(timer); };
-    }, [evaluable, segmentsKey, segmentResult, tSeg]);
-    const activeSegmentIds = evaluable.conditions.length > 0 && segmentResult?.key === segmentsKey ? segmentResult.ids : null;
-    const segmentsLoading = evaluable.conditions.length > 0 && segmentResult?.key !== segmentsKey;
 
-    const filterParams = useMemo<{ industry?: string[]; noIndustry?: boolean; ids?: number[] }>(() => {
+    const filterParams = useMemo<{ industry?: string[]; noIndustry?: boolean }>(() => {
         const industryFilter = filterState.industry ?? [];
         const industries = industryFilter.filter((k) => k !== FILTER_EMPTY);
-        const params: { industry?: string[]; noIndustry?: boolean; ids?: number[] } = {};
+        const params: { industry?: string[]; noIndustry?: boolean } = {};
         if (industries.length) params.industry = industries;
         if (industryFilter.includes(FILTER_EMPTY)) params.noIndustry = true;
-        if (evaluable.conditions.length > 0) {
-            params.ids = activeSegmentIds ? (activeSegmentIds.size ? Array.from(activeSegmentIds) : [0]) : [0];
-        }
         return params;
-    }, [filterState, evaluable, activeSegmentIds]);
+    }, [filterState]);
+
+    const fetchCompaniesPage = useCallback(async (params: CompaniesPageParams) => {
+        if (!hasSegments) {
+            failedSegmentKeyRef.current = null;
+            return getCompaniesPage(params);
+        }
+        try {
+            const response = await getCompaniesSegmentPage({ ...params, definition: evaluable });
+            failedSegmentKeyRef.current = null;
+            setSegmentErrorKey((key) => key === segmentsKey ? null : key);
+            return response;
+        } catch (error) {
+            if (failedSegmentKeyRef.current !== segmentsKey) {
+                failedSegmentKeyRef.current = segmentsKey;
+                toastError(tSeg('evaluateFailed'));
+            }
+            setSegmentErrorKey(segmentsKey);
+            throw error;
+        }
+    }, [evaluable, hasSegments, segmentsKey, tSeg]);
 
     const {
         items: companies,
@@ -148,43 +198,109 @@ export default function CompaniesBrowser({ savedViews }: { savedViews: SavedView
         applyQuery,
         sortKey,
         sortDirection,
-        onSortChange,
-        applySort,
+        onSortChange: changeServerSort,
+        applySort: applyServerSort,
+        revision,
         reload,
-    } = useServerRecords<Company, CompaniesPageParams>(getCompaniesPage, filterParams);
+    } = useServerRecords<Company, CompaniesPageParams>(fetchCompaniesPage, filterParams);
 
     const selectedCompanies = useMemo(() => companies.filter((c) => selectedIds.has(c.id)), [companies, selectedIds]);
     const selectedCompanyIds = useMemo(() => Array.from(selectedIds).map(Number), [selectedIds]);
 
-    const filterSignature = useMemo(() => JSON.stringify([filterParams, query]), [filterParams, query]);
+    const filterSignature = useMemo(
+        () => JSON.stringify([filterParams, query, hasSegments ? segmentsKey : null, segmentErrorKey === segmentsKey]),
+        [filterParams, query, hasSegments, segmentsKey, segmentErrorKey],
+    );
+    const filterSignatureRef = useRef(filterSignature);
+    useEffect(() => {
+        filterSignatureRef.current = filterSignature;
+    }, [filterSignature]);
     const [matchedSignature, setMatchedSignature] = useState<string | null>(null);
-    const allMatchingActive = matchedSignature === filterSignature;
-    const handleSelectedIdsChange = useCallback((ids: Set<SelectionId>) => {
-        if (ids.size === 0) setMatchedSignature(null);
-        setSelectedIds(ids);
+    const allMatchingActive = selectedIds.size > 0 && matchedSignature === filterSignature;
+    const selectAllRequestRef = useRef(0);
+    const [selectingAll, setSelectingAll] = useState(false);
+    const clearSelection = useCallback(() => {
+        selectAllRequestRef.current += 1;
+        setSelectingAll(false);
+        setMatchedSignature(null);
+        setSelectedIds(new Set());
     }, [setSelectedIds]);
-    useEffect(() => { if (!allMatchingActive) setSelectedIds(new Set()); }, [companies, allMatchingActive, setSelectedIds]);
+    const onSortChange = useCallback((key: string) => {
+        clearSelection();
+        changeServerSort(key);
+    }, [clearSelection, changeServerSort]);
+    const applySort = useCallback((key: string | null, direction: 'asc' | 'desc') => {
+        clearSelection();
+        applyServerSort(key, direction);
+    }, [clearSelection, applyServerSort]);
+    const handleSelectedIdsChange = useCallback((ids: Set<SelectionId>) => {
+        selectAllRequestRef.current += 1;
+        setMatchedSignature(null);
+        setSelectedIds(allMatchingActive ? new Set() : ids);
+    }, [allMatchingActive, setSelectedIds]);
+    const selectionScope = `${page}:${size}:${sortKey ?? ''}:${sortDirection}:${revision}:${filterSignature}`;
+    const previousSelectionScopeRef = useRef(selectionScope);
+    useEffect(() => {
+        const scopeChanged = previousSelectionScopeRef.current !== selectionScope;
+        previousSelectionScopeRef.current = selectionScope;
+        if (scopeChanged && !allMatchingActive) clearSelection();
+    }, [selectionScope, allMatchingActive, clearSelection]);
+
+    const [metricsByCompanyId, setMetricsByCompanyId] = useState<Map<number, CompanyMetrics>>(new Map());
+    const [metricsStatusByCompanyId, setMetricsStatusByCompanyId] =
+        useState<Map<number, LoadStatus>>(new Map());
+    const metricsRequestRef = useRef(new Map<number, number>());
+    const metricsGenerationRef = useRef(0);
+    const usersPromiseRef = useRef<Promise<User[]> | null>(null);
+    useEffect(() => () => {
+        metricsGenerationRef.current += 1;
+    }, []);
+
+    const resetMetrics = useCallback(() => {
+        metricsGenerationRef.current += 1;
+        metricsRequestRef.current.clear();
+        setMetricsByCompanyId(new Map());
+        setMetricsStatusByCompanyId(new Map());
+    }, []);
 
     const [companyFacets, setCompanyFacets] = useState<CompanyFacets | null>(null);
     const loadFacets = useCallback(() => {
         getCompanyFacets().then(setCompanyFacets).catch(() => setCompanyFacets(null));
     }, []);
     useEffect(() => { loadFacets(); }, [loadFacets]);
-    const refresh = useCallback(() => { reload(); loadFacets(); }, [reload, loadFacets]);
+    const refresh = useCallback(() => {
+        clearSelection();
+        resetMetrics();
+        reload();
+        loadFacets();
+    }, [clearSelection, resetMetrics, reload, loadFacets]);
 
-    const [selectingAll, setSelectingAll] = useState(false);
     const selectAllMatching = useCallback(async () => {
+        const requestId = selectAllRequestRef.current + 1;
+        selectAllRequestRef.current = requestId;
+        const requestSignature = filterSignature;
         setSelectingAll(true);
         try {
-            const ids = await getCompanyIds({ ...filterParams, q: query || undefined });
+            const params = { ...filterParams, q: query || undefined };
+            const ids = hasSegments
+                ? await getCompanySegmentIds({ ...params, definition: evaluable })
+                : await getCompanyIds(params);
+            if (requestId !== selectAllRequestRef.current || requestSignature !== filterSignatureRef.current) return;
             setSelectedIds(new Set(ids));
-            setMatchedSignature(filterSignature);
+            setMatchedSignature(requestSignature);
         } catch (err) {
-            toastError(err instanceof Error ? err.message : t('toastSelectAllFailed'));
+            if (requestId !== selectAllRequestRef.current) return;
+            if (hasSegments) {
+                if (failedSegmentKeyRef.current !== segmentsKey) toastError(tSeg('evaluateFailed'));
+                failedSegmentKeyRef.current = segmentsKey;
+                setSegmentErrorKey(segmentsKey);
+            } else {
+                toastError(err instanceof Error ? err.message : t('toastSelectAllFailed'));
+            }
         } finally {
-            setSelectingAll(false);
+            if (requestId === selectAllRequestRef.current) setSelectingAll(false);
         }
-    }, [filterParams, query, filterSignature, setSelectedIds, t]);
+    }, [filterParams, query, hasSegments, evaluable, segmentsKey, filterSignature, setSelectedIds, t, tSeg]);
 
     const [isDeleting, setIsDeleting] = useState(false);
     const [editSheetOpen, setEditSheetOpen] = useState(false);
@@ -221,39 +337,50 @@ export default function CompaniesBrowser({ savedViews }: { savedViews: SavedView
         return newContact;
     };
 
-    const [allContacts, setAllContacts] = useState<Contact[]>([]);
-    const [allDeals, setAllDeals] = useState<Deal[]>([]);
-    const [allTasks, setAllTasks] = useState<Task[]>([]);
-    const [allActivities, setAllActivities] = useState<Activity[]>([]);
-    const [allNotes, setAllNotes] = useState<Note[]>([]);
-    const [allUsers, setAllUsers] = useState<User[]>([]);
-    const [metricsStatus, setMetricsStatus] = useState<LoadStatus>('idle');
-
     const [tempByCompanyId, setTempByCompanyId] = useState<Map<number, RelationshipTemperature>>(new Map());
     useEffect(() => {
+        let cancelled = false;
         getCompanyTemperatures(companies.map((company) => company.id))
-            .then((temps) => setTempByCompanyId(new Map(temps.map((temp) => [temp.id, temp]))))
-            .catch(() => setTempByCompanyId(new Map()));
-    }, [companies]);
-
-    const ensureMetricsLoaded = useCallback(() => {
-        if (metricsStatus === 'loading' || metricsStatus === 'ready') return;
-        setMetricsStatus('loading');
-        Promise.all([getContacts({}), getDeals(), getTasks(), getActivities(), getNotes(), getUsers()])
-            .then(([contacts, deals, tasks, activities, notes, users]) => {
-                setAllContacts(contacts);
-                setAllDeals(deals);
-                setAllTasks(tasks);
-                setAllActivities(activities);
-                setAllNotes(notes);
-                setAllUsers(users);
-                setMetricsStatus('ready');
+            .then((temps) => {
+                if (!cancelled) setTempByCompanyId(new Map(temps.map((temp) => [temp.id, temp])));
             })
             .catch(() => {
-                setMetricsStatus('error');
+                if (!cancelled) setTempByCompanyId(new Map());
+            });
+        return () => {
+            cancelled = true;
+        };
+    }, [companies]);
+
+    const ensureMetricsLoaded = useCallback((companyId: number) => {
+        const status = metricsStatusByCompanyId.get(companyId);
+        if (status === 'loading' || status === 'ready') return;
+        const requestId = (metricsRequestRef.current.get(companyId) ?? 0) + 1;
+        const generation = metricsGenerationRef.current;
+        metricsRequestRef.current.set(companyId, requestId);
+        setMetricsStatusByCompanyId((current) => new Map(current).set(companyId, 'loading'));
+        usersPromiseRef.current ??= getUsers();
+        Promise.all([getCompanyEngagement(companyId), usersPromiseRef.current])
+            .then(([engagement, users]) => {
+                if (generation !== metricsGenerationRef.current
+                    || metricsRequestRef.current.get(companyId) !== requestId) return;
+                setMetricsByCompanyId((current) =>
+                    new Map(current).set(companyId, metricsFromEngagement(engagement, users, Date.now())));
+                setMetricsStatusByCompanyId((current) => new Map(current).set(companyId, 'ready'));
+            })
+            .catch(() => {
+                if (generation !== metricsGenerationRef.current
+                    || metricsRequestRef.current.get(companyId) !== requestId) return;
+                usersPromiseRef.current = null;
+                setMetricsByCompanyId((current) => {
+                    const next = new Map(current);
+                    next.delete(companyId);
+                    return next;
+                });
+                setMetricsStatusByCompanyId((current) => new Map(current).set(companyId, 'error'));
                 toastError(t('toastMetricsLoadFailed'));
             });
-    }, [metricsStatus, t]);
+    }, [metricsStatusByCompanyId, t]);
 
     const closeNewDialog = (open: boolean) => {
         setNewDialogOpen(open);
@@ -359,12 +486,14 @@ export default function CompaniesBrowser({ savedViews }: { savedViews: SavedView
     };
 
     const quickEditOne = useCallback((company: Company) => {
+        setMatchedSignature(null);
         setSelectedIds(new Set([company.id]));
         setDrafts({ [company.id]: toDraft(company) });
         setEditSheetOpen(true);
     }, [setSelectedIds]);
 
     const deleteOne = useCallback((company: Company) => {
+        setMatchedSignature(null);
         setSelectedIds(new Set([company.id]));
         setDeleteDialogOpen(true);
     }, [setSelectedIds, setDeleteDialogOpen]);
@@ -482,89 +611,20 @@ export default function CompaniesBrowser({ savedViews }: { savedViews: SavedView
             })),
     ];
 
-    const [now] = useState(() => Date.now());
-    const metricsByCompanyId = useMemo(() => {
-        const map = new Map<number, CompanyMetrics>();
-        for (const company of companies) {
-            const persons = allContacts.filter((c) => c.companyId === company.id);
-            const deals = allDeals.filter((d) => d.company === company.id);
-            const personIds = new Set(persons.map((c) => c.id));
-            const dealIds = new Set(deals.map((d) => d.id));
-            const tasks = allTasks.filter((t) =>
-                (t.personId != null && personIds.has(t.personId)) ||
-                (t.dealId != null && dealIds.has(t.dealId)),
-            );
-            const activities = allActivities.filter((a) =>
-                (a.personId != null && personIds.has(a.personId)) ||
-                (a.dealId != null && dealIds.has(a.dealId)),
-            );
-            const notes = allNotes.filter((n) =>
-                (n.person != null && personIds.has(n.person)) ||
-                (n.deal != null && dealIds.has(n.deal)),
-            );
-            const userIds = new Set<number>();
-            for (const t of tasks) if (t.assignedToId != null) userIds.add(t.assignedToId);
-            for (const a of activities) userIds.add(a.createdById);
-            for (const n of notes) userIds.add(n.author);
-
-            const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
-            const firstWeekStart = now - 11 * WEEK_MS;
-            const weeklyEngagement = Array.from({ length: 12 }, (_, i) => ({
-                weekStart: firstWeekStart + i * WEEK_MS,
-                count: 0,
-                activities: 0,
-                tasks: 0,
-                notes: 0,
-            }));
-            const bucket = (ts: number, kind: 'activities' | 'tasks' | 'notes') => {
-                if (!Number.isFinite(ts)) return;
-                const idx = Math.floor((ts - firstWeekStart) / WEEK_MS);
-                if (idx < 0 || idx >= weeklyEngagement.length) return;
-                weeklyEngagement[idx][kind]++;
-                weeklyEngagement[idx].count++;
-            };
-            for (const a of activities) bucket(parseMysqlDateTime(a.timestamp), 'activities');
-            for (const t of tasks) bucket(parseMysqlDateTime(t.createdAt), 'tasks');
-            for (const n of notes) bucket(parseMysqlDateTime(n.createdAt), 'notes');
-
-            const currency = pickDominantCurrency(deals);
-            let pastRevenue = 0;
-            let projectedRevenue = 0;
-            for (const d of deals) {
-                if ((d.currency || 'USD') !== currency) continue;
-                if (isDealClosed(d)) {
-                    pastRevenue += d.value ?? 0;
-                } else {
-                    projectedRevenue += d.value ?? 0;
-                }
-            }
-
-            map.set(company.id, {
-                persons,
-                relatedUsers: allUsers.filter((u) => userIds.has(u.id)),
-                pastRevenue,
-                projectedRevenue,
-                currency,
-                numDeals: deals.length,
-                numTasks: tasks.length,
-                numActivities: activities.length,
-                numNotes: notes.length,
-                weeklyEngagement,
-            });
-        }
-        return map;
-    }, [now, companies, allContacts, allDeals, allTasks, allActivities, allNotes, allUsers]);
-
     const selectionActions = (
         <ButtonGroup className="rounded-full bg-muted">
-            <Button variant="outline" size="sm" onClick={viewSelected}>
-                <EyeIcon className="size-4" />
-                {t('view')}
-            </Button>
-            <Button variant="outline" size="sm" onClick={openEditSheet}>
-                <PencilIcon className="size-4" />
-                {t('quickEdit')}
-            </Button>
+            {!allMatchingActive && (
+                <>
+                    <Button variant="outline" size="sm" onClick={viewSelected}>
+                        <EyeIcon className="size-4" />
+                        {t('view')}
+                    </Button>
+                    <Button variant="outline" size="sm" onClick={openEditSheet}>
+                        <PencilIcon className="size-4" />
+                        {t('quickEdit')}
+                    </Button>
+                </>
+            )}
             <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                     <Button variant="outline" size="sm">
@@ -681,9 +741,9 @@ export default function CompaniesBrowser({ savedViews }: { savedViews: SavedView
                 </Rise>
 
                 {(() => {
-                    const pageFullySelected = companies.length > 0 && selectedCompanyIds.length >= companies.length;
-                    const allMatchingSelected = total > companies.length && selectedCompanyIds.length >= total;
-                    const canSelectAllMatching = hasActiveFilters && pageFullySelected && total > companies.length && selectedCompanyIds.length < total;
+                    const pageFullySelected = companies.length > 0 && companies.every((company) => selectedIds.has(company.id));
+                    const allMatchingSelected = allMatchingActive && total > companies.length && selectedIds.size >= total;
+                    const canSelectAllMatching = hasActiveFilters && pageFullySelected && total > companies.length && selectedIds.size < total;
                     if (!canSelectAllMatching && !allMatchingSelected) return null;
                     return (
                         <div className="flex flex-wrap items-center justify-center gap-x-2 gap-y-1 rounded-lg bg-muted px-4 py-2 text-sm text-muted-foreground ring-1 ring-border">
@@ -714,15 +774,15 @@ export default function CompaniesBrowser({ savedViews }: { savedViews: SavedView
                 <Rise delay={0.18}>
                     <RecordsRenderView<Company>
                         data={companies}
-                        loading={loading || segmentsLoading}
+                        loading={loading}
                         columns={[...columns, ...customColumns.map((c) => ({ ...c, sortable: false }))]}
                         addColumnSlot={addColumnSlot}
                         renderCard={(item, { onQuickEdit, onDelete }) => (
                             <CompanyCard
                                 company={item}
                                 metrics={metricsByCompanyId.get(item.id)}
-                                metricsStatus={metricsStatus}
-                                onFirstExpand={ensureMetricsLoaded}
+                                metricsStatus={metricsStatusByCompanyId.get(item.id) ?? 'idle'}
+                                onFirstExpand={() => ensureMetricsLoaded(item.id)}
                                 onQuickEdit={onQuickEdit ? () => onQuickEdit(item) : undefined}
                                 onDelete={onDelete ? () => onDelete(item) : undefined}
                             />

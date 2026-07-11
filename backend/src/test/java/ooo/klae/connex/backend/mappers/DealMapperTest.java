@@ -124,6 +124,45 @@ class DealMapperTest extends AbstractMapperTest {
     }
 
     @Test
+    void filteredRelatedNameSearchDoesNotExposeForeignCompanyReferences() {
+        Workspace target = newWorkspace();
+        Pipeline targetPipeline = newPipelineIn(target);
+        Stage targetStage = newStageIn(target, targetPipeline, 0);
+        Deal targetDeal = newDealIn(target, targetPipeline, targetStage);
+        Workspace foreignWorkspace = newWorkspace();
+        Company foreignCompany = newCompanyIn(foreignWorkspace, "Foreign " + unique());
+        jdbcTemplate.update("UPDATE deal SET company_id = ? WHERE id = ?", foreignCompany.getId(), targetDeal.getId());
+
+        List<Deal> matches = dealMapper.getDealsPageFiltered(
+            target.getId(), "%" + foreignCompany.getName() + "%", null, null, null,
+            null, null, null, false, null, null, 25, 0);
+
+        assertTrue(matches.isEmpty());
+        assertEquals(0, dealMapper.countDealsFiltered(
+            target.getId(), "%" + foreignCompany.getName() + "%", null,
+            null, null, null, false, null, null));
+    }
+
+    @Test
+    void filteredRelatedNameSearchDoesNotTrustMismatchedStageWorkspace() {
+        Workspace pipelineOwner = newWorkspace();
+        Pipeline foreignPipeline = newPipelineIn(pipelineOwner);
+        Workspace target = newWorkspace();
+        String stageName = "Mismatched " + unique();
+        Stage mismatchedStage = newStageIn(target, foreignPipeline, stageName, 0);
+        newDealIn(target, foreignPipeline, mismatchedStage);
+
+        List<Deal> matches = dealMapper.getDealsPageFiltered(
+            target.getId(), "%" + stageName + "%", null, null, null,
+            null, null, null, false, null, null, 25, 0);
+
+        assertTrue(matches.isEmpty());
+        assertEquals(0, dealMapper.countDealsFiltered(
+            target.getId(), "%" + stageName + "%", null,
+            null, null, null, false, null, null));
+    }
+
+    @Test
     void getDealsPageSortsByRelatedNamesAndStatusWithinWorkspace() {
         Workspace pageWorkspace = newWorkspace();
         Pipeline zuluPipeline = newPipelineIn(pageWorkspace, "Zulu Pipeline");
@@ -536,6 +575,10 @@ class DealMapperTest extends AbstractMapperTest {
 
         assertEquals(2, dealMapper.closingSoonCount(workspace.getId(), 7));
         assertEquals(1, dealMapper.closingSoonCount(foreignWorkspace.getId(), 7));
+        assertEquals(List.of(today.getId(), lastDay.getId()),
+            dealMapper.closingSoonDeals(workspace.getId(), 7, 6).stream().map(Deal::getId).toList());
+        assertEquals(List.of(today.getId()),
+            dealMapper.closingSoonDeals(workspace.getId(), 7, 1).stream().map(Deal::getId).toList());
     }
 
     @Test
@@ -605,7 +648,7 @@ class DealMapperTest extends AbstractMapperTest {
         ), facetCounts(dealMapper.countsByStage(workspace.getId())));
         assertEquals(Map.of(Integer.toString(pipeline.getId()), 4L),
             facetCounts(dealMapper.countsByPipeline(workspace.getId())));
-        assertEquals(Map.of(Integer.toString(company.getId()), 3L),
+        assertEquals(Map.of(Integer.toString(company.getId()), 3L, "__empty__", 1L),
             facetCounts(dealMapper.countsByCompany(workspace.getId())));
         assertEquals(Map.of("JPY", 3L, "USD", 1L),
             facetCounts(dealMapper.countsByCurrency(workspace.getId())));

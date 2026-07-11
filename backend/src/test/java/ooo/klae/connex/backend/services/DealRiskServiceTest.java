@@ -141,6 +141,22 @@ class DealRiskServiceTest extends AbstractServiceTest {
     }
 
     @Test
+    void assessDealsScopesBatchedInputsToRequestedWorkspaceDeals() {
+        Deal requested = openDeal();
+        closeDateOf(requested, "2126-06-01");
+        Deal omitted = openDeal();
+        closeDateOf(omitted, "2126-06-01");
+        Deal foreign = overdueDealInWorkspace(newWorkspace().getId());
+
+        List<DealRiskDto> risks = service.assessDeals(
+            workspace.getId(), List.of(requested.getId(), foreign.getId()));
+
+        assertThat(risks).extracting(DealRiskDto::getDealId)
+            .containsExactly(requested.getId())
+            .doesNotContain(omitted.getId(), foreign.getId());
+    }
+
+    @Test
     void closingSoonWhileQuietFlagsHigh() {
         Deal deal = openDeal();
         closeDateOf(deal, "2126-06-30");

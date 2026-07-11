@@ -3,6 +3,7 @@ package ooo.klae.connex.backend.mappers;
 import org.apache.ibatis.annotations.Param;
 
 import ooo.klae.connex.backend.beans.Company;
+import ooo.klae.connex.backend.dto.CompanyEngagementTouchDto;
 import java.util.List;
 
 /**
@@ -20,10 +21,14 @@ public interface CompanyMapper {
     long countCompanies(@Param("workspaceId") int workspaceId, @Param("query") String query,
             @Param("industry") List<String> industry, @Param("noIndustry") boolean noIndustry,
             @Param("ids") List<Integer> ids);
+    List<CompanyEngagementTouchDto> getCompanyEngagementTouches(
+            @Param("workspaceId") int workspaceId,
+            @Param("companyId") int companyId,
+            @Param("currentUserId") int currentUserId);
     /** Ids only for the same filter predicates as {@code getCompaniesPage}; backs "select all matching". */
     List<Integer> getCompanyIdsFiltered(@Param("workspaceId") int workspaceId, @Param("query") String query,
             @Param("industry") List<String> industry, @Param("noIndustry") boolean noIndustry,
-            @Param("ids") List<Integer> ids, @Param("limit") int limit);
+            @Param("ids") List<Integer> ids, @Param("limit") int limit, @Param("offset") int offset);
     List<String> distinctIndustries(int workspaceId);
     boolean hasCompanyWithoutIndustry(int workspaceId);
     List<Company> getCompaniesByTagId(@Param("workspaceId") int workspaceId, @Param("tagId") int tagId);
