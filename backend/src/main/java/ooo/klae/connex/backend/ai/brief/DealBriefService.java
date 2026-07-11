@@ -6,6 +6,7 @@ import java.security.NoSuchAlgorithmException;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HexFormat;
 import java.util.List;
@@ -15,10 +16,10 @@ import java.util.concurrent.ConcurrentHashMap;
 import org.springframework.stereotype.Service;
 
 import lombok.RequiredArgsConstructor;
-import ooo.klae.connex.backend.ai.AiCompletionOutcome;
 import ooo.klae.connex.backend.ai.AiFeatureGate;
 import ooo.klae.connex.backend.ai.AiInvocation;
 import ooo.klae.connex.backend.ai.AiInvocationService;
+import ooo.klae.connex.backend.ai.AiStructuredOutcome;
 import ooo.klae.connex.backend.ai.masking.MaskedMessage;
 import ooo.klae.connex.backend.ai.masking.MaskedPrompt;
 import ooo.klae.connex.backend.ai.masking.MaskingContext;
@@ -34,7 +35,10 @@ import ooo.klae.connex.backend.services.WorkspaceService;
 @Service
 @RequiredArgsConstructor
 public class DealBriefService {
-    static final int MAX_TOKENS = 900;
+    static final int MAX_TOKENS = 2048;
+    static final int MAX_SECTIONS = 8;
+    static final int MAX_TITLE_CHARS = 160;
+    static final int MAX_BODY_CHARS = 2000;
     static final double TEMPERATURE = 0.2;
     static final int MAX_CACHE_ENTRIES = 256;
     static final Duration CACHE_TTL = Duration.ofMinutes(30);
@@ -70,11 +74,19 @@ public class DealBriefService {
         }
 
         try {
-            AiCompletionOutcome outcome = aiInvocationService.complete(new AiInvocation(
-                    FEATURE, assembly.context(), assembly.prompt(), MAX_TOKENS, TEMPERATURE));
+            AiStructuredOutcome<DealBriefContent> outcome = aiInvocationService.completeStructured(
+                    new AiInvocation(FEATURE, assembly.context(), assembly.prompt(), MAX_TOKENS, TEMPERATURE),
+                    DealBriefContent.class);
+            if (!(outcome instanceof AiStructuredOutcome.Parsed<DealBriefContent> parsed)) {
+                return DealBriefDto.unavailable(dealId, PROVIDER_ERROR);
+            }
+            List<DealBriefDto.Section> sections = sections(parsed.value());
+            if (sections.isEmpty()) {
+                return DealBriefDto.unavailable(dealId, PROVIDER_ERROR);
+            }
             Instant generatedAt = Instant.now(clock);
             DealBriefDto brief = DealBriefDto.of(
-                    dealId, outcome.text(), generatedAt.toString(), outcome.demaskWarnings());
+                    dealId, sections, generatedAt.toString(), parsed.demaskWarnings());
             cache(cacheKey, brief, generatedAt.plus(CACHE_TTL));
             return brief;
         } catch (MaskingLeakException | AiProviderException exception) {
@@ -82,6 +94,38 @@ public class DealBriefService {
         } catch (ForbiddenException exception) {
             return DealBriefDto.unavailable(dealId, NOT_CONFIGURED);
         }
+    }
+
+    private static List<DealBriefDto.Section> sections(DealBriefContent content) {
+        if (content == null || content.sections() == null) {
+            return List.of();
+        }
+        List<DealBriefDto.Section> sections = new ArrayList<>();
+        for (DealBriefContent.Section section : content.sections()) {
+            if (section == null || isBlank(section.title()) || isBlank(section.body())) {
+                continue;
+            }
+            sections.add(new DealBriefDto.Section(
+                    truncate(section.title().strip(), MAX_TITLE_CHARS),
+                    truncate(section.body().strip(), MAX_BODY_CHARS)));
+            if (sections.size() == MAX_SECTIONS) {
+                break;
+            }
+        }
+        return List.copyOf(sections);
+    }
+
+    private static String truncate(String value, int maxCodePoints) {
+        int codePoints = value.codePointCount(0, value.length());
+        if (codePoints <= maxCodePoints) {
+            return value;
+        }
+        int end = value.offsetByCodePoints(0, maxCodePoints - 1);
+        return value.substring(0, end) + "…";
+    }
+
+    private static boolean isBlank(String value) {
+        return value == null || value.isBlank();
     }
 
     private DealBriefDto cached(String key, Instant now) {

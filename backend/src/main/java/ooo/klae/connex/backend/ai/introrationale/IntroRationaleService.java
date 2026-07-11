@@ -15,10 +15,10 @@ import java.util.concurrent.ConcurrentHashMap;
 import org.springframework.stereotype.Service;
 
 import lombok.RequiredArgsConstructor;
-import ooo.klae.connex.backend.ai.AiCompletionOutcome;
 import ooo.klae.connex.backend.ai.AiFeatureGate;
 import ooo.klae.connex.backend.ai.AiInvocation;
 import ooo.klae.connex.backend.ai.AiInvocationService;
+import ooo.klae.connex.backend.ai.AiStructuredOutcome;
 import ooo.klae.connex.backend.ai.masking.MaskedMessage;
 import ooo.klae.connex.backend.ai.masking.MaskedPrompt;
 import ooo.klae.connex.backend.ai.masking.MaskingContext;
@@ -36,7 +36,8 @@ import ooo.klae.connex.backend.services.WorkspaceService;
 @Service
 @RequiredArgsConstructor
 public class IntroRationaleService {
-    static final int MAX_TOKENS = 200;
+    static final int MAX_TOKENS = 512;
+    static final int MAX_RATIONALE_CHARS = 400;
     static final double TEMPERATURE = 0.2;
     static final int MAX_CACHE_ENTRIES = 256;
     static final Duration CACHE_TTL = Duration.ofMinutes(30);
@@ -86,14 +87,20 @@ public class IntroRationaleService {
         }
 
         try {
-            AiCompletionOutcome outcome = aiInvocationService.complete(new AiInvocation(
-                    FEATURE, assembly.context(), assembly.prompt(), MAX_TOKENS, TEMPERATURE));
-            if (outcome.text().isBlank()) {
+            AiStructuredOutcome<IntroRationaleContent> outcome = aiInvocationService.completeStructured(
+                    new AiInvocation(FEATURE, assembly.context(), assembly.prompt(), MAX_TOKENS, TEMPERATURE),
+                    IntroRationaleContent.class);
+            if (!(outcome instanceof AiStructuredOutcome.Parsed<IntroRationaleContent> parsed)) {
+                return IntroRationaleDto.unavailable(lo, hi, PROVIDER_ERROR);
+            }
+            IntroRationaleContent content = parsed.value();
+            if (content == null || isBlank(content.rationale())) {
                 return IntroRationaleDto.unavailable(lo, hi, PROVIDER_ERROR);
             }
             Instant generatedAt = Instant.now(clock);
             IntroRationaleDto rationale = IntroRationaleDto.of(
-                    lo, hi, outcome.text(), generatedAt.toString(), outcome.demaskWarnings());
+                    lo, hi, truncate(content.rationale().strip(), MAX_RATIONALE_CHARS),
+                    generatedAt.toString(), parsed.demaskWarnings());
             cache(cacheKey, rationale, generatedAt.plus(CACHE_TTL));
             return rationale;
         } catch (MaskingLeakException | AiProviderException exception) {
@@ -101,6 +108,19 @@ public class IntroRationaleService {
         } catch (ForbiddenException exception) {
             return IntroRationaleDto.unavailable(lo, hi, NOT_CONFIGURED);
         }
+    }
+
+    private static String truncate(String value, int maxCodePoints) {
+        int codePoints = value.codePointCount(0, value.length());
+        if (codePoints <= maxCodePoints) {
+            return value;
+        }
+        int end = value.offsetByCodePoints(0, maxCodePoints - 1);
+        return value.substring(0, end) + "…";
+    }
+
+    private static boolean isBlank(String value) {
+        return value == null || value.isBlank();
     }
 
     private IntroRationaleDto cached(String key, Instant now) {
