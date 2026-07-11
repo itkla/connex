@@ -6,6 +6,7 @@ import { ArrowPathIcon, SparklesIcon } from '@heroicons/react/24/outline';
 
 import { getDealBrief } from '@/app/lib/api';
 import type { DealBrief } from '@/app/lib/types';
+import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 
@@ -22,7 +23,7 @@ type BriefState =
  * off by default. Generation is slow (a masked LLM call, server-cached), so arrival is a calm
  * fade; a provider failure offers a quiet retry and never blocks the deterministic signals.
  */
-export default function DealBriefPanel({ dealId }: { dealId: number }) {
+export default function DealBriefPanel({ dealId, className }: { dealId: number; className?: string }) {
     const t = useTranslations('DealBrief');
     const locale = useLocale();
     const [state, setState] = useState<BriefState>({ status: 'loading' });
@@ -68,7 +69,7 @@ export default function DealBriefPanel({ dealId }: { dealId: number }) {
     if (state.status === 'hidden') return null;
 
     return (
-        <section aria-label={t('panelTitle')} className="mt-8 grid gap-3">
+        <section aria-label={t('panelTitle')} className={cn('grid gap-3', className)}>
             <h2 className="flex items-center gap-1.5 text-xs font-medium uppercase tracking-[0.12em] text-muted-foreground">
                 <SparklesIcon className="size-3.5" aria-hidden />
                 {t('panelTitle')}

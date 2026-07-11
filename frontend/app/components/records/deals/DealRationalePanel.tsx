@@ -6,6 +6,7 @@ import { ArrowPathIcon, LightBulbIcon } from '@heroicons/react/24/outline';
 
 import { getDealRationale } from '@/app/lib/api';
 import type { DealRationale } from '@/app/lib/types';
+import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 
@@ -23,7 +24,7 @@ type RationaleState =
  * call (server-cached), so arrival is a calm fade; a provider failure offers a quiet retry and never
  * blocks the deterministic signals shown above.
  */
-export default function DealRationalePanel({ dealId }: { dealId: number }) {
+export default function DealRationalePanel({ dealId, className }: { dealId: number; className?: string }) {
     const t = useTranslations('DealRationale');
     const locale = useLocale();
     const [state, setState] = useState<RationaleState>({ status: 'loading' });
@@ -69,7 +70,7 @@ export default function DealRationalePanel({ dealId }: { dealId: number }) {
     if (state.status === 'hidden') return null;
 
     return (
-        <section aria-label={t('panelTitle')} className="mt-8 grid gap-3">
+        <section aria-label={t('panelTitle')} className={cn('grid gap-3', className)}>
             <h2 className="flex items-center gap-1.5 text-xs font-medium uppercase tracking-[0.12em] text-muted-foreground">
                 <LightBulbIcon className="size-3.5" aria-hidden />
                 {t('panelTitle')}

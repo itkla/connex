@@ -244,8 +244,10 @@ export default async function DealPage({ params }: { params: { id: number } }) {
                     </div>
                     <EntityNotificationBanner initialNotifications={notificationPage.items} />
                     <DealRiskPanel risk={risk} />
-                    <DealRationalePanel dealId={deal.id} />
-                    <DealBriefPanel dealId={deal.id} />
+                    <div className="mt-8 flex flex-col gap-6 lg:flex-row lg:items-start lg:gap-4">
+                        <DealBriefPanel dealId={deal.id} className="min-w-0 lg:flex-[2]" />
+                        <DealRationalePanel dealId={deal.id} className="min-w-0 lg:flex-[1]" />
+                    </div>
                 </Rise>
 
                 <Rise delay={0.06}>
