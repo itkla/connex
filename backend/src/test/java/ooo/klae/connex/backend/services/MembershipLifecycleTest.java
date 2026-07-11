@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.services;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -61,6 +62,22 @@ class MembershipLifecycleTest extends AbstractServiceTest {
         workspaceService.leaveWorkspace(ws.getId(), member.getId());
 
         assertFalse(workspaceMapper.isMember(ws.getId(), member.getId()));
+    }
+
+    @Test
+    void leaveWorkspaceAndSelectNextPersistsRemainingMembership() {
+        WorkspaceMembershipDto first = workspaceService.createWorkspace("Leave First", currentUser.getId());
+        WorkspaceMembershipDto second = workspaceService.createWorkspace("Leave Second", currentUser.getId());
+        User member = newUser();
+        workspaceMapper.removeMember(workspace.getId(), member.getId());
+        workspaceMapper.addMember(first.getId(), member.getId(), "member");
+        workspaceMapper.addMember(second.getId(), member.getId(), "member");
+        workspaceService.rememberActive(member.getId(), first.getId());
+
+        Integer nextWorkspaceId = workspaceService.leaveWorkspaceAndSelectNext(first.getId(), member.getId());
+
+        assertEquals(second.getId(), nextWorkspaceId);
+        assertEquals(second.getId(), workspaceMapper.getLastActiveWorkspaceId(member.getId()));
     }
 
     @Test

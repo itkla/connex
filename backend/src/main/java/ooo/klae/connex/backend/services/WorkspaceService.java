@@ -583,6 +583,22 @@ public class WorkspaceService {
         auditService.record("workspace.member.leave", "workspace", workspaceId, null, "Left the workspace", null);
     }
 
+    /**
+     * Leaves a workspace and atomically persists the caller's next active workspace.
+     * @param workspaceId the workspace being left
+     * @param userId the departing member
+     * @return the next active workspace id, or null when no membership remains
+     */
+    @Transactional
+    public Integer leaveWorkspaceAndSelectNext(int workspaceId, int userId) {
+        leaveWorkspace(workspaceId, userId);
+        Integer nextWorkspaceId = defaultWorkspaceIdFor(userId);
+        if (nextWorkspaceId != null) {
+            rememberActive(userId, nextWorkspaceId);
+        }
+        return nextWorkspaceId;
+    }
+
     private void notifyJoinRequest(int workspaceId, int recipientId, User actor) {
         try {
             Notification notification = new Notification();

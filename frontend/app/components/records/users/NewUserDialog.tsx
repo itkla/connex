@@ -1,6 +1,6 @@
 "use client";
 
-import { type ComponentType, type ReactNode, type SVGProps, useState } from "react";
+import { type ComponentType, type SVGProps, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { PlusIcon } from "@heroicons/react/24/solid";
@@ -33,6 +33,7 @@ import {
 } from "@/components/ui/dialog-status-cover";
 import { cn } from "@/lib/utils";
 import { ApiError, createUser } from "@/app/lib/api";
+import { usePasskeyStepUpErrorHandler } from "@/app/hooks/usePasskeyStepUpError";
 import { toastError, toastSuccess } from "@/app/lib/toast";
 import { type RegisterPayload } from "@/app/lib/types";
 
@@ -91,6 +92,7 @@ function Field({
 
 export default function NewUserDialog() {
     const t = useTranslations("UsersNewUserDialog");
+    const handlePasskeyStepUpError = usePasskeyStepUpErrorHandler();
     const router = useRouter();
     const [open, setOpen] = useState(false);
     const [payload, setPayload] = useState<RegisterPayload>(EMPTY);
@@ -131,6 +133,9 @@ export default function NewUserDialog() {
             setTimeout(() => onOpenChange(false), 900);
             router.refresh();
         } catch (err) {
+            if (handlePasskeyStepUpError(err)) {
+                return;
+            }
             if (err instanceof ApiError && err.fieldErrors) {
                 const fieldErrors = err.fieldErrors;
                 setErrors(fieldErrors);
