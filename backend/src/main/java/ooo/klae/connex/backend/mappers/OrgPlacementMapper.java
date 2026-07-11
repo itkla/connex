@@ -19,6 +19,19 @@ public interface OrgPlacementMapper {
     OrgPlacement findByOrg(@Param("orgId") int orgId);
 
     /**
+     * Existence-verified read for the routing path: {@code organization} LEFT
+     * JOIN {@code org_placement}. An org with no placement row yields a result
+     * whose {@code placementMode} is {@code null}; {@code PlacementRegistry}
+     * substitutes {@link OrgPlacement#sharedDefault(int)} so the shared-tier
+     * defaults live in exactly one place.
+     *
+     * @param orgId the organization to look up
+     * @return the effective placement (null-mode when the org has no placement
+     *     row), or {@code null} only when the organization itself does not exist
+     */
+    OrgPlacement findEffectiveByOrg(@Param("orgId") int orgId);
+
+    /**
      * Persists a placement row. Used by tests and future provisioning; not yet
      * reachable from any request-scoped service.
      *

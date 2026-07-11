@@ -81,7 +81,7 @@ abstract class AbstractServiceTest {
         request.getSession().setAttribute(SessionSecurityService.WEBAUTHN_STEP_UP_AT_ATTR, now);
         request.getSession().setAttribute(SessionSecurityService.WEBAUTHN_STEP_UP_USER_ATTR, user.getId());
         RequestContextHolder.setRequestAttributes(new ServletRequestAttributes(request));
-        tenantContext.set(workspaceId, orgId, user.getId(), role == null ? "member" : role);
+        tenantContext.set(workspaceId, orgId, user.getId(), role == null ? "member" : role, null);
     }
 
     @AfterEach

@@ -43,7 +43,7 @@ class OrgAuditViewTest extends AbstractServiceTest {
     void workspaceRecordActionsDoNotLeakIntoTheOrgTrail() {
         int orgId = workspaceMapper.getOrgId(workspace.getId());
         orgMemberMapper.addMember(orgId, currentUser.getId(), "owner");
-        tenantContext.set(workspace.getId(), orgId, currentUser.getId(), "owner");
+        tenantContext.set(workspace.getId(), orgId, currentUser.getId(), "owner", null);
         try {
             auditService.record("company.update", "company", 123, "Acme", "Changed a workspace record", null);
         } finally {

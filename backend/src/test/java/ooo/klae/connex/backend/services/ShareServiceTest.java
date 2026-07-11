@@ -46,7 +46,7 @@ class ShareServiceTest extends AbstractServiceTest {
      * reuses the active org for owner/admin creators).
      */
     private WorkspaceMembershipDto createSiblingWorkspace(WorkspaceMembershipDto first, String name) {
-        tenantContext.set(first.getId(), workspaceService.getOrgId(first.getId()), currentUser.getId(), "owner");
+        tenantContext.set(first.getId(), workspaceService.getOrgId(first.getId()), currentUser.getId(), "owner", null);
         WorkspaceMembershipDto sibling = workspaceService.createWorkspace(name, currentUser.getId());
         authenticateAs(currentUser, first.getId());
         return sibling;
@@ -99,7 +99,7 @@ class ShareServiceTest extends AbstractServiceTest {
         User outsider = newUser();
         workspaceMapper.addMember(foreign.getId(), outsider.getId(), "owner");
 
-        tenantContext.set(a.getId(), workspaceService.getOrgId(a.getId()), currentUser.getId(), "owner");
+        tenantContext.set(a.getId(), workspaceService.getOrgId(a.getId()), currentUser.getId(), "owner", null);
         assertThrows(ForbiddenException.class,
             () -> shareService.share("company", company.getId(), foreign.getId(), false));
     }
@@ -120,7 +120,7 @@ class ShareServiceTest extends AbstractServiceTest {
         workspaceMapper.insert(otherOrgWs);
         workspaceMapper.addMember(otherOrgWs.getId(), currentUser.getId(), "owner");
 
-        tenantContext.set(a.getId(), workspaceService.getOrgId(a.getId()), currentUser.getId(), "owner");
+        tenantContext.set(a.getId(), workspaceService.getOrgId(a.getId()), currentUser.getId(), "owner", null);
         assertThrows(ForbiddenException.class,
             () -> shareService.share("company", company.getId(), otherOrgWs.getId(), false));
     }

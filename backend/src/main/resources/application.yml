@@ -85,6 +85,22 @@ connex:
         # Fail-closed MyBatis backstop: rejects workspace-scoped queries that run
         # without a resolved tenant context. Disable only to debug isolation issues.
         enforce-scope: ${CONNEX_TENANCY_ENFORCE_SCOPE:true}
+        routing:
+            # Placement-based catalog routing (#313 Phase 3 / #440). 'single-database'
+            # (the default, and the only mode for on-prem/silo) never switches catalogs;
+            # an org whose placement row demands routing is refused with 503 rather than
+            # silently served from shared storage. 'catalog-per-placement' switches the
+            # pooled connection to the org's database_handle at checkout and resets it on
+            # return. DO NOT enable catalog-per-placement in production until the
+            # control-plane split increment (#440) lands AND off-request-thread work
+            # (@Async rule triggers, @Scheduled rule/notification jobs) resolves the org
+            # catalog — those paths currently run on the shared catalog.
+            mode: ${CONNEX_TENANCY_ROUTING_MODE:single-database}
+            # Control-plane/default catalog; required when mode=catalog-per-placement.
+            default-catalog: ${CONNEX_TENANCY_ROUTING_DEFAULT_CATALOG:}
+            # How long a per-org placement lookup is cached on the request path.
+            # Placement writes must invalidate (PlacementRegistry.invalidate).
+            placement-cache-ttl: ${CONNEX_TENANCY_ROUTING_PLACEMENT_CACHE_TTL:30s}
     security:
         # CSRF protection for state-changing requests. The SPA fetches the token from
         # GET /api/auth/csrf and echoes it in the X-XSRF-TOKEN header. Kill-switch for cutover.

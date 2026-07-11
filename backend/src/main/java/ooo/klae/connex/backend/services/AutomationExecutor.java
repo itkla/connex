@@ -10,6 +10,7 @@ import org.springframework.stereotype.Component;
 import lombok.RequiredArgsConstructor;
 
 import ooo.klae.connex.backend.beans.User;
+import ooo.klae.connex.backend.tenant.TenantCatalogResolver;
 import ooo.klae.connex.backend.tenant.TenantContext;
 
 /**
@@ -25,6 +26,7 @@ public class AutomationExecutor {
     private final TenantContext tenantContext;
     private final WorkspaceService workspaceService;
     private final AutomationScope automationScope;
+    private final TenantCatalogResolver tenantCatalogResolver;
 
     /**
      * Runs {@code work} with {@code principal} installed in the security context and {@code workspaceId}
@@ -32,24 +34,28 @@ public class AutomationExecutor {
      * re-trigger rules), restoring all three afterward.
      */
     public <T> T runAs(int workspaceId, User principal, String role, Supplier<T> work) {
+        int orgId = workspaceService.getOrgId(workspaceId);
+        String catalog = tenantCatalogResolver.resolveCatalog(orgId);
+
         SecurityContext previousSecurity = SecurityContextHolder.getContext();
         boolean hadTenant = tenantContext.isResolved();
         Integer previousWorkspace = hadTenant ? tenantContext.getWorkspaceId() : null;
         Integer previousUser = hadTenant ? tenantContext.getUserId() : null;
         String previousRole = hadTenant ? tenantContext.getRole() : null;
         Integer previousOrg = hadTenant ? tenantContext.getOrgId() : null;
+        String previousCatalog = hadTenant ? tenantContext.getCatalog() : null;
 
         SecurityContext context = SecurityContextHolder.createEmptyContext();
         context.setAuthentication(new UsernamePasswordAuthenticationToken(principal, null, principal.getAuthorities()));
         SecurityContextHolder.setContext(context);
-        tenantContext.set(workspaceId, workspaceService.getOrgId(workspaceId), principal.getId(), role);
+        tenantContext.set(workspaceId, orgId, principal.getId(), role, catalog);
         boolean previousScope = automationScope.enter();
         try {
             return work.get();
         } finally {
             automationScope.restore(previousScope);
             if (hadTenant) {
-                tenantContext.set(previousWorkspace, previousOrg, previousUser, previousRole);
+                tenantContext.set(previousWorkspace, previousOrg, previousUser, previousRole, previousCatalog);
             } else {
                 tenantContext.clear();
             }
