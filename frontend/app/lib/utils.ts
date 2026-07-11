@@ -586,3 +586,16 @@ export function riskContainerClasses(severity: DealRiskSeverity): string {
 export function riskTextClass(severity: DealRiskSeverity): string {
     return RISK_TEXT[severity] ?? RISK_TEXT.low;
 }
+
+/**
+ * The browser's current UTC offset as a {@code ±HH:MM} string (e.g. {@code +09:00}), for
+ * timezone-aware server-side month bucketing of realized-revenue.
+ */
+export function browserTimezoneOffset(): string {
+    const totalMinutes = -new Date().getTimezoneOffset();
+    const sign = totalMinutes >= 0 ? '+' : '-';
+    const abs = Math.abs(totalMinutes);
+    const hh = String(Math.floor(abs / 60)).padStart(2, '0');
+    const mm = String(abs % 60).padStart(2, '0');
+    return `${sign}${hh}:${mm}`;
+}

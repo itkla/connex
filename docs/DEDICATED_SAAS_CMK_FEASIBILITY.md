@@ -22,10 +22,14 @@ It is not a customer-managed-key tier by default.
 True customer-managed database key custody is supportable for Connex-operated
 SaaS only if the dedicated tier is implemented as an infrastructure unit whose
 database storage, snapshots, backups, replicas, and restore targets can all be
-created and verified under that organization's selected KMS key. The current
-[#313] `CREATE DATABASE cnx_<random>` shape on a shared database server is a
-dedicated database/catalog boundary, not a per-organization storage-key
-boundary.
+created and verified under that organization's selected KMS key. That
+infrastructure unit is the **Connex-operated silo** (a dedicated single-tenant
+instance/cluster + isolated network, [#100]) — the same single-tenant deployable
+as on-prem, operated by Connex. The current [#313] `CREATE DATABASE cnx_<random>`
+shape on a shared database server is a dedicated database/catalog boundary, not a
+per-organization storage-key boundary, so it is not a CMK tier; the silo is.
+A silo remains Connex-operated, so customer key custody there is storage-layer
+custody and revocation leverage, not application blindness.
 
 Customers that require direct key custody before that hosted implementation
 exists should use the customer-operated/on-prem model in
@@ -37,7 +41,7 @@ exists should use the customer-operated/on-prem model in
 | --- | --- | --- |
 | Pooled SaaS database | Not feasible. Multiple organizations share the same database/storage key boundary. | "Hosted pooled SaaS uses Connex/cloud-controlled storage encryption when the `SAAS_STORAGE_ENCRYPTION_RUNBOOK.md` evidence gate is satisfied; it does not provide customer-managed database keys." |
 | Dedicated schema/catalog on a shared DB instance or cluster | Not a true per-org CMK boundary. For AWS RDS, this is an architectural inference from encryption being configured for DB instance/cluster storage resources, logs, backups, read replicas, and snapshots; a separate logical database name does not by itself create a separate KMS key boundary. | "Dedicated database isolation reduces shared-database blast radius, but the storage key is still Connex/cloud controlled unless a separate infrastructure-level CMK mode is implemented." |
-| Dedicated DB instance or cluster per organization | Technically feasible on AWS RDS/Aurora when created with a customer-controlled or contractually dedicated KMS key and grant model. Operationally supportable only after per-org provisioning, grants, key-policy checks, backup/snapshot/restore handling, monitoring, revocation runbooks, and the hosted storage evidence gate exist. | "Dedicated CMK is available only for contracted dedicated infrastructure whose key, backups, replicas, and restore process are verified per organization. The running Connex app still processes plaintext." |
+| Dedicated DB instance or cluster per organization (Connex-operated silo, #100) | Technically feasible on AWS RDS/Aurora when created with a customer-controlled or contractually dedicated KMS key and grant model. Operationally supportable only after per-org provisioning, grants, key-policy checks, backup/snapshot/restore handling, monitoring, revocation runbooks, and the hosted storage evidence gate exist. | "Dedicated CMK is available only for contracted dedicated infrastructure whose key, backups, replicas, and restore process are verified per organization. The running Connex app still processes plaintext." |
 | Customer-operated/on-prem | Supported outside Connex-operated SaaS. The customer controls the database/storage/keyring/KMS/HSM/KMIP/Vault layer and backup keys. | "Customer-operated deployments give the customer infrastructure and key custody; the running app still processes plaintext inside that environment." |
 
 ## Implementation Gates
@@ -76,7 +80,7 @@ equivalent structured values:
 | Field | Purpose |
 | --- | --- |
 | `org_id` | Customer boundary for the dedicated database placement. |
-| `placement_mode` | `shared`, `dedicated_database`, or future `dedicated_cmk`. |
+| `placement_mode` | `shared`, `dedicated_database`, `connex_operated_silo` (dedicated single-tenant infrastructure, the CMK-capable tier), or future `dedicated_cmk`. |
 | `database_handle` | Random non-customer-derived handle such as `cnx_<random>`. |
 | `storage_encryption_mode` | `provider_managed`, `connex_managed_cmk`, `customer_managed_cmk`, or `customer_operated`. |
 | `key_controller` | Connex, Connex cloud provider, customer, or customer-operated environment. |
@@ -128,6 +132,7 @@ equivalent structured values:
 - Connex encryption guarantee matrix: [ENCRYPTION_GUARANTEE_MATRIX.md](ENCRYPTION_GUARANTEE_MATRIX.md)
 - Customer-operated encryption runbook: [ON_PREM_ENCRYPTION_RUNBOOK.md](ON_PREM_ENCRYPTION_RUNBOOK.md)
 
+[#100]: https://github.com/itkla/connex/issues/100
 [#313]: https://github.com/itkla/connex/issues/313
 [#371]: https://github.com/itkla/connex/issues/371
 [#376]: https://github.com/itkla/connex/issues/376

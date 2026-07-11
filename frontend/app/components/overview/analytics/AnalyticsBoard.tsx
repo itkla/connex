@@ -42,7 +42,7 @@ import {
     getDealTop,
     getTeamLeaderboard,
 } from '@/app/lib/api';
-import { formatCompactCurrency } from '@/app/lib/utils';
+import { browserTimezoneOffset, formatCompactCurrency } from '@/app/lib/utils';
 import DealsAging from '@/app/components/records/deals/DealsAging';
 import TopDeals from '@/app/components/records/deals/TopDeals';
 
@@ -186,7 +186,7 @@ export default function AnalyticsBoard({
 
     useEffect(() => {
         let cancelled = false;
-        getDealRevenueTimeseries(currency)
+        getDealRevenueTimeseries(currency, browserTimezoneOffset())
             .then((data) => { if (!cancelled) setRevenueSeries(data); })
             .catch(() => { if (!cancelled) setRevenueSeries({ closed: [], projected: [] }); });
         getDealStageDistribution(currency)

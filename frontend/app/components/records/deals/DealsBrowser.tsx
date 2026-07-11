@@ -65,7 +65,7 @@ import BulkTagDialog from '@/app/components/records/BulkTagDialog';
 import BulkAssignOwnerDialog from '@/app/components/records/BulkAssignOwnerDialog';
 import BulkChangeStageDialog from '@/app/components/records/BulkChangeStageDialog';
 import { notifyBulkResult } from '@/app/lib/bulkToast';
-import { formatCompactCurrency, formatDate, formatDateTime, parseCalendarDate } from '@/app/lib/utils';
+import { browserTimezoneOffset, formatCompactCurrency, formatDate, formatDateTime, parseCalendarDate } from '@/app/lib/utils';
 import {
     type Company,
     type CreateDealPayload,
@@ -292,7 +292,7 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
     const [stageDistribution, setStageDistribution] = useState<DealStageDistribution[]>([]);
     useEffect(() => {
         let cancelled = false;
-        getDealRevenueTimeseries(activeCurrency)
+        getDealRevenueTimeseries(activeCurrency, browserTimezoneOffset())
             .then((series) => { if (!cancelled) setRevenueSeries(series); })
             .catch(() => { if (!cancelled) setRevenueSeries({ closed: [], projected: [] }); });
         getDealStageDistribution(activeCurrency)

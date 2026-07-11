@@ -234,18 +234,18 @@ class RecordListControllerTest {
         DealRevenueSeriesDto series = new DealRevenueSeriesDto(List.of(), List.of());
         List<DealStageDistributionDto> distribution = List.of(
             new DealStageDistributionDto(1, 2, 3, 4.0, 5, 6.0));
-        when(dealService.getRevenueTimeseries("JPY")).thenReturn(series);
+        when(dealService.getRevenueTimeseries("JPY", null)).thenReturn(series);
         when(dealService.getStageDistribution("JPY")).thenReturn(distribution);
 
-        assertSame(series, controller.getRevenueTimeseries("JPY"));
+        assertSame(series, controller.getRevenueTimeseries("JPY", null));
         assertSame(distribution, controller.getStageDistribution("JPY"));
 
-        controller.getRevenueTimeseries("  ");
+        controller.getRevenueTimeseries("  ", null);
         controller.getStageDistribution("");
 
-        verify(dealService).getRevenueTimeseries("JPY");
+        verify(dealService).getRevenueTimeseries("JPY", null);
         verify(dealService).getStageDistribution("JPY");
-        verify(dealService).getRevenueTimeseries(null);
+        verify(dealService).getRevenueTimeseries(null, null);
         verify(dealService).getStageDistribution(null);
     }
 
