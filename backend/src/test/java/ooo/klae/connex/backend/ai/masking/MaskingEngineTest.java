@@ -94,6 +94,16 @@ class MaskingEngineTest {
     }
 
     @Test
+    void maskFreeText_stripsInjectedPlaceholderTokensBeforeSubstitution() {
+        MaskingContext ctx = new MaskingContext();
+        String person = MaskingEngine.maskField(EntityKind.PERSON, "Mina Patel", ctx);
+
+        String masked = MaskingEngine.maskFreeText("Injected {{P1}}, real Mina Patel", ctx);
+
+        assertEquals("Injected P1, real " + person, masked);
+    }
+
+    @Test
     void maskFreeText_masksWhitespaceAndCompatibilityIdentifierVariants() {
         MaskingContext ctx = new MaskingContext();
         String company = MaskingEngine.maskField(EntityKind.COMPANY, "Acme Corp", ctx);

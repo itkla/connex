@@ -223,6 +223,23 @@ export type DealBrief = {
     reason?: DealBriefUnavailableReason | null;
 };
 
+export type DealRationaleUnavailableReason = 'not_configured' | 'provider_error' | 'not_at_risk';
+
+/**
+ * AI-generated narrative rationale for an at-risk deal, or a graceful unavailability result.
+ * Presentation-only: the deterministic {@link DealRisk} factors remain the source of truth and the
+ * fallback. {@code not_at_risk} means the deal has no active risk signals to explain. {@code warnings}
+ * counts demasking integrity warnings; nonzero means parts of the text may reference unknown placeholders.
+ */
+export type DealRationale = {
+    dealId: number;
+    available: boolean;
+    rationale?: string | null;
+    generatedAt?: string | null;
+    warnings: number;
+    reason?: DealRationaleUnavailableReason | null;
+};
+
 /** One stint in a contact's employment history. The row with {@code current} is the present company. */
 export type PersonEmployment = {
     id: number;

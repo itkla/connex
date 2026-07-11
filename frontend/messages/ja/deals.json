@@ -19,6 +19,13 @@
     "attribution": "AI生成 · {time}",
     "integrityWarning": "一部の参照を確認できませんでした"
   },
+  "DealRationale": {
+    "panelTitle": "AIリスク分析",
+    "error": "リスク分析を生成できませんでした。",
+    "retry": "再試行",
+    "attribution": "AI生成 · {time}",
+    "integrityWarning": "一部の参照を確認できませんでした"
+  },
   "DealsPage": {
     "allDeals": "案件一覧",
     "actual": "実績",

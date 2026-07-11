@@ -1,4 +1,4 @@
-package ooo.klae.connex.backend.ai.brief;
+package ooo.klae.connex.backend.ai.riskrationale;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -24,47 +24,57 @@ import ooo.klae.connex.backend.ai.masking.MaskedPrompt;
 import ooo.klae.connex.backend.ai.masking.MaskingContext;
 import ooo.klae.connex.backend.ai.masking.MaskingLeakException;
 import ooo.klae.connex.backend.ai.provider.AiProviderException;
-import ooo.klae.connex.backend.dto.DealBriefDto;
+import ooo.klae.connex.backend.dto.DealRationaleDto;
+import ooo.klae.connex.backend.dto.DealRiskDto;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
+import ooo.klae.connex.backend.services.DealRiskService;
 import ooo.klae.connex.backend.services.WorkspaceService;
 
 /**
- * Generates presentation-only deal briefs through the audited AI invocation boundary.
+ * Generates presentation-only deal-risk rationales through the audited AI invocation boundary.
  */
 @Service
 @RequiredArgsConstructor
-public class DealBriefService {
-    static final int MAX_TOKENS = 900;
+public class DealRiskRationaleService {
+    static final int MAX_TOKENS = 350;
     static final double TEMPERATURE = 0.2;
     static final int MAX_CACHE_ENTRIES = 256;
     static final Duration CACHE_TTL = Duration.ofMinutes(30);
 
-    private static final String FEATURE = "deal.brief";
+    private static final String FEATURE = "deal.risk_rationale";
     private static final String NOT_CONFIGURED = "not_configured";
     private static final String PROVIDER_ERROR = "provider_error";
+    private static final String NOT_AT_RISK = "not_at_risk";
 
-    private final DealBriefAssembler dealBriefAssembler;
+    private final DealRiskRationaleAssembler dealRiskRationaleAssembler;
     private final AiInvocationService aiInvocationService;
     private final AiFeatureGate aiFeatureGate;
+    private final DealRiskService dealRiskService;
     private final WorkspaceService workspaceService;
     private final Clock clock;
-    private final ConcurrentHashMap<String, CachedBrief> cache = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, CachedRationale> cache = new ConcurrentHashMap<>();
 
     /**
-     * Generates or reuses a fresh brief for a workspace-scoped deal.
-     * @param dealId deal to summarize
-     * @return available brief or a graceful unavailability response
+     * Generates or reuses a fresh rationale for a workspace-scoped at-risk deal.
+     * @param dealId deal whose deterministic risk signals should be explained
+     * @return available rationale or a graceful unavailability response
      */
-    public DealBriefDto generate(int dealId) {
+    public DealRationaleDto generate(int dealId) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         if (!aiFeatureGate.isAiUsable()) {
-            return DealBriefDto.unavailable(dealId, NOT_CONFIGURED);
+            return DealRationaleDto.unavailable(dealId, NOT_CONFIGURED);
         }
 
-        BriefAssembly assembly = dealBriefAssembler.assemble(workspaceId, dealId);
+        DealRiskDto risk = dealRiskService.assessDeal(workspaceId, dealId);
+        if (risk == null || "none".equals(risk.getLevel())
+                || risk.getFactors() == null || risk.getFactors().isEmpty()) {
+            return DealRationaleDto.unavailable(dealId, NOT_AT_RISK);
+        }
+
+        RationaleAssembly assembly = dealRiskRationaleAssembler.assemble(workspaceId, dealId, risk);
         String cacheKey = cacheKey(workspaceId, dealId, assembly.prompt(), assembly.context());
         Instant now = Instant.now(clock);
-        DealBriefDto cached = cached(cacheKey, now);
+        DealRationaleDto cached = cached(cacheKey, now);
         if (cached != null) {
             return cached;
         }
@@ -72,39 +82,42 @@ public class DealBriefService {
         try {
             AiCompletionOutcome outcome = aiInvocationService.complete(new AiInvocation(
                     FEATURE, assembly.context(), assembly.prompt(), MAX_TOKENS, TEMPERATURE));
+            if (outcome.text().isBlank()) {
+                return DealRationaleDto.unavailable(dealId, PROVIDER_ERROR);
+            }
             Instant generatedAt = Instant.now(clock);
-            DealBriefDto brief = DealBriefDto.of(
+            DealRationaleDto rationale = DealRationaleDto.of(
                     dealId, outcome.text(), generatedAt.toString(), outcome.demaskWarnings());
-            cache(cacheKey, brief, generatedAt.plus(CACHE_TTL));
-            return brief;
+            cache(cacheKey, rationale, generatedAt.plus(CACHE_TTL));
+            return rationale;
         } catch (MaskingLeakException | AiProviderException exception) {
-            return DealBriefDto.unavailable(dealId, PROVIDER_ERROR);
+            return DealRationaleDto.unavailable(dealId, PROVIDER_ERROR);
         } catch (ForbiddenException exception) {
-            return DealBriefDto.unavailable(dealId, NOT_CONFIGURED);
+            return DealRationaleDto.unavailable(dealId, NOT_CONFIGURED);
         }
     }
 
-    private DealBriefDto cached(String key, Instant now) {
-        CachedBrief cached = cache.get(key);
+    private DealRationaleDto cached(String key, Instant now) {
+        CachedRationale cached = cache.get(key);
         if (cached == null) {
             return null;
         }
         if (now.isBefore(cached.expiresAt())) {
-            return cached.brief();
+            return cached.rationale();
         }
         cache.remove(key, cached);
         return null;
     }
 
-    private void cache(String key, DealBriefDto brief, Instant expiresAt) {
+    private void cache(String key, DealRationaleDto rationale, Instant expiresAt) {
         synchronized (cache) {
             cache.entrySet().removeIf(entry -> !Instant.now(clock).isBefore(entry.getValue().expiresAt()));
             if (!cache.containsKey(key) && cache.size() >= MAX_CACHE_ENTRIES) {
                 cache.entrySet().stream()
-                        .min(Map.Entry.comparingByValue(Comparator.comparing(CachedBrief::expiresAt)))
+                        .min(Map.Entry.comparingByValue(Comparator.comparing(CachedRationale::expiresAt)))
                         .ifPresent(entry -> cache.remove(entry.getKey(), entry.getValue()));
             }
-            cache.put(key, new CachedBrief(brief, expiresAt));
+            cache.put(key, new CachedRationale(rationale, expiresAt));
         }
     }
 
@@ -147,6 +160,6 @@ public class DealBriefService {
         serialized.append(value.length()).append(':').append(value);
     }
 
-    private record CachedBrief(DealBriefDto brief, Instant expiresAt) {
+    private record CachedRationale(DealRationaleDto rationale, Instant expiresAt) {
     }
 }

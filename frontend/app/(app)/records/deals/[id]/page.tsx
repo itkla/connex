@@ -63,6 +63,7 @@ import DealActionsMenu from '@/app/components/records/deals/DealActionsMenu';
 import DealActivityBreakdown from '@/app/components/records/deals/DealActivityBreakdown';
 import EngineEvaluationPanel from '@/app/components/records/EngineEvaluationPanel';
 import DealBriefPanel from '@/app/components/records/deals/DealBriefPanel';
+import DealRationalePanel from '@/app/components/records/deals/DealRationalePanel';
 import DealRiskPanel from '@/app/components/records/deals/DealRiskPanel';
 import DealRiskPill from '@/app/components/records/deals/DealRiskPill';
 import DealLifecycleProgress from '@/app/components/records/deals/DealLifecycleProgress';
@@ -243,6 +244,7 @@ export default async function DealPage({ params }: { params: { id: number } }) {
                     </div>
                     <EntityNotificationBanner initialNotifications={notificationPage.items} />
                     <DealRiskPanel risk={risk} />
+                    <DealRationalePanel dealId={deal.id} />
                     <DealBriefPanel dealId={deal.id} />
                 </Rise>
 
