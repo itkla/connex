@@ -1369,8 +1369,8 @@ export function getDealRisksFromCookie(cookie: string | null) {
  * AI-generated brief for a deal. Returns a graceful unavailability result (never an error) when AI
  * is not configured for the organization; generation is slow (an LLM call), so fetch client-side.
  */
-export function getDealBrief(id: number, init: RequestInit = {}) {
-    return getJson<Types.DealBrief>(`/api/deals/${id}/brief`, init);
+export function getDealBrief(id: number, refresh = false, init: RequestInit = {}) {
+    return getJson<Types.DealBrief>(`/api/deals/${id}/brief${refresh ? buildQuery({ refresh: true }) : ''}`, init);
 }
 
 /**
@@ -1378,8 +1378,11 @@ export function getDealBrief(id: number, init: RequestInit = {}) {
  * when the deal is not at risk or AI is not configured for the organization; generation is slow (an
  * LLM call), so fetch client-side.
  */
-export function getDealRationale(id: number, init: RequestInit = {}) {
-    return getJson<Types.DealRationale>(`/api/deals/${id}/rationale`, init);
+export function getDealRationale(id: number, refresh = false, init: RequestInit = {}) {
+    return getJson<Types.DealRationale>(
+        `/api/deals/${id}/rationale${refresh ? buildQuery({ refresh: true }) : ''}`,
+        init,
+    );
 }
 
 /**

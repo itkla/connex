@@ -55,6 +55,16 @@ public class DealRiskRationaleService {
      * @return available rationale or a graceful unavailability response
      */
     public DealRationaleDto generate(int dealId) {
+        return generate(dealId, false);
+    }
+
+    /**
+     * Generates or reuses a rationale for a workspace-scoped at-risk deal.
+     * @param dealId deal whose deterministic risk signals should be explained
+     * @param refresh when true, bypass any stored output and force a fresh generation
+     * @return available rationale or a graceful unavailability response
+     */
+    public DealRationaleDto generate(int dealId, boolean refresh) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         if (!aiFeatureGate.isAiUsable()) {
             return DealRationaleDto.unavailable(dealId, NOT_CONFIGURED);
@@ -68,9 +78,11 @@ public class DealRiskRationaleService {
 
         RationaleAssembly assembly = dealRiskRationaleAssembler.assemble(workspaceId, dealId, risk);
         String contentHash = aiOutputCacheStore.contentHash(assembly.prompt(), assembly.context());
-        DealRationaleDto cached = cached(workspaceId, dealId, contentHash);
-        if (cached != null) {
-            return cached;
+        if (!refresh) {
+            DealRationaleDto cached = cached(workspaceId, dealId, contentHash);
+            if (cached != null) {
+                return cached;
+            }
         }
 
         try {

@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useLocale, useTranslations } from 'next-intl';
 import { ArrowPathIcon, SparklesIcon } from '@heroicons/react/24/outline';
 
@@ -28,12 +28,15 @@ export default function DealBriefPanel({ dealId }: { dealId: number }) {
     const [state, setState] = useState<BriefState>({ status: 'loading' });
 
     const [reloadKey, setReloadKey] = useState(0);
+    const refreshNext = useRef(false);
 
     useEffect(() => {
         let cancelled = false;
+        const refresh = refreshNext.current;
+        refreshNext.current = false;
         (async () => {
             try {
-                const brief = await getDealBrief(dealId);
+                const brief = await getDealBrief(dealId, refresh);
                 if (cancelled) return;
                 if (brief.available && ((brief.sections && brief.sections.length > 0) || brief.brief)) {
                     setState({ status: 'ready', brief });
@@ -52,6 +55,12 @@ export default function DealBriefPanel({ dealId }: { dealId: number }) {
     }, [dealId, reloadKey]);
 
     const retry = () => {
+        setState({ status: 'loading' });
+        setReloadKey((key) => key + 1);
+    };
+
+    const regenerate = () => {
+        refreshNext.current = true;
         setState({ status: 'loading' });
         setReloadKey((key) => key + 1);
     };
@@ -97,16 +106,27 @@ export default function DealBriefPanel({ dealId }: { dealId: number }) {
                             {state.brief.brief}
                         </div>
                     )}
-                    <p className="text-xs text-muted-foreground">
-                        {t('attribution', {
-                            time: state.brief.generatedAt
-                                ? new Intl.DateTimeFormat(locale, { timeStyle: 'short' }).format(
-                                      new Date(state.brief.generatedAt),
-                                  )
-                                : '',
-                        })}
-                        {state.brief.warnings > 0 ? <> · {t('integrityWarning')}</> : null}
-                    </p>
+                    <div className="flex items-center justify-between gap-3">
+                        <p className="text-xs text-muted-foreground">
+                            {t('attribution', {
+                                time: state.brief.generatedAt
+                                    ? new Intl.DateTimeFormat(locale, { timeStyle: 'short' }).format(
+                                          new Date(state.brief.generatedAt),
+                                      )
+                                    : '',
+                            })}
+                            {state.brief.warnings > 0 ? <> · {t('integrityWarning')}</> : null}
+                        </p>
+                        <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={regenerate}
+                            className="shrink-0 text-muted-foreground"
+                        >
+                            <ArrowPathIcon className="size-4" aria-hidden />
+                            {t('regenerate')}
+                        </Button>
+                    </div>
                 </div>
             )}
         </section>

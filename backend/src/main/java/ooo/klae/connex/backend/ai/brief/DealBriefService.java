@@ -51,6 +51,16 @@ public class DealBriefService {
      * @return available brief or a graceful unavailability response
      */
     public DealBriefDto generate(int dealId) {
+        return generate(dealId, false);
+    }
+
+    /**
+     * Generates or reuses a brief for a workspace-scoped deal.
+     * @param dealId deal to summarize
+     * @param refresh when true, bypass any stored output and force a fresh generation
+     * @return available brief or a graceful unavailability response
+     */
+    public DealBriefDto generate(int dealId, boolean refresh) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         if (!aiFeatureGate.isAiUsable()) {
             return DealBriefDto.unavailable(dealId, NOT_CONFIGURED);
@@ -58,9 +68,11 @@ public class DealBriefService {
 
         BriefAssembly assembly = dealBriefAssembler.assemble(workspaceId, dealId);
         String contentHash = aiOutputCacheStore.contentHash(assembly.prompt(), assembly.context());
-        DealBriefDto cached = cached(workspaceId, dealId, contentHash);
-        if (cached != null) {
-            return cached;
+        if (!refresh) {
+            DealBriefDto cached = cached(workspaceId, dealId, contentHash);
+            if (cached != null) {
+                return cached;
+            }
         }
 
         try {

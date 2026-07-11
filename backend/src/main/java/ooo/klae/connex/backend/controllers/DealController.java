@@ -306,14 +306,14 @@ public class DealController {
 
     /** Returns an AI-generated before-you-call brief, or a graceful unavailability response. */
     @GetMapping("/{id}/brief")
-    public DealBriefDto brief(@PathVariable int id) {
-        return dealBriefService.generate(id);
+    public DealBriefDto brief(@PathVariable int id, @RequestParam(defaultValue = "false") boolean refresh) {
+        return dealBriefService.generate(id, refresh);
     }
 
     /** Returns an AI-generated deal-risk rationale, or a graceful unavailability response. */
     @GetMapping("/{id}/rationale")
-    public DealRationaleDto rationale(@PathVariable int id) {
-        return dealRiskRationaleService.generate(id);
+    public DealRationaleDto rationale(@PathVariable int id, @RequestParam(defaultValue = "false") boolean refresh) {
+        return dealRiskRationaleService.generate(id, refresh);
     }
 
     /**

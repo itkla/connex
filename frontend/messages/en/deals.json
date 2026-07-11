@@ -16,6 +16,7 @@
     "panelTitle": "AI brief",
     "error": "Couldn't generate the brief.",
     "retry": "Retry",
+    "regenerate": "Regenerate",
     "attribution": "AI-generated · {time}",
     "integrityWarning": "Some references could not be verified"
   },
@@ -23,6 +24,7 @@
     "panelTitle": "AI risk analysis",
     "error": "Couldn't generate the risk analysis.",
     "retry": "Retry",
+    "regenerate": "Regenerate",
     "attribution": "AI-generated · {time}",
     "integrityWarning": "Some references could not be verified"
   },
