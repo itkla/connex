@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.ai.riskrationale;
 
+import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.format.DateTimeParseException;
 import java.time.temporal.ChronoUnit;
@@ -236,7 +237,7 @@ public class DealRiskRationaleAssembler {
     }
 
     private static String amount(double value, String currency, MaskingContext context) {
-        String amount = Double.toString(value);
+        String amount = BigDecimal.valueOf(value).stripTrailingZeros().toPlainString();
         String safeCurrency = maskAllowedText(currency, context);
         return isBlank(safeCurrency) ? amount : amount + " " + safeCurrency;
     }

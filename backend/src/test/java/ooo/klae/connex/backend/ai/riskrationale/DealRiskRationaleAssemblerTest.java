@@ -88,6 +88,8 @@ class DealRiskRationaleAssemblerTest {
         assertTrue(serialized.contains("person={{P2}}"));
         assertTrue(serialized.contains("role=Decision maker at {{C1}}"));
         assertTrue(serialized.contains("Close timing: 4 days overdue"));
+        assertTrue(serialized.contains("Value: 125000 USD"));
+        assertFalse(serialized.contains("125000.0"));
         assertFalse(serialized.contains("Acme Holdings"));
         assertFalse(serialized.contains("Mina Patel"));
         assertFalse(serialized.contains("Olivia Chen"));
@@ -95,6 +97,33 @@ class DealRiskRationaleAssemblerTest {
         assertFalse(serialized.contains("+1 415 555 0199"));
         verify(dealService).getDealSummary(DEAL_ID);
         verify(dealService).getPeopleByDealId(DEAL_ID);
+    }
+
+    @Test
+    void assemble_largeDealValueUsesPlainDecimalNotation() {
+        DealSummaryDto summary = new DealSummaryDto(
+                DEAL_ID,
+                "Enterprise renewal",
+                5.0E7,
+                "JPY",
+                "open",
+                "2026-08-01",
+                "Renewal",
+                "Enterprise",
+                "BigCo",
+                "Owner Name");
+        DealRiskFactor factor = new DealRiskFactor("close_overdue", "high", Map.of("daysOverdue", 5));
+        DealRiskDto risk = new DealRiskDto(
+                DEAL_ID, 5.0E7, "JPY", "high", 80, List.of(factor), "2026-07-09 18:30:00");
+
+        when(dealService.getDealSummary(DEAL_ID)).thenReturn(summary);
+        when(dealService.getPeopleByDealId(DEAL_ID)).thenReturn(List.of());
+
+        String serialized = serialized(assembler.assemble(WORKSPACE_ID, DEAL_ID, risk).prompt());
+
+        assertTrue(serialized.contains("Value: 50000000 JPY"));
+        assertFalse(serialized.contains("5.0E7"));
+        assertFalse(serialized.contains("E7"));
     }
 
     private static String serialized(MaskedPrompt prompt) {

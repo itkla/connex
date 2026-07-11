@@ -13,6 +13,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
 /**
  * Ephemeral per-request token map for AI masking. The map is never persisted or serialized, and
@@ -57,6 +58,19 @@ public final class MaskingContext {
      */
     public Set<String> identifierDictionary() {
         return Collections.unmodifiableSet(identifierDictionary);
+    }
+
+    /**
+     * Token-to-original-value bindings for cache fingerprinting, ordered by token. Fingerprinting the
+     * bindings (not merely the raw-value set) makes a cache key change when two requests share the
+     * same masked text but bind the same tokens to different identifiers (an identity swap).
+     * @return ordered immutable token-to-original-value entries
+     */
+    public List<Map.Entry<String, String>> tokenBindings() {
+        return tokenToOriginalValue.entrySet().stream()
+                .sorted(Map.Entry.comparingByKey())
+                .map(entry -> Map.entry(entry.getKey(), entry.getValue()))
+                .collect(Collectors.toUnmodifiableList());
     }
 
     @Override

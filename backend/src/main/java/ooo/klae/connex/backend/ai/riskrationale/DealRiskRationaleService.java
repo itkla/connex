@@ -8,6 +8,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.Comparator;
 import java.util.HexFormat;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -81,6 +82,9 @@ public class DealRiskRationaleService {
         try {
             AiCompletionOutcome outcome = aiInvocationService.complete(new AiInvocation(
                     FEATURE, assembly.context(), assembly.prompt(), MAX_TOKENS, TEMPERATURE));
+            if (outcome.text().isBlank()) {
+                return DealRationaleDto.unavailable(dealId, PROVIDER_ERROR);
+            }
             Instant generatedAt = Instant.now(clock);
             DealRationaleDto rationale = DealRationaleDto.of(
                     dealId, outcome.text(), generatedAt.toString(), outcome.demaskWarnings());
@@ -139,8 +143,12 @@ public class DealRiskRationaleService {
             appendPart(serialized, message.getRole());
             appendPart(serialized, message.getContent());
         }
-        serialized.append(context.identifierDictionary().size()).append(':');
-        context.identifierDictionary().stream().sorted().forEach(value -> appendPart(serialized, value));
+        List<Map.Entry<String, String>> bindings = context.tokenBindings();
+        serialized.append(bindings.size()).append(':');
+        for (Map.Entry<String, String> binding : bindings) {
+            appendPart(serialized, binding.getKey());
+            appendPart(serialized, binding.getValue());
+        }
         return serialized.toString();
     }
 

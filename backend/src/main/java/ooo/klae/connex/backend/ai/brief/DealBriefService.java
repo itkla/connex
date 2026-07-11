@@ -8,6 +8,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.Comparator;
 import java.util.HexFormat;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -129,8 +130,12 @@ public class DealBriefService {
             appendPart(serialized, message.getRole());
             appendPart(serialized, message.getContent());
         }
-        serialized.append(context.identifierDictionary().size()).append(':');
-        context.identifierDictionary().stream().sorted().forEach(value -> appendPart(serialized, value));
+        List<Map.Entry<String, String>> bindings = context.tokenBindings();
+        serialized.append(bindings.size()).append(':');
+        for (Map.Entry<String, String> binding : bindings) {
+            appendPart(serialized, binding.getKey());
+            appendPart(serialized, binding.getValue());
+        }
         return serialized.toString();
     }
 

@@ -53,7 +53,7 @@ public final class MaskingEngine {
         if (verdict.excluded()) {
             return OMITTED_BY_POLICY;
         }
-        String masked = normalizedText;
+        String masked = stripInjectedTokenDelimiters(normalizedText);
         for (MaskingContext.IdentifierEntry entry : ctx.identifierEntriesByLongestRawValue()) {
             masked = identifierPattern(entry.rawValue()).matcher(masked)
                     .replaceAll(Matcher.quoteReplacement(entry.token()));
@@ -75,6 +75,10 @@ public final class MaskingEngine {
     public static String maskField(EntityKind kind, String rawValue, MaskingContext ctx) {
         Objects.requireNonNull(ctx, "ctx");
         return ctx.tokenFor(kind, rawValue);
+    }
+
+    private static String stripInjectedTokenDelimiters(String value) {
+        return value.replace("{{", "").replace("}}", "");
     }
 
     private static Pattern identifierPattern(String rawValue) {

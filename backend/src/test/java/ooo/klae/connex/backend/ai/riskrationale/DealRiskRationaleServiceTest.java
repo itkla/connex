@@ -165,6 +165,57 @@ class DealRiskRationaleServiceTest {
     }
 
     @Test
+    void generate_blankCompletion_returnsProviderErrorAndDoesNotCache() {
+        DealRiskDto risk = atRisk();
+        RationaleAssembly assembly = assembly();
+        when(aiFeatureGate.isAiUsable()).thenReturn(true);
+        when(dealRiskService.assessDeal(WORKSPACE_ID, DEAL_ID)).thenReturn(risk);
+        when(dealRiskRationaleAssembler.assemble(WORKSPACE_ID, DEAL_ID, risk)).thenReturn(assembly);
+        when(aiInvocationService.complete(any(AiInvocation.class)))
+                .thenReturn(new AiCompletionOutcome("   ", 0, 5, 0, "end_turn"));
+
+        DealRationaleDto first = service.generate(DEAL_ID);
+        DealRationaleDto second = service.generate(DEAL_ID);
+
+        assertUnavailable(first, "provider_error");
+        verify(aiInvocationService, times(2)).complete(any(AiInvocation.class));
+    }
+
+    @Test
+    void generate_identitySwapWithIdenticalMaskedText_doesNotCollideInCache() {
+        DealRiskDto risk = atRisk();
+        MaskingContext firstContext = new MaskingContext();
+        MaskingEngine.maskField(EntityKind.PERSON, "Alice Ng", firstContext);
+        MaskingEngine.maskField(EntityKind.PERSON, "Bob Lee", firstContext);
+        MaskingContext swappedContext = new MaskingContext();
+        MaskingEngine.maskField(EntityKind.PERSON, "Bob Lee", swappedContext);
+        MaskingEngine.maskField(EntityKind.PERSON, "Alice Ng", swappedContext);
+        RationaleAssembly first = new RationaleAssembly(firstContext, twoPersonPrompt());
+        RationaleAssembly swapped = new RationaleAssembly(swappedContext, twoPersonPrompt());
+
+        when(aiFeatureGate.isAiUsable()).thenReturn(true);
+        when(dealRiskService.assessDeal(WORKSPACE_ID, DEAL_ID)).thenReturn(risk);
+        when(dealRiskRationaleAssembler.assemble(WORKSPACE_ID, DEAL_ID, risk)).thenReturn(first, swapped);
+        when(aiInvocationService.complete(any(AiInvocation.class)))
+                .thenReturn(new AiCompletionOutcome("first", 0, 5, 5, "end_turn"),
+                        new AiCompletionOutcome("second", 0, 5, 5, "end_turn"));
+
+        DealRationaleDto firstResult = service.generate(DEAL_ID);
+        DealRationaleDto secondResult = service.generate(DEAL_ID);
+
+        assertEquals("first", firstResult.getRationale());
+        assertEquals("second", secondResult.getRationale());
+        verify(aiInvocationService, times(2)).complete(any(AiInvocation.class));
+    }
+
+    private static MaskedPrompt twoPersonPrompt() {
+        return PromptAssembly.builder()
+                .system("Use only the supplied risk factors.")
+                .userTurn("Owner: {{P1}}; person={{P2}}")
+                .build();
+    }
+
+    @Test
     void generate_maskingLeak_returnsProviderError() {
         arrangeInvocationFailure(new MaskingLeakException("blocked outbound identifier"));
 
