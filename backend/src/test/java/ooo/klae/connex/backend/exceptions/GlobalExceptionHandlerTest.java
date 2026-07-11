@@ -12,6 +12,7 @@ import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
+import org.springframework.web.bind.MissingServletRequestParameterException;
 
 /**
  * The data-integrity handler must not echo which unique column collided (#81): a duplicate email or
@@ -22,6 +23,15 @@ import org.springframework.http.converter.HttpMessageNotReadableException;
 class GlobalExceptionHandlerTest {
 
     private final GlobalExceptionHandler handler = new GlobalExceptionHandler();
+
+    @Test
+    void missingParameter_mapsTo400WithParameterName() {
+        ResponseEntity<String> response = handler.missingParameter(
+                new MissingServletRequestParameterException("personA", "int"));
+
+        assertEquals(HttpStatus.BAD_REQUEST, response.getStatusCode());
+        assertEquals("Missing required parameter: personA", response.getBody());
+    }
 
     @Test
     void dataIntegrity_onEmailConstraint_doesNotRevealField() {

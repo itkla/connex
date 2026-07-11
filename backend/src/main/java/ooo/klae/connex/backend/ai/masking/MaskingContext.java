@@ -85,6 +85,9 @@ public final class MaskingContext {
     List<IdentifierEntry> identifierEntriesByLongestRawValue() {
         List<IdentifierEntry> entries = new ArrayList<>();
         for (Map.Entry<String, String> entry : rawIdentifierToToken.entrySet()) {
+            if (entry.getKey().isBlank()) {
+                continue;
+            }
             entries.add(new IdentifierEntry(entry.getKey(), entry.getValue()));
         }
         entries.sort(Comparator.comparingInt((IdentifierEntry entry) -> entry.rawValue().length()).reversed());
@@ -95,7 +98,8 @@ public final class MaskingContext {
         if (rawValue == null || rawValue.isBlank()) {
             throw new IllegalArgumentException("Cannot tokenize a blank identifier");
         }
-        return WHITESPACE.matcher(rawValue.trim()).replaceAll(" ");
+        String withoutDelimiters = rawValue.replace("{{", "").replace("}}", "");
+        return WHITESPACE.matcher(withoutDelimiters.trim()).replaceAll(" ");
     }
 
     private static String canonicalKey(String rawValue) {
