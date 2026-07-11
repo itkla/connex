@@ -45,6 +45,7 @@ import UserAvatar from '@/app/components/records/users/UserAvatar';
 import NotificationBell from '@/app/components/notifications/NotificationBell';
 import WorkspaceSwitcher from '@/app/components/WorkspaceSwitcher';
 import QuickCreateLauncher from '@/app/components/actions/QuickCreateLauncher';
+import CommandPaletteTrigger from '@/app/components/actions/CommandPaletteTrigger';
 import { useWorkspace } from '@/app/hooks/useWorkspace';
 
 type NavItem = {
@@ -359,6 +360,8 @@ export default function Sidebar({
                 </header>
 
                 <QuickCreateLauncher />
+
+                <CommandPaletteTrigger />
 
                 <nav className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto pr-1">
                     {sections.map((section) => (

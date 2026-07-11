@@ -8,6 +8,8 @@ import { WorkspaceProvider } from "@/app/hooks/useWorkspace";
 import { NavTrailProvider } from "@/app/hooks/useNavTrail";
 import { ActionProvider } from "@/app/hooks/useActions";
 import NotificationActionsBridge from "@/app/components/actions/NotificationActionsBridge";
+import PreferenceActionsBridge from "@/app/components/actions/PreferenceActionsBridge";
+import CommandPaletteProvider from "@/app/components/actions/CommandPaletteProvider";
 
 export default async function AppLayout({
     children,
@@ -35,16 +37,19 @@ export default async function AppLayout({
                 <NavTrailProvider>
                     <ActionProvider user={user}>
                         <NotificationActionsBridge />
-                        <ContentShell
-                            sidebar={
-                                <Sidebar
-                                    user={user}
-                                    className="w-64 bg-sidebar h-full p-6 rounded-xl border border-sidebar-border shadow-xl"
-                                />
-                            }
-                        >
-                            {children}
-                        </ContentShell>
+                        <PreferenceActionsBridge />
+                        <CommandPaletteProvider>
+                            <ContentShell
+                                sidebar={
+                                    <Sidebar
+                                        user={user}
+                                        className="w-64 bg-sidebar h-full p-6 rounded-xl border border-sidebar-border shadow-xl"
+                                    />
+                                }
+                            >
+                                {children}
+                            </ContentShell>
+                        </CommandPaletteProvider>
                     </ActionProvider>
                 </NavTrailProvider>
             </NotificationProvider>
