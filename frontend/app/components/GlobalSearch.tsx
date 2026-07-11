@@ -106,6 +106,7 @@ export default function GlobalSearch() {
     const containerRef = useRef<HTMLDivElement>(null);
     const inlineInputRef = useRef<HTMLInputElement>(null);
     const paletteInputRef = useRef<HTMLInputElement>(null);
+    const paletteRef = useRef<HTMLDivElement>(null);
     const listRef = useRef<HTMLDivElement>(null);
     const lastFocusedRef = useRef<HTMLElement | null>(null);
     const modeRef = useRef<Mode>(mode);
@@ -266,6 +267,27 @@ export default function GlobalSearch() {
         }
     };
 
+    const onPaletteKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+        if (event.key === 'ArrowDown' || event.key === 'ArrowUp' || event.key === 'PageDown' || event.key === 'PageUp') {
+            setExpanded(true);
+            return;
+        }
+        if (event.key !== 'Tab' || !paletteRef.current) return;
+        const focusables = paletteRef.current.querySelectorAll<HTMLElement>(
+            'a[href], button:not([disabled]), textarea, input, select, [tabindex]:not([tabindex="-1"])',
+        );
+        if (focusables.length === 0) return;
+        const first = focusables[0];
+        const last = focusables[focusables.length - 1];
+        if (event.shiftKey && document.activeElement === first) {
+            event.preventDefault();
+            last.focus();
+        } else if (!event.shiftKey && document.activeElement === last) {
+            event.preventDefault();
+            first.focus();
+        }
+    };
+
     const inlineRecordCount = flatRows.length;
     const paletteRecordCount = paletteRecordGroups.reduce((sum, group) => sum + group.rows.length, 0);
     const commandCount = commandGroups.reduce((sum, entry) => sum + entry.actions.length, 0);
@@ -391,9 +413,11 @@ export default function GlobalSearch() {
                 {isPalette ? (
                     <motion.div
                         key="global-search-overlay"
+                        ref={paletteRef}
                         role="dialog"
                         aria-modal
                         aria-label={tActions('palette.trigger')}
+                        onKeyDown={onPaletteKeyDown}
                         initial={{ opacity: 0 }}
                         animate={{ opacity: 1 }}
                         exit={{ opacity: 0 }}
