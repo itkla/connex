@@ -1,11 +1,10 @@
 'use client';
 
-import { useMemo } from 'react';
 import { Pie, PieChart, ResponsiveContainer, Tooltip as RechartsTooltip } from 'recharts';
 import { useTranslations } from 'next-intl';
 
-import { type Task, type TaskStatus } from '@/app/lib/types';
-import { TASK_STATUSES, taskStatusCounts } from '@/app/components/overview/analytics/relationshipMetrics';
+import { type TaskStatus } from '@/app/lib/types';
+import { TASK_STATUSES } from '@/app/components/overview/analytics/relationshipMetrics';
 
 const STATUS_COLOR: Record<TaskStatus, string> = {
     todo: 'var(--chart-2)',
@@ -15,21 +14,33 @@ const STATUS_COLOR: Record<TaskStatus, string> = {
 
 type Slice = { key: TaskStatus; label: string; count: number; fill: string };
 
-export default function TaskStatusDonut({ tasks }: { tasks: Task[] }) {
+/**
+ * Task-status donut. Consumes server-computed status counts and renders the done-share as the
+ * centred completion percentage plus a per-status legend.
+ */
+export default function TaskStatusDonut({
+    counts,
+}: {
+    counts: { todo: number; inProgress: number; done: number };
+}) {
     const t = useTranslations('AnalyticsTaskStatus');
 
-    const counts = useMemo(() => taskStatusCounts(tasks), [tasks]);
-    const total = TASK_STATUSES.reduce((sum, status) => sum + counts[status], 0);
+    const byStatus: Record<TaskStatus, number> = {
+        todo: counts.todo,
+        in_progress: counts.inProgress,
+        done: counts.done,
+    };
+    const total = TASK_STATUSES.reduce((sum, status) => sum + byStatus[status], 0);
 
     if (total === 0) {
         return <div className="flex h-56 items-center justify-center text-sm text-muted-foreground">{t('empty')}</div>;
     }
 
-    const completion = Math.round((counts.done / total) * 100);
+    const completion = Math.round((byStatus.done / total) * 100);
     const data: Slice[] = TASK_STATUSES.map((status) => ({
         key: status,
         label: t(status),
-        count: counts[status],
+        count: byStatus[status],
         fill: STATUS_COLOR[status],
     }));
 

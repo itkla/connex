@@ -489,6 +489,41 @@ class DealMapperTest extends AbstractMapperTest {
     }
 
     @Test
+    void closingSoonCountUsesInclusiveWindowOpenStateAndWorkspaceScope() {
+        workspace = newWorkspace();
+        Pipeline pipeline = newPipeline();
+        Stage stage = newStage(pipeline, 0);
+        Deal today = analyticsDeal(workspace, pipeline, stage, "Today", 10.0, 0.0,
+            "JPY", null, 1, null, 1);
+        Deal lastDay = analyticsDeal(workspace, pipeline, stage, "Last Day", 10.0, 0.0,
+            "JPY", null, 1, null, 1);
+        Deal yesterday = analyticsDeal(workspace, pipeline, stage, "Yesterday", 10.0, 0.0,
+            "JPY", null, 1, null, 1);
+        Deal afterWindow = analyticsDeal(workspace, pipeline, stage, "After Window", 10.0, 0.0,
+            "JPY", null, 1, null, 1);
+        Deal closed = analyticsDeal(workspace, pipeline, stage, "Closed", 10.0, 10.0,
+            "JPY", true, 10, 1, 1);
+        jdbcTemplate.update("UPDATE deal SET expected_close_date = CURDATE() WHERE id = ?", today.getId());
+        jdbcTemplate.update("UPDATE deal SET expected_close_date = DATE_ADD(CURDATE(), INTERVAL 7 DAY) WHERE id = ?",
+            lastDay.getId());
+        jdbcTemplate.update("UPDATE deal SET expected_close_date = DATE_SUB(CURDATE(), INTERVAL 1 DAY) WHERE id = ?",
+            yesterday.getId());
+        jdbcTemplate.update("UPDATE deal SET expected_close_date = DATE_ADD(CURDATE(), INTERVAL 8 DAY) WHERE id = ?",
+            afterWindow.getId());
+        jdbcTemplate.update("UPDATE deal SET expected_close_date = CURDATE() WHERE id = ?", closed.getId());
+
+        Workspace foreignWorkspace = newWorkspace();
+        Pipeline foreignPipeline = newPipelineIn(foreignWorkspace);
+        Stage foreignStage = newStageIn(foreignWorkspace, foreignPipeline, 0);
+        Deal foreign = analyticsDeal(foreignWorkspace, foreignPipeline, foreignStage, "Foreign", 10.0, 0.0,
+            "JPY", null, 1, null, 1);
+        jdbcTemplate.update("UPDATE deal SET expected_close_date = CURDATE() WHERE id = ?", foreign.getId());
+
+        assertEquals(2, dealMapper.closingSoonCount(workspace.getId(), 7));
+        assertEquals(1, dealMapper.closingSoonCount(foreignWorkspace.getId(), 7));
+    }
+
+    @Test
     void topDealsOrderLimitFilterAndStayWorkspaceScoped() {
         workspace = newWorkspace();
         Pipeline pipeline = newPipeline();

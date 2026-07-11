@@ -15,6 +15,7 @@ import ooo.klae.connex.backend.dto.PageResponse;
 import ooo.klae.connex.backend.dto.TaskDto;
 import ooo.klae.connex.backend.dto.TaskMoveRequest;
 import ooo.klae.connex.backend.dto.TaskRescheduleRequest;
+import ooo.klae.connex.backend.dto.TaskSummaryDto;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.services.TaskService;
 import ooo.klae.connex.backend.util.PageBounds;
@@ -70,6 +71,14 @@ public class TaskController {
         List<TaskDto> items = taskService.getTasksPage(bounds.size(), bounds.offset())
             .stream().map(TaskDto::from).toList();
         return new PageResponse<>(items, taskService.countTasks());
+    }
+
+    /**
+     * GET endpoint for workspace-wide task status and due-date counts.
+     */
+    @GetMapping("/summary")
+    public TaskSummaryDto getTaskSummary() {
+        return taskService.getTaskSummary();
     }
 
     /**

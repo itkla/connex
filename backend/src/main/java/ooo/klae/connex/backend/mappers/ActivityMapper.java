@@ -3,6 +3,8 @@ package ooo.klae.connex.backend.mappers;
 import org.apache.ibatis.annotations.Param;
 
 import ooo.klae.connex.backend.beans.Activity;
+import ooo.klae.connex.backend.dto.ActivityVolumeBucketDto;
+import ooo.klae.connex.backend.dto.TeamLeaderboardEntryDto;
 
 import java.util.List;
 
@@ -26,6 +28,17 @@ public interface ActivityMapper {
         @Param("personId") Integer personId,
         @Param("dealId") Integer dealId,
         @Param("createdById") Integer createdById);
+    List<ActivityVolumeBucketDto> activityVolume(
+        @Param("workspaceId") int workspaceId,
+        @Param("days") int days,
+        @Param("buckets") int buckets,
+        @Param("spanDays") double spanDays
+    );
+    List<TeamLeaderboardEntryDto> teamLeaderboard(
+        @Param("workspaceId") int workspaceId,
+        @Param("days") int days
+    );
+    long upcomingCount(@Param("workspaceId") int workspaceId, @Param("days") int days);
     List<Activity> getActivitiesByPersonId(@Param("workspaceId") int workspaceId, @Param("personId") int personId);
     List<Activity> getActivitiesByDealId(@Param("workspaceId") int workspaceId, @Param("dealId") int dealId);
     List<Activity> getActivitiesByCreatedById(@Param("workspaceId") int workspaceId, @Param("createdById") int createdById);

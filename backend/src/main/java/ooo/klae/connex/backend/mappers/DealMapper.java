@@ -100,6 +100,7 @@ public interface DealMapper {
         @Param("workspaceId") int workspaceId,
         @Param("currency") String currency
     );
+    long closingSoonCount(@Param("workspaceId") int workspaceId, @Param("days") int days);
     List<Deal> topOpenDeals(
         @Param("workspaceId") int workspaceId,
         @Param("currency") String currency

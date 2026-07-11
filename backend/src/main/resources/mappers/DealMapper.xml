@@ -372,6 +372,16 @@
     ORDER BY d.stage_id
   </select>
 
+  <select id="closingSoonCount" resultType="long">
+    SELECT COUNT(*)
+    FROM deal d
+    WHERE d.workspace_id = #{workspaceId}
+      AND d.won IS NULL
+      AND d.closed_at IS NULL
+      AND d.expected_close_date &gt;= CURDATE()
+      AND d.expected_close_date &lt;= DATE_ADD(CURDATE(), INTERVAL #{days} DAY)
+  </select>
+
   <select id="topOpenDeals" resultMap="DealResult">
     SELECT <include refid="qualifiedDealColumns"/>
     FROM deal d

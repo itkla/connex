@@ -10,6 +10,9 @@ import ooo.klae.connex.backend.mappers.DealMapper;
 import ooo.klae.connex.backend.beans.Activity;
 import ooo.klae.connex.backend.beans.Notification;
 import ooo.klae.connex.backend.beans.User;
+import ooo.klae.connex.backend.dto.ActivityVolumeBucketDto;
+import ooo.klae.connex.backend.dto.CountDto;
+import ooo.klae.connex.backend.dto.TeamLeaderboardEntryDto;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.notifications.NotificationDelivery;
 import ooo.klae.connex.backend.tenant.Permission;
@@ -18,6 +21,7 @@ import ooo.klae.connex.backend.tenant.RequirePermission;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -79,10 +83,42 @@ public class ActivityService {
         return activityMapper.countActivities(workspaceId, personId, dealId, createdById);
     }
 
+    public List<ActivityVolumeBucketDto> getActivityVolume(int days) {
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        int bucketCount = activityBucketCount(days);
+        double spanDays = days / (double) bucketCount;
+        List<ActivityVolumeBucketDto> volume = new ArrayList<>(bucketCount);
+        for (int bucketIndex = 0; bucketIndex < bucketCount; bucketIndex++) {
+            volume.add(new ActivityVolumeBucketDto(bucketIndex, 0, 0, 0, 0, 0));
+        }
+        for (ActivityVolumeBucketDto bucket :
+                activityMapper.activityVolume(workspaceId, days, bucketCount, spanDays)) {
+            volume.set(bucket.bucketIndex(), bucket);
+        }
+        return volume;
+    }
+
+    public List<TeamLeaderboardEntryDto> getTeamLeaderboard(int days) {
+        return activityMapper.teamLeaderboard(workspaceService.getCurrentWorkspaceId(), days);
+    }
+
+    public CountDto getUpcomingCount(int days) {
+        return new CountDto(activityMapper.upcomingCount(workspaceService.getCurrentWorkspaceId(), days));
+    }
+
     public List<Activity> getActivitiesByPersonId(int personId) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         return referenceService.hydrateActivities(workspaceId,
             activityMapper.getActivitiesByPersonId(workspaceId, personId));
+    }
+
+    private static int activityBucketCount(int days) {
+        return switch (days) {
+            case 30 -> 6;
+            case 90 -> 9;
+            case 365 -> 12;
+            default -> throw new IllegalArgumentException("Unsupported analytics range: " + days);
+        };
     }
 
     public List<Activity> getActivitiesByDealId(int dealId) {

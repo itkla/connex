@@ -9,9 +9,12 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.jdbc.core.JdbcTemplate;
 
 import ooo.klae.connex.backend.beans.Task;
 import ooo.klae.connex.backend.beans.User;
+import ooo.klae.connex.backend.beans.Workspace;
+import ooo.klae.connex.backend.dto.TaskSummaryDto;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
@@ -19,6 +22,7 @@ import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 class TaskServiceTest extends AbstractServiceTest {
 
     @Autowired TaskService taskService;
+    @Autowired JdbcTemplate jdbcTemplate;
 
     @Test
     void move_reordersWithinStatusContiguously() {
@@ -128,5 +132,32 @@ class TaskServiceTest extends AbstractServiceTest {
     void reschedule_rejectsInvalidDate() {
         Task task = newTask(currentUser, null, null);
         assertThrows(BadRequestException.class, () -> taskService.reschedule(task.getId(), "2025-13-45"));
+    }
+
+    @Test
+    void taskSummaryUsesTheActiveWorkspace() {
+        Task todo = newTask(currentUser, null, null);
+        Task inProgress = newTask(currentUser, null, null);
+        taskMapper.moveTask(workspace.getId(), inProgress.getId(), "in_progress", false, 0);
+        Task done = newTask(currentUser, null, null);
+        taskMapper.moveTask(workspace.getId(), done.getId(), "done", true, 0);
+        jdbcTemplate.update("UPDATE task SET due_date = DATE_SUB(CURDATE(), INTERVAL 1 DAY) WHERE id = ?", todo.getId());
+        jdbcTemplate.update("UPDATE task SET due_date = DATE_ADD(CURDATE(), INTERVAL 7 DAY) WHERE id = ?", inProgress.getId());
+        jdbcTemplate.update("UPDATE task SET due_date = CURDATE() WHERE id = ?", done.getId());
+
+        Workspace foreignWorkspace = new Workspace();
+        foreignWorkspace.setName("Foreign " + unique());
+        foreignWorkspace.setSlug("foreign_" + unique());
+        workspaceMapper.insert(foreignWorkspace);
+        Task foreign = new Task();
+        foreign.setWorkspaceId(foreignWorkspace.getId());
+        foreign.setDescription("foreign");
+        foreign.setCompleted(false);
+        foreign.setStatus("todo");
+        foreign.setAssignedTo(currentUser);
+        taskMapper.insert(foreign);
+        jdbcTemplate.update("UPDATE task SET due_date = CURDATE() WHERE id = ?", foreign.getId());
+
+        assertEquals(new TaskSummaryDto(1, 1, 1, 1, 1), taskService.getTaskSummary());
     }
 }

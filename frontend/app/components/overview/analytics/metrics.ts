@@ -22,11 +22,6 @@ export const ACTIVITY_COLORS: Record<ActivityType, string> = {
 
 const DAY = 86400000; // 1 day in milliseconds
 
-export function normalizeActivityType(value?: string | null): ActivityType {
-    const v = (value ?? '').trim();
-    return (ACTIVITY_TYPES as readonly string[]).includes(v) ? (v as ActivityType) : 'Other';
-}
-
 export type DeltaKind = 'pct' | 'pp';
 export type KpiKey = 'wonRevenue' | 'newPipeline' | 'winRate' | 'avgCycle';
 

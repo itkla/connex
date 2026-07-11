@@ -16,6 +16,7 @@ import ooo.klae.connex.backend.mappers.TaskMapper;
 import ooo.klae.connex.backend.beans.Notification;
 import ooo.klae.connex.backend.beans.Task;
 import ooo.klae.connex.backend.beans.User;
+import ooo.klae.connex.backend.dto.TaskSummaryDto;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
@@ -79,6 +80,10 @@ public class TaskService {
 
     public long countTasks() {
         return taskMapper.countTasks(workspaceService.getCurrentWorkspaceId());
+    }
+
+    public TaskSummaryDto getTaskSummary() {
+        return taskMapper.taskSummary(workspaceService.getCurrentWorkspaceId());
     }
 
     public List<Task> getTasksByAssignedToId(int assignedToId) {

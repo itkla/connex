@@ -12,12 +12,16 @@ import org.springframework.web.bind.annotation.RestController;
 
 import ooo.klae.connex.backend.beans.Activity;
 import ooo.klae.connex.backend.dto.ActivityDto;
+import ooo.klae.connex.backend.dto.ActivityVolumeBucketDto;
+import ooo.klae.connex.backend.dto.CountDto;
 import ooo.klae.connex.backend.dto.PageResponse;
+import ooo.klae.connex.backend.dto.TeamLeaderboardEntryDto;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.services.ActivityService;
 import ooo.klae.connex.backend.util.PageBounds;
 
 import java.util.List;
+import java.util.Set;
 
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -31,6 +35,8 @@ import lombok.RequiredArgsConstructor;
 @RequestMapping("/api/activities")
 @RequiredArgsConstructor
 public class ActivityController {
+    private static final Set<String> ANALYTICS_RANGES = Set.of("30d", "90d", "12m");
+
     private final ActivityService activityService;
 
     /**
@@ -85,6 +91,34 @@ public class ActivityController {
     }
 
     /**
+     * GET endpoint for workspace-wide activity volume by analytics time bucket.
+     */
+    @GetMapping("/volume")
+    public List<ActivityVolumeBucketDto> getActivityVolume(
+        @RequestParam(defaultValue = "90d") String range
+    ) {
+        return activityService.getActivityVolume(analyticsRangeDays(range));
+    }
+
+    /**
+     * GET endpoint for workspace-wide user touch counts within an analytics range.
+     */
+    @GetMapping("/leaderboard")
+    public List<TeamLeaderboardEntryDto> getTeamLeaderboard(
+        @RequestParam(defaultValue = "90d") String range
+    ) {
+        return activityService.getTeamLeaderboard(analyticsRangeDays(range));
+    }
+
+    /**
+     * GET endpoint for the number of upcoming activities in the active workspace.
+     */
+    @GetMapping("/upcoming-count")
+    public CountDto getUpcomingCount(@RequestParam(defaultValue = "7") int days) {
+        return activityService.getUpcomingCount(validatePositiveDays(days));
+    }
+
+    /**
      * GET endpoint to retrieve a single activity by ID.
      * @param id
      * @return
@@ -122,5 +156,35 @@ public class ActivityController {
     @DeleteMapping("/{id}")
     public void deleteActivity(@PathVariable int id) {
         activityService.delete(id);
+    }
+
+    private static int analyticsRangeDays(String range) {
+        String normalizedRange = validateOptionalValue(range, ANALYTICS_RANGES, "range");
+        return switch (normalizedRange == null ? "90d" : normalizedRange) {
+            case "30d" -> 30;
+            case "90d" -> 90;
+            case "12m" -> 365;
+            default -> throw new BadRequestException("range must be one of: 30d, 90d, 12m");
+        };
+    }
+
+    private static String validateOptionalValue(String value, Set<String> allowed, String parameter) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        if (!allowed.contains(value)) {
+            throw new BadRequestException(parameter + " must be one of: " + String.join(", ", allowed));
+        }
+        return value;
+    }
+
+    private static int validatePositiveDays(int days) {
+        if (days < 1) {
+            throw new BadRequestException("days must be a positive integer");
+        }
+        if (days > 366) {
+            throw new BadRequestException("days must be 366 or fewer");
+        }
+        return days;
     }
 }

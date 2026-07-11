@@ -1213,6 +1213,66 @@ export type DealTop = {
     topWon: DealSummary[];
 };
 
+/** One time bucket of the activity-volume chart: counts per activity type. */
+export type ActivityVolumeBucket = {
+    bucketIndex: number;
+    call: number;
+    email: number;
+    meeting: number;
+    note: number;
+    other: number;
+};
+
+/** One user's touch count (activities + completed tasks + notes) for the team leaderboard. */
+export type TeamLeaderboardEntry = {
+    userId: number;
+    touches: number;
+};
+
+/** A bare server-computed count. */
+export type Count = {
+    count: number;
+};
+
+/** Server-computed task status + due-window counts (backs the task donut + greeting). */
+export type TaskSummary = {
+    todo: number;
+    inProgress: number;
+    done: number;
+    overdue: number;
+    dueSoon: number;
+};
+
+/** Relationship-temperature band counts. */
+export type WarmthBandCounts = {
+    hot: number;
+    warm: number;
+    cool: number;
+    cold: number;
+};
+
+/** Contact warmth-trend counts. */
+export type WarmthTrendCounts = {
+    rising: number;
+    steady: number;
+    cooling: number;
+};
+
+/** Contact decay-horizon counts (days until cold): {@code soon} ≤30, {@code mid} ≤60, {@code later} ≤90. */
+export type WarmthDecayCounts = {
+    soon: number;
+    mid: number;
+    later: number;
+};
+
+/** Server-computed workspace-wide warmth summary over ALL contacts/companies (not a bounded slice). */
+export type WarmthSummary = {
+    contacts: WarmthBandCounts;
+    companies: WarmthBandCounts;
+    contactTrends: WarmthTrendCounts;
+    contactDecay: WarmthDecayCounts;
+};
+
 export type UploadedFile = {
     url: string;
     fileName: string;

@@ -21,6 +21,7 @@ import ooo.klae.connex.backend.dto.BulkOwnerRequest;
 import ooo.klae.connex.backend.dto.BulkStageRequest;
 import ooo.klae.connex.backend.dto.BulkTagRequest;
 import ooo.klae.connex.backend.dto.CloseDealRequest;
+import ooo.klae.connex.backend.dto.CountDto;
 import ooo.klae.connex.backend.dto.CustomFieldEntryDto;
 import ooo.klae.connex.backend.dto.CustomFieldValueRequest;
 import ooo.klae.connex.backend.dto.CustomFieldValuesRequest;
@@ -230,6 +231,14 @@ public class DealController {
         return dealService.getTopDeals(normalizedCurrency);
     }
 
+    /**
+     * GET endpoint for open deals expected to close within the requested number of days.
+     */
+    @GetMapping("/closing-soon-count")
+    public CountDto getClosingSoonCount(@RequestParam(defaultValue = "7") int days) {
+        return dealService.getClosingSoonCount(validatePositiveDays(days));
+    }
+
     private static int analyticsRangeDays(String range) {
         String normalizedRange = validateOptionalValue(range, ANALYTICS_RANGES, "range");
         return switch (normalizedRange == null ? "90d" : normalizedRange) {
@@ -248,6 +257,16 @@ public class DealController {
             throw new BadRequestException(parameter + " must be one of: " + String.join(", ", allowed));
         }
         return value;
+    }
+
+    private static int validatePositiveDays(int days) {
+        if (days < 1) {
+            throw new BadRequestException("days must be a positive integer");
+        }
+        if (days > 366) {
+            throw new BadRequestException("days must be 366 or fewer");
+        }
+        return days;
     }
 
     /**

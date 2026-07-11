@@ -1,14 +1,9 @@
 'use client';
 
-import { useMemo } from 'react';
 import { useTranslations } from 'next-intl';
 
-import { type RelationshipTemperature } from '@/app/lib/types';
-import {
-    DECAY_BUCKETS,
-    type DecayBucketKey,
-    decayCounts,
-} from '@/app/components/overview/analytics/relationshipMetrics';
+import { type WarmthDecayCounts } from '@/app/lib/types';
+import { DECAY_BUCKETS, type DecayBucketKey } from '@/app/components/overview/analytics/relationshipMetrics';
 
 const BUCKET_COLOR: Record<DecayBucketKey, string> = {
     soon: 'var(--warmth-cool)',
@@ -16,10 +11,14 @@ const BUCKET_COLOR: Record<DecayBucketKey, string> = {
     later: 'var(--warmth-cold)',
 };
 
-export default function RelationshipDecay({ contacts }: { contacts: RelationshipTemperature[] }) {
+/**
+ * Relationship-decay horizon bars read from the server-computed {@link WarmthDecayCounts}
+ * (contacts predicted to go cold within each horizon: {@code soon}/{@code mid}/{@code later}).
+ */
+export default function RelationshipDecay({ decay }: { decay: WarmthDecayCounts }) {
     const t = useTranslations('AnalyticsDecay');
 
-    const counts = useMemo(() => decayCounts(contacts), [contacts]);
+    const counts = decay;
     const total = DECAY_BUCKETS.reduce((sum, bucket) => sum + counts[bucket.key], 0);
 
     if (total === 0) {

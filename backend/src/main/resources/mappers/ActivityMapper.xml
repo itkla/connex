@@ -67,6 +67,74 @@
     </if>
   </select>
 
+  <select id="activityVolume" resultType="ooo.klae.connex.backend.dto.ActivityVolumeBucketDto">
+    SELECT
+      <choose>
+        <when test="days == 365">
+          (#{buckets} - 1) - LEAST(#{buckets} - 1, GREATEST(0,
+            PERIOD_DIFF(DATE_FORMAT(NOW(), '%Y%m'), DATE_FORMAT(a.timestamp, '%Y%m'))))
+        </when>
+        <otherwise>
+          (#{buckets} - 1) - LEAST(#{buckets} - 1, GREATEST(0,
+            FLOOR(DATEDIFF(NOW(), a.timestamp) / #{spanDays})))
+        </otherwise>
+      </choose> AS bucket_index,
+      COALESCE(SUM(CASE WHEN a.type = 'Call' THEN 1 ELSE 0 END), 0) AS `call`,
+      COALESCE(SUM(CASE WHEN a.type = 'Email' THEN 1 ELSE 0 END), 0) AS `email`,
+      COALESCE(SUM(CASE WHEN a.type = 'Meeting' THEN 1 ELSE 0 END), 0) AS `meeting`,
+      COALESCE(SUM(CASE WHEN a.type = 'Note' THEN 1 ELSE 0 END), 0) AS `note`,
+      COALESCE(SUM(CASE WHEN a.type NOT IN ('Call', 'Email', 'Meeting', 'Note') THEN 1 ELSE 0 END), 0) AS `other`
+    FROM activity a
+    WHERE a.workspace_id = #{workspaceId}
+      AND a.timestamp &lt;= NOW()
+    <choose>
+      <when test="days == 365">
+        AND a.timestamp &gt;= DATE_SUB(DATE_FORMAT(CURDATE(), '%Y-%m-01'), INTERVAL 11 MONTH)
+      </when>
+      <otherwise>
+        AND a.timestamp &gt;= DATE_SUB(NOW(), INTERVAL #{days} DAY)
+      </otherwise>
+    </choose>
+    GROUP BY bucket_index
+    ORDER BY bucket_index
+  </select>
+
+  <select id="teamLeaderboard" resultType="ooo.klae.connex.backend.dto.TeamLeaderboardEntryDto">
+    SELECT touch.user_id, COUNT(*) AS touches
+    FROM (
+      SELECT a.created_by_id AS user_id
+      FROM activity a
+      WHERE a.workspace_id = #{workspaceId}
+        AND a.timestamp &gt;= DATE_SUB(NOW(), INTERVAL #{days} DAY)
+        AND a.timestamp &lt;= NOW()
+      UNION ALL
+      SELECT t.assigned_to_id AS user_id
+      FROM task t
+      WHERE t.workspace_id = #{workspaceId}
+        AND t.assigned_to_id IS NOT NULL
+        AND t.completed = TRUE
+        AND t.updated_at &gt;= DATE_SUB(NOW(), INTERVAL #{days} DAY)
+        AND t.updated_at &lt;= NOW()
+      UNION ALL
+      SELECT n.author_id AS user_id
+      FROM note n
+      WHERE n.workspace_id = #{workspaceId}
+        AND n.visibility != 'private'
+        AND n.created_at &gt;= DATE_SUB(NOW(), INTERVAL #{days} DAY)
+        AND n.created_at &lt;= NOW()
+    ) touch
+    GROUP BY touch.user_id
+    ORDER BY touches DESC, touch.user_id
+  </select>
+
+  <select id="upcomingCount" resultType="long">
+    SELECT COUNT(*)
+    FROM activity a
+    WHERE a.workspace_id = #{workspaceId}
+      AND a.timestamp &gt; NOW()
+      AND a.timestamp &lt;= DATE_ADD(NOW(), INTERVAL #{days} DAY)
+  </select>
+
   <select id="getActivitiesByPersonId" resultMap="ActivityResult">
     SELECT <include refid="activityColumns"/> FROM activity
     WHERE workspace_id = #{workspaceId} AND person_id = #{personId} ORDER BY timestamp DESC, id DESC

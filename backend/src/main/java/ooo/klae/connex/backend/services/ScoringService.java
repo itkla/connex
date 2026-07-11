@@ -23,7 +23,11 @@ import ooo.klae.connex.backend.beans.Deal;
 import ooo.klae.connex.backend.beans.Note;
 import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.beans.Task;
+import ooo.klae.connex.backend.dto.BandCounts;
+import ooo.klae.connex.backend.dto.DecayCounts;
 import ooo.klae.connex.backend.dto.RelationshipTemperatureDto;
+import ooo.klae.connex.backend.dto.TrendCounts;
+import ooo.klae.connex.backend.dto.WarmthSummaryDto;
 import ooo.klae.connex.backend.mappers.ActivityMapper;
 import ooo.klae.connex.backend.mappers.CompanyMapper;
 import ooo.klae.connex.backend.mappers.DealMapper;
@@ -199,6 +203,47 @@ public class ScoringService {
     public List<RelationshipTemperatureDto> scoreCompanies(int workspaceId, Instant asOf) {
         long t = asOf.toEpochMilli();
         return computeCompanyScores(workspaceId, t, t);
+    }
+
+    public WarmthSummaryDto summarize(int workspaceId) {
+        List<RelationshipTemperatureDto> contacts = scoreContacts(workspaceId);
+        List<RelationshipTemperatureDto> companies = scoreCompanies(workspaceId);
+        return new WarmthSummaryDto(
+            bandCounts(contacts),
+            bandCounts(companies),
+            trendCounts(contacts),
+            decayCounts(contacts)
+        );
+    }
+
+    private static BandCounts bandCounts(List<RelationshipTemperatureDto> scores) {
+        return new BandCounts(
+            scores.stream().filter(score -> "hot".equals(score.getBand())).count(),
+            scores.stream().filter(score -> "warm".equals(score.getBand())).count(),
+            scores.stream().filter(score -> "cool".equals(score.getBand())).count(),
+            scores.stream().filter(score -> "cold".equals(score.getBand())).count()
+        );
+    }
+
+    private static TrendCounts trendCounts(List<RelationshipTemperatureDto> scores) {
+        return new TrendCounts(
+            scores.stream().filter(score -> "rising".equals(score.getTrend())).count(),
+            scores.stream().filter(score -> "steady".equals(score.getTrend())).count(),
+            scores.stream().filter(score -> "cooling".equals(score.getTrend())).count()
+        );
+    }
+
+    private static DecayCounts decayCounts(List<RelationshipTemperatureDto> scores) {
+        return new DecayCounts(
+            scores.stream().filter(score -> inDecayRange(score, 0, 30)).count(),
+            scores.stream().filter(score -> inDecayRange(score, 31, 60)).count(),
+            scores.stream().filter(score -> inDecayRange(score, 61, 90)).count()
+        );
+    }
+
+    private static boolean inDecayRange(RelationshipTemperatureDto score, int minimum, int maximum) {
+        Integer days = score.getDaysUntilCold();
+        return days != null && days >= minimum && days <= maximum;
     }
 
     private List<RelationshipTemperatureDto> computeCompanyScores(int workspaceId, long reference, long cutoff) {

@@ -31,6 +31,7 @@ import ooo.klae.connex.backend.beans.Stage;
 import ooo.klae.connex.backend.beans.Tag;
 import ooo.klae.connex.backend.beans.Task;
 import ooo.klae.connex.backend.beans.User;
+import ooo.klae.connex.backend.dto.CountDto;
 import ooo.klae.connex.backend.dto.CustomFieldEntryDto;
 import ooo.klae.connex.backend.dto.DealAgingDto;
 import ooo.klae.connex.backend.dto.DealBucketValueDto;
@@ -324,6 +325,10 @@ public class DealService {
             .map(deal -> toDealSummary(workspaceId, deal))
             .toList();
         return new DealTopDto(topOpen, topWon);
+    }
+
+    public CountDto getClosingSoonCount(int days) {
+        return new CountDto(dealMapper.closingSoonCount(workspaceService.getCurrentWorkspaceId(), days));
     }
 
     private static List<Double> emptyKpiSeries() {

@@ -19,12 +19,18 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 import ooo.klae.connex.backend.ai.brief.DealBriefService;
 import ooo.klae.connex.backend.ai.riskrationale.DealRiskRationaleService;
+import ooo.klae.connex.backend.dto.BandCounts;
+import ooo.klae.connex.backend.dto.CountDto;
+import ooo.klae.connex.backend.dto.DecayCounts;
 import ooo.klae.connex.backend.dto.DealAgingDto;
 import ooo.klae.connex.backend.dto.DealKpisDto;
 import ooo.klae.connex.backend.dto.DealPipelineValueDto;
 import ooo.klae.connex.backend.dto.DealRevenueSeriesDto;
 import ooo.klae.connex.backend.dto.DealStageDistributionDto;
 import ooo.klae.connex.backend.dto.DealTopDto;
+import ooo.klae.connex.backend.dto.TaskSummaryDto;
+import ooo.klae.connex.backend.dto.TrendCounts;
+import ooo.klae.connex.backend.dto.WarmthSummaryDto;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.services.ActivityService;
 import ooo.klae.connex.backend.services.BulkOperationService;
@@ -288,6 +294,21 @@ class RecordListControllerTest {
     }
 
     @Test
+    void dealClosingSoonCountValidatesAndDelegatesDays() {
+        DealController controller = new DealController(
+            dealService, bulkOperationService, dealRiskService, dealBriefService,
+            dealRiskRationaleService, workspaceService);
+        CountDto count = new CountDto(4);
+        when(dealService.getClosingSoonCount(7)).thenReturn(count);
+
+        assertSame(count, controller.getClosingSoonCount(7));
+        assertThrows(BadRequestException.class, () -> controller.getClosingSoonCount(0));
+
+        verify(dealService).getClosingSoonCount(7);
+        verify(dealService, never()).getClosingSoonCount(0);
+    }
+
+    @Test
     void notesWithoutFilterRequirePageEndpoint() {
         NoteController controller = new NoteController(noteService);
 
@@ -330,6 +351,15 @@ class RecordListControllerTest {
     }
 
     @Test
+    void taskSummaryDelegatesToService() {
+        TaskController controller = new TaskController(taskService);
+        TaskSummaryDto summary = new TaskSummaryDto(1, 2, 3, 4, 5);
+        when(taskService.getTaskSummary()).thenReturn(summary);
+
+        assertSame(summary, controller.getTaskSummary());
+    }
+
+    @Test
     void activitiesWithoutFilterOrPaginationRequirePageEndpoint() {
         ActivityController controller = new ActivityController(activityService);
 
@@ -348,6 +378,25 @@ class RecordListControllerTest {
 
         assertEquals(0, response.total());
         verify(activityService).getActivitiesPage(null, null, null, 100, 0);
+    }
+
+    @Test
+    void activityAnalyticsRangesAndDaysAreValidatedBeforeDelegation() {
+        ActivityController controller = new ActivityController(activityService);
+        when(activityService.getActivityVolume(30)).thenReturn(List.of());
+        when(activityService.getTeamLeaderboard(365)).thenReturn(List.of());
+        when(activityService.getUpcomingCount(7)).thenReturn(new CountDto(2));
+
+        assertTrue(controller.getActivityVolume("30d").isEmpty());
+        assertTrue(controller.getTeamLeaderboard("12m").isEmpty());
+        assertEquals(2, controller.getUpcomingCount(7).count());
+        assertThrows(BadRequestException.class, () -> controller.getActivityVolume("7d"));
+        assertThrows(BadRequestException.class, () -> controller.getTeamLeaderboard("all"));
+        assertThrows(BadRequestException.class, () -> controller.getUpcomingCount(0));
+
+        verify(activityService).getActivityVolume(30);
+        verify(activityService).getTeamLeaderboard(365);
+        verify(activityService).getUpcomingCount(7);
     }
 
     @Test
@@ -375,5 +424,21 @@ class RecordListControllerTest {
 
         assertEquals(0, response.size());
         verify(scoringService).scoreContacts(7, new java.util.LinkedHashSet<>(List.of(3, 4)));
+    }
+
+    @Test
+    void scoringSummaryUsesCurrentWorkspaceAuthorizationPath() {
+        ScoringController controller = new ScoringController(scoringService, workspaceService);
+        WarmthSummaryDto summary = new WarmthSummaryDto(
+            new BandCounts(1, 2, 3, 4),
+            new BandCounts(5, 6, 7, 8),
+            new TrendCounts(9, 10, 11),
+            new DecayCounts(12, 13, 14)
+        );
+        when(workspaceService.getCurrentWorkspaceId()).thenReturn(7);
+        when(scoringService.summarize(7)).thenReturn(summary);
+
+        assertSame(summary, controller.summary());
+        verify(scoringService).summarize(7);
     }
 }

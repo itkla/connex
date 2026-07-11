@@ -10,6 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.jdbc.core.JdbcTemplate;
 
 import ooo.klae.connex.backend.beans.Company;
 import ooo.klae.connex.backend.beans.Deal;
@@ -19,10 +20,12 @@ import ooo.klae.connex.backend.beans.Stage;
 import ooo.klae.connex.backend.beans.Task;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.beans.Workspace;
+import ooo.klae.connex.backend.dto.TaskSummaryDto;
 
 class TaskMapperTest extends AbstractMapperTest {
 
     @Autowired TaskMapper taskMapper;
+    @Autowired JdbcTemplate jdbcTemplate;
 
     private Task build(String description, User assignedTo, Person person, Deal deal) {
         Task task = new Task();
@@ -245,6 +248,39 @@ class TaskMapperTest extends AbstractMapperTest {
         assertNull(taskMapper.getTaskById(other.getId(), task.getId()));
         assertEquals(0, taskMapper.complete(other.getId(), task.getId(), user.getId(), 0));
         assertFalse(taskMapper.getTaskById(workspace.getId(), task.getId()).isCompleted());
+    }
+
+    @Test
+    void taskSummaryCountsStatusesAndDueWindowsWithinWorkspace() {
+        Workspace target = newWorkspace();
+        User user = newUser();
+        Task todo = build("todo", user, null, null);
+        todo.setWorkspaceId(target.getId());
+        taskMapper.insert(todo);
+        Task inProgress = build("in-progress", user, null, null);
+        inProgress.setWorkspaceId(target.getId());
+        inProgress.setStatus("in_progress");
+        taskMapper.insert(inProgress);
+        Task done = build("done", user, null, null);
+        done.setWorkspaceId(target.getId());
+        done.setCompleted(true);
+        done.setStatus("done");
+        taskMapper.insert(done);
+        Task farFuture = build("far-future", user, null, null);
+        farFuture.setWorkspaceId(target.getId());
+        taskMapper.insert(farFuture);
+        Task foreign = build("foreign", user, null, null);
+        taskMapper.insert(foreign);
+        jdbcTemplate.update("UPDATE task SET due_date = DATE_SUB(CURDATE(), INTERVAL 1 DAY) WHERE id = ?", todo.getId());
+        jdbcTemplate.update("UPDATE task SET due_date = DATE_ADD(CURDATE(), INTERVAL 7 DAY) WHERE id = ?", inProgress.getId());
+        jdbcTemplate.update("UPDATE task SET due_date = CURDATE() WHERE id = ?", done.getId());
+        jdbcTemplate.update("UPDATE task SET due_date = DATE_ADD(CURDATE(), INTERVAL 8 DAY) WHERE id = ?", farFuture.getId());
+        jdbcTemplate.update("UPDATE task SET due_date = CURDATE() WHERE id = ?", foreign.getId());
+
+        TaskSummaryDto summary = taskMapper.taskSummary(target.getId());
+
+        assertEquals(new TaskSummaryDto(2, 1, 1, 1, 1), summary);
+        assertEquals(new TaskSummaryDto(1, 0, 0, 0, 1), taskMapper.taskSummary(workspace.getId()));
     }
 
     private Workspace newWorkspace() {

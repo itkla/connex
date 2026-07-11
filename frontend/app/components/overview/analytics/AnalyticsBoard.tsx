@@ -13,7 +13,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 
 import {
-    type Activity,
+    type ActivityVolumeBucket,
     type DealAging,
     type DealKpis,
     type DealMetrics,
@@ -25,20 +25,24 @@ import {
     type IntroSuggestion,
     type IntroductionRecord,
     type JobMove,
-    type Note,
     type Pipeline,
-    type RelationshipTemperature,
     type Stage,
-    type Task,
+    type TaskSummary,
+    type TeamLeaderboardEntry,
     type User,
+    type WarmthSummary,
 } from '@/app/lib/types';
 import {
+    getActivityVolume,
     getDealAging,
     getDealKpis,
     getDealPipelineValue,
     getDealRevenueTimeseries,
     getDealStageDistribution,
     getDealTop,
+    getTaskSummary,
+    getTeamLeaderboard,
+    getWarmthSummary,
 } from '@/app/lib/api';
 import { formatCompactCurrency } from '@/app/lib/utils';
 import DealsAging from '@/app/components/records/deals/DealsAging';
@@ -62,7 +66,6 @@ import IntroActivity from '@/app/components/overview/analytics/IntroActivity';
 import RecentMovesList from '@/app/components/overview/analytics/RecentMovesList';
 import FirstRun from '@/app/components/overview/analytics/FirstRun';
 import { type RangeKey } from '@/app/components/overview/analytics/metrics';
-import { warmSummary } from '@/app/components/overview/analytics/relationshipMetrics';
 
 const EMPTY_KPIS: DealKpis = {
     wonRevenue: 0,
@@ -84,6 +87,21 @@ const EMPTY_KPIS: DealKpis = {
 };
 
 const EMPTY_TOP: DealTop = { topOpen: [], topWon: [] };
+
+const EMPTY_TASK_SUMMARY: TaskSummary = {
+    todo: 0,
+    inProgress: 0,
+    done: 0,
+    overdue: 0,
+    dueSoon: 0,
+};
+
+const EMPTY_WARMTH_SUMMARY: WarmthSummary = {
+    contacts: { hot: 0, warm: 0, cool: 0, cold: 0 },
+    companies: { hot: 0, warm: 0, cool: 0, cold: 0 },
+    contactTrends: { rising: 0, steady: 0, cooling: 0 },
+    contactDecay: { soon: 0, mid: 0, later: 0 },
+};
 
 function Reveal({
     children,
@@ -112,12 +130,7 @@ export default function AnalyticsBoard({
     dealMetrics,
     pipelines,
     stages,
-    activities,
-    tasks,
-    notes,
     users,
-    contactTemps,
-    companyTemps,
     dealRisks,
     introSuggestions,
     introLineage,
@@ -126,12 +139,7 @@ export default function AnalyticsBoard({
     dealMetrics: DealMetrics;
     pipelines: Pipeline[];
     stages: Stage[];
-    activities: Activity[];
-    tasks: Task[];
-    notes: Note[];
     users: User[];
-    contactTemps: RelationshipTemperature[];
-    companyTemps: RelationshipTemperature[];
     dealRisks: DealRisk[];
     introSuggestions: IntroSuggestion[];
     introLineage: IntroductionRecord[];
@@ -175,6 +183,10 @@ export default function AnalyticsBoard({
     const [topDeals, setTopDeals] = useState<DealTop>(EMPTY_TOP);
     const [revenueSeries, setRevenueSeries] = useState<DealRevenueSeries>({ closed: [], projected: [] });
     const [stageDistribution, setStageDistribution] = useState<DealStageDistribution[]>([]);
+    const [activityBuckets, setActivityBuckets] = useState<ActivityVolumeBucket[]>([]);
+    const [leaderboard, setLeaderboard] = useState<TeamLeaderboardEntry[]>([]);
+    const [taskSummary, setTaskSummary] = useState<TaskSummary>(EMPTY_TASK_SUMMARY);
+    const [warmth, setWarmth] = useState<WarmthSummary>(EMPTY_WARMTH_SUMMARY);
 
     useEffect(() => {
         let cancelled = false;
@@ -204,12 +216,43 @@ export default function AnalyticsBoard({
         return () => { cancelled = true; };
     }, [currency]);
 
+    useEffect(() => {
+        let cancelled = false;
+        getActivityVolume(range)
+            .then((data) => { if (!cancelled) setActivityBuckets(data); })
+            .catch(() => { if (!cancelled) setActivityBuckets([]); });
+        getTeamLeaderboard(range)
+            .then((data) => { if (!cancelled) setLeaderboard(data); })
+            .catch(() => { if (!cancelled) setLeaderboard([]); });
+        return () => { cancelled = true; };
+    }, [range]);
+
+    useEffect(() => {
+        let cancelled = false;
+        getTaskSummary()
+            .then((data) => { if (!cancelled) setTaskSummary(data); })
+            .catch(() => { if (!cancelled) setTaskSummary(EMPTY_TASK_SUMMARY); });
+        getWarmthSummary()
+            .then((data) => { if (!cancelled) setWarmth(data); })
+            .catch(() => { if (!cancelled) setWarmth(EMPTY_WARMTH_SUMMARY); });
+        return () => { cancelled = true; };
+    }, []);
+
     const openPipeline = useMemo(
         () => dealMetrics.byCurrency.find((c) => c.currency === currency)?.openValue ?? 0,
         [dealMetrics, currency],
     );
 
-    const warm = useMemo(() => warmSummary(contactTemps), [contactTemps]);
+    const warm = useMemo(() => {
+        const { hot, warm: warmBand, cool, cold } = warmth.contacts;
+        const tracked = hot + warmBand + cool + cold;
+        const warmCount = hot + warmBand;
+        return {
+            tracked,
+            share: tracked > 0 ? warmCount / tracked : 0,
+            cooling: warmth.contactTrends.cooling,
+        };
+    }, [warmth]);
 
     const dealRisksInCurrency = useMemo(
         () => dealRisks.filter((r) => r.currency === currency),
@@ -240,15 +283,19 @@ export default function AnalyticsBoard({
         [warm, atRisk, introSuggestions],
     );
 
+    const companiesTracked =
+        warmth.companies.hot + warmth.companies.warm + warmth.companies.cool + warmth.companies.cold;
+    const tasksTracked = taskSummary.todo + taskSummary.inProgress + taskSummary.done;
+
     const hasDeals = dealMetrics.totalCount > 0;
     const hasRelationshipData =
-        contactTemps.length > 0 ||
-        companyTemps.length > 0 ||
+        warm.tracked > 0 ||
+        companiesTracked > 0 ||
         dealRisks.length > 0 ||
         introSuggestions.length > 0 ||
         introLineage.length > 0 ||
         recentMoves.length > 0 ||
-        tasks.length > 0;
+        tasksTracked > 0;
     const relBase = hasDeals ? 6 : 0;
 
     const rangeOptions: { key: RangeKey; label: string }[] = [
@@ -374,7 +421,7 @@ export default function AnalyticsBoard({
                     infoLabel={t('infoAria')}
                     className="lg:col-span-3"
                 >
-                    <ActivityVolume activities={activities} range={range} />
+                    <ActivityVolume buckets={activityBuckets} range={range} />
                 </Panel>
                 <Panel
                     title={t('teamTitle')}
@@ -383,13 +430,7 @@ export default function AnalyticsBoard({
                     infoLabel={t('infoAria')}
                     className="lg:col-span-2"
                 >
-                    <TeamLeaderboard
-                        users={users}
-                        activities={activities}
-                        tasks={tasks}
-                        notes={notes}
-                        range={range}
-                    />
+                    <TeamLeaderboard users={users} standings={leaderboard} />
                 </Panel>
             </Reveal>
 
@@ -437,7 +478,7 @@ export default function AnalyticsBoard({
                             infoLabel={t('infoAria')}
                             className="lg:col-span-3"
                         >
-                            <WarmthDistribution contacts={contactTemps} companies={companyTemps} />
+                            <WarmthDistribution summary={warmth} />
                         </Panel>
                         <Panel
                             title={t('decayTitle')}
@@ -445,7 +486,7 @@ export default function AnalyticsBoard({
                             infoLabel={t('infoAria')}
                             className="lg:col-span-2"
                         >
-                            <RelationshipDecay contacts={contactTemps} />
+                            <RelationshipDecay decay={warmth.contactDecay} />
                         </Panel>
                     </Reveal>
 
@@ -470,7 +511,13 @@ export default function AnalyticsBoard({
                             infoLabel={t('infoAria')}
                             className="lg:col-span-2"
                         >
-                            <TaskStatusDonut tasks={tasks} />
+                            <TaskStatusDonut
+                                counts={{
+                                    todo: taskSummary.todo,
+                                    inProgress: taskSummary.inProgress,
+                                    done: taskSummary.done,
+                                }}
+                            />
                         </Panel>
                     </Reveal>
 

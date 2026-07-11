@@ -11,6 +11,7 @@ import {
 
 import {
     getActivitiesFromCookie,
+    getActivityVolumeFromCookie,
     getAttachmentFacets,
     getAttachmentsPage,
     getCompaniesFromCookie,
@@ -21,6 +22,7 @@ import {
     getContactTemperaturesFromCookie,
     getCurrentUserFromCookie,
     getDashboardLayoutFromCookie,
+    getDealClosingSoonCountFromCookie,
     getDealKpisFromCookie,
     getDealMetricsFromCookie,
     getDealPipelineValueFromCookie,
@@ -34,14 +36,20 @@ import {
     getPipelinesFromCookie,
     getRecentMovesFromCookie,
     getStagesByPipelineId,
+    getTaskSummaryFromCookie,
     getTasksFromCookie,
+    getTeamLeaderboardFromCookie,
+    getUpcomingActivityCountFromCookie,
     getUsers,
+    getWarmthSummaryFromCookie,
 } from '@/app/lib/api';
 import type {
+    ActivityVolumeBucket,
     Attachment,
     AttachmentFacets,
     Company,
     Contact,
+    Count,
     DashboardWidgetType,
     DealKpis,
     DealMetrics,
@@ -51,7 +59,10 @@ import type {
     Notification,
     Page,
     Stage,
+    TaskSummary as TaskSummaryCounts,
+    TeamLeaderboardEntry,
     User,
+    WarmthSummary,
 } from '@/app/lib/types';
 
 import { startOfLocalDay, timeOf } from '@/app/lib/utils';
@@ -103,6 +114,21 @@ const EMPTY_DEAL_KPIS: DealKpis = {
     avgCycleSeries: [],
 };
 
+const EMPTY_TASK_SUMMARY: TaskSummaryCounts = {
+    todo: 0,
+    inProgress: 0,
+    done: 0,
+    overdue: 0,
+    dueSoon: 0,
+};
+
+const EMPTY_WARMTH_SUMMARY: WarmthSummary = {
+    contacts: { hot: 0, warm: 0, cool: 0, cold: 0 },
+    companies: { hot: 0, warm: 0, cool: 0, cold: 0 },
+    contactTrends: { rising: 0, steady: 0, cooling: 0 },
+    contactDecay: { soon: 0, mid: 0, later: 0 },
+};
+
 const DASHBOARD_RANGE: RangeKey = '90d';
 
 const DAY = 1000 * 60 * 60 * 24;
@@ -137,7 +163,7 @@ export default async function Dashboard() {
 
     const init = { headers: { cookie: cookie ?? '' } } as const;
     const emptyFacets: AttachmentFacets = { sources: [], kinds: [], tags: [], orphaned: 0, total: 0, totalSize: 0 };
-    const [companies, contacts, deals, pipelines, tasks, activities, notes, users, recentFiles, fileFacets, recentMoves, introSuggestions, dealRisks, layoutResponse, notifications, dealMetrics, companiesPage, contactsPage] =
+    const [companies, contacts, deals, pipelines, tasks, activities, notes, users, recentFiles, fileFacets, recentMoves, introSuggestions, dealRisks, layoutResponse, notifications, dealMetrics, companiesPage, contactsPage, activityVolume, leaderboard, taskSummary, upcomingActivityCount, closingSoonCount, warmthSummary] =
         await Promise.all([
             getCompaniesFromCookie(cookie),
             getContactsFromCookie(cookie),
@@ -161,6 +187,12 @@ export default async function Dashboard() {
             getDealMetricsFromCookie(cookie).catch(() => ({ byCurrency: [], totalCount: 0 }) as DealMetrics),
             getCompaniesPage({ size: 1 }, init).catch(() => ({ items: [], total: 0 }) as Page<Company>),
             getContactsPage({ size: 1 }, init).catch(() => ({ items: [], total: 0 }) as Page<Contact>),
+            getActivityVolumeFromCookie(cookie, DASHBOARD_RANGE).catch(() => [] as ActivityVolumeBucket[]),
+            getTeamLeaderboardFromCookie(cookie, DASHBOARD_RANGE).catch(() => [] as TeamLeaderboardEntry[]),
+            getTaskSummaryFromCookie(cookie).catch(() => EMPTY_TASK_SUMMARY),
+            getUpcomingActivityCountFromCookie(cookie, 7).catch(() => ({ count: 0 }) as Count),
+            getDealClosingSoonCountFromCookie(cookie, 7).catch(() => ({ count: 0 }) as Count),
+            getWarmthSummaryFromCookie(cookie).catch(() => EMPTY_WARMTH_SUMMARY),
         ]);
 
     const [contactTemps, companyTemps] = await Promise.all([
@@ -193,25 +225,10 @@ export default async function Dashboard() {
 
     const now = new Date().getTime();
     const todayStart = startOfLocalDay(now);
-    const overdueTasks = tasks.filter((task) => {
-        if (task.completed) return false;
-        const due = timeOf(task.dueDate);
-        return due > 0 && due < todayStart;
-    }).length;
-    const closingSoon = deals.filter((deal) => {
-        if (deal.closedAt) return false;
-        const close = timeOf(deal.expectedCloseDate);
-        return close >= todayStart && close - todayStart <= 7 * DAY;
-    }).length;
-    const dueSoon = tasks.filter((task) => {
-        if (task.completed) return false;
-        const due = timeOf(task.dueDate);
-        return due >= todayStart && due - todayStart <= 7 * DAY;
-    }).length;
-    const upcomingActivities = activities.filter((activity) => {
-        const ts = timeOf(activity.timestamp);
-        return ts > now && ts - now <= 7 * DAY;
-    }).length;
+    const overdueTasks = taskSummary.overdue;
+    const dueSoon = taskSummary.dueSoon;
+    const closingSoon = closingSoonCount.count;
+    const upcomingActivities = upcomingActivityCount.count;
 
     const currency = dominantCurrency(dealMetrics);
     const [dealKpis, pipelineValues, revenueSeries, stageDistribution] = await Promise.all([
@@ -264,7 +281,7 @@ export default async function Dashboard() {
             </div>
         ),
         companyWarmth: <CompanyWarmth items={companyWarmthItems} />,
-        warmthDistribution: <WarmthDistribution temps={contactTemps} />,
+        warmthDistribution: <WarmthDistribution summary={warmthSummary} />,
         closingSoon: <ClosingSoonDeals items={closingSoonItems} />,
         recentNotes: (
             <div className="overflow-hidden rounded-2xl border border-border bg-card">
@@ -286,9 +303,9 @@ export default async function Dashboard() {
         stageFunnel: chartCard(
             <StageFunnel distribution={stageDistribution} pipelines={pipelines} stages={stages} currency={currency} />,
         ),
-        activityVolume: chartCard(<ActivityVolume activities={activities} range={DASHBOARD_RANGE} />),
+        activityVolume: chartCard(<ActivityVolume buckets={activityVolume} range={DASHBOARD_RANGE} />),
         teamLeaderboard: chartCard(
-            <TeamLeaderboard users={users} activities={activities} tasks={tasks} notes={notes} range={DASHBOARD_RANGE} />,
+            <TeamLeaderboard users={users} standings={leaderboard} />,
         ),
     };
 
