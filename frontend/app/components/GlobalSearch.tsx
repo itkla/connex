@@ -4,18 +4,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
+import { Command as CommandPrimitive } from 'cmdk';
 import { MagnifyingGlassIcon } from '@heroicons/react/24/outline';
 import { Loader2Icon } from 'lucide-react';
 
-import {
-    Command,
-    CommandGroup,
-    CommandInput,
-    CommandItem,
-    CommandList,
-    CommandSeparator,
-    CommandShortcut,
-} from '@/components/ui/command';
+import { CommandGroup, CommandItem, CommandList, CommandSeparator, CommandShortcut } from '@/components/ui/command';
 import { useActions, useAvailableActions } from '@/app/hooks/useActions';
 import { ACTION_GROUPS, type ActionGroup, type AppAction } from '@/app/lib/actions/types';
 import { search as searchApi } from '@/app/lib/api';
@@ -31,7 +24,20 @@ const EMPTY_GROUP_ORDER: readonly ActionGroup[] = ['record', 'create', 'navigate
 
 const SHORTCUT_GLYPHS: Record<string, string> = { mod: '⌘', ctrl: '⌃', alt: '⌥', shift: '⇧' };
 
-const MORPH_TRANSITION = { type: 'spring', stiffness: 380, damping: 32, mass: 0.9 } as const;
+/** The pill morph (header ↔ centered) — position-only, so the bar keeps its shape. */
+const PILL_MORPH = { type: 'spring', stiffness: 440, damping: 38, mass: 0.9 } as const;
+/** The panel's slide-down entrance from beneath the pill. */
+const PANEL_SLIDE = { type: 'spring', stiffness: 360, damping: 30, mass: 0.8 } as const;
+/** The bouncy hover extend/collapse of the panel window. */
+const PANEL_BOUNCE = { type: 'spring', stiffness: 300, damping: 15, mass: 0.85 } as const;
+/** Panel heights (px): a small window by default, a larger scrollable one on hover. */
+const PANEL_COLLAPSED = 168;
+const PANEL_EXPANDED = 452;
+
+const PILL_SHELL =
+    'relative flex w-full items-center rounded-full bg-muted ring-1 ring-border focus-within:ring-2 focus-within:ring-brand';
+const PILL_INPUT =
+    'w-full rounded-full bg-transparent py-2.5 pr-16 pl-11 text-base text-foreground placeholder:text-muted-foreground outline-none';
 
 type Mode = 'inline' | 'palette';
 type ScopedResults = { query: string; data: SearchResults };
@@ -72,10 +78,12 @@ const EMPTY_RESULTS: SearchResults = {
 
 /**
  * The unified global search surface. As an inline field in the app header it runs the debounced
- * record-search dropdown; pressing `Cmd/Ctrl+K` from anywhere morphs the same field to screen-center
- * and expands it into the command palette (permission-aware registry commands plus record search),
- * carrying the query across. Escape, outside-click, or selecting a result returns it to the inline
- * field. Honors reduced-motion by fading in centered instead of flying.
+ * record-search dropdown; pressing `Cmd/Ctrl+K` from anywhere slides the same pill to the centre of the
+ * viewport (keeping its shape) and slides a command panel down from beneath it — permission-aware
+ * registry commands plus record search, carrying the query across. The panel shows a small window that
+ * springs open to a larger scrollable one on hover. The centred field stays anchored and focused so it
+ * never moves as the panel resizes. Escape, outside-click, or selecting a result returns to the inline
+ * field; reduced-motion drops the spring/slide.
  */
 export default function GlobalSearch() {
     const tSearch = useTranslations('CommonSearchBar');
@@ -91,6 +99,7 @@ export default function GlobalSearch() {
     const [mode, setMode] = useState<Mode>('inline');
     const [query, setQuery] = useState(urlQuery);
     const [inlineOpen, setInlineOpen] = useState(false);
+    const [expanded, setExpanded] = useState(false);
     const [results, setResults] = useState<ScopedResults | null>(null);
     const [activeIndex, setActiveIndex] = useState(-1);
 
@@ -159,6 +168,7 @@ export default function GlobalSearch() {
 
     const closePalette = useCallback(() => {
         setMode('inline');
+        setExpanded(false);
         const opener = lastFocusedRef.current;
         lastFocusedRef.current = null;
         requestAnimationFrame(() => {
@@ -258,9 +268,8 @@ export default function GlobalSearch() {
     };
 
     const onPaletteKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
-        if (event.key === 'Escape') {
-            event.preventDefault();
-            closePalette();
+        if (event.key === 'ArrowDown' || event.key === 'ArrowUp' || event.key === 'PageDown' || event.key === 'PageUp') {
+            setExpanded(true);
             return;
         }
         if (event.key !== 'Tab' || !paletteRef.current) return;
@@ -282,108 +291,22 @@ export default function GlobalSearch() {
     const inlineRecordCount = flatRows.length;
     const paletteRecordCount = paletteRecordGroups.reduce((sum, group) => sum + group.rows.length, 0);
     const commandCount = commandGroups.reduce((sum, entry) => sum + entry.actions.length, 0);
-    const showNoResults = isPalette && trimmed.length > 0 && !searching && commandCount + paletteRecordCount === 0;
+    const showNoResults = trimmed.length > 0 && !searching && commandCount + paletteRecordCount === 0;
 
     return (
         <div ref={containerRef} className="relative w-full">
-            {isPalette ? <div aria-hidden className="h-11 w-full" /> : null}
-
-            <motion.div
-                ref={paletteRef}
-                layout={!reduceMotion}
-                transition={reduceMotion ? { duration: 0 } : MORPH_TRANSITION}
-                className={cn(
-                    'ring-1 ring-border transition-[background-color,border-radius,box-shadow] duration-200',
-                    isPalette
-                        ? 'fixed inset-x-0 top-[14vh] z-50 mx-auto w-[min(40rem,92vw)] overflow-hidden rounded-2xl bg-popover text-popover-foreground shadow-2xl'
-                        : 'relative w-full rounded-full bg-muted focus-within:ring-2 focus-within:ring-brand',
-                )}
-                role={isPalette ? 'dialog' : undefined}
-                aria-modal={isPalette ? true : undefined}
-                aria-label={isPalette ? tActions('palette.trigger') : undefined}
-                onKeyDown={isPalette ? onPaletteKeyDown : undefined}
-            >
-                {isPalette ? (
-                  <motion.div
-                    layout={!reduceMotion}
-                    initial={reduceMotion ? { opacity: 1 } : { opacity: 0 }}
-                    animate={{ opacity: 1 }}
-                    transition={reduceMotion ? { duration: 0 } : { duration: 0.18, delay: 0.06, ease: [0.23, 1, 0.32, 1] }}
-                  >
-                    <Command shouldFilter={false} loop className="bg-transparent">
-                        <CommandInput ref={paletteInputRef} value={query} onValueChange={setQuery} placeholder={tActions('palette.placeholder')} />
-                        <CommandList>
-                            {commandGroups.map((entry) => (
-                                <CommandGroup key={entry.group} heading={tActions(`group.${entry.group}`)}>
-                                    {entry.actions.map((action) => {
-                                        const Icon = action.icon;
-                                        const pending = pendingIds.has(action.id);
-                                        return (
-                                            <CommandItem key={action.id} value={action.id} disabled={pending} onSelect={() => runAction(action.id)}>
-                                                {pending ? (
-                                                    <Loader2Icon className="size-4 animate-spin text-muted-foreground" />
-                                                ) : Icon ? (
-                                                    <Icon className="size-4 text-muted-foreground" />
-                                                ) : null}
-                                                <span className="flex-1 truncate">{tActions(action.labelKey)}</span>
-                                                {action.shortcut ? <CommandShortcut>{formatShortcut(action.shortcut)}</CommandShortcut> : null}
-                                            </CommandItem>
-                                        );
-                                    })}
-                                </CommandGroup>
-                            ))}
-
-                            {commandGroups.length > 0 && paletteRecordGroups.length > 0 ? <CommandSeparator /> : null}
-
-                            {paletteRecordGroups.map((group) => (
-                                <CommandGroup key={group.key} heading={group.heading}>
-                                    {group.rows.map((row) => {
-                                        const RowIcon = row.icon;
-                                        return (
-                                            <CommandItem key={row.key} value={row.key} onSelect={() => goToRecord(row.href, row.external)}>
-                                                <span className="flex size-6 shrink-0 items-center justify-center">
-                                                    {row.leading ? (
-                                                        row.leading
-                                                    ) : row.accent ? (
-                                                        <span className="size-3.5 rounded-full ring-1 ring-border" style={{ backgroundColor: row.accent }} />
-                                                    ) : RowIcon ? (
-                                                        <RowIcon className="size-4 text-muted-foreground" />
-                                                    ) : null}
-                                                </span>
-                                                <span className="min-w-0 flex-1">
-                                                    <span className="block truncate">{row.label}</span>
-                                                    {row.subtitle ? (
-                                                        <span className="block truncate text-xs text-muted-foreground">{row.subtitle}</span>
-                                                    ) : null}
-                                                </span>
-                                            </CommandItem>
-                                        );
-                                    })}
-                                </CommandGroup>
-                            ))}
-
-                            {searching ? (
-                                <div className="flex items-center justify-center gap-2 py-6 text-sm text-muted-foreground">
-                                    <Loader2Icon className="size-4 animate-spin" />
-                                    {tActions('palette.loading')}
-                                </div>
-                            ) : null}
-
-                            {showNoResults ? (
-                                <div className="py-8 text-center text-sm text-muted-foreground">
-                                    {tActions('palette.noResults', { query: trimmed })}
-                                </div>
-                            ) : null}
-                        </CommandList>
-                    </Command>
-                  </motion.div>
-                ) : (
-                    <form
+            {isPalette ? (
+                <div aria-hidden className="h-11 w-full" />
+            ) : (
+                <>
+                    <motion.form
+                        layoutId="global-search-pill"
                         role="search"
                         onSubmit={(event) => {
                             event.preventDefault();
                             goToSearchPage();
                         }}
+                        className={PILL_SHELL}
                     >
                         <MagnifyingGlassIcon className="pointer-events-none absolute left-3.5 top-1/2 size-5 -translate-y-1/2 text-muted-foreground" />
                         <input
@@ -398,7 +321,7 @@ export default function GlobalSearch() {
                             onClick={() => setInlineOpen(true)}
                             onKeyDown={onInlineKeyDown}
                             placeholder={tSearch('placeholder')}
-                            className="w-full rounded-full bg-transparent py-2.5 pr-16 pl-11 text-base text-foreground placeholder:text-muted-foreground outline-none"
+                            className={PILL_INPUT}
                             role="combobox"
                             aria-expanded={showInlineDropdown}
                             aria-controls="global-search-listbox"
@@ -408,70 +331,71 @@ export default function GlobalSearch() {
                         <kbd className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 select-none rounded border border-border bg-background px-1.5 py-0.5 font-mono text-[10px] font-medium text-muted-foreground">
                             ⌘K
                         </kbd>
-                    </form>
-                )}
-            </motion.div>
+                    </motion.form>
 
-            {showInlineDropdown ? (
-                <div
-                    ref={listRef}
-                    id="global-search-listbox"
-                    role="listbox"
-                    className="absolute inset-x-0 top-full z-40 mt-2 max-h-[70vh] overflow-y-auto rounded-2xl bg-popover p-2 text-popover-foreground shadow-lg ring-1 ring-border"
-                >
-                    {searching && inlineRecordCount === 0 ? (
-                        <div className="flex justify-center py-3">
-                            <Loader2Icon className="size-5 animate-spin text-muted-foreground" />
+                    {showInlineDropdown ? (
+                        <div
+                            ref={listRef}
+                            id="global-search-listbox"
+                            role="listbox"
+                            className="absolute inset-x-0 top-full z-40 mt-2 max-h-[70vh] overflow-y-auto rounded-2xl bg-popover p-2 text-popover-foreground shadow-lg ring-1 ring-border"
+                        >
+                            {searching && inlineRecordCount === 0 ? (
+                                <div className="flex justify-center py-3">
+                                    <Loader2Icon className="size-5 animate-spin text-muted-foreground" />
+                                </div>
+                            ) : null}
+                            {!searching && inlineRecordCount === 0 ? (
+                                <p className="px-3 py-2 text-sm text-muted-foreground">{tSearch('noResults', { query: trimmed })}</p>
+                            ) : null}
+                            {inlineGroups.map((group) => (
+                                <div key={group.key} className="mb-1 last:mb-0">
+                                    <p className="px-3 pb-1 pt-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">{group.heading}</p>
+                                    {group.rows.map((row) => {
+                                        const Icon = row.icon;
+                                        return (
+                                            <button
+                                                key={row.key}
+                                                type="button"
+                                                data-index={row.index}
+                                                onClick={() => navigateInline(row.href, row.external)}
+                                                onMouseEnter={() => setActiveIndex(row.index)}
+                                                className={cn(
+                                                    'flex w-full items-center gap-3 rounded-xl px-3 py-2 text-left transition',
+                                                    activeIndex === row.index ? 'bg-muted' : 'hover:bg-muted',
+                                                )}
+                                                role="option"
+                                                aria-selected={activeIndex === row.index}
+                                            >
+                                                <span className="flex size-8 shrink-0 items-center justify-center">
+                                                    {row.leading ? (
+                                                        row.leading
+                                                    ) : row.accent ? (
+                                                        <span className="size-4 rounded-full ring-1 ring-border" style={{ backgroundColor: row.accent }} />
+                                                    ) : Icon ? (
+                                                        <Icon className="size-5 text-muted-foreground" />
+                                                    ) : null}
+                                                </span>
+                                                <span className="min-w-0 flex-1">
+                                                    <span className="block truncate text-sm text-foreground">{row.label}</span>
+                                                    {row.subtitle ? (
+                                                        <span className="block truncate text-xs text-muted-foreground">{row.subtitle}</span>
+                                                    ) : null}
+                                                </span>
+                                            </button>
+                                        );
+                                    })}
+                                </div>
+                            ))}
                         </div>
                     ) : null}
-                    {!searching && inlineRecordCount === 0 ? (
-                        <p className="px-3 py-2 text-sm text-muted-foreground">{tSearch('noResults', { query: trimmed })}</p>
-                    ) : null}
-                    {inlineGroups.map((group) => (
-                        <div key={group.key} className="mb-1 last:mb-0">
-                            <p className="px-3 pb-1 pt-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">{group.heading}</p>
-                            {group.rows.map((row) => {
-                                const Icon = row.icon;
-                                return (
-                                    <button
-                                        key={row.key}
-                                        type="button"
-                                        data-index={row.index}
-                                        onClick={() => navigateInline(row.href, row.external)}
-                                        onMouseEnter={() => setActiveIndex(row.index)}
-                                        className={cn(
-                                            'flex w-full items-center gap-3 rounded-xl px-3 py-2 text-left transition',
-                                            activeIndex === row.index ? 'bg-muted' : 'hover:bg-muted',
-                                        )}
-                                        role="option"
-                                        aria-selected={activeIndex === row.index}
-                                    >
-                                        <span className="flex size-8 shrink-0 items-center justify-center">
-                                            {row.leading ? (
-                                                row.leading
-                                            ) : row.accent ? (
-                                                <span className="size-4 rounded-full ring-1 ring-border" style={{ backgroundColor: row.accent }} />
-                                            ) : Icon ? (
-                                                <Icon className="size-5 text-muted-foreground" />
-                                            ) : null}
-                                        </span>
-                                        <span className="min-w-0 flex-1">
-                                            <span className="block truncate text-sm text-foreground">{row.label}</span>
-                                            {row.subtitle ? (
-                                                <span className="block truncate text-xs text-muted-foreground">{row.subtitle}</span>
-                                            ) : null}
-                                        </span>
-                                    </button>
-                                );
-                            })}
-                        </div>
-                    ))}
-                </div>
-            ) : null}
+                </>
+            )}
 
             <AnimatePresence>
                 {isPalette ? (
                     <motion.button
+                        key="global-search-scrim"
                         type="button"
                         aria-hidden
                         tabIndex={-1}
@@ -482,6 +406,121 @@ export default function GlobalSearch() {
                         transition={{ duration: 0.16, ease: [0.23, 1, 0.32, 1] }}
                         className="fixed inset-0 z-40 cursor-default bg-black/50 backdrop-blur-[1px]"
                     />
+                ) : null}
+            </AnimatePresence>
+
+            <AnimatePresence>
+                {isPalette ? (
+                    <motion.div
+                        key="global-search-overlay"
+                        ref={paletteRef}
+                        role="dialog"
+                        aria-modal
+                        aria-label={tActions('palette.trigger')}
+                        onKeyDown={onPaletteKeyDown}
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        exit={{ opacity: 0 }}
+                        transition={{ duration: 0.14 }}
+                        className="fixed inset-x-0 top-[calc(50vh-1.5rem)] z-50 mx-auto flex w-[min(36rem,92vw)] flex-col gap-2"
+                    >
+                        <CommandPrimitive shouldFilter={false} loop className="contents">
+                            <motion.div layoutId="global-search-pill" transition={reduceMotion ? { duration: 0 } : PILL_MORPH} className={cn(PILL_SHELL, 'z-10 shadow-lg')}>
+                                <MagnifyingGlassIcon className="pointer-events-none absolute left-3.5 top-1/2 size-5 -translate-y-1/2 text-muted-foreground" />
+                                <CommandPrimitive.Input
+                                    ref={paletteInputRef}
+                                    value={query}
+                                    onValueChange={setQuery}
+                                    placeholder={tActions('palette.placeholder')}
+                                    autoFocus
+                                    className={PILL_INPUT}
+                                />
+                                <kbd className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 select-none rounded border border-border bg-background px-1.5 py-0.5 font-mono text-[10px] font-medium text-muted-foreground">
+                                    esc
+                                </kbd>
+                            </motion.div>
+
+                            <motion.div
+                                initial={reduceMotion ? { opacity: 0 } : { opacity: 0, y: -24 }}
+                                animate={{ opacity: 1, y: 0 }}
+                                exit={reduceMotion ? { opacity: 0 } : { opacity: 0, y: -18 }}
+                                transition={reduceMotion ? { duration: 0.12 } : PANEL_SLIDE}
+                                onHoverStart={() => setExpanded(true)}
+                                onHoverEnd={() => setExpanded(false)}
+                                onMouseDown={(event) => event.preventDefault()}
+                                className="relative z-0 overflow-hidden rounded-2xl bg-popover text-popover-foreground shadow-2xl ring-1 ring-border"
+                            >
+                                <motion.div
+                                    animate={{ maxHeight: expanded ? PANEL_EXPANDED : PANEL_COLLAPSED }}
+                                    transition={reduceMotion ? { duration: 0 } : PANEL_BOUNCE}
+                                    className="no-scrollbar overflow-y-auto"
+                                    style={{ maxHeight: PANEL_COLLAPSED }}
+                                >
+                                    <CommandList className="max-h-none overflow-visible p-1">
+                                        {commandGroups.map((entry) => (
+                                            <CommandGroup key={entry.group} heading={tActions(`group.${entry.group}`)}>
+                                                {entry.actions.map((action) => {
+                                                    const Icon = action.icon;
+                                                    const pending = pendingIds.has(action.id);
+                                                    return (
+                                                        <CommandItem key={action.id} value={action.id} disabled={pending} onSelect={() => runAction(action.id)}>
+                                                            {pending ? (
+                                                                <Loader2Icon className="size-4 animate-spin text-muted-foreground" />
+                                                            ) : Icon ? (
+                                                                <Icon className="size-4 text-muted-foreground" />
+                                                            ) : null}
+                                                            <span className="flex-1 truncate">{tActions(action.labelKey)}</span>
+                                                            {action.shortcut ? <CommandShortcut>{formatShortcut(action.shortcut)}</CommandShortcut> : null}
+                                                        </CommandItem>
+                                                    );
+                                                })}
+                                            </CommandGroup>
+                                        ))}
+
+                                        {commandGroups.length > 0 && paletteRecordGroups.length > 0 ? <CommandSeparator /> : null}
+
+                                        {paletteRecordGroups.map((group) => (
+                                            <CommandGroup key={group.key} heading={group.heading}>
+                                                {group.rows.map((row) => {
+                                                    const RowIcon = row.icon;
+                                                    return (
+                                                        <CommandItem key={row.key} value={row.key} onSelect={() => goToRecord(row.href, row.external)}>
+                                                            <span className="flex size-6 shrink-0 items-center justify-center">
+                                                                {row.leading ? (
+                                                                    row.leading
+                                                                ) : row.accent ? (
+                                                                    <span className="size-3.5 rounded-full ring-1 ring-border" style={{ backgroundColor: row.accent }} />
+                                                                ) : RowIcon ? (
+                                                                    <RowIcon className="size-4 text-muted-foreground" />
+                                                                ) : null}
+                                                            </span>
+                                                            <span className="min-w-0 flex-1">
+                                                                <span className="block truncate">{row.label}</span>
+                                                                {row.subtitle ? (
+                                                                    <span className="block truncate text-xs text-muted-foreground">{row.subtitle}</span>
+                                                                ) : null}
+                                                            </span>
+                                                        </CommandItem>
+                                                    );
+                                                })}
+                                            </CommandGroup>
+                                        ))}
+
+                                        {searching ? (
+                                            <div className="flex items-center justify-center gap-2 py-6 text-sm text-muted-foreground">
+                                                <Loader2Icon className="size-4 animate-spin" />
+                                                {tActions('palette.loading')}
+                                            </div>
+                                        ) : null}
+
+                                        {showNoResults ? (
+                                            <div className="py-8 text-center text-sm text-muted-foreground">{tActions('palette.noResults', { query: trimmed })}</div>
+                                        ) : null}
+                                    </CommandList>
+                                </motion.div>
+                            </motion.div>
+                        </CommandPrimitive>
+                    </motion.div>
                 ) : null}
             </AnimatePresence>
         </div>
