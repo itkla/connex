@@ -19,7 +19,7 @@ Layout: `controllers/` · `services/` · `mappers/` (+ XML in `resources/mappers
 
 ## Tenant isolation & RBAC — the core invariant
 
-This is the most load-bearing property of Connex. A change that leaks data across tenants or bypasses RBAC is a critical defect, full stop. The detailed model lives in [`../MULTITENANCY_PLAN.md`](../MULTITENANCY_PLAN.md) — read it before touching tenancy.
+This is the most load-bearing property of Connex. A change that leaks data across tenants or bypasses RBAC is a critical defect, full stop. The detailed model lives in [`../docs/MULTITENANCY_PLAN.md`](../docs/MULTITENANCY_PLAN.md) — read it before touching tenancy.
 
 - **Every query is tenant-scoped.** Reads and writes must be constrained to the resolved workspace/tenant. Most tables carry a workspace column (see the `*_workspace` migrations) — filter on it in the mapper, every time. Never trust a tenant id from the request body; use the resolved tenant context.
 - **Every endpoint is RBAC-checked.** No controller method is reachable without the appropriate role/permission check. Mirror how the neighboring controller for the same entity authorizes.
