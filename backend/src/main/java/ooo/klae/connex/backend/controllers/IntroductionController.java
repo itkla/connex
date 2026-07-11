@@ -12,6 +12,8 @@ import org.springframework.web.bind.annotation.RestController;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 
+import ooo.klae.connex.backend.ai.introrationale.IntroRationaleService;
+import ooo.klae.connex.backend.dto.IntroRationaleDto;
 import ooo.klae.connex.backend.dto.IntroSuggestionDto;
 import ooo.klae.connex.backend.dto.IntroductionDto;
 import ooo.klae.connex.backend.dto.IntroductionRequestDto;
@@ -28,6 +30,7 @@ import ooo.klae.connex.backend.services.IntroductionService;
 @RequiredArgsConstructor
 public class IntroductionController {
     private final IntroductionService introductionService;
+    private final IntroRationaleService introRationaleService;
 
     /**
      * GET ranked reverse-introduction suggestions for the active workspace.
@@ -36,6 +39,12 @@ public class IntroductionController {
     @GetMapping("/suggestions")
     public List<IntroSuggestionDto> getSuggestions(@RequestParam(defaultValue = "20") int limit) {
         return introductionService.getSuggestions(limit);
+    }
+
+    /** Returns an AI-generated introduction rationale, or a graceful unavailability response. */
+    @GetMapping("/suggestions/rationale")
+    public IntroRationaleDto rationale(@RequestParam int personA, @RequestParam int personB) {
+        return introRationaleService.generate(personA, personB);
     }
 
     /**
