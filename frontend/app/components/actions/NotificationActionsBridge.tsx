@@ -16,7 +16,7 @@ import type { AppAction } from "@/app/lib/actions/types";
  * provider so it can bridge {@link useNotifications} into the registry. Renders nothing.
  */
 export default function NotificationActionsBridge(): null {
-    const { refreshUnread } = useNotifications();
+    const { setUnread } = useNotifications();
     const t = useTranslations("Actions");
 
     const actions = useMemo<readonly AppAction[]>(
@@ -28,13 +28,13 @@ export default function NotificationActionsBridge(): null {
                 icon: BellAlertIcon,
                 order: 20,
                 execute: async () => {
-                    await markAllNotificationsRead();
-                    await refreshUnread();
+                    const counts = await markAllNotificationsRead();
+                    setUnread(counts.unread);
                     toastSuccess(t("feedback.allNotificationsRead"));
                 },
             },
         ],
-        [refreshUnread, t],
+        [setUnread, t],
     );
 
     useRegisterActions(actions);

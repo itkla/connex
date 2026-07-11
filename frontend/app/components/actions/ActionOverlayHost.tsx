@@ -27,16 +27,21 @@ export default function ActionOverlayHost({
     onClose: () => void;
 }) {
     const [users, setUsers] = useState<User[]>([]);
+    const [usersLoaded, setUsersLoaded] = useState(false);
 
     useEffect(() => {
         if (overlay?.kind !== "create-task") return;
         let cancelled = false;
         getUsers()
             .then((fetched) => {
-                if (!cancelled) setUsers(fetched);
+                if (cancelled) return;
+                setUsers(fetched);
+                setUsersLoaded(true);
             })
             .catch(() => {
-                if (!cancelled) setUsers([]);
+                if (cancelled) return;
+                setUsers([]);
+                setUsersLoaded(true);
             });
         return () => {
             cancelled = true;
@@ -51,7 +56,7 @@ export default function ActionOverlayHost({
 
     return (
         <>
-            {overlay?.kind === "create-task" ? (
+            {overlay?.kind === "create-task" && usersLoaded ? (
                 <TaskDialog
                     open
                     onOpenChange={handleOpenChange}
