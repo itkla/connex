@@ -48,6 +48,13 @@
     "record": {
       "copyLink": "Copy link to this record"
     },
+    "workspace": {
+      "themeLight": "Light theme",
+      "themeDark": "Dark theme",
+      "themeSystem": "System theme",
+      "languageEnglish": "Language: English",
+      "languageJapanese": "Language: 日本語"
+    },
     "utility": {
       "copyPageLink": "Copy link to this page",
       "markAllNotificationsRead": "Mark all notifications read"
@@ -78,6 +85,10 @@
         "task": "task, todo, to-do, reminder",
         "note": "note, memo",
         "activity": "activity, log, call, meeting, email"
+      },
+      "workspace": {
+        "theme": "theme, appearance, dark, light, mode",
+        "language": "language, locale, translation, english, japanese, 日本語, 言語"
       }
     }
   }

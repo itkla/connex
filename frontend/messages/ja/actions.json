@@ -48,6 +48,13 @@
     "record": {
       "copyLink": "このレコードのリンクをコピー"
     },
+    "workspace": {
+      "themeLight": "ライトテーマ",
+      "themeDark": "ダークテーマ",
+      "themeSystem": "システムテーマ",
+      "languageEnglish": "言語: English",
+      "languageJapanese": "言語: 日本語"
+    },
     "utility": {
       "copyPageLink": "このページのリンクをコピー",
       "markAllNotificationsRead": "すべての通知を既読にする"
@@ -78,6 +85,10 @@
         "task": "タスク, todo, やること, リマインダー",
         "note": "ノート, メモ",
         "activity": "アクティビティ, ログ, 通話, 会議, メール"
+      },
+      "workspace": {
+        "theme": "テーマ, 外観, ダーク, ライト, モード",
+        "language": "言語, ロケール, 翻訳, english, japanese, 日本語"
       }
     }
   }
