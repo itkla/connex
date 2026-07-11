@@ -4,8 +4,11 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.anyInt;
+import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.spy;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -23,7 +26,11 @@ import ooo.klae.connex.backend.beans.Deal;
 import ooo.klae.connex.backend.beans.Note;
 import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.beans.Task;
+import ooo.klae.connex.backend.dto.BandCounts;
+import ooo.klae.connex.backend.dto.DecayCounts;
 import ooo.klae.connex.backend.dto.RelationshipTemperatureDto;
+import ooo.klae.connex.backend.dto.TrendCounts;
+import ooo.klae.connex.backend.dto.WarmthSummaryDto;
 import ooo.klae.connex.backend.mappers.ActivityMapper;
 import ooo.klae.connex.backend.mappers.CompanyMapper;
 import ooo.klae.connex.backend.mappers.DealMapper;
@@ -164,6 +171,39 @@ class ScoringServiceTest {
         verify(activityMapper, never()).getAllActivities(anyInt());
     }
 
+    @Test
+    void summarizeReducesWorkspaceWideScoresIntoBandsTrendsAndDecayBuckets() {
+        ScoringService service = spy(service(NOW, List.of(), List.of(), List.of(), List.of(), List.of(), List.of()));
+        List<RelationshipTemperatureDto> contacts = List.of(
+            temperature(1, "hot", "rising", -1),
+            temperature(2, "warm", "steady", 0),
+            temperature(3, "cool", "cooling", 30),
+            temperature(4, "cold", "rising", 31),
+            temperature(5, "hot", "steady", 60),
+            temperature(6, "warm", "cooling", 61),
+            temperature(7, "cool", "rising", 90),
+            temperature(8, "cold", "steady", 91),
+            temperature(9, "cold", "steady", null)
+        );
+        List<RelationshipTemperatureDto> companies = List.of(
+            temperature(10, "hot", "steady", null),
+            temperature(11, "warm", "steady", null),
+            temperature(12, "cool", "steady", null),
+            temperature(13, "cold", "steady", null)
+        );
+        doReturn(contacts).when(service).scoreContacts(WS);
+        doReturn(companies).when(service).scoreCompanies(WS);
+
+        WarmthSummaryDto summary = service.summarize(WS);
+
+        assertEquals(new BandCounts(2, 2, 2, 3), summary.contacts());
+        assertEquals(new BandCounts(1, 1, 1, 1), summary.companies());
+        assertEquals(new TrendCounts(3, 4, 2), summary.contactTrends());
+        assertEquals(new DecayCounts(2, 2, 2), summary.contactDecay());
+        verify(service, times(1)).scoreContacts(WS);
+        verify(service, times(1)).scoreCompanies(WS);
+    }
+
     private static RelationshipTemperatureDto scoreFor(List<RelationshipTemperatureDto> scores, int id) {
         return scores.stream().filter(s -> s.getId() == id).findFirst().orElseThrow();
     }
@@ -209,5 +249,9 @@ class ScoringServiceTest {
         a.setType(type);
         a.setTimestamp(timestamp);
         return a;
+    }
+
+    private static RelationshipTemperatureDto temperature(int id, String band, String trend, Integer daysUntilCold) {
+        return new RelationshipTemperatureDto(id, 0, band, trend, null, null, 0, null, daysUntilCold);
     }
 }

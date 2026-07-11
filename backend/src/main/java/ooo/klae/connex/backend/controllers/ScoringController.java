@@ -12,13 +12,14 @@ import org.springframework.web.bind.annotation.RestController;
 import lombok.RequiredArgsConstructor;
 
 import ooo.klae.connex.backend.dto.RelationshipTemperatureDto;
+import ooo.klae.connex.backend.dto.WarmthSummaryDto;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.services.ScoringService;
 import ooo.klae.connex.backend.services.WorkspaceService;
 import ooo.klae.connex.backend.util.PageBounds;
 
 /**
- * Read-only relationship-temperature (warmth) scores for bounded active-workspace record sets.
+ * Read-only relationship-temperature scores and workspace-wide warmth summaries.
  * Computed on read; see {@link ScoringService}.
  */
 @RestController
@@ -38,6 +39,12 @@ public class ScoringController {
     @GetMapping("/companies")
     public List<RelationshipTemperatureDto> companies(@RequestParam(required = false) List<Integer> ids) {
         return scoringService.scoreCompanies(workspaceService.getCurrentWorkspaceId(), boundedIds(ids));
+    }
+
+    /** Workspace-wide warmth bands, contact trends, and predicted contact decay counts. */
+    @GetMapping("/summary")
+    public WarmthSummaryDto summary() {
+        return scoringService.summarize(workspaceService.getCurrentWorkspaceId());
     }
 
     private Set<Integer> boundedIds(List<Integer> ids) {

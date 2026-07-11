@@ -615,6 +615,28 @@ class DealServiceTest extends AbstractServiceTest {
         assertThrows(BadRequestException.class, () -> dealService.reschedule(deal.getId(), "9999-99-99"));
     }
 
+    @Test
+    void closingSoonCountUsesTheActiveWorkspace() {
+        Pipeline pipeline = newPipeline();
+        Stage stage = newStage(pipeline, 0);
+        Company company = newCompany();
+        Deal closing = newDeal(pipeline, stage, company);
+        Deal later = newDeal(pipeline, stage, company);
+        jdbcTemplate.update("UPDATE deal SET expected_close_date = CURDATE() WHERE id = ?", closing.getId());
+        jdbcTemplate.update("UPDATE deal SET expected_close_date = DATE_ADD(CURDATE(), INTERVAL 8 DAY) WHERE id = ?",
+            later.getId());
+
+        Workspace foreignWorkspace = newWorkspace();
+        Pipeline foreignPipeline = newPipelineIn(foreignWorkspace);
+        Stage foreignStage = newStageIn(foreignWorkspace, foreignPipeline);
+        Company foreignCompany = newCompanyIn(foreignWorkspace);
+        Deal foreign = analyticsDeal(foreignWorkspace, foreignPipeline, foreignStage, foreignCompany,
+            "Foreign", 100.0, 0.0, "JPY", null, 1, null, 1);
+        jdbcTemplate.update("UPDATE deal SET expected_close_date = CURDATE() WHERE id = ?", foreign.getId());
+
+        assertEquals(1, dealService.getClosingSoonCount(7).count());
+    }
+
     private Workspace newWorkspace() {
         Workspace created = new Workspace();
         created.setName("Workspace " + unique());

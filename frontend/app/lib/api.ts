@@ -1272,6 +1272,60 @@ export function getDealTopFromCookie(cookie: string | null, currency?: string) {
     return getJson<Types.DealTop>(`/api/deals/top${buildQuery({ currency })}`, withCookie(cookie));
 }
 
+/** Server-computed count of open deals with an expected close in the next {@code days} (default 7). */
+export function getDealClosingSoonCount(days?: number, init: RequestInit = {}) {
+    return getJson<Types.Count>(`/api/deals/closing-soon-count${buildQuery({ days })}`, init);
+}
+
+export function getDealClosingSoonCountFromCookie(cookie: string | null, days?: number) {
+    return getJson<Types.Count>(`/api/deals/closing-soon-count${buildQuery({ days })}`, withCookie(cookie));
+}
+
+/** Server-computed activity counts by type per time bucket over {@code range} (30d/90d/12m). */
+export function getActivityVolume(range?: string, init: RequestInit = {}) {
+    return getJson<Types.ActivityVolumeBucket[]>(`/api/activities/volume${buildQuery({ range })}`, init);
+}
+
+export function getActivityVolumeFromCookie(cookie: string | null, range?: string) {
+    return getJson<Types.ActivityVolumeBucket[]>(`/api/activities/volume${buildQuery({ range })}`, withCookie(cookie));
+}
+
+/** Server-computed per-user touch counts (activities + completed tasks + notes) over {@code range}. */
+export function getTeamLeaderboard(range?: string, init: RequestInit = {}) {
+    return getJson<Types.TeamLeaderboardEntry[]>(`/api/activities/leaderboard${buildQuery({ range })}`, init);
+}
+
+export function getTeamLeaderboardFromCookie(cookie: string | null, range?: string) {
+    return getJson<Types.TeamLeaderboardEntry[]>(`/api/activities/leaderboard${buildQuery({ range })}`, withCookie(cookie));
+}
+
+/** Server-computed count of activities scheduled in the next {@code days} (default 7). */
+export function getUpcomingActivityCount(days?: number, init: RequestInit = {}) {
+    return getJson<Types.Count>(`/api/activities/upcoming-count${buildQuery({ days })}`, init);
+}
+
+export function getUpcomingActivityCountFromCookie(cookie: string | null, days?: number) {
+    return getJson<Types.Count>(`/api/activities/upcoming-count${buildQuery({ days })}`, withCookie(cookie));
+}
+
+/** Server-computed task status + due-window counts over ALL tasks. */
+export function getTaskSummary(init: RequestInit = {}) {
+    return getJson<Types.TaskSummary>(`/api/tasks/summary`, init);
+}
+
+export function getTaskSummaryFromCookie(cookie: string | null) {
+    return getJson<Types.TaskSummary>(`/api/tasks/summary`, withCookie(cookie));
+}
+
+/** Server-computed workspace-wide warmth summary (band/trend/decay counts) over ALL contacts/companies. */
+export function getWarmthSummary(init: RequestInit = {}) {
+    return getJson<Types.WarmthSummary>(`/api/scoring/summary`, init);
+}
+
+export function getWarmthSummaryFromCookie(cookie: string | null) {
+    return getJson<Types.WarmthSummary>(`/api/scoring/summary`, withCookie(cookie));
+}
+
 /**
  * Server-computed per-stage open/closed rollup over ALL deals, optionally scoped to a currency.
  * Feeds the deals page stage-distribution chart.

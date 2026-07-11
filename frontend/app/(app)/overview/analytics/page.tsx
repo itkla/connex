@@ -3,42 +3,40 @@ import { headers } from 'next/headers';
 import { redirect } from 'next/navigation';
 
 import {
-    getActivitiesFromCookie,
-    getCompaniesFromCookie,
-    getContactsFromCookie,
-    getCompanyTemperaturesFromCookie,
-    getContactTemperaturesFromCookie,
     getCurrentUserFromCookie,
     getDealMetricsFromCookie,
     getDealRisksFromCookie,
     getIntroSuggestionsFromCookie,
     getIntroductions,
-    getNotesFromCookie,
     getPipelinesFromCookie,
     getRecentMovesFromCookie,
     getStagesByPipelineId,
-    getTasksFromCookie,
+    getTaskSummaryFromCookie,
     getUsers,
+    getWarmthSummaryFromCookie,
 } from '@/app/lib/api';
 import type {
-    Activity,
-    Company,
-    Contact,
     DealMetrics,
     DealRisk,
     IntroSuggestion,
     IntroductionRecord,
     JobMove,
-    Note,
     Pipeline,
-    RelationshipTemperature,
     Stage,
-    Task,
+    TaskSummary,
     User,
+    WarmthSummary,
 } from '@/app/lib/types';
 import AnalyticsBoard from '@/app/components/overview/analytics/AnalyticsBoard';
 
 const EMPTY_DEAL_METRICS: DealMetrics = { byCurrency: [], totalCount: 0 };
+const EMPTY_TASK_SUMMARY: TaskSummary = { todo: 0, inProgress: 0, done: 0, overdue: 0, dueSoon: 0 };
+const EMPTY_WARMTH_SUMMARY: WarmthSummary = {
+    contacts: { hot: 0, warm: 0, cool: 0, cold: 0 },
+    companies: { hot: 0, warm: 0, cool: 0, cold: 0 },
+    contactTrends: { rising: 0, steady: 0, cooling: 0 },
+    contactDecay: { soon: 0, mid: 0, later: 0 },
+};
 
 export const metadata: Metadata = {
     title: 'Analytics',
@@ -55,26 +53,18 @@ export default async function AnalyticsPage() {
     const init = { headers: { cookie: cookie ?? '' } } as const;
 
     const [
-        companies,
-        contacts,
         dealMetrics,
         pipelines,
-        tasks,
-        activities,
-        notes,
         users,
         dealRisks,
         introSuggestions,
         recentMoves,
         introLineage,
+        taskSummary,
+        warmth,
     ] = await Promise.all([
-        getCompaniesFromCookie(cookie).catch(() => [] as Company[]),
-        getContactsFromCookie(cookie).catch(() => [] as Contact[]),
         getDealMetricsFromCookie(cookie).catch(() => EMPTY_DEAL_METRICS),
         getPipelinesFromCookie(cookie).catch(() => [] as Pipeline[]),
-        getTasksFromCookie(cookie).catch(() => [] as Task[]),
-        getActivitiesFromCookie(cookie).catch(() => [] as Activity[]),
-        getNotesFromCookie(cookie).catch(() => [] as Note[]),
         getUsers(init).catch(() => [] as User[]),
         getDealRisksFromCookie(cookie).catch(() => [] as DealRisk[]),
         getIntroSuggestionsFromCookie(cookie).catch(() => [] as IntroSuggestion[]),
@@ -82,11 +72,8 @@ export default async function AnalyticsPage() {
         getIntroductions({ size: 500 }, init)
             .then((page) => page.items)
             .catch(() => [] as IntroductionRecord[]),
-    ]);
-
-    const [contactTemps, companyTemps] = await Promise.all([
-        getContactTemperaturesFromCookie(cookie, contacts.map((contact) => contact.id)).catch(() => [] as RelationshipTemperature[]),
-        getCompanyTemperaturesFromCookie(cookie, companies.map((company) => company.id)).catch(() => [] as RelationshipTemperature[]),
+        getTaskSummaryFromCookie(cookie).catch(() => EMPTY_TASK_SUMMARY),
+        getWarmthSummaryFromCookie(cookie).catch(() => EMPTY_WARMTH_SUMMARY),
     ]);
 
     const stageLists = await Promise.all(
@@ -99,16 +86,13 @@ export default async function AnalyticsPage() {
             dealMetrics={dealMetrics}
             pipelines={pipelines}
             stages={stages}
-            activities={activities}
-            tasks={tasks}
-            notes={notes}
             users={users}
-            contactTemps={contactTemps}
-            companyTemps={companyTemps}
             dealRisks={dealRisks}
             introSuggestions={introSuggestions}
             introLineage={introLineage}
             recentMoves={recentMoves}
+            taskSummary={taskSummary}
+            warmth={warmth}
         />
     );
 }
