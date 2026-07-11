@@ -1,9 +1,5 @@
 {
   "Actions": {
-    "launcher": {
-      "label": "アクション",
-      "aria": "クイックアクションを開く"
-    },
     "quickCreate": {
       "trigger": "新規作成",
       "title": "作成",

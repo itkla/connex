@@ -7,7 +7,7 @@ import { Bars3BottomLeftIcon, CalendarIcon } from '@heroicons/react/24/outline';
 import { Loader2Icon } from 'lucide-react';
 
 import { Label } from '@/components/ui/label';
-import { fieldInputClass, fieldLeadIconClass } from '@/components/ui/dialog-status-cover';
+import { fieldErrorClass, fieldInputClass, fieldLeadIconClass } from '@/components/ui/dialog-status-cover';
 import { cn } from '@/lib/utils';
 import { createTask, isFieldError } from '@/app/lib/api';
 import { toastError, toastSuccess } from '@/app/lib/toast';
@@ -31,7 +31,7 @@ export default function TaskQuickForm({
     defaults?: CreateDefaults;
     currentUserId: number;
     onCreated: () => void;
-    onMoreDetails: (draft: { description: string }) => void;
+    onMoreDetails: (draft: { description: string; dueDate: string }) => void;
 }) {
     const router = useRouter();
     const t = useTranslations('Actions');
@@ -92,7 +92,7 @@ export default function TaskQuickForm({
                         rows={2}
                         autoFocus
                         aria-invalid={Boolean(fieldErrors.description)}
-                        className={cn(fieldInputClass, 'min-h-16 resize-none py-2 pl-9 pr-3')}
+                        className={cn(fieldInputClass, 'min-h-16 resize-none py-2 pl-9 pr-3', fieldErrors.description && fieldErrorClass)}
                     />
                 </div>
                 {fieldErrors.description && <p className="text-sm text-destructive">{fieldErrors.description}</p>}
@@ -113,7 +113,7 @@ export default function TaskQuickForm({
             </div>
 
             <QuickFormFooter
-                onMoreDetails={() => onMoreDetails({ description })}
+                onMoreDetails={() => onMoreDetails({ description, dueDate })}
                 submitDisabled={submitting || !description.trim()}
             >
                 {submitting ? <Loader2Icon className="size-4 animate-spin" /> : t('quickCreate.create')}

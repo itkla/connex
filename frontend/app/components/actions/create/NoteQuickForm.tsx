@@ -6,7 +6,7 @@ import { useTranslations } from 'next-intl';
 import { Loader2Icon } from 'lucide-react';
 
 import { Label } from '@/components/ui/label';
-import { fieldInputClass } from '@/components/ui/dialog-status-cover';
+import { fieldErrorClass, fieldInputClass } from '@/components/ui/dialog-status-cover';
 import { cn } from '@/lib/utils';
 import { createNote, isFieldError } from '@/app/lib/api';
 import { toastError, toastSuccess } from '@/app/lib/toast';
@@ -87,7 +87,7 @@ export default function NoteQuickForm({
                     rows={3}
                     autoFocus
                     aria-invalid={Boolean(fieldErrors.content)}
-                    className={cn(fieldInputClass, 'min-h-20 resize-none px-3 py-2')}
+                    className={cn(fieldInputClass, 'min-h-20 resize-none px-3 py-2', fieldErrors.content && fieldErrorClass)}
                 />
                 {fieldErrors.content && <p className="text-sm text-destructive">{fieldErrors.content}</p>}
             </div>

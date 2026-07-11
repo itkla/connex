@@ -6,7 +6,7 @@ import { useTranslations } from 'next-intl';
 import { Loader2Icon } from 'lucide-react';
 
 import { Label } from '@/components/ui/label';
-import { fieldInputClass } from '@/components/ui/dialog-status-cover';
+import { fieldErrorClass, fieldInputClass } from '@/components/ui/dialog-status-cover';
 import { cn } from '@/lib/utils';
 import { createActivity, isFieldError } from '@/app/lib/api';
 import { toastError, toastSuccess } from '@/app/lib/toast';
@@ -101,7 +101,7 @@ export default function ActivityQuickForm({
                     placeholder={ta('subjectPlaceholder')}
                     autoFocus
                     aria-invalid={Boolean(fieldErrors.subject)}
-                    className={cn(fieldInputClass, 'px-3')}
+                    className={cn(fieldInputClass, 'px-3', fieldErrors.subject && fieldErrorClass)}
                 />
                 {fieldErrors.subject && <p className="text-sm text-destructive">{fieldErrors.subject}</p>}
             </div>

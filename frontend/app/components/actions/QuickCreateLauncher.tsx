@@ -155,7 +155,8 @@ export default function QuickCreateLauncher() {
         (kind: FormKind, draft: Record<string, string>) => {
             const recordType = FORM_TO_RECORD_TYPE[kind];
             const defaults = deriveCreateDefaults(context, recordType);
-            if (kind === 'task') openOverlay({ kind: 'create-task', defaults, draft: { description: draft.description } });
+            if (kind === 'task')
+                openOverlay({ kind: 'create-task', defaults, draft: { description: draft.description, dueDate: draft.dueDate } });
             else if (kind === 'note') openOverlay({ kind: 'create-note', defaults, draft: { content: draft.content } });
             else openOverlay({ kind: 'create-activity', defaults, draft });
             closeLauncher();
@@ -214,7 +215,7 @@ export default function QuickCreateLauncher() {
                 aria-expanded={open}
                 aria-label={t('quickCreate.trigger')}
                 onClick={() => (open ? closeLauncher() : openLauncher())}
-                className="inline-flex w-full items-center gap-2 rounded-lg bg-brand px-3 py-2 text-sm font-semibold text-neutral-950 transition-[transform,background-color] duration-150 ease-out hover:bg-brand-hover active:scale-[0.99] motion-reduce:transition-none motion-reduce:active:scale-100"
+                className="inline-flex w-full items-center gap-2 rounded-lg bg-brand px-3 py-2 text-sm font-semibold text-brand-foreground transition-[transform,background-color] duration-150 ease-out hover:bg-brand-hover active:scale-[0.99] motion-reduce:transition-none motion-reduce:active:scale-100"
             >
                 <PlusIcon className="size-4" />
                 {t('quickCreate.trigger')}

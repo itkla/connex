@@ -32,7 +32,7 @@ export default function QuickFormFooter({
             <Button
                 type="submit"
                 disabled={submitDisabled}
-                className="min-w-24 bg-brand text-white shadow-sm transition hover:bg-brand-hover hover:shadow-md"
+                className="min-w-24 bg-brand text-brand-foreground shadow-sm transition hover:bg-brand-hover hover:shadow-md"
             >
                 {children}
             </Button>
