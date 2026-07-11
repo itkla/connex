@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="ooo.klae.connex.backend.mappers.AiOutputCacheMapper">
+
+  <sql id="columns">
+    id, workspace_id, feature, subject_a_id, subject_b_id, content_hash, payload, warnings, generated_at, created_at, updated_at
+  </sql>
+
+  <select id="getBySubject" resultType="AiOutputCache">
+    SELECT <include refid="columns"/> FROM ai_output_cache
+    WHERE workspace_id = #{workspaceId}
+      AND feature = #{feature}
+      AND subject_a_id = #{subjectAId}
+      AND subject_b_id = #{subjectBId}
+  </select>
+
+  <insert id="upsert" useGeneratedKeys="true" keyProperty="id">
+    INSERT INTO ai_output_cache
+      (workspace_id, feature, subject_a_id, subject_b_id, content_hash, payload, warnings, generated_at)
+    VALUES
+      (#{workspaceId}, #{feature}, #{subjectAId}, #{subjectBId}, #{contentHash}, #{payload}, #{warnings}, #{generatedAt})
+    AS incoming
+    ON DUPLICATE KEY UPDATE
+      content_hash = incoming.content_hash,
+      payload = incoming.payload,
+      warnings = incoming.warnings,
+      generated_at = incoming.generated_at
+  </insert>
+
+</mapper>
