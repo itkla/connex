@@ -11,6 +11,7 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import java.util.List;
+import java.util.Map;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -43,6 +44,7 @@ class BedrockAnthropicAdapterTest {
 
     @Test
     void complete_buildsAnthropicRequestAndParsesResponse() throws Exception {
+        assertEquals("bedrock", adapter.providerId());
         when(bedrockClient.invokeModel(eq(BedrockRegion.US_EAST_1), eq("anthropic.claude-3-sonnet-v1:0"),
                 any(AiCredentials.class), anyString()))
                 .thenReturn("""
@@ -99,7 +101,8 @@ class BedrockAnthropicAdapterTest {
     @Test
     void complete_nonBedrockTargetRaisesProviderException() {
         AiCompletionRequest request = new AiCompletionRequest(
-                new AiProviderTarget("azure_openai", "us-east-1", "model"),
+                new AiProviderTarget("azure_openai", null, "model",
+                        "https://resource.openai.azure.com", "2025-01-01", "deployment", null, false),
                 credentials(),
                 null,
                 List.of(new AiMessage("user", "Hello?")),
@@ -121,7 +124,8 @@ class BedrockAnthropicAdapterTest {
 
     private static AiCompletionRequest validRequest(String systemPrompt) {
         return new AiCompletionRequest(
-                new AiProviderTarget("bedrock", "us-east-1", "anthropic.claude-3-sonnet-v1:0"),
+                new AiProviderTarget("bedrock", "us-east-1", "anthropic.claude-3-sonnet-v1:0",
+                        null, null, null, null, false),
                 credentials(),
                 systemPrompt,
                 List.of(
@@ -132,6 +136,8 @@ class BedrockAnthropicAdapterTest {
     }
 
     private static AiCredentials credentials() {
-        return new AiCredentials("AKIDEXAMPLE", "SECRET", null);
+        return AiCredentials.of(Map.of(
+                "accessKeyId", "AKIDEXAMPLE",
+                "secretAccessKey", "SECRET"));
     }
 }

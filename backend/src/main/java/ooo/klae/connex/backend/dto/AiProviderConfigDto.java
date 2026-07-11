@@ -13,6 +13,11 @@ import ooo.klae.connex.backend.beans.AiProviderConfig;
 public class AiProviderConfigDto {
     private String provider;
     private String region;
+    private String endpoint;
+    private String apiVersion;
+    private String deployment;
+    private String projectId;
+    private boolean allowInternalEndpoint;
     private String modelId;
     private boolean hasCredential;
     private String credentialLast4;
@@ -32,6 +37,11 @@ public class AiProviderConfigDto {
         }
         dto.setProvider(config.getProvider());
         dto.setRegion(config.getRegion());
+        dto.setEndpoint(config.getEndpoint());
+        dto.setApiVersion(config.getApiVersion());
+        dto.setDeployment(config.getDeployment());
+        dto.setProjectId(config.getProjectId());
+        dto.setAllowInternalEndpoint(config.isAllowInternalEndpoint());
         dto.setModelId(config.getModelId());
         dto.setHasCredential(config.getCredentialRef() != null && !config.getCredentialRef().isBlank());
         dto.setCredentialLast4(config.getCredentialLast4());

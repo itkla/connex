@@ -28,6 +28,11 @@ public class BedrockAnthropicAdapter implements AiProvider {
     private final ObjectMapper objectMapper;
 
     @Override
+    public String providerId() {
+        return PROVIDER_BEDROCK;
+    }
+
+    @Override
     public AiCompletionResult complete(AiCompletionRequest request) {
         if (request == null) {
             throw new AiProviderException("AI completion request is required");

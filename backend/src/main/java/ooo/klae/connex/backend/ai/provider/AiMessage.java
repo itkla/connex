@@ -13,4 +13,9 @@ public record AiMessage(String role, String content) {
         Objects.requireNonNull(role, "role");
         Objects.requireNonNull(content, "content");
     }
+
+    @Override
+    public String toString() {
+        return "AiMessage[role=" + role + ", content=<redacted>]";
+    }
 }

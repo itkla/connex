@@ -25,4 +25,11 @@ public record AiCompletionRequest(
         Objects.requireNonNull(credentials, "credentials");
         messages = List.copyOf(Objects.requireNonNull(messages, "messages"));
     }
+
+    @Override
+    public String toString() {
+        return "AiCompletionRequest[target=" + target
+                + ", credentials=<redacted>, systemPrompt=<redacted>, messages=<redacted>, maxTokens="
+                + maxTokens + ", temperature=" + temperature + "]";
+    }
 }

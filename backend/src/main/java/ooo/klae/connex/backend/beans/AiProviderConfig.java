@@ -16,6 +16,11 @@ public class AiProviderConfig {
     private int orgId;
     private String provider;
     private String region;
+    private String endpoint;
+    private String apiVersion;
+    private String deployment;
+    private String projectId;
+    private boolean allowInternalEndpoint;
     private String modelId;
     private String credentialRef;
     private String credentialLast4;

@@ -24,19 +24,28 @@ public class AiProperties {
     private boolean enabled = false;
 
     /**
-     * Bedrock outbound TCP connect timeout in milliseconds. Kept short by default so AI egress
-     * fails closed instead of pinning request threads on unreachable provider networks.
+     * Whether organizations may point an OpenAI-compatible provider at private or internal
+     * endpoint addresses. Defaults to false: on a shared multi-tenant deployment an org-supplied
+     * internal endpoint is an SSRF vector, so the org-level {@code allowInternalEndpoint} flag is
+     * honored only when the instance operator opts in (e.g. a self-hosted deployment running a
+     * LAN inference server).
+     */
+    private boolean allowInternalEndpoints = false;
+
+    /**
+     * AI provider outbound TCP connect timeout in milliseconds. Kept short by default so AI
+     * egress fails closed instead of pinning request threads on unreachable provider networks.
      */
     private long connectTimeoutMs = 3000;
 
     /**
-     * Bedrock outbound request timeout in milliseconds, covering response wait and body read.
+     * AI provider outbound request timeout in milliseconds, covering response wait and body read.
      */
     private long requestTimeoutMs = 60000;
 
     /**
-     * Maximum Bedrock response body size in bytes. Oversized responses are rejected rather than
-     * truncated so downstream JSON parsing never sees partial provider output.
+     * Maximum AI provider response body size in bytes. Oversized responses are rejected rather
+     * than truncated so downstream JSON parsing never sees partial provider output.
      */
     private int maxResponseBytes = 2097152;
 }

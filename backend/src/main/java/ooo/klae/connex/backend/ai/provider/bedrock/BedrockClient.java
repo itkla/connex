@@ -8,7 +8,10 @@ import java.net.http.HttpClient;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.Arrays;
 import java.util.Objects;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 import org.springframework.http.MediaType;
 import org.springframework.http.client.JdkClientHttpRequestFactory;
@@ -35,6 +38,9 @@ public class BedrockClient {
     private static final int BUFFER_BYTES = 8192;
     private static final int HTTP_TOO_MANY_REQUESTS = 429;
     private static final int HTTP_SERVICE_UNAVAILABLE = 503;
+    private static final Set<String> ALLOWED_HOSTS = Arrays.stream(BedrockRegion.values())
+            .map(BedrockRegion::host)
+            .collect(Collectors.toUnmodifiableSet());
 
     private final RestClient restClient;
     private final int maxResponseBytes;
@@ -95,7 +101,7 @@ public class BedrockClient {
 
     private BedrockResponse sendOnce(String host, String rawPath, String regionCode, AiCredentials credentials,
             byte[] body) {
-        AiEgressGuard.requireFetchable(host);
+        AiEgressGuard.requireAllowlistedHost(host, ALLOWED_HOSTS);
         AwsSigV4Signer.SignedRequest signed = AwsSigV4Signer.sign(METHOD_POST, host, rawPath, EMPTY_QUERY, body,
                 regionCode, credentials, Instant.now());
         URI uri = URI.create("https://" + host + signed.encodedPath());

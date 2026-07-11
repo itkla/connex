@@ -35,6 +35,7 @@ import ooo.klae.connex.backend.ai.provider.AiCompletionResult;
 import ooo.klae.connex.backend.ai.provider.AiCredentials;
 import ooo.klae.connex.backend.ai.provider.AiProvider;
 import ooo.klae.connex.backend.ai.provider.AiProviderException;
+import ooo.klae.connex.backend.ai.provider.AiProviderRouter;
 import ooo.klae.connex.backend.ai.provider.ResolvedAiProvider;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.services.AiProviderConfigService;
@@ -52,6 +53,7 @@ class AiInvocationServiceTest {
     @Mock private AiFeatureGate aiFeatureGate;
     @Mock private AiProviderConfigService aiProviderConfigService;
     @Mock private AiProvider aiProvider;
+    @Mock private AiProviderRouter aiProviderRouter;
     @Mock private WorkspaceService workspaceService;
     @Mock private AuditService auditService;
 
@@ -60,14 +62,18 @@ class AiInvocationServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new AiInvocationService(aiFeatureGate, aiProviderConfigService, aiProvider,
+        service = new AiInvocationService(aiFeatureGate, aiProviderConfigService, aiProviderRouter,
                 workspaceService, auditService, new ObjectMapper());
         resolved = new ResolvedAiProvider("bedrock", "us-east-1", "anthropic.claude-3-sonnet-v1:0",
-                new AiCredentials("AKIA_TEST", "SECRET_ACCESS_KEY", null));
+                null, null, null, null, false,
+                AiCredentials.of(Map.of(
+                        "accessKeyId", "AKIA_TEST",
+                        "secretAccessKey", "SECRET_ACCESS_KEY")));
         lenient().when(workspaceService.getCurrentWorkspaceId()).thenReturn(WORKSPACE_ID);
         lenient().when(workspaceService.getCurrentOrgId()).thenReturn(ORG_ID);
         lenient().when(workspaceService.getCurrentUserId()).thenReturn(ACTOR_ID);
         lenient().when(aiProviderConfigService.resolveForOrg(ORG_ID)).thenReturn(resolved);
+        lenient().when(aiProviderRouter.adapterFor("bedrock")).thenReturn(aiProvider);
     }
 
     @Test
