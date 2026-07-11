@@ -274,7 +274,7 @@ export default async function Dashboard() {
         notifications: <NotificationsCard items={notifications.items} />,
         quickActions: (
             <div className="flex h-full items-center justify-center rounded-2xl border border-border bg-card p-6">
-                <QuickCreate currentUserId={user.id} />
+                <QuickCreate />
             </div>
         ),
         analyticsKpis: <AnalyticsKpisWidget kpis={dealKpis} currency={currency} />,

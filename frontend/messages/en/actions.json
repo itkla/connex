@@ -1,0 +1,54 @@
+{
+  "Actions": {
+    "launcher": {
+      "label": "Actions",
+      "aria": "Open quick actions"
+    },
+    "group": {
+      "create": "Create",
+      "navigate": "Go to",
+      "record": "This record",
+      "workspace": "Workspace",
+      "utility": "Utilities"
+    },
+    "navigate": {
+      "dashboard": "Dashboard",
+      "companies": "Companies",
+      "contacts": "Contacts",
+      "deals": "Deals",
+      "pipelines": "Pipelines",
+      "analytics": "Analytics",
+      "calendar": "Calendar",
+      "settings": "Settings",
+      "organization": "Organization"
+    },
+    "create": {
+      "task": "New task",
+      "note": "New note",
+      "activity": "Log activity"
+    },
+    "record": {
+      "copyLink": "Copy link to this record"
+    },
+    "utility": {
+      "copyPageLink": "Copy link to this page",
+      "markAllNotificationsRead": "Mark all notifications read"
+    },
+    "feedback": {
+      "linkCopied": "Link copied to clipboard",
+      "recordLinkCopied": "Link to {label} copied",
+      "allNotificationsRead": "All notifications marked as read",
+      "runFailed": "Something went wrong. Please try again."
+    },
+    "keywords": {
+      "navigate": {
+        "contacts": "contacts, people, persons"
+      },
+      "create": {
+        "task": "task, todo, to-do, reminder",
+        "note": "note, memo",
+        "activity": "activity, log, call, meeting, email"
+      }
+    }
+  }
+}

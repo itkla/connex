@@ -1,0 +1,54 @@
+{
+  "Actions": {
+    "launcher": {
+      "label": "アクション",
+      "aria": "クイックアクションを開く"
+    },
+    "group": {
+      "create": "作成",
+      "navigate": "移動",
+      "record": "このレコード",
+      "workspace": "ワークスペース",
+      "utility": "ユーティリティ"
+    },
+    "navigate": {
+      "dashboard": "ダッシュボード",
+      "companies": "会社",
+      "contacts": "連絡先",
+      "deals": "取引",
+      "pipelines": "パイプライン",
+      "analytics": "分析",
+      "calendar": "カレンダー",
+      "settings": "設定",
+      "organization": "組織"
+    },
+    "create": {
+      "task": "新しいタスク",
+      "note": "新しいノート",
+      "activity": "アクティビティを記録"
+    },
+    "record": {
+      "copyLink": "このレコードのリンクをコピー"
+    },
+    "utility": {
+      "copyPageLink": "このページのリンクをコピー",
+      "markAllNotificationsRead": "すべての通知を既読にする"
+    },
+    "feedback": {
+      "linkCopied": "リンクをクリップボードにコピーしました",
+      "recordLinkCopied": "{label} のリンクをコピーしました",
+      "allNotificationsRead": "すべての通知を既読にしました",
+      "runFailed": "問題が発生しました。もう一度お試しください。"
+    },
+    "keywords": {
+      "navigate": {
+        "contacts": "連絡先, 人, 担当者, コンタクト"
+      },
+      "create": {
+        "task": "タスク, todo, やること, リマインダー",
+        "note": "ノート, メモ",
+        "activity": "アクティビティ, ログ, 通話, 会議, メール"
+      }
+    }
+  }
+}

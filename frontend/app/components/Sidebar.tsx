@@ -44,6 +44,7 @@ import { DropdownMenuItem, DropdownMenuPortal, DropdownMenuSub, DropdownMenuSubC
 import UserAvatar from '@/app/components/records/users/UserAvatar';
 import NotificationBell from '@/app/components/notifications/NotificationBell';
 import WorkspaceSwitcher from '@/app/components/WorkspaceSwitcher';
+import GlobalActionsMenu from '@/app/components/actions/GlobalActionsMenu';
 import { useWorkspace } from '@/app/hooks/useWorkspace';
 
 type NavItem = {
@@ -356,6 +357,8 @@ export default function Sidebar({
                     <WorkspaceSwitcher />
                     <NotificationBell />
                 </header>
+
+                <GlobalActionsMenu />
 
                 <nav className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto pr-1">
                     {sections.map((section) => (
