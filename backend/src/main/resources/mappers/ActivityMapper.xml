@@ -208,7 +208,7 @@
 
 
   <select id="countCreatedAnywhere" resultType="int">
-    SELECT COUNT(*) FROM activity WHERE created_by_id = #{userId}
+    SELECT COUNT(*) FROM activity WHERE created_by_id = #{userId} FOR UPDATE
   </select>
 
 </mapper>

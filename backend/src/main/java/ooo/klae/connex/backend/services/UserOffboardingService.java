@@ -48,6 +48,14 @@ public class UserOffboardingService {
      * {@code introduction.introducer_user_id} RESTRICT constraints: authored
      * history must be reassigned or removed before the account can go.
      *
+     * <p>The counts are locking reads ({@code FOR UPDATE}): under InnoDB
+     * repeatable-read, the equality scan on each author index takes gap locks
+     * that block a concurrent insert of authored content for this user until
+     * the deletion transaction commits — the serialization the RESTRICT
+     * constraints provided at the parent row (same idiom as
+     * {@code lockOwnerIds} in the sole-owner guard). Must run inside the
+     * deletion transaction; the author-column indexes must survive the FK drop.
+     *
      * @param userId the account being deleted
      * @throws ConflictException when authored content still exists anywhere
      */
