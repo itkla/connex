@@ -124,8 +124,6 @@
     WHERE workspace_id = #{workspaceId} AND user_id = #{userId}
   </delete>
 
-
-
   <insert id="insert" useGeneratedKeys="true" keyProperty="id">
     INSERT INTO workspace (name, slug<if test="orgId != 0">, org_id</if>)
     VALUES (#{name}, #{slug}<if test="orgId != 0">, #{orgId}</if>)

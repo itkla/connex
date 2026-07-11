@@ -70,5 +70,4 @@ public interface TaskMapper {
      * for the {@code task.assigned_to_id} ON DELETE SET NULL (#440 increment 3).
      */
     void unassignAnywhere(@Param("userId") int userId);
-
 }

@@ -5,25 +5,25 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.util.List;
+
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 
 import ooo.klae.connex.backend.beans.Company;
 import ooo.klae.connex.backend.beans.Deal;
-import ooo.klae.connex.backend.beans.Notification;
 import ooo.klae.connex.backend.beans.Pipeline;
 import ooo.klae.connex.backend.beans.Rule;
 import ooo.klae.connex.backend.beans.SavedView;
 import ooo.klae.connex.backend.beans.Stage;
 import ooo.klae.connex.backend.beans.Task;
 import ooo.klae.connex.backend.beans.User;
+import ooo.klae.connex.backend.beans.UserDashboard;
 import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.mappers.NotificationMapper;
 import ooo.klae.connex.backend.mappers.RuleMapper;
 import ooo.klae.connex.backend.mappers.SavedViewMapper;
 import ooo.klae.connex.backend.mappers.UserDashboardMapper;
-
-import java.util.List;
 
 /**
  * Proves the service-layer offboarding fan-out does what the dropped
@@ -73,7 +73,7 @@ class UserOffboardingServiceTest extends AbstractServiceTest {
         Task task = newTask(target, null, null);
         SavedView view = savedView(target);
         userDashboardMapper.upsert(dashboard(target));
-        notificationMapper.upsert(notificationFor(target));
+        newNotification(workspace.getId(), target.getId());
         Rule rule = ruleFor(target);
 
         offboardingService.eraseOrgDataReferences(target.getId());
@@ -90,6 +90,23 @@ class UserOffboardingServiceTest extends AbstractServiceTest {
         assertEquals(target.getDisplayName(), userMapper.getUserById(target.getId()).getDisplayName());
     }
 
+    @Test
+    void memberDetachmentCleansContentWhileTheMembershipStillExists() {
+        User member = newUser();
+        Pipeline pipeline = newPipeline();
+        Deal deal = newDeal(pipeline, newStage(pipeline, 1), newCompany());
+        dealMapper.insertCollaborators(workspace.getId(), deal.getId(), List.of(member.getId()));
+        newNotification(workspace.getId(), member.getId());
+        Task task = newTask(member, null, null);
+
+        offboardingService.detachMemberContent(workspace.getId(), member.getId());
+
+        assertTrue(dealMapper.getCollaborators(workspace.getId(), deal.getId()).isEmpty());
+        assertEquals(0, notificationMapper.countPage(member.getId(), null, null, null, null));
+        assertNull(taskMapper.getTaskById(workspace.getId(), task.getId()).getAssignedTo());
+        assertTrue(workspaceMapper.isMember(workspace.getId(), member.getId()));
+    }
+
     private SavedView savedView(User owner) {
         SavedView view = new SavedView();
         view.setWorkspaceId(workspace.getId());
@@ -101,27 +118,14 @@ class UserOffboardingServiceTest extends AbstractServiceTest {
         return view;
     }
 
-    private ooo.klae.connex.backend.beans.UserDashboard dashboard(User owner) {
-        ooo.klae.connex.backend.beans.UserDashboard dashboard = new ooo.klae.connex.backend.beans.UserDashboard();
+    private UserDashboard dashboard(User owner) {
+        UserDashboard dashboard = new UserDashboard();
         dashboard.setWorkspaceId(workspace.getId());
         dashboard.setUserId(owner.getId());
         dashboard.setLayoutJson("{\"widgets\":[]}");
         return dashboard;
     }
 
-    private Notification notificationFor(User recipient) {
-        Notification notification = new Notification();
-        notification.setWorkspaceId(workspace.getId());
-        notification.setRecipientId(recipient.getId());
-        notification.setType("task.assigned");
-        notification.setCategory("tasks");
-        notification.setSeverity("info");
-        notification.setTemplateVersion(1);
-        notification.setTitle("Task assigned");
-        notification.setDedupeKey("offboarding-" + unique());
-        notification.setTriggeredAt("2026-07-11 00:00:00");
-        return notification;
-    }
 
     private Rule ruleFor(User user) {
         Rule rule = new Rule();

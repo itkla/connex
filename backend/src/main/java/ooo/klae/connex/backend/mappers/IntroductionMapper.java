@@ -48,5 +48,4 @@ public interface IntroductionMapper {
      * ON DELETE RESTRICT (#440 increment 3).
      */
     int countIntroducedAnywhere(@Param("userId") int userId);
-
 }

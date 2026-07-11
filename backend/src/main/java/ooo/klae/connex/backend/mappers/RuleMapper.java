@@ -57,5 +57,4 @@ public interface RuleMapper {
      * increment 3).
      */
     void clearCreatedByAnywhere(@Param("userId") int userId);
-
 }

@@ -55,5 +55,4 @@ public interface ActivityMapper {
      * increment 3).
      */
     int countCreatedAnywhere(@Param("userId") int userId);
-
 }

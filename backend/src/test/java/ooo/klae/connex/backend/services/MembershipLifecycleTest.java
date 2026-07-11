@@ -9,7 +9,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 
-import ooo.klae.connex.backend.beans.Notification;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.dto.WorkspaceMembershipDto;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
@@ -21,19 +20,6 @@ class MembershipLifecycleTest extends AbstractServiceTest {
     @Autowired InviteService inviteService;
     @Autowired NotificationMapper notificationMapper;
 
-    private void seedNotification(int workspaceId, int recipientId) {
-        Notification notification = new Notification();
-        notification.setWorkspaceId(workspaceId);
-        notification.setRecipientId(recipientId);
-        notification.setType("task.assigned");
-        notification.setCategory("tasks");
-        notification.setSeverity("info");
-        notification.setTemplateVersion(1);
-        notification.setTitle("Lifecycle " + unique());
-        notification.setDedupeKey("lifecycle-" + unique());
-        notification.setTriggeredAt("2026-07-11 00:00:00");
-        notificationMapper.upsert(notification);
-    }
 
     private long recipientNotificationCount(int recipientId) {
         return notificationMapper.countPage(recipientId, null, null, null, null);
@@ -97,7 +83,7 @@ class MembershipLifecycleTest extends AbstractServiceTest {
         WorkspaceMembershipDto ws = workspaceService.createWorkspace("Decline Notif WS", currentUser.getId());
         User invitee = newUser();
         inviteService.addExistingMember(ws.getId(), currentUser.getId(), invitee.getEmail(), "member");
-        seedNotification(ws.getId(), invitee.getId());
+        newNotification(ws.getId(), invitee.getId());
 
         workspaceService.declineMembership(ws.getId(), invitee.getId());
 
@@ -110,7 +96,7 @@ class MembershipLifecycleTest extends AbstractServiceTest {
         var pipeline = newPipeline();
         var deal = newDeal(pipeline, newStage(pipeline, 1), newCompany());
         dealMapper.insertCollaborators(workspace.getId(), deal.getId(), java.util.List.of(member.getId()));
-        seedNotification(workspace.getId(), member.getId());
+        newNotification(workspace.getId(), member.getId());
 
         workspaceService.removeMember(workspace.getId(), currentUser.getId(), member.getId());
 
@@ -121,7 +107,7 @@ class MembershipLifecycleTest extends AbstractServiceTest {
     @Test
     void leaveWorkspace_cleansTheLeaverContent() {
         User member = newUser();
-        seedNotification(workspace.getId(), member.getId());
+        newNotification(workspace.getId(), member.getId());
 
         workspaceService.leaveWorkspace(workspace.getId(), member.getId());
 

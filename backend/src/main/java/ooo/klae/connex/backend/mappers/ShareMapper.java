@@ -69,5 +69,4 @@ public interface ShareMapper {
      * ON DELETE SET NULL (#440 increment 3).
      */
     void clearPipelineShareGrantedByAnywhere(@Param("userId") int userId);
-
 }

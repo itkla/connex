@@ -514,11 +514,8 @@
 
   <delete id="deleteAllForRecipient">
     DELETE FROM notification
-    WHERE workspace_id = #{workspaceId} AND recipient_id = #{recipientId}
-  </delete>
-
-  <delete id="deleteAllForRecipientAnywhere">
-    DELETE FROM notification WHERE recipient_id = #{recipientId}
+    WHERE recipient_id = #{recipientId}
+    <if test="workspaceId != null">AND workspace_id = #{workspaceId}</if>
   </delete>
 
   <update id="clearActorAnywhere">

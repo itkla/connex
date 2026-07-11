@@ -242,5 +242,4 @@ public interface DealMapper {
      * deletion (#440 increment 3).
      */
     void removeCollaboratorAnywhere(@Param("userId") int userId);
-
 }

@@ -38,5 +38,4 @@ public interface NoteMapper {
      * is refused while authored notes exist (#440 increment 3).
      */
     int countAuthoredAnywhere(@Param("userId") int userId);
-
 }

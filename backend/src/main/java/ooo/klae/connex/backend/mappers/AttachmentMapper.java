@@ -46,5 +46,4 @@ public interface AttachmentMapper {
      * ON DELETE SET NULL (#440 increment 3).
      */
     void clearUploaderAnywhere(@Param("userId") int userId);
-
 }

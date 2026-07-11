@@ -128,9 +128,9 @@ public class UserService implements UserDetailsService {
         workspaceService.requireSelf(id);
         workspaceService.assertNotSoleOwnerOfAnyWorkspace(id);
         orgMemberService.assertNotSoleOwnerOfAnyOrg(id);
-        userOffboardingService.assertNoAuthoredContent(id);
         User before = getUserById(id);
         userOffboardingService.eraseOrgDataReferences(id);
+        userOffboardingService.assertNoAuthoredContent(id);
         userMapper.delete(id);
         auditService.record("user.delete", "user", id, before.getUsername(),
             "Deleted user " + before.getUsername(),

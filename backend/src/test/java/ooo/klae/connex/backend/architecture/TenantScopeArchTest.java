@@ -90,7 +90,7 @@ class TenantScopeArchTest {
         "ooo.klae.connex.backend.mappers.NotificationMapper.restore",
         "ooo.klae.connex.backend.mappers.NotificationMapper.snooze",
         "ooo.klae.connex.backend.mappers.NotificationMapper.markAllRead",
-        "ooo.klae.connex.backend.mappers.NotificationMapper.deleteAllForRecipientAnywhere",
+        "ooo.klae.connex.backend.mappers.NotificationMapper.deleteAllForRecipient",
         "ooo.klae.connex.backend.mappers.NotificationMapper.clearActorAnywhere",
         "ooo.klae.connex.backend.mappers.DealMapper.clearOwnershipAnywhere",
         "ooo.klae.connex.backend.mappers.DealMapper.removeCollaboratorAnywhere",

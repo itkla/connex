@@ -27,5 +27,4 @@ public interface SavedViewMapper {
      * CASCADE (#440 increment 3); personal data erased on account deletion.
      */
     void deleteForUserAnywhere(@Param("userId") int userId);
-
 }
