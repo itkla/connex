@@ -8,6 +8,7 @@ import { ArrowsRightLeftIcon, BuildingOffice2Icon, UsersIcon } from '@heroicons/
 import { Button } from '@/components/ui/button';
 import type { IntroSuggestion, TemperatureBand } from '@/app/lib/types';
 
+import IntroRationaleLine from './IntroRationaleLine';
 import IntroStrength from './IntroStrength';
 import PartyAvatar from './PartyAvatar';
 import WarmthBadge from './WarmthBadge';
@@ -100,6 +101,8 @@ export default function IntroSuggestionCard({
                     warmth={suggestion.personBWarmth}
                 />
             </div>
+
+            <IntroRationaleLine personAId={suggestion.personAId} personBId={suggestion.personBId} />
 
             <div className="mt-5 flex flex-wrap items-center justify-between gap-3">
                 <div className="flex flex-wrap gap-1.5">

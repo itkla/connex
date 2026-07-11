@@ -48,5 +48,10 @@
     "strengthGood": "良好",
     "strengthFair": "要検討",
     "strengthAria": "マッチ度: {level}"
+  },
+  "IntroRationale": {
+    "label": "AIインサイト",
+    "attribution": "AI生成 · {time}",
+    "integrityWarning": "一部の参照を確認できませんでした"
   }
 }

@@ -327,6 +327,23 @@ export type IntroSuggestion = {
     sharedCompany?: string | null;
 };
 
+export type IntroRationaleUnavailableReason = 'not_configured' | 'provider_error' | 'not_a_suggestion';
+
+/**
+ * AI-generated one-line rationale for a suggested reverse introduction, or a graceful unavailability
+ * result. Presentation-only: the deterministic {@link IntroSuggestion} reasons/chips remain the source
+ * of truth and the fallback. {@code not_a_suggestion} means the pair is no longer a current suggestion.
+ */
+export type IntroRationale = {
+    personAId: number;
+    personBId: number;
+    available: boolean;
+    rationale?: string | null;
+    generatedAt?: string | null;
+    warnings: number;
+    reason?: IntroRationaleUnavailableReason | null;
+};
+
 /** A recorded introduction in the lineage feed ("intros you've made"). */
 export type IntroductionRecord = {
     id: number;

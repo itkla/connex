@@ -1055,6 +1055,18 @@ export function getIntroSuggestions(init: RequestInit = {}, limit?: number) {
     return getJson<Types.IntroSuggestion[]>(`/api/introductions/suggestions${buildQuery({ limit })}`, init);
 }
 
+/**
+ * AI-generated "why introduce them" rationale for a suggested reverse introduction. Returns a graceful
+ * unavailability result (never an error) when AI is not configured or the pair is not a current
+ * suggestion; generation is slow (an LLM call), so fetch client-side. Mirrors {@link getDealRationale}.
+ */
+export function getIntroRationale(personAId: number, personBId: number, init: RequestInit = {}) {
+    return getJson<Types.IntroRationale>(
+        `/api/introductions/suggestions/rationale${buildQuery({ personA: personAId, personB: personBId })}`,
+        init,
+    );
+}
+
 export function getIntroSuggestionsFromCookie(cookie: string | null, limit?: number) {
     return safeWithCookie<Types.IntroSuggestion>((init) => getIntroSuggestions(init, limit), cookie);
 }

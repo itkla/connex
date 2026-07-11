@@ -48,5 +48,10 @@
     "strengthGood": "Good",
     "strengthFair": "Fair",
     "strengthAria": "Match strength: {level}"
+  },
+  "IntroRationale": {
+    "label": "AI insight",
+    "attribution": "AI-generated · {time}",
+    "integrityWarning": "Some references could not be verified"
   }
 }
