@@ -92,7 +92,7 @@ class IntroRationaleAssemblerTest {
     }
 
     @Test
-    void assemble_threadsRequestLocaleIntoSystemPrompt() {
+    void assemble_japaneseLocaleTranslatesOnlyJsonStringValues() {
         LocaleContextHolder.setLocale(Locale.JAPANESE);
         try {
             IntroSuggestionDto suggestion = new IntroSuggestionDto();
@@ -106,7 +106,11 @@ class IntroRationaleAssemblerTest {
 
             String systemPrompt = assembler.assemble(WORKSPACE_ID, suggestion).prompt().getSystemPrompt();
 
-            assertTrue(systemPrompt.contains("Japanese"));
+            assertTrue(systemPrompt.contains("Write every JSON string value in Japanese"));
+            assertTrue(systemPrompt.contains("keep all JSON property names"));
+            assertTrue(systemPrompt.contains("in English exactly as specified"));
+            assertTrue(systemPrompt.contains("do not translate the keys"));
+            assertTrue(systemPrompt.contains("\"rationale\""));
         } finally {
             LocaleContextHolder.resetLocaleContext();
         }

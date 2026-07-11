@@ -114,7 +114,7 @@ public class DealBriefAssembler {
         StringBuilder prompt = new StringBuilder("CRM_CONTEXT_BEGIN\nDEAL\n");
         appendValue(prompt, "Company", companyToken);
         appendValue(prompt, "Stage", summary == null ? null : maskAllowedText(summary.getStageName(), context));
-        appendValue(prompt, "Expected close", maskAllowedText(deal.getExpectedCloseDate(), context));
+        appendValue(prompt, "Expected close", maskTemporal(deal.getExpectedCloseDate(), context));
         if (Double.isFinite(deal.getValue())) {
             appendValue(prompt, "Value", amount(deal.getValue(), deal.getCurrency(), context));
         }
@@ -198,7 +198,7 @@ public class DealBriefAssembler {
                 continue;
             }
             String stage = maskAllowedText(history.getStageName(), context);
-            String achievedAt = maskAllowedText(history.getAchievedAt(), context);
+            String achievedAt = maskTemporal(history.getAchievedAt(), context);
             appendDigestLine(prompt, achievedAt, stage);
         }
     }
@@ -271,7 +271,7 @@ public class DealBriefAssembler {
             if (isBlank(digest)) {
                 continue;
             }
-            appendDigestLine(prompt, maskAllowedText(activity.getTimestamp(), context), digest);
+            appendDigestLine(prompt, maskTemporal(activity.getTimestamp(), context), digest);
             appended = true;
         }
         if (!appended) {
@@ -290,7 +290,7 @@ public class DealBriefAssembler {
             if (isBlank(digest)) {
                 continue;
             }
-            appendDigestLine(prompt, maskAllowedText(note.getCreatedAt(), context), digest);
+            appendDigestLine(prompt, maskTemporal(note.getCreatedAt(), context), digest);
             appended = true;
         }
         if (!appended) {
@@ -309,7 +309,7 @@ public class DealBriefAssembler {
             if (isBlank(digest)) {
                 continue;
             }
-            appendDigestLine(prompt, maskAllowedText(task.getDueDate(), context), digest);
+            appendDigestLine(prompt, maskTemporal(task.getDueDate(), context), digest);
             appended++;
             if (appended == MAX_TASKS) {
                 break;
@@ -343,6 +343,13 @@ public class DealBriefAssembler {
         }
         String normalized = value.strip().replace('\r', ' ').replace('\n', ' ').replace('\t', ' ');
         return truncate(MaskingEngine.maskFreeText(normalized, context), MAX_ALLOWED_TEXT_CHARS);
+    }
+
+    private static String maskTemporal(String value, MaskingContext context) {
+        if (isBlank(value)) {
+            return "";
+        }
+        return truncate(MaskingEngine.maskTemporal(value, context), MAX_ALLOWED_TEXT_CHARS);
     }
 
     private static String amount(double value, String currency, MaskingContext context) {

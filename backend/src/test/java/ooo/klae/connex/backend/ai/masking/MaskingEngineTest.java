@@ -54,7 +54,7 @@ class MaskingEngineTest {
                 "warmth", "hot",
                 "stage", "renewal"));
 
-        assertDoesNotThrow(() -> OutboundLeakScan.assertNoLeak(serialized, ctx));
+        assertDoesNotThrow(() -> OutboundLeakScan.assertNoLeak(serialized, ctx, objectMapper));
         for (String rawValue : ctx.identifierDictionary()) {
             assertFalse(containsIgnoreCase(serialized, rawValue), rawValue);
         }
@@ -66,7 +66,30 @@ class MaskingEngineTest {
         MaskingEngine.maskField(EntityKind.PERSON, "Ann Smith", ctx);
         String serialized = objectMapper.writeValueAsString(Map.of("message", "Please contact Ann Smith."));
 
-        assertThrows(MaskingLeakException.class, () -> OutboundLeakScan.assertNoLeak(serialized, ctx));
+        assertThrows(MaskingLeakException.class, () -> OutboundLeakScan.assertNoLeak(serialized, ctx, objectMapper));
+    }
+
+    @Test
+    void leakScanThrowsWhenJsonEscapingHidesRawIdentifiers() throws Exception {
+        MaskingContext quoted = new MaskingContext();
+        MaskingEngine.maskField(EntityKind.PERSON, "Bob \"The Buyer\"", quoted);
+        String quotedPayload = objectMapper.writeValueAsString(Map.of("message", "Ask Bob \"The Buyer\" today"));
+
+        MaskingContext slashed = new MaskingContext();
+        MaskingEngine.maskField(EntityKind.COMPANY, "Acme\\North", slashed);
+        String slashedPayload = objectMapper.writeValueAsString(Map.of("message", "Acme\\North is ready"));
+
+        assertThrows(MaskingLeakException.class,
+                () -> OutboundLeakScan.assertNoLeak(quotedPayload, quoted, objectMapper));
+        assertThrows(MaskingLeakException.class,
+                () -> OutboundLeakScan.assertNoLeak(slashedPayload, slashed, objectMapper));
+
+        MaskingContext keyed = new MaskingContext();
+        MaskingEngine.maskField(EntityKind.PERSON, "Bob Smith", keyed);
+        String keyedPayload = "{\"Bob\\u0020Smith\":\"safe\"}";
+
+        assertThrows(MaskingLeakException.class,
+                () -> OutboundLeakScan.assertNoLeak(keyedPayload, keyed, objectMapper));
     }
 
     @Test
@@ -90,7 +113,19 @@ class MaskingEngineTest {
         assertFalse(masked.contains(url));
         assertFalse(masked.contains(bareUrl));
         assertFalse(masked.contains(accountNumber));
-        assertDoesNotThrow(() -> OutboundLeakScan.assertNoLeak(masked, ctx));
+        assertDoesNotThrow(() -> OutboundLeakScan.assertNoLeak(masked, ctx, objectMapper));
+    }
+
+    @Test
+    void maskTemporal_preservesStructuredIsoValuesWithoutWeakeningFreeTextPhoneRedaction() {
+        MaskingContext ctx = new MaskingContext();
+
+        assertEquals("2026-08-31", MaskingEngine.maskTemporal("2026-08-31", ctx));
+        assertEquals("2026-07-01 09:00:00", MaskingEngine.maskTemporal("2026-07-01 09:00:00", ctx));
+        assertEquals("2026-07-01T09:00:00.123456789Z",
+                MaskingEngine.maskTemporal("2026-07-01T09:00:00.123456789Z", ctx));
+        assertEquals(MaskingEngine.REDACTED, MaskingEngine.maskFreeText("2026-07-10", ctx));
+        assertEquals(MaskingEngine.REDACTED, MaskingEngine.maskTemporal("2026-07-10-555-1212", ctx));
     }
 
     @Test
@@ -150,10 +185,11 @@ class MaskingEngineTest {
         String masked = MaskingEngine.maskFreeText("Met Acme  Corp and Ａｃｍｅ Ｃｏｒｐ.", ctx);
 
         assertEquals("Met " + company + " and " + company + ".", masked);
-        assertDoesNotThrow(() -> OutboundLeakScan.assertNoLeak(masked, ctx));
+        assertDoesNotThrow(() -> OutboundLeakScan.assertNoLeak(masked, ctx, objectMapper));
     }
 
     private static boolean containsIgnoreCase(String value, String needle) {
         return value.toLowerCase(Locale.ROOT).contains(needle.toLowerCase(Locale.ROOT));
     }
+
 }

@@ -3,21 +3,28 @@ package ooo.klae.connex.backend.ai.provider.openai;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.net.InetAddress;
 import java.net.URI;
-import java.net.http.HttpClient;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.Objects;
 
+import org.apache.hc.client5.http.config.ConnectionConfig;
+import org.apache.hc.client5.http.impl.classic.CloseableHttpClient;
+import org.apache.hc.client5.http.impl.classic.HttpClients;
+import org.apache.hc.client5.http.impl.io.PoolingHttpClientConnectionManagerBuilder;
+import org.apache.hc.core5.io.CloseMode;
+import org.apache.hc.core5.util.Timeout;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
-import org.springframework.http.client.JdkClientHttpRequestFactory;
+import org.springframework.http.client.HttpComponentsClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
 
 import ooo.klae.connex.backend.ai.AiProperties;
-import ooo.klae.connex.backend.ai.egress.AiEgressGuard;
+import ooo.klae.connex.backend.ai.egress.AiEndpointAddressValidator;
+import ooo.klae.connex.backend.ai.egress.PinnedHostDnsResolver;
 import ooo.klae.connex.backend.ai.provider.AiCredentials;
 import ooo.klae.connex.backend.ai.provider.AiProviderException;
 
@@ -32,25 +39,34 @@ public class OpenAiCompatibleClient {
 
     private final RestClient restClient;
     private final int maxResponseBytes;
+    private final Duration connectTimeout;
+    private final Duration requestTimeout;
+    private final AiEndpointAddressValidator endpointAddressValidator;
 
     @Autowired
-    public OpenAiCompatibleClient(AiProperties aiProperties) {
+    public OpenAiCompatibleClient(
+            AiProperties aiProperties, AiEndpointAddressValidator endpointAddressValidator) {
         Objects.requireNonNull(aiProperties, "aiProperties");
-        HttpClient httpClient = HttpClient.newBuilder()
-                .followRedirects(HttpClient.Redirect.NEVER)
-                .connectTimeout(duration(aiProperties.getConnectTimeoutMs(), "connect timeout"))
-                .build();
-        JdkClientHttpRequestFactory requestFactory = new JdkClientHttpRequestFactory(httpClient);
-        requestFactory.setReadTimeout(duration(aiProperties.getRequestTimeoutMs(), "request timeout"));
-        this.restClient = RestClient.builder()
-                .requestFactory(requestFactory)
-                .build();
+        this.restClient = null;
+        this.connectTimeout = duration(aiProperties.getConnectTimeoutMs(), "connect timeout");
+        this.requestTimeout = duration(aiProperties.getRequestTimeoutMs(), "request timeout");
         this.maxResponseBytes = positiveInt(aiProperties.getMaxResponseBytes(), "max response bytes");
+        this.endpointAddressValidator = Objects.requireNonNull(endpointAddressValidator, "endpointAddressValidator");
     }
 
     OpenAiCompatibleClient(RestClient restClient, int maxResponseBytes) {
+        this(restClient, maxResponseBytes, new AiEndpointAddressValidator(new AiProperties()));
+    }
+
+    OpenAiCompatibleClient(
+            RestClient restClient,
+            int maxResponseBytes,
+            AiEndpointAddressValidator endpointAddressValidator) {
         this.restClient = Objects.requireNonNull(restClient, "restClient");
         this.maxResponseBytes = positiveInt(maxResponseBytes, "max response bytes");
+        this.connectTimeout = null;
+        this.requestTimeout = null;
+        this.endpointAddressValidator = Objects.requireNonNull(endpointAddressValidator, "endpointAddressValidator");
     }
 
     /**
@@ -75,7 +91,14 @@ public class OpenAiCompatibleClient {
         byte[] body = requestBodyJson.getBytes(StandardCharsets.UTF_8);
         OpenAiCompatibleResponse response;
         try {
-            response = sendOnce(endpoint, host, allowInternalEndpoint, apiKey, body);
+            InetAddress pinnedAddress = endpointAddressValidator.resolveFetchable(host, allowInternalEndpoint);
+            if (restClient != null) {
+                response = sendOnce(restClient, endpoint, apiKey, body);
+            } else {
+                try (PinnedRestClient pinned = pinnedRestClient(host, pinnedAddress)) {
+                    response = sendOnce(pinned.restClient(), endpoint, apiKey, body);
+                }
+            }
         } catch (AiProviderException exception) {
             throw exception;
         } catch (RestClientException exception) {
@@ -90,19 +113,44 @@ public class OpenAiCompatibleClient {
         return new String(response.body(), StandardCharsets.UTF_8);
     }
 
-    private OpenAiCompatibleResponse sendOnce(URI endpoint, String host, boolean allowInternalEndpoint,
-            String apiKey, byte[] body) {
-        RestClient.RequestBodySpec spec = restClient.post()
+    private OpenAiCompatibleResponse sendOnce(
+            RestClient client, URI endpoint, String apiKey, byte[] body) {
+        RestClient.RequestBodySpec spec = client.post()
                 .uri(endpoint)
                 .contentType(MediaType.APPLICATION_JSON)
                 .accept(MediaType.APPLICATION_JSON);
         if (apiKey != null && !apiKey.isBlank()) {
             spec = spec.header("Authorization", "Bearer " + apiKey);
         }
-        AiEgressGuard.requireFetchableHost(host, allowInternalEndpoint);
         return spec.body(body)
                 .exchange((request, response) -> new OpenAiCompatibleResponse(
                         response.getStatusCode().value(), readBounded(response.getBody())));
+    }
+
+    private PinnedRestClient pinnedRestClient(String host, InetAddress address) {
+        Timeout connect = Timeout.of(connectTimeout);
+        Timeout request = Timeout.of(requestTimeout);
+        ConnectionConfig connectionConfig = ConnectionConfig.custom()
+            .setConnectTimeout(connect)
+            .setSocketTimeout(request)
+            .build();
+        var connectionManager = PoolingHttpClientConnectionManagerBuilder.create()
+            .setDnsResolver(new PinnedHostDnsResolver(host, address))
+            .setDefaultConnectionConfig(connectionConfig)
+            .setMaxConnPerRoute(1)
+            .setMaxConnTotal(1)
+            .build();
+        CloseableHttpClient httpClient = HttpClients.custom()
+            .setConnectionManager(connectionManager)
+            .disableAutomaticRetries()
+            .disableRedirectHandling()
+            .build();
+        HttpComponentsClientHttpRequestFactory requestFactory =
+            new HttpComponentsClientHttpRequestFactory(httpClient);
+        requestFactory.setConnectionRequestTimeout(connectTimeout);
+        requestFactory.setReadTimeout(requestTimeout);
+        RestClient pinned = RestClient.builder().requestFactory(requestFactory).build();
+        return new PinnedRestClient(pinned, httpClient);
     }
 
     private byte[] readBounded(InputStream input) throws IOException {
@@ -174,6 +222,14 @@ public class OpenAiCompatibleClient {
         @Override
         public String toString() {
             return "OpenAiCompatibleResponse[redacted]";
+        }
+    }
+
+    private record PinnedRestClient(RestClient restClient, CloseableHttpClient httpClient)
+            implements AutoCloseable {
+        @Override
+        public void close() {
+            httpClient.close(CloseMode.GRACEFUL);
         }
     }
 }

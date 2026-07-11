@@ -153,7 +153,7 @@ class VertexAdapterTest {
                 () -> adapter.complete(request("mistral-large", null)));
         assertEquals("Unsupported Vertex model", unsupported.getMessage());
 
-        for (String modelId : List.of("claude/sonnet-4", "gemini..flash")) {
+        for (String modelId : List.of("claude/sonnet-4", "gemini..flash", "Gemini-2.5-pro")) {
             AiProviderException invalid = assertThrows(AiProviderException.class,
                     () -> adapter.complete(request(modelId, null)));
             assertEquals("Invalid Vertex model id", invalid.getMessage());

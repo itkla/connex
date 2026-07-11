@@ -6,6 +6,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.stream.Collectors;
 
@@ -14,6 +15,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.context.i18n.LocaleContextHolder;
 
 import ooo.klae.connex.backend.ai.AiRelationshipContext;
 import ooo.klae.connex.backend.ai.masking.MaskedMessage;
@@ -128,6 +130,25 @@ class DealRiskRationaleAssemblerTest {
         assertTrue(serialized.contains("Value: 50000000 JPY"));
         assertFalse(serialized.contains("5.0E7"));
         assertFalse(serialized.contains("E7"));
+    }
+
+    @Test
+    void assemble_japaneseLocaleTranslatesOnlyJsonStringValues() {
+        DealRiskDto risk = new DealRiskDto(
+                DEAL_ID, 0, "JPY", "medium", 25, List.of(), "2026-07-09 18:30:00");
+        LocaleContextHolder.setLocale(Locale.JAPANESE);
+        try {
+            String systemPrompt = assembler.assemble(WORKSPACE_ID, DEAL_ID, risk).prompt().getSystemPrompt();
+
+            assertTrue(systemPrompt.contains("Write every JSON string value in Japanese"));
+            assertTrue(systemPrompt.contains("keep all JSON property names"));
+            assertTrue(systemPrompt.contains("in English exactly as specified"));
+            assertTrue(systemPrompt.contains("do not translate the keys"));
+            assertTrue(systemPrompt.contains("\"narrative\""));
+            assertTrue(systemPrompt.contains("\"actions\""));
+        } finally {
+            LocaleContextHolder.resetLocaleContext();
+        }
     }
 
     private static String serialized(MaskedPrompt prompt) {

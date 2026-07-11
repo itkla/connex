@@ -315,8 +315,16 @@ export default async function DealPage({ params }: { params: { id: number } }) {
 
                 <Rise delay={0.15}>
                     <div className="flex flex-col gap-6 lg:flex-row lg:items-stretch lg:gap-4">
-                        <DealBriefPanel dealId={deal.id} className="min-w-0 lg:flex-[2]" />
-                        <DealRationalePanel dealId={deal.id} className="min-w-0 lg:flex-[1]" />
+                        <DealBriefPanel
+                            key={`deal-brief-${deal.id}`}
+                            dealId={deal.id}
+                            className="min-w-0 lg:flex-[2]"
+                        />
+                        <DealRationalePanel
+                            key={`deal-rationale-${deal.id}`}
+                            dealId={deal.id}
+                            className="min-w-0 lg:flex-[1]"
+                        />
                     </div>
                 </Rise>
 

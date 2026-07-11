@@ -102,7 +102,11 @@ export default function IntroSuggestionCard({
                 />
             </div>
 
-            <IntroRationaleLine personAId={suggestion.personAId} personBId={suggestion.personBId} />
+            <IntroRationaleLine
+                key={`intro-rationale-${suggestion.personAId}-${suggestion.personBId}`}
+                personAId={suggestion.personAId}
+                personBId={suggestion.personBId}
+            />
 
             <div className="mt-5 flex flex-wrap items-center justify-between gap-3">
                 <div className="flex flex-wrap gap-1.5">

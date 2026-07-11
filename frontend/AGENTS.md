@@ -64,12 +64,13 @@ When in doubt, open a reference page and mirror it.
 - **The backend is reached at `/api/*`.** `next.config.ts` rewrites `/api/:path*` → `http://localhost:8080/api/:path*`, so the backend must be running (`./gradlew bootRun`) for the app to work. A few Next route handlers under `app/api/*` (uploads, logo/avatar) proxy specific flows — extend those patterns rather than inventing new ones.
 - **Use the shared API client** in `app/lib/api.ts`; types in `app/lib/types.ts` must match backend DTOs. Don't scatter raw `fetch` calls.
 - **Auth/session is cookie-based** (`JSESSIONID` + `connex_workspace`), enforced in `proxy.ts` (route protection, login/onboarding/invite redirects). When adding protected routes, update the prefixes there.
+- **Slow AI request de-duplication is identity-bound.** The shared client keys in-flight AI mutations by the opaque server-issued authenticated-session generation from `/api/auth/csrf`, workspace, and locale; auth/workspace transitions must invalidate locally and notify other tabs without persisting user or session identifiers.
 - **Surface errors as toasts** via `app/lib/toast.ts` (`sonner`) — don't swallow failures or leave dead UI. Handle loading and error states explicitly.
 
 ## Internationalization (EN + JA)
 
 - Connex is **bilingual: English and Japanese.** Every user-facing string goes through `next-intl` — add keys to **both** `messages/en` and `messages/ja`. Never hardcode copy.
-- Config lives in `i18n/request.ts`. Use the Japanese font (`--font-noto-sans-jp`) where JA renders; don't assume Latin-only text widths in layouts.
+- Supported locales and the default live in `i18n/config.ts`; request message loading lives in `i18n/request.ts`. Use the Japanese font (`--font-noto-sans-jp`) where JA renders; don't assume Latin-only text widths in layouts.
 
 ## Accessibility
 

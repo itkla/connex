@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { LightBulbIcon } from '@heroicons/react/24/outline';
 
-import { getIntroRationale } from '@/app/lib/api';
+import { generateIntroRationale } from '@/app/lib/api';
 import type { IntroRationale } from '@/app/lib/types';
 import { Skeleton } from '@/components/ui/skeleton';
 
@@ -12,6 +12,8 @@ type RationaleState =
     | { status: 'loading' }
     | { status: 'hidden' }
     | { status: 'ready'; rationale: IntroRationale };
+
+type IntroRationaleState = RationaleState & { pairKey: string };
 
 /**
  * AI-generated one-line "why introduce them" rationale for the lead reverse-introduction suggestion —
@@ -29,27 +31,29 @@ export default function IntroRationaleLine({
     personBId: number;
 }) {
     const t = useTranslations('IntroRationale');
-    const [state, setState] = useState<RationaleState>({ status: 'loading' });
+    const pairKey = `${Math.min(personAId, personBId)}:${Math.max(personAId, personBId)}`;
+    const [storedState, setStoredState] = useState<IntroRationaleState>({ pairKey, status: 'loading' });
+    const state: RationaleState = storedState.pairKey === pairKey ? storedState : { status: 'loading' };
 
     useEffect(() => {
         let cancelled = false;
         (async () => {
             try {
-                const rationale = await getIntroRationale(personAId, personBId);
+                const rationale = await generateIntroRationale(personAId, personBId);
                 if (cancelled) return;
                 if (rationale.available && rationale.rationale) {
-                    setState({ status: 'ready', rationale });
+                    setStoredState({ pairKey, status: 'ready', rationale });
                 } else {
-                    setState({ status: 'hidden' });
+                    setStoredState({ pairKey, status: 'hidden' });
                 }
             } catch {
-                if (!cancelled) setState({ status: 'hidden' });
+                if (!cancelled) setStoredState({ pairKey, status: 'hidden' });
             }
         })();
         return () => {
             cancelled = true;
         };
-    }, [personAId, personBId]);
+    }, [pairKey, personAId, personBId]);
 
     if (state.status === 'hidden') return null;
 

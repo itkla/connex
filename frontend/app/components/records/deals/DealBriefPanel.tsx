@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useLocale, useTranslations } from 'next-intl';
 import { ArrowPathIcon, SparklesIcon } from '@heroicons/react/24/outline';
 
-import { getDealBrief } from '@/app/lib/api';
+import { generateDealBrief } from '@/app/lib/api';
 import type { DealBrief } from '@/app/lib/types';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
@@ -16,6 +16,8 @@ type BriefState =
     | { status: 'error' }
     | { status: 'ready'; brief: DealBrief };
 
+type DealBriefState = BriefState & { dealId: number };
+
 /**
  * AI-generated "before you call" brief on the deal-detail page — the sibling of
  * {@link DealRiskPanel}. Fetches on mount: organizations without a configured BYOP provider get a
@@ -26,7 +28,8 @@ type BriefState =
 export default function DealBriefPanel({ dealId, className }: { dealId: number; className?: string }) {
     const t = useTranslations('DealBrief');
     const locale = useLocale();
-    const [state, setState] = useState<BriefState>({ status: 'loading' });
+    const [storedState, setStoredState] = useState<DealBriefState>({ dealId, status: 'loading' });
+    const state: BriefState = storedState.dealId === dealId ? storedState : { status: 'loading' };
 
     const [reloadKey, setReloadKey] = useState(0);
     const refreshNext = useRef(false);
@@ -37,17 +40,17 @@ export default function DealBriefPanel({ dealId, className }: { dealId: number; 
         refreshNext.current = false;
         (async () => {
             try {
-                const brief = await getDealBrief(dealId, refresh);
+                const brief = await generateDealBrief(dealId, refresh);
                 if (cancelled) return;
                 if (brief.available && ((brief.sections && brief.sections.length > 0) || brief.brief)) {
-                    setState({ status: 'ready', brief });
+                    setStoredState({ dealId, status: 'ready', brief });
                 } else if (brief.reason === 'provider_error') {
-                    setState({ status: 'error' });
+                    setStoredState({ dealId, status: 'error' });
                 } else {
-                    setState({ status: 'hidden' });
+                    setStoredState({ dealId, status: 'hidden' });
                 }
             } catch {
-                if (!cancelled) setState({ status: 'error' });
+                if (!cancelled) setStoredState({ dealId, status: 'error' });
             }
         })();
         return () => {
@@ -56,13 +59,13 @@ export default function DealBriefPanel({ dealId, className }: { dealId: number; 
     }, [dealId, reloadKey]);
 
     const retry = () => {
-        setState({ status: 'loading' });
+        setStoredState({ dealId, status: 'loading' });
         setReloadKey((key) => key + 1);
     };
 
     const regenerate = () => {
         refreshNext.current = true;
-        setState({ status: 'loading' });
+        setStoredState({ dealId, status: 'loading' });
         setReloadKey((key) => key + 1);
     };
 

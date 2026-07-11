@@ -6,6 +6,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -15,6 +16,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.context.i18n.LocaleContextHolder;
 
 import ooo.klae.connex.backend.ai.AiRelationshipContext;
 import ooo.klae.connex.backend.ai.masking.MaskedMessage;
@@ -115,8 +117,32 @@ class DealBriefAssemblerTest {
         assertFalse(serialized.contains("mina.patel@acme.example"));
         assertFalse(serialized.contains("+1 415 555 0199"));
         assertFalse(serialized.contains("1 Market Street"));
+        assertTrue(serialized.contains("2026-08-31"));
+        assertTrue(serialized.contains("2026-07-01 09:00:00"));
+        assertTrue(serialized.contains("2026-07-08 14:00:00"));
+        assertTrue(serialized.contains("2026-07-07 16:00:00"));
+        assertTrue(serialized.contains("2026-07-10"));
         verify(scoringService).scoreContacts(WORKSPACE_ID, Set.of(PERSON_ID));
         verify(dealRiskService).assessDeal(WORKSPACE_ID, DEAL_ID);
+    }
+
+    @Test
+    void assemble_japaneseLocaleTranslatesOnlyJsonStringValues() {
+        when(dealService.getDealById(DEAL_ID)).thenReturn(deal());
+        LocaleContextHolder.setLocale(Locale.JAPANESE);
+        try {
+            String systemPrompt = assembler.assemble(WORKSPACE_ID, DEAL_ID).prompt().getSystemPrompt();
+
+            assertTrue(systemPrompt.contains("Write every JSON string value in Japanese"));
+            assertTrue(systemPrompt.contains("keep all JSON property names"));
+            assertTrue(systemPrompt.contains("in English exactly as specified"));
+            assertTrue(systemPrompt.contains("do not translate the keys"));
+            assertTrue(systemPrompt.contains("\"sections\""));
+            assertTrue(systemPrompt.contains("\"title\""));
+            assertTrue(systemPrompt.contains("\"body\""));
+        } finally {
+            LocaleContextHolder.resetLocaleContext();
+        }
     }
 
     private static Deal deal() {

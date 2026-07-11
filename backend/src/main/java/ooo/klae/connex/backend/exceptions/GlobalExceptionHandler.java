@@ -10,6 +10,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.AuthenticationException;
 import org.springframework.http.converter.HttpMessageNotReadableException;
+import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
@@ -99,6 +100,13 @@ public class GlobalExceptionHandler {
     public ResponseEntity<String> missingParameter(MissingServletRequestParameterException ex) {
         return ResponseEntity.status(HttpStatus.BAD_REQUEST)
                 .body("Missing required parameter: " + ex.getParameterName());
+    }
+
+    @ExceptionHandler(HttpRequestMethodNotSupportedException.class)
+    public ResponseEntity<String> methodNotSupported(HttpRequestMethodNotSupportedException ex) {
+        return ResponseEntity.status(ex.getStatusCode())
+                .headers(ex.getHeaders())
+                .body("Request method is not supported");
     }
 
     @ExceptionHandler(RequestBodyTooLargeException.class)
