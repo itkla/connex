@@ -17,8 +17,8 @@ import ooo.klae.connex.backend.ai.masking.OutboundLeakScan;
 import ooo.klae.connex.backend.ai.provider.AiCompletionRequest;
 import ooo.klae.connex.backend.ai.provider.AiCompletionResult;
 import ooo.klae.connex.backend.ai.provider.AiMessage;
-import ooo.klae.connex.backend.ai.provider.AiProvider;
 import ooo.klae.connex.backend.ai.provider.AiProviderException;
+import ooo.klae.connex.backend.ai.provider.AiProviderRouter;
 import ooo.klae.connex.backend.ai.provider.ResolvedAiProvider;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.services.AiProviderConfigService;
@@ -40,7 +40,7 @@ public class AiInvocationService {
 
     private final AiFeatureGate aiFeatureGate;
     private final AiProviderConfigService aiProviderConfigService;
-    private final AiProvider aiProvider;
+    private final AiProviderRouter aiProviderRouter;
     private final WorkspaceService workspaceService;
     private final AuditService auditService;
     private final ObjectMapper objectMapper;
@@ -95,7 +95,8 @@ public class AiInvocationService {
                 null, null, null, null, null);
 
         try {
-            AiCompletionResult result = aiProvider.complete(request(resolved, invocation));
+            AiCompletionResult result = aiProviderRouter.adapterFor(resolved.provider())
+                    .complete(request(resolved, invocation));
             Demasker.DemaskResult demasked = Demasker.demask(result.text(), invocation.context());
             emitAudit(workspaceId, orgId, resolved, invocation, correlationId, "success",
                     result.inputTokens(), result.outputTokens(), result.stopReason(), demasked.warnings(), null);

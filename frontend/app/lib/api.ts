@@ -1253,6 +1253,25 @@ export function getDealBrief(id: number, init: RequestInit = {}) {
     return getJson<Types.DealBrief>(`/api/deals/${id}/brief`, init);
 }
 
+/**
+ * Org-admin BYOP AI provider settings, addressed through the acting workspace. Saving requires
+ * recent authentication (step-up); credentials are write-only and never returned.
+ */
+export function getAiProviderConfig(workspaceId: number, init: RequestInit = {}) {
+    return getJson<Types.AiProviderConfig>(`/api/ai/provider?workspaceId=${workspaceId}`, {
+        cache: "no-store",
+        ...init,
+    });
+}
+
+export function saveAiProviderConfig(workspaceId: number, request: Types.AiProviderConfigRequest) {
+    return putJson<Types.AiProviderConfig>(`/api/ai/provider?workspaceId=${workspaceId}`, request);
+}
+
+export function revokeAiProviderConfig(workspaceId: number) {
+    return deleteJson<void>(`/api/ai/provider?workspaceId=${workspaceId}`);
+}
+
 export function createDeal(payload: Types.CreateDealPayload) {
     return postJson<Types.Deal>(`/api/deals`, payload);
 }

@@ -1426,3 +1426,39 @@ export type SsoConnectionRequest = {
     samlIdpX509?: string | null;
     domains: string[];
 };
+
+export type AiProviderKind = "bedrock" | "azure_openai" | "vertex" | "openai_compatible";
+
+export type AiProviderConfig = {
+    provider: AiProviderKind | null;
+    region: string | null;
+    endpoint: string | null;
+    apiVersion: string | null;
+    deployment: string | null;
+    projectId: string | null;
+    allowInternalEndpoint: boolean;
+    modelId: string | null;
+    hasCredential: boolean;
+    credentialLast4: string | null;
+    noTrainingAttested: boolean;
+    enabled: boolean;
+    updatedAt: string | null;
+};
+
+export type AiProviderConfigRequest = {
+    provider: AiProviderKind;
+    modelId: string;
+    noTrainingAttested: boolean;
+    enabled: boolean;
+    region?: string | null;
+    endpoint?: string | null;
+    apiVersion?: string | null;
+    deployment?: string | null;
+    projectId?: string | null;
+    allowInternalEndpoint?: boolean;
+    accessKeyId?: string | null;
+    secretAccessKey?: string | null;
+    sessionToken?: string | null;
+    apiKey?: string | null;
+    serviceAccountJson?: string | null;
+};

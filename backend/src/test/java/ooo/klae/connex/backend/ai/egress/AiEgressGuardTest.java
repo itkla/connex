@@ -5,32 +5,62 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.net.InetAddress;
+import java.util.Set;
 
 import org.junit.jupiter.api.Test;
 
 import ooo.klae.connex.backend.ai.provider.AiProviderException;
-import ooo.klae.connex.backend.ai.provider.bedrock.BedrockRegion;
 
 class AiEgressGuardTest {
 
     @Test
-    void requireFetchable_rejectsNonAllowlistedHostsBeforeResolution() {
-        assertThrows(AiProviderException.class,
-                () -> AiEgressGuard.requireFetchable("bedrock-runtime.us-east-1.amazonaws.com.evil.com"));
-        assertThrows(AiProviderException.class, () -> AiEgressGuard.requireFetchable("evil.com"));
-        assertThrows(AiProviderException.class, () -> AiEgressGuard.requireFetchable("203.0.113.10"));
-        assertThrows(AiProviderException.class,
-                () -> AiEgressGuard.requireFetchable("bedrock-runtime.mars-1.amazonaws.com"));
+    void requireAllowlistedHost_allowsCaseInsensitiveMatchWithPublicResolution() throws Exception {
+        InetAddress[] publicAddresses = { InetAddress.getByName("8.8.8.8") };
+
+        assertDoesNotThrow(() -> AiEgressGuard.requireAllowlistedHost(
+                "CLOUD.EXAMPLE.COM", Set.of("cloud.example.com"), publicAddresses));
     }
 
     @Test
-    void requirePublicAddresses_allowsPublicResolvedAddresses() throws Exception {
-        InetAddress[] addresses = {
-                InetAddress.getByName("8.8.8.8"),
-                InetAddress.getByName("2606:4700:4700::1111")
-        };
+    void requireAllowlistedHost_rejectsNonAllowlistedHostBeforeAddressChecks() throws Exception {
+        InetAddress[] publicAddresses = { InetAddress.getByName("8.8.8.8") };
 
-        assertDoesNotThrow(() -> AiEgressGuard.requirePublicAddresses(BedrockRegion.US_EAST_1.host(), addresses));
+        assertThrows(AiProviderException.class, () -> AiEgressGuard.requireAllowlistedHost(
+                "cloud.example.com.evil.test", Set.of("cloud.example.com"), publicAddresses));
+        assertThrows(AiProviderException.class, () -> AiEgressGuard.requireAllowlistedHost(
+                "evil.test", Set.of("cloud.example.com"), publicAddresses));
+        assertThrows(AiProviderException.class, () -> AiEgressGuard.requireAllowlistedHost(
+                null, Set.of("cloud.example.com"), publicAddresses));
+    }
+
+    @Test
+    void requireFetchableHost_allowsPublicAndRejectsPrivateWhenPrivateIsDisabled() throws Exception {
+        InetAddress[] publicAddresses = { InetAddress.getByName("8.8.8.8") };
+        InetAddress[] privateAddresses = { InetAddress.getByName("10.0.0.1") };
+
+        assertDoesNotThrow(() -> AiEgressGuard.requireFetchableHost("public.example", false, publicAddresses));
+        assertThrows(AiProviderException.class,
+                () -> AiEgressGuard.requireFetchableHost("private.example", false, privateAddresses));
+    }
+
+    @Test
+    void requireFetchableHost_allowsPrivateOnlyWhenExplicitlyEnabled() throws Exception {
+        InetAddress[] privateAddresses = { InetAddress.getByName("192.168.1.20") };
+
+        assertDoesNotThrow(() -> AiEgressGuard.requireFetchableHost("private.example", true, privateAddresses));
+        assertThrows(AiProviderException.class,
+                () -> AiEgressGuard.requireFetchableHost("private.example", false, privateAddresses));
+    }
+
+    @Test
+    void requireFetchableHost_internalPathRejectsPublicAddresses() throws Exception {
+        InetAddress[] publicAddresses = { InetAddress.getByName("8.8.8.8") };
+        InetAddress[] mixed = { InetAddress.getByName("10.0.0.1"), InetAddress.getByName("8.8.8.8") };
+
+        assertThrows(AiProviderException.class,
+                () -> AiEgressGuard.requireFetchableHost("public.example", true, publicAddresses));
+        assertThrows(AiProviderException.class,
+                () -> AiEgressGuard.requireFetchableHost("mixed.example", true, mixed));
     }
 
     @Test
@@ -59,16 +89,19 @@ class AiEgressGuardTest {
     }
 
     @Test
-    void requirePublicAddresses_rejectsEmptyResolution() {
+    void requireFetchableHost_rejectsEmptyOrNullResolution() {
         assertThrows(AiProviderException.class,
-                () -> AiEgressGuard.requirePublicAddresses(BedrockRegion.US_EAST_1.host(), new InetAddress[0]));
+                () -> AiEgressGuard.requireFetchableHost("empty.example", true, new InetAddress[0]));
+        assertThrows(AiProviderException.class,
+                () -> AiEgressGuard.requireFetchableHost("empty.example", true, null));
+        assertThrows(AiProviderException.class,
+                () -> AiEgressGuard.requireFetchableHost("empty.example", true, new InetAddress[] { null }));
     }
 
     private static void assertBlocked(String address) throws Exception {
         InetAddress resolved = InetAddress.getByName(address);
-        assertTrue(AiEgressGuard.isBlocked(resolved));
+        assertTrue(AiEgressGuard.isBlocked(resolved), address);
         assertThrows(AiProviderException.class,
-                () -> AiEgressGuard.requirePublicAddresses(BedrockRegion.US_EAST_1.host(),
-                        new InetAddress[] { resolved }));
+                () -> AiEgressGuard.requirePublicAddresses("provider.example", new InetAddress[] { resolved }));
     }
 }

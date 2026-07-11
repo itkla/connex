@@ -80,15 +80,18 @@ public final class AwsSigV4Signer {
         requireText(host, "host");
         requireText(region, "region");
         requireText(service, "service");
-        requireCredentials(credentials);
+        Objects.requireNonNull(credentials, "credentials");
         Objects.requireNonNull(timestamp, "timestamp");
+        String accessKeyId = credentials.require("accessKeyId");
+        String secretAccessKey = credentials.require("secretAccessKey");
+        String sessionToken = credentials.get("sessionToken");
 
         String amzDate = AMZ_DATE_FORMAT.format(timestamp);
         String date = DATE_FORMAT.format(timestamp);
         String encodedPath = encodeCanonicalPath(rawPath);
         String canonicalPath = encodeCanonicalPath(encodedPath);
         String payloadHash = sha256Hex(requestBody == null ? new byte[0] : requestBody);
-        Map<String, String> headers = signedHeaders(host, contentType, amzDate, credentials.sessionToken());
+        Map<String, String> headers = signedHeaders(host, contentType, amzDate, sessionToken);
         String canonicalHeaders = canonicalHeaders(headers);
         String signedHeaders = signedHeaderNames(headers);
         String query = canonicalQueryString == null ? "" : canonicalQueryString;
@@ -103,13 +106,13 @@ public final class AwsSigV4Signer {
                 + amzDate + "\n"
                 + credentialScope + "\n"
                 + sha256Hex(canonicalRequest.getBytes(StandardCharsets.UTF_8));
-        String signature = hex(hmac(signingKey(credentials.secretAccessKey(), date, region, service),
+        String signature = hex(hmac(signingKey(secretAccessKey, date, region, service),
                 stringToSign.getBytes(StandardCharsets.UTF_8)));
         String authorization = ALGORITHM
-                + " Credential=" + credentials.accessKeyId() + "/" + credentialScope
+                + " Credential=" + accessKeyId + "/" + credentialScope
                 + ", SignedHeaders=" + signedHeaders
                 + ", Signature=" + signature;
-        return new SignedRequest(authorization, amzDate, credentials.sessionToken(), canonicalRequest,
+        return new SignedRequest(authorization, amzDate, sessionToken, canonicalRequest,
                 stringToSign, signature, encodedPath, signedHeaders);
     }
 
@@ -220,12 +223,6 @@ public final class AwsSigV4Signer {
             chars[index * 2 + 1] = HEX[value & 0x0F];
         }
         return new String(chars);
-    }
-
-    private static void requireCredentials(AiCredentials credentials) {
-        Objects.requireNonNull(credentials, "credentials");
-        requireText(credentials.accessKeyId(), "accessKeyId");
-        requireText(credentials.secretAccessKey(), "secretAccessKey");
     }
 
     private static void requireText(String value, String name) {

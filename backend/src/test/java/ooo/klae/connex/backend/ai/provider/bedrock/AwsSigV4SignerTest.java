@@ -5,16 +5,16 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
+import java.util.Map;
 
 import org.junit.jupiter.api.Test;
 
 import ooo.klae.connex.backend.ai.provider.AiCredentials;
 
 class AwsSigV4SignerTest {
-    private static final AiCredentials AWS_EXAMPLE_CREDENTIALS = new AiCredentials(
-            "AKIDEXAMPLE",
-            "wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY",
-            null);
+    private static final AiCredentials AWS_EXAMPLE_CREDENTIALS = AiCredentials.of(Map.of(
+            "accessKeyId", "AKIDEXAMPLE",
+            "secretAccessKey", "wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY"));
 
     @Test
     void awsPublishedIamVector_matchesCanonicalRequestStringToSignAndSignature() {
@@ -76,10 +76,10 @@ class AwsSigV4SignerTest {
 
     @Test
     void sessionToken_isIncludedInCanonicalAndSignedHeaders() {
-        AiCredentials temporaryCredentials = new AiCredentials(
-                "AKIDEXAMPLE",
-                "wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY",
-                "SESSION_TOKEN");
+        AiCredentials temporaryCredentials = AiCredentials.of(Map.of(
+                "accessKeyId", "AKIDEXAMPLE",
+                "secretAccessKey", "wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY",
+                "sessionToken", "SESSION_TOKEN"));
 
         AwsSigV4Signer.SignedRequest signed = AwsSigV4Signer.sign(
                 "POST",

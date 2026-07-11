@@ -158,6 +158,11 @@ connex:
         # no-retention attestation) and a member holds the AI_USE permission. Set
         # CONNEX_AI_ENABLED=false to disable AI for the whole instance.
         enabled: ${CONNEX_AI_ENABLED:true}
+        # Instance gate for org-configured private/internal OpenAI-compatible endpoints. Defaults
+        # false: on a shared multi-tenant deployment an org-supplied internal endpoint is an SSRF
+        # vector, so the org-level allowInternalEndpoint flag is honored only when the operator of
+        # a self-hosted instance opts in.
+        allow-internal-endpoints: ${CONNEX_AI_ALLOW_INTERNAL_ENDPOINTS:false}
         connect-timeout-ms: ${CONNEX_AI_CONNECT_TIMEOUT_MS:3000}
         request-timeout-ms: ${CONNEX_AI_REQUEST_TIMEOUT_MS:60000}
         max-response-bytes: ${CONNEX_AI_MAX_RESPONSE_BYTES:2097152}

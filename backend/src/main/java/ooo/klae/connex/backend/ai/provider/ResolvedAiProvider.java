@@ -5,15 +5,28 @@ import java.util.Objects;
 /**
  * Organization-scoped AI provider configuration resolved for a single model call.
  * @param provider provider id
- * @param region provider region code
+ * @param region nullable provider region or location
  * @param modelId provider model id
+ * @param endpoint nullable provider endpoint
+ * @param apiVersion nullable provider API version
+ * @param deployment nullable provider deployment
+ * @param projectId nullable provider project identifier
+ * @param allowInternalEndpoint whether private endpoint addresses are allowed
  * @param credentials decrypted credential material for provider use
  */
-public record ResolvedAiProvider(String provider, String region, String modelId, AiCredentials credentials) {
+public record ResolvedAiProvider(
+        String provider,
+        String region,
+        String modelId,
+        String endpoint,
+        String apiVersion,
+        String deployment,
+        String projectId,
+        boolean allowInternalEndpoint,
+        AiCredentials credentials) {
 
     public ResolvedAiProvider {
         Objects.requireNonNull(provider, "provider");
-        Objects.requireNonNull(region, "region");
         Objects.requireNonNull(modelId, "modelId");
         Objects.requireNonNull(credentials, "credentials");
     }
@@ -23,7 +36,8 @@ public record ResolvedAiProvider(String provider, String region, String modelId,
      * @return provider target without credential material
      */
     public AiProviderTarget target() {
-        return new AiProviderTarget(provider, region, modelId);
+        return new AiProviderTarget(provider, region, modelId, endpoint, apiVersion, deployment,
+                projectId, allowInternalEndpoint);
     }
 
     @Override
@@ -31,6 +45,11 @@ public record ResolvedAiProvider(String provider, String region, String modelId,
         return "ResolvedAiProvider[provider=" + provider
                 + ", region=" + region
                 + ", modelId=" + modelId
+                + ", endpoint=" + endpoint
+                + ", apiVersion=" + apiVersion
+                + ", deployment=" + deployment
+                + ", projectId=" + projectId
+                + ", allowInternalEndpoint=" + allowInternalEndpoint
                 + ", credentials=<redacted>]";
     }
 }
