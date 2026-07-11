@@ -23,6 +23,9 @@
       "organization": "Organization"
     },
     "create": {
+      "company": "New company",
+      "person": "New contact",
+      "deal": "New deal",
       "task": "New task",
       "note": "New note",
       "activity": "Log activity"
@@ -38,13 +41,22 @@
       "linkCopied": "Link copied to clipboard",
       "recordLinkCopied": "Link to {label} copied",
       "allNotificationsRead": "All notifications marked as read",
-      "runFailed": "Something went wrong. Please try again."
+      "runFailed": "Something went wrong. Please try again.",
+      "companyCreated": "Company created",
+      "personCreated": "Contact created",
+      "dealCreated": "Deal created",
+      "createFailed": "Couldn't create. Please try again.",
+      "companyContactsAllFailed": "Company created, but its {count} contacts couldn't be added.",
+      "companyContactsPartial": "Added {succeeded} of {total} contacts."
     },
     "keywords": {
       "navigate": {
         "contacts": "contacts, people, persons"
       },
       "create": {
+        "company": "company, org, organization, account",
+        "person": "person, contact, people, lead",
+        "deal": "deal, opportunity, sale",
         "task": "task, todo, to-do, reminder",
         "note": "note, memo",
         "activity": "activity, log, call, meeting, email"

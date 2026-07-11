@@ -23,6 +23,9 @@
       "organization": "組織"
     },
     "create": {
+      "company": "新しい会社",
+      "person": "新しい連絡先",
+      "deal": "新しい取引",
       "task": "新しいタスク",
       "note": "新しいノート",
       "activity": "アクティビティを記録"
@@ -38,13 +41,22 @@
       "linkCopied": "リンクをクリップボードにコピーしました",
       "recordLinkCopied": "{label} のリンクをコピーしました",
       "allNotificationsRead": "すべての通知を既読にしました",
-      "runFailed": "問題が発生しました。もう一度お試しください。"
+      "runFailed": "問題が発生しました。もう一度お試しください。",
+      "companyCreated": "会社を作成しました",
+      "personCreated": "連絡先を作成しました",
+      "dealCreated": "取引を作成しました",
+      "createFailed": "作成できませんでした。もう一度お試しください。",
+      "companyContactsAllFailed": "会社は作成しましたが、{count} 件の連絡先を追加できませんでした。",
+      "companyContactsPartial": "{total} 件中 {succeeded} 件の連絡先を追加しました。"
     },
     "keywords": {
       "navigate": {
         "contacts": "連絡先, 人, 担当者, コンタクト"
       },
       "create": {
+        "company": "会社, 組織, 取引先, アカウント",
+        "person": "連絡先, 人, 担当者, リード",
+        "deal": "取引, 商談, 案件",
         "task": "タスク, todo, やること, リマインダー",
         "note": "ノート, メモ",
         "activity": "アクティビティ, ログ, 通話, 会議, メール"

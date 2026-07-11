@@ -10,6 +10,9 @@ import type { OverlayRequest } from "@/app/lib/actions/types";
 const TaskDialog = dynamic(() => import("@/app/components/activity/tasks/TaskDialog"));
 const NoteDialog = dynamic(() => import("@/app/components/activity/notes/NoteDialog"));
 const ActivityDialog = dynamic(() => import("@/app/components/activity/activities/ActivityDialog"));
+const CompanyCreateContainer = dynamic(() => import("@/app/components/actions/create/CompanyCreateContainer"));
+const ContactCreateContainer = dynamic(() => import("@/app/components/actions/create/ContactCreateContainer"));
+const DealCreateContainer = dynamic(() => import("@/app/components/actions/create/DealCreateContainer"));
 
 /**
  * Renders the shell-owned create overlays that registry actions open. Each form is code-split and
@@ -78,6 +81,15 @@ export default function ActionOverlayHost({
             ) : null}
             {overlay?.kind === "create-activity" ? (
                 <ActivityDialog open onOpenChange={handleOpenChange} persons={[]} deals={[]} currentUserId={user.id} />
+            ) : null}
+            {overlay?.kind === "create-company" ? (
+                <CompanyCreateContainer open onOpenChange={handleOpenChange} />
+            ) : null}
+            {overlay?.kind === "create-person" ? (
+                <ContactCreateContainer open onOpenChange={handleOpenChange} defaults={overlay.defaults} />
+            ) : null}
+            {overlay?.kind === "create-deal" ? (
+                <DealCreateContainer open onOpenChange={handleOpenChange} defaults={overlay.defaults} />
             ) : null}
         </>
     );

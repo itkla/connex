@@ -12,10 +12,12 @@ import {
     FunnelIcon,
     HomeIcon,
     LinkIcon,
+    UserPlusIcon,
     UsersIcon,
 } from "@heroicons/react/24/outline";
 
 import { toastSuccess } from "@/app/lib/toast";
+import { deriveCreateDefaults } from "./createDefaults";
 import type { ActiveRecordRef, AppAction, RecordType } from "./types";
 
 const RECORD_PATHS: Record<RecordType, string | null> = {
@@ -57,10 +59,10 @@ function navigateAction(
 
 /**
  * The always-registered global actions the provider contributes: navigation to the primary
- * destinations, quick creation of the self-contained record types, and utility actions. Company,
- * person, and deal creation are intentionally deferred to the Quick Create work (#403), which extracts
- * their reusable form containers; the notification "mark all read" action is contributed separately by
- * a bridge that owns the notification context.
+ * destinations, quick creation of every core record type, and utility actions. Each create action
+ * opens a shell-owned overlay seeded with context-aware prefills derived from the current record; the
+ * notification "mark all read" action is contributed separately by a bridge that owns the notification
+ * context.
  */
 export const SEED_ACTIONS: readonly AppAction[] = [
     navigateAction("navigate.dashboard", "navigate.dashboard", "/dashboard", HomeIcon, 10),
@@ -78,15 +80,48 @@ export const SEED_ACTIONS: readonly AppAction[] = [
     }),
 
     {
+        id: "create.company",
+        group: "create",
+        labelKey: "create.company",
+        icon: BuildingOffice2Icon,
+        order: 10,
+        keywordsKey: "keywords.create.company",
+        execute: (context, helpers) => {
+            helpers.openOverlay({ kind: "create-company", defaults: deriveCreateDefaults(context, "company") });
+        },
+    },
+    {
+        id: "create.person",
+        group: "create",
+        labelKey: "create.person",
+        icon: UserPlusIcon,
+        order: 20,
+        keywordsKey: "keywords.create.person",
+        execute: (context, helpers) => {
+            helpers.openOverlay({ kind: "create-person", defaults: deriveCreateDefaults(context, "person") });
+        },
+    },
+    {
+        id: "create.deal",
+        group: "create",
+        labelKey: "create.deal",
+        icon: BriefcaseIcon,
+        order: 30,
+        keywordsKey: "keywords.create.deal",
+        execute: (context, helpers) => {
+            helpers.openOverlay({ kind: "create-deal", defaults: deriveCreateDefaults(context, "deal") });
+        },
+    },
+    {
         id: "create.task",
         group: "create",
         labelKey: "create.task",
         icon: CheckCircleIcon,
-        order: 10,
+        order: 40,
         shortcut: "mod+alt+t",
         keywordsKey: "keywords.create.task",
-        execute: (_context, helpers) => {
-            helpers.openOverlay({ kind: "create-task" });
+        execute: (context, helpers) => {
+            helpers.openOverlay({ kind: "create-task", defaults: deriveCreateDefaults(context, "task") });
         },
     },
     {
@@ -94,11 +129,11 @@ export const SEED_ACTIONS: readonly AppAction[] = [
         group: "create",
         labelKey: "create.note",
         icon: DocumentTextIcon,
-        order: 20,
+        order: 50,
         shortcut: "mod+alt+n",
         keywordsKey: "keywords.create.note",
-        execute: (_context, helpers) => {
-            helpers.openOverlay({ kind: "create-note" });
+        execute: (context, helpers) => {
+            helpers.openOverlay({ kind: "create-note", defaults: deriveCreateDefaults(context, "note") });
         },
     },
     {
@@ -106,11 +141,11 @@ export const SEED_ACTIONS: readonly AppAction[] = [
         group: "create",
         labelKey: "create.activity",
         icon: ChatBubbleLeftRightIcon,
-        order: 30,
+        order: 60,
         shortcut: "mod+alt+a",
         keywordsKey: "keywords.create.activity",
-        execute: (_context, helpers) => {
-            helpers.openOverlay({ kind: "create-activity" });
+        execute: (context, helpers) => {
+            helpers.openOverlay({ kind: "create-activity", defaults: deriveCreateDefaults(context, "activity") });
         },
     },
 
