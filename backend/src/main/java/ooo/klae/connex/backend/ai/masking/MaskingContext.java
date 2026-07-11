@@ -95,7 +95,8 @@ public final class MaskingContext {
         if (rawValue == null || rawValue.isBlank()) {
             throw new IllegalArgumentException("Cannot tokenize a blank identifier");
         }
-        return WHITESPACE.matcher(rawValue.trim()).replaceAll(" ");
+        String withoutDelimiters = rawValue.replace("{{", "").replace("}}", "");
+        return WHITESPACE.matcher(withoutDelimiters.trim()).replaceAll(" ");
     }
 
     private static String canonicalKey(String rawValue) {

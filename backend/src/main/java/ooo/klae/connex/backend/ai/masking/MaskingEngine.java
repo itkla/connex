@@ -49,11 +49,12 @@ public final class MaskingEngine {
             return "";
         }
         String normalizedText = Normalizer.normalize(text, Normalizer.Form.NFKC);
-        SpecialCareTextScreen.ScreenVerdict verdict = SpecialCareTextScreen.screen(normalizedText);
+        String sanitizedText = stripInjectedTokenDelimiters(normalizeSeparators(normalizedText));
+        SpecialCareTextScreen.ScreenVerdict verdict = SpecialCareTextScreen.screen(sanitizedText);
         if (verdict.excluded()) {
             return OMITTED_BY_POLICY;
         }
-        String masked = stripInjectedTokenDelimiters(normalizedText);
+        String masked = sanitizedText;
         for (MaskingContext.IdentifierEntry entry : ctx.identifierEntriesByLongestRawValue()) {
             masked = identifierPattern(entry.rawValue()).matcher(masked)
                     .replaceAll(Matcher.quoteReplacement(entry.token()));
@@ -79,6 +80,20 @@ public final class MaskingEngine {
 
     private static String stripInjectedTokenDelimiters(String value) {
         return value.replace("{{", "").replace("}}", "");
+    }
+
+    private static String normalizeSeparators(String value) {
+        StringBuilder normalized = new StringBuilder(value.length());
+        value.codePoints().forEach(codePoint -> {
+            int type = Character.getType(codePoint);
+            if (type == Character.CONTROL || type == Character.LINE_SEPARATOR
+                    || type == Character.PARAGRAPH_SEPARATOR) {
+                normalized.append(' ');
+            } else {
+                normalized.appendCodePoint(codePoint);
+            }
+        });
+        return normalized.toString();
     }
 
     private static Pattern identifierPattern(String rawValue) {

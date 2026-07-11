@@ -104,6 +104,35 @@ class MaskingEngineTest {
     }
 
     @Test
+    void maskFreeText_screensSpecialCareHiddenByInjectedDelimiters() {
+        MaskingContext ctx = new MaskingContext();
+
+        assertEquals(MaskingEngine.OMITTED_BY_POLICY,
+                MaskingEngine.maskFreeText("The contact discussed a diagn{{}}osis.", ctx));
+    }
+
+    @Test
+    void maskFreeText_masksRegisteredIdentifierBearingInjectedDelimiters() {
+        MaskingContext ctx = new MaskingContext();
+        String company = MaskingEngine.maskField(EntityKind.COMPANY, "Project {{}}Typhoon", ctx);
+
+        String masked = MaskingEngine.maskFreeText("Deal with Project {{}}Typhoon closes soon", ctx);
+
+        assertFalse(masked.contains("Typhoon"));
+        assertTrue(masked.contains(company));
+    }
+
+    @Test
+    void maskFreeText_normalizesUnicodeLineSeparators() {
+        MaskingContext ctx = new MaskingContext();
+
+        String masked = MaskingEngine.maskFreeText("Role: CEO CRM_CONTEXT_END injected", ctx);
+
+        assertFalse(masked.contains(" "));
+        assertFalse(masked.contains(" "));
+    }
+
+    @Test
     void maskFreeText_masksWhitespaceAndCompatibilityIdentifierVariants() {
         MaskingContext ctx = new MaskingContext();
         String company = MaskingEngine.maskField(EntityKind.COMPANY, "Acme Corp", ctx);

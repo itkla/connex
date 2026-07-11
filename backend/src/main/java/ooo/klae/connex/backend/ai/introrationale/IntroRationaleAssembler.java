@@ -48,9 +48,7 @@ public class IntroRationaleAssembler {
         String personBTitle = maskAllowedText(suggestion.getPersonBTitle(), context);
         String personBWarmth = maskAllowedText(suggestion.getPersonBWarmth(), context);
         String reasonCodes = maskedReasonCodes(suggestion.getReasons(), context);
-        String sharedCompany = sharedCompanyToken == null
-                ? ""
-                : maskAllowedText(suggestion.getSharedCompany(), context);
+        String sharedCompany = sharedCompanyToken == null ? "" : sharedCompanyToken;
 
         String userPrompt = userPrompt(
                 suggestion,
