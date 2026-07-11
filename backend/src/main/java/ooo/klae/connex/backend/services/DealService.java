@@ -250,10 +250,10 @@ public class DealService {
         );
     }
 
-    public DealRevenueSeriesDto getRevenueTimeseries(String currency) {
+    public DealRevenueSeriesDto getRevenueTimeseries(String currency, String tzOffset) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         return new DealRevenueSeriesDto(
-            dealMapper.revenueClosedByMonth(workspaceId, currency),
+            dealMapper.revenueClosedByMonth(workspaceId, currency, tzOffset),
             dealMapper.revenueProjectedByMonth(workspaceId, currency)
         );
     }

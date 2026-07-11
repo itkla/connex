@@ -1227,8 +1227,8 @@ export function getDealFacets(init: RequestInit = {}) {
  * by expected-close month) over ALL deals, optionally scoped to a currency. Replaces client-side
  * bucketing of a bounded page slice.
  */
-export function getDealRevenueTimeseries(currency?: string, init: RequestInit = {}) {
-    return getJson<Types.DealRevenueSeries>(`/api/deals/revenue-timeseries${buildQuery({ currency })}`, init);
+export function getDealRevenueTimeseries(currency?: string, tzOffset?: string, init: RequestInit = {}) {
+    return getJson<Types.DealRevenueSeries>(`/api/deals/revenue-timeseries${buildQuery({ currency, tzOffset })}`, init);
 }
 
 const withCookie = (cookie: string | null): RequestInit => (cookie ? { headers: { cookie }, cache: "no-store" } : {});

@@ -154,9 +154,9 @@ class DealServiceTest extends AbstractServiceTest {
         foreign.setWon(true);
         dealMapper.insert(foreign);
 
-        DealRevenueSeriesDto series = dealService.getRevenueTimeseries(null);
+        DealRevenueSeriesDto series = dealService.getRevenueTimeseries(null, null);
         List<DealStageDistributionDto> distribution = dealService.getStageDistribution(null);
-        DealRevenueSeriesDto filteredSeries = dealService.getRevenueTimeseries("JPY");
+        DealRevenueSeriesDto filteredSeries = dealService.getRevenueTimeseries("JPY", null);
         List<DealStageDistributionDto> filteredDistribution = dealService.getStageDistribution("JPY");
 
         assertEquals(Map.of("2026-2", 180.0, "2026-3", 25.0, "2026-4", 550.0),

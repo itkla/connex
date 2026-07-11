@@ -244,7 +244,7 @@ class DealMapperTest extends AbstractMapperTest {
             400.0, 0.0, "USD", null, "2026-03-15", null);
 
         assertEquals(Map.of("2026-2", 430.0, "2026-5", 25.0),
-            monthTotals(dealMapper.revenueClosedByMonth(workspace.getId(), null)));
+            monthTotals(dealMapper.revenueClosedByMonth(workspace.getId(), null, null)));
         assertEquals(Map.of("2026-2", 600.0, "2026-3", 450.0),
             monthTotals(dealMapper.revenueProjectedByMonth(workspace.getId(), null)));
 
@@ -264,7 +264,7 @@ class DealMapperTest extends AbstractMapperTest {
         assertEquals(250.0, second.closedValue(), 0.0001);
 
         assertEquals(Map.of("2026-2", 180.0, "2026-5", 25.0),
-            monthTotals(dealMapper.revenueClosedByMonth(workspace.getId(), "JPY")));
+            monthTotals(dealMapper.revenueClosedByMonth(workspace.getId(), "JPY", null)));
         assertEquals(Map.of("2026-2", 300.0, "2026-3", 50.0),
             monthTotals(dealMapper.revenueProjectedByMonth(workspace.getId(), "JPY")));
         List<DealStageDistributionDto> filtered =
@@ -273,6 +273,21 @@ class DealMapperTest extends AbstractMapperTest {
         assertEquals(firstStage.getId(), filtered.get(0).stageId());
         assertEquals(firstPipeline.getId(), filtered.get(0).pipelineId());
         assertEquals(230.0, filtered.get(0).closedValue(), 0.0001);
+    }
+
+    @Test
+    void revenueClosedByMonthShiftsClosedAtByTimezoneOffset() {
+        workspace = newWorkspace();
+        Pipeline pipeline = newPipeline();
+        Stage stage = newStage(pipeline, 0);
+        Company company = newCompany();
+        updateChartDeal(newDeal(pipeline, stage, company),
+            100.0, 90.0, "JPY", true, null, "2026-01-31 20:00:00");
+
+        assertEquals(Map.of("2026-1", 90.0),
+            monthTotals(dealMapper.revenueClosedByMonth(workspace.getId(), null, null)));
+        assertEquals(Map.of("2026-2", 90.0),
+            monthTotals(dealMapper.revenueClosedByMonth(workspace.getId(), null, "+09:00")));
     }
 
     @Test
