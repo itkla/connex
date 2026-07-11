@@ -16,6 +16,7 @@
     "panelTitle": "AIブリーフ",
     "error": "ブリーフを生成できませんでした。",
     "retry": "再試行",
+    "regenerate": "再生成",
     "attribution": "AI生成 · {time}",
     "integrityWarning": "一部の参照を確認できませんでした"
   },
@@ -23,6 +24,7 @@
     "panelTitle": "AIリスク分析",
     "error": "リスク分析を生成できませんでした。",
     "retry": "再試行",
+    "regenerate": "再生成",
     "attribution": "AI生成 · {time}",
     "integrityWarning": "一部の参照を確認できませんでした"
   },

@@ -160,6 +160,26 @@ class DealBriefServiceTest {
     }
 
     @Test
+    void generate_refresh_bypassesCacheAndRegenerates() {
+        BriefAssembly assembly = assembly();
+        when(aiFeatureGate.isAiUsable()).thenReturn(true);
+        when(dealBriefAssembler.assemble(WORKSPACE_ID, DEAL_ID)).thenReturn(assembly);
+        when(aiOutputCacheStore.contentHash(assembly.prompt(), assembly.context())).thenReturn(HASH);
+        when(aiInvocationService.completeStructured(any(AiInvocation.class), eq(DealBriefContent.class)))
+                .thenReturn(new AiStructuredOutcome.Parsed<>(
+                        new DealBriefContent(List.of(new DealBriefContent.Section("Who they are", "Fresh take."))),
+                        0, 20, 10, "end_turn"));
+
+        DealBriefDto result = service.generate(DEAL_ID, true);
+
+        assertEquals("Fresh take.", result.getSections().get(0).body());
+        verify(aiInvocationService).completeStructured(any(AiInvocation.class), eq(DealBriefContent.class));
+        verify(aiOutputCacheStore, never()).find(anyInt(), any(), anyInt(), anyInt());
+        verify(aiOutputCacheStore).save(eq(WORKSPACE_ID), eq(FEATURE), eq(DEAL_ID),
+                eq(AiOutputCacheStore.NO_SUBJECT), eq(HASH), any(DealBriefContent.class), eq(0), eq(NOW.toString()));
+    }
+
+    @Test
     void generate_providerFailure_returnsProviderError() {
         arrangeMiss(assembly());
         when(aiInvocationService.completeStructured(any(AiInvocation.class), eq(DealBriefContent.class)))

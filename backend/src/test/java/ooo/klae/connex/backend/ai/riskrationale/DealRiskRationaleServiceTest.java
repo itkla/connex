@@ -188,6 +188,28 @@ class DealRiskRationaleServiceTest {
     }
 
     @Test
+    void generate_refresh_bypassesCacheAndRegenerates() {
+        RationaleAssembly assembly = assembly();
+        DealRiskDto risk = atRisk();
+        when(aiFeatureGate.isAiUsable()).thenReturn(true);
+        when(dealRiskService.assessDeal(WORKSPACE_ID, DEAL_ID)).thenReturn(risk);
+        when(dealRiskRationaleAssembler.assemble(WORKSPACE_ID, DEAL_ID, risk)).thenReturn(assembly);
+        when(aiOutputCacheStore.contentHash(assembly.prompt(), assembly.context())).thenReturn(HASH);
+        when(aiInvocationService.completeStructured(any(AiInvocation.class), eq(DealRiskRationaleContent.class)))
+                .thenReturn(new AiStructuredOutcome.Parsed<>(
+                        new DealRiskRationaleContent("Fresh narrative.", List.of()), 0, 20, 10, "end_turn"));
+
+        DealRationaleDto result = service.generate(DEAL_ID, true);
+
+        assertEquals("Fresh narrative.", result.getNarrative());
+        verify(aiInvocationService).completeStructured(any(AiInvocation.class), eq(DealRiskRationaleContent.class));
+        verify(aiOutputCacheStore, never()).find(anyInt(), any(), anyInt(), anyInt());
+        verify(aiOutputCacheStore).save(eq(WORKSPACE_ID), eq(FEATURE), eq(DEAL_ID),
+                eq(AiOutputCacheStore.NO_SUBJECT), eq(HASH), any(DealRiskRationaleContent.class), eq(0),
+                eq(NOW.toString()));
+    }
+
+    @Test
     void generate_malformedOutcome_returnsProviderErrorAndDoesNotPersist() {
         arrangeMiss(assembly());
         when(aiInvocationService.completeStructured(any(AiInvocation.class), eq(DealRiskRationaleContent.class)))
