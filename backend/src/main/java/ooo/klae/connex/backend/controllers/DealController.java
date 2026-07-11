@@ -11,6 +11,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import ooo.klae.connex.backend.ai.brief.DealBriefService;
+import ooo.klae.connex.backend.ai.riskrationale.DealRiskRationaleService;
 import ooo.klae.connex.backend.beans.Deal;
 import ooo.klae.connex.backend.beans.DealPerson;
 import ooo.klae.connex.backend.dto.ActivityDto;
@@ -34,6 +35,7 @@ import ooo.klae.connex.backend.dto.DealMetricsDto;
 import ooo.klae.connex.backend.dto.DealMoveRequest;
 import ooo.klae.connex.backend.dto.DealOwnerDto;
 import ooo.klae.connex.backend.dto.DealPipelineValueDto;
+import ooo.klae.connex.backend.dto.DealRationaleDto;
 import ooo.klae.connex.backend.dto.DealRevenueSeriesDto;
 import ooo.klae.connex.backend.dto.DealRescheduleRequest;
 import ooo.klae.connex.backend.dto.DealRiskDto;
@@ -78,6 +80,7 @@ public class DealController {
     private final BulkOperationService bulkOperationService;
     private final DealRiskService dealRiskService;
     private final DealBriefService dealBriefService;
+    private final DealRiskRationaleService dealRiskRationaleService;
     private final WorkspaceService workspaceService;
 
     /**
@@ -273,6 +276,12 @@ public class DealController {
     @GetMapping("/{id}/brief")
     public DealBriefDto brief(@PathVariable int id) {
         return dealBriefService.generate(id);
+    }
+
+    /** Returns an AI-generated deal-risk rationale, or a graceful unavailability response. */
+    @GetMapping("/{id}/rationale")
+    public DealRationaleDto rationale(@PathVariable int id) {
+        return dealRiskRationaleService.generate(id);
     }
 
     /**

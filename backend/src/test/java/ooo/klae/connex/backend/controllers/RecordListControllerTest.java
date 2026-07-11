@@ -18,6 +18,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import ooo.klae.connex.backend.ai.brief.DealBriefService;
+import ooo.klae.connex.backend.ai.riskrationale.DealRiskRationaleService;
 import ooo.klae.connex.backend.dto.DealAgingDto;
 import ooo.klae.connex.backend.dto.DealKpisDto;
 import ooo.klae.connex.backend.dto.DealPipelineValueDto;
@@ -48,6 +49,7 @@ class RecordListControllerTest {
     @Mock private DealService dealService;
     @Mock private DealRiskService dealRiskService;
     @Mock private DealBriefService dealBriefService;
+    @Mock private DealRiskRationaleService dealRiskRationaleService;
     @Mock private WorkspaceService workspaceService;
     @Mock private NoteService noteService;
     @Mock private TaskService taskService;
@@ -177,7 +179,8 @@ class RecordListControllerTest {
     @Test
     void dealsWithoutFilterRequirePageEndpoint() {
         DealController controller = new DealController(
-            dealService, bulkOperationService, dealRiskService, dealBriefService, workspaceService);
+            dealService, bulkOperationService, dealRiskService, dealBriefService,
+            dealRiskRationaleService, workspaceService);
 
         assertThrows(BadRequestException.class, () -> controller.getDeals(null, null, null, null, null));
 
@@ -187,7 +190,8 @@ class RecordListControllerTest {
     @Test
     void dealsPageClampsSize() {
         DealController controller = new DealController(
-            dealService, bulkOperationService, dealRiskService, dealBriefService, workspaceService);
+            dealService, bulkOperationService, dealRiskService, dealBriefService,
+            dealRiskRationaleService, workspaceService);
         when(dealService.getDealsPage(
             null, null, null, null, null, null, null, null, 100, 0)).thenReturn(List.of());
         when(dealService.countDeals(null, null, null, null, null, null)).thenReturn(37L);
@@ -204,7 +208,8 @@ class RecordListControllerTest {
     @Test
     void dealsPageRejectsInvalidStatusAndDirection() {
         DealController controller = new DealController(
-            dealService, bulkOperationService, dealRiskService, dealBriefService, workspaceService);
+            dealService, bulkOperationService, dealRiskService, dealBriefService,
+            dealRiskRationaleService, workspaceService);
 
         assertThrows(BadRequestException.class, () -> controller.getDealsPage(
             1, 25, null, null, "sideways", null, null, null, null, null));
@@ -218,7 +223,8 @@ class RecordListControllerTest {
     @Test
     void dealChartEndpointsNormalizeAndForwardCurrency() {
         DealController controller = new DealController(
-            dealService, bulkOperationService, dealRiskService, dealBriefService, workspaceService);
+            dealService, bulkOperationService, dealRiskService, dealBriefService,
+            dealRiskRationaleService, workspaceService);
         DealRevenueSeriesDto series = new DealRevenueSeriesDto(List.of(), List.of());
         List<DealStageDistributionDto> distribution = List.of(
             new DealStageDistributionDto(1, 2, 3, 4.0, 5, 6.0));
@@ -240,7 +246,8 @@ class RecordListControllerTest {
     @Test
     void dealAnalyticsEndpointsNormalizeAndForwardParameters() {
         DealController controller = new DealController(
-            dealService, bulkOperationService, dealRiskService, dealBriefService, workspaceService);
+            dealService, bulkOperationService, dealRiskService, dealBriefService,
+            dealRiskRationaleService, workspaceService);
         DealKpisDto kpis = new DealKpisDto(
             0.0, null, 0.0, null, 0, 0, 0.0, 0.0, null, null, 0.0, null,
             List.of(), List.of(), List.of(), List.of());
@@ -270,7 +277,8 @@ class RecordListControllerTest {
     @Test
     void dealAnalyticsEndpointsRejectInvalidRange() {
         DealController controller = new DealController(
-            dealService, bulkOperationService, dealRiskService, dealBriefService, workspaceService);
+            dealService, bulkOperationService, dealRiskService, dealBriefService,
+            dealRiskRationaleService, workspaceService);
 
         assertThrows(BadRequestException.class, () -> controller.getDealKpis(null, "7d"));
         assertThrows(BadRequestException.class, () -> controller.getDealPipelineValue(null, "all"));
