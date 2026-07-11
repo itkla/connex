@@ -9,21 +9,29 @@ Connex must not require a modified application package to run with encryption
 default-on. Operators wire encryption through MySQL, storage, KMS/keyring
 systems, environment variables, and deployment policy outside the Connex WAR.
 
-## Supported Modes
+## Supported Encryption Boundaries
 
-Use one of these modes before running Connex migrations in a customer-operated
-environment.
+Select at least one encryption boundary before running Connex migrations in a
+customer-operated environment.
 
 | Mode | Required controls | Suitable for |
 | --- | --- | --- |
 | Customer-managed volume encryption | Customer-controlled encryption for MySQL data directory, redo/undo/binlog storage, temporary storage, backup staging, application logs, and any attached object/file storage. Keys are held in the customer's cloud KMS, HSM, storage platform, or equivalent. | Baseline on-prem posture and environments where MySQL tablespace encryption is unavailable. |
 | MySQL/InnoDB data-at-rest encryption | MySQL keyring component loaded before InnoDB initialization, encrypted Connex schemas/tablespaces by default, encrypted redo logs, encrypted undo logs, and encrypted binary logs where supported. | Preferred database-level posture for customer-operated MySQL. |
+
+The customer may combine volume encryption and MySQL/InnoDB encryption. For
+the MySQL/InnoDB boundary, select a keyring provider separately:
+
+| MySQL keyring provider | Required controls | Suitable for |
+| --- | --- | --- |
 | Centralized key manager | MySQL Enterprise or platform integration with a customer-controlled key manager such as Vault, HSM, KMIP, cloud KMS, or equivalent. | Regulated deployments that require centralized custody, key audit, and revocation workflows. |
 | File keyring with encrypted host storage | MySQL file-based keyring stored on customer-encrypted host storage with strict filesystem permissions and independent backup custody. | Small on-prem installs where Enterprise/KMS integration is unavailable. Not a compliance-grade substitute for centralized key management. |
 
-The customer may combine volume encryption and MySQL/InnoDB encryption. For
-regulated environments, prefer centralized key management over a local file
-keyring.
+A keyring provider is not an encryption boundary by itself. It satisfies this
+runbook only when the MySQL/InnoDB encryption settings and preflight below are
+also enforced, or when the separately verified volume-encryption boundary
+covers every listed storage surface. For regulated environments, prefer
+centralized key management over a local file keyring.
 
 ## MySQL Configuration Pattern
 
@@ -115,17 +123,67 @@ Configure Connex through environment/configuration only:
   `sslMode=VERIFY_CA` or `sslMode=VERIFY_IDENTITY`.
 - `CONNEX_DB_USERNAME` and `CONNEX_DB_PASSWORD` are provisioned from the
   customer's secret manager.
-- `CONNEX_SECRET_STORE_KEY_ID`, `CONNEX_SECRET_STORE_MASTER_KEY`,
-  `CONNEX_SECRET_STORE_KEYS_*`, and `CONNEX_SECRET_STORE_DISABLED_KEY_IDS`
-  follow `SECRET_STORE_KEY_LIFECYCLE_RUNBOOK.md`.
-- `CONNEX_AUDIT_INTEGRITY_HMAC_SECRET` is customer-held secret material when
-  audit tamper-evidence is enabled.
+- `CONNEX_SECRET_STORE_KEY_ID`, `CONNEX_SECRET_STORE_MASTER_KEY`, and
+  `CONNEX_SECRET_STORE_DISABLED_KEY_IDS` follow
+  `SECRET_STORE_KEY_LIFECYCLE_RUNBOOK.md`.
+- `CONNEX_AUDIT_INTEGRITY_HMAC_SECRET` is required outside the `dev` and
+  `test` profiles. Generate it with a cryptographically secure random generator
+  with at least 256 bits of entropy (for example, Base64-encode 32 random bytes),
+  store it in the customer's secret manager, and do not reuse it. The runtime
+  additionally rejects values shorter than 32 characters.
 - No secret belongs in a WAR, container image, repository, migration file,
   frontend `NEXT_PUBLIC_*` variable, or customer export.
 
+There is no wildcard `CONNEX_SECRET_STORE_KEYS_*` binding for prior envelope
+keys. Bind each prior key's exact stored key id explicitly in deployment
+configuration, preserving punctuation such as the hyphen in `old-v1`. The
+environment variable supplies the secret value; the configuration supplies the
+map key:
+
+```yaml
+connex:
+  secret-store:
+    keys:
+      old-v1: ${CONNEX_SECRET_STORE_KEY_OLD_V1}
+```
+
+Add one mapping per prior key that diagnostics still report in use. Remove a
+mapping only after every row using that exact key id has been rewrapped.
+
 ## Preflight Verification
 
-Run this checklist before onboarding data and after each database restore.
+Record which supported mode is the deployment's encryption boundary. Run the
+matching mode-specific checklist before onboarding data and after each database
+restore, followed by the common checks.
+
+### Customer-Managed Volume Encryption Preflight
+
+Use these checks when encryption is enforced below MySQL and MySQL tablespace
+encryption is unavailable:
+
+1. Map every MySQL data, redo, undo, binary-log, temporary, and backup-staging
+   path to customer-encrypted storage. Include application logs and attached
+   object/file storage that may contain customer data.
+2. Verify the volumes are encrypted and attached under the expected immutable
+   provider key ids before MySQL starts. Record the key controller, account or
+   tenant, region, and storage resources covered by each key.
+3. Confirm MySQL cannot redirect temporary files, logs, snapshots, or backups to
+   an unencrypted local disk or staging path.
+4. Create a disposable isolated restore target using the expected keys. On that
+   target only, restart MySQL and verify that withholding a required volume key
+   prevents attach, restart, or restore as documented for the storage provider.
+   Never run the key-withholding exercise against the production target.
+5. Verify physical backups, snapshots, logical dumps, and exports remain on
+   encrypted storage or are encrypted before leaving the customer boundary.
+
+MySQL keyring variables, schema `DEFAULT ENCRYPTION`, and tablespace encryption
+metadata are not gates for this mode: MySQL is expected to report plaintext
+tablespaces inside an encrypted volume. Record the volume boundary and evidence
+instead; do not claim MySQL/InnoDB encryption for this deployment.
+
+### MySQL/InnoDB Encryption Preflight
+
+Use these checks when the selected mode includes MySQL/InnoDB encryption:
 
 1. Confirm the selected keyring component loads before InnoDB startup.
 2. Confirm the customer can restart MySQL without operator-supplied Connex
@@ -170,26 +228,38 @@ Run this checklist before onboarding data and after each database restore.
    ```
 
    Use the deployment's MySQL metadata model if these views differ.
-8. Confirm the Connex application starts with verified database TLS.
-9. Confirm a full backup and isolated restore can recover the database and
-   keyring/key-manager state without Connex engineering access.
-10. Confirm logical exports, CSV exports, and backup artifacts are encrypted
-   before leaving the customer-controlled environment.
-11. Record the key owner, recovery owner, rotation cadence, last restore-drill
-   date, and lockout contact in the customer's deployment evidence.
 
-Do not onboard production data if MySQL can create Connex tables while
-`default_table_encryption=OFF`, if `table_encryption_privilege_check=OFF`, if
-the Connex schema default is not encrypted, if any Connex tablespace verifies
-as unencrypted, if the keyring cannot survive restart, or if backup encryption
-is not proven.
+### Common Preflight
+
+1. Confirm the Connex application starts with verified database TLS.
+2. Confirm a full backup and isolated restore can recover the database and the
+   selected volume-key or keyring/key-manager state without Connex engineering
+   access.
+3. Confirm logical exports, CSV exports, and backup artifacts are encrypted
+   before leaving the customer-controlled environment.
+4. Record the encryption mode, immutable key ids, key owner, recovery owner,
+   rotation cadence, last restore-drill date, and lockout contact in the
+   customer's deployment evidence.
+
+For volume-only mode, do not onboard production data if any covered storage
+path is unencrypted, if MySQL can write customer data outside that boundary, if
+key-withholding behavior is unproven, or if backup encryption is not proven.
+
+For a mode that claims MySQL/InnoDB encryption, do not onboard production data
+if MySQL can create Connex tables while `default_table_encryption=OFF`, if
+`table_encryption_privilege_check=OFF`, if the Connex schema default is not
+encrypted, if any Connex tablespace verifies as unencrypted, if the keyring
+cannot survive restart, or if backup encryption is not proven.
 
 ## Backup, Restore, And Export Requirements
 
-Physical backups must preserve encrypted tablespaces and the keyring or
-key-manager metadata needed to restore them. Keyring backups and database
-backups must be encrypted and access-controlled separately so that loss of one
-artifact does not expose customer data alone.
+For MySQL/InnoDB encryption, physical backups must preserve encrypted
+tablespaces and the keyring or key-manager metadata needed to restore them. For
+volume-only encryption, a backup copied outside the encrypted volume is no
+longer protected by that volume; encrypt the backup artifact with a
+customer-controlled backup key before it leaves the boundary. In both modes,
+key metadata and database backups must be encrypted and access-controlled
+separately so that loss of one artifact does not expose customer data alone.
 
 Logical backups such as `mysqldump`, MySQL Shell dumps, CSV exports, and Connex
 API exports contain plaintext data when generated. Encrypt them immediately
@@ -199,7 +269,7 @@ attachments, email, object storage, or removable media.
 Every production environment needs an isolated restore drill that proves:
 
 - The database backup restores.
-- The keyring/key-manager state restores.
+- The selected volume-key or keyring/key-manager state restores.
 - Connex can start without modifying the application package.
 - A withheld or revoked customer key prevents access as expected.
 - A restored customer key brings the service back without plaintext export.
@@ -233,10 +303,12 @@ database artifacts.
 - Select the encryption mode and key owner before installation.
 - Install the keyring component or volume encryption before the first Connex
   migration.
-- Enable `default_table_encryption=ON`,
+- For MySQL/InnoDB mode, enable `default_table_encryption=ON`,
   `table_encryption_privilege_check=ON`, encrypted Connex schema defaults, and
-  redo/undo/binlog encryption where supported.
-- Verify every Connex tablespace/table is encrypted before onboarding data.
+  redo/undo/binlog encryption where supported, then verify every Connex
+  tablespace/table is encrypted before onboarding data.
+- For volume-only mode, verify every MySQL and customer-data storage path is
+  inside the recorded encrypted-volume boundary before onboarding data.
 - Store all keyring/KMS/Vault/HSM credentials outside Connex artifacts.
 - Enforce verified database TLS for Connex connections.
 - Encrypt and access-control physical backups, logical dumps, and exports.
