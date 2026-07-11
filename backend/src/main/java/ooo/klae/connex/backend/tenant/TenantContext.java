@@ -17,10 +17,12 @@ public class TenantContext {
 
     private static final ThreadLocal<Scope> CURRENT = new ThreadLocal<>();
 
-    public void set(int workspaceId, int orgId, int userId, String role) {
-        set(workspaceId, orgId, userId, role, null);
-    }
-
+    /**
+     * Installs the scope for the current thread. The catalog must come from
+     * {@link TenantCatalogResolver} (or be an explicit {@code null} for the
+     * default/shared catalog) — there is deliberately no catalog-less overload,
+     * so every installer decides routing explicitly.
+     */
     public void set(int workspaceId, int orgId, int userId, String role, String catalog) {
         CURRENT.set(new Scope(workspaceId, orgId, userId, role, catalog));
     }

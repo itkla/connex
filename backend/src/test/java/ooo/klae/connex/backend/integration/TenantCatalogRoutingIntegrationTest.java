@@ -78,14 +78,13 @@ class TenantCatalogRoutingIntegrationTest {
 
     @AfterAll
     static void tearDownPool() throws SQLException {
-        if (pool != null) {
-            pool.close();
+        if (pool == null) {
+            return;
         }
-        if (username != null && password != null) {
-            try (Connection bootstrap = DriverManager.getConnection(url, username, password);
-                    Statement statement = bootstrap.createStatement()) {
-                statement.execute("DROP DATABASE IF EXISTS " + SCRATCH_CATALOG);
-            }
+        pool.close();
+        try (Connection bootstrap = DriverManager.getConnection(url, username, password);
+                Statement statement = bootstrap.createStatement()) {
+            statement.execute("DROP DATABASE IF EXISTS " + SCRATCH_CATALOG);
         }
     }
 
@@ -145,7 +144,7 @@ class TenantCatalogRoutingIntegrationTest {
 
     @Test
     void sharedContextStaysOnTheDefaultCatalog() throws SQLException {
-        TENANT_CONTEXT.set(1, 1, 1, "owner");
+        TENANT_CONTEXT.set(1, 1, 1, "owner", null);
         try (Connection connection = routing.getConnection()) {
             assertEquals(defaultCatalog, currentDatabase(connection));
         }

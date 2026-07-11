@@ -46,6 +46,24 @@ class TenantRoutingConfigTest {
     }
 
     @Test
+    void rejectsDefaultCatalogMismatchingTheJdbcUrlDatabase() {
+        try (HikariDataSource hikari = new HikariDataSource()) {
+            hikari.setJdbcUrl("jdbc:mysql://localhost:3306/connexdb?sslMode=DISABLED");
+            assertThrows(IllegalStateException.class,
+                () -> TenantRoutingConfig.decorate(hikari, routingProperties("connexdb_prod"), new TenantContext()));
+        }
+    }
+
+    @Test
+    void acceptsDefaultCatalogMatchingTheJdbcUrlDatabase() {
+        try (HikariDataSource hikari = new HikariDataSource()) {
+            hikari.setJdbcUrl("jdbc:mysql://localhost:3306/connexdb?sslMode=DISABLED");
+            assertNotNull(TenantRoutingConfig.decorate(hikari, routingProperties("connexdb"), new TenantContext()));
+            assertEquals("connexdb", hikari.getCatalog());
+        }
+    }
+
+    @Test
     void rejectsBlankDefaultCatalog() {
         try (HikariDataSource hikari = new HikariDataSource()) {
             assertThrows(IllegalStateException.class,

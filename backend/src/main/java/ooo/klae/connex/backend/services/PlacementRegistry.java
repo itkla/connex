@@ -69,22 +69,23 @@ public class PlacementRegistry {
             return cached.placement();
         }
         OrgPlacement loaded = orgPlacementMapper.findEffectiveByOrg(orgId);
+        if (loaded != null && loaded.getPlacementMode() == null) {
+            loaded = OrgPlacement.sharedDefault(orgId);
+        }
         effectiveCache.put(orgId, new CachedEffective(loaded, now + cacheTtlNanos()));
         return loaded;
     }
 
     private long cacheTtlNanos() {
         Duration ttl = routingProperties.getPlacementCacheTtl();
-        long nanos;
+        if (ttl == null || ttl.isNegative()) {
+            return 0;
+        }
         try {
-            nanos = ttl.toNanos();
+            return Math.min(ttl.toNanos(), MAX_CACHE_TTL_NANOS);
         } catch (ArithmeticException overflow) {
             return MAX_CACHE_TTL_NANOS;
         }
-        if (nanos < 0) {
-            return 0;
-        }
-        return Math.min(nanos, MAX_CACHE_TTL_NANOS);
     }
 
     /**
@@ -95,11 +96,6 @@ public class PlacementRegistry {
      */
     public void invalidate(int orgId) {
         effectiveCache.remove(orgId);
-    }
-
-    /** Drops every cached effective placement. */
-    public void invalidateAll() {
-        effectiveCache.clear();
     }
 
     private void requirePositive(int orgId) {

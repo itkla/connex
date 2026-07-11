@@ -1,6 +1,8 @@
 package ooo.klae.connex.backend.config;
 
 import java.sql.SQLException;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import javax.sql.DataSource;
 
@@ -29,6 +31,8 @@ import ooo.klae.connex.backend.tenant.TenantRoutingProperties;
 @Configuration
 @ConditionalOnProperty(name = "connex.tenancy.routing.mode", havingValue = "catalog-per-placement")
 public class TenantRoutingConfig {
+
+    private static final Pattern JDBC_URL_DATABASE = Pattern.compile("^jdbc:mysql://[^/]+/([^?/]+)");
 
     @Bean
     static BeanPostProcessor tenantRoutingDataSourceDecorator(
@@ -85,6 +89,13 @@ public class TenantRoutingConfig {
             throw new IllegalStateException(
                 "connex.tenancy.routing.default-catalog is required when mode=catalog-per-placement");
         }
+        String urlDatabase = databaseFromJdbcUrl(hikari.getJdbcUrl());
+        if (urlDatabase != null && !urlDatabase.equals(defaultCatalog)) {
+            throw new IllegalStateException(
+                "connex.tenancy.routing.default-catalog '" + defaultCatalog + "' does not match the database '"
+                    + urlDatabase + "' in the JDBC URL; arming the pool catalog would silently repoint every "
+                    + "connection at the wrong database");
+        }
         String existingCatalog = hikari.getCatalog();
         if (existingCatalog == null || existingCatalog.isBlank()) {
             hikari.setCatalog(defaultCatalog);
@@ -94,5 +105,13 @@ public class TenantRoutingConfig {
                     + defaultCatalog + "'; the pool dirty-bit reset and the routing decorator would disagree");
         }
         return new TenantRoutingDataSource(hikari, tenantContext, defaultCatalog, hikari::evictConnection);
+    }
+
+    private static String databaseFromJdbcUrl(String jdbcUrl) {
+        if (jdbcUrl == null) {
+            return null;
+        }
+        Matcher matcher = JDBC_URL_DATABASE.matcher(jdbcUrl);
+        return matcher.find() ? matcher.group(1) : null;
     }
 }

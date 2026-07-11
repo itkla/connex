@@ -78,16 +78,13 @@ class OrgPlacementMapperTest extends AbstractMapperTest {
     }
 
     @Test
-    void effectivePlacementCarriesSharedShapeForRowlessOrg() {
+    void effectivePlacementCarriesNullModeForRowlessOrg() {
         Organization org = newOrg();
 
         OrgPlacement effective = orgPlacementMapper.findEffectiveByOrg(org.getId());
 
         assertEquals(org.getId(), effective.getOrgId());
-        assertEquals("shared", effective.getPlacementMode());
-        assertEquals("provider_managed", effective.getStorageEncryptionMode());
-        assertEquals("connex_cloud_provider", effective.getKeyController());
-        assertFalse(effective.isRevocationSupported());
+        assertNull(effective.getPlacementMode());
         assertNull(effective.getDatabaseHandle());
     }
 

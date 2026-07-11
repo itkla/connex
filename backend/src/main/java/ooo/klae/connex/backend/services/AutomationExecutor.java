@@ -34,6 +34,9 @@ public class AutomationExecutor {
      * re-trigger rules), restoring all three afterward.
      */
     public <T> T runAs(int workspaceId, User principal, String role, Supplier<T> work) {
+        int orgId = workspaceService.getOrgId(workspaceId);
+        String catalog = tenantCatalogResolver.resolveCatalog(orgId);
+
         SecurityContext previousSecurity = SecurityContextHolder.getContext();
         boolean hadTenant = tenantContext.isResolved();
         Integer previousWorkspace = hadTenant ? tenantContext.getWorkspaceId() : null;
@@ -41,9 +44,6 @@ public class AutomationExecutor {
         String previousRole = hadTenant ? tenantContext.getRole() : null;
         Integer previousOrg = hadTenant ? tenantContext.getOrgId() : null;
         String previousCatalog = hadTenant ? tenantContext.getCatalog() : null;
-
-        int orgId = workspaceService.getOrgId(workspaceId);
-        String catalog = tenantCatalogResolver.resolveCatalog(orgId);
 
         SecurityContext context = SecurityContextHolder.createEmptyContext();
         context.setAuthentication(new UsernamePasswordAuthenticationToken(principal, null, principal.getAuthorities()));

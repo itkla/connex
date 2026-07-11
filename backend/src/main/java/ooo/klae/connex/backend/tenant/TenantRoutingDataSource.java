@@ -4,6 +4,7 @@ import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Proxy;
 import java.sql.Connection;
 import java.sql.SQLException;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
 
 import javax.sql.DataSource;
@@ -86,12 +87,15 @@ public class TenantRoutingDataSource extends DelegatingDataSource {
     }
 
     private Connection wrap(Connection target) {
+        AtomicBoolean closed = new AtomicBoolean();
         return (Connection) Proxy.newProxyInstance(TenantRoutingDataSource.class.getClassLoader(),
             new Class<?>[] { Connection.class },
             (proxy, method, args) -> {
                 switch (method.getName()) {
                     case "close" -> {
-                        resetAndClose(target);
+                        if (closed.compareAndSet(false, true)) {
+                            resetAndClose(target);
+                        }
                         return null;
                     }
                     case "equals" -> {

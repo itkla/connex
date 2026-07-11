@@ -64,6 +64,19 @@ class PlacementRegistryTest {
     }
 
     @Test
+    void rowlessOrgSubstitutesTheSharedDefault() {
+        OrgPlacement nullMode = new OrgPlacement();
+        nullMode.setOrgId(7);
+        when(orgPlacementMapper.findEffectiveByOrg(7)).thenReturn(nullMode);
+
+        OrgPlacement effective = placementRegistry.effectivePlacementFor(7);
+
+        assertEquals(7, effective.getOrgId());
+        assertEquals("shared", effective.getPlacementMode());
+        assertEquals("provider_managed", effective.getStorageEncryptionMode());
+    }
+
+    @Test
     void effectivePlacementIsCachedWithinTtl() {
         when(orgPlacementMapper.findEffectiveByOrg(7)).thenReturn(OrgPlacement.sharedDefault(7));
 
@@ -97,6 +110,17 @@ class PlacementRegistryTest {
     @Test
     void zeroTtlDisablesCaching() {
         properties.setPlacementCacheTtl(Duration.ZERO);
+        when(orgPlacementMapper.findEffectiveByOrg(7)).thenReturn(OrgPlacement.sharedDefault(7));
+
+        placementRegistry.effectivePlacementFor(7);
+        placementRegistry.effectivePlacementFor(7);
+
+        verify(orgPlacementMapper, times(2)).findEffectiveByOrg(7);
+    }
+
+    @Test
+    void negativeOverflowingTtlDisablesCachingInsteadOfClampingPositive() {
+        properties.setPlacementCacheTtl(Duration.ofDays(-200_000));
         when(orgPlacementMapper.findEffectiveByOrg(7)).thenReturn(OrgPlacement.sharedDefault(7));
 
         placementRegistry.effectivePlacementFor(7);

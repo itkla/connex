@@ -37,12 +37,8 @@
 
   <select id="findEffectiveByOrg" resultMap="OrgPlacementResult">
     SELECT o.id AS org_id,
-           COALESCE(p.placement_mode, 'shared') AS placement_mode,
-           p.database_handle,
-           COALESCE(p.storage_encryption_mode, 'provider_managed') AS storage_encryption_mode,
-           COALESCE(p.key_controller, 'connex_cloud_provider') AS key_controller,
-           p.kms_provider, p.kms_key_ref, p.kms_key_region,
-           COALESCE(p.revocation_supported, FALSE) AS revocation_supported,
+           p.placement_mode, p.database_handle, p.storage_encryption_mode, p.key_controller,
+           p.kms_provider, p.kms_key_ref, p.kms_key_region, p.revocation_supported,
            p.revocation_effect, p.backup_encryption_mode, p.snapshot_copy_policy,
            p.restore_validation_state, p.evidence_checked_at, p.created_at, p.updated_at
     FROM organization o

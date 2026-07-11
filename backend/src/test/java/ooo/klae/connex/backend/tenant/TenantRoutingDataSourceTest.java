@@ -8,6 +8,7 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -24,11 +25,8 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InOrder;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.mockito.junit.jupiter.MockitoSettings;
-import org.mockito.quality.Strictness;
 
 @ExtendWith(MockitoExtension.class)
-@MockitoSettings(strictness = Strictness.LENIENT)
 class TenantRoutingDataSourceTest {
 
     private static final String DEFAULT_CATALOG = "connexdb";
@@ -60,7 +58,7 @@ class TenantRoutingDataSourceTest {
 
     @Test
     void sharedContextPassesThroughUntouched() throws SQLException {
-        tenantContext.set(1, 1, 1, "owner");
+        tenantContext.set(1, 1, 1, "owner", null);
         assertSame(connection, dataSource.getConnection());
         verify(connection, never()).setCatalog(anyString());
     }
@@ -89,6 +87,18 @@ class TenantRoutingDataSourceTest {
         routed.close();
         verify(connection).setCatalog(DEFAULT_CATALOG);
         verify(connection).close();
+    }
+
+    @Test
+    void doubleCloseIsANoOpAndNeverEvicts() throws SQLException {
+        tenantContext.set(1, 1, 1, "owner", TENANT_CATALOG);
+        Connection routed = dataSource.getConnection();
+
+        routed.close();
+        routed.close();
+        verify(connection, times(1)).setCatalog(DEFAULT_CATALOG);
+        verify(connection, times(1)).close();
+        verify(evictor, never()).accept(any());
     }
 
     @Test
