@@ -160,6 +160,25 @@ async function getJson<T>(path: string, init: RequestInit = {}): Promise<T> {
     return requestJson<T>(path, { ...init, method: "GET" });
 }
 
+const inFlightGets = new Map<string, Promise<unknown>>();
+
+/**
+ * De-duplicates concurrent GETs to the same path so a double-mounted effect (React Strict Mode) or
+ * a fast remount shares one in-flight request instead of racing several. Load-bearing for the slow
+ * AI endpoints, where two concurrent generations can leave one succeeding and the other erroring.
+ */
+function dedupedGet<T>(path: string, init: RequestInit = {}): Promise<T> {
+    const existing = inFlightGets.get(path);
+    if (existing) {
+        return existing as Promise<T>;
+    }
+    const request = getJson<T>(path, init).finally(() => {
+        inFlightGets.delete(path);
+    });
+    inFlightGets.set(path, request);
+    return request;
+}
+
 async function putJson<T>(path: string, body: unknown = {}, init: RequestInit = {}): Promise<T> {
     return requestJson<T>(path, {
         ...init,
@@ -1061,7 +1080,7 @@ export function getIntroSuggestions(init: RequestInit = {}, limit?: number) {
  * suggestion; generation is slow (an LLM call), so fetch client-side. Mirrors {@link getDealRationale}.
  */
 export function getIntroRationale(personAId: number, personBId: number, init: RequestInit = {}) {
-    return getJson<Types.IntroRationale>(
+    return dedupedGet<Types.IntroRationale>(
         `/api/introductions/suggestions/rationale${buildQuery({ personA: personAId, personB: personBId })}`,
         init,
     );
@@ -1370,7 +1389,7 @@ export function getDealRisksFromCookie(cookie: string | null) {
  * is not configured for the organization; generation is slow (an LLM call), so fetch client-side.
  */
 export function getDealBrief(id: number, refresh = false, init: RequestInit = {}) {
-    return getJson<Types.DealBrief>(`/api/deals/${id}/brief${refresh ? buildQuery({ refresh: true }) : ''}`, init);
+    return dedupedGet<Types.DealBrief>(`/api/deals/${id}/brief${refresh ? buildQuery({ refresh: true }) : ''}`, init);
 }
 
 /**
@@ -1379,7 +1398,7 @@ export function getDealBrief(id: number, refresh = false, init: RequestInit = {}
  * LLM call), so fetch client-side.
  */
 export function getDealRationale(id: number, refresh = false, init: RequestInit = {}) {
-    return getJson<Types.DealRationale>(
+    return dedupedGet<Types.DealRationale>(
         `/api/deals/${id}/rationale${refresh ? buildQuery({ refresh: true }) : ''}`,
         init,
     );
