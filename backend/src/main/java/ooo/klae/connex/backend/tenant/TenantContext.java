@@ -7,16 +7,22 @@ import org.springframework.stereotype.Component;
  * once per request by {@link TenantResolutionInterceptor} and read by
  * {@code WorkspaceService.getCurrentWorkspaceId()}. Off the request thread (tests,
  * scheduled jobs) it stays unresolved and callers fall back to membership lookup.
+ * The optional catalog pins the org's placement-routed database for the whole
+ * request span; {@code null} means the default (shared) catalog.
  */
 @Component
 public class TenantContext {
 
-    private record Scope(int workspaceId, int orgId, int userId, String role) {}
+    private record Scope(int workspaceId, int orgId, int userId, String role, String catalog) {}
 
     private static final ThreadLocal<Scope> CURRENT = new ThreadLocal<>();
 
     public void set(int workspaceId, int orgId, int userId, String role) {
-        CURRENT.set(new Scope(workspaceId, orgId, userId, role));
+        set(workspaceId, orgId, userId, role, null);
+    }
+
+    public void set(int workspaceId, int orgId, int userId, String role, String catalog) {
+        CURRENT.set(new Scope(workspaceId, orgId, userId, role, catalog));
     }
 
     public boolean isResolved() {
@@ -41,6 +47,11 @@ public class TenantContext {
     public String getRole() {
         Scope s = CURRENT.get();
         return s == null ? null : s.role();
+    }
+
+    public String getCatalog() {
+        Scope s = CURRENT.get();
+        return s == null ? null : s.catalog();
     }
 
     public void clear() {

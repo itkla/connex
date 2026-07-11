@@ -78,6 +78,37 @@ class OrgPlacementMapperTest extends AbstractMapperTest {
     }
 
     @Test
+    void effectivePlacementCarriesSharedShapeForRowlessOrg() {
+        Organization org = newOrg();
+
+        OrgPlacement effective = orgPlacementMapper.findEffectiveByOrg(org.getId());
+
+        assertEquals(org.getId(), effective.getOrgId());
+        assertEquals("shared", effective.getPlacementMode());
+        assertEquals("provider_managed", effective.getStorageEncryptionMode());
+        assertEquals("connex_cloud_provider", effective.getKeyController());
+        assertFalse(effective.isRevocationSupported());
+        assertNull(effective.getDatabaseHandle());
+    }
+
+    @Test
+    void effectivePlacementReturnsPersistedRow() {
+        Organization org = newOrg();
+        String handle = "cnx_" + unique();
+        orgPlacementMapper.insert(silo(org.getId(), handle));
+
+        OrgPlacement effective = orgPlacementMapper.findEffectiveByOrg(org.getId());
+
+        assertEquals("connex_operated_silo", effective.getPlacementMode());
+        assertEquals(handle, effective.getDatabaseHandle());
+    }
+
+    @Test
+    void effectivePlacementIsNullForMissingOrg() {
+        assertNull(orgPlacementMapper.findEffectiveByOrg(999999999));
+    }
+
+    @Test
     void sharedDefaultCarriesPooledPosture() {
         OrgPlacement placement = OrgPlacement.sharedDefault(42);
         assertEquals("shared", placement.getPlacementMode());

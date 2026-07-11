@@ -98,3 +98,4 @@ Rules for any new AI-powered feature:
 - Test: load `CONNEX_DB_*` from your untracked `backend/.env`, then run `./gradlew test`
 - Build: `./gradlew build`
 - DB up: create `backend/.env` from `backend/.env.example`, fill local-only passwords, then run `docker compose up -d db` (from `backend/`)
+- Routing integration test: `TenantCatalogRoutingIntegrationTest` creates a scratch catalog `connexdb_routing_it`; when the test DB user lacks the privilege (CI runs as root and has it) the test self-skips with instructions. To run it locally, grant once as root: ``GRANT ALL PRIVILEGES ON `connexdb\_routing\_%`.* TO 'connexuser'@'%';``

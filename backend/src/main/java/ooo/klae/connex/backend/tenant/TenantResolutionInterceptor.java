@@ -30,6 +30,7 @@ public class TenantResolutionInterceptor implements HandlerInterceptor {
 
     private final WorkspaceService workspaceService;
     private final TenantContext tenantContext;
+    private final TenantCatalogResolver tenantCatalogResolver;
 
     @Override
     public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler) {
@@ -51,7 +52,8 @@ public class TenantResolutionInterceptor implements HandlerInterceptor {
             throw new ForbiddenException("Not a member of workspace " + candidate);
         }
         int orgId = workspaceService.getOrgId(candidate);
-        tenantContext.set(candidate, orgId, user.getId(), role);
+        String catalog = tenantCatalogResolver.resolveCatalog(orgId);
+        tenantContext.set(candidate, orgId, user.getId(), role, catalog);
         return true;
     }
 
