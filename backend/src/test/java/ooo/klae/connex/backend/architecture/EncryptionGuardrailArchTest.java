@@ -200,7 +200,7 @@ class EncryptionGuardrailArchTest {
 
         assertTrue(violations.isEmpty(),
             "Unsupported hosted-SaaS encryption claims must be denied or explicitly qualified to "
-                + "customer-operated/on-prem deployments per ENCRYPTION_GUARANTEE_MATRIX.md: " + violations);
+                + "customer-operated/on-prem deployments per docs/ENCRYPTION_GUARANTEE_MATRIX.md: " + violations);
     }
 
     @Test
@@ -257,7 +257,7 @@ class EncryptionGuardrailArchTest {
             "Expected approved Cipher sites were not scanned as Cipher users: " + missingApproved);
         assertTrue(violations.isEmpty(),
             "App-level Cipher use is confined to approved encryption packages. Searchable CRM data must follow "
-                + "ENCRYPTION_GUARANTEE_MATRIX.md and #375 instead of adding service, mapper, bean, or provider "
+                + "docs/ENCRYPTION_GUARANTEE_MATRIX.md and #375 instead of adding service, mapper, bean, or provider "
                 + "encryption: " + violations);
     }
 
@@ -282,7 +282,7 @@ class EncryptionGuardrailArchTest {
 
         assertTrue(violations.isEmpty(),
             "MyBatis type handlers and JPA-style converters must not transparently encrypt database columns. "
-                + "Searchable CRM fields must use storage/database encryption per ENCRYPTION_GUARANTEE_MATRIX.md "
+                + "Searchable CRM fields must use storage/database encryption per docs/ENCRYPTION_GUARANTEE_MATRIX.md "
                 + "and #375: " + violations);
     }
 
