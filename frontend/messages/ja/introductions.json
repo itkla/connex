@@ -51,7 +51,6 @@
   },
   "IntroRationale": {
     "label": "AIインサイト",
-    "attribution": "AI生成 · {time}",
     "integrityWarning": "一部の参照を確認できませんでした"
   }
 }

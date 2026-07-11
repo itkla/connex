@@ -60,7 +60,12 @@ export default function IntroRationaleLine({
     return (
         <p className="mt-4 flex max-w-[70ch] items-start gap-1.5 text-sm leading-relaxed text-muted-foreground motion-safe:animate-in motion-safe:fade-in motion-safe:duration-300">
             <LightBulbIcon className="mt-0.5 size-3.5 shrink-0" aria-label={t('label')} />
-            <span>{state.rationale.rationale}</span>
+            <span>
+                {state.rationale.rationale}
+                {state.rationale.warnings > 0 ? (
+                    <span className="text-muted-foreground/70"> · {t('integrityWarning')}</span>
+                ) : null}
+            </span>
         </p>
     );
 }
