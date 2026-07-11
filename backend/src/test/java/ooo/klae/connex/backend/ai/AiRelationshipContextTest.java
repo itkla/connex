@@ -6,12 +6,15 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.Mockito.when;
 
+import java.time.Clock;
+import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
 
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
@@ -38,7 +41,17 @@ class AiRelationshipContextTest {
     @Mock private ConnectionService connectionService;
     @Mock private CompanyService companyService;
 
-    @InjectMocks private AiRelationshipContext context;
+    private AiRelationshipContext context;
+
+    @BeforeEach
+    void setUp() {
+        context = new AiRelationshipContext(
+                dealService,
+                personService,
+                connectionService,
+                companyService,
+                Clock.fixed(Instant.parse("2026-07-11T00:00:00Z"), ZoneOffset.UTC));
+    }
 
     @Test
     void appendAccountHistory_masksReasonsExcludesCurrentDealAndTagsOutcomes() {
@@ -120,7 +133,7 @@ class AiRelationshipContextTest {
         assertTrue(out.contains("- Person: " + stakeholderToken));
         assertTrue(out.contains("Employment: {{C1}}"));
         assertTrue(out.contains("Title: VP Sales"));
-        assertTrue(out.contains("To: present"));
+        assertTrue(out.contains("Status: current"));
         assertTrue(out.contains("Connection: {{P2}}"));
         assertTrue(out.contains("Trusted former teammate"));
         assertTrue(out.contains(MaskingEngine.OMITTED_BY_POLICY));

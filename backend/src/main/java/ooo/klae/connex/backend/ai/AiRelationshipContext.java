@@ -1,6 +1,10 @@
 package ooo.klae.connex.backend.ai;
 
 import java.math.BigDecimal;
+import java.time.Clock;
+import java.time.LocalDate;
+import java.time.format.DateTimeParseException;
+import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
@@ -40,6 +44,7 @@ public class AiRelationshipContext {
     private final PersonService personService;
     private final ConnectionService connectionService;
     private final CompanyService companyService;
+    private final Clock clock;
 
     /**
      * Appends the company's industry, when known.
@@ -112,7 +117,8 @@ public class AiRelationshipContext {
             }
             deals.sort(Comparator
                     .comparing((Deal deal) -> deal.getWon() == null ? 1 : 0)
-                    .thenComparing(AiRelationshipContext::closeKey, Comparator.reverseOrder()));
+                    .thenComparing(AiRelationshipContext::closeKey, Comparator.reverseOrder())
+                    .thenComparing(Deal::getId));
             List<String> lines = new ArrayList<>();
             for (Deal deal : deals) {
                 lines.add(accountHistoryLine(deal, context));
@@ -134,8 +140,11 @@ public class AiRelationshipContext {
         if (Double.isFinite(value) && value > 0) {
             line.append("; Value: ").append(amount(value, deal.getCurrency(), context));
         }
-        appendInline(line, "Closed", maskAllowed(deal.getClosedAt(), context));
-        appendInline(line, "Expected close", maskAllowed(deal.getExpectedCloseDate(), context));
+        if (deal.getWon() != null) {
+            appendInline(line, "Closed", relativeAge(deal.getClosedAt()));
+        } else {
+            appendInline(line, "Expected close", relativeAge(deal.getExpectedCloseDate()));
+        }
         appendInline(line, "Reason", maskFree(deal.getClosedReason(), context));
         return line.append('\n').toString();
     }
@@ -157,9 +166,12 @@ public class AiRelationshipContext {
                 StringBuilder line = new StringBuilder("  Employment: ")
                         .append(MaskingEngine.maskField(EntityKind.COMPANY, employment.getCompanyName(), context));
                 appendInline(line, "Title", maskAllowed(employment.getTitle(), context));
-                appendInline(line, "From", maskAllowed(employment.getStartedAt(), context));
-                appendInline(line, "To", isBlank(employment.getEndedAt()) ? "present"
-                        : maskAllowed(employment.getEndedAt(), context));
+                appendInline(line, "Started", relativeAge(employment.getStartedAt()));
+                if (isBlank(employment.getEndedAt())) {
+                    appendInline(line, "Status", "current");
+                } else {
+                    appendInline(line, "Left", relativeAge(employment.getEndedAt()));
+                }
                 lines.add(line.append('\n').toString());
                 if (++appended == MAX_EMPLOYMENT) {
                     break;
@@ -193,6 +205,37 @@ public class AiRelationshipContext {
             }
         } catch (RuntimeException exception) {
             return;
+        }
+    }
+
+    private String relativeAge(String isoDate) {
+        LocalDate date = parseDate(isoDate);
+        if (date == null) {
+            return "";
+        }
+        LocalDate today = LocalDate.now(clock);
+        long days = ChronoUnit.DAYS.between(date, today);
+        if (days == 0) {
+            return "today";
+        }
+        long magnitude = Math.abs(days);
+        String span;
+        if (magnitude < 45) {
+            span = magnitude + " days";
+        } else {
+            span = Math.abs(ChronoUnit.MONTHS.between(date.withDayOfMonth(1), today.withDayOfMonth(1))) + " months";
+        }
+        return days > 0 ? span + " ago" : "in " + span;
+    }
+
+    private static LocalDate parseDate(String value) {
+        if (isBlank(value) || value.strip().length() < 10) {
+            return null;
+        }
+        try {
+            return LocalDate.parse(value.strip().substring(0, 10));
+        } catch (DateTimeParseException exception) {
+            return null;
         }
     }
 
