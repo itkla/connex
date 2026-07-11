@@ -7,7 +7,6 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 
 import javax.sql.DataSource;
 
@@ -28,21 +27,23 @@ import org.springframework.boot.test.context.SpringBootTest;
 @SpringBootTest
 class OffboardingIndexArchTest {
 
-    private static final Map<String, String> REQUIRED_LEADING_INDEXES = Map.ofEntries(
-        Map.entry("note", "author_id"),
-        Map.entry("activity", "created_by_id"),
-        Map.entry("introduction", "introducer_user_id"),
-        Map.entry("notification", "recipient_id"),
-        Map.entry("deal_collaborator", "user_id"),
-        Map.entry("deal", "owner_id"),
-        Map.entry("task", "assigned_to_id"),
-        Map.entry("attachment", "uploaded_by_id"),
-        Map.entry("rule", "run_as_user_id"),
-        Map.entry("saved_view", "user_id"),
-        Map.entry("user_dashboard", "user_id"),
-        Map.entry("company_share", "granted_by"),
-        Map.entry("person_share", "granted_by"),
-        Map.entry("pipeline_share", "granted_by"));
+    private static final List<String[]> REQUIRED_LEADING_INDEXES = List.of(
+        new String[] {"note", "author_id"},
+        new String[] {"activity", "created_by_id"},
+        new String[] {"introduction", "introducer_user_id"},
+        new String[] {"notification", "recipient_id"},
+        new String[] {"notification", "actor_id"},
+        new String[] {"deal_collaborator", "user_id"},
+        new String[] {"deal", "owner_id"},
+        new String[] {"task", "assigned_to_id"},
+        new String[] {"attachment", "uploaded_by_id"},
+        new String[] {"rule", "run_as_user_id"},
+        new String[] {"rule", "created_by_id"},
+        new String[] {"saved_view", "user_id"},
+        new String[] {"user_dashboard", "user_id"},
+        new String[] {"company_share", "granted_by"},
+        new String[] {"person_share", "granted_by"},
+        new String[] {"pipeline_share", "granted_by"});
 
     @Autowired private DataSource dataSource;
 
@@ -54,13 +55,13 @@ class OffboardingIndexArchTest {
                     "SELECT COUNT(*) FROM information_schema.STATISTICS"
                         + " WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?"
                         + " AND COLUMN_NAME = ? AND SEQ_IN_INDEX = 1")) {
-            for (Map.Entry<String, String> required : REQUIRED_LEADING_INDEXES.entrySet()) {
-                statement.setString(1, required.getKey());
-                statement.setString(2, required.getValue());
+            for (String[] required : REQUIRED_LEADING_INDEXES) {
+                statement.setString(1, required[0]);
+                statement.setString(2, required[1]);
                 try (ResultSet resultSet = statement.executeQuery()) {
                     resultSet.next();
                     if (resultSet.getInt(1) == 0) {
-                        missing.add(required.getKey() + "." + required.getValue());
+                        missing.add(required[0] + "." + required[1]);
                     }
                 }
             }
@@ -71,22 +72,4 @@ class OffboardingIndexArchTest {
                 + missing);
     }
 
-    /**
-     * {@code rule.created_by_id} is asserted separately because {@code rule}
-     * appears twice in the fan-out ({@code run_as_user_id} above).
-     */
-    @Test
-    void ruleCreatedByHasALeadingIndex() throws Exception {
-        try (Connection connection = dataSource.getConnection();
-                PreparedStatement statement = connection.prepareStatement(
-                    "SELECT COUNT(*) FROM information_schema.STATISTICS"
-                        + " WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'rule'"
-                        + " AND COLUMN_NAME = 'created_by_id' AND SEQ_IN_INDEX = 1")) {
-            try (ResultSet resultSet = statement.executeQuery()) {
-                resultSet.next();
-                assertTrue(resultSet.getInt(1) > 0,
-                    "rule.created_by_id needs a leading index (FK-implicit today; explicit after the FK drop)");
-            }
-        }
-    }
 }

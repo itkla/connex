@@ -56,10 +56,14 @@ public class UserOffboardingService {
      * that block a concurrent insert of authored content for this user until
      * the deletion transaction commits — the serialization the RESTRICT
      * constraints provided at the parent row (same idiom as
-     * {@code lockOwnerIds} in the sole-owner guard). Runs LAST in the deletion
-     * flow, immediately before the {@code app_user} delete — exactly when the
-     * RESTRICT constraints fired — so the gap locks are held only for the
-     * final instants of the transaction. The user-reference indexes pinned by
+     * {@code lockOwnerIds} in the sole-owner guard). Runs FIRST in the
+     * deletion flow so a refused deletion does no doomed erasure work; the gap
+     * locks are held until commit, so the race stays closed through the
+     * erasure and the {@code app_user} delete. One asymmetry with RESTRICT
+     * remains: a concurrent insert the gap lock blocks will succeed after this
+     * transaction commits (RESTRICT would have failed it), so the follow-up
+     * increment must decide between insert-time author validation and
+     * tolerated-dangling semantics. The user-reference indexes pinned by
      * {@code OffboardingIndexArchTest} must survive the FK drop.
      *
      * @param userId the account being deleted
@@ -109,7 +113,7 @@ public class UserOffboardingService {
     public void eraseOrgDataReferences(int userId) {
         savedViewMapper.deleteForUserAnywhere(userId);
         userDashboardMapper.deleteForUserAnywhere(userId);
-        notificationMapper.deleteAllForRecipient(null, userId);
+        notificationMapper.deleteAllForRecipientAnywhere(userId);
         dealMapper.removeCollaboratorAnywhere(userId);
         notificationMapper.clearActorAnywhere(userId);
         dealMapper.clearOwnershipAnywhere(userId);

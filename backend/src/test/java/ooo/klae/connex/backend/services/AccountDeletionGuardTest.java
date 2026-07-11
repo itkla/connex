@@ -2,6 +2,7 @@ package ooo.klae.connex.backend.services;
 
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -11,6 +12,7 @@ import ooo.klae.connex.backend.beans.Task;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ConflictException;
+import ooo.klae.connex.backend.mappers.AuditLogMapper;
 import ooo.klae.connex.backend.mappers.OrgMemberMapper;
 import ooo.klae.connex.backend.mappers.OrganizationMapper;
 
@@ -25,6 +27,7 @@ class AccountDeletionGuardTest extends AbstractServiceTest {
     @Autowired private WorkspaceService workspaceService;
     @Autowired private OrgMemberService orgMemberService;
     @Autowired private OrgMemberMapper orgMemberMapper;
+    @Autowired private AuditLogMapper auditLogMapper;
     @Autowired private OrganizationMapper organizationMapper;
 
     private int newOrgOwnedBy(int userId) {
@@ -82,5 +85,8 @@ class AccountDeletionGuardTest extends AbstractServiceTest {
 
         assertNull(userMapper.getUserById(target.getId()));
         assertNull(taskMapper.getTaskById(workspace.getId(), task.getId()).getAssignedTo());
+        assertTrue(auditLogMapper.findRecent(workspace.getId(), 50, 0).stream()
+            .anyMatch(entry -> "user.delete".equals(entry.getAction())),
+            "account erasure must be audited; recording after the row delete was silently swallowed");
     }
 }

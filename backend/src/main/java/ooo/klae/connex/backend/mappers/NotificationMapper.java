@@ -138,14 +138,22 @@ public interface NotificationMapper {
     );
 
     /**
-     * Deletes every notification addressed to a recipient — in one workspace
-     * (membership removal), or across all workspaces when {@code workspaceId}
-     * is {@code null} (account deletion, spanning workspaces the user already
-     * left). Offboarding replacement for the {@code notification ->
-     * workspace_member} CASCADE and the app_user cascade chain (#440
-     * increment 3).
+     * Deletes every notification addressed to a recipient in one workspace.
+     * Offboarding replacement for the {@code notification -> workspace_member}
+     * CASCADE (#440 increment 3). Deliberately separate from
+     * {@link #deleteAllForRecipientAnywhere(int)}: the primitive
+     * {@code workspaceId} keeps the workspace-scoped call unable to widen
+     * silently, since both statements are exempt from the tenant backstops.
      */
-    void deleteAllForRecipient(@Param("workspaceId") Integer workspaceId, @Param("recipientId") int recipientId);
+    void deleteAllForRecipient(@Param("workspaceId") int workspaceId, @Param("recipientId") int recipientId);
+
+    /**
+     * Deletes every notification addressed to a recipient across all
+     * workspaces — account deletion only, spanning workspaces the user
+     * already left. Offboarding replacement for the app_user cascade chain
+     * (#440 increment 3).
+     */
+    void deleteAllForRecipientAnywhere(@Param("recipientId") int recipientId);
 
     /**
      * Nulls the actor reference on every notification produced by a user.

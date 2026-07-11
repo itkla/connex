@@ -122,19 +122,22 @@ public class UserService implements UserDetailsService {
      * erased in the service layer ({@link UserOffboardingService}) rather than
      * by cross-plane foreign keys (#440 increment 3); control-plane rows
      * (memberships, credentials, sessions) still cascade from {@code app_user}.
+     * The audit record is written while the actor row still exists — recording
+     * after the delete violated the actor foreign key inside the transaction
+     * and the event was silently swallowed, leaving account erasure unaudited.
      */
     @Transactional
     public void delete(int id) {
         workspaceService.requireSelf(id);
         workspaceService.assertNotSoleOwnerOfAnyWorkspace(id);
         orgMemberService.assertNotSoleOwnerOfAnyOrg(id);
+        userOffboardingService.assertNoAuthoredContent(id);
         User before = getUserById(id);
         userOffboardingService.eraseOrgDataReferences(id);
-        userOffboardingService.assertNoAuthoredContent(id);
-        userMapper.delete(id);
         auditService.record("user.delete", "user", id, before.getUsername(),
             "Deleted user " + before.getUsername(),
             auditService.diff(before, null, AUDIT_FIELDS));
+        userMapper.delete(id);
     }
 
     /**
