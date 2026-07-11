@@ -19,6 +19,13 @@
     "attribution": "AI-generated · {time}",
     "integrityWarning": "Some references could not be verified"
   },
+  "DealRationale": {
+    "panelTitle": "AI risk analysis",
+    "error": "Couldn't generate the risk analysis.",
+    "retry": "Retry",
+    "attribution": "AI-generated · {time}",
+    "integrityWarning": "Some references could not be verified"
+  },
   "DealsPage": {
     "allDeals": "All Deals",
     "actual": "Actual",

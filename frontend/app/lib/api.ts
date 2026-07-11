@@ -1308,6 +1308,15 @@ export function getDealBrief(id: number, init: RequestInit = {}) {
 }
 
 /**
+ * AI-generated risk rationale for a deal. Returns a graceful unavailability result (never an error)
+ * when the deal is not at risk or AI is not configured for the organization; generation is slow (an
+ * LLM call), so fetch client-side.
+ */
+export function getDealRationale(id: number, init: RequestInit = {}) {
+    return getJson<Types.DealRationale>(`/api/deals/${id}/rationale`, init);
+}
+
+/**
  * Org-admin BYOP AI provider settings, addressed through the acting workspace. Saving requires
  * recent authentication (step-up); credentials are write-only and never returned.
  */
