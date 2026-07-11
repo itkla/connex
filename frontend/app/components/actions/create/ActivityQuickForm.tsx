@@ -27,11 +27,15 @@ export default function ActivityQuickForm({
     currentUserId,
     onCreated,
     onMoreDetails,
+    onPendingChange,
+    pending,
 }: {
     defaults?: CreateDefaults;
     currentUserId: number;
     onCreated: () => void;
     onMoreDetails: (draft: { type: ActivityType; subject: string; notes: string }) => void;
+    onPendingChange: (pending: boolean) => void;
+    pending: boolean;
 }) {
     const router = useRouter();
     const t = useTranslations('Actions');
@@ -46,10 +50,11 @@ export default function ActivityQuickForm({
 
     const handleSubmit = async (e: React.SubmitEvent<HTMLFormElement>) => {
         e.preventDefault();
-        if (submittingRef.current) return;
+        if (submittingRef.current || pending) return;
         resetFieldErrors();
         submittingRef.current = true;
         setSubmitting(true);
+        onPendingChange(true);
         try {
             await createActivity({
                 type,
@@ -74,8 +79,10 @@ export default function ActivityQuickForm({
         } finally {
             submittingRef.current = false;
             setSubmitting(false);
+            onPendingChange(false);
         }
     };
+    const busy = submitting || pending;
 
     return (
         <form onSubmit={handleSubmit} className="grid gap-4">
@@ -86,7 +93,7 @@ export default function ActivityQuickForm({
                     value={type}
                     onChange={setType}
                     getLabel={(ty) => ta(`type${ty}` as 'typeCall')}
-                    disabled={submitting}
+                    disabled={busy}
                 />
             </div>
             <div className="grid gap-1.5">
@@ -100,6 +107,7 @@ export default function ActivityQuickForm({
                     }}
                     placeholder={ta('subjectPlaceholder')}
                     autoFocus
+                    disabled={busy}
                     aria-invalid={Boolean(fieldErrors.subject)}
                     className={cn(fieldInputClass, 'px-3', fieldErrors.subject && fieldErrorClass)}
                 />
@@ -111,6 +119,7 @@ export default function ActivityQuickForm({
                     id="quick-activity-notes"
                     value={notes}
                     onChange={(e) => setNotes(e.target.value)}
+                    disabled={busy}
                     rows={2}
                     className={cn(fieldInputClass, 'min-h-16 resize-none px-3 py-2')}
                 />
@@ -118,9 +127,10 @@ export default function ActivityQuickForm({
 
             <QuickFormFooter
                 onMoreDetails={() => onMoreDetails({ type, subject, notes })}
-                submitDisabled={submitting || !subject.trim()}
+                pending={busy}
+                submitDisabled={busy || !subject.trim()}
             >
-                {submitting ? <Loader2Icon className="size-4 animate-spin" /> : t('quickCreate.create')}
+                {busy ? <Loader2Icon className="size-4 animate-spin" /> : t('quickCreate.create')}
             </QuickFormFooter>
         </form>
     );
