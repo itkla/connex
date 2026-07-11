@@ -8,14 +8,19 @@ import org.junit.jupiter.api.Test;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 
 class TimezoneSupportTest {
-
     @Test
     void validatesZoneAndUsesRegistrationFallback() {
         assertEquals("Asia/Tokyo", TimezoneSupport.validate("Asia/Tokyo", "UTC"));
         assertEquals("UTC", TimezoneSupport.validate(null, "UTC"));
-        assertThrows(
-            BadRequestException.class,
-            () -> TimezoneSupport.validate("Mars/Olympus_Mons", "UTC")
-        );
+        assertThrows(BadRequestException.class,
+            () -> TimezoneSupport.validate("Mars/Olympus_Mons", "UTC"));
+    }
+
+    @Test
+    void ianaValidationAcceptsRegionsAndUtcButRejectsFixedOffsets() {
+        assertEquals("America/New_York", TimezoneSupport.validateIana("America/New_York", "UTC"));
+        assertEquals("UTC", TimezoneSupport.validateIana(null, "UTC"));
+        assertThrows(BadRequestException.class,
+            () -> TimezoneSupport.validateIana("+09:00", "UTC"));
     }
 }

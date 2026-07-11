@@ -79,11 +79,11 @@
             FLOOR(DATEDIFF(NOW(), a.timestamp) / #{spanDays})))
         </otherwise>
       </choose> AS bucket_index,
-      COALESCE(SUM(CASE WHEN a.type = 'Call' THEN 1 ELSE 0 END), 0) AS `call`,
-      COALESCE(SUM(CASE WHEN a.type = 'Email' THEN 1 ELSE 0 END), 0) AS `email`,
-      COALESCE(SUM(CASE WHEN a.type = 'Meeting' THEN 1 ELSE 0 END), 0) AS `meeting`,
-      COALESCE(SUM(CASE WHEN a.type = 'Note' THEN 1 ELSE 0 END), 0) AS `note`,
-      COALESCE(SUM(CASE WHEN a.type NOT IN ('Call', 'Email', 'Meeting', 'Note') THEN 1 ELSE 0 END), 0) AS `other`
+      COALESCE(SUM(CASE WHEN LOWER(TRIM(a.type)) = 'call' THEN 1 ELSE 0 END), 0) AS `call`,
+      COALESCE(SUM(CASE WHEN LOWER(TRIM(a.type)) = 'email' THEN 1 ELSE 0 END), 0) AS `email`,
+      COALESCE(SUM(CASE WHEN LOWER(TRIM(a.type)) = 'meeting' THEN 1 ELSE 0 END), 0) AS `meeting`,
+      COALESCE(SUM(CASE WHEN LOWER(TRIM(a.type)) = 'note' THEN 1 ELSE 0 END), 0) AS `note`,
+      COALESCE(SUM(CASE WHEN LOWER(TRIM(a.type)) NOT IN ('call', 'email', 'meeting', 'note') THEN 1 ELSE 0 END), 0) AS `other`
     FROM activity a
     WHERE a.workspace_id = #{workspaceId}
       AND a.timestamp &lt;= NOW()

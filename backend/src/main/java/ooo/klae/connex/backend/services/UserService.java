@@ -107,7 +107,7 @@ public class UserService implements UserDetailsService {
         if (user.getTimezone() == null || user.getTimezone().isBlank()) {
             user.setTimezone(before.getTimezone());
         } else {
-            user.setTimezone(TimezoneSupport.validate(user.getTimezone(), null));
+            user.setTimezone(TimezoneSupport.validateIana(user.getTimezone(), null));
         }
         userMapper.update(user);
         auditService.record("user.update", "user", id, user.getUsername(),
@@ -181,7 +181,7 @@ public class UserService implements UserDetailsService {
     public User updateTimezone(int userId, String timezone) {
         workspaceService.requireSelf(userId);
         User before = getUserById(userId);
-        String validated = TimezoneSupport.validate(timezone, null);
+        String validated = TimezoneSupport.validateIana(timezone, null);
         userMapper.updateTimezone(userId, validated);
         auditService.record("user.updateTimezone", "user", userId, before.getUsername(),
             "Updated timezone for " + before.getUsername(),

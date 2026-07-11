@@ -97,7 +97,7 @@ public class AuthService {
             user.setDisplayName(request.getDisplayName());
             user.setEmail(request.getEmail());
             user.setEmailVerified(emailVerified);
-            user.setTimezone(TimezoneSupport.validate(request.getTimezone(), "UTC"));
+            user.setTimezone(TimezoneSupport.validateIana(request.getTimezone(), "UTC"));
             user.setPasswordHash(passwordEncoder.encode(request.getPassword()));
             userMapper.insert(user);
             // New users get their own owned workspace unless the instance restricts creation
@@ -126,7 +126,7 @@ public class AuthService {
         user.setDisplayName(request.getDisplayName());
         user.setEmail(request.getEmail());
         user.setEmailVerified(true);
-        user.setTimezone(TimezoneSupport.validate(request.getTimezone(), "UTC"));
+        user.setTimezone(TimezoneSupport.validateIana(request.getTimezone(), "UTC"));
         user.setPasswordHash(passwordEncoder.encode(request.getPassword()));
         userMapper.insert(user);
         workspaceService.createWorkspaceForBootstrap(user.getDisplayName() + "'s Workspace", user.getId());

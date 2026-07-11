@@ -155,6 +155,7 @@ public class ActivityService {
         try {
             activity.setWorkspaceId(workspaceId);
             activity.setCreatedBy(actor);
+            activity.setType(normalizeType(activity.getType()));
             activity.setTimestamp(resolveTimestamp(activity.getTimestamp(), null));
             activityMapper.insert(activity);
             auditService.record("activity.create", "activity", activity.getId(), activity.getSubject(),
@@ -188,6 +189,7 @@ public class ActivityService {
         activity.setId(id);
         activity.setWorkspaceId(workspaceId);
         activity.setCreatedBy(before.getCreatedBy());
+        activity.setType(normalizeType(activity.getType()));
         activity.setTimestamp(resolveTimestamp(activity.getTimestamp(), before.getTimestamp()));
         activityMapper.update(activity);
         auditService.record("activity.update", "activity", id, activity.getSubject(),
@@ -226,6 +228,10 @@ public class ActivityService {
         if (dealId != null && !dealMapper.exists(workspaceId, dealId)) {
             throw new ResourceNotFoundException("Deal not found with id: " + dealId);
         }
+    }
+
+    private static String normalizeType(String type) {
+        return type == null ? null : type.trim();
     }
 
     private void notifyMentions(int workspaceId, Activity activity, List<Integer> recipientIds, User actor) {

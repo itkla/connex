@@ -3,6 +3,7 @@ import { headers } from 'next/headers';
 import { redirect } from 'next/navigation';
 
 import {
+    getAllStagesFromCookie,
     getCurrentUserFromCookie,
     getDealMetricsFromCookie,
     getDealRisksFromCookie,
@@ -10,7 +11,6 @@ import {
     getIntroductions,
     getPipelinesFromCookie,
     getRecentMovesFromCookie,
-    getStagesByPipelineId,
     getTaskSummaryFromCookie,
     getUsers,
     getWarmthSummaryFromCookie,
@@ -22,7 +22,6 @@ import type {
     IntroductionRecord,
     JobMove,
     Pipeline,
-    Stage,
     TaskSummary,
     User,
     WarmthSummary,
@@ -55,6 +54,7 @@ export default async function AnalyticsPage() {
     const [
         dealMetrics,
         pipelines,
+        stages,
         users,
         dealRisks,
         introSuggestions,
@@ -65,6 +65,7 @@ export default async function AnalyticsPage() {
     ] = await Promise.all([
         getDealMetricsFromCookie(cookie).catch(() => EMPTY_DEAL_METRICS),
         getPipelinesFromCookie(cookie).catch(() => [] as Pipeline[]),
+        getAllStagesFromCookie(cookie),
         getUsers(init).catch(() => [] as User[]),
         getDealRisksFromCookie(cookie).catch(() => [] as DealRisk[]),
         getIntroSuggestionsFromCookie(cookie).catch(() => [] as IntroSuggestion[]),
@@ -76,14 +77,10 @@ export default async function AnalyticsPage() {
         getWarmthSummaryFromCookie(cookie).catch(() => EMPTY_WARMTH_SUMMARY),
     ]);
 
-    const stageLists = await Promise.all(
-        pipelines.map((p) => getStagesByPipelineId(p.id, init).catch(() => [] as Stage[])),
-    );
-    const stages = stageLists.flat();
-
     return (
         <AnalyticsBoard
             dealMetrics={dealMetrics}
+            timezone={user.timezone}
             pipelines={pipelines}
             stages={stages}
             users={users}

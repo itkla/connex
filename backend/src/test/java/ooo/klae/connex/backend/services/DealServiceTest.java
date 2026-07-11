@@ -183,6 +183,29 @@ class DealServiceTest extends AbstractServiceTest {
     }
 
     @Test
+    void revenueTimeseriesUsesHistoricalIanaRulesPerClosedTimestamp() {
+        Workspace activeWorkspace = newWorkspace();
+        workspaceMapper.addMember(activeWorkspace.getId(), currentUser.getId(), "owner");
+        workspace = activeWorkspace;
+        authenticateAs(currentUser, workspace.getId());
+        Pipeline pipeline = newPipeline();
+        Stage stage = newStage(pipeline, 0);
+        Company company = newCompany();
+        updateChartDeal(newDeal(pipeline, stage, company),
+            100.0, 90.0, "USD", true, null, "2026-01-01 04:30:00");
+        updateChartDeal(newDeal(pipeline, stage, company),
+            20.0, 10.0, "USD", false, "2026-07-15", "2026-07-01 03:30:00");
+
+        DealRevenueSeriesDto utc = dealService.getRevenueTimeseries("USD", "UTC");
+        DealRevenueSeriesDto newYork = dealService.getRevenueTimeseries("USD", "America/New_York");
+
+        assertEquals(Map.of("2026-1", 90.0, "2026-7", 10.0), monthTotals(utc.closed()));
+        assertEquals(Map.of("2025-12", 90.0, "2026-6", 10.0), monthTotals(newYork.closed()));
+        assertEquals(Map.of("2026-1", 90.0, "2026-7", 10.0),
+            monthTotals(dealService.getRevenueTimeseries("USD", "+09:00").closed()));
+    }
+
+    @Test
     void analyticsAggregatesAssembleSeriesSummariesAndStayWorkspaceScoped() {
         Workspace activeWorkspace = newWorkspace();
         workspaceMapper.addMember(activeWorkspace.getId(), currentUser.getId(), "owner");
@@ -249,6 +272,8 @@ class DealServiceTest extends AbstractServiceTest {
         assertEquals(List.of(open.getId()), top.topOpen().stream().map(DealSummaryDto::getId).toList());
         assertEquals(List.of(currentWon.getId(), previousWon.getId()),
             top.topWon().stream().map(DealSummaryDto::getId).toList());
+        assertEquals(List.of(80.0, 40.0),
+            top.topWon().stream().map(DealSummaryDto::getActualValue).toList());
         assertTrue(top.topWon().stream().allMatch(summary -> company.getName().equals(summary.getCompanyName())));
     }
 
@@ -382,6 +407,7 @@ class DealServiceTest extends AbstractServiceTest {
         DealSummaryDto summary = dealService.getDealSummary(deal.getId());
 
         assertEquals(deal.getId(), summary.getId());
+        assertEquals(deal.getActualValue(), summary.getActualValue(), 0.0001);
         assertEquals(pipeline.getName(), summary.getPipelineName());
         assertEquals(stage.getName(), summary.getStageName());
         assertEquals(company.getName(), summary.getCompanyName());
@@ -617,6 +643,10 @@ class DealServiceTest extends AbstractServiceTest {
 
     @Test
     void closingSoonCountUsesTheActiveWorkspace() {
+        Workspace activeWorkspace = newWorkspace();
+        workspaceMapper.addMember(activeWorkspace.getId(), currentUser.getId(), "owner");
+        workspace = activeWorkspace;
+        authenticateAs(currentUser, workspace.getId());
         Pipeline pipeline = newPipeline();
         Stage stage = newStage(pipeline, 0);
         Company company = newCompany();
@@ -635,6 +665,8 @@ class DealServiceTest extends AbstractServiceTest {
         jdbcTemplate.update("UPDATE deal SET expected_close_date = CURDATE() WHERE id = ?", foreign.getId());
 
         assertEquals(1, dealService.getClosingSoonCount(7).count());
+        assertEquals(List.of(closing.getId()),
+            dealService.getClosingSoonDeals(7, 6).stream().map(Deal::getId).toList());
     }
 
     private Workspace newWorkspace() {
@@ -739,6 +771,6 @@ class DealServiceTest extends AbstractServiceTest {
 
     private Map<String, Double> monthTotals(List<DealMonthTotalDto> totals) {
         return totals.stream().collect(Collectors.toMap(
-            total -> total.year() + "-" + total.month(), DealMonthTotalDto::total));
+            total -> total.year() + "-" + total.month(), total -> total.total().doubleValue()));
     }
 }

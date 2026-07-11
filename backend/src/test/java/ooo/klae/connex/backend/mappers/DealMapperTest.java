@@ -1,5 +1,7 @@
 package ooo.klae.connex.backend.mappers;
 
+import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -26,8 +28,10 @@ import ooo.klae.connex.backend.dto.DealBucketValueDto;
 import ooo.klae.connex.backend.dto.DealCurrencyMetricsDto;
 import ooo.klae.connex.backend.dto.DealKpiClosedBucketDto;
 import ooo.klae.connex.backend.dto.DealKpiPeriodDto;
-import ooo.klae.connex.backend.dto.DealMonthTotalDto;
+import ooo.klae.connex.backend.dto.DealMonthDecimalTotalDto;
 import ooo.klae.connex.backend.dto.DealPipelineValueDto;
+import ooo.klae.connex.backend.dto.DealRevenueMonthBoundary;
+import ooo.klae.connex.backend.dto.DealRevenueRangeDto;
 import ooo.klae.connex.backend.dto.DealStageDistributionDto;
 import ooo.klae.connex.backend.dto.FacetCount;
 
@@ -243,8 +247,15 @@ class DealMapperTest extends AbstractMapperTest {
         updateChartDeal(newDeal(secondPipeline, secondStage, company),
             400.0, 0.0, "USD", null, "2026-03-15", null);
 
-        assertEquals(Map.of("2026-2", 430.0, "2026-5", 25.0),
-            monthTotals(dealMapper.revenueClosedByMonth(workspace.getId(), null, null)));
+        DealRevenueRangeDto closedRange = dealMapper.revenueClosedEventRange(workspace.getId(), null);
+        assertEquals(LocalDateTime.of(2026, 5, 20, 0, 0), closedRange.earliest());
+        assertEquals(LocalDateTime.of(2026, 5, 20, 0, 0), closedRange.latest());
+        List<DealRevenueMonthBoundary> mayBoundary = List.of(new DealRevenueMonthBoundary(
+            2026, 5, LocalDateTime.of(2026, 5, 1, 0, 0), LocalDateTime.of(2026, 6, 1, 0, 0)));
+        assertEquals(Map.of("2026-5", 25.0),
+            monthTotals(dealMapper.revenueClosedByBoundaries(workspace.getId(), null, mayBoundary)));
+        assertEquals(Map.of("2026-2", 430.0),
+            monthTotals(dealMapper.revenueScheduledClosedByMonth(workspace.getId(), null)));
         assertEquals(Map.of("2026-2", 600.0, "2026-3", 450.0),
             monthTotals(dealMapper.revenueProjectedByMonth(workspace.getId(), null)));
 
@@ -263,8 +274,11 @@ class DealMapperTest extends AbstractMapperTest {
         assertEquals(1, second.closedCount());
         assertEquals(250.0, second.closedValue(), 0.0001);
 
-        assertEquals(Map.of("2026-2", 180.0, "2026-5", 25.0),
-            monthTotals(dealMapper.revenueClosedByMonth(workspace.getId(), "JPY", null)));
+        assertEquals(closedRange, dealMapper.revenueClosedEventRange(workspace.getId(), "JPY"));
+        assertEquals(Map.of("2026-5", 25.0),
+            monthTotals(dealMapper.revenueClosedByBoundaries(workspace.getId(), "JPY", mayBoundary)));
+        assertEquals(Map.of("2026-2", 180.0),
+            monthTotals(dealMapper.revenueScheduledClosedByMonth(workspace.getId(), "JPY")));
         assertEquals(Map.of("2026-2", 300.0, "2026-3", 50.0),
             monthTotals(dealMapper.revenueProjectedByMonth(workspace.getId(), "JPY")));
         List<DealStageDistributionDto> filtered =
@@ -273,21 +287,6 @@ class DealMapperTest extends AbstractMapperTest {
         assertEquals(firstStage.getId(), filtered.get(0).stageId());
         assertEquals(firstPipeline.getId(), filtered.get(0).pipelineId());
         assertEquals(230.0, filtered.get(0).closedValue(), 0.0001);
-    }
-
-    @Test
-    void revenueClosedByMonthShiftsClosedAtByTimezoneOffset() {
-        workspace = newWorkspace();
-        Pipeline pipeline = newPipeline();
-        Stage stage = newStage(pipeline, 0);
-        Company company = newCompany();
-        updateChartDeal(newDeal(pipeline, stage, company),
-            100.0, 90.0, "JPY", true, null, "2026-01-31 20:00:00");
-
-        assertEquals(Map.of("2026-1", 90.0),
-            monthTotals(dealMapper.revenueClosedByMonth(workspace.getId(), null, null)));
-        assertEquals(Map.of("2026-2", 90.0),
-            monthTotals(dealMapper.revenueClosedByMonth(workspace.getId(), null, "+09:00")));
     }
 
     @Test
@@ -377,6 +376,31 @@ class DealMapperTest extends AbstractMapperTest {
         assertEquals(1, previous.wonCount());
         assertEquals(1, previous.lostCount());
         assertEquals(30.0, previous.lostValue(), 0.0001);
+    }
+
+    @Test
+    void dealKpiAveragesIgnoreNegativeCycles() {
+        workspace = newWorkspace();
+        Pipeline pipeline = newPipeline();
+        Stage stage = newStage(pipeline, 0);
+        analyticsDeal(workspace, pipeline, stage, "Current Valid", 100.0, 80.0,
+            "JPY", true, 10, 2, 1);
+        analyticsDeal(workspace, pipeline, stage, "Current Invalid", 100.0, 70.0,
+            "JPY", true, 1, 2, 1);
+        analyticsDeal(workspace, pipeline, stage, "Previous Valid", 100.0, 60.0,
+            "JPY", true, 55, 40, 1);
+        analyticsDeal(workspace, pipeline, stage, "Previous Invalid", 100.0, 50.0,
+            "JPY", true, 35, 40, 1);
+
+        DealKpiPeriodDto current = dealMapper.dealKpiCurrent(workspace.getId(), "JPY", 30);
+        DealKpiPeriodDto previous = dealMapper.dealKpiPrevious(workspace.getId(), "JPY", 30, 60);
+        Map<Integer, DealKpiClosedBucketDto> series = dealMapper
+            .dealKpiClosedSeries(workspace.getId(), "JPY", 30, 2.5).stream()
+            .collect(Collectors.toMap(DealKpiClosedBucketDto::bucketIndex, value -> value));
+
+        assertEquals(8.0, current.avgCycleDays(), 0.0001);
+        assertEquals(15.0, previous.avgCycleDays(), 0.0001);
+        assertEquals(8.0, series.get(11).avgCycleDays(), 0.0001);
     }
 
     @Test
@@ -505,6 +529,7 @@ class DealMapperTest extends AbstractMapperTest {
 
     @Test
     void closingSoonCountUsesInclusiveWindowOpenStateAndWorkspaceScope() {
+        LocalDate todayDate = LocalDate.of(2026, 7, 10);
         workspace = newWorkspace();
         Pipeline pipeline = newPipeline();
         Stage stage = newStage(pipeline, 0);
@@ -518,24 +543,30 @@ class DealMapperTest extends AbstractMapperTest {
             "JPY", null, 1, null, 1);
         Deal closed = analyticsDeal(workspace, pipeline, stage, "Closed", 10.0, 10.0,
             "JPY", true, 10, 1, 1);
-        jdbcTemplate.update("UPDATE deal SET expected_close_date = CURDATE() WHERE id = ?", today.getId());
-        jdbcTemplate.update("UPDATE deal SET expected_close_date = DATE_ADD(CURDATE(), INTERVAL 7 DAY) WHERE id = ?",
-            lastDay.getId());
-        jdbcTemplate.update("UPDATE deal SET expected_close_date = DATE_SUB(CURDATE(), INTERVAL 1 DAY) WHERE id = ?",
-            yesterday.getId());
-        jdbcTemplate.update("UPDATE deal SET expected_close_date = DATE_ADD(CURDATE(), INTERVAL 8 DAY) WHERE id = ?",
-            afterWindow.getId());
-        jdbcTemplate.update("UPDATE deal SET expected_close_date = CURDATE() WHERE id = ?", closed.getId());
+        jdbcTemplate.update("UPDATE deal SET expected_close_date = ? WHERE id = ?", todayDate, today.getId());
+        jdbcTemplate.update("UPDATE deal SET expected_close_date = ? WHERE id = ?",
+            todayDate.plusDays(7), lastDay.getId());
+        jdbcTemplate.update("UPDATE deal SET expected_close_date = ? WHERE id = ?",
+            todayDate.minusDays(1), yesterday.getId());
+        jdbcTemplate.update("UPDATE deal SET expected_close_date = ? WHERE id = ?",
+            todayDate.plusDays(8), afterWindow.getId());
+        jdbcTemplate.update("UPDATE deal SET expected_close_date = ? WHERE id = ?", todayDate, closed.getId());
 
         Workspace foreignWorkspace = newWorkspace();
         Pipeline foreignPipeline = newPipelineIn(foreignWorkspace);
         Stage foreignStage = newStageIn(foreignWorkspace, foreignPipeline, 0);
         Deal foreign = analyticsDeal(foreignWorkspace, foreignPipeline, foreignStage, "Foreign", 10.0, 0.0,
             "JPY", null, 1, null, 1);
-        jdbcTemplate.update("UPDATE deal SET expected_close_date = CURDATE() WHERE id = ?", foreign.getId());
+        jdbcTemplate.update("UPDATE deal SET expected_close_date = ? WHERE id = ?", todayDate, foreign.getId());
 
-        assertEquals(2, dealMapper.closingSoonCount(workspace.getId(), 7));
-        assertEquals(1, dealMapper.closingSoonCount(foreignWorkspace.getId(), 7));
+        assertEquals(2, dealMapper.closingSoonCount(workspace.getId(), todayDate, 7));
+        assertEquals(1, dealMapper.closingSoonCount(foreignWorkspace.getId(), todayDate, 7));
+        assertEquals(List.of(today.getId(), lastDay.getId()),
+            dealMapper.closingSoonDeals(workspace.getId(), todayDate, 7, 6)
+                .stream().map(Deal::getId).toList());
+        assertEquals(List.of(today.getId()),
+            dealMapper.closingSoonDeals(workspace.getId(), todayDate, 7, 1)
+                .stream().map(Deal::getId).toList());
     }
 
     @Test
@@ -993,9 +1024,9 @@ class DealMapperTest extends AbstractMapperTest {
         return facets.stream().collect(Collectors.toMap(FacetCount::getKey, FacetCount::getCount));
     }
 
-    private Map<String, Double> monthTotals(List<DealMonthTotalDto> totals) {
+    private Map<String, Double> monthTotals(List<DealMonthDecimalTotalDto> totals) {
         return totals.stream().collect(Collectors.toMap(
-            total -> total.year() + "-" + total.month(), DealMonthTotalDto::total));
+            total -> total.year() + "-" + total.month(), total -> total.total().doubleValue()));
     }
 
     private DealStageDistributionDto distributionFor(List<DealStageDistributionDto> distribution,
