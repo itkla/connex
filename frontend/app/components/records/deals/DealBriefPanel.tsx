@@ -35,7 +35,7 @@ export default function DealBriefPanel({ dealId }: { dealId: number }) {
             try {
                 const brief = await getDealBrief(dealId);
                 if (cancelled) return;
-                if (brief.available && brief.brief) {
+                if (brief.available && ((brief.sections && brief.sections.length > 0) || brief.brief)) {
                     setState({ status: 'ready', brief });
                 } else if (brief.reason === 'provider_error') {
                     setState({ status: 'error' });
@@ -81,9 +81,22 @@ export default function DealBriefPanel({ dealId }: { dealId: number }) {
                 </div>
             ) : (
                 <div className="grid gap-3 rounded-lg border px-4 py-3 motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-bottom-1 motion-safe:duration-300">
-                    <div className="max-w-[70ch] whitespace-pre-wrap text-sm leading-relaxed text-foreground">
-                        {state.brief.brief}
-                    </div>
+                    {state.brief.sections && state.brief.sections.length > 0 ? (
+                        <div className="grid max-w-[70ch] gap-4">
+                            {state.brief.sections.map((section, index) => (
+                                <div key={index} className="grid gap-1">
+                                    <h3 className="text-sm font-medium text-foreground">{section.title}</h3>
+                                    <p className="whitespace-pre-wrap text-sm leading-relaxed text-muted-foreground">
+                                        {section.body}
+                                    </p>
+                                </div>
+                            ))}
+                        </div>
+                    ) : (
+                        <div className="max-w-[70ch] whitespace-pre-wrap text-sm leading-relaxed text-foreground">
+                            {state.brief.brief}
+                        </div>
+                    )}
                     <p className="text-xs text-muted-foreground">
                         {t('attribution', {
                             time: state.brief.generatedAt
