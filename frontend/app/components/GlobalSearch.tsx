@@ -14,6 +14,7 @@ import { ACTION_GROUPS, type ActionGroup, type AppAction } from '@/app/lib/actio
 import { search as searchApi } from '@/app/lib/api';
 import type { SearchResults } from '@/app/lib/types';
 import { buildSearchGroups, openResult, type ResultGroup } from '@/app/lib/search/resultGroups';
+import { easeOut, springJiggle, springSmooth, springSnappy } from '@/app/lib/motion';
 import { cn } from '@/lib/utils';
 
 const MIN_QUERY_LENGTH = 2;
@@ -24,12 +25,6 @@ const EMPTY_GROUP_ORDER: readonly ActionGroup[] = ['record', 'create', 'navigate
 
 const SHORTCUT_GLYPHS: Record<string, string> = { mod: '⌘', ctrl: '⌃', alt: '⌥', shift: '⇧' };
 
-/** The pill morph (header ↔ centered) — position-only, so the bar keeps its shape. */
-const PILL_MORPH = { type: 'spring', stiffness: 440, damping: 38, mass: 0.9 } as const;
-/** The panel's slide-down entrance from beneath the pill. */
-const PANEL_SLIDE = { type: 'spring', stiffness: 360, damping: 30, mass: 0.8 } as const;
-/** The bouncy hover extend/collapse of the panel window. */
-const PANEL_BOUNCE = { type: 'spring', stiffness: 300, damping: 15, mass: 0.85 } as const;
 /** Panel heights (px): a small window by default, a larger scrollable one on hover. */
 const PANEL_COLLAPSED = 168;
 const PANEL_EXPANDED = 452;
@@ -403,7 +398,7 @@ export default function GlobalSearch() {
                         initial={{ opacity: 0 }}
                         animate={{ opacity: 1 }}
                         exit={{ opacity: 0 }}
-                        transition={{ duration: 0.16, ease: [0.23, 1, 0.32, 1] }}
+                        transition={{ duration: 0.16, ease: easeOut }}
                         className="fixed inset-0 z-40 cursor-default bg-black/50 backdrop-blur-[1px]"
                     />
                 ) : null}
@@ -425,7 +420,7 @@ export default function GlobalSearch() {
                         className="fixed inset-x-0 top-[calc(50vh-1.5rem)] z-50 mx-auto flex w-[min(36rem,92vw)] flex-col gap-2"
                     >
                         <CommandPrimitive shouldFilter={false} loop className="contents">
-                            <motion.div layoutId="global-search-pill" transition={reduceMotion ? { duration: 0 } : PILL_MORPH} className={cn(PILL_SHELL, 'z-10 shadow-lg')}>
+                            <motion.div layoutId="global-search-pill" transition={reduceMotion ? { duration: 0 } : springSnappy} className={cn(PILL_SHELL, 'z-10 shadow-lg')}>
                                 <MagnifyingGlassIcon className="pointer-events-none absolute left-3.5 top-1/2 size-5 -translate-y-1/2 text-muted-foreground" />
                                 <CommandPrimitive.Input
                                     ref={paletteInputRef}
@@ -444,7 +439,7 @@ export default function GlobalSearch() {
                                 initial={reduceMotion ? { opacity: 0 } : { opacity: 0, y: -24 }}
                                 animate={{ opacity: 1, y: 0 }}
                                 exit={reduceMotion ? { opacity: 0 } : { opacity: 0, y: -18 }}
-                                transition={reduceMotion ? { duration: 0.12 } : PANEL_SLIDE}
+                                transition={reduceMotion ? { duration: 0.12 } : springSmooth}
                                 onHoverStart={() => setExpanded(true)}
                                 onHoverEnd={() => setExpanded(false)}
                                 onMouseDown={(event) => event.preventDefault()}
@@ -452,7 +447,7 @@ export default function GlobalSearch() {
                             >
                                 <motion.div
                                     animate={{ maxHeight: expanded ? PANEL_EXPANDED : PANEL_COLLAPSED }}
-                                    transition={reduceMotion ? { duration: 0 } : PANEL_BOUNCE}
+                                    transition={reduceMotion ? { duration: 0 } : springJiggle}
                                     className="no-scrollbar overflow-y-auto"
                                     style={{ maxHeight: PANEL_COLLAPSED }}
                                 >
