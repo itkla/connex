@@ -176,7 +176,6 @@ export default function SearchBar() {
                     role="listbox"
                 >
                     {loading && !hasResults && (
-                        // <p className="px-3 py-2 text-sm text-neutral-500">{t("searching")}</p>
                         <Loader2Icon className="size-5 text-muted-foreground animate-spin flex justify-center items-center" />
                     )}
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { useTheme } from "next-themes";
 import { ComputerDesktopIcon, GlobeAltIcon, LanguageIcon, MoonIcon, SunIcon } from "@heroicons/react/24/outline";
 
@@ -21,8 +21,12 @@ function setLocale(locale: "en" | "ja"): void {
  */
 export default function PreferenceActionsBridge(): null {
     const { setTheme } = useTheme();
+    const setThemeRef = useRef(setTheme);
+    useEffect(() => {
+        setThemeRef.current = setTheme;
+    }, [setTheme]);
 
-    const actions = useMemo<AppAction[]>(
+    const actions = useMemo<readonly AppAction[]>(
         () => [
             {
                 id: "workspace.theme-light",
@@ -31,7 +35,7 @@ export default function PreferenceActionsBridge(): null {
                 icon: SunIcon,
                 order: 40,
                 keywordsKey: "keywords.workspace.theme",
-                execute: () => setTheme("light"),
+                execute: () => setThemeRef.current("light"),
             },
             {
                 id: "workspace.theme-dark",
@@ -40,7 +44,7 @@ export default function PreferenceActionsBridge(): null {
                 icon: MoonIcon,
                 order: 41,
                 keywordsKey: "keywords.workspace.theme",
-                execute: () => setTheme("dark"),
+                execute: () => setThemeRef.current("dark"),
             },
             {
                 id: "workspace.theme-system",
@@ -49,7 +53,7 @@ export default function PreferenceActionsBridge(): null {
                 icon: ComputerDesktopIcon,
                 order: 42,
                 keywordsKey: "keywords.workspace.theme",
-                execute: () => setTheme("system"),
+                execute: () => setThemeRef.current("system"),
             },
             {
                 id: "workspace.language-en",
@@ -70,7 +74,7 @@ export default function PreferenceActionsBridge(): null {
                 execute: () => setLocale("ja"),
             },
         ],
-        [setTheme],
+        [],
     );
 
     useRegisterActions(actions);

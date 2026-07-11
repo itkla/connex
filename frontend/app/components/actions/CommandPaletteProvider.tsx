@@ -1,6 +1,6 @@
 'use client';
 
-import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 
 import CommandPalette from './CommandPalette';
 
@@ -27,6 +27,11 @@ export default function CommandPaletteProvider({ children }: { children: ReactNo
     const [open, setOpen] = useState(false);
     const [query, setQuery] = useState('');
 
+    const openRef = useRef(open);
+    useEffect(() => {
+        openRef.current = open;
+    }, [open]);
+
     const handleOpenChange = useCallback((next: boolean) => {
         setOpen(next);
         if (!next) setQuery('');
@@ -34,16 +39,25 @@ export default function CommandPaletteProvider({ children }: { children: ReactNo
 
     useEffect(() => {
         const onKeyDown = (event: KeyboardEvent) => {
+            if (event.repeat) return;
             if ((event.metaKey || event.ctrlKey) && !event.altKey && (event.key === 'k' || event.key === 'K')) {
                 event.preventDefault();
-                setOpen((current) => !current);
+                handleOpenChange(!openRef.current);
             }
         };
         document.addEventListener('keydown', onKeyDown);
         return () => document.removeEventListener('keydown', onKeyDown);
-    }, []);
+    }, [handleOpenChange]);
 
-    const value = useMemo<CommandPaletteContextValue>(() => ({ open: () => setOpen(true) }), []);
+    const value = useMemo<CommandPaletteContextValue>(
+        () => ({
+            open: () => {
+                setQuery('');
+                setOpen(true);
+            },
+        }),
+        [],
+    );
 
     return (
         <CommandPaletteContext.Provider value={value}>

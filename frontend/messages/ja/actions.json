@@ -22,7 +22,6 @@
     "palette": {
       "trigger": "検索とコマンド",
       "placeholder": "検索・移動…",
-      "records": "レコード",
       "loading": "検索中…",
       "noResults": "「{query}」に一致する結果がありません"
     },
