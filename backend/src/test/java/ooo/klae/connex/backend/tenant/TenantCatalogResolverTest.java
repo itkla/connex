@@ -73,6 +73,21 @@ class TenantCatalogResolverTest {
     }
 
     @Test
+    void databaseHandleEqualToDefaultCatalogIsRefused() {
+        properties.setMode(TenantRoutingProperties.MODE_CATALOG_PER_PLACEMENT);
+        properties.setDefaultCatalog("connexdb");
+        when(placementRegistry.effectivePlacementFor(7)).thenReturn(dedicated("ConnexDB"));
+        assertThrows(ServiceUnavailableException.class, () -> resolver.resolveCatalog(7));
+    }
+
+    @Test
+    void databaseHandleTargetingSystemCatalogIsRefused() {
+        properties.setMode(TenantRoutingProperties.MODE_CATALOG_PER_PLACEMENT);
+        when(placementRegistry.effectivePlacementFor(7)).thenReturn(dedicated("mysql"));
+        assertThrows(ServiceUnavailableException.class, () -> resolver.resolveCatalog(7));
+    }
+
+    @Test
     void missingDatabaseHandleIsRefused() {
         properties.setMode(TenantRoutingProperties.MODE_CATALOG_PER_PLACEMENT);
         when(placementRegistry.effectivePlacementFor(7)).thenReturn(dedicated(null));

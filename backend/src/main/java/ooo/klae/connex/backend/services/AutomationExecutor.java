@@ -42,11 +42,13 @@ public class AutomationExecutor {
         Integer previousOrg = hadTenant ? tenantContext.getOrgId() : null;
         String previousCatalog = hadTenant ? tenantContext.getCatalog() : null;
 
+        int orgId = workspaceService.getOrgId(workspaceId);
+        String catalog = tenantCatalogResolver.resolveCatalog(orgId);
+
         SecurityContext context = SecurityContextHolder.createEmptyContext();
         context.setAuthentication(new UsernamePasswordAuthenticationToken(principal, null, principal.getAuthorities()));
         SecurityContextHolder.setContext(context);
-        int orgId = workspaceService.getOrgId(workspaceId);
-        tenantContext.set(workspaceId, orgId, principal.getId(), role, tenantCatalogResolver.resolveCatalog(orgId));
+        tenantContext.set(workspaceId, orgId, principal.getId(), role, catalog);
         boolean previousScope = automationScope.enter();
         try {
             return work.get();

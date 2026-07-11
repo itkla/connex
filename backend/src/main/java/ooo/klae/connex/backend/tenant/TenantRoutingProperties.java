@@ -18,7 +18,8 @@ import lombok.Data;
  * placement demands routing. {@code catalog-per-placement} switches the pooled
  * connection to the org's {@code database_handle} at checkout and resets it on
  * return; it must not be enabled in production until the control-plane split
- * increment has landed.
+ * increment has landed and off-request-thread work (async rule triggers,
+ * scheduled rule/notification jobs) resolves the tenant catalog.
  */
 @Data
 @Validated

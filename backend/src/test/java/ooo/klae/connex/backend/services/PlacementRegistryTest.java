@@ -1,6 +1,7 @@
 package ooo.klae.connex.backend.services;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -102,5 +103,16 @@ class PlacementRegistryTest {
         placementRegistry.effectivePlacementFor(7);
 
         verify(orgPlacementMapper, times(2)).findEffectiveByOrg(7);
+    }
+
+    @Test
+    void absurdlyLargeTtlIsClampedAndDoesNotThrow() {
+        properties.setPlacementCacheTtl(Duration.ofDays(200_000));
+        when(orgPlacementMapper.findEffectiveByOrg(7)).thenReturn(OrgPlacement.sharedDefault(7));
+
+        assertNotNull(placementRegistry.effectivePlacementFor(7));
+        placementRegistry.effectivePlacementFor(7);
+
+        verify(orgPlacementMapper, times(1)).findEffectiveByOrg(7);
     }
 }

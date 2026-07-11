@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.services;
 
+import java.time.Duration;
 import java.util.concurrent.ConcurrentHashMap;
 
 import org.springframework.stereotype.Service;
@@ -19,6 +20,8 @@ import ooo.klae.connex.backend.tenant.TenantRoutingProperties;
 @Service
 @RequiredArgsConstructor
 public class PlacementRegistry {
+
+    private static final long MAX_CACHE_TTL_NANOS = Duration.ofDays(365).toNanos();
 
     private record CachedEffective(OrgPlacement placement, long expiresAtNanos) {}
 
@@ -66,9 +69,22 @@ public class PlacementRegistry {
             return cached.placement();
         }
         OrgPlacement loaded = orgPlacementMapper.findEffectiveByOrg(orgId);
-        long ttlNanos = routingProperties.getPlacementCacheTtl().toNanos();
-        effectiveCache.put(orgId, new CachedEffective(loaded, now + ttlNanos));
+        effectiveCache.put(orgId, new CachedEffective(loaded, now + cacheTtlNanos()));
         return loaded;
+    }
+
+    private long cacheTtlNanos() {
+        Duration ttl = routingProperties.getPlacementCacheTtl();
+        long nanos;
+        try {
+            nanos = ttl.toNanos();
+        } catch (ArithmeticException overflow) {
+            return MAX_CACHE_TTL_NANOS;
+        }
+        if (nanos < 0) {
+            return 0;
+        }
+        return Math.min(nanos, MAX_CACHE_TTL_NANOS);
     }
 
     /**

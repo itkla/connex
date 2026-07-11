@@ -59,14 +59,30 @@ public class TenantRoutingDataSource extends DelegatingDataSource {
         try {
             connection.setCatalog(catalog);
         } catch (SQLException e) {
-            try {
-                connection.close();
-            } catch (SQLException closeFailure) {
-                e.addSuppressed(closeFailure);
-            }
+            evictAndClose(connection, e);
             throw e;
         }
         return wrap(connection);
+    }
+
+    /**
+     * Evicts a connection whose catalog switch failed, then closes it. The
+     * driver may have applied the switch server-side before failing, and
+     * HikariCP only arms its dirty-bit reset once {@code setCatalog} returns, so
+     * closing alone could recycle a connection still pointing at the tenant
+     * catalog. Eviction guarantees the physical connection is destroyed instead.
+     */
+    private void evictAndClose(Connection connection, SQLException cause) {
+        try {
+            evictor.accept(connection);
+        } catch (RuntimeException evictFailure) {
+            cause.addSuppressed(evictFailure);
+        }
+        try {
+            connection.close();
+        } catch (SQLException closeFailure) {
+            cause.addSuppressed(closeFailure);
+        }
     }
 
     private Connection wrap(Connection target) {

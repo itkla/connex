@@ -103,13 +103,14 @@ class TenantRoutingDataSourceTest {
     }
 
     @Test
-    void checkoutSwitchFailureClosesTheConnectionAndPropagates() throws SQLException {
+    void checkoutSwitchFailureEvictsClosesAndPropagates() throws SQLException {
         tenantContext.set(1, 1, 1, "owner", TENANT_CATALOG);
         doThrow(new SQLException("switch failed")).when(connection).setCatalog(TENANT_CATALOG);
 
         assertThrows(SQLException.class, () -> dataSource.getConnection());
-        verify(connection).close();
-        verify(evictor, never()).accept(any());
+        InOrder order = inOrder(evictor, connection);
+        order.verify(evictor).accept(connection);
+        order.verify(connection).close();
     }
 
     @Test
