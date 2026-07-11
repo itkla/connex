@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -24,10 +25,10 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
-import ooo.klae.connex.backend.ai.AiCompletionOutcome;
 import ooo.klae.connex.backend.ai.AiFeatureGate;
 import ooo.klae.connex.backend.ai.AiInvocation;
 import ooo.klae.connex.backend.ai.AiInvocationService;
+import ooo.klae.connex.backend.ai.AiStructuredOutcome;
 import ooo.klae.connex.backend.ai.masking.EntityKind;
 import ooo.klae.connex.backend.ai.masking.MaskedPrompt;
 import ooo.klae.connex.backend.ai.masking.MaskingContext;
@@ -77,7 +78,7 @@ class IntroRationaleServiceTest {
         assertUnavailable(result, "not_configured");
         verify(introductionService, never()).computeSuggestions(anyInt(), anyInt());
         verify(introRationaleAssembler, never()).assemble(anyInt(), any());
-        verify(aiInvocationService, never()).complete(any());
+        verify(aiInvocationService, never()).completeStructured(any(), any());
     }
 
     @Test
@@ -90,7 +91,7 @@ class IntroRationaleServiceTest {
 
         assertUnavailable(result, "not_a_suggestion");
         verify(introRationaleAssembler, never()).assemble(anyInt(), any());
-        verify(aiInvocationService, never()).complete(any());
+        verify(aiInvocationService, never()).completeStructured(any(), any());
     }
 
     @Test
@@ -101,9 +102,10 @@ class IntroRationaleServiceTest {
         when(introductionService.computeSuggestions(WORKSPACE_ID, IntroRationaleService.RESOLVE_LIMIT))
                 .thenReturn(List.of(suggestion));
         when(introRationaleAssembler.assemble(WORKSPACE_ID, suggestion)).thenReturn(assembly);
-        when(aiInvocationService.complete(any(AiInvocation.class)))
-                .thenReturn(new AiCompletionOutcome(
-                        "Alice and Bob share three trusted connections and complementary roles.",
+        when(aiInvocationService.completeStructured(any(AiInvocation.class), eq(IntroRationaleContent.class)))
+                .thenReturn(new AiStructuredOutcome.Parsed<>(
+                        new IntroRationaleContent(
+                                "Alice and Bob share three trusted connections and complementary roles."),
                         2,
                         80,
                         24,
@@ -124,7 +126,7 @@ class IntroRationaleServiceTest {
         verify(introductionService).computeSuggestions(WORKSPACE_ID, IntroRationaleService.RESOLVE_LIMIT);
         verify(introRationaleAssembler).assemble(WORKSPACE_ID, suggestion);
         ArgumentCaptor<AiInvocation> invocation = ArgumentCaptor.forClass(AiInvocation.class);
-        verify(aiInvocationService).complete(invocation.capture());
+        verify(aiInvocationService).completeStructured(invocation.capture(), eq(IntroRationaleContent.class));
         assertEquals("intro.rationale", invocation.getValue().feature());
         assertSame(assembly.context(), invocation.getValue().context());
         assertSame(assembly.prompt(), invocation.getValue().prompt());
@@ -140,33 +142,58 @@ class IntroRationaleServiceTest {
         when(introductionService.computeSuggestions(WORKSPACE_ID, IntroRationaleService.RESOLVE_LIMIT))
                 .thenReturn(List.of(suggestion));
         when(introRationaleAssembler.assemble(WORKSPACE_ID, suggestion)).thenReturn(assembly);
-        when(aiInvocationService.complete(any(AiInvocation.class)))
-                .thenReturn(new AiCompletionOutcome("Cached rationale", 0, 20, 10, "end_turn"));
+        when(aiInvocationService.completeStructured(any(AiInvocation.class), eq(IntroRationaleContent.class)))
+                .thenReturn(new AiStructuredOutcome.Parsed<>(
+                        new IntroRationaleContent("Cached rationale"), 0, 20, 10, "end_turn"));
 
         IntroRationaleDto first = service.generate(PERSON_A_ID, PERSON_B_ID);
         IntroRationaleDto second = service.generate(PERSON_B_ID, PERSON_A_ID);
 
         assertSame(first, second);
-        verify(aiInvocationService, times(1)).complete(any(AiInvocation.class));
+        verify(aiInvocationService, times(1))
+                .completeStructured(any(AiInvocation.class), eq(IntroRationaleContent.class));
     }
 
     @Test
-    void generate_blankCompletion_returnsProviderErrorAndDoesNotCache() {
+    void generate_malformedOutcome_returnsProviderErrorAndDoesNotCache() {
         IntroSuggestionDto suggestion = suggestion(PERSON_A_ID, PERSON_B_ID);
         IntroRationaleAssembly assembly = assembly();
         when(aiFeatureGate.isAiUsable()).thenReturn(true);
         when(introductionService.computeSuggestions(WORKSPACE_ID, IntroRationaleService.RESOLVE_LIMIT))
                 .thenReturn(List.of(suggestion));
         when(introRationaleAssembler.assemble(WORKSPACE_ID, suggestion)).thenReturn(assembly);
-        when(aiInvocationService.complete(any(AiInvocation.class)))
-                .thenReturn(new AiCompletionOutcome("   ", 0, 5, 0, "end_turn"));
+        when(aiInvocationService.completeStructured(any(AiInvocation.class), eq(IntroRationaleContent.class)))
+                .thenReturn(new AiStructuredOutcome.Malformed<>(
+                        AiStructuredOutcome.REASON_MALFORMED, 5, 0, "end_turn"));
 
         IntroRationaleDto first = service.generate(PERSON_A_ID, PERSON_B_ID);
         IntroRationaleDto second = service.generate(PERSON_A_ID, PERSON_B_ID);
 
         assertUnavailable(first, "provider_error");
         assertUnavailable(second, "provider_error");
-        verify(aiInvocationService, times(2)).complete(any(AiInvocation.class));
+        verify(aiInvocationService, times(2))
+                .completeStructured(any(AiInvocation.class), eq(IntroRationaleContent.class));
+    }
+
+    @Test
+    void generate_blankRationale_returnsProviderErrorAndDoesNotCache() {
+        IntroSuggestionDto suggestion = suggestion(PERSON_A_ID, PERSON_B_ID);
+        IntroRationaleAssembly assembly = assembly();
+        when(aiFeatureGate.isAiUsable()).thenReturn(true);
+        when(introductionService.computeSuggestions(WORKSPACE_ID, IntroRationaleService.RESOLVE_LIMIT))
+                .thenReturn(List.of(suggestion));
+        when(introRationaleAssembler.assemble(WORKSPACE_ID, suggestion)).thenReturn(assembly);
+        when(aiInvocationService.completeStructured(any(AiInvocation.class), eq(IntroRationaleContent.class)))
+                .thenReturn(new AiStructuredOutcome.Parsed<>(
+                        new IntroRationaleContent("   "), 0, 5, 0, "end_turn"));
+
+        IntroRationaleDto first = service.generate(PERSON_A_ID, PERSON_B_ID);
+        IntroRationaleDto second = service.generate(PERSON_A_ID, PERSON_B_ID);
+
+        assertUnavailable(first, "provider_error");
+        assertUnavailable(second, "provider_error");
+        verify(aiInvocationService, times(2))
+                .completeStructured(any(AiInvocation.class), eq(IntroRationaleContent.class));
     }
 
     @Test
@@ -185,16 +212,18 @@ class IntroRationaleServiceTest {
         when(introductionService.computeSuggestions(WORKSPACE_ID, IntroRationaleService.RESOLVE_LIMIT))
                 .thenReturn(List.of(suggestion));
         when(introRationaleAssembler.assemble(WORKSPACE_ID, suggestion)).thenReturn(first, swapped);
-        when(aiInvocationService.complete(any(AiInvocation.class)))
-                .thenReturn(new AiCompletionOutcome("first", 0, 5, 5, "end_turn"),
-                        new AiCompletionOutcome("second", 0, 5, 5, "end_turn"));
+        when(aiInvocationService.completeStructured(any(AiInvocation.class), eq(IntroRationaleContent.class)))
+                .thenReturn(
+                        new AiStructuredOutcome.Parsed<>(new IntroRationaleContent("first"), 0, 5, 5, "end_turn"),
+                        new AiStructuredOutcome.Parsed<>(new IntroRationaleContent("second"), 0, 5, 5, "end_turn"));
 
         IntroRationaleDto firstResult = service.generate(PERSON_A_ID, PERSON_B_ID);
         IntroRationaleDto secondResult = service.generate(PERSON_A_ID, PERSON_B_ID);
 
         assertEquals("first", firstResult.getRationale());
         assertEquals("second", secondResult.getRationale());
-        verify(aiInvocationService, times(2)).complete(any(AiInvocation.class));
+        verify(aiInvocationService, times(2))
+                .completeStructured(any(AiInvocation.class), eq(IntroRationaleContent.class));
     }
 
     @Test
@@ -230,7 +259,8 @@ class IntroRationaleServiceTest {
         when(introductionService.computeSuggestions(WORKSPACE_ID, IntroRationaleService.RESOLVE_LIMIT))
                 .thenReturn(List.of(suggestion));
         when(introRationaleAssembler.assemble(WORKSPACE_ID, suggestion)).thenReturn(assembly());
-        when(aiInvocationService.complete(any(AiInvocation.class))).thenThrow(exception);
+        when(aiInvocationService.completeStructured(any(AiInvocation.class), eq(IntroRationaleContent.class)))
+                .thenThrow(exception);
     }
 
     private static MaskedPrompt twoPersonPrompt() {

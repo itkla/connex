@@ -36,7 +36,7 @@ export default function DealRationalePanel({ dealId }: { dealId: number }) {
             try {
                 const rationale = await getDealRationale(dealId);
                 if (cancelled) return;
-                if (rationale.available && rationale.rationale) {
+                if (rationale.available && (rationale.narrative || rationale.rationale)) {
                     setState({ status: 'ready', rationale });
                 } else if (rationale.reason === 'provider_error') {
                     setState({ status: 'error' });
@@ -82,8 +82,26 @@ export default function DealRationalePanel({ dealId }: { dealId: number }) {
                 </div>
             ) : (
                 <div className="grid gap-3 rounded-lg border px-4 py-3 motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-bottom-1 motion-safe:duration-300">
-                    <div className="max-w-[70ch] whitespace-pre-wrap text-sm leading-relaxed text-foreground">
-                        {state.rationale.rationale}
+                    <div className="grid max-w-[70ch] gap-3">
+                        <p className="whitespace-pre-wrap text-sm leading-relaxed text-foreground">
+                            {state.rationale.narrative ?? state.rationale.rationale}
+                        </p>
+                        {state.rationale.actions && state.rationale.actions.length > 0 ? (
+                            <ul className="grid gap-1.5">
+                                {state.rationale.actions.map((action, index) => (
+                                    <li
+                                        key={index}
+                                        className="flex gap-2 text-sm leading-relaxed text-muted-foreground"
+                                    >
+                                        <span
+                                            aria-hidden
+                                            className="mt-[0.5rem] size-1 shrink-0 rounded-full bg-muted-foreground/50"
+                                        />
+                                        <span>{action}</span>
+                                    </li>
+                                ))}
+                            </ul>
+                        ) : null}
                     </div>
                     <p className="text-xs text-muted-foreground">
                         {t('attribution', {
