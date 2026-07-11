@@ -24,7 +24,7 @@ export type IconType = React.ComponentType<{ className?: string }>;
 /**
  * One selectable search result. `leading` carries a pre-rendered avatar node when a type has one;
  * otherwise `icon` (or an `accent` swatch) is used. `index` is a flat position across all groups, used
- * by the roving-keyboard SearchBar dropdown; the cmdk palette ignores it and keys off `key`.
+ * by the roving-keyboard inline search dropdown; the cmdk palette ignores it and keys off `key`.
  */
 export type ResultRow = {
     key: string;
@@ -56,8 +56,8 @@ export function truncate(text: string, max = 70): string {
 
 /**
  * Builds the ordered, labeled result groups from a global-search response. This is the single source of
- * truth for result grouping, row shape, labels, and destination hrefs, shared by the top SearchBar, the
- * `/search` page, and the command palette so record search is never reimplemented.
+ * truth for result grouping, row shape, labels, and destination hrefs, shared by the global search
+ * field, the `/search` page, and the command palette so record search is never reimplemented.
  *
  * @param results - the search response, or null when there is nothing to show
  * @param t - a translator scoped to the `CommonSearchBar` namespace

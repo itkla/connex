@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { usePathname } from "next/navigation";
 import { MenuIcon, PanelLeftCloseIcon, PanelLeftOpenIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import SearchBar from "@/app/components/SearchBar";
+import GlobalSearch from "@/app/components/GlobalSearch";
 import NavBreadcrumb from "@/app/components/NavBreadcrumb";
 import { useTranslations } from "next-intl";
 
@@ -115,7 +115,7 @@ export default function ContentShell({
                     </div>
 
                     <div className="w-full max-w-xl min-w-0">
-                        <SearchBar />
+                        <GlobalSearch />
                     </div>
                 </div>
 
