@@ -6,6 +6,7 @@ import dynamic from "next/dynamic";
 import { getUsers } from "@/app/lib/api";
 import type { User } from "@/app/lib/types";
 import type { OverlayRequest } from "@/app/lib/actions/types";
+import { ACTIVITY_TYPES } from "@/app/components/activity/activities/activityTypes";
 
 const TaskDialog = dynamic(() => import("@/app/components/activity/tasks/TaskDialog"));
 const NoteDialog = dynamic(() => import("@/app/components/activity/notes/NoteDialog"));
@@ -67,6 +68,7 @@ export default function ActionOverlayHost({
                     deals={[]}
                     users={users}
                     currentUserId={user.id}
+                    defaultDescription={overlay.draft?.description ?? ""}
                 />
             ) : null}
             {overlay?.kind === "create-note" ? (
@@ -77,10 +79,20 @@ export default function ActionOverlayHost({
                     persons={[]}
                     deals={[]}
                     currentUserId={user.id}
+                    defaultContent={overlay.draft?.content ?? ""}
                 />
             ) : null}
             {overlay?.kind === "create-activity" ? (
-                <ActivityDialog open onOpenChange={handleOpenChange} persons={[]} deals={[]} currentUserId={user.id} />
+                <ActivityDialog
+                    open
+                    onOpenChange={handleOpenChange}
+                    persons={[]}
+                    deals={[]}
+                    currentUserId={user.id}
+                    defaultType={ACTIVITY_TYPES.find((activityType) => activityType === overlay.draft?.type)}
+                    defaultSubject={overlay.draft?.subject ?? ""}
+                    defaultNotes={overlay.draft?.notes ?? ""}
+                />
             ) : null}
             {overlay?.kind === "create-company" ? (
                 <CompanyCreateContainer open onOpenChange={handleOpenChange} />

@@ -76,11 +76,16 @@ export type CreateDefaults = {
     pipelineId?: number;
 };
 
+/** Values typed into a quick-create form, carried into the full dialog when the user asks for more detail. */
+export type TaskDraft = { description?: string };
+export type NoteDraft = { content?: string };
+export type ActivityDraft = { type?: string; subject?: string; notes?: string };
+
 /** A shell-owned overlay an action can open. The union is closed; later work extends it additively. */
 export type OverlayRequest =
-    | { kind: "create-task"; defaults?: CreateDefaults }
-    | { kind: "create-note"; defaults?: CreateDefaults }
-    | { kind: "create-activity"; defaults?: CreateDefaults }
+    | { kind: "create-task"; defaults?: CreateDefaults; draft?: TaskDraft }
+    | { kind: "create-note"; defaults?: CreateDefaults; draft?: NoteDraft }
+    | { kind: "create-activity"; defaults?: CreateDefaults; draft?: ActivityDraft }
     | { kind: "create-company"; defaults?: CreateDefaults }
     | { kind: "create-person"; defaults?: CreateDefaults }
     | { kind: "create-deal"; defaults?: CreateDefaults };

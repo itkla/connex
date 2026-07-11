@@ -4,6 +4,25 @@
       "label": "アクション",
       "aria": "クイックアクションを開く"
     },
+    "quickCreate": {
+      "trigger": "新規作成",
+      "title": "作成",
+      "description": "レコードを作成",
+      "back": "種類に戻る",
+      "close": "閉じる",
+      "create": "作成",
+      "moreDetails": "詳細",
+      "linkedTo": "関連付け",
+      "task": {
+        "descriptionLabel": "タスク",
+        "descriptionPlaceholder": "何をする必要がありますか？",
+        "dueDateLabel": "期日"
+      },
+      "note": {
+        "contentLabel": "ノート",
+        "contentPlaceholder": "ノートを入力…"
+      }
+    },
     "group": {
       "create": "作成",
       "navigate": "移動",
@@ -47,7 +66,10 @@
       "dealCreated": "取引を作成しました",
       "createFailed": "作成できませんでした。もう一度お試しください。",
       "companyContactsAllFailed": "会社は作成しましたが、{count} 件の連絡先を追加できませんでした。",
-      "companyContactsPartial": "{total} 件中 {succeeded} 件の連絡先を追加しました。"
+      "companyContactsPartial": "{total} 件中 {succeeded} 件の連絡先を追加しました。",
+      "taskCreated": "タスクを作成しました",
+      "noteCreated": "ノートを作成しました",
+      "activityCreated": "アクティビティを記録しました"
     },
     "keywords": {
       "navigate": {
