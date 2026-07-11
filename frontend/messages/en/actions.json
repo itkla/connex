@@ -19,6 +19,13 @@
         "contentPlaceholder": "Write a note…"
       }
     },
+    "palette": {
+      "trigger": "Search & commands",
+      "placeholder": "Search or jump to…",
+      "records": "Records",
+      "loading": "Searching…",
+      "noResults": "No results for “{query}”"
+    },
     "group": {
       "create": "Create",
       "navigate": "Go to",
