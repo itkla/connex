@@ -99,6 +99,7 @@ export default function GlobalSearch() {
     const paletteInputRef = useRef<HTMLInputElement>(null);
     const paletteRef = useRef<HTMLDivElement>(null);
     const listRef = useRef<HTMLDivElement>(null);
+    const lastFocusedRef = useRef<HTMLElement | null>(null);
     const modeRef = useRef<Mode>(mode);
     useEffect(() => {
         modeRef.current = mode;
@@ -131,12 +132,16 @@ export default function GlobalSearch() {
         };
     }, [trimmed, shouldSearch]);
 
-    const scopedData = results?.query === trimmed ? results.data : null;
-    const searchGroups = useMemo<ResultGroup[]>(
-        () => (trimmed.length >= MIN_QUERY_LENGTH ? buildSearchGroups(scopedData, tSearch) : []),
-        [scopedData, trimmed, tSearch],
+    const paletteData = results?.query === trimmed ? results.data : null;
+    const paletteRecordGroups = useMemo<ResultGroup[]>(
+        () => (trimmed.length >= MIN_QUERY_LENGTH ? buildSearchGroups(paletteData, tSearch) : []),
+        [paletteData, trimmed, tSearch],
     );
-    const flatRows = useMemo(() => searchGroups.flatMap((group) => group.rows), [searchGroups]);
+    const inlineGroups = useMemo<ResultGroup[]>(
+        () => (trimmed.length >= MIN_QUERY_LENGTH ? buildSearchGroups(results?.data ?? null, tSearch) : []),
+        [results, trimmed, tSearch],
+    );
+    const flatRows = useMemo(() => inlineGroups.flatMap((group) => group.rows), [inlineGroups]);
     const searching = shouldSearch && results?.query !== trimmed;
 
     const commandGroups = useMemo(() => {
@@ -154,7 +159,11 @@ export default function GlobalSearch() {
 
     const closePalette = useCallback(() => {
         setMode('inline');
-        requestAnimationFrame(() => inlineInputRef.current?.focus());
+        const opener = lastFocusedRef.current;
+        lastFocusedRef.current = null;
+        requestAnimationFrame(() => {
+            if (opener && opener.isConnected) opener.focus();
+        });
     }, []);
 
     useEffect(() => {
@@ -163,15 +172,22 @@ export default function GlobalSearch() {
             if ((event.metaKey || event.ctrlKey) && !event.altKey && (event.key === 'k' || event.key === 'K')) {
                 event.preventDefault();
                 if (modeRef.current === 'palette') {
-                    setMode('inline');
+                    closePalette();
                 } else {
+                    const active = document.activeElement;
+                    lastFocusedRef.current = active instanceof HTMLElement ? active : null;
                     setMode('palette');
                 }
+                return;
+            }
+            if (event.key === 'Escape' && modeRef.current === 'palette') {
+                event.preventDefault();
+                closePalette();
             }
         };
         document.addEventListener('keydown', onKeyDown);
         return () => document.removeEventListener('keydown', onKeyDown);
-    }, []);
+    }, [closePalette]);
 
     useEffect(() => {
         if (mode !== 'palette') return;
@@ -263,22 +279,24 @@ export default function GlobalSearch() {
         }
     };
 
-    const recordCount = flatRows.length;
+    const inlineRecordCount = flatRows.length;
+    const paletteRecordCount = paletteRecordGroups.reduce((sum, group) => sum + group.rows.length, 0);
     const commandCount = commandGroups.reduce((sum, entry) => sum + entry.actions.length, 0);
-    const showNoResults = isPalette && trimmed.length > 0 && !searching && commandCount + recordCount === 0;
+    const showNoResults = isPalette && trimmed.length > 0 && !searching && commandCount + paletteRecordCount === 0;
 
     return (
         <div ref={containerRef} className="relative w-full">
             {isPalette ? <div aria-hidden className="h-11 w-full" /> : null}
 
             <motion.div
+                ref={paletteRef}
                 layout={!reduceMotion}
                 transition={reduceMotion ? { duration: 0 } : MORPH_TRANSITION}
                 className={cn(
-                    'overflow-hidden ring-1 ring-border transition-[background-color,border-radius,box-shadow] duration-200',
+                    'ring-1 ring-border transition-[background-color,border-radius,box-shadow] duration-200',
                     isPalette
-                        ? 'fixed inset-x-0 top-[14vh] z-50 mx-auto w-[min(640px,92vw)] rounded-2xl bg-popover text-popover-foreground shadow-2xl'
-                        : 'relative w-full rounded-full bg-muted',
+                        ? 'fixed inset-x-0 top-[14vh] z-50 mx-auto w-[min(40rem,92vw)] overflow-hidden rounded-2xl bg-popover text-popover-foreground shadow-2xl'
+                        : 'relative w-full rounded-full bg-muted focus-within:ring-2 focus-within:ring-brand',
                 )}
                 role={isPalette ? 'dialog' : undefined}
                 aria-modal={isPalette ? true : undefined}
@@ -287,6 +305,7 @@ export default function GlobalSearch() {
             >
                 {isPalette ? (
                   <motion.div
+                    layout={!reduceMotion}
                     initial={reduceMotion ? { opacity: 1 } : { opacity: 0 }}
                     animate={{ opacity: 1 }}
                     transition={reduceMotion ? { duration: 0 } : { duration: 0.18, delay: 0.06, ease: [0.23, 1, 0.32, 1] }}
@@ -314,9 +333,9 @@ export default function GlobalSearch() {
                                 </CommandGroup>
                             ))}
 
-                            {commandGroups.length > 0 && searchGroups.length > 0 ? <CommandSeparator /> : null}
+                            {commandGroups.length > 0 && paletteRecordGroups.length > 0 ? <CommandSeparator /> : null}
 
-                            {searchGroups.map((group) => (
+                            {paletteRecordGroups.map((group) => (
                                 <CommandGroup key={group.key} heading={group.heading}>
                                     {group.rows.map((row) => {
                                         const RowIcon = row.icon;
@@ -371,11 +390,15 @@ export default function GlobalSearch() {
                             ref={inlineInputRef}
                             type="text"
                             value={query}
-                            onChange={(event) => setQuery(event.target.value)}
-                            onFocus={() => setInlineOpen(true)}
+                            onChange={(event) => {
+                                setQuery(event.target.value);
+                                setActiveIndex(-1);
+                                setInlineOpen(true);
+                            }}
+                            onClick={() => setInlineOpen(true)}
                             onKeyDown={onInlineKeyDown}
                             placeholder={tSearch('placeholder')}
-                            className="w-full rounded-full bg-transparent py-2.5 pr-16 pl-11 text-base text-foreground placeholder:text-muted-foreground outline-none focus-visible:ring-2 focus-visible:ring-brand"
+                            className="w-full rounded-full bg-transparent py-2.5 pr-16 pl-11 text-base text-foreground placeholder:text-muted-foreground outline-none"
                             role="combobox"
                             aria-expanded={showInlineDropdown}
                             aria-controls="global-search-listbox"
@@ -396,15 +419,15 @@ export default function GlobalSearch() {
                     role="listbox"
                     className="absolute inset-x-0 top-full z-40 mt-2 max-h-[70vh] overflow-y-auto rounded-2xl bg-popover p-2 text-popover-foreground shadow-lg ring-1 ring-border"
                 >
-                    {searching && recordCount === 0 ? (
+                    {searching && inlineRecordCount === 0 ? (
                         <div className="flex justify-center py-3">
                             <Loader2Icon className="size-5 animate-spin text-muted-foreground" />
                         </div>
                     ) : null}
-                    {!searching && recordCount === 0 ? (
+                    {!searching && inlineRecordCount === 0 ? (
                         <p className="px-3 py-2 text-sm text-muted-foreground">{tSearch('noResults', { query: trimmed })}</p>
                     ) : null}
-                    {searchGroups.map((group) => (
+                    {inlineGroups.map((group) => (
                         <div key={group.key} className="mb-1 last:mb-0">
                             <p className="px-3 pb-1 pt-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">{group.heading}</p>
                             {group.rows.map((row) => {

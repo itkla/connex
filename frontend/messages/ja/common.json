@@ -119,7 +119,6 @@
   },
   "CommonSearchBar": {
     "placeholder": "何でも検索",
-    "search": "検索",
     "searching": "検索中...",
     "noResults": "「{query}」の検索結果はありません",
     "resultsHeading": "「{query}」の検索結果",

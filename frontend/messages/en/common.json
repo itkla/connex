@@ -119,7 +119,6 @@
   },
   "CommonSearchBar": {
     "placeholder": "Search for anything",
-    "search": "Search",
     "searching": "Searching...",
     "noResults": "No results for “{query}”",
     "resultsHeading": "Results for “{query}”",
