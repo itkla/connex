@@ -6,6 +6,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 
+import org.springframework.context.i18n.LocaleContextHolder;
 import org.springframework.stereotype.Service;
 
 import lombok.RequiredArgsConstructor;
@@ -77,9 +78,10 @@ public class DealRiskRationaleService {
         }
 
         RationaleAssembly assembly = dealRiskRationaleAssembler.assemble(workspaceId, dealId, risk);
+        String cacheFeature = cacheFeature();
         String contentHash = aiOutputCacheStore.contentHash(assembly.prompt(), assembly.context());
         if (!refresh) {
-            DealRationaleDto cached = cached(workspaceId, dealId, contentHash);
+            DealRationaleDto cached = cached(workspaceId, cacheFeature, dealId, contentHash);
             if (cached != null) {
                 return cached;
             }
@@ -99,7 +101,7 @@ public class DealRiskRationaleService {
             String narrative = truncate(content.narrative().strip(), MAX_NARRATIVE_CHARS);
             List<String> actions = actions(content.actions());
             String generatedAt = Instant.now(clock).toString();
-            aiOutputCacheStore.save(workspaceId, FEATURE, dealId, AiOutputCacheStore.NO_SUBJECT,
+            aiOutputCacheStore.save(workspaceId, cacheFeature, dealId, AiOutputCacheStore.NO_SUBJECT,
                     contentHash, new DealRiskRationaleContent(narrative, actions), parsed.demaskWarnings(), generatedAt);
             return DealRationaleDto.of(dealId, narrative, actions, generatedAt, parsed.demaskWarnings());
         } catch (MaskingLeakException | AiProviderException exception) {
@@ -109,9 +111,9 @@ public class DealRiskRationaleService {
         }
     }
 
-    private DealRationaleDto cached(int workspaceId, int dealId, String contentHash) {
+    private DealRationaleDto cached(int workspaceId, String cacheFeature, int dealId, String contentHash) {
         Optional<AiOutputCache> row = aiOutputCacheStore.find(
-                workspaceId, FEATURE, dealId, AiOutputCacheStore.NO_SUBJECT);
+                workspaceId, cacheFeature, dealId, AiOutputCacheStore.NO_SUBJECT);
         if (row.isEmpty() || !contentHash.equals(row.get().getContentHash())) {
             return null;
         }
@@ -143,6 +145,11 @@ public class DealRiskRationaleService {
             }
         }
         return List.copyOf(cleaned);
+    }
+
+    private static String cacheFeature() {
+        String language = LocaleContextHolder.getLocale().getLanguage();
+        return FEATURE + ':' + (language.isBlank() ? "en" : language);
     }
 
     private static String truncate(String value, int maxCodePoints) {

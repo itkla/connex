@@ -69,20 +69,20 @@ export default function DealBriefPanel({ dealId, className }: { dealId: number; 
     if (state.status === 'hidden') return null;
 
     return (
-        <section aria-label={t('panelTitle')} className={cn('grid gap-3', className)}>
+        <section aria-label={t('panelTitle')} className={cn('flex flex-col gap-3', className)}>
             <h2 className="flex items-center gap-1.5 text-xs font-medium uppercase tracking-[0.12em] text-muted-foreground">
                 <SparklesIcon className="size-3.5" aria-hidden />
                 {t('panelTitle')}
             </h2>
             {state.status === 'loading' ? (
-                <div className="grid gap-2 rounded-lg border px-4 py-3" aria-busy>
+                <div className="grid flex-1 gap-2 rounded-lg border px-4 py-3" aria-busy>
                     <Skeleton className="h-3.5 w-full" />
                     <Skeleton className="h-3.5 w-11/12" />
                     <Skeleton className="h-3.5 w-4/5" />
                     <Skeleton className="h-3.5 w-2/3" />
                 </div>
             ) : state.status === 'error' ? (
-                <div className="flex items-center justify-between gap-3 rounded-lg border px-4 py-3">
+                <div className="flex flex-1 items-center justify-between gap-3 rounded-lg border px-4 py-3">
                     <p className="text-sm text-muted-foreground">{t('error')}</p>
                     <Button variant="ghost" size="sm" onClick={retry} className="shrink-0">
                         <ArrowPathIcon className="size-4" aria-hidden />
@@ -90,9 +90,9 @@ export default function DealBriefPanel({ dealId, className }: { dealId: number; 
                     </Button>
                 </div>
             ) : (
-                <div className="grid gap-3 rounded-lg border px-4 py-3 motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-bottom-1 motion-safe:duration-300">
+                <div className="flex flex-1 flex-col gap-3 rounded-lg border px-4 py-3 motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-bottom-1 motion-safe:duration-300">
                     {state.brief.sections && state.brief.sections.length > 0 ? (
-                        <div className="grid max-w-[70ch] gap-4">
+                        <div className="grid max-w-[70ch] flex-1 gap-4">
                             {state.brief.sections.map((section, index) => (
                                 <div key={index} className="grid gap-1">
                                     <h3 className="text-sm font-medium text-foreground">{section.title}</h3>
@@ -103,7 +103,7 @@ export default function DealBriefPanel({ dealId, className }: { dealId: number; 
                             ))}
                         </div>
                     ) : (
-                        <div className="max-w-[70ch] whitespace-pre-wrap text-sm leading-relaxed text-foreground">
+                        <div className="max-w-[70ch] flex-1 whitespace-pre-wrap text-sm leading-relaxed text-foreground">
                             {state.brief.brief}
                         </div>
                     )}

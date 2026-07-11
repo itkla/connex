@@ -4,9 +4,11 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 
+import org.springframework.context.i18n.LocaleContextHolder;
 import org.springframework.stereotype.Service;
 
 import lombok.RequiredArgsConstructor;
@@ -90,7 +92,7 @@ public class DealBriefAssembler {
         String userPrompt = userPrompt(deal, summary, stageHistory, stakeholders, warmth, risk,
                 activities, notes, tasks, companyToken, context);
         MaskedPrompt prompt = PromptAssembly.builder()
-                .system(SYSTEM_PROMPT)
+                .system(SYSTEM_PROMPT + languageDirective())
                 .userTurn(userPrompt)
                 .build();
         return new BriefAssembly(context, prompt);
@@ -370,6 +372,11 @@ public class DealBriefAssembler {
             prompt.append(date).append(": ");
         }
         prompt.append(digest).append('\n');
+    }
+
+    private static String languageDirective() {
+        String language = LocaleContextHolder.getLocale().getDisplayLanguage(Locale.ENGLISH);
+        return "\nWrite the entire brief in " + (language.isBlank() ? "English" : language) + ".";
     }
 
     private static String truncate(String value, int maxCodePoints) {
