@@ -12,6 +12,7 @@ function isLocale(value: string | undefined): value is Locale {
 
 const namespaces = [
     "common",
+    "actions",
     "auth",
     "workspace",
     "organization",
