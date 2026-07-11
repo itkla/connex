@@ -43,6 +43,9 @@ const PANEL_WIDTH = 380;
 const PANEL_GAP = 12;
 const VIEWPORT_MARGIN = 16;
 
+/** Strong ease-out curve; the built-in CSS/JS easings are too weak to feel intentional. */
+const EASE_OUT = [0.23, 1, 0.32, 1] as const;
+
 type Anchor = { top: number; left: number; maxHeight: number };
 
 const MOBILE_QUERY = '(max-width: 767px)';
@@ -265,10 +268,14 @@ export default function QuickCreateLauncher() {
                                       onKeyDown={handlePanelKeyDown}
                                       initial={reduceMotion ? { opacity: 0 } : { opacity: 0, scale: 0.96, y: -6 }}
                                       animate={reduceMotion ? { opacity: 1 } : { opacity: 1, scale: 1, y: 0 }}
-                                      exit={reduceMotion ? { opacity: 0 } : { opacity: 0, scale: 0.97, y: -4 }}
+                                      exit={
+                                          reduceMotion
+                                              ? { opacity: 0, transition: { duration: 0.1, ease: EASE_OUT } }
+                                              : { opacity: 0, scale: 0.97, y: -4, transition: { duration: 0.13, ease: EASE_OUT } }
+                                      }
                                       transition={
                                           reduceMotion
-                                              ? { duration: 0.12 }
+                                              ? { duration: 0.12, ease: EASE_OUT }
                                               : { type: 'spring', stiffness: 520, damping: 38, mass: 0.8 }
                                       }
                                       style={{
@@ -325,6 +332,7 @@ function QuickCreatePanelBody({
     showChrome,
 }: PanelBodyProps) {
     const t = useTranslations('Actions');
+    const reduceMotion = useReducedMotion() ?? false;
     const isForm = view !== 'selector';
 
     return (
@@ -356,30 +364,40 @@ function QuickCreatePanelBody({
             ) : null}
 
             <div className="min-h-0 overflow-y-auto p-4">
-                {view === 'selector' ? (
-                    <TypeSelector actions={actions} onSelect={onSelect} />
-                ) : currentUserId == null ? null : view === 'task' ? (
-                    <TaskQuickForm
-                        defaults={defaults}
-                        currentUserId={currentUserId}
-                        onCreated={onCreated}
-                        onMoreDetails={(draft) => onMoreDetails('task', draft)}
-                    />
-                ) : view === 'note' ? (
-                    <NoteQuickForm
-                        defaults={defaults}
-                        currentUserId={currentUserId}
-                        onCreated={onCreated}
-                        onMoreDetails={(draft) => onMoreDetails('note', draft)}
-                    />
-                ) : (
-                    <ActivityQuickForm
-                        defaults={defaults}
-                        currentUserId={currentUserId}
-                        onCreated={onCreated}
-                        onMoreDetails={(draft) => onMoreDetails('activity', draft)}
-                    />
-                )}
+                <AnimatePresence mode="wait" initial={false}>
+                    <motion.div
+                        key={view}
+                        initial={reduceMotion ? { opacity: 0 } : { opacity: 0, y: 4 }}
+                        animate={reduceMotion ? { opacity: 1 } : { opacity: 1, y: 0 }}
+                        exit={reduceMotion ? { opacity: 0 } : { opacity: 0, y: -4 }}
+                        transition={{ duration: 0.12, ease: EASE_OUT }}
+                    >
+                        {view === 'selector' ? (
+                            <TypeSelector actions={actions} onSelect={onSelect} />
+                        ) : currentUserId == null ? null : view === 'task' ? (
+                            <TaskQuickForm
+                                defaults={defaults}
+                                currentUserId={currentUserId}
+                                onCreated={onCreated}
+                                onMoreDetails={(draft) => onMoreDetails('task', draft)}
+                            />
+                        ) : view === 'note' ? (
+                            <NoteQuickForm
+                                defaults={defaults}
+                                currentUserId={currentUserId}
+                                onCreated={onCreated}
+                                onMoreDetails={(draft) => onMoreDetails('note', draft)}
+                            />
+                        ) : (
+                            <ActivityQuickForm
+                                defaults={defaults}
+                                currentUserId={currentUserId}
+                                onCreated={onCreated}
+                                onMoreDetails={(draft) => onMoreDetails('activity', draft)}
+                            />
+                        )}
+                    </motion.div>
+                </AnimatePresence>
             </div>
         </div>
     );
@@ -426,7 +444,7 @@ function TypeSelector({
                         tabIndex={index === 0 ? 0 : -1}
                         data-autofocus={index === 0 ? '' : undefined}
                         onClick={() => onSelect(action)}
-                        className="group flex items-center gap-3 rounded-lg px-2.5 py-2 text-left transition-colors hover:bg-muted focus-visible:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
+                        className="group flex items-center gap-3 rounded-lg px-2.5 py-2 text-left transition-[transform,background-color] duration-150 ease-out hover:bg-muted focus-visible:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand active:scale-[0.98] motion-reduce:transition-none motion-reduce:active:scale-100"
                     >
                         <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-muted text-muted-foreground ring-1 ring-border transition-colors group-hover:bg-brand-light group-hover:text-brand-dark group-hover:ring-transparent group-focus-visible:bg-brand-light group-focus-visible:text-brand-dark">
                             {Icon ? <Icon className="size-4" /> : null}
