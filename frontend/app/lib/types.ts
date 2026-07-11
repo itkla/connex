@@ -202,6 +202,8 @@ export type DealRisk = {
     score: number;
     factors: DealRiskFactor[];
     assessedAt: string;
+    value: number;
+    currency: string;
 };
 
 /** Why an AI deal brief is unavailable: AI is not configured for the org, or the provider call failed. */
@@ -1127,6 +1129,54 @@ export type DealStageDistribution = {
     openValue: number;
     closedCount: number;
     closedValue: number;
+};
+
+/**
+ * Server-computed deal KPIs for the analytics/dashboard clusters over ALL deals in a range.
+ * Scalars are current-period; {@code *Prev} are the previous window (null = no baseline).
+ * The four series are 12 buckets, oldest→newest, over the current period.
+ */
+export type DealKpis = {
+    wonRevenue: number;
+    wonRevenuePrev: number | null;
+    newPipeline: number;
+    newPipelinePrev: number | null;
+    wonCount: number;
+    lostCount: number;
+    wonValue: number;
+    lostValue: number;
+    wonCountPrev: number | null;
+    lostCountPrev: number | null;
+    avgCycleDays: number;
+    avgCycleDaysPrev: number | null;
+    wonSeries: number[];
+    newPipelineSeries: number[];
+    /** Win-rate per bucket as a 0–100 percent (note: the {@link DealKpis} scalar win rate is derived from wonCount/lostCount, not this series). */
+    winRateSeries: number[];
+    avgCycleSeries: number[];
+};
+
+/** Server-computed per-pipeline won-in-range + open rollup for the analytics pipeline-value chart. */
+export type DealPipelineValue = {
+    pipelineId: number | null;
+    wonValue: number;
+    openValue: number;
+    openCount: number;
+};
+
+/** Server-computed per-stage open-deal age buckets for the deals-aging chart. */
+export type DealAging = {
+    stageId: number | null;
+    fresh: number;
+    active: number;
+    aging: number;
+    stalled: number;
+};
+
+/** Server-computed top open/won deals for the analytics top-deals widget. */
+export type DealTop = {
+    topOpen: DealSummary[];
+    topWon: DealSummary[];
 };
 
 export type UploadedFile = {

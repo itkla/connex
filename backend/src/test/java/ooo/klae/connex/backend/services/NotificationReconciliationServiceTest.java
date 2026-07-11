@@ -419,10 +419,10 @@ class NotificationReconciliationServiceTest {
         DealRiskService dealRiskService = Mockito.mock(DealRiskService.class);
         Clock clock = Clock.fixed(Instant.parse("2026-06-23T15:30:00Z"), ZoneOffset.UTC);
 
-        DealRiskDto high = new DealRiskDto(101, "high", 60,
+        DealRiskDto high = new DealRiskDto(101, 0.0, null, "high", 60,
             List.of(new DealRiskFactor("close_overdue", "high", Map.of("daysOverdue", 22L))),
             "2026-06-23 15:30:00");
-        DealRiskDto low = new DealRiskDto(102, "low", 10,
+        DealRiskDto low = new DealRiskDto(102, 0.0, null, "low", 10,
             List.of(new DealRiskFactor("no_stakeholders", "low", Map.of())),
             "2026-06-23 15:30:00");
         when(dealRiskService.assessWorkspace(eq(7), any())).thenReturn(List.of(high, low));
@@ -474,7 +474,7 @@ class NotificationReconciliationServiceTest {
         DealRiskService dealRiskService = Mockito.mock(DealRiskService.class);
         Clock clock = Clock.fixed(Instant.parse("2026-06-23T15:30:00Z"), ZoneOffset.UTC);
 
-        DealRiskDto medium = new DealRiskDto(101, "medium", 25,
+        DealRiskDto medium = new DealRiskDto(101, 0.0, null, "medium", 25,
             List.of(new DealRiskFactor("stalled", "medium", Map.of("daysSinceTouch", 40))),
             "2026-06-23 15:30:00");
         when(dealRiskService.assessWorkspace(eq(7), any())).thenReturn(List.of(medium));
@@ -510,7 +510,7 @@ class NotificationReconciliationServiceTest {
         optOut.setEnabled(false);
 
         when(preferenceMapper.findByWorkspaceAndChannel(7, "in_app")).thenReturn(List.of(optOut));
-        when(dealRiskService.assessWorkspace(eq(7), any())).thenReturn(List.of(new DealRiskDto(101, "high", 60,
+        when(dealRiskService.assessWorkspace(eq(7), any())).thenReturn(List.of(new DealRiskDto(101, 0.0, null, "high", 60,
             List.of(new DealRiskFactor("close_overdue", "high", Map.of("daysOverdue", 22L))), "2026-06-23 15:30:00")));
         when(notificationMapper.findOpenDealRecipients(7)).thenReturn(List.of(recipient(101, "Acme renewal", 42)));
 
@@ -749,7 +749,7 @@ class NotificationReconciliationServiceTest {
             202, NotificationReconciliationService.DEAL_RISK_TYPE, "deal.risk:101");
         when(notificationMapper.findTaskReminderCandidates(7)).thenReturn(List.of(task));
         when(notificationMapper.findWorkspaceReminderNotifications(7)).thenReturn(List.of(existing));
-        when(dealRiskService.assessWorkspace(eq(7), any())).thenReturn(List.of(new DealRiskDto(101, "high", 60,
+        when(dealRiskService.assessWorkspace(eq(7), any())).thenReturn(List.of(new DealRiskDto(101, 0.0, null, "high", 60,
             List.of(new DealRiskFactor("close_overdue", "high", Map.of("daysOverdue", 22L))), "2026-06-23 15:30:00")));
         when(notificationMapper.findOpenDealRecipients(7)).thenReturn(new AbstractList<>() {
             @Override

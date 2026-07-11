@@ -241,6 +241,161 @@
     GROUP BY d.stage_id, d.pipeline_id
   </select>
 
+  <select id="dealKpiCurrent" resultType="ooo.klae.connex.backend.dto.DealKpiPeriodDto">
+    SELECT COALESCE(SUM(CASE WHEN d.won = TRUE
+               AND d.closed_at &gt;= DATE_SUB(NOW(), INTERVAL #{days} DAY)
+               AND d.closed_at &lt;= NOW() THEN d.actual_value END), 0) AS won_revenue,
+           COALESCE(SUM(CASE WHEN d.created_at &gt;= DATE_SUB(NOW(), INTERVAL #{days} DAY)
+               AND d.created_at &lt;= NOW() THEN d.value END), 0) AS new_pipeline,
+           COUNT(CASE WHEN d.created_at &gt;= DATE_SUB(NOW(), INTERVAL #{days} DAY)
+               AND d.created_at &lt;= NOW() THEN 1 END) AS new_pipeline_count,
+           COUNT(CASE WHEN d.won = TRUE
+               AND d.closed_at &gt;= DATE_SUB(NOW(), INTERVAL #{days} DAY)
+               AND d.closed_at &lt;= NOW() THEN 1 END) AS won_count,
+           COUNT(CASE WHEN d.won = FALSE
+               AND d.closed_at &gt;= DATE_SUB(NOW(), INTERVAL #{days} DAY)
+               AND d.closed_at &lt;= NOW() THEN 1 END) AS lost_count,
+           COALESCE(SUM(CASE WHEN d.won = FALSE
+               AND d.closed_at &gt;= DATE_SUB(NOW(), INTERVAL #{days} DAY)
+               AND d.closed_at &lt;= NOW() THEN d.value END), 0) AS lost_value,
+           COALESCE(AVG(CASE WHEN d.won = TRUE
+               AND d.closed_at &gt;= DATE_SUB(NOW(), INTERVAL #{days} DAY)
+               AND d.closed_at &lt;= NOW() THEN DATEDIFF(d.closed_at, d.created_at) END), 0) AS avg_cycle_days
+    FROM deal d
+    WHERE d.workspace_id = #{workspaceId}
+    <if test="currency != null">
+      AND d.currency = #{currency}
+    </if>
+  </select>
+
+  <select id="dealKpiPrevious" resultType="ooo.klae.connex.backend.dto.DealKpiPeriodDto">
+    SELECT COALESCE(SUM(CASE WHEN d.won = TRUE
+               AND d.closed_at &gt;= DATE_SUB(NOW(), INTERVAL #{previousDays} DAY)
+               AND d.closed_at &lt; DATE_SUB(NOW(), INTERVAL #{days} DAY)
+               THEN d.actual_value END), 0) AS won_revenue,
+           COALESCE(SUM(CASE WHEN d.created_at &gt;= DATE_SUB(NOW(), INTERVAL #{previousDays} DAY)
+               AND d.created_at &lt; DATE_SUB(NOW(), INTERVAL #{days} DAY)
+               THEN d.value END), 0) AS new_pipeline,
+           COUNT(CASE WHEN d.created_at &gt;= DATE_SUB(NOW(), INTERVAL #{previousDays} DAY)
+               AND d.created_at &lt; DATE_SUB(NOW(), INTERVAL #{days} DAY)
+               THEN 1 END) AS new_pipeline_count,
+           COUNT(CASE WHEN d.won = TRUE
+               AND d.closed_at &gt;= DATE_SUB(NOW(), INTERVAL #{previousDays} DAY)
+               AND d.closed_at &lt; DATE_SUB(NOW(), INTERVAL #{days} DAY)
+               THEN 1 END) AS won_count,
+           COUNT(CASE WHEN d.won = FALSE
+               AND d.closed_at &gt;= DATE_SUB(NOW(), INTERVAL #{previousDays} DAY)
+               AND d.closed_at &lt; DATE_SUB(NOW(), INTERVAL #{days} DAY)
+               THEN 1 END) AS lost_count,
+           COALESCE(SUM(CASE WHEN d.won = FALSE
+               AND d.closed_at &gt;= DATE_SUB(NOW(), INTERVAL #{previousDays} DAY)
+               AND d.closed_at &lt; DATE_SUB(NOW(), INTERVAL #{days} DAY)
+               THEN d.value END), 0) AS lost_value,
+           COALESCE(AVG(CASE WHEN d.won = TRUE
+               AND d.closed_at &gt;= DATE_SUB(NOW(), INTERVAL #{previousDays} DAY)
+               AND d.closed_at &lt; DATE_SUB(NOW(), INTERVAL #{days} DAY)
+               THEN DATEDIFF(d.closed_at, d.created_at) END), 0) AS avg_cycle_days
+    FROM deal d
+    WHERE d.workspace_id = #{workspaceId}
+    <if test="currency != null">
+      AND d.currency = #{currency}
+    </if>
+  </select>
+
+  <select id="dealKpiClosedSeries" resultType="ooo.klae.connex.backend.dto.DealKpiClosedBucketDto">
+    SELECT 11 - LEAST(11, GREATEST(0,
+               FLOOR(DATEDIFF(NOW(), d.closed_at) / #{span}))) AS bucket_index,
+           COALESCE(SUM(CASE WHEN d.won = TRUE THEN d.actual_value END), 0) AS won_value,
+           COUNT(CASE WHEN d.won = TRUE THEN 1 END) AS won_count,
+           COUNT(CASE WHEN d.won = FALSE THEN 1 END) AS lost_count,
+           COALESCE(AVG(CASE WHEN d.won = TRUE
+               THEN DATEDIFF(d.closed_at, d.created_at) END), 0) AS avg_cycle_days
+    FROM deal d
+    WHERE d.workspace_id = #{workspaceId}
+    <if test="currency != null">
+      AND d.currency = #{currency}
+    </if>
+      AND d.won IS NOT NULL
+      AND d.closed_at &gt;= DATE_SUB(NOW(), INTERVAL #{days} DAY)
+      AND d.closed_at &lt;= NOW()
+    GROUP BY bucket_index
+    ORDER BY bucket_index
+  </select>
+
+  <select id="dealKpiNewPipelineSeries" resultType="ooo.klae.connex.backend.dto.DealBucketValueDto">
+    SELECT 11 - LEAST(11, GREATEST(0,
+               FLOOR(DATEDIFF(NOW(), d.created_at) / #{span}))) AS bucket_index,
+           COALESCE(SUM(d.value), 0) AS value
+    FROM deal d
+    WHERE d.workspace_id = #{workspaceId}
+    <if test="currency != null">
+      AND d.currency = #{currency}
+    </if>
+      AND d.created_at &gt;= DATE_SUB(NOW(), INTERVAL #{days} DAY)
+      AND d.created_at &lt;= NOW()
+    GROUP BY bucket_index
+    ORDER BY bucket_index
+  </select>
+
+  <select id="dealPipelineValue" resultType="ooo.klae.connex.backend.dto.DealPipelineValueDto">
+    SELECT d.pipeline_id AS pipeline_id,
+           COALESCE(SUM(CASE WHEN d.won = TRUE
+               AND d.closed_at &gt;= DATE_SUB(NOW(), INTERVAL #{days} DAY)
+               AND d.closed_at &lt;= NOW() THEN d.actual_value END), 0) AS won_value,
+           COALESCE(SUM(CASE WHEN d.won IS NULL THEN d.value END), 0) AS open_value,
+           COUNT(CASE WHEN d.won IS NULL THEN 1 END) AS open_count
+    FROM deal d
+    WHERE d.workspace_id = #{workspaceId}
+    <if test="currency != null">
+      AND d.currency = #{currency}
+    </if>
+    GROUP BY d.pipeline_id
+    ORDER BY d.pipeline_id
+  </select>
+
+  <select id="dealAging" resultType="ooo.klae.connex.backend.dto.DealAgingDto">
+    SELECT d.stage_id AS stage_id,
+           COUNT(CASE WHEN DATEDIFF(NOW(), d.updated_at) &lt;= 7 THEN 1 END) AS fresh,
+           COUNT(CASE WHEN DATEDIFF(NOW(), d.updated_at) &gt; 7
+               AND DATEDIFF(NOW(), d.updated_at) &lt;= 30 THEN 1 END) AS active,
+           COUNT(CASE WHEN DATEDIFF(NOW(), d.updated_at) &gt; 30
+               AND DATEDIFF(NOW(), d.updated_at) &lt;= 60 THEN 1 END) AS aging,
+           COUNT(CASE WHEN DATEDIFF(NOW(), d.updated_at) &gt; 60 THEN 1 END) AS stalled
+    FROM deal d
+    WHERE d.workspace_id = #{workspaceId}
+    <if test="currency != null">
+      AND d.currency = #{currency}
+    </if>
+      AND d.won IS NULL
+      AND d.stage_id IS NOT NULL
+    GROUP BY d.stage_id
+    ORDER BY d.stage_id
+  </select>
+
+  <select id="topOpenDeals" resultMap="DealResult">
+    SELECT <include refid="qualifiedDealColumns"/>
+    FROM deal d
+    WHERE d.workspace_id = #{workspaceId}
+    <if test="currency != null">
+      AND d.currency = #{currency}
+    </if>
+      AND d.won IS NULL
+    ORDER BY d.value DESC, d.id ASC
+    LIMIT 3
+  </select>
+
+  <select id="topWonDeals" resultMap="DealResult">
+    SELECT <include refid="qualifiedDealColumns"/>
+    FROM deal d
+    WHERE d.workspace_id = #{workspaceId}
+    <if test="currency != null">
+      AND d.currency = #{currency}
+    </if>
+      AND d.won = TRUE
+    ORDER BY d.actual_value DESC, d.id ASC
+    LIMIT 3
+  </select>
+
   <select id="countsByStatus" resultType="ooo.klae.connex.backend.dto.FacetCount">
     SELECT CASE WHEN d.won IS NULL THEN 'open' WHEN d.won THEN 'won' ELSE 'lost' END AS `key`,
            COUNT(*) AS count

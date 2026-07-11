@@ -4,6 +4,8 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -16,8 +18,12 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import ooo.klae.connex.backend.ai.brief.DealBriefService;
+import ooo.klae.connex.backend.dto.DealAgingDto;
+import ooo.klae.connex.backend.dto.DealKpisDto;
+import ooo.klae.connex.backend.dto.DealPipelineValueDto;
 import ooo.klae.connex.backend.dto.DealRevenueSeriesDto;
 import ooo.klae.connex.backend.dto.DealStageDistributionDto;
+import ooo.klae.connex.backend.dto.DealTopDto;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.services.ActivityService;
 import ooo.klae.connex.backend.services.BulkOperationService;
@@ -229,6 +235,48 @@ class RecordListControllerTest {
         verify(dealService).getStageDistribution("JPY");
         verify(dealService).getRevenueTimeseries(null);
         verify(dealService).getStageDistribution(null);
+    }
+
+    @Test
+    void dealAnalyticsEndpointsNormalizeAndForwardParameters() {
+        DealController controller = new DealController(
+            dealService, bulkOperationService, dealRiskService, dealBriefService, workspaceService);
+        DealKpisDto kpis = new DealKpisDto(
+            0.0, null, 0.0, null, 0, 0, 0.0, 0.0, null, null, 0.0, null,
+            List.of(), List.of(), List.of(), List.of());
+        List<DealPipelineValueDto> pipelineValues = List.of(
+            new DealPipelineValueDto(1, 2.0, 3.0, 4));
+        List<DealAgingDto> aging = List.of(new DealAgingDto(1, 2, 3, 4, 5));
+        DealTopDto top = new DealTopDto(List.of(), List.of());
+        when(dealService.getDealKpis("JPY", 30)).thenReturn(kpis);
+        when(dealService.getDealPipelineValue("JPY", 365)).thenReturn(pipelineValues);
+        when(dealService.getDealAging(null)).thenReturn(aging);
+        when(dealService.getTopDeals(null)).thenReturn(top);
+
+        assertSame(kpis, controller.getDealKpis("JPY", "30d"));
+        assertSame(pipelineValues, controller.getDealPipelineValue("JPY", "12m"));
+        assertSame(aging, controller.getDealAging("  "));
+        assertSame(top, controller.getTopDeals(""));
+
+        controller.getDealKpis(" ", null);
+
+        verify(dealService).getDealKpis("JPY", 30);
+        verify(dealService).getDealPipelineValue("JPY", 365);
+        verify(dealService).getDealAging(null);
+        verify(dealService).getTopDeals(null);
+        verify(dealService).getDealKpis(null, 90);
+    }
+
+    @Test
+    void dealAnalyticsEndpointsRejectInvalidRange() {
+        DealController controller = new DealController(
+            dealService, bulkOperationService, dealRiskService, dealBriefService, workspaceService);
+
+        assertThrows(BadRequestException.class, () -> controller.getDealKpis(null, "7d"));
+        assertThrows(BadRequestException.class, () -> controller.getDealPipelineValue(null, "all"));
+
+        verify(dealService, never()).getDealKpis(any(), anyInt());
+        verify(dealService, never()).getDealPipelineValue(any(), anyInt());
     }
 
     @Test

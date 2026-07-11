@@ -5,6 +5,8 @@ import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -30,12 +32,19 @@ import ooo.klae.connex.backend.beans.Tag;
 import ooo.klae.connex.backend.beans.Task;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.dto.CustomFieldEntryDto;
+import ooo.klae.connex.backend.dto.DealAgingDto;
+import ooo.klae.connex.backend.dto.DealBucketValueDto;
 import ooo.klae.connex.backend.dto.DealCurrencyMetricsDto;
 import ooo.klae.connex.backend.dto.DealFacets;
+import ooo.klae.connex.backend.dto.DealKpiClosedBucketDto;
+import ooo.klae.connex.backend.dto.DealKpiPeriodDto;
+import ooo.klae.connex.backend.dto.DealKpisDto;
 import ooo.klae.connex.backend.dto.DealMetricsDto;
+import ooo.klae.connex.backend.dto.DealPipelineValueDto;
 import ooo.klae.connex.backend.dto.DealRevenueSeriesDto;
 import ooo.klae.connex.backend.dto.DealStageDistributionDto;
 import ooo.klae.connex.backend.dto.DealSummaryDto;
+import ooo.klae.connex.backend.dto.DealTopDto;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.tenant.Permission;
@@ -89,6 +98,7 @@ public class DealService {
     private static final String MENTION_SEVERITY = "info";
     private static final String IN_APP = "in_app";
     private static final int SNIPPET_LENGTH = 140;
+    private static final int KPI_SERIES_BUCKETS = 12;
 
     private static final Set<String> AUDIT_FIELDS =
         Set.of("name", "value", "actualValue", "currency", "pipelineId", "stageId",
@@ -252,6 +262,74 @@ public class DealService {
         return dealMapper.stageDistribution(workspaceService.getCurrentWorkspaceId(), currency);
     }
 
+    public DealKpisDto getDealKpis(String currency, int days) {
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        DealKpiPeriodDto current = dealMapper.dealKpiCurrent(workspaceId, currency, days);
+        DealKpiPeriodDto previous = dealMapper.dealKpiPrevious(workspaceId, currency, days, days * 2);
+        double span = days / (double) KPI_SERIES_BUCKETS;
+
+        List<Double> wonSeries = emptyKpiSeries();
+        List<Double> winRateSeries = emptyKpiSeries();
+        List<Double> avgCycleSeries = emptyKpiSeries();
+        for (DealKpiClosedBucketDto bucket :
+                dealMapper.dealKpiClosedSeries(workspaceId, currency, days, span)) {
+            int index = bucket.bucketIndex();
+            wonSeries.set(index, bucket.wonValue());
+            long closedCount = bucket.wonCount() + bucket.lostCount();
+            winRateSeries.set(index, closedCount == 0 ? 0.0 : bucket.wonCount() * 100.0 / closedCount);
+            avgCycleSeries.set(index, bucket.avgCycleDays());
+        }
+
+        List<Double> newPipelineSeries = emptyKpiSeries();
+        for (DealBucketValueDto bucket :
+                dealMapper.dealKpiNewPipelineSeries(workspaceId, currency, days, span)) {
+            newPipelineSeries.set(bucket.bucketIndex(), bucket.value());
+        }
+
+        long previousClosedCount = previous.wonCount() + previous.lostCount();
+        return new DealKpisDto(
+            current.wonRevenue(),
+            previous.wonCount() == 0 ? null : previous.wonRevenue(),
+            current.newPipeline(),
+            previous.newPipelineCount() == 0 ? null : previous.newPipeline(),
+            current.wonCount(),
+            current.lostCount(),
+            current.wonRevenue(),
+            current.lostValue(),
+            previousClosedCount == 0 ? null : previous.wonCount(),
+            previousClosedCount == 0 ? null : previous.lostCount(),
+            current.avgCycleDays(),
+            previous.wonCount() == 0 ? null : previous.avgCycleDays(),
+            wonSeries,
+            newPipelineSeries,
+            winRateSeries,
+            avgCycleSeries
+        );
+    }
+
+    public List<DealPipelineValueDto> getDealPipelineValue(String currency, int days) {
+        return dealMapper.dealPipelineValue(workspaceService.getCurrentWorkspaceId(), currency, days);
+    }
+
+    public List<DealAgingDto> getDealAging(String currency) {
+        return dealMapper.dealAging(workspaceService.getCurrentWorkspaceId(), currency);
+    }
+
+    public DealTopDto getTopDeals(String currency) {
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        List<DealSummaryDto> topOpen = dealMapper.topOpenDeals(workspaceId, currency).stream()
+            .map(deal -> toDealSummary(workspaceId, deal))
+            .toList();
+        List<DealSummaryDto> topWon = dealMapper.topWonDeals(workspaceId, currency).stream()
+            .map(deal -> toDealSummary(workspaceId, deal))
+            .toList();
+        return new DealTopDto(topOpen, topWon);
+    }
+
+    private static List<Double> emptyKpiSeries() {
+        return new ArrayList<>(Collections.nCopies(KPI_SERIES_BUCKETS, 0.0));
+    }
+
     /**
      * Retrieves all {@code Deal} records by pipeline ID.
      * @param pipelineId
@@ -334,6 +412,10 @@ public class DealService {
         Deal deal = dealMapper.getDealById(workspaceId, id);
         if (deal == null) throw new ResourceNotFoundException("Deal not found with id: " + id);
 
+        return toDealSummary(workspaceId, deal);
+    }
+
+    private DealSummaryDto toDealSummary(int workspaceId, Deal deal) {
         String status = deal.getWon() == null ? "open" : deal.getWon() ? "won" : "lost";
         String pipelineName = null;
         if (deal.getPipelineId() != null) {

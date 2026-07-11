@@ -11,6 +11,8 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.jdbc.core.JdbcTemplate;
 
 import ooo.klae.connex.backend.beans.Company;
 import ooo.klae.connex.backend.beans.Deal;
@@ -19,12 +21,19 @@ import ooo.klae.connex.backend.beans.Pipeline;
 import ooo.klae.connex.backend.beans.Stage;
 import ooo.klae.connex.backend.beans.Tag;
 import ooo.klae.connex.backend.beans.Workspace;
+import ooo.klae.connex.backend.dto.DealAgingDto;
+import ooo.klae.connex.backend.dto.DealBucketValueDto;
 import ooo.klae.connex.backend.dto.DealCurrencyMetricsDto;
+import ooo.klae.connex.backend.dto.DealKpiClosedBucketDto;
+import ooo.klae.connex.backend.dto.DealKpiPeriodDto;
 import ooo.klae.connex.backend.dto.DealMonthTotalDto;
+import ooo.klae.connex.backend.dto.DealPipelineValueDto;
 import ooo.klae.connex.backend.dto.DealStageDistributionDto;
 import ooo.klae.connex.backend.dto.FacetCount;
 
 class DealMapperTest extends AbstractMapperTest {
+
+    @Autowired private JdbcTemplate jdbcTemplate;
 
     /**
      * Inserts a new deal and checks if the generated ID is not zero.
@@ -264,6 +273,262 @@ class DealMapperTest extends AbstractMapperTest {
         assertEquals(firstStage.getId(), filtered.get(0).stageId());
         assertEquals(firstPipeline.getId(), filtered.get(0).pipelineId());
         assertEquals(230.0, filtered.get(0).closedValue(), 0.0001);
+    }
+
+    @Test
+    void dealKpiPeriodsUseRealizedCloseBoundariesAndStayWorkspaceScoped() {
+        workspace = newWorkspace();
+        Pipeline pipeline = newPipeline();
+        Stage stage = newStage(pipeline, 0);
+
+        Deal currentWon = analyticsDeal(workspace, pipeline, stage, "Current Won", 100.0, 80.0,
+            "JPY", true, 20, 5, 1);
+        analyticsDeal(workspace, pipeline, stage, "Current Won Two", 200.0, 120.0,
+            "JPY", true, 15, 1, 1);
+        analyticsDeal(workspace, pipeline, stage, "Current Lost", 60.0, 0.0,
+            "JPY", false, 25, 10, 1);
+        analyticsDeal(workspace, pipeline, stage, "Current Open", 40.0, 0.0,
+            "JPY", null, 2, null, 1);
+        analyticsDeal(workspace, pipeline, stage, "Future Close", 10.0, 999.0,
+            "JPY", true, 1, -1, 1);
+        analyticsDeal(workspace, pipeline, stage, "Previous Won", 70.0, 50.0,
+            "JPY", true, 55, 40, 1);
+        analyticsDeal(workspace, pipeline, stage, "Previous Lost", 30.0, 0.0,
+            "JPY", false, 50, 45, 1);
+        analyticsDeal(workspace, pipeline, stage, "Previous Open", 20.0, 0.0,
+            "JPY", null, 31, null, 1);
+        analyticsDeal(workspace, pipeline, stage, "Before Previous", 900.0, 800.0,
+            "JPY", true, 80, 61, 1);
+        analyticsDeal(workspace, pipeline, stage, "Other Currency", 700.0, 600.0,
+            "USD", true, 10, 2, 1);
+        jdbcTemplate.update("UPDATE deal SET expected_close_date = ? WHERE id = ?",
+            "2100-01-01", currentWon.getId());
+
+        Workspace foreignWorkspace = newWorkspace();
+        Pipeline foreignPipeline = newPipelineIn(foreignWorkspace);
+        Stage foreignStage = newStageIn(foreignWorkspace, foreignPipeline, 0);
+        analyticsDeal(foreignWorkspace, foreignPipeline, foreignStage, "Foreign", 5000.0, 4000.0,
+            "JPY", true, 10, 2, 1);
+        analyticsDeal(foreignWorkspace, foreignPipeline, foreignStage, "Foreign Previous",
+            4000.0, 3000.0, "JPY", true, 50, 40, 1);
+
+        DealKpiPeriodDto current = dealMapper.dealKpiCurrent(workspace.getId(), "JPY", 30);
+        DealKpiPeriodDto previous = dealMapper.dealKpiPrevious(workspace.getId(), "JPY", 30, 60);
+
+        assertEquals(200.0, current.wonRevenue(), 0.0001);
+        assertEquals(410.0, current.newPipeline(), 0.0001);
+        assertEquals(5, current.newPipelineCount());
+        assertEquals(2, current.wonCount());
+        assertEquals(1, current.lostCount());
+        assertEquals(60.0, current.lostValue(), 0.0001);
+        assertEquals(14.5, current.avgCycleDays(), 0.0001);
+        assertEquals(50.0, previous.wonRevenue(), 0.0001);
+        assertEquals(120.0, previous.newPipeline(), 0.0001);
+        assertEquals(3, previous.newPipelineCount());
+        assertEquals(1, previous.wonCount());
+        assertEquals(1, previous.lostCount());
+        assertEquals(30.0, previous.lostValue(), 0.0001);
+        assertEquals(15.0, previous.avgCycleDays(), 0.0001);
+    }
+
+    @Test
+    void dealKpiPeriodsIncludeEachBoundaryInExactlyOneWindow() {
+        workspace = newWorkspace();
+        Pipeline pipeline = newPipeline();
+        Stage stage = newStage(pipeline, 0);
+
+        Deal currentBoundary = analyticsDeal(workspace, pipeline, stage, "Current Boundary",
+            10.0, 10.0, "JPY", true, 1, 1, 1);
+        Deal previousUpperBoundary = analyticsDeal(workspace, pipeline, stage, "Previous Upper Boundary",
+            20.0, 20.0, "JPY", true, 1, 1, 1);
+        Deal previousLowerBoundary = analyticsDeal(workspace, pipeline, stage, "Previous Lower Boundary",
+            30.0, 0.0, "JPY", false, 1, 1, 1);
+        Deal beforePreviousBoundary = analyticsDeal(workspace, pipeline, stage, "Before Previous Boundary",
+            40.0, 0.0, "JPY", false, 1, 1, 1);
+        setAnalyticsBoundary(currentBoundary, 30, 1);
+        setAnalyticsBoundary(previousUpperBoundary, 30, -1);
+        setAnalyticsBoundary(previousLowerBoundary, 60, 1);
+        setAnalyticsBoundary(beforePreviousBoundary, 60, -1);
+
+        DealKpiPeriodDto current = dealMapper.dealKpiCurrent(workspace.getId(), "JPY", 30);
+        DealKpiPeriodDto previous = dealMapper.dealKpiPrevious(workspace.getId(), "JPY", 30, 60);
+
+        assertEquals(10.0, current.wonRevenue(), 0.0001);
+        assertEquals(10.0, current.newPipeline(), 0.0001);
+        assertEquals(1, current.wonCount());
+        assertEquals(0, current.lostCount());
+        assertEquals(20.0, previous.wonRevenue(), 0.0001);
+        assertEquals(50.0, previous.newPipeline(), 0.0001);
+        assertEquals(1, previous.wonCount());
+        assertEquals(1, previous.lostCount());
+        assertEquals(30.0, previous.lostValue(), 0.0001);
+    }
+
+    @Test
+    void dealKpiSeriesGroupAndClampBucketsOldestToNewest() {
+        workspace = newWorkspace();
+        Pipeline pipeline = newPipeline();
+        Stage stage = newStage(pipeline, 0);
+
+        analyticsDeal(workspace, pipeline, stage, "Newest Won", 100.0, 80.0,
+            "JPY", true, 11, 1, 1);
+        analyticsDeal(workspace, pipeline, stage, "Newest Lost", 50.0, 0.0,
+            "JPY", false, 12, 1, 1);
+        analyticsDeal(workspace, pipeline, stage, "Middle Won", 60.0, 40.0,
+            "JPY", true, 25, 5, 1);
+        analyticsDeal(workspace, pipeline, stage, "Oldest Won", 20.0, 20.0,
+            "JPY", true, 29, 28, 1);
+        analyticsDeal(workspace, pipeline, stage, "New Open", 30.0, 0.0,
+            "JPY", null, 3, null, 1);
+
+        Workspace foreignWorkspace = newWorkspace();
+        Pipeline foreignPipeline = newPipelineIn(foreignWorkspace);
+        Stage foreignStage = newStageIn(foreignWorkspace, foreignPipeline, 0);
+        analyticsDeal(foreignWorkspace, foreignPipeline, foreignStage, "Foreign", 900.0, 800.0,
+            "JPY", true, 11, 1, 1);
+
+        Map<Integer, DealKpiClosedBucketDto> closed = dealMapper
+            .dealKpiClosedSeries(workspace.getId(), "JPY", 30, 2.5).stream()
+            .collect(Collectors.toMap(DealKpiClosedBucketDto::bucketIndex, value -> value));
+        Map<Integer, Double> created = dealMapper
+            .dealKpiNewPipelineSeries(workspace.getId(), "JPY", 30, 2.5).stream()
+            .collect(Collectors.toMap(DealBucketValueDto::bucketIndex, DealBucketValueDto::value));
+
+        assertEquals(3, closed.size());
+        assertEquals(80.0, closed.get(11).wonValue(), 0.0001);
+        assertEquals(1, closed.get(11).wonCount());
+        assertEquals(1, closed.get(11).lostCount());
+        assertEquals(10.0, closed.get(11).avgCycleDays(), 0.0001);
+        assertEquals(40.0, closed.get(9).wonValue(), 0.0001);
+        assertEquals(20.0, closed.get(9).avgCycleDays(), 0.0001);
+        assertEquals(20.0, closed.get(0).wonValue(), 0.0001);
+        assertEquals(1.0, closed.get(0).avgCycleDays(), 0.0001);
+        assertEquals(150.0, created.get(7), 0.0001);
+        assertEquals(60.0, created.get(1), 0.0001);
+        assertEquals(20.0, created.get(0), 0.0001);
+        assertEquals(30.0, created.get(10), 0.0001);
+    }
+
+    @Test
+    void dealPipelineValueGroupsCurrentWonAndAllOpenDealsByPipeline() {
+        workspace = newWorkspace();
+        Pipeline firstPipeline = newPipeline();
+        Stage firstStage = newStage(firstPipeline, 0);
+        Pipeline secondPipeline = newPipeline();
+        Stage secondStage = newStage(secondPipeline, 0);
+
+        analyticsDeal(workspace, firstPipeline, firstStage, "First Won", 100.0, 90.0,
+            "JPY", true, 20, 5, 1);
+        analyticsDeal(workspace, firstPipeline, firstStage, "First Old Won", 100.0, 80.0,
+            "JPY", true, 50, 31, 1);
+        analyticsDeal(workspace, firstPipeline, firstStage, "First Future Won", 100.0, 500.0,
+            "JPY", true, 1, -1, 1);
+        analyticsDeal(workspace, firstPipeline, firstStage, "First Open", 100.0, 0.0,
+            "JPY", null, 100, null, 1);
+        analyticsDeal(workspace, firstPipeline, firstStage, "First Lost", 60.0, 0.0,
+            "JPY", false, 20, 2, 1);
+        analyticsDeal(workspace, secondPipeline, secondStage, "Second Won", 60.0, 50.0,
+            "JPY", true, 20, 4, 1);
+        analyticsDeal(workspace, secondPipeline, secondStage, "Second Open A", 20.0, 0.0,
+            "JPY", null, 100, null, 1);
+        analyticsDeal(workspace, secondPipeline, secondStage, "Second Open B", 30.0, 0.0,
+            "JPY", null, 100, null, 1);
+        analyticsDeal(workspace, firstPipeline, firstStage, "Other Currency", 1000.0, 900.0,
+            "USD", true, 20, 2, 1);
+
+        Workspace foreignWorkspace = newWorkspace();
+        Pipeline foreignPipeline = newPipelineIn(foreignWorkspace);
+        Stage foreignStage = newStageIn(foreignWorkspace, foreignPipeline, 0);
+        analyticsDeal(foreignWorkspace, foreignPipeline, foreignStage, "Foreign Open", 5000.0, 0.0,
+            "JPY", null, 1, null, 1);
+
+        List<DealPipelineValueDto> values =
+            dealMapper.dealPipelineValue(workspace.getId(), "JPY", 30);
+        DealPipelineValueDto first = pipelineValueFor(values, firstPipeline.getId());
+        DealPipelineValueDto second = pipelineValueFor(values, secondPipeline.getId());
+
+        assertEquals(2, values.size());
+        assertEquals(90.0, first.wonValue(), 0.0001);
+        assertEquals(100.0, first.openValue(), 0.0001);
+        assertEquals(1, first.openCount());
+        assertEquals(50.0, second.wonValue(), 0.0001);
+        assertEquals(50.0, second.openValue(), 0.0001);
+        assertEquals(2, second.openCount());
+    }
+
+    @Test
+    void dealAgingUsesSevenThirtyAndSixtyDayEdges() {
+        workspace = newWorkspace();
+        Pipeline pipeline = newPipeline();
+        Stage stage = newStage(pipeline, 0);
+
+        analyticsDeal(workspace, pipeline, stage, "Seven", 10.0, 0.0, "JPY", null, 7, null, 7);
+        analyticsDeal(workspace, pipeline, stage, "Eight", 10.0, 0.0, "JPY", null, 8, null, 8);
+        analyticsDeal(workspace, pipeline, stage, "Thirty", 10.0, 0.0, "JPY", null, 30, null, 30);
+        analyticsDeal(workspace, pipeline, stage, "Thirty One", 10.0, 0.0, "JPY", null, 31, null, 31);
+        analyticsDeal(workspace, pipeline, stage, "Sixty", 10.0, 0.0, "JPY", null, 60, null, 60);
+        analyticsDeal(workspace, pipeline, stage, "Sixty One", 10.0, 0.0, "JPY", null, 61, null, 61);
+        analyticsDeal(workspace, pipeline, stage, "Closed", 10.0, 8.0, "JPY", true, 70, 5, 61);
+        analyticsDeal(workspace, pipeline, stage, "Other Currency", 10.0, 0.0,
+            "USD", null, 61, null, 61);
+
+        Workspace foreignWorkspace = newWorkspace();
+        Pipeline foreignPipeline = newPipelineIn(foreignWorkspace);
+        Stage foreignStage = newStageIn(foreignWorkspace, foreignPipeline, 0);
+        analyticsDeal(foreignWorkspace, foreignPipeline, foreignStage, "Foreign", 10.0, 0.0,
+            "JPY", null, 61, null, 61);
+
+        List<DealAgingDto> aging = dealMapper.dealAging(workspace.getId(), "JPY");
+
+        assertEquals(1, aging.size());
+        assertEquals(stage.getId(), aging.get(0).stageId());
+        assertEquals(1, aging.get(0).fresh());
+        assertEquals(2, aging.get(0).active());
+        assertEquals(2, aging.get(0).aging());
+        assertEquals(1, aging.get(0).stalled());
+    }
+
+    @Test
+    void topDealsOrderLimitFilterAndStayWorkspaceScoped() {
+        workspace = newWorkspace();
+        Pipeline pipeline = newPipeline();
+        Stage stage = newStage(pipeline, 0);
+
+        Deal open500 = analyticsDeal(workspace, pipeline, stage, "Open 500", 500.0, 0.0,
+            "JPY", null, 5, null, 1);
+        Deal open400 = analyticsDeal(workspace, pipeline, stage, "Open 400", 400.0, 0.0,
+            "JPY", null, 5, null, 1);
+        Deal open300 = analyticsDeal(workspace, pipeline, stage, "Open 300", 300.0, 0.0,
+            "JPY", null, 5, null, 1);
+        analyticsDeal(workspace, pipeline, stage, "Open 200", 200.0, 0.0,
+            "JPY", null, 5, null, 1);
+        analyticsDeal(workspace, pipeline, stage, "Open 100", 100.0, 0.0,
+            "JPY", null, 5, null, 1);
+        Deal won50 = analyticsDeal(workspace, pipeline, stage, "Won 50", 100.0, 50.0,
+            "JPY", true, 20, 5, 1);
+        Deal won40 = analyticsDeal(workspace, pipeline, stage, "Won 40", 500.0, 40.0,
+            "JPY", true, 20, 5, 1);
+        Deal won30 = analyticsDeal(workspace, pipeline, stage, "Won 30", 400.0, 30.0,
+            "JPY", true, 20, 5, 1);
+        analyticsDeal(workspace, pipeline, stage, "Won 20", 300.0, 20.0,
+            "JPY", true, 20, 5, 1);
+        analyticsDeal(workspace, pipeline, stage, "Lost High", 5000.0, 4000.0,
+            "JPY", false, 20, 5, 1);
+        analyticsDeal(workspace, pipeline, stage, "USD High", 6000.0, 5000.0,
+            "USD", true, 20, 5, 1);
+
+        Workspace foreignWorkspace = newWorkspace();
+        Pipeline foreignPipeline = newPipelineIn(foreignWorkspace);
+        Stage foreignStage = newStageIn(foreignWorkspace, foreignPipeline, 0);
+        analyticsDeal(foreignWorkspace, foreignPipeline, foreignStage, "Foreign High", 7000.0, 6000.0,
+            "JPY", true, 20, 5, 1);
+        analyticsDeal(foreignWorkspace, foreignPipeline, foreignStage, "Foreign Open", 7000.0, 0.0,
+            "JPY", null, 5, null, 1);
+
+        assertEquals(List.of(open500.getId(), open400.getId(), open300.getId()),
+            dealMapper.topOpenDeals(workspace.getId(), "JPY").stream().map(Deal::getId).toList());
+        assertEquals(List.of(won50.getId(), won40.getId(), won30.getId()),
+            dealMapper.topWonDeals(workspace.getId(), "JPY").stream().map(Deal::getId).toList());
     }
 
     @Test
@@ -595,6 +860,48 @@ class DealMapperTest extends AbstractMapperTest {
         return deal;
     }
 
+    private Deal analyticsDeal(Workspace ws, Pipeline pipeline, Stage stage, String name,
+            double value, double actualValue, String currency, Boolean won,
+            int createdDaysAgo, Integer closedDaysAgo, int updatedDaysAgo) {
+        Deal deal = newDealIn(ws, pipeline, stage);
+        deal.setName(name);
+        deal.setValue(value);
+        deal.setActualValue(actualValue);
+        deal.setCurrency(currency);
+        deal.setWon(won);
+        deal.setClosedAt(won == null ? null : "2000-01-01 00:00:00");
+        dealMapper.update(deal);
+        if (won == null) {
+            jdbcTemplate.update("""
+                UPDATE deal
+                SET created_at = DATE_SUB(NOW(), INTERVAL ? DAY),
+                    updated_at = DATE_SUB(NOW(), INTERVAL ? DAY)
+                WHERE workspace_id = ? AND id = ?
+                """, createdDaysAgo, updatedDaysAgo, ws.getId(), deal.getId());
+        } else {
+            if (closedDaysAgo == null) {
+                throw new IllegalArgumentException("A closed deal requires a close timestamp");
+            }
+            jdbcTemplate.update("""
+                UPDATE deal
+                SET created_at = DATE_SUB(NOW(), INTERVAL ? DAY),
+                    closed_at = DATE_SUB(NOW(), INTERVAL ? DAY),
+                    updated_at = DATE_SUB(NOW(), INTERVAL ? DAY)
+                WHERE workspace_id = ? AND id = ?
+                """, createdDaysAgo, closedDaysAgo, updatedDaysAgo, ws.getId(), deal.getId());
+        }
+        return deal;
+    }
+
+    private void setAnalyticsBoundary(Deal deal, int daysAgo, int minuteOffset) {
+        jdbcTemplate.update("""
+            UPDATE deal
+            SET created_at = DATE_ADD(DATE_SUB(NOW(), INTERVAL ? DAY), INTERVAL ? MINUTE),
+                closed_at = DATE_ADD(DATE_SUB(NOW(), INTERVAL ? DAY), INTERVAL ? MINUTE)
+            WHERE workspace_id = ? AND id = ?
+            """, daysAgo, minuteOffset, daysAgo, minuteOffset, workspace.getId(), deal.getId());
+    }
+
     private List<Integer> dealPageIds(Workspace ws, String sort, String dir) {
         return dealMapper.getDealsPage(
             ws.getId(), null, sort, dir, null, null, null, null, null, 100, 0)
@@ -645,6 +952,13 @@ class DealMapperTest extends AbstractMapperTest {
             int stageId, int pipelineId) {
         return distribution.stream()
             .filter(item -> item.stageId() == stageId && item.pipelineId() == pipelineId)
+            .findFirst()
+            .orElseThrow();
+    }
+
+    private DealPipelineValueDto pipelineValueFor(List<DealPipelineValueDto> values, int pipelineId) {
+        return values.stream()
+            .filter(item -> item.pipelineId() == pipelineId)
             .findFirst()
             .orElseThrow();
     }

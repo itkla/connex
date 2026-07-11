@@ -90,7 +90,7 @@ class DealBriefAssemblerTest {
                 "medium",
                 Map.of("person", "Mina Patel", "email", "mina.patel@acme.example"));
         DealRiskDto risk = new DealRiskDto(
-                DEAL_ID, "medium", 25, List.of(riskFactor), "2026-07-09 18:30:00");
+                DEAL_ID, 0.0, null, "medium", 25, List.of(riskFactor), "2026-07-09 18:30:00");
 
         when(dealService.getDealById(DEAL_ID)).thenReturn(deal);
         when(dealService.getDealSummary(DEAL_ID)).thenReturn(summary);

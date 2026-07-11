@@ -10,10 +10,9 @@ import {
     DropdownMenuItem,
     DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { type Deal, type Pipeline, type Stage } from '@/app/lib/types';
+import { type DealStageDistribution, type Pipeline, type Stage } from '@/app/lib/types';
 import { formatCompactCurrency } from '@/app/lib/utils';
 import { classifyStage } from '@/app/components/records/deals/dealOutcome';
-import { isClosed } from '@/app/components/overview/analytics/metrics';
 
 type Row = {
     id: number;
@@ -32,13 +31,18 @@ function stageFill(index: number, total: number, klass: string): string {
     return `color-mix(in oklch, var(--color-brand) ${100 - lighten}%, var(--card))`;
 }
 
+/**
+ * Open-deal stage funnel per pipeline from the server-computed {@link DealStageDistribution}
+ * rollup. Uses each stage's open count/value; stage and pipeline names are joined from the loaded
+ * {@code stages}/{@code pipelines}.
+ */
 export default function StageFunnel({
-    deals,
+    distribution,
     pipelines,
     stages,
     currency,
 }: {
-    deals: Deal[];
+    distribution: DealStageDistribution[];
     pipelines: Pipeline[];
     stages: Stage[];
     currency: string;
@@ -47,20 +51,25 @@ export default function StageFunnel({
     const locale = useLocale();
     const [selectedId, setSelectedId] = useState<number | null>(null);
 
-    const openDeals = useMemo(
-        () => deals.filter((d) => !isClosed(d) && d.pipeline != null && d.stage != null),
-        [deals],
-    );
+    const distByStage = useMemo(() => {
+        const map = new Map<number, DealStageDistribution>();
+        for (const row of distribution) {
+            if (row.stageId != null) map.set(row.stageId, row);
+        }
+        return map;
+    }, [distribution]);
 
     const available = useMemo(() => {
         const counts = new Map<number, number>();
-        for (const d of openDeals) counts.set(d.pipeline!, (counts.get(d.pipeline!) ?? 0) + 1);
+        for (const row of distribution) {
+            if (row.pipelineId == null || row.openCount <= 0) continue;
+            counts.set(row.pipelineId, (counts.get(row.pipelineId) ?? 0) + row.openCount);
+        }
         return pipelines
-            .filter((p) => counts.has(p.id))
-            .map((p) => ({ id: p.id, name: p.name, openCount: counts.get(p.id)! }))
-            // sort by open count descending
+            .filter((p) => (counts.get(p.id) ?? 0) > 0)
+            .map((p) => ({ id: p.id, name: p.name, openCount: counts.get(p.id) ?? 0 }))
             .sort((a, b) => b.openCount - a.openCount);
-    }, [openDeals, pipelines]);
+    }, [distribution, pipelines]);
 
     const activeId =
         selectedId != null && available.some((p) => p.id === selectedId) ? selectedId : available[0]?.id ?? null;
@@ -72,17 +81,17 @@ export default function StageFunnel({
             .sort((a, b) => a.position - b.position);
         return pipelineStages
             .map((stage, i) => {
-                const matches = openDeals.filter((d) => d.stage === stage.id);
+                const entry = distByStage.get(stage.id);
                 return {
                     id: stage.id,
                     name: stage.name,
-                    count: matches.length,
-                    value: matches.reduce((sum, d) => sum + (d.value ?? 0), 0),
+                    count: entry?.openCount ?? 0,
+                    value: entry?.openValue ?? 0,
                     fill: stageFill(i, pipelineStages.length, classifyStage(stage)),
                 };
             })
             .filter((r) => r.count > 0);
-    }, [activeId, stages, openDeals]);
+    }, [activeId, stages, distByStage]);
 
     if (available.length === 0) {
         return <div className="flex h-56 items-center justify-center text-sm text-muted-foreground">{t('empty')}</div>;

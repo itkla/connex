@@ -3,7 +3,6 @@
 import * as React from 'react';
 import { Area, AreaChart, CartesianGrid, XAxis, YAxis } from 'recharts';
 import { useLocale, useTranslations } from 'next-intl';
-import { ChevronDownIcon } from '@heroicons/react/24/outline';
 
 import {
     ChartContainer,
@@ -12,90 +11,96 @@ import {
     type ChartConfig,
 } from '@/components/ui/chart';
 import {
-    DropdownMenu,
-    DropdownMenuContent,
-    DropdownMenuItem,
-    DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
-import {
     Tooltip,
     TooltipContent,
     TooltipProvider,
     TooltipTrigger,
 } from '@/components/ui/tooltip';
-import { type Deal } from '@/app/lib/types';
+import { type DealMonthTotal, type DealRevenueSeries } from '@/app/lib/types';
 import { cn } from '@/lib/utils';
-import { formatCompactCurrency, parseMysqlDateTime, pickDominantCurrency } from '@/app/lib/utils';
+import { formatCompactCurrency } from '@/app/lib/utils';
+import { type RangeKey } from '@/app/components/overview/analytics/metrics';
 
-const MONTHS_BACK = 5;
-const MONTHS_TOTAL = 12;
+const MIN_MONTHS_FORWARD = 3;
+const MAX_MONTHS_FORWARD = 12;
+const MONTHS_BACK: Record<RangeKey, number> = { '30d': 4, '90d': 7, '12m': 12 };
 
 type Metric = 'profit' | 'projections';
 type Bucket = { key: string; label: string; profit: number; projections: number };
 
-function buildBuckets(deals: Deal[], now: number, locale: string): Bucket[] {
+function forwardHorizon(series: DealRevenueSeries, now: number): number {
+    const reference = new Date(now);
+    const base = reference.getFullYear() * 12 + reference.getMonth();
+    let furthest = MIN_MONTHS_FORWARD;
+    for (const point of [...series.closed, ...series.projected]) {
+        const offset = point.year * 12 + (point.month - 1) - base;
+        if (offset > furthest) furthest = offset;
+    }
+    return Math.min(MAX_MONTHS_FORWARD, Math.max(MIN_MONTHS_FORWARD, furthest));
+}
+
+function buildBuckets(series: DealRevenueSeries, now: number, locale: string, range: RangeKey): Bucket[] {
     const start = new Date(now);
     start.setDate(1);
     start.setHours(0, 0, 0, 0);
-    start.setMonth(start.getMonth() - MONTHS_BACK);
+    start.setMonth(start.getMonth() - (MONTHS_BACK[range] - 1));
 
     const monthLabel = new Intl.DateTimeFormat(locale, { month: 'short' });
+    const monthYearLabel = new Intl.DateTimeFormat(locale, { month: 'short', year: '2-digit' });
     const buckets: Bucket[] = [];
     const keyToIndex = new Map<string, number>();
+    const total = MONTHS_BACK[range] + forwardHorizon(series, now);
 
-    for (let i = 0; i < MONTHS_TOTAL; i++) {
+    for (let i = 0; i < total; i++) {
         const d = new Date(start.getFullYear(), start.getMonth() + i, 1);
         const key = `${d.getFullYear()}-${d.getMonth()}`;
         keyToIndex.set(key, buckets.length);
-        buckets.push({ key, label: monthLabel.format(d), profit: 0, projections: 0 });
+        const label = d.getMonth() === 0 || i === 0 ? monthYearLabel.format(d) : monthLabel.format(d);
+        buckets.push({ key, label, profit: 0, projections: 0 });
     }
 
-    for (const deal of deals) {
-        const closed = parseMysqlDateTime(deal.closedAt);
-        if (Number.isFinite(closed) && closed <= now) {
-            // realized profit, bucketed by when it closed
-            const d = new Date(closed);
-            const idx = keyToIndex.get(`${d.getFullYear()}-${d.getMonth()}`);
-            if (idx !== undefined) buckets[idx].profit += deal.actualValue ?? 0;
-        } else {
-            // open deal, projected by expected close date
-            const expected = parseMysqlDateTime(deal.expectedCloseDate);
-            if (!Number.isFinite(expected)) continue;
-            const d = new Date(expected);
-            const idx = keyToIndex.get(`${d.getFullYear()}-${d.getMonth()}`);
-            if (idx !== undefined) buckets[idx].projections += deal.value ?? 0;
-        }
+    const bucketKeyOf = (point: DealMonthTotal) => `${point.year}-${point.month - 1}`;
+    for (const point of series.closed) {
+        const idx = keyToIndex.get(bucketKeyOf(point));
+        if (idx !== undefined) buckets[idx].profit += point.total;
+    }
+    for (const point of series.projected) {
+        const idx = keyToIndex.get(bucketKeyOf(point));
+        if (idx !== undefined) buckets[idx].projections += point.total;
     }
 
     return buckets;
 }
 
-export default function PipelineChart({ deals }: { deals: Deal[] }) {
+/**
+ * Active-pipeline trend — realized profit (won-by-close-month) vs projected value
+ * (by expected-close-month) — from the server-computed {@link DealRevenueSeries}. The series is
+ * aggregated server-side over all deals in the dashboard's currency; {@code range} only sizes the
+ * historical window shown.
+ */
+export default function PipelineChart({
+    series,
+    currency,
+    range,
+}: {
+    series: DealRevenueSeries;
+    currency: string;
+    range: RangeKey;
+}) {
     const t = useTranslations('DashboardPipelineChart');
     const locale = useLocale();
     const [active, setActive] = React.useState<Metric>('projections');
-    const [selectedCurrency, setSelectedCurrency] = React.useState<string | null>(null);
-    const now = React.useMemo(() => new Date().getTime(), []);
+    const [now] = React.useState(() => Date.now());
 
-    const currencyCounts = React.useMemo(() => {
-        const counts = new Map<string, number>();
-        for (const d of deals) {
-            const c = d.currency || 'USD';
-            counts.set(c, (counts.get(c) ?? 0) + 1);
-        }
-        return counts;
-    }, [deals]);
-    const dominantCurrency = React.useMemo(() => pickDominantCurrency(deals), [deals]);
-    const currency =
-        selectedCurrency && currencyCounts.has(selectedCurrency) ? selectedCurrency : dominantCurrency;
-    const dealsInCurrency = React.useMemo(
-        () => deals.filter((d) => (d.currency || 'USD') === currency),
-        [deals, currency],
-    );
     const data = React.useMemo(
-        () => buildBuckets(dealsInCurrency, now, locale),
-        [dealsInCurrency, now, locale],
+        () => buildBuckets(series, now, locale, range),
+        [series, now, locale, range],
     );
+    const labelByKey = React.useMemo(() => {
+        const map = new Map<string, string>();
+        for (const b of data) map.set(b.key, b.label);
+        return map;
+    }, [data]);
     const totals = React.useMemo(
         () => ({
             profit: data.reduce((sum, b) => sum + b.profit, 0),
@@ -119,41 +124,9 @@ export default function PipelineChart({ deals }: { deals: Deal[] }) {
                         <span className="text-xs font-medium tracking-[0.12em] text-muted-foreground uppercase">
                             {t('activePipeline')}
                         </span>
-                        {currencyCounts.size > 1 ? (
-                            <DropdownMenu>
-                                <DropdownMenuTrigger asChild>
-                                    <button
-                                        type="button"
-                                        aria-label={t('currency')}
-                                        className="inline-flex items-center gap-1.5 rounded-full bg-muted px-2.5 py-1 text-xs font-medium text-foreground ring-1 ring-border transition hover:bg-muted/60"
-                                    >
-                                        {currency}
-                                        <ChevronDownIcon className="size-3.5 text-muted-foreground" />
-                                    </button>
-                                </DropdownMenuTrigger>
-                                <DropdownMenuContent align="end">
-                                    {Array.from(currencyCounts.entries())
-                                        .sort((a, b) => b[1] - a[1])
-                                        .map(([code, count]) => (
-                                            <DropdownMenuItem
-                                                key={code}
-                                                onSelect={() => setSelectedCurrency(code)}
-                                            >
-                                                <span className={code === currency ? 'font-semibold' : ''}>
-                                                    {code}
-                                                </span>
-                                                <span className="ml-auto text-xs tabular-nums text-muted-foreground">
-                                                    {count}
-                                                </span>
-                                            </DropdownMenuItem>
-                                        ))}
-                                </DropdownMenuContent>
-                            </DropdownMenu>
-                        ) : (
-                            <span className="rounded-full bg-muted px-2.5 py-1 text-xs font-medium text-muted-foreground ring-1 ring-border">
-                                {currency}
-                            </span>
-                        )}
+                        <span className="rounded-full bg-muted px-2.5 py-1 text-xs font-medium text-muted-foreground ring-1 ring-border">
+                            {currency}
+                        </span>
                     </div>
                     <span className="text-sm text-muted-foreground">{t('chartDescription')}</span>
                 </div>
@@ -206,7 +179,8 @@ export default function PipelineChart({ deals }: { deals: Deal[] }) {
                         </defs>
                         <CartesianGrid vertical={false} strokeDasharray="3 3" stroke="var(--chart-grid)" />
                         <XAxis
-                            dataKey="label"
+                            dataKey="key"
+                            tickFormatter={(value: string) => labelByKey.get(value) ?? value}
                             tickLine={false}
                             axisLine={false}
                             tickMargin={8}
