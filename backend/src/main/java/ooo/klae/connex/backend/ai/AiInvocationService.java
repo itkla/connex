@@ -9,6 +9,7 @@ import java.util.UUID;
 import org.springframework.stereotype.Service;
 
 import lombok.RequiredArgsConstructor;
+import ooo.klae.connex.backend.ai.masking.CompletionNormalizer;
 import ooo.klae.connex.backend.ai.masking.Demasker;
 import ooo.klae.connex.backend.ai.masking.MaskedMessage;
 import ooo.klae.connex.backend.ai.masking.MaskedPrompt;
@@ -97,7 +98,8 @@ public class AiInvocationService {
         try {
             AiCompletionResult result = aiProviderRouter.adapterFor(resolved.provider())
                     .complete(request(resolved, invocation));
-            Demasker.DemaskResult demasked = Demasker.demask(result.text(), invocation.context());
+            Demasker.DemaskResult demasked = Demasker.demask(
+                    CompletionNormalizer.stripReasoning(result.text()), invocation.context());
             emitAudit(workspaceId, orgId, resolved, invocation, correlationId, "success",
                     result.inputTokens(), result.outputTokens(), result.stopReason(), demasked.warnings(), null);
             return new AiCompletionOutcome(demasked.text(), demasked.warnings(),
