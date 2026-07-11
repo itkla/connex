@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -25,10 +26,10 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
-import ooo.klae.connex.backend.ai.AiCompletionOutcome;
 import ooo.klae.connex.backend.ai.AiFeatureGate;
 import ooo.klae.connex.backend.ai.AiInvocation;
 import ooo.klae.connex.backend.ai.AiInvocationService;
+import ooo.klae.connex.backend.ai.AiStructuredOutcome;
 import ooo.klae.connex.backend.ai.masking.EntityKind;
 import ooo.klae.connex.backend.ai.masking.MaskedPrompt;
 import ooo.klae.connex.backend.ai.masking.MaskingContext;
@@ -78,7 +79,7 @@ class DealRiskRationaleServiceTest {
         assertUnavailable(result, "not_configured");
         verify(dealRiskService, never()).assessDeal(anyInt(), anyInt());
         verify(dealRiskRationaleAssembler, never()).assemble(anyInt(), anyInt(), any());
-        verify(aiInvocationService, never()).complete(any());
+        verify(aiInvocationService, never()).completeStructured(any(), any());
     }
 
     @Test
@@ -98,7 +99,7 @@ class DealRiskRationaleServiceTest {
 
         assertUnavailable(result, "not_at_risk");
         verify(dealRiskRationaleAssembler, never()).assemble(anyInt(), anyInt(), any());
-        verify(aiInvocationService, never()).complete(any());
+        verify(aiInvocationService, never()).completeStructured(any(), any());
     }
 
     @Test
@@ -112,19 +113,21 @@ class DealRiskRationaleServiceTest {
 
         assertUnavailable(result, "not_at_risk");
         verify(dealRiskRationaleAssembler, never()).assemble(anyInt(), anyInt(), any());
-        verify(aiInvocationService, never()).complete(any());
+        verify(aiInvocationService, never()).completeStructured(any(), any());
     }
 
     @Test
-    void generate_happyPath_returnsDemaskedRationaleAndWarnings() {
+    void generate_happyPath_returnsDemaskedNarrativeActionsAndWarnings() {
         DealRiskDto risk = atRisk();
         RationaleAssembly assembly = assembly();
         when(aiFeatureGate.isAiUsable()).thenReturn(true);
         when(dealRiskService.assessDeal(WORKSPACE_ID, DEAL_ID)).thenReturn(risk);
         when(dealRiskRationaleAssembler.assemble(WORKSPACE_ID, DEAL_ID, risk)).thenReturn(assembly);
-        when(aiInvocationService.complete(any(AiInvocation.class)))
-                .thenReturn(new AiCompletionOutcome(
-                        "The deal is overdue and quiet. Contact Mina Patel today.",
+        when(aiInvocationService.completeStructured(any(AiInvocation.class), eq(DealRiskRationaleContent.class)))
+                .thenReturn(new AiStructuredOutcome.Parsed<>(
+                        new DealRiskRationaleContent(
+                                "The deal is overdue and quiet.",
+                                List.of("Contact Mina Patel today.", "Confirm the budget.")),
                         2,
                         120,
                         45,
@@ -133,13 +136,17 @@ class DealRiskRationaleServiceTest {
         DealRationaleDto result = service.generate(DEAL_ID);
 
         assertTrue(result.isAvailable());
-        assertEquals("The deal is overdue and quiet. Contact Mina Patel today.", result.getRationale());
+        assertEquals("The deal is overdue and quiet.", result.getNarrative());
+        assertEquals(List.of("Contact Mina Patel today.", "Confirm the budget."), result.getActions());
+        assertEquals(
+                "The deal is overdue and quiet.\n• Contact Mina Patel today.\n• Confirm the budget.",
+                result.getRationale());
         assertEquals(NOW.toString(), result.getGeneratedAt());
         assertEquals(2, result.getWarnings());
         assertNull(result.getReason());
 
         ArgumentCaptor<AiInvocation> invocation = ArgumentCaptor.forClass(AiInvocation.class);
-        verify(aiInvocationService).complete(invocation.capture());
+        verify(aiInvocationService).completeStructured(invocation.capture(), eq(DealRiskRationaleContent.class));
         assertEquals("deal.risk_rationale", invocation.getValue().feature());
         assertSame(assembly.context(), invocation.getValue().context());
         assertSame(assembly.prompt(), invocation.getValue().prompt());
@@ -154,31 +161,42 @@ class DealRiskRationaleServiceTest {
         when(aiFeatureGate.isAiUsable()).thenReturn(true);
         when(dealRiskService.assessDeal(WORKSPACE_ID, DEAL_ID)).thenReturn(risk);
         when(dealRiskRationaleAssembler.assemble(WORKSPACE_ID, DEAL_ID, risk)).thenReturn(assembly);
-        when(aiInvocationService.complete(any(AiInvocation.class)))
-                .thenReturn(new AiCompletionOutcome("Cached rationale", 0, 20, 10, "end_turn"));
+        when(aiInvocationService.completeStructured(any(AiInvocation.class), eq(DealRiskRationaleContent.class)))
+                .thenReturn(new AiStructuredOutcome.Parsed<>(
+                        new DealRiskRationaleContent("Cached narrative.", List.of()), 0, 20, 10, "end_turn"));
 
         DealRationaleDto first = service.generate(DEAL_ID);
         DealRationaleDto second = service.generate(DEAL_ID);
 
         assertSame(first, second);
-        verify(aiInvocationService, times(1)).complete(any(AiInvocation.class));
+        verify(aiInvocationService, times(1))
+                .completeStructured(any(AiInvocation.class), eq(DealRiskRationaleContent.class));
     }
 
     @Test
-    void generate_blankCompletion_returnsProviderErrorAndDoesNotCache() {
-        DealRiskDto risk = atRisk();
-        RationaleAssembly assembly = assembly();
-        when(aiFeatureGate.isAiUsable()).thenReturn(true);
-        when(dealRiskService.assessDeal(WORKSPACE_ID, DEAL_ID)).thenReturn(risk);
-        when(dealRiskRationaleAssembler.assemble(WORKSPACE_ID, DEAL_ID, risk)).thenReturn(assembly);
-        when(aiInvocationService.complete(any(AiInvocation.class)))
-                .thenReturn(new AiCompletionOutcome("   ", 0, 5, 0, "end_turn"));
+    void generate_malformedOutcome_returnsProviderErrorAndDoesNotCache() {
+        arrangeOutcome(new AiStructuredOutcome.Malformed<>(
+                AiStructuredOutcome.REASON_TRUNCATED, 200, 200, "length"));
 
         DealRationaleDto first = service.generate(DEAL_ID);
-        DealRationaleDto second = service.generate(DEAL_ID);
+        service.generate(DEAL_ID);
 
         assertUnavailable(first, "provider_error");
-        verify(aiInvocationService, times(2)).complete(any(AiInvocation.class));
+        verify(aiInvocationService, times(2))
+                .completeStructured(any(AiInvocation.class), eq(DealRiskRationaleContent.class));
+    }
+
+    @Test
+    void generate_blankNarrative_returnsProviderErrorAndDoesNotCache() {
+        arrangeOutcome(new AiStructuredOutcome.Parsed<>(
+                new DealRiskRationaleContent("   ", List.of("Do something.")), 0, 20, 5, "end_turn"));
+
+        DealRationaleDto first = service.generate(DEAL_ID);
+        service.generate(DEAL_ID);
+
+        assertUnavailable(first, "provider_error");
+        verify(aiInvocationService, times(2))
+                .completeStructured(any(AiInvocation.class), eq(DealRiskRationaleContent.class));
     }
 
     @Test
@@ -196,16 +214,20 @@ class DealRiskRationaleServiceTest {
         when(aiFeatureGate.isAiUsable()).thenReturn(true);
         when(dealRiskService.assessDeal(WORKSPACE_ID, DEAL_ID)).thenReturn(risk);
         when(dealRiskRationaleAssembler.assemble(WORKSPACE_ID, DEAL_ID, risk)).thenReturn(first, swapped);
-        when(aiInvocationService.complete(any(AiInvocation.class)))
-                .thenReturn(new AiCompletionOutcome("first", 0, 5, 5, "end_turn"),
-                        new AiCompletionOutcome("second", 0, 5, 5, "end_turn"));
+        when(aiInvocationService.completeStructured(any(AiInvocation.class), eq(DealRiskRationaleContent.class)))
+                .thenReturn(
+                        new AiStructuredOutcome.Parsed<>(
+                                new DealRiskRationaleContent("first", List.of()), 0, 5, 5, "end_turn"),
+                        new AiStructuredOutcome.Parsed<>(
+                                new DealRiskRationaleContent("second", List.of()), 0, 5, 5, "end_turn"));
 
         DealRationaleDto firstResult = service.generate(DEAL_ID);
         DealRationaleDto secondResult = service.generate(DEAL_ID);
 
-        assertEquals("first", firstResult.getRationale());
-        assertEquals("second", secondResult.getRationale());
-        verify(aiInvocationService, times(2)).complete(any(AiInvocation.class));
+        assertEquals("first", firstResult.getNarrative());
+        assertEquals("second", secondResult.getNarrative());
+        verify(aiInvocationService, times(2))
+                .completeStructured(any(AiInvocation.class), eq(DealRiskRationaleContent.class));
     }
 
     private static MaskedPrompt twoPersonPrompt() {
@@ -242,12 +264,22 @@ class DealRiskRationaleServiceTest {
         assertUnavailable(result, "not_configured");
     }
 
+    private void arrangeOutcome(AiStructuredOutcome<DealRiskRationaleContent> outcome) {
+        DealRiskDto risk = atRisk();
+        when(aiFeatureGate.isAiUsable()).thenReturn(true);
+        when(dealRiskService.assessDeal(WORKSPACE_ID, DEAL_ID)).thenReturn(risk);
+        when(dealRiskRationaleAssembler.assemble(WORKSPACE_ID, DEAL_ID, risk)).thenReturn(assembly());
+        when(aiInvocationService.completeStructured(any(AiInvocation.class), eq(DealRiskRationaleContent.class)))
+                .thenReturn(outcome);
+    }
+
     private void arrangeInvocationFailure(RuntimeException exception) {
         DealRiskDto risk = atRisk();
         when(aiFeatureGate.isAiUsable()).thenReturn(true);
         when(dealRiskService.assessDeal(WORKSPACE_ID, DEAL_ID)).thenReturn(risk);
         when(dealRiskRationaleAssembler.assemble(WORKSPACE_ID, DEAL_ID, risk)).thenReturn(assembly());
-        when(aiInvocationService.complete(any(AiInvocation.class))).thenThrow(exception);
+        when(aiInvocationService.completeStructured(any(AiInvocation.class), eq(DealRiskRationaleContent.class)))
+                .thenThrow(exception);
     }
 
     private static DealRiskDto atRisk() {
@@ -270,6 +302,8 @@ class DealRiskRationaleServiceTest {
         assertFalse(result.isAvailable());
         assertEquals(DEAL_ID, result.getDealId());
         assertEquals(reason, result.getReason());
+        assertNull(result.getNarrative());
+        assertNull(result.getActions());
         assertNull(result.getRationale());
         assertNull(result.getGeneratedAt());
         assertEquals(0, result.getWarnings());

@@ -30,6 +30,7 @@ import ooo.klae.connex.backend.ai.masking.MaskingContext;
 import ooo.klae.connex.backend.ai.masking.MaskingEngine;
 import ooo.klae.connex.backend.ai.masking.MaskingLeakException;
 import ooo.klae.connex.backend.ai.masking.PromptAssembly;
+import ooo.klae.connex.backend.ai.introrationale.IntroRationaleContent;
 import ooo.klae.connex.backend.ai.provider.AiCompletionRequest;
 import ooo.klae.connex.backend.ai.provider.AiCompletionResult;
 import ooo.klae.connex.backend.ai.provider.AiCredentials;
@@ -150,6 +151,96 @@ class AiInvocationServiceTest {
         assertEquals("failure", audits.get(1).get("outcome"));
         assertEquals("provider_exception", audits.get(1).get("reason"));
         assertNoContent(audits.get(1));
+    }
+
+    @Test
+    void completeStructured_cleanObject_returnsParsedDemaskedValue() {
+        AiInvocation invocation = invocation("Summarize relationship state");
+        when(aiProvider.complete(any(AiCompletionRequest.class)))
+                .thenReturn(new AiCompletionResult("{\"rationale\":\"Follow up with {{P1}} soon.\"}", 30, 12, "end_turn"));
+
+        AiStructuredOutcome<IntroRationaleContent> outcome =
+                service.completeStructured(invocation, IntroRationaleContent.class);
+
+        AiStructuredOutcome.Parsed<IntroRationaleContent> parsed = asParsed(outcome);
+        assertEquals("Follow up with Mina Patel soon.", parsed.value().rationale());
+        assertEquals(0, parsed.demaskWarnings());
+        assertEquals(30, parsed.inputTokens());
+        assertEquals(12, parsed.outputTokens());
+        assertEquals("end_turn", parsed.stopReason());
+    }
+
+    @Test
+    void completeStructured_nonJsonProse_returnsMalformedOutput() {
+        AiInvocation invocation = invocation("Summarize relationship state");
+        when(aiProvider.complete(any(AiCompletionRequest.class)))
+                .thenReturn(new AiCompletionResult("Sorry, I cannot produce a structured answer.", 10, 3, "end_turn"));
+
+        AiStructuredOutcome<IntroRationaleContent> outcome =
+                service.completeStructured(invocation, IntroRationaleContent.class);
+
+        AiStructuredOutcome.Malformed<IntroRationaleContent> malformed = asMalformed(outcome);
+        assertEquals(AiStructuredOutcome.REASON_MALFORMED, malformed.reason());
+        assertEquals("end_turn", malformed.stopReason());
+    }
+
+    @Test
+    void completeStructured_truncatedObjectAtTokenLimit_returnsTruncated() {
+        AiInvocation invocation = invocation("Summarize relationship state");
+        when(aiProvider.complete(any(AiCompletionRequest.class)))
+                .thenReturn(new AiCompletionResult("{\"rationale\":\"Follow up with {{P1}}", 64, 64, "max_tokens"));
+
+        AiStructuredOutcome<IntroRationaleContent> outcome =
+                service.completeStructured(invocation, IntroRationaleContent.class);
+
+        AiStructuredOutcome.Malformed<IntroRationaleContent> malformed = asMalformed(outcome);
+        assertEquals(AiStructuredOutcome.REASON_TRUNCATED, malformed.reason());
+        assertEquals("max_tokens", malformed.stopReason());
+    }
+
+    @Test
+    void completeStructured_stripsLeadingReasoningPreambleBeforeJson() {
+        AiInvocation invocation = invocation("Summarize relationship state");
+        when(aiProvider.complete(any(AiCompletionRequest.class)))
+                .thenReturn(new AiCompletionResult(
+                        "<thought>plan the reply first</thought>{\"rationale\":\"Ping {{P1}}.\"}", 40, 15, "end_turn"));
+
+        AiStructuredOutcome<IntroRationaleContent> outcome =
+                service.completeStructured(invocation, IntroRationaleContent.class);
+
+        AiStructuredOutcome.Parsed<IntroRationaleContent> parsed = asParsed(outcome);
+        assertEquals("Ping Mina Patel.", parsed.value().rationale());
+    }
+
+    @Test
+    void completeStructured_success_emitsAttemptAndSuccessAuditWithoutContent() {
+        AiInvocation invocation = invocation("Summarize relationship state");
+        when(aiProvider.complete(any(AiCompletionRequest.class)))
+                .thenReturn(new AiCompletionResult("{\"rationale\":\"Ping {{P1}}.\"}", 20, 8, "end_turn"));
+
+        service.completeStructured(invocation, IntroRationaleContent.class);
+
+        List<Map<?, ?>> audits = auditMetadata();
+        assertEquals("attempt", audits.get(0).get("outcome"));
+        assertEquals("success", audits.get(1).get("outcome"));
+        assertEquals(Boolean.TRUE, audits.get(1).get("structured"));
+        assertEquals("parsed", audits.get(1).get("parseOutcome"));
+        assertNoContent(audits.get(0));
+        assertNoContent(audits.get(1));
+    }
+
+    private static <T> AiStructuredOutcome.Parsed<T> asParsed(AiStructuredOutcome<T> outcome) {
+        if (outcome instanceof AiStructuredOutcome.Parsed<T> parsed) {
+            return parsed;
+        }
+        throw new AssertionError("Expected a parsed structured outcome but was " + outcome);
+    }
+
+    private static <T> AiStructuredOutcome.Malformed<T> asMalformed(AiStructuredOutcome<T> outcome) {
+        if (outcome instanceof AiStructuredOutcome.Malformed<T> malformed) {
+            return malformed;
+        }
+        throw new AssertionError("Expected a malformed structured outcome but was " + outcome);
     }
 
     private AiInvocation invocation(String maskedPromptText) {

@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -15,6 +16,7 @@ import static org.mockito.Mockito.when;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
+import java.util.List;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -23,10 +25,10 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
-import ooo.klae.connex.backend.ai.AiCompletionOutcome;
 import ooo.klae.connex.backend.ai.AiFeatureGate;
 import ooo.klae.connex.backend.ai.AiInvocation;
 import ooo.klae.connex.backend.ai.AiInvocationService;
+import ooo.klae.connex.backend.ai.AiStructuredOutcome;
 import ooo.klae.connex.backend.ai.masking.EntityKind;
 import ooo.klae.connex.backend.ai.masking.MaskedPrompt;
 import ooo.klae.connex.backend.ai.masking.MaskingContext;
@@ -70,31 +72,44 @@ class DealBriefServiceTest {
         assertFalse(result.isAvailable());
         assertEquals(DEAL_ID, result.getDealId());
         assertEquals("not_configured", result.getReason());
+        assertNull(result.getSections());
         assertNull(result.getBrief());
         assertNull(result.getGeneratedAt());
         assertEquals(0, result.getWarnings());
-        verify(aiInvocationService, never()).complete(any());
+        verify(aiInvocationService, never()).completeStructured(any(), any());
         verify(dealBriefAssembler, never()).assemble(anyInt(), anyInt());
     }
 
     @Test
-    void generate_happyPath_returnsDemaskedBriefAndWarnings() {
+    void generate_happyPath_returnsDemaskedSectionsAndWarnings() {
         BriefAssembly assembly = assembly();
         when(aiFeatureGate.isAiUsable()).thenReturn(true);
         when(dealBriefAssembler.assemble(WORKSPACE_ID, DEAL_ID)).thenReturn(assembly);
-        when(aiInvocationService.complete(any(AiInvocation.class)))
-                .thenReturn(new AiCompletionOutcome("Mina Patel should lead the call.", 2, 120, 45, "end_turn"));
+        when(aiInvocationService.completeStructured(any(AiInvocation.class), eq(DealBriefContent.class)))
+                .thenReturn(new AiStructuredOutcome.Parsed<>(
+                        new DealBriefContent(List.of(
+                                new DealBriefContent.Section("Who they are", "Mina Patel leads the call."),
+                                new DealBriefContent.Section("Deal status", "Proposal sent."))),
+                        2,
+                        120,
+                        45,
+                        "end_turn"));
 
         DealBriefDto result = service.generate(DEAL_ID);
 
         assertTrue(result.isAvailable());
-        assertEquals("Mina Patel should lead the call.", result.getBrief());
+        assertEquals(2, result.getSections().size());
+        assertEquals("Who they are", result.getSections().get(0).title());
+        assertEquals("Mina Patel leads the call.", result.getSections().get(0).body());
+        assertEquals(
+                "Who they are\nMina Patel leads the call.\n\nDeal status\nProposal sent.",
+                result.getBrief());
         assertEquals(NOW.toString(), result.getGeneratedAt());
         assertEquals(2, result.getWarnings());
         assertNull(result.getReason());
 
         ArgumentCaptor<AiInvocation> invocation = ArgumentCaptor.forClass(AiInvocation.class);
-        verify(aiInvocationService).complete(invocation.capture());
+        verify(aiInvocationService).completeStructured(invocation.capture(), eq(DealBriefContent.class));
         assertEquals("deal.brief", invocation.getValue().feature());
         assertSame(assembly.context(), invocation.getValue().context());
         assertSame(assembly.prompt(), invocation.getValue().prompt());
@@ -106,13 +121,14 @@ class DealBriefServiceTest {
     void generate_providerFailure_returnsProviderError() {
         when(aiFeatureGate.isAiUsable()).thenReturn(true);
         when(dealBriefAssembler.assemble(WORKSPACE_ID, DEAL_ID)).thenReturn(assembly());
-        when(aiInvocationService.complete(any(AiInvocation.class)))
+        when(aiInvocationService.completeStructured(any(AiInvocation.class), eq(DealBriefContent.class)))
                 .thenThrow(new AiProviderException("provider unavailable"));
 
         DealBriefDto result = service.generate(DEAL_ID);
 
         assertFalse(result.isAvailable());
         assertEquals("provider_error", result.getReason());
+        assertNull(result.getSections());
         assertNull(result.getBrief());
         assertNull(result.getGeneratedAt());
     }
@@ -121,15 +137,48 @@ class DealBriefServiceTest {
     void generate_maskingLeak_returnsProviderError() {
         when(aiFeatureGate.isAiUsable()).thenReturn(true);
         when(dealBriefAssembler.assemble(WORKSPACE_ID, DEAL_ID)).thenReturn(assembly());
-        when(aiInvocationService.complete(any(AiInvocation.class)))
+        when(aiInvocationService.completeStructured(any(AiInvocation.class), eq(DealBriefContent.class)))
                 .thenThrow(new MaskingLeakException("blocked outbound identifier"));
 
         DealBriefDto result = service.generate(DEAL_ID);
 
         assertFalse(result.isAvailable());
         assertEquals("provider_error", result.getReason());
+        assertNull(result.getSections());
         assertNull(result.getBrief());
         assertNull(result.getGeneratedAt());
+    }
+
+    @Test
+    void generate_malformedOutcome_returnsProviderErrorAndDoesNotCache() {
+        when(aiFeatureGate.isAiUsable()).thenReturn(true);
+        when(dealBriefAssembler.assemble(WORKSPACE_ID, DEAL_ID)).thenReturn(assembly());
+        when(aiInvocationService.completeStructured(any(AiInvocation.class), eq(DealBriefContent.class)))
+                .thenReturn(new AiStructuredOutcome.Malformed<>(
+                        AiStructuredOutcome.REASON_MALFORMED, 200, 120, "end_turn"));
+
+        DealBriefDto first = service.generate(DEAL_ID);
+        service.generate(DEAL_ID);
+
+        assertFalse(first.isAvailable());
+        assertEquals("provider_error", first.getReason());
+        verify(aiInvocationService, times(2))
+                .completeStructured(any(AiInvocation.class), eq(DealBriefContent.class));
+    }
+
+    @Test
+    void generate_noValidSections_returnsProviderError() {
+        when(aiFeatureGate.isAiUsable()).thenReturn(true);
+        when(dealBriefAssembler.assemble(WORKSPACE_ID, DEAL_ID)).thenReturn(assembly());
+        when(aiInvocationService.completeStructured(any(AiInvocation.class), eq(DealBriefContent.class)))
+                .thenReturn(new AiStructuredOutcome.Parsed<>(
+                        new DealBriefContent(List.of(new DealBriefContent.Section("  ", "  "))),
+                        0, 20, 5, "end_turn"));
+
+        DealBriefDto result = service.generate(DEAL_ID);
+
+        assertFalse(result.isAvailable());
+        assertEquals("provider_error", result.getReason());
     }
 
     @Test
@@ -137,14 +186,17 @@ class DealBriefServiceTest {
         BriefAssembly assembly = assembly();
         when(aiFeatureGate.isAiUsable()).thenReturn(true);
         when(dealBriefAssembler.assemble(WORKSPACE_ID, DEAL_ID)).thenReturn(assembly);
-        when(aiInvocationService.complete(any(AiInvocation.class)))
-                .thenReturn(new AiCompletionOutcome("Cached brief", 0, 20, 10, "end_turn"));
+        when(aiInvocationService.completeStructured(any(AiInvocation.class), eq(DealBriefContent.class)))
+                .thenReturn(new AiStructuredOutcome.Parsed<>(
+                        new DealBriefContent(List.of(new DealBriefContent.Section("Who they are", "Cached."))),
+                        0, 20, 10, "end_turn"));
 
         DealBriefDto first = service.generate(DEAL_ID);
         DealBriefDto second = service.generate(DEAL_ID);
 
         assertSame(first, second);
-        verify(aiInvocationService, times(1)).complete(any(AiInvocation.class));
+        verify(aiInvocationService, times(1))
+                .completeStructured(any(AiInvocation.class), eq(DealBriefContent.class));
     }
 
     @Test
@@ -152,16 +204,22 @@ class DealBriefServiceTest {
         when(aiFeatureGate.isAiUsable()).thenReturn(true);
         when(dealBriefAssembler.assemble(WORKSPACE_ID, DEAL_ID))
                 .thenReturn(assembly("Mina Patel"), assembly("Mina Shah"));
-        when(aiInvocationService.complete(any(AiInvocation.class)))
-                .thenReturn(new AiCompletionOutcome("First brief", 0, 20, 10, "end_turn"),
-                        new AiCompletionOutcome("Second brief", 0, 20, 10, "end_turn"));
+        when(aiInvocationService.completeStructured(any(AiInvocation.class), eq(DealBriefContent.class)))
+                .thenReturn(
+                        new AiStructuredOutcome.Parsed<>(
+                                new DealBriefContent(List.of(new DealBriefContent.Section("Who they are", "First."))),
+                                0, 20, 10, "end_turn"),
+                        new AiStructuredOutcome.Parsed<>(
+                                new DealBriefContent(List.of(new DealBriefContent.Section("Who they are", "Second."))),
+                                0, 20, 10, "end_turn"));
 
         DealBriefDto first = service.generate(DEAL_ID);
         DealBriefDto second = service.generate(DEAL_ID);
 
-        assertEquals("First brief", first.getBrief());
-        assertEquals("Second brief", second.getBrief());
-        verify(aiInvocationService, times(2)).complete(any(AiInvocation.class));
+        assertEquals("First.", first.getSections().get(0).body());
+        assertEquals("Second.", second.getSections().get(0).body());
+        verify(aiInvocationService, times(2))
+                .completeStructured(any(AiInvocation.class), eq(DealBriefContent.class));
     }
 
     private static BriefAssembly assembly() {
