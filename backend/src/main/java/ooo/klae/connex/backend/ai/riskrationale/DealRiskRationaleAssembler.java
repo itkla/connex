@@ -7,9 +7,11 @@ import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 
+import org.springframework.context.i18n.LocaleContextHolder;
 import org.springframework.stereotype.Service;
 
 import lombok.RequiredArgsConstructor;
@@ -73,7 +75,7 @@ public class DealRiskRationaleAssembler {
         String userPrompt = userPrompt(
                 risk, summary, deal, factors, stakeholderTokens, warmth, companyToken, ownerToken, context);
         MaskedPrompt prompt = PromptAssembly.builder()
-                .system(SYSTEM_PROMPT)
+                .system(SYSTEM_PROMPT + languageDirective())
                 .userTurn(userPrompt)
                 .build();
         return new RationaleAssembly(context, prompt);
@@ -340,6 +342,11 @@ public class DealRiskRationaleAssembler {
         } catch (DateTimeParseException exception) {
             return null;
         }
+    }
+
+    private static String languageDirective() {
+        String language = LocaleContextHolder.getLocale().getDisplayLanguage(Locale.ENGLISH);
+        return "\nWrite the entire response in " + (language.isBlank() ? "English" : language) + ".";
     }
 
     private static String truncate(String value, int maxCodePoints) {
