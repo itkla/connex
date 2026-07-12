@@ -7,13 +7,13 @@ import { ArrowUpRightIcon, UserIcon, BriefcaseIcon, CheckCircleIcon } from '@her
 import { Loader2Icon } from 'lucide-react';
 
 import {
-    Sheet,
-    SheetContent,
-    SheetHeader,
-    SheetTitle,
-    SheetDescription,
-    SheetFooter,
-} from '@/components/ui/sheet';
+    Drawer,
+    DrawerContent,
+    DrawerHeader,
+    DrawerTitle,
+    DrawerDescription,
+    DrawerFooter,
+} from '@/components/ui/drawer';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -106,23 +106,19 @@ export default function EventDetailSheet({
     ];
 
     return (
-        <Sheet open={open} onOpenChange={onOpenChange}>
-            <SheetContent
-                side="bottom"
-                onOpenAutoFocus={(e) => {
-                    e.preventDefault();
-                    (e.currentTarget as HTMLElement | null)?.focus();
-                }}
+        <Drawer open={open} onOpenChange={onOpenChange} swipeDirection="down">
+            <DrawerContent
+                initialFocus={false}
                 className="mx-auto max-h-[85vh] gap-0 rounded-t-2xl pb-[max(1rem,env(safe-area-inset-bottom))] sm:max-w-lg"
             >
-                <SheetHeader className="gap-2">
+                <DrawerHeader className="gap-2">
                     <Badge variant="secondary" className="w-fit gap-1.5">
                         <Icon className="size-3.5" aria-hidden />
                         {t(KIND_LABEL_KEY[event.kind])}
                     </Badge>
-                    <SheetTitle className="text-lg leading-snug">{event.title}</SheetTitle>
-                    <SheetDescription className="tabular-nums">{whenLabel}</SheetDescription>
-                </SheetHeader>
+                    <DrawerTitle className="text-lg leading-snug">{event.title}</DrawerTitle>
+                    <DrawerDescription className="tabular-nums">{whenLabel}</DrawerDescription>
+                </DrawerHeader>
 
                 {(person || deal) && (
                     <div className="flex flex-col gap-2 px-4 pb-1">
@@ -208,7 +204,7 @@ export default function EventDetailSheet({
                     </div>
                 )}
 
-                <SheetFooter className="flex-row gap-2">
+                <DrawerFooter className="flex-row gap-2">
                     {event.kind === 'task' && onComplete && event.raw.assignedToId === currentUserId && (
                         <Button
                             variant="secondary"
@@ -225,8 +221,8 @@ export default function EventDetailSheet({
                             <ArrowUpRightIcon className="size-4" />
                         </Link>
                     </Button>
-                </SheetFooter>
-            </SheetContent>
-        </Sheet>
+                </DrawerFooter>
+            </DrawerContent>
+        </Drawer>
     );
 }
