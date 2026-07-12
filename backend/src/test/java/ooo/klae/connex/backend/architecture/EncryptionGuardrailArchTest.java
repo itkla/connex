@@ -287,6 +287,7 @@ class EncryptionGuardrailArchTest {
         "ooo/klae/connex/backend/dto/SsoLinkConfirmRequest.java#password");
 
     private static final Set<String> APPROVED_SECRET_RESPONSE_FIELDS = Set.of(
+        "ooo/klae/connex/backend/dto/CsrfBootstrapDto.java#token",
         "ooo/klae/connex/backend/dto/InviteDto.java#token",
         "ooo/klae/connex/backend/dto/InviteLinkDto.java#token",
         "ooo/klae/connex/backend/dto/MailConfigDto.java#hasPassword",

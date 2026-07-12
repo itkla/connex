@@ -39,6 +39,7 @@ import ooo.klae.connex.backend.sso.SocialLoginClientRegistrations;
 import ooo.klae.connex.backend.sso.SsoAuthenticationSuccessHandler;
 import ooo.klae.connex.backend.tenant.TenantCatalogResolver;
 import ooo.klae.connex.backend.tenant.TenantContext;
+import ooo.klae.connex.backend.tenant.WorkspaceCookie;
 
 @WebMvcTest(
     controllers = { DealController.class, IntroductionController.class },
@@ -72,6 +73,7 @@ class AiGenerationEndpointSecurityTest {
     @MockitoBean private SessionSecurityService sessionSecurityService;
     @MockitoBean private TenantCatalogResolver tenantCatalogResolver;
     @MockitoBean private TenantContext tenantContext;
+    @MockitoBean private WorkspaceCookie workspaceCookie;
 
     @Test
     void providerGeneratingEndpointsRejectGetAndRequireCsrfForPost() throws Exception {
