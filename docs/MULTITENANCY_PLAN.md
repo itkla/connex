@@ -130,8 +130,9 @@ sub-partitions inside an org. Decisions locked 2026-07-03 (recorded on #313):
   makes it moot. #97's original "org_id on every table" mechanism is superseded accordingly. Dedicated
   database encryption and CMK claims for this tier must point to `ENCRYPTION_GUARANTEE_MATRIX.md` and
   `DEDICATED_SAAS_CMK_FEASIBILITY.md`, remain distinct from hosted SaaS plaintext-access claims, and
-  carry the future placement registry fields for storage encryption mode, key controller, KMS reference,
-  backup encryption mode, restore validation, and revocation semantics (#369/#376).
+  carry the placement registry fields for storage encryption mode, key controller, KMS reference,
+  backup encryption mode, restore validation, and revocation semantics (#369/#376) — live since V62
+  (`org_placement`, #441).
 - **Deployment ladder (corrected 2026-07-10, #313/#100).** Four tiers, broad to deep-trust: pooled SaaS →
   dedicated per-org database (both on the shared app fleet, logical isolation) → **Connex-operated dedicated
   silo** → customer-operated on-prem. A silo is the *same* single-tenant deployable as on-prem (single-database
@@ -142,6 +143,20 @@ sub-partitions inside an org. Decisions locked 2026-07-03 (recorded on #313):
   single-tenant deployable. Because a silo is Connex-operated, Connex can still reach silo data — the deep-trust
   "Connex-blind" guarantee stays on-prem (`ENCRYPTION_GUARANTEE_MATRIX.md`). This reinstates the silo tier that
   the 2026-07-03 record on #313 had dropped; #100 tracks it.
+- **Phase 3 shipped (2026-07-12, #440 — registry #441, routing #446, control-plane split #463/#479).**
+  `org_placement` resolves every org's placement (TTL-cached, `shared` default for row-less orgs, fail-closed
+  503 for anything this deployment cannot serve — missing org, silo, dedicated without routing, malformed or
+  reserved catalog handle). Catalog routing runs as a decorator over the shared Hikari pool
+  (`TenantRoutingDataSource`): the catalog resolves once at `TenantContext`-install, switches at checkout,
+  and resets on return with belt (service reset + evict-on-failure) and braces (armed HikariCP dirty-bit —
+  which only fires when the pool `catalog` property is set); adversarial tests prove the same physical
+  connection cannot be recycled dirty. The control-plane wall is structural: V65 dropped all 39 org-data →
+  control-plane FKs (their semantics live in `UserOffboardingService` / `detachMemberContent` /
+  `prepareFreshMembership` and a `FOR UPDATE` authored-content guard), `TablePlaneRegistry` classifies every
+  table, and arch tests enforce the wall (no cross-plane FK either direction), migration-lineage purity
+  (`db/migration/control|tenant`; root frozen at V65), the pinned mapper-crossing baseline (= the Phase-4
+  hydration work-list), and user-reference index survival. Routing mode defaults to `single-database`
+  (the only mode on-prem/silo) and stays off until the flag-enable gate (#485) clears.
 - **Enforced seams:** (1) share grants are `INSERT..SELECT` with an ownership + same-org ceiling in SQL —
   0 affected rows means structurally refused (`ShareMapperTest`), and `ShareService` additionally throws;
   (2) **workspace→org placement**: a new workspace joins the active workspace's org only when its creator
