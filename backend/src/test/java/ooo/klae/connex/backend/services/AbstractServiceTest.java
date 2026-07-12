@@ -81,6 +81,7 @@ abstract class AbstractServiceTest {
         MockHttpServletRequest request = new MockHttpServletRequest();
         long now = System.currentTimeMillis();
         request.getSession().setAttribute(SessionSecurityService.AUTHENTICATED_AT_ATTR, now);
+        request.getSession().setAttribute(SessionSecurityService.AUTHENTICATED_USER_ATTR, user.getId());
         request.getSession().setAttribute(SessionSecurityService.WEBAUTHN_STEP_UP_AT_ATTR, now);
         request.getSession().setAttribute(SessionSecurityService.WEBAUTHN_STEP_UP_USER_ATTR, user.getId());
         RequestContextHolder.setRequestAttributes(new ServletRequestAttributes(request));

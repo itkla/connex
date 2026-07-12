@@ -48,6 +48,7 @@ import jakarta.servlet.http.HttpServletResponse;
 import ooo.klae.connex.backend.sso.DbRelyingPartyRegistrationRepository;
 import ooo.klae.connex.backend.sso.SsoAuthenticationSuccessHandler;
 import ooo.klae.connex.backend.services.SessionSecurityService;
+import ooo.klae.connex.backend.tenant.WorkspaceCookie;
 
 /**
  * Spring Security configuration.
@@ -136,6 +137,7 @@ public class SecurityConfig {
             SsoAuthenticationSuccessHandler ssoAuthenticationSuccessHandler,
             RequestBodySizeProperties requestBodySizeProperties,
             SessionSecurityService sessionSecurityService,
+            WorkspaceCookie workspaceCookie,
             @Value("${connex.security.csrf-enabled:true}") boolean csrfEnabled,
             @Value("${connex.sso.enabled:false}") boolean ssoEnabled) throws Exception {
         boolean oauthEnabled = ssoEnabled || socialLoginClientRegistrations.anyEnabled();
@@ -197,7 +199,10 @@ public class SecurityConfig {
                 .invalidateHttpSession(true)
                 .clearAuthentication(true)
                 .deleteCookies("JSESSIONID")
-                .logoutSuccessHandler((req, res, auth) -> res.setStatus(200))
+                .logoutSuccessHandler((req, res, auth) -> {
+                    workspaceCookie.clear(res);
+                    res.setStatus(200);
+                })
             );
         if (oauthEnabled) {
             http

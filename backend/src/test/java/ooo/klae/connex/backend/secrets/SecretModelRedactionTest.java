@@ -7,6 +7,7 @@ import org.junit.jupiter.api.Test;
 import ooo.klae.connex.backend.beans.SsoConnection;
 import ooo.klae.connex.backend.beans.WorkspaceMailConfig;
 import ooo.klae.connex.backend.dto.MailConfigDto;
+import ooo.klae.connex.backend.dto.PasskeyRegistrationOptionsRequest;
 
 class SecretModelRedactionTest {
 
@@ -50,5 +51,13 @@ class SecretModelRedactionTest {
 
         assertFalse(dto.toString().contains("secret:v1:44"));
         assertFalse(dto.toString().contains("passwordEnc"));
+    }
+
+    @Test
+    void passkeyRegistrationOptionsRedactsCurrentPassword() {
+        PasskeyRegistrationOptionsRequest request = new PasskeyRegistrationOptionsRequest();
+        request.setCurrentPassword("Str0ng!Pass");
+
+        assertFalse(request.toString().contains("Str0ng!Pass"));
     }
 }
