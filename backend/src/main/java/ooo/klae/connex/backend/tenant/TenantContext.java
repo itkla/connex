@@ -54,6 +54,21 @@ public class TenantContext {
         return s == null ? null : s.role();
     }
 
+    /**
+     * The identity scope's own catalog, ignoring any {@code TenantWorkScope}
+     * override — the value save/restore code must snapshot, since restoring an
+     * override value into the scope would corrupt it once the override pops.
+     */
+    public String getScopeCatalog() {
+        Scope s = CURRENT.get();
+        return s == null ? null : s.catalog();
+    }
+
+    /** Whether a {@code TenantWorkScope} catalog override is active on the thread. */
+    boolean hasCatalogOverride() {
+        return CATALOG_OVERRIDE.get() != null;
+    }
+
     public String getCatalog() {
         Optional<String> override = CATALOG_OVERRIDE.get();
         if (override != null) {

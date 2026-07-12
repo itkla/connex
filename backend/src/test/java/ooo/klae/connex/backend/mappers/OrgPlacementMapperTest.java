@@ -6,6 +6,8 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.util.Objects;
+
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.dao.DataAccessException;
@@ -140,6 +142,6 @@ class OrgPlacementMapperTest extends AbstractMapperTest {
         newOrg();
 
         assertTrue(orgPlacementMapper.distinctDedicatedHandles().contains(handle));
-        assertFalse(orgPlacementMapper.distinctDedicatedHandles().stream().anyMatch(java.util.Objects::isNull));
+        assertFalse(orgPlacementMapper.distinctDedicatedHandles().stream().anyMatch(Objects::isNull));
     }
 }

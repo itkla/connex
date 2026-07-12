@@ -1,9 +1,11 @@
 package ooo.klae.connex.backend.tenant;
 
+import java.util.Objects;
 import java.util.Optional;
 import java.util.function.Supplier;
 
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
@@ -37,12 +39,7 @@ public class TenantWorkScope {
      * @return the work's result
      */
     public <T> T unrouted(Supplier<T> work) {
-        Optional<String> previous = tenantContext.swapCatalogOverride(Optional.empty());
-        try {
-            return work.get();
-        } finally {
-            tenantContext.swapCatalogOverride(previous);
-        }
+        return runWithOverride(Optional.empty(), work);
     }
 
     /**
@@ -64,13 +61,7 @@ public class TenantWorkScope {
      * @throws IllegalStateException when the workspace does not exist
      */
     public <T> T inWorkspace(int workspaceId, Supplier<T> work) {
-        String catalog = resolveCatalogForWorkspace(workspaceId);
-        Optional<String> previous = tenantContext.swapCatalogOverride(Optional.ofNullable(catalog));
-        try {
-            return work.get();
-        } finally {
-            tenantContext.swapCatalogOverride(previous);
-        }
+        return withCatalog(resolveCatalogForWorkspace(workspaceId), work);
     }
 
     /**
@@ -97,7 +88,18 @@ public class TenantWorkScope {
      * @return the work's result
      */
     public <T> T withCatalog(String catalog, Supplier<T> work) {
-        Optional<String> previous = tenantContext.swapCatalogOverride(Optional.ofNullable(catalog));
+        return runWithOverride(Optional.ofNullable(catalog), work);
+    }
+
+    private <T> T runWithOverride(Optional<String> override, Supplier<T> work) {
+        if (TransactionSynchronizationManager.isActualTransactionActive()
+                && !Objects.equals(override.orElse(null), tenantContext.getCatalog())) {
+            throw new IllegalStateException(
+                "Catalog scope cannot CHANGE inside an active transaction: the transaction-bound "
+                    + "connection keeps its original catalog, so the new pin would silently not apply. "
+                    + "Re-pinning the same catalog (e.g. runAs within an already-routed span) is allowed");
+        }
+        Optional<String> previous = tenantContext.swapCatalogOverride(override);
         try {
             return work.get();
         } finally {

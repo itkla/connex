@@ -8,8 +8,8 @@ import org.springframework.transaction.event.TransactionPhase;
 import org.springframework.transaction.event.TransactionalEventListener;
 
 import lombok.RequiredArgsConstructor;
-import ooo.klae.connex.backend.tenant.TenantWorkScope;
 import ooo.klae.connex.backend.services.NotificationReconciliationService;
+import ooo.klae.connex.backend.tenant.TenantWorkScope;
 
 /**
  * Reconciles source changes asynchronously after the source transaction commits, off the request thread.

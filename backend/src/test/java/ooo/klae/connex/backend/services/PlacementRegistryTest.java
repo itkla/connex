@@ -10,6 +10,9 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.time.Duration;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.List;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -109,15 +112,15 @@ class PlacementRegistryTest {
 
     @Test
     void activeCatalogsIsDefaultOnlyInSingleDatabaseMode() {
-        assertEquals(java.util.Collections.singletonList(null), placementRegistry.activeCatalogs());
+        assertEquals(Collections.singletonList(null), placementRegistry.activeCatalogs());
     }
 
     @Test
     void activeCatalogsFansOutOverDedicatedHandlesInCatalogMode() {
         properties.setMode(TenantRoutingProperties.MODE_CATALOG_PER_PLACEMENT);
-        when(orgPlacementMapper.distinctDedicatedHandles()).thenReturn(java.util.List.of("cnx_a", "cnx_b"));
+        when(orgPlacementMapper.distinctDedicatedHandles()).thenReturn(List.of("cnx_a", "cnx_b"));
 
-        assertEquals(java.util.Arrays.asList(null, "cnx_a", "cnx_b"), placementRegistry.activeCatalogs());
+        assertEquals(Arrays.asList(null, "cnx_a", "cnx_b"), placementRegistry.activeCatalogs());
     }
 
     @Test
@@ -125,9 +128,9 @@ class PlacementRegistryTest {
         properties.setMode(TenantRoutingProperties.MODE_CATALOG_PER_PLACEMENT);
         properties.setDefaultCatalog("connexdb");
         when(orgPlacementMapper.distinctDedicatedHandles())
-            .thenReturn(java.util.List.of("mysql", "ConnexDB", "cnx_ok", "bad-handle"));
+            .thenReturn(List.of("mysql", "ConnexDB", "cnx_ok", "bad-handle"));
 
-        assertEquals(java.util.Arrays.asList(null, "cnx_ok"), placementRegistry.activeCatalogs());
+        assertEquals(Arrays.asList(null, "cnx_ok"), placementRegistry.activeCatalogs());
     }
 
     @Test

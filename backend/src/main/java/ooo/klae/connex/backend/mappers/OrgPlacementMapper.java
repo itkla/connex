@@ -1,5 +1,7 @@
 package ooo.klae.connex.backend.mappers;
 
+import java.util.List;
+
 import org.apache.ibatis.annotations.Param;
 
 import ooo.klae.connex.backend.beans.OrgPlacement;
@@ -46,5 +48,5 @@ public interface OrgPlacementMapper {
      *
      * @return the distinct dedicated catalog handles, sorted
      */
-    java.util.List<String> distinctDedicatedHandles();
+    List<String> distinctDedicatedHandles();
 }

@@ -7,9 +7,9 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 import lombok.RequiredArgsConstructor;
-import ooo.klae.connex.backend.tenant.TenantWorkScope;
 
 import ooo.klae.connex.backend.mappers.RuleMapper;
+import ooo.klae.connex.backend.tenant.TenantWorkScope;
 
 /**
  * Periodically evaluates time-based (schedule) rules. Mirrors the notification scheduler: it fans out
@@ -56,12 +56,18 @@ public class RuleScheduler {
      */
     private void evaluateCatalog(String catalog) {
         for (int workspaceId : tenantWorkScope.withCatalog(catalog, ruleMapper::workspaceIdsWithEnabledScheduleRules)) {
-            for (String cadence : CADENCES) {
-                try {
-                    tenantWorkScope.inWorkspace(workspaceId, () -> ruleEngineService.runSchedule(workspaceId, cadence));
-                } catch (Exception e) {
-                    log.warn("Schedule evaluation failed for workspace {} cadence {}: {}", workspaceId, cadence, e.getMessage());
-                }
+            try {
+                tenantWorkScope.inWorkspace(workspaceId, () -> {
+                    for (String cadence : CADENCES) {
+                        try {
+                            ruleEngineService.runSchedule(workspaceId, cadence);
+                        } catch (Exception e) {
+                            log.warn("Schedule evaluation failed for workspace {} cadence {}: {}", workspaceId, cadence, e.getMessage());
+                        }
+                    }
+                });
+            } catch (Exception e) {
+                log.warn("Schedule evaluation skipped for workspace {}: {}", workspaceId, e.getMessage());
             }
         }
     }

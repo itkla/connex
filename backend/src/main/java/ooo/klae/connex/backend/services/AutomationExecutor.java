@@ -46,7 +46,7 @@ public class AutomationExecutor {
         Integer previousUser = hadTenant ? tenantContext.getUserId() : null;
         String previousRole = hadTenant ? tenantContext.getRole() : null;
         Integer previousOrg = hadTenant ? tenantContext.getOrgId() : null;
-        String previousCatalog = hadTenant ? tenantContext.getCatalog() : null;
+        String previousCatalog = hadTenant ? tenantContext.getScopeCatalog() : null;
 
         SecurityContext context = SecurityContextHolder.createEmptyContext();
         context.setAuthentication(new UsernamePasswordAuthenticationToken(principal, null, principal.getAuthorities()));
