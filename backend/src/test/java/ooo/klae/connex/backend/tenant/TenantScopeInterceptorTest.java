@@ -31,7 +31,7 @@ class TenantScopeInterceptorTest {
         assertTrue(interceptor.requiresResolvedContext(NS + "CompanyMapper.getAllCompanies"));
         assertTrue(interceptor.requiresResolvedContext(NS + "DealMapper.search"));
         assertTrue(interceptor.requiresResolvedContext(NS + "NotificationMapper.findPage"));
-        assertTrue(interceptor.requiresResolvedContext(NS + "TaskMapper.insert"));
+        assertTrue(interceptor.requiresResolvedContext(NS + "AuditLogMapper.findRecent"));
     }
 
     @Test
@@ -39,9 +39,8 @@ class TenantScopeInterceptorTest {
         assertFalse(interceptor.requiresResolvedContext(NS + "WorkspaceMapper.getRole"));
         assertFalse(interceptor.requiresResolvedContext(NS + "UserMapper.search"));
         assertFalse(interceptor.requiresResolvedContext(NS + "PreferenceMapper.isEnabled"));
-        assertFalse(interceptor.requiresResolvedContext(NS + "AuditLogMapper.findRecent"));
-        assertFalse(interceptor.requiresResolvedContext(NS + "RoleMapper.findPermissions"));
-        assertFalse(interceptor.requiresResolvedContext(NS + "NoteMapper.countAuthoredAnywhere"));
+        assertFalse(interceptor.requiresResolvedContext(NS + "AuditLogMapper.insert"));
+        assertFalse(interceptor.requiresResolvedContext(NS + "AuditLogMapper.findOrgExport"));
     }
 
     @Test

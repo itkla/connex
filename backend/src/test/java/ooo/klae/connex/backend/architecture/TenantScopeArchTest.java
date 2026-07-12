@@ -51,7 +51,8 @@ class TenantScopeArchTest {
      * recipient-scoped across every membership by design (MULTITENANCY_PLAN §0.3 —
      * it binds {@code #{recipientId}}), the two scheduler helpers only enumerate
      * workspace ids for per-workspace background fan-out (they return no tenant rows),
-     * and the {@code count*Anywhere} selects are
+     * and the org-scoped audit reads are org-filtered ({@code #{orgId}}) and gated by
+     * org membership (MULTITENANCY_PLAN §0.6). The {@code count*Anywhere} selects are
      * the account-offboarding guards (#440 increment 3): identity-scoped counts that
      * mirror the dropped RESTRICT constraints across every workspace.
      */
@@ -62,6 +63,8 @@ class TenantScopeArchTest {
         "ooo.klae.connex.backend.mappers.NotificationMapper.findById",
         "ooo.klae.connex.backend.mappers.NotificationMapper.findWorkspaceIds",
         "ooo.klae.connex.backend.mappers.RuleMapper.workspaceIdsWithEnabledScheduleRules",
+        "ooo.klae.connex.backend.mappers.AuditLogMapper.findRecentByOrg",
+        "ooo.klae.connex.backend.mappers.AuditLogMapper.findOrgExport",
         "ooo.klae.connex.backend.mappers.NoteMapper.countAuthoredAnywhere",
         "ooo.klae.connex.backend.mappers.ActivityMapper.countCreatedAnywhere",
         "ooo.klae.connex.backend.mappers.IntroductionMapper.countIntroducedAnywhere"
@@ -69,7 +72,9 @@ class TenantScopeArchTest {
 
     /**
      * Scoped-mapper writes that legitimately do not bind {@code #{workspaceId}}.
-     * The notification mutations are
+     * The audit-log insert runs during auth flows before a workspace is pinned and
+     * carries a nullable {@code workspace_id} for system events (mirrors the matching
+     * exemption in {@link TenantScopeInterceptor}). The notification mutations are
      * recipient-scoped across every membership by design (MULTITENANCY_PLAN §0.3 — they
      * bind {@code #{recipientId}}), exactly like the exempt notification selects above.
      * The {@code *Anywhere} writes are the account-offboarding erasures (#440
@@ -78,6 +83,7 @@ class TenantScopeArchTest {
      * including ones the departing user has already left.
      */
     private static final Set<String> EXEMPT_WRITES = Set.of(
+        "ooo.klae.connex.backend.mappers.AuditLogMapper.insert",
         "ooo.klae.connex.backend.mappers.NotificationMapper.markRead",
         "ooo.klae.connex.backend.mappers.NotificationMapper.markUnread",
         "ooo.klae.connex.backend.mappers.NotificationMapper.dismiss",

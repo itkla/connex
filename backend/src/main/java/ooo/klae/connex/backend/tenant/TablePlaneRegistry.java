@@ -19,6 +19,13 @@ import java.util.Set;
  * workspace_role} is control-plane so {@code workspace_member.role_id} keeps
  * its constraint; {@code appi_incident} is control-plane so it stays writable
  * during an org-catalog outage it may be describing.
+ *
+ * <p>This registry classifies TABLES for the physical split; it is orthogonal
+ * to {@code TenantScopeInterceptor}'s mapper-namespace sets, which classify
+ * STATEMENTS for scope enforcement. A mapper can stay workspace-scope-enforced
+ * (e.g. {@code AuditLogMapper}, {@code RoleMapper}) while every table it
+ * touches lives on the control plane — the enforcement backstop and the plane
+ * wall protect different invariants.
  */
 public final class TablePlaneRegistry {
 

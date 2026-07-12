@@ -514,7 +514,7 @@ public class WorkspaceService {
      */
     @Transactional
     public MemberDto addPendingMember(int workspaceId, User actor, User target, String role) {
-        notificationMapper.deleteAllForRecipient(workspaceId, target.getId());
+        userOffboardingService.prepareFreshMembership(workspaceId, target.getId());
         workspaceMapper.addPendingMember(workspaceId, target.getId(), role);
         notifyJoinRequest(workspaceId, target.getId(), actor);
         auditService.record("workspace.member.invite", "workspace", workspaceId, target.getDisplayName(),
@@ -535,6 +535,7 @@ public class WorkspaceService {
         if (isMember(workspaceId, userId)) {
             return;
         }
+        userOffboardingService.prepareFreshMembership(workspaceId, userId);
         workspaceMapper.addMember(workspaceId, userId, role);
         int orgId = workspaceMapper.getOrgId(workspaceId);
         auditService.record("org.workspace_member.sso_provision", "organization", orgId, null,

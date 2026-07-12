@@ -15,6 +15,7 @@ import ooo.klae.connex.backend.mappers.SavedViewMapper;
 import ooo.klae.connex.backend.mappers.ShareMapper;
 import ooo.klae.connex.backend.mappers.TaskMapper;
 import ooo.klae.connex.backend.mappers.UserDashboardMapper;
+import ooo.klae.connex.backend.mappers.WorkspaceMapper;
 
 /**
  * Service-layer replacement for the database-level fan-out that account
@@ -44,6 +45,7 @@ public class UserOffboardingService {
     private final ShareMapper shareMapper;
     private final SavedViewMapper savedViewMapper;
     private final UserDashboardMapper userDashboardMapper;
+    private final WorkspaceMapper workspaceMapper;
 
     /**
      * Refuses deletion while the user still owns authored content, mirroring
@@ -77,6 +79,25 @@ public class UserOffboardingService {
             throw new ConflictException(
                 "Account still owns authored content (" + notes + " notes, " + activities
                     + " activities, " + introductions + " introductions); reassign or delete it first");
+        }
+    }
+
+    /**
+     * Clears any notification rows addressed to a user who is about to receive
+     * a brand-new membership in the workspace. With the cross-plane cascades
+     * gone (#440 increment 3), a notification inserted while an earlier
+     * removal was committing survives as an orphan; without this clean it
+     * would resurface in the rejoiner's inbox. Guarded on the absence of ANY
+     * membership row so a pending invitee's legitimate notifications are never
+     * touched. Called by every fresh-membership path: invites, invite links,
+     * and SSO JIT provisioning.
+     *
+     * @param workspaceId the workspace being joined
+     * @param userId the joining user
+     */
+    public void prepareFreshMembership(int workspaceId, int userId) {
+        if (workspaceMapper.getMember(workspaceId, userId) == null) {
+            notificationMapper.deleteAllForRecipient(workspaceId, userId);
         }
     }
 

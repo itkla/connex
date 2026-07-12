@@ -66,7 +66,9 @@ public class TenantScopeInterceptor implements Interceptor {
         MAPPERS + "TaskMapper",
         MAPPERS + "NotificationMapper",
         MAPPERS + "IntroductionMapper",
+        MAPPERS + "AuditLogMapper",
         MAPPERS + "PersonEdgeMapper",
+        MAPPERS + "RoleMapper",
         MAPPERS + "ShareMapper",
         MAPPERS + "AiOutputCacheMapper"
     );
@@ -77,10 +79,7 @@ public class TenantScopeInterceptor implements Interceptor {
      * WebAuthn, federated/SSO identity), membership and capability-token flows
      * that run before a tenant is resolvable (workspace, invites, allowed
      * domains), per-user preferences, per-workspace mail config used by
-     * background senders, the organization root itself, and — per the plane
-     * decisions on #440 increment 3 — the whole audit trail (hash-chained,
-     * writable during auth flows and org-catalog outages) and the workspace
-     * role catalog that {@code workspace_member.role_id} references. Every mapper XML
+     * background senders, and the organization root itself. Every mapper XML
      * must appear either here or in {@link #SCOPED_NAMESPACES} — the
      * registry-completeness architecture test enforces the partition so a new
      * mapper cannot silently bypass the fail-closed backstop.
@@ -90,7 +89,6 @@ public class TenantScopeInterceptor implements Interceptor {
         MAPPERS + "AiProviderConfigMapper",
         MAPPERS + "AppiIncidentMapper",
         MAPPERS + "AuditIntegrityMapper",
-        MAPPERS + "AuditLogMapper",
         MAPPERS + "OrgAllowedDomainMapper",
         MAPPERS + "EmailChangeTokenMapper",
         MAPPERS + "FederatedIdentityMapper",
@@ -103,7 +101,6 @@ public class TenantScopeInterceptor implements Interceptor {
         MAPPERS + "PasswordResetTokenMapper",
         MAPPERS + "PreferenceMapper",
         MAPPERS + "RegistrationVerificationTokenMapper",
-        MAPPERS + "RoleMapper",
         MAPPERS + "SecretValueMapper",
         MAPPERS + "SsoConnectionMapper",
         MAPPERS + "SsoDomainMapper",
@@ -115,18 +112,31 @@ public class TenantScopeInterceptor implements Interceptor {
     );
 
     /**
-     * Scoped statements that legitimately run with an unresolved context. The
-     * offboarding statements (#440 increment 3) replace the dropped
+     * Scoped statements that legitimately run with an unresolved context. Audit
+     * writes happen during auth flows (before a workspace is pinned) and carry a
+     * nullable {@code workspace_id} for system events. The role-permission read
+     * backs {@code WorkspaceService.permissionsFor}, which any auth-plane request
+     * ({@code /api/auth/**} is excluded from tenant resolution) may reach with an
+     * explicit membership-validated workspace id; the statement itself anchors
+     * {@code workspace_id} in SQL, so it is safe without a resolved context. The
+     * org-scoped audit reads are org-filtered ({@code org_id}) and gated by org
+     * membership (an org admin needn't have any active workspace), so they too may
+     * run without a resolved workspace context.
+     *
+     * <p>The offboarding statements (#440 increment 3) replace the dropped
      * cross-plane foreign keys. The {@code *Anywhere} guards and erasures run
      * during self-serve account deletion, which is identity-scoped
      * ({@code requireSelf}) and deliberately spans every workspace — including
      * ones the user has left, where no tenant context could be resolved. The
-     * recipient-scoped notification delete backs invitation decline (and the
-     * stale-row clean at invite time), which a user with no active workspace
-     * may perform; it anchors {@code workspace_id} and {@code recipient_id}
-     * in SQL.
+     * recipient-scoped notification delete backs invitation decline, which a
+     * user with no active workspace may perform; it anchors
+     * {@code workspace_id} and {@code recipient_id} in SQL.
      */
     private static final Set<String> EXEMPT_STATEMENTS = Set.of(
+        MAPPERS + "AuditLogMapper.insert",
+        MAPPERS + "AuditLogMapper.findRecentByOrg",
+        MAPPERS + "AuditLogMapper.findOrgExport",
+        MAPPERS + "RoleMapper.findPermissions",
         MAPPERS + "NoteMapper.countAuthoredAnywhere",
         MAPPERS + "ActivityMapper.countCreatedAnywhere",
         MAPPERS + "IntroductionMapper.countIntroducedAnywhere",

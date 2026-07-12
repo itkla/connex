@@ -37,6 +37,7 @@ public class InviteService {
 
     private final InviteMapper inviteMapper;
     private final WorkspaceMapper workspaceMapper;
+    private final UserOffboardingService userOffboardingService;
     private final UserMapper userMapper;
     private final WorkspaceService workspaceService;
     private final OrgAllowedDomainService orgAllowedDomainService;
@@ -142,6 +143,7 @@ public class InviteService {
         int workspaceId = invite.getWorkspaceId();
         requireOrgDomainAllowed(workspaceId, user.getEmail());
         if (!workspaceMapper.isMember(workspaceId, user.getId())) {
+            userOffboardingService.prepareFreshMembership(workspaceId, user.getId());
             workspaceMapper.addMember(workspaceId, user.getId(), invite.getRole());
         }
         inviteMapper.markAccepted(invite.getId(), user.getId());

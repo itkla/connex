@@ -26,15 +26,31 @@ import ooo.klae.connex.backend.tenant.TablePlaneRegistry;
  * split and is exempt; new migrations belong in one of the two subfolders.
  * Flyway scans location subdirectories recursively, so no configuration
  * change is involved — only placement.
+ *
+ * <p>The scan is a regex heuristic over comment-stripped SQL (DDL targets,
+ * index targets, DML targets, FROM/JOIN sources) — layered with
+ * {@code TablePlaneArchTest}'s live-schema wall check and human review, not
+ * relied on alone. It errs toward false positives: an unrecognized token is a
+ * violation, so exotic SQL should be rare and deliberate in these lineages.
  */
 class MigrationLineageArchTest {
 
-    private static final Pattern TABLE_STATEMENT = Pattern.compile(
-        "(?:CREATE|ALTER|DROP|RENAME|TRUNCATE)\\s+TABLE\\s+(?:IF\\s+(?:NOT\\s+)?EXISTS\\s+)?[`\"]?(\\w+)",
-        Pattern.CASE_INSENSITIVE);
-    private static final Pattern DML_STATEMENT = Pattern.compile(
-        "(?:INSERT\\s+INTO|UPDATE|DELETE\\s+FROM)\\s+[`\"]?(\\w+)",
-        Pattern.CASE_INSENSITIVE);
+    private static final List<Pattern> TABLE_REFERENCES = List.of(
+        Pattern.compile(
+            "(?:CREATE|ALTER|DROP|TRUNCATE)\\s+TABLE\\s+(?:IF\\s+(?:NOT\\s+)?EXISTS\\s+)?[`\"]?(\\w+)",
+            Pattern.CASE_INSENSITIVE),
+        Pattern.compile(
+            "RENAME\\s+TABLE\\s+[`\"]?(\\w+)[`\"]?\\s+TO\\s+[`\"]?(\\w+)",
+            Pattern.CASE_INSENSITIVE),
+        Pattern.compile(
+            "(?:CREATE(?:\\s+UNIQUE|\\s+FULLTEXT|\\s+SPATIAL)?|DROP)\\s+INDEX\\s+[`\"]?\\w+[`\"]?\\s+ON\\s+[`\"]?(\\w+)",
+            Pattern.CASE_INSENSITIVE),
+        Pattern.compile(
+            "^\\s*(?:INSERT\\s+INTO|REPLACE\\s+INTO|UPDATE|DELETE\\s+FROM)\\s+[`\"]?(\\w+)",
+            Pattern.CASE_INSENSITIVE | Pattern.MULTILINE),
+        Pattern.compile(
+            "(?:FROM|JOIN)\\s+[`\"]?([a-z_]\\w*)[`\"]?(?:\\s|$)",
+            Pattern.CASE_INSENSITIVE | Pattern.MULTILINE));
 
     @Test
     void tenantLineageTouchesOnlyOrgDataTables() throws IOException {
@@ -54,13 +70,18 @@ class MigrationLineageArchTest {
         List<String> violations = new ArrayList<>();
         try (Stream<Path> files = Files.list(directory)) {
             for (Path file : files.filter(path -> path.getFileName().toString().endsWith(".sql")).toList()) {
-                String sql = Files.readString(file);
-                for (Pattern pattern : List.of(TABLE_STATEMENT, DML_STATEMENT)) {
+                String sql = stripComments(Files.readString(file));
+                for (Pattern pattern : TABLE_REFERENCES) {
                     Matcher matcher = pattern.matcher(sql);
                     while (matcher.find()) {
-                        String table = matcher.group(1);
-                        if (!allowedTables.contains(table) && !allowedTables.contains(table.toUpperCase(Locale.ROOT))) {
-                            violations.add(file.getFileName() + " touches " + table);
+                        for (int group = 1; group <= matcher.groupCount(); group++) {
+                            String table = matcher.group(group);
+                            if (table == null || SQL_NOISE.contains(table.toUpperCase(Locale.ROOT))) {
+                                continue;
+                            }
+                            if (!allowedTables.contains(table) && !allowedTables.contains(table.toUpperCase(Locale.ROOT))) {
+                                violations.add(file.getFileName() + " touches " + table);
+                            }
                         }
                     }
                 }
@@ -70,6 +91,13 @@ class MigrationLineageArchTest {
             "Migrations in db/migration/" + lineage + " may only touch " + lineage + "-plane tables "
                 + "(TablePlaneRegistry); move the statement to the other lineage or revisit the table's "
                 + "placement on #440: " + violations);
+    }
+
+    /** Keywords the FROM/JOIN and DML scans can capture that are not table names. */
+    private static final Set<String> SQL_NOISE = Set.of("DUAL", "SELECT", "CURRENT_TIMESTAMP");
+
+    private static String stripComments(String sql) {
+        return sql.replaceAll("--[^\\n]*", "").replaceAll("/\\*.*?\\*/", "");
     }
 
     private Path repoRoot() {
