@@ -172,6 +172,31 @@ class DealMapperTest extends AbstractMapperTest {
     }
 
     @Test
+    void relatedNameReadsIgnoreForeignRowsReferencedByCorruptDeal() {
+        Workspace pageWorkspace = newWorkspace();
+        Pipeline localPipeline = newPipelineIn(pageWorkspace, "Alpha Pipeline");
+        Stage localStage = newStageIn(pageWorkspace, localPipeline, "Alpha Stage", 0);
+        Company localCompany = newCompanyIn(pageWorkspace, "Alpha Company");
+        Deal local = newDealIn(pageWorkspace, localPipeline, localStage);
+        local.setCompanyId(localCompany.getId());
+        dealMapper.update(local);
+
+        Deal corrupt = newDealIn(pageWorkspace, localPipeline, localStage);
+        Workspace foreignWorkspace = newWorkspace();
+        Pipeline foreignPipeline = newPipelineIn(foreignWorkspace, "Zulu Foreign Pipeline");
+        Stage foreignStage = newStageIn(foreignWorkspace, foreignPipeline, "Zulu Foreign Stage", 0);
+        Company foreignCompany = newCompanyIn(foreignWorkspace, "Zulu Foreign Company");
+        jdbcTemplate.update(
+            "UPDATE deal SET pipeline_id = ?, stage_id = ?, company_id = ? WHERE id = ?",
+            foreignPipeline.getId(), foreignStage.getId(), foreignCompany.getId(), corrupt.getId());
+
+        assertEquals(List.of(corrupt.getId(), local.getId()), dealPageIds(pageWorkspace, "company", "asc"));
+        assertEquals(List.of(corrupt.getId(), local.getId()), dealPageIds(pageWorkspace, "pipeline", "asc"));
+        assertEquals(List.of(corrupt.getId(), local.getId()), dealPageIds(pageWorkspace, "stage", "asc"));
+        assertTrue(dealMapper.search(pageWorkspace.getId(), "%Zulu Foreign%").isEmpty());
+    }
+
+    @Test
     void dealMetricsAggregatesMatchingDealsByCurrency() {
         workspace = newWorkspace();
         Pipeline pipeline = newPipeline();

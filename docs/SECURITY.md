@@ -1,6 +1,6 @@
 # Connex — Security Posture & APPI 安全管理措置 Disclosure
 
-> **Purpose.** One document serving two audiences: the **enterprise security-posture artifact** buyers ask for during procurement, and the **APPI 安全管理措置 (security control measures) disclosure** referenced from our public [Data Disclosure page](frontend/app/disclosure) (APPI Art. 32). Issue [#104].
+> **Purpose.** One document serving two audiences: the **enterprise security-posture artifact** buyers ask for during procurement, and the **APPI 安全管理措置 (security control measures) disclosure** referenced from our public [Data Disclosure page](../frontend/app/disclosure) (APPI Art. 32). Issue [#104].
 > **Status: living document.** It describes the architecture as it actually stands today and marks in-progress items with their tracking issue. It is deliberately honest about what has **not** landed yet — do not read an in-progress item as a shipped control.
 > **Not legal advice.** Confirm the APPI framing and any customer commitments with counsel and the signed DPA ([APPI_DPA_TEMPLATE.md](APPI_DPA_TEMPLATE.md), [#93]).
 > **Owner:** {{SECURITY_OWNER}} · **Last reviewed:** 2026-07-09

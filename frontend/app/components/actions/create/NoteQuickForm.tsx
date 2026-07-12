@@ -26,11 +26,15 @@ export default function NoteQuickForm({
     currentUserId,
     onCreated,
     onMoreDetails,
+    onPendingChange,
+    pending,
 }: {
     defaults?: CreateDefaults;
     currentUserId: number;
     onCreated: () => void;
     onMoreDetails: (draft: { content: string }) => void;
+    onPendingChange: (pending: boolean) => void;
+    pending: boolean;
 }) {
     const router = useRouter();
     const t = useTranslations('Actions');
@@ -42,10 +46,11 @@ export default function NoteQuickForm({
 
     const handleSubmit = async (e: React.SubmitEvent<HTMLFormElement>) => {
         e.preventDefault();
-        if (submittingRef.current) return;
+        if (submittingRef.current || pending) return;
         resetFieldErrors();
         submittingRef.current = true;
         setSubmitting(true);
+        onPendingChange(true);
         try {
             await createNote({
                 content: content.trim(),
@@ -68,8 +73,10 @@ export default function NoteQuickForm({
         } finally {
             submittingRef.current = false;
             setSubmitting(false);
+            onPendingChange(false);
         }
     };
+    const busy = submitting || pending;
 
     return (
         <form onSubmit={handleSubmit} className="grid gap-4">
@@ -86,6 +93,7 @@ export default function NoteQuickForm({
                     placeholder={t('quickCreate.note.contentPlaceholder')}
                     rows={3}
                     autoFocus
+                    disabled={busy}
                     aria-invalid={Boolean(fieldErrors.content)}
                     className={cn(fieldInputClass, 'min-h-20 resize-none px-3 py-2', fieldErrors.content && fieldErrorClass)}
                 />
@@ -94,9 +102,10 @@ export default function NoteQuickForm({
 
             <QuickFormFooter
                 onMoreDetails={() => onMoreDetails({ content })}
-                submitDisabled={submitting || !content.trim()}
+                pending={busy}
+                submitDisabled={busy || !content.trim()}
             >
-                {submitting ? <Loader2Icon className="size-4 animate-spin" /> : t('quickCreate.create')}
+                {busy ? <Loader2Icon className="size-4 animate-spin" /> : t('quickCreate.create')}
             </QuickFormFooter>
         </form>
     );

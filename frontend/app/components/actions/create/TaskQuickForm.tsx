@@ -27,11 +27,15 @@ export default function TaskQuickForm({
     currentUserId,
     onCreated,
     onMoreDetails,
+    onPendingChange,
+    pending,
 }: {
     defaults?: CreateDefaults;
     currentUserId: number;
     onCreated: () => void;
     onMoreDetails: (draft: { description: string; dueDate: string }) => void;
+    onPendingChange: (pending: boolean) => void;
+    pending: boolean;
 }) {
     const router = useRouter();
     const t = useTranslations('Actions');
@@ -44,10 +48,11 @@ export default function TaskQuickForm({
 
     const handleSubmit = async (e: React.SubmitEvent<HTMLFormElement>) => {
         e.preventDefault();
-        if (submittingRef.current) return;
+        if (submittingRef.current || pending) return;
         resetFieldErrors();
         submittingRef.current = true;
         setSubmitting(true);
+        onPendingChange(true);
         try {
             await createTask({
                 description: description.trim(),
@@ -71,8 +76,10 @@ export default function TaskQuickForm({
         } finally {
             submittingRef.current = false;
             setSubmitting(false);
+            onPendingChange(false);
         }
     };
+    const busy = submitting || pending;
 
     return (
         <form onSubmit={handleSubmit} className="grid gap-4">
@@ -91,6 +98,7 @@ export default function TaskQuickForm({
                         placeholder={t('quickCreate.task.descriptionPlaceholder')}
                         rows={2}
                         autoFocus
+                        disabled={busy}
                         aria-invalid={Boolean(fieldErrors.description)}
                         className={cn(fieldInputClass, 'min-h-16 resize-none py-2 pl-9 pr-3', fieldErrors.description && fieldErrorClass)}
                     />
@@ -107,6 +115,7 @@ export default function TaskQuickForm({
                         type="date"
                         value={dueDate}
                         onChange={(e) => setDueDate(e.target.value)}
+                        disabled={busy}
                         className={cn(fieldInputClass, 'pl-9 pr-3')}
                     />
                 </div>
@@ -114,9 +123,10 @@ export default function TaskQuickForm({
 
             <QuickFormFooter
                 onMoreDetails={() => onMoreDetails({ description, dueDate })}
-                submitDisabled={submitting || !description.trim()}
+                pending={busy}
+                submitDisabled={busy || !description.trim()}
             >
-                {submitting ? <Loader2Icon className="size-4 animate-spin" /> : t('quickCreate.create')}
+                {busy ? <Loader2Icon className="size-4 animate-spin" /> : t('quickCreate.create')}
             </QuickFormFooter>
         </form>
     );

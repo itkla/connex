@@ -25,6 +25,7 @@ import org.springframework.transaction.annotation.Transactional;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.dto.PasskeyDto;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
+import ooo.klae.connex.backend.exceptions.PasskeyEnrollmentRequiredException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.mappers.WebauthnCredentialMapper;
@@ -36,8 +37,9 @@ import lombok.RequiredArgsConstructor;
  * Orchestrates the WebAuthn ceremonies over Spring Security's {@code WebAuthnRelyingPartyOperations}
  * (which performs attestation/assertion verification) and owns the durable handle&harr;{@code app_user}
  * link plus credential-ownership enforcement. Passkeys are additive: enrollment requires an
- * authenticated session; authentication resolves the account from the credential's user handle and
- * hands a verified {@link User} back to the controller, which finishes the shared login ceremony.
+ * authenticated session and proof through the account's existing authentication method;
+ * authentication resolves the account from the credential's user handle and hands a verified
+ * {@link User} back to the controller, which finishes the shared login ceremony.
  */
 @Service
 @RequiredArgsConstructor
@@ -65,14 +67,22 @@ public class WebAuthnService {
 
     /**
      * Verifies an attestation response and persists the new credential.
+     * @param expectedUserId the authenticated account completing the ceremony
      * @param options the options issued in {@link #createRegistrationOptions}
      * @param credential the client's attestation response
      * @param label the user-supplied nickname
      * @return the stored credential record
      */
     @Transactional
-    public CredentialRecord finishRegistration(PublicKeyCredentialCreationOptions options,
+    public CredentialRecord finishRegistration(int expectedUserId, PublicKeyCredentialCreationOptions options,
             PublicKeyCredential<AuthenticatorAttestationResponse> credential, String label) {
+        PublicKeyCredentialUserEntity optionUser = options.getUser();
+        Integer optionUserId = optionUser == null
+            ? null
+            : userEntityMapper.findUserIdByHandle(optionUser.getId().toBase64UrlString());
+        if (optionUserId == null || optionUserId != expectedUserId) {
+            throw new BadCredentialsException("Passkey registration is not bound to the current account");
+        }
         CredentialRecord record = rpOperations.registerCredential(
             new ImmutableRelyingPartyRegistrationRequest(options, new RelyingPartyPublicKey(credential, label)));
         userCredentials.save(record);
@@ -97,7 +107,7 @@ public class WebAuthnService {
     public PublicKeyCredentialRequestOptions createStepUpOptions(Authentication auth) {
         User user = (User) auth.getPrincipal();
         if (listForUser(user.getId()).isEmpty()) {
-            throw new BadRequestException("No passkey enrolled");
+            throw new PasskeyEnrollmentRequiredException();
         }
         return rpOperations.createCredentialRequestOptions(
             new ImmutablePublicKeyCredentialRequestOptionsRequest(auth));

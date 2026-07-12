@@ -33,9 +33,23 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(ex.getMessage());
     }
 
+    @ExceptionHandler(PasskeyEnrollmentRequiredException.class)
+    public ResponseEntity<Map<String, String>> passkeyEnrollmentRequired(
+            PasskeyEnrollmentRequiredException ex) {
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+            .body(Map.of("code", ex.getCode(), "message", ex.getMessage()));
+    }
+
     @ExceptionHandler(ForbiddenException.class)
     public ResponseEntity<String> forbidden(ForbiddenException ex) {
         return ResponseEntity.status(HttpStatus.FORBIDDEN).body(ex.getMessage());
+    }
+
+    @ExceptionHandler(RecentAuthenticationRequiredException.class)
+    public ResponseEntity<Map<String, String>> recentAuthenticationRequired(
+            RecentAuthenticationRequiredException ex) {
+        return ResponseEntity.status(HttpStatus.FORBIDDEN)
+            .body(Map.of("code", ex.getCode(), "message", ex.getMessage()));
     }
 
     @ExceptionHandler(SsoEnforcedException.class)

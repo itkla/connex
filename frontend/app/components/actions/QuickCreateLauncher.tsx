@@ -45,16 +45,6 @@ const PANEL_WIDTH = 380;
 const PANEL_GAP = 12;
 const VIEWPORT_MARGIN = 16;
 
-const SHORTCUT_GLYPHS: Record<string, string> = { mod: '⌘', ctrl: '⌃', alt: '⌥', shift: '⇧' };
-
-/** Renders a normalized chord as compact glyphs for the selector's keyboard hint. */
-function formatShortcut(chord: string): string {
-    return chord
-        .split('+')
-        .map((part) => SHORTCUT_GLYPHS[part] ?? part.toUpperCase())
-        .join('');
-}
-
 type Anchor = { top: number; left: number; maxHeight: number };
 
 /** True once mounted on the client; false during SSR so portals/sheets only render after hydration. */
@@ -84,6 +74,7 @@ export default function QuickCreateLauncher() {
     const [open, setOpen] = useState(false);
     const [view, setView] = useState<View>('selector');
     const [anchor, setAnchor] = useState<Anchor | null>(null);
+    const [pending, setPending] = useState(false);
 
     const triggerRef = useRef<HTMLButtonElement>(null);
     const rootRef = useRef<HTMLDivElement>(null);
@@ -103,18 +94,33 @@ export default function QuickCreateLauncher() {
         };
     }, []);
 
-    const closeLauncher = useCallback(() => {
+    const forceCloseLauncher = useCallback(() => {
+        setPending(false);
         setOpen(false);
         setView('selector');
         const trigger = triggerRef.current;
         if (trigger) requestAnimationFrame(() => trigger.focus());
     }, []);
 
+    const closeLauncher = useCallback(() => {
+        if (pending) return;
+        forceCloseLauncher();
+    }, [forceCloseLauncher, pending]);
+
     const openLauncher = useCallback(() => {
+        setPending(false);
         setView('selector');
         setAnchor(computeAnchor());
         setOpen(true);
     }, [computeAnchor]);
+
+    const returnToSelector = useCallback(() => {
+        if (!pending) setView('selector');
+    }, [pending]);
+
+    const handleCreated = useCallback(() => {
+        forceCloseLauncher();
+    }, [forceCloseLauncher]);
 
     useEffect(() => {
         if (!open || isMobile) return;
@@ -167,7 +173,7 @@ export default function QuickCreateLauncher() {
             if (event.key === 'Escape') {
                 event.preventDefault();
                 if (view === 'selector') closeLauncher();
-                else setView('selector');
+                else returnToSelector();
                 return;
             }
             if (event.key !== 'Tab' || !panelRef.current) return;
@@ -185,7 +191,7 @@ export default function QuickCreateLauncher() {
                 first.focus();
             }
         },
-        [view, closeLauncher],
+        [view, closeLauncher, returnToSelector],
     );
 
     const body = (
@@ -196,10 +202,12 @@ export default function QuickCreateLauncher() {
             currentUserId={currentUserId}
             titleId={titleId}
             onSelect={selectAction}
-            onBack={() => setView('selector')}
+            onBack={returnToSelector}
             onClose={closeLauncher}
-            onCreated={closeLauncher}
+            onCreated={handleCreated}
             onMoreDetails={escalateToDialog}
+            onPendingChange={setPending}
+            pending={pending}
             showChrome={!isMobile}
         />
     );
@@ -212,6 +220,7 @@ export default function QuickCreateLauncher() {
                 aria-haspopup="dialog"
                 aria-expanded={open}
                 aria-label={t('quickCreate.trigger')}
+                disabled={open && pending}
                 onClick={() => (open ? closeLauncher() : openLauncher())}
                 whileTap={reduceMotion ? undefined : { scale: 0.95 }}
                 transition={reduceMotion ? instant : springJiggle}
@@ -223,12 +232,13 @@ export default function QuickCreateLauncher() {
 
             {mounted && isMobile ? (
                 <Drawer open={open} onOpenChange={(next) => (next ? openLauncher() : closeLauncher())} swipeDirection="down">
-                    <DrawerContent className="max-h-[85dvh] gap-0 rounded-t-2xl p-0">
+                    <DrawerContent showCloseButton={false} className="max-h-[85dvh] gap-0 rounded-t-2xl p-0">
                         <DrawerHeader className="flex-row items-center gap-2 border-b border-border px-5 py-4">
                             {view !== 'selector' ? (
                                 <button
                                     type="button"
-                                    onClick={() => setView('selector')}
+                                    onClick={returnToSelector}
+                                    disabled={pending}
                                     aria-label={t('quickCreate.back')}
                                     className="grid size-7 shrink-0 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
                                 >
@@ -239,6 +249,15 @@ export default function QuickCreateLauncher() {
                                 {view === 'selector' ? t('quickCreate.title') : t(`create.${view}`)}
                             </DrawerTitle>
                             <DrawerDescription className="sr-only">{t('quickCreate.description')}</DrawerDescription>
+                            <button
+                                type="button"
+                                onClick={closeLauncher}
+                                disabled={pending}
+                                aria-label={t('quickCreate.close')}
+                                className="grid size-7 shrink-0 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
+                            >
+                                <XMarkIcon className="size-4" />
+                            </button>
                         </DrawerHeader>
                         <div className="overflow-y-auto px-5 pb-6 pt-4">{body}</div>
                     </DrawerContent>
@@ -255,6 +274,7 @@ export default function QuickCreateLauncher() {
                                       aria-hidden
                                       tabIndex={-1}
                                       onClick={closeLauncher}
+                                      disabled={pending}
                                       className="fixed inset-0 z-40 cursor-default"
                                   />
                                   <motion.div
@@ -303,6 +323,8 @@ type PanelBodyProps = {
     onClose: () => void;
     onCreated: () => void;
     onMoreDetails: (kind: FormKind, draft: Record<string, string>) => void;
+    onPendingChange: (pending: boolean) => void;
+    pending: boolean;
     showChrome: boolean;
 };
 
@@ -322,6 +344,8 @@ function QuickCreatePanelBody({
     onClose,
     onCreated,
     onMoreDetails,
+    onPendingChange,
+    pending,
     showChrome,
 }: PanelBodyProps) {
     const t = useTranslations('Actions');
@@ -336,6 +360,7 @@ function QuickCreatePanelBody({
                         <button
                             type="button"
                             onClick={onBack}
+                            disabled={pending}
                             aria-label={t('quickCreate.back')}
                             className="grid size-7 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
                         >
@@ -348,6 +373,7 @@ function QuickCreatePanelBody({
                     <button
                         type="button"
                         onClick={onClose}
+                        disabled={pending}
                         aria-label={t('quickCreate.close')}
                         className="grid size-7 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
                     >
@@ -373,6 +399,8 @@ function QuickCreatePanelBody({
                                 currentUserId={currentUserId}
                                 onCreated={onCreated}
                                 onMoreDetails={(draft) => onMoreDetails('task', draft)}
+                                onPendingChange={onPendingChange}
+                                pending={pending}
                             />
                         ) : view === 'note' ? (
                             <NoteQuickForm
@@ -380,6 +408,8 @@ function QuickCreatePanelBody({
                                 currentUserId={currentUserId}
                                 onCreated={onCreated}
                                 onMoreDetails={(draft) => onMoreDetails('note', draft)}
+                                onPendingChange={onPendingChange}
+                                pending={pending}
                             />
                         ) : (
                             <ActivityQuickForm
@@ -387,6 +417,8 @@ function QuickCreatePanelBody({
                                 currentUserId={currentUserId}
                                 onCreated={onCreated}
                                 onMoreDetails={(draft) => onMoreDetails('activity', draft)}
+                                onPendingChange={onPendingChange}
+                                pending={pending}
                             />
                         )}
                     </motion.div>
@@ -462,11 +494,6 @@ function TypeSelector({
                             {Icon ? <Icon className="size-4" /> : null}
                         </span>
                         <span className="flex-1 text-sm font-medium text-foreground">{t(action.labelKey)}</span>
-                        {action.shortcut ? (
-                            <kbd className="pointer-events-none shrink-0 select-none rounded border border-border bg-background px-1.5 py-0.5 font-mono text-[10px] font-medium text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100">
-                                {formatShortcut(action.shortcut)}
-                            </kbd>
-                        ) : null}
                     </motion.button>
                 );
             })}
