@@ -29,6 +29,7 @@ import org.springframework.web.bind.annotation.RestController;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.dto.PasskeyDto;
 import ooo.klae.connex.backend.dto.PasskeyRegistrationOptionsRequest;
+import ooo.klae.connex.backend.dto.PasskeyRegistrationRequirementsDto;
 import ooo.klae.connex.backend.dto.RenamePasskeyRequest;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
@@ -46,7 +47,6 @@ import ooo.klae.connex.backend.webauthn.WebAuthnService;
 
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
-import jakarta.servlet.http.HttpSession;
 import jakarta.validation.Valid;
 
 import tools.jackson.core.type.TypeReference;
@@ -55,9 +55,10 @@ import lombok.RequiredArgsConstructor;
 
 /**
  * WebAuthn / passkey ceremony endpoints under {@code /api/auth/webauthn}. Registration and
- * credential management require an authenticated session (passkeys are additive to password login);
- * the authentication ceremony is pre-login. Challenges are held in the {@code HttpSession} and
- * cleared after every verify. A successful assertion finishes through
+ * credential management require an authenticated session; first enrollment is bound to the
+ * account's existing password or a fresh passwordless federated login. The authentication ceremony
+ * is pre-login. Challenges are held in the {@code HttpSession} and cleared after every verify.
+ * A successful assertion finishes through
  * {@code AuthService.establishAuthenticatedSession}, the same ceremony as password login.
  */
 @RestController
@@ -69,8 +70,6 @@ public class WebAuthnController {
         new TypeReference<>() {};
     private static final TypeReference<PublicKeyCredential<AuthenticatorAssertionResponse>> ASSERTION_TYPE =
         new TypeReference<>() {};
-    private static final String FIRST_PASSKEY_BOOTSTRAP_USER_ATTR = "connex.firstPasskeyBootstrapUserId";
-
     private final WebAuthnService webAuthnService;
     private final AuthService authService;
     private final WebAuthnJsonMapper json;
@@ -81,6 +80,17 @@ public class WebAuthnController {
     private final SsoConnectionService ssoConnectionService;
     private final SessionSecurityService sessionSecurityService;
     private final AuditService auditService;
+
+    /**
+     * Reports whether the current account must confirm its password for first-passkey enrollment.
+     */
+    @GetMapping("/register/requirements")
+    public PasskeyRegistrationRequirementsDto registrationRequirements() {
+        User user = authService.getCurrentUser();
+        boolean currentPasswordRequired = !webAuthnService.hasPasskey(user.getId())
+                && authService.hasPasswordCredential(user.getId());
+        return new PasskeyRegistrationRequirementsDto(currentPasswordRequired);
+    }
 
     /**
      * Issues passkey registration options for the authenticated user and stashes them in the session.
@@ -95,7 +105,7 @@ public class WebAuthnController {
         PublicKeyCredentialCreationOptions options = webAuthnService.createRegistrationOptions(auth);
         creationOptions.save(req, res, options);
         if (firstPasskeyBootstrap) {
-            markFirstPasskeyBootstrap(req, user.getId());
+            sessionSecurityService.markFirstPasskeyBootstrap(req, user.getId());
         }
         return ResponseEntity.ok(json.write(options));
     }
@@ -117,7 +127,7 @@ public class WebAuthnController {
         try {
             authorizePasskeyRegistrationVerify(user, req);
             PublicKeyCredential<AuthenticatorAttestationResponse> credential = json.read(body, ATTESTATION_TYPE);
-            CredentialRecord record = webAuthnService.finishRegistration(options, credential, label);
+            CredentialRecord record = webAuthnService.finishRegistration(user.getId(), options, credential, label);
             auditService.record("auth.passkey.register", "user", user.getId(), user.getDisplayName(),
                     "Passkey registered", auditService.singleChange("label", null, label));
             return Map.of("credentialId", record.getCredentialId().toBase64UrlString());
@@ -133,7 +143,7 @@ public class WebAuthnController {
             throw new BadRequestException("Passkey registration failed");
         } finally {
             creationOptions.save(req, res, null);
-            clearFirstPasskeyBootstrap(req);
+            sessionSecurityService.clearFirstPasskeyBootstrap(req);
         }
     }
 
@@ -278,13 +288,13 @@ public class WebAuthnController {
 
     private boolean authorizePasskeyRegistrationOptions(User user, PasskeyRegistrationOptionsRequest request,
             HttpServletRequest httpRequest) {
-        clearFirstPasskeyBootstrap(httpRequest);
+        sessionSecurityService.clearFirstPasskeyBootstrap(httpRequest);
         if (webAuthnService.hasPasskey(user.getId())) {
             sessionSecurityService.requireRecentAuthentication(user.getId());
             return false;
         }
         String password = request == null ? null : request.getCurrentPassword();
-        authService.requireCurrentPassword(user.getId(), password, clientIpResolver.resolve(httpRequest));
+        authService.requireFirstPasskeyBootstrapAuthentication(user.getId(), password, httpRequest);
         return true;
     }
 
@@ -293,28 +303,8 @@ public class WebAuthnController {
             sessionSecurityService.requireRecentAuthentication(user.getId());
             return;
         }
-        if (!isFirstPasskeyBootstrap(httpRequest, user.getId())) {
+        if (!sessionSecurityService.hasFreshFirstPasskeyBootstrap(httpRequest, user.getId())) {
             throw new BadRequestException("Current password confirmation required");
         }
-    }
-
-    private static void markFirstPasskeyBootstrap(HttpServletRequest request, int userId) {
-        request.getSession().setAttribute(FIRST_PASSKEY_BOOTSTRAP_USER_ATTR, userId);
-    }
-
-    private static void clearFirstPasskeyBootstrap(HttpServletRequest request) {
-        HttpSession session = request.getSession(false);
-        if (session != null) {
-            session.removeAttribute(FIRST_PASSKEY_BOOTSTRAP_USER_ATTR);
-        }
-    }
-
-    private static boolean isFirstPasskeyBootstrap(HttpServletRequest request, int userId) {
-        HttpSession session = request.getSession(false);
-        if (session == null) {
-            return false;
-        }
-        Object value = session.getAttribute(FIRST_PASSKEY_BOOTSTRAP_USER_ATTR);
-        return value instanceof Integer typed && typed == userId;
     }
 }

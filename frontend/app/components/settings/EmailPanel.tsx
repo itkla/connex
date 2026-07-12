@@ -11,6 +11,7 @@ import {
     sendWorkspaceMailTest,
 } from "@/app/lib/api";
 import { useWorkspace } from "@/app/hooks/useWorkspace";
+import { usePasskeyStepUpErrorHandler } from "@/app/hooks/usePasskeyStepUpError";
 import { toastError, toastSuccess } from "@/app/lib/toast";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -63,6 +64,7 @@ function toForm(config: MailConfig): FormState {
 
 export default function EmailPanel() {
     const t = useTranslations("WorkspaceEmail");
+    const handlePasskeyStepUpError = usePasskeyStepUpErrorHandler();
     const { activeWorkspaceId } = useWorkspace();
 
     const [form, setForm] = useState<FormState>(EMPTY);
@@ -132,7 +134,9 @@ export default function EmailPanel() {
             setSavedEnabled(saved.enabled);
             toastSuccess(t("saved"));
         } catch (err) {
-            toastError(err instanceof Error ? err.message : t("saveFailed"));
+            if (!handlePasskeyStepUpError(err)) {
+                toastError(err instanceof Error ? err.message : t("saveFailed"));
+            }
         } finally {
             setSaving(false);
         }
@@ -149,7 +153,9 @@ export default function EmailPanel() {
                 toastError(result.error ?? t("testFailed"));
             }
         } catch (err) {
-            toastError(err instanceof Error ? err.message : t("testFailed"));
+            if (!handlePasskeyStepUpError(err)) {
+                toastError(err instanceof Error ? err.message : t("testFailed"));
+            }
         } finally {
             setTesting(false);
         }
@@ -166,7 +172,9 @@ export default function EmailPanel() {
             setSavedEnabled(false);
             toastSuccess(t("removed"));
         } catch (err) {
-            toastError(err instanceof Error ? err.message : t("saveFailed"));
+            if (!handlePasskeyStepUpError(err)) {
+                toastError(err instanceof Error ? err.message : t("saveFailed"));
+            }
         } finally {
             setSaving(false);
         }

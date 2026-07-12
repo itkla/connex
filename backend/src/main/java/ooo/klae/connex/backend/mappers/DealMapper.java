@@ -215,4 +215,31 @@ public interface DealMapper {
         @Param("dealId") int dealId,
         @Param("userIds") List<Integer> userIds
     );
+
+    /**
+     * Clears deal ownership held by a member within one workspace. Moved from
+     * {@code WorkspaceMapper} so the control plane never writes org-data tables
+     * (#440 increment 3).
+     */
+    void clearMemberDealOwnership(@Param("workspaceId") int workspaceId, @Param("userId") int userId);
+
+    /**
+     * Clears deal ownership across all workspaces. Offboarding replacement for
+     * the {@code deal.owner_id} ON DELETE SET NULL (#440 increment 3).
+     */
+    void clearOwnershipAnywhere(@Param("userId") int userId);
+
+    /**
+     * Removes a member from every deal-collaborator list in one workspace.
+     * Offboarding replacement for the {@code deal_collaborator ->
+     * workspace_member} CASCADE (#440 increment 3).
+     */
+    void removeCollaboratorFromWorkspace(@Param("workspaceId") int workspaceId, @Param("userId") int userId);
+
+    /**
+     * Removes a user from every deal-collaborator list across all workspaces.
+     * Offboarding replacement for the DB-level cascade chain on account
+     * deletion (#440 increment 3).
+     */
+    void removeCollaboratorAnywhere(@Param("userId") int userId);
 }

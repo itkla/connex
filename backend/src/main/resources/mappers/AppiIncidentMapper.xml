@@ -86,12 +86,26 @@
     FROM audit_log al
     LEFT JOIN workspace w ON w.id = al.workspace_id AND w.org_id = al.org_id
     WHERE al.org_id = #{orgId}
-      AND (#{occurredFrom} IS NULL OR al.created_at >= #{occurredFrom})
-      AND (#{occurredTo} IS NULL OR al.created_at &lt;= #{occurredTo})
+      AND al.created_at >= #{occurredFrom}
+      AND al.created_at &lt;= #{occurredTo}
     GROUP BY CASE WHEN w.id IS NULL THEN NULL ELSE al.workspace_id END,
       w.name, COALESCE(al.entity_type, 'system'), al.action, al.outcome
-    ORDER BY eventCount DESC, lastSeenAt DESC
-    LIMIT #{limit}
+    ORDER BY eventCount DESC, lastSeenAt DESC, workspaceId, entityType, action, outcome
+    LIMIT #{limit} OFFSET #{offset}
+  </select>
+
+  <select id="countScopeFromAudit" resultType="long">
+    SELECT COUNT(*)
+    FROM (
+      SELECT 1
+      FROM audit_log al
+      LEFT JOIN workspace w ON w.id = al.workspace_id AND w.org_id = al.org_id
+      WHERE al.org_id = #{orgId}
+        AND al.created_at >= #{occurredFrom}
+        AND al.created_at &lt;= #{occurredTo}
+      GROUP BY CASE WHEN w.id IS NULL THEN NULL ELSE al.workspace_id END,
+        w.name, COALESCE(al.entity_type, 'system'), al.action, al.outcome
+    ) incident_scope
   </select>
 
 </mapper>

@@ -48,4 +48,25 @@ public interface ShareMapper {
     List<ShareDto> listCompanyShares(@Param("workspaceId") int workspaceId, @Param("id") int id);
     List<ShareDto> listPersonShares(@Param("workspaceId") int workspaceId, @Param("id") int id);
     List<ShareDto> listPipelineShares(@Param("workspaceId") int workspaceId, @Param("id") int id);
+
+    /**
+     * Nulls the grantor reference on company shares granted by a user.
+     * Offboarding replacement for the {@code company_share.granted_by}
+     * ON DELETE SET NULL (#440 increment 3).
+     */
+    void clearCompanyShareGrantedByAnywhere(@Param("userId") int userId);
+
+    /**
+     * Nulls the grantor reference on person shares granted by a user.
+     * Offboarding replacement for the {@code person_share.granted_by}
+     * ON DELETE SET NULL (#440 increment 3).
+     */
+    void clearPersonShareGrantedByAnywhere(@Param("userId") int userId);
+
+    /**
+     * Nulls the grantor reference on pipeline shares granted by a user.
+     * Offboarding replacement for the {@code pipeline_share.granted_by}
+     * ON DELETE SET NULL (#440 increment 3).
+     */
+    void clearPipelineShareGrantedByAnywhere(@Param("userId") int userId);
 }

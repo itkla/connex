@@ -119,6 +119,29 @@ class GlobalExceptionHandlerTest {
     }
 
     @Test
+    void recentAuthenticationRequired_returnsStableCode() {
+        ResponseEntity<Map<String, String>> response = handler.recentAuthenticationRequired(
+            new RecentAuthenticationRequiredException());
+
+        assertEquals(HttpStatus.FORBIDDEN, response.getStatusCode());
+        Map<String, String> body = response.getBody();
+        assertNotNull(body);
+        assertEquals(RecentAuthenticationRequiredException.CODE, body.get("code"));
+        assertEquals("Recent WebAuthn authentication required", body.get("message"));
+    }
+
+    @Test
+    void passkeyEnrollmentRequired_returnsStableCode() {
+        ResponseEntity<Map<String, String>> response = handler.passkeyEnrollmentRequired(
+            new PasskeyEnrollmentRequiredException());
+
+        assertEquals(HttpStatus.BAD_REQUEST, response.getStatusCode());
+        Map<String, String> body = response.getBody();
+        assertNotNull(body);
+        assertEquals(PasskeyEnrollmentRequiredException.CODE, body.get("code"));
+    }
+
+    @Test
     void secretUnavailable_returnsSanitizedBody() {
         ResponseEntity<String> response = handler.secretUnavailable(
             new SecretUnavailableException("missing key id prod-v1"));

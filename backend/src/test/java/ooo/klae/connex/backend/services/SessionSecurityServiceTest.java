@@ -2,6 +2,7 @@ package ooo.klae.connex.backend.services;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -26,6 +27,7 @@ import org.springframework.web.context.request.ServletRequestAttributes;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.config.SessionSecurityProperties;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
+import ooo.klae.connex.backend.exceptions.RecentAuthenticationRequiredException;
 
 class SessionSecurityServiceTest {
     private MutableClock clock;
@@ -56,6 +58,7 @@ class SessionSecurityServiceTest {
         service.markAuthenticated(request, 7);
 
         assertEquals(clock.millis(), request.getSession().getAttribute(SessionSecurityService.AUTHENTICATED_AT_ATTR));
+        assertEquals(7, request.getSession().getAttribute(SessionSecurityService.AUTHENTICATED_USER_ATTR));
         assertNull(request.getSession().getAttribute(SessionSecurityService.WEBAUTHN_STEP_UP_AT_ATTR));
         assertNull(request.getSession().getAttribute(SessionSecurityService.WEBAUTHN_STEP_UP_USER_ATTR));
     }
@@ -129,7 +132,32 @@ class SessionSecurityServiceTest {
 
     @Test
     void requireRecentAuthenticationRejectsWithoutRequest() {
-        assertThrows(ForbiddenException.class, () -> service.requireRecentAuthentication(7));
+        assertThrows(RecentAuthenticationRequiredException.class,
+                () -> service.requireRecentAuthentication(7));
+    }
+
+    @Test
+    void firstPasskeyBootstrapIsUserBoundAndExpiresWithRecentAuthenticationWindow() {
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        service.markFirstPasskeyBootstrap(request, 7);
+
+        assertTrue(service.hasFreshFirstPasskeyBootstrap(request, 7));
+
+        clock.advance(Duration.ofMinutes(11));
+
+        assertFalse(service.hasFreshFirstPasskeyBootstrap(request, 7));
+        assertNull(request.getSession().getAttribute(SessionSecurityService.FIRST_PASSKEY_BOOTSTRAP_AT_ATTR));
+        assertNull(request.getSession().getAttribute(SessionSecurityService.FIRST_PASSKEY_BOOTSTRAP_USER_ATTR));
+    }
+
+    @Test
+    void firstPasskeyBootstrapRejectsAndClearsDifferentUserProof() {
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        service.markFirstPasskeyBootstrap(request, 7);
+
+        assertFalse(service.hasFreshFirstPasskeyBootstrap(request, 8));
+        assertNull(request.getSession().getAttribute(SessionSecurityService.FIRST_PASSKEY_BOOTSTRAP_AT_ATTR));
+        assertNull(request.getSession().getAttribute(SessionSecurityService.FIRST_PASSKEY_BOOTSTRAP_USER_ATTR));
     }
 
     @Test
@@ -140,7 +168,8 @@ class SessionSecurityServiceTest {
         request.getSession().setAttribute(SessionSecurityService.WEBAUTHN_STEP_UP_USER_ATTR, 7);
         RequestContextHolder.setRequestAttributes(new ServletRequestAttributes(request));
 
-        assertThrows(ForbiddenException.class, () -> service.requireRecentAuthentication(7));
+        assertThrows(RecentAuthenticationRequiredException.class,
+                () -> service.requireRecentAuthentication(7));
     }
 
     @Test
@@ -158,7 +187,50 @@ class SessionSecurityServiceTest {
         service.markStepUp(request, 7);
         RequestContextHolder.setRequestAttributes(new ServletRequestAttributes(request));
 
-        assertThrows(ForbiddenException.class, () -> service.requireRecentAuthentication(8));
+        assertThrows(RecentAuthenticationRequiredException.class,
+                () -> service.requireRecentAuthentication(8));
+    }
+
+    @Test
+    void requireFreshAuthenticatedSessionAllowsFreshSameUserSession() {
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        service.markAuthenticated(request, 7);
+
+        assertDoesNotThrow(() -> service.requireFreshAuthenticatedSession(request, 7));
+    }
+
+    @Test
+    void requireFreshAuthenticatedSessionRejectsStaleSession() {
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        request.getSession().setAttribute(SessionSecurityService.AUTHENTICATED_AT_ATTR,
+                clock.millis() - Duration.ofMinutes(11).toMillis());
+        request.getSession().setAttribute(SessionSecurityService.AUTHENTICATED_USER_ATTR, 7);
+
+        assertThrows(ForbiddenException.class,
+                () -> service.requireFreshAuthenticatedSession(request, 7));
+    }
+
+    @Test
+    void requireFreshAuthenticatedSessionRejectsDifferentUserSession() {
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        service.markAuthenticated(request, 7);
+
+        assertThrows(ForbiddenException.class,
+                () -> service.requireFreshAuthenticatedSession(request, 8));
+    }
+
+    @Test
+    void freshAuthenticationChecksRejectFutureTimestamps() {
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        request.getSession().setAttribute(SessionSecurityService.AUTHENTICATED_AT_ATTR,
+                clock.millis() + Duration.ofMinutes(1).toMillis());
+        request.getSession().setAttribute(SessionSecurityService.AUTHENTICATED_USER_ATTR, 7);
+        request.getSession().setAttribute(SessionSecurityService.WEBAUTHN_STEP_UP_AT_ATTR,
+                clock.millis() + Duration.ofMinutes(1).toMillis());
+        request.getSession().setAttribute(SessionSecurityService.WEBAUTHN_STEP_UP_USER_ATTR, 7);
+
+        assertFalse(service.hasFreshAuthenticatedSession(request.getSession(), 7));
+        assertFalse(service.hasFreshRecentAuthentication(request.getSession(), 7));
     }
 
     @Test
@@ -179,6 +251,7 @@ class SessionSecurityServiceTest {
 
         assertEquals(session.getCreationTime(),
                 session.getAttribute(SessionSecurityService.AUTHENTICATED_AT_ATTR));
+        assertEquals(7, session.getAttribute(SessionSecurityService.AUTHENTICATED_USER_ATTR));
     }
 
     private static void authenticateUser(int userId) {
@@ -191,6 +264,10 @@ class SessionSecurityServiceTest {
 
     private static final class MutableClock extends Clock {
         private Instant instant = Instant.parse("2026-07-09T00:00:00Z");
+
+        private void advance(Duration duration) {
+            instant = instant.plus(duration);
+        }
 
         @Override
         public ZoneId getZone() {

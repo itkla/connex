@@ -12,10 +12,12 @@ import { Button } from '@/components/ui/button';
  */
 export default function QuickFormFooter({
     onMoreDetails,
+    pending,
     submitDisabled,
     children,
 }: {
     onMoreDetails: () => void;
+    pending: boolean;
     submitDisabled: boolean;
     children: ReactNode;
 }) {
@@ -25,13 +27,16 @@ export default function QuickFormFooter({
             <button
                 type="button"
                 onClick={onMoreDetails}
-                className="rounded-md text-sm font-medium text-muted-foreground underline-offset-4 transition-colors hover:text-foreground hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
+                disabled={pending}
+                className="rounded-md text-sm font-medium text-muted-foreground underline-offset-4 transition-colors hover:text-foreground hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:text-muted-foreground disabled:hover:no-underline"
             >
                 {t('quickCreate.moreDetails')}
             </button>
             <Button
                 type="submit"
                 disabled={submitDisabled}
+                aria-busy={pending}
+                aria-label={t('quickCreate.create')}
                 className="min-w-24 bg-brand text-brand-foreground shadow-sm transition hover:bg-brand-hover hover:shadow-md"
             >
                 {children}

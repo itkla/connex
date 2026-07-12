@@ -2,6 +2,9 @@ package ooo.klae.connex.backend.dto;
 
 import java.time.LocalDateTime;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
+
+import jakarta.validation.constraints.AssertTrue;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
 
@@ -32,4 +35,20 @@ public class AppiIncidentRequest {
 
     @Size(max = 10000)
     private String containment;
+
+    /** Returns whether every supplied timestamp fits the MySQL {@code DATETIME} year range. */
+    @AssertTrue(message = "timestamps must use years from 1000 through 9999")
+    @JsonIgnore
+    public boolean isMysqlDateTimeRangeValid() {
+        return supported(occurredFrom)
+            && supported(occurredTo)
+            && supported(detectedAt)
+            && supported(customerNotifiedAt)
+            && supported(ppcReportedAt)
+            && supported(individualsNotifiedAt);
+    }
+
+    private static boolean supported(LocalDateTime value) {
+        return value == null || value.getYear() >= 1000 && value.getYear() <= 9999;
+    }
 }

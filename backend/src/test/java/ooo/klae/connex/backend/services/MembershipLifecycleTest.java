@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.services;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -11,11 +12,18 @@ import org.springframework.beans.factory.annotation.Autowired;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.dto.WorkspaceMembershipDto;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
+import ooo.klae.connex.backend.mappers.NotificationMapper;
 
 class MembershipLifecycleTest extends AbstractServiceTest {
 
     @Autowired WorkspaceService workspaceService;
     @Autowired InviteService inviteService;
+    @Autowired NotificationMapper notificationMapper;
+
+
+    private long recipientNotificationCount(int recipientId) {
+        return notificationMapper.countPage(recipientId, null, null, null, null);
+    }
 
     @Test
     void addExistingMember_createsPendingMembershipWithNoAccess() {
@@ -64,9 +72,61 @@ class MembershipLifecycleTest extends AbstractServiceTest {
     }
 
     @Test
+    void leaveWorkspaceAndSelectNextPersistsRemainingMembership() {
+        WorkspaceMembershipDto first = workspaceService.createWorkspace("Leave First", currentUser.getId());
+        WorkspaceMembershipDto second = workspaceService.createWorkspace("Leave Second", currentUser.getId());
+        User member = newUser();
+        workspaceMapper.removeMember(workspace.getId(), member.getId());
+        workspaceMapper.addMember(first.getId(), member.getId(), "member");
+        workspaceMapper.addMember(second.getId(), member.getId(), "member");
+        workspaceService.rememberActive(member.getId(), first.getId());
+
+        Integer nextWorkspaceId = workspaceService.leaveWorkspaceAndSelectNext(first.getId(), member.getId());
+
+        assertEquals(second.getId(), nextWorkspaceId);
+        assertEquals(second.getId(), workspaceMapper.getLastActiveWorkspaceId(member.getId()));
+    }
+
+    @Test
     void leaveWorkspace_lastOwnerCannotLeave() {
         WorkspaceMembershipDto ws = workspaceService.createWorkspace("Solo WS", currentUser.getId());
         assertThrows(BadRequestException.class,
             () -> workspaceService.leaveWorkspace(ws.getId(), currentUser.getId()));
+    }
+
+    @Test
+    void declineMembership_removesTheInviteNotifications() {
+        WorkspaceMembershipDto ws = workspaceService.createWorkspace("Decline Notif WS", currentUser.getId());
+        User invitee = newUser();
+        inviteService.addExistingMember(ws.getId(), currentUser.getId(), invitee.getEmail(), "member");
+        newNotification(ws.getId(), invitee.getId());
+
+        workspaceService.declineMembership(ws.getId(), invitee.getId());
+
+        assertEquals(0, recipientNotificationCount(invitee.getId()));
+    }
+
+    @Test
+    void removeMember_cleansNotificationsAndCollaboratorSeats() {
+        User member = newUser();
+        var pipeline = newPipeline();
+        var deal = newDeal(pipeline, newStage(pipeline, 1), newCompany());
+        dealMapper.insertCollaborators(workspace.getId(), deal.getId(), java.util.List.of(member.getId()));
+        newNotification(workspace.getId(), member.getId());
+
+        workspaceService.removeMember(workspace.getId(), currentUser.getId(), member.getId());
+
+        assertEquals(0, recipientNotificationCount(member.getId()));
+        assertTrue(dealMapper.getCollaborators(workspace.getId(), deal.getId()).isEmpty());
+    }
+
+    @Test
+    void leaveWorkspace_cleansTheLeaverContent() {
+        User member = newUser();
+        newNotification(workspace.getId(), member.getId());
+
+        workspaceService.leaveWorkspace(workspace.getId(), member.getId());
+
+        assertEquals(0, recipientNotificationCount(member.getId()));
     }
 }

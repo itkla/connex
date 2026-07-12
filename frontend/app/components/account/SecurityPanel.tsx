@@ -16,13 +16,16 @@ import { startRegistration, WebAuthnError } from "@simplewebauthn/browser";
 
 import type { Passkey } from "@/app/lib/types";
 import {
+    ApiError,
     beginPasskeyRegistration,
     deletePasskey,
     finishPasskeyRegistration,
+    getPasskeyRegistrationRequirements,
     getPasskeys,
     renamePasskey,
 } from "@/app/lib/api";
 import { usePasskeySupport } from "@/app/hooks/usePasskeySupport";
+import { usePasskeyStepUpErrorHandler } from "@/app/hooks/usePasskeyStepUpError";
 import { toastError, toastInfo, toastSuccess } from "@/app/lib/toast";
 import { formatRelativeTime } from "@/app/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -104,6 +107,7 @@ function isCancellation(err: unknown): boolean {
 export default function SecurityPanel() {
     const t = useTranslations("AccountSecurity");
     const locale = useLocale();
+    const handlePasskeyStepUpError = usePasskeyStepUpErrorHandler();
 
     const [passkeys, setPasskeys] = useState<Passkey[]>([]);
     const [loading, setLoading] = useState(true);
@@ -111,6 +115,11 @@ export default function SecurityPanel() {
     const [reloadKey, setReloadKey] = useState(0);
     const supported = usePasskeySupport();
     const [adding, setAdding] = useState(false);
+    const [currentPasswordRequired, setCurrentPasswordRequired] = useState(false);
+    const [passwordOpen, setPasswordOpen] = useState(false);
+    const [currentPassword, setCurrentPassword] = useState("");
+    const [passwordError, setPasswordError] = useState<string | null>(null);
+    const [confirmingPassword, setConfirmingPassword] = useState(false);
 
     const [renameTarget, setRenameTarget] = useState<Passkey | null>(null);
     const [renameValue, setRenameValue] = useState("");
@@ -124,8 +133,14 @@ export default function SecurityPanel() {
             setLoading(true);
             setError(false);
             try {
-                const loaded = await getPasskeys();
-                if (!cancelled) setPasskeys(loaded);
+                const [loaded, requirements] = await Promise.all([
+                    getPasskeys(),
+                    getPasskeyRegistrationRequirements(),
+                ]);
+                if (!cancelled) {
+                    setPasskeys(loaded);
+                    setCurrentPasswordRequired(requirements.currentPasswordRequired);
+                }
             } catch {
                 if (!cancelled) {
                     setError(true);
@@ -140,22 +155,62 @@ export default function SecurityPanel() {
         };
     }, [t, reloadKey]);
 
+    const finishRegistration = async (optionsJSON: Awaited<ReturnType<typeof beginPasskeyRegistration>>) => {
+        const credential = await startRegistration({ optionsJSON });
+        await finishPasskeyRegistration(deviceLabel(), credential);
+        setPasskeys(await getPasskeys());
+        setCurrentPasswordRequired(false);
+        toastSuccess(t("added"));
+    };
+
     const addPasskey = async () => {
+        if (passkeys.length === 0 && currentPasswordRequired) {
+            setPasswordError(null);
+            setPasswordOpen(true);
+            return;
+        }
         setAdding(true);
+        let registrationStarted = false;
         try {
             const optionsJSON = await beginPasskeyRegistration();
-            const credential = await startRegistration({ optionsJSON });
-            await finishPasskeyRegistration(deviceLabel(), credential);
-            setPasskeys(await getPasskeys());
-            toastSuccess(t("added"));
+            registrationStarted = true;
+            await finishRegistration(optionsJSON);
         } catch (err) {
             if (isCancellation(err)) {
-                toastInfo(t("canceled"));
+                toastInfo(t(registrationStarted ? "canceled" : "stepUpCanceled"));
+            } else if (handlePasskeyStepUpError(err)) {
+                return;
+            } else if (err instanceof ApiError && err.status === 403 && passkeys.length === 0) {
+                toastError(t("freshSignInRequired"));
             } else {
-                toastError(err instanceof Error ? err.message : t("addFailed"));
+                toastError(t("addFailed"));
             }
         } finally {
             setAdding(false);
+        }
+    };
+
+    const confirmFirstPasskey = async () => {
+        if (!currentPassword || confirmingPassword) return;
+        setConfirmingPassword(true);
+        setPasswordError(null);
+        try {
+            const optionsJSON = await beginPasskeyRegistration(currentPassword);
+            setCurrentPassword("");
+            await finishRegistration(optionsJSON);
+            setPasswordOpen(false);
+        } catch (err) {
+            setCurrentPassword("");
+            if (isCancellation(err)) {
+                toastInfo(t("canceled"));
+                setPasswordOpen(false);
+            } else if (err instanceof ApiError && err.status === 401) {
+                setPasswordError(t("incorrectPassword"));
+            } else {
+                toastError(t("addFailed"));
+            }
+        } finally {
+            setConfirmingPassword(false);
         }
     };
 
@@ -177,7 +232,14 @@ export default function SecurityPanel() {
             toastSuccess(t("renamed"));
             setRenameTarget(null);
         } catch (err) {
-            toastError(err instanceof Error ? err.message : t("renameFailed"));
+            if (handlePasskeyStepUpError(err)) {
+                return;
+            }
+            if (isCancellation(err)) {
+                toastInfo(t("stepUpCanceled"));
+            } else {
+                toastError(t("renameFailed"));
+            }
         } finally {
             setIsRenaming(false);
         }
@@ -192,7 +254,14 @@ export default function SecurityPanel() {
             toastSuccess(t("removed"));
             setRemoveTarget(null);
         } catch (err) {
-            toastError(err instanceof Error ? err.message : t("removeFailed"));
+            if (handlePasskeyStepUpError(err)) {
+                return;
+            }
+            if (isCancellation(err)) {
+                toastInfo(t("stepUpCanceled"));
+            } else {
+                toastError(t("removeFailed"));
+            }
         } finally {
             setIsRemoving(false);
         }
@@ -298,6 +367,70 @@ export default function SecurityPanel() {
                         </ul>
                     ))}
             </Rise>
+
+            <Dialog
+                open={passwordOpen}
+                onOpenChange={(open) => {
+                    if (confirmingPassword) return;
+                    setPasswordOpen(open);
+                    if (!open) {
+                        setCurrentPassword("");
+                        setPasswordError(null);
+                    }
+                }}
+            >
+                <DialogContent className="sm:max-w-md">
+                    <DialogHeader>
+                        <DialogTitle>{t("passwordTitle")}</DialogTitle>
+                        <DialogDescription>{t("passwordDescription")}</DialogDescription>
+                    </DialogHeader>
+                    <form
+                        onSubmit={(e) => {
+                            e.preventDefault();
+                            void confirmFirstPasskey();
+                        }}
+                        className="space-y-4"
+                    >
+                        <div className="space-y-2">
+                            <Label htmlFor="passkey-current-password">{t("passwordLabel")}</Label>
+                            <Input
+                                id="passkey-current-password"
+                                type="password"
+                                autoComplete="current-password"
+                                value={currentPassword}
+                                onChange={(e) => {
+                                    setCurrentPassword(e.target.value);
+                                    setPasswordError(null);
+                                }}
+                                maxLength={255}
+                                aria-invalid={passwordError !== null}
+                                aria-describedby={passwordError ? "passkey-current-password-error" : undefined}
+                                autoFocus
+                                required
+                            />
+                            {passwordError && (
+                                <p id="passkey-current-password-error" role="alert" className="text-sm text-destructive">
+                                    {passwordError}
+                                </p>
+                            )}
+                        </div>
+                        <DialogFooter>
+                            <DialogClose asChild>
+                                <Button type="button" variant="outline" disabled={confirmingPassword}>
+                                    {t("cancel")}
+                                </Button>
+                            </DialogClose>
+                            <Button
+                                type="submit"
+                                disabled={confirmingPassword || !currentPassword}
+                                className="bg-brand text-white hover:bg-brand-hover"
+                            >
+                                {confirmingPassword ? <Loader2Icon className="size-4 animate-spin" /> : t("continue")}
+                            </Button>
+                        </DialogFooter>
+                    </form>
+                </DialogContent>
+            </Dialog>
 
             <Dialog
                 open={renameTarget !== null}

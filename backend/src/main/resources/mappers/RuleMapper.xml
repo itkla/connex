@@ -70,4 +70,13 @@
     ORDER BY executed_at DESC, id DESC
     LIMIT #{limit}
   </select>
+
+  <update id="clearRunAsAnywhere">
+    UPDATE rule SET run_as_user_id = NULL WHERE run_as_user_id = #{userId}
+  </update>
+
+  <update id="clearCreatedByAnywhere">
+    UPDATE rule SET created_by_id = NULL WHERE created_by_id = #{userId}
+  </update>
+
 </mapper>
