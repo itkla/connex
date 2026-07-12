@@ -12,6 +12,7 @@ import {
 import {
     getActivitiesFromCookie,
     getActivityVolumeFromCookie,
+    getAllStagesFromCookie,
     getAttachmentFacets,
     getAttachmentsPage,
     getCompaniesFromCookie,
@@ -23,6 +24,7 @@ import {
     getCurrentUserFromCookie,
     getDashboardLayoutFromCookie,
     getDealClosingSoonCountFromCookie,
+    getDealClosingSoonFromCookie,
     getDealKpisFromCookie,
     getDealMetricsFromCookie,
     getDealPipelineValueFromCookie,
@@ -35,7 +37,6 @@ import {
     getNotifications,
     getPipelinesFromCookie,
     getRecentMovesFromCookie,
-    getStagesByPipelineId,
     getTaskSummaryFromCookie,
     getTasksFromCookie,
     getTeamLeaderboardFromCookie,
@@ -58,14 +59,11 @@ import type {
     DealStageDistribution,
     NotificationPage,
     Page,
-    Stage,
     TaskSummary as TaskSummaryCounts,
     TeamLeaderboardEntry,
     User,
     WarmthSummary,
 } from '@/app/lib/types';
-
-import { startOfLocalDay, timeOf } from '@/app/lib/utils';
 
 import AtRiskDeals, { type AtRiskItem } from '@/app/components/dashboard/AtRiskDeals';
 import CoolingRelationships, { type CoolingItem } from '@/app/components/dashboard/CoolingRelationships';
@@ -131,8 +129,6 @@ const EMPTY_WARMTH_SUMMARY: WarmthSummary = {
 
 const DASHBOARD_RANGE: RangeKey = '90d';
 
-const DAY = 1000 * 60 * 60 * 24;
-
 /**
  * Picks the currency with the most deals from the server-computed {@link DealMetrics}, so the
  * dashboard's aggregate widgets scope to the workspace's dominant currency rather than the
@@ -163,12 +159,13 @@ export default async function Dashboard() {
 
     const init = { headers: { cookie: cookie ?? '' } } as const;
     const emptyFacets: AttachmentFacets = { sources: [], kinds: [], tags: [], orphaned: 0, total: 0, totalSize: 0 };
-    const [companies, contacts, deals, pipelines, tasks, activities, notes, users, recentFiles, fileFacets, recentMoves, introSuggestions, dealRisks, layoutResponse, notifications, dealMetrics, companiesPage, contactsPage, activityVolume, leaderboard, taskSummary, upcomingActivityCount, closingSoonCount, warmthSummary] =
+    const [companies, contacts, deals, pipelines, stages, tasks, activities, notes, users, recentFiles, fileFacets, recentMoves, introSuggestions, dealRisks, layoutResponse, notifications, dealMetrics, companiesPage, contactsPage, activityVolume, leaderboard, taskSummary, upcomingActivityCount, closingSoonCount, closingSoonDeals, warmthSummary] =
         await Promise.all([
             getCompaniesFromCookie(cookie),
             getContactsFromCookie(cookie),
             getDealsFromCookie(cookie),
             getPipelinesFromCookie(cookie),
+            getAllStagesFromCookie(cookie),
             getTasksFromCookie(cookie),
             getActivitiesFromCookie(cookie),
             getNotesFromCookie(cookie),
@@ -191,6 +188,7 @@ export default async function Dashboard() {
             getTaskSummaryFromCookie(cookie).catch(() => EMPTY_TASK_SUMMARY),
             getUpcomingActivityCountFromCookie(cookie, 7).catch(() => ({ count: 0 }) as Count),
             getDealClosingSoonCountFromCookie(cookie, 7).catch(() => ({ count: 0 }) as Count),
+            getDealClosingSoonFromCookie(cookie, 7, 6).catch(() => []),
             getWarmthSummaryFromCookie(cookie).catch(() => EMPTY_WARMTH_SUMMARY),
         ]);
 
@@ -198,10 +196,6 @@ export default async function Dashboard() {
         getContactTemperaturesFromCookie(cookie, contacts.map((contact) => contact.id)),
         getCompanyTemperaturesFromCookie(cookie, companies.map((company) => company.id)),
     ]);
-
-    const stages = (
-        await Promise.all(pipelines.map((pipeline) => getStagesByPipelineId(pipeline.id, init).catch(() => [] as Stage[])))
-    ).flat();
 
     const companyById = new Map(companies.map((company) => [company.id, company]));
     const dealById = new Map(deals.map((deal) => [deal.id, deal]));
@@ -222,8 +216,6 @@ export default async function Dashboard() {
         .sort((a, b) => (b.temp.daysSinceTouch ?? 0) - (a.temp.daysSinceTouch ?? 0))
         .slice(0, 6);
 
-    const now = new Date().getTime();
-    const todayStart = startOfLocalDay(now);
     const overdueTasks = taskSummary.overdue;
     const dueSoon = taskSummary.dueSoon;
     const closingSoon = closingSoonCount.count;
@@ -233,7 +225,9 @@ export default async function Dashboard() {
     const [dealKpis, pipelineValues, revenueSeries, stageDistribution] = await Promise.all([
         getDealKpisFromCookie(cookie, currency, DASHBOARD_RANGE).catch(() => EMPTY_DEAL_KPIS),
         getDealPipelineValueFromCookie(cookie, currency, DASHBOARD_RANGE).catch(() => [] as DealPipelineValue[]),
-        getDealRevenueTimeseries(currency, undefined, init).catch(() => ({ closed: [], projected: [] }) as DealRevenueSeries),
+        getDealRevenueTimeseries(currency, user.timezone, init).catch(
+            () => ({ closed: [], projected: [] }) as DealRevenueSeries,
+        ),
         getDealStageDistribution(currency, init).catch(() => [] as DealStageDistribution[]),
     ]);
 
@@ -244,14 +238,7 @@ export default async function Dashboard() {
         .sort((a, b) => (b.temp.daysSinceTouch ?? 0) - (a.temp.daysSinceTouch ?? 0))
         .slice(0, 6);
 
-    const closingSoonItems: ClosingSoonItem[] = deals
-        .filter((deal) => {
-            if (deal.closedAt) return false;
-            const close = timeOf(deal.expectedCloseDate);
-            return close >= todayStart && close - todayStart <= 7 * DAY;
-        })
-        .sort((a, b) => timeOf(a.expectedCloseDate) - timeOf(b.expectedCloseDate))
-        .slice(0, 6)
+    const closingSoonItems: ClosingSoonItem[] = closingSoonDeals
         .map((deal) => ({ deal, company: deal.company != null ? companyById.get(deal.company) : undefined }));
 
     const chartCard = (child: ReactNode) => (
@@ -301,7 +288,9 @@ export default async function Dashboard() {
             </div>
         ),
         analyticsKpis: <AnalyticsKpisWidget kpis={dealKpis} currency={currency} />,
-        revenueTrend: chartCard(<RevenueTrend series={revenueSeries} currency={currency} range={DASHBOARD_RANGE} />),
+        revenueTrend: chartCard(
+            <RevenueTrend series={revenueSeries} currency={currency} range={DASHBOARD_RANGE} timezone={user.timezone} />,
+        ),
         winRate: chartCard(<WinRateDonut kpis={dealKpis} currency={currency} />),
         pipelineValue: chartCard(
             <PipelineValue values={pipelineValues} pipelines={pipelines} currency={currency} />,

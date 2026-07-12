@@ -1345,11 +1345,11 @@ export function getDealFacets(init: RequestInit = {}) {
 
 /**
  * Server-computed monthly revenue trend (realized won revenue by scheduled close month, projected
- * by expected-close month) over ALL deals, optionally scoped to a currency. Replaces client-side
- * bucketing of a bounded page slice.
+ * by expected-close month) over ALL deals, optionally scoped to a currency. The IANA timezone
+ * applies the viewer's historical offset rules when bucketing realized revenue.
  */
-export function getDealRevenueTimeseries(currency?: string, tzOffset?: string, init: RequestInit = {}) {
-    return getJson<Types.DealRevenueSeries>(`/api/deals/revenue-timeseries${buildQuery({ currency, tzOffset })}`, init);
+export function getDealRevenueTimeseries(currency?: string, timezone?: string, init: RequestInit = {}) {
+    return getJson<Types.DealRevenueSeries>(`/api/deals/revenue-timeseries${buildQuery({ currency, timezone })}`, init);
 }
 
 const withCookie = (cookie: string | null): RequestInit => (cookie ? { headers: { cookie }, cache: "no-store" } : {});
@@ -1400,6 +1400,10 @@ export function getDealClosingSoonCount(days?: number, init: RequestInit = {}) {
 
 export function getDealClosingSoonCountFromCookie(cookie: string | null, days?: number) {
     return getJson<Types.Count>(`/api/deals/closing-soon-count${buildQuery({ days })}`, withCookie(cookie));
+}
+
+export function getDealClosingSoonFromCookie(cookie: string | null, days = 7, limit = 6) {
+    return getJson<Types.Deal[]>(`/api/deals/closing-soon${buildQuery({ days, limit })}`, withCookie(cookie));
 }
 
 /** Server-computed activity counts by type per time bucket over {@code range} (30d/90d/12m). */
@@ -1708,6 +1712,15 @@ export function getPipelines(init: RequestInit = {}) {
 
 export function getPipelinesFromCookie(cookie: string | null) {
     return safeWithCookie<Types.Pipeline>((init) => getPipelines(init), cookie);
+}
+
+/** Returns every pipeline stage visible in the active workspace in one request. */
+export function getAllStages(init: RequestInit = {}) {
+    return getJson<Types.Stage[]>(`/api/pipelines/stages`, init);
+}
+
+export function getAllStagesFromCookie(cookie: string | null) {
+    return safeWithCookie<Types.Stage>((init) => getAllStages(init), cookie);
 }
 
 export function getStagesByPipelineId(pipelineId: number, init: RequestInit = {}) {

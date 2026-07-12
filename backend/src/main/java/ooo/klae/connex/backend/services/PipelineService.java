@@ -92,6 +92,10 @@ public class PipelineService {
         return stages;
     }
 
+    public List<Stage> getAllStages() {
+        return pipelineMapper.getAllStages(workspaceService.getCurrentWorkspaceId());
+    }
+
     public Stage getStageById(int id) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         Stage stage = pipelineMapper.getVisibleStageById(workspaceId, id);

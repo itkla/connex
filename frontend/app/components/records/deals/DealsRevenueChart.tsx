@@ -11,38 +11,38 @@ import {
     type ChartConfig,
 } from '@/components/ui/chart';
 import { type DealRevenueSeries } from '@/app/lib/types';
-import { formatCompactCurrency } from '@/app/lib/utils';
+import { formatCompactCurrency, yearMonthInTimezone } from '@/app/lib/utils';
 
 const MONTHS_BACK = 6;
 const MONTHS_FORWARD = 6;
 
 type Bucket = { key: string; label: string; closed: number; projected: number };
 
-function buildBuckets(series: DealRevenueSeries, now: number, locale: string) {
-    const start = new Date(now);
-    start.setDate(1);
-    start.setHours(0, 0, 0, 0);
-    start.setMonth(start.getMonth() - MONTHS_BACK);
+function buildBuckets(series: DealRevenueSeries, now: number, locale: string, timezone: string) {
+    const current = yearMonthInTimezone(now, timezone);
+    const currentIndex = current.year * 12 + current.month - 1;
+    const startIndex = currentIndex - MONTHS_BACK;
 
-    const monthLabel = new Intl.DateTimeFormat(locale, { month: 'short' });
-    const monthYearLabel = new Intl.DateTimeFormat(locale, { month: 'short', year: '2-digit' });
+    const monthLabel = new Intl.DateTimeFormat(locale, { month: 'short', timeZone: 'UTC' });
+    const monthYearLabel = new Intl.DateTimeFormat(locale, { month: 'short', year: '2-digit', timeZone: 'UTC' });
     const buckets: Bucket[] = [];
     const keyToIndex = new Map<string, number>();
 
     const total = MONTHS_BACK + MONTHS_FORWARD + 1;
     for (let i = 0; i < total; i++) {
-        const d = new Date(start.getFullYear(), start.getMonth() + i, 1);
-        const key = `${d.getFullYear()}-${d.getMonth()}`;
+        const monthIndex = startIndex + i;
+        const year = Math.floor(monthIndex / 12);
+        const month = ((monthIndex % 12) + 12) % 12;
+        const d = new Date(Date.UTC(year, month, 1));
+        const key = `${year}-${month}`;
         keyToIndex.set(key, buckets.length);
 
-        // display as Month Year
-        const label = d.getMonth() === 0 || i === 0 ? monthYearLabel.format(d) : monthLabel.format(d);
+        const label = month === 0 || i === 0 ? monthYearLabel.format(d) : monthLabel.format(d);
 
         buckets.push({ key, label, closed: 0, projected: 0 });
     }
 
-    const today = new Date(now);
-    const todayKey = `${today.getFullYear()}-${today.getMonth()}`;
+    const todayKey = `${current.year}-${current.month - 1}`;
     const todayLabel = buckets[keyToIndex.get(todayKey) ?? -1]?.label ?? null;
 
     for (const point of series.closed) {
@@ -57,11 +57,22 @@ function buildBuckets(series: DealRevenueSeries, now: number, locale: string) {
     return { data: buckets, todayLabel };
 }
 
-export default function DealsRevenueChart({ series, currency }: { series: DealRevenueSeries; currency: string }) {
+export default function DealsRevenueChart({
+    series,
+    currency,
+    timezone,
+}: {
+    series: DealRevenueSeries;
+    currency: string;
+    timezone: string;
+}) {
     const t = useTranslations('DealsRevenueChart');
     const locale = useLocale();
     const [now] = React.useState(() => Date.now());
-    const { data, todayLabel } = React.useMemo(() => buildBuckets(series, now, locale), [series, now, locale]);
+    const { data, todayLabel } = React.useMemo(
+        () => buildBuckets(series, now, locale, timezone),
+        [series, now, locale, timezone],
+    );
     const chartConfig = React.useMemo(
         () =>
             ({

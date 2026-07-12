@@ -587,15 +587,43 @@ export function riskTextClass(severity: DealRiskSeverity): string {
     return RISK_TEXT[severity] ?? RISK_TEXT.low;
 }
 
-/**
- * The browser's current UTC offset as a {@code ±HH:MM} string (e.g. {@code +09:00}), for
- * timezone-aware server-side month bucketing of realized-revenue.
- */
-export function browserTimezoneOffset(): string {
-    const totalMinutes = -new Date().getTimezoneOffset();
-    const sign = totalMinutes >= 0 ? '+' : '-';
-    const abs = Math.abs(totalMinutes);
-    const hh = String(Math.floor(abs / 60)).padStart(2, '0');
-    const mm = String(abs % 60).padStart(2, '0');
-    return `${sign}${hh}:${mm}`;
+export type CalendarYearMonth = { year: number; month: number };
+
+function fixedOffsetSeconds(timezone: string): number | null {
+    if (/^(?:Z|UTC|GMT|UT)$/i.test(timezone)) return 0;
+    const match = /^(?:(?:UTC|GMT|UT))?([+-])(\d{1,2})(?::?(\d{2}))?(?::?(\d{2}))?$/i.exec(timezone);
+    if (!match) return null;
+    const hours = Number(match[2]);
+    const minutes = Number(match[3] ?? '0');
+    const seconds = Number(match[4] ?? '0');
+    if (
+        hours > 18
+        || minutes > 59
+        || seconds > 59
+        || (hours === 18 && (minutes !== 0 || seconds !== 0))
+    ) return null;
+    const total = hours * 3600 + minutes * 60 + seconds;
+    return match[1] === '-' ? -total : total;
+}
+
+/** Resolves the calendar year and month for a timestamp in an IANA or legacy fixed-offset timezone. */
+export function yearMonthInTimezone(timestamp: number, timezone: string): CalendarYearMonth {
+    const offsetSeconds = fixedOffsetSeconds(timezone);
+    if (offsetSeconds != null) {
+        const shifted = new Date(timestamp + offsetSeconds * 1000);
+        return { year: shifted.getUTCFullYear(), month: shifted.getUTCMonth() + 1 };
+    }
+    try {
+        const parts = new Intl.DateTimeFormat('en-US', {
+            timeZone: timezone,
+            year: 'numeric',
+            month: 'numeric',
+        }).formatToParts(new Date(timestamp));
+        const year = Number(parts.find((part) => part.type === 'year')?.value);
+        const month = Number(parts.find((part) => part.type === 'month')?.value);
+        if (Number.isInteger(year) && Number.isInteger(month)) return { year, month };
+    } catch {
+        return yearMonthInTimezone(timestamp, 'UTC');
+    }
+    return yearMonthInTimezone(timestamp, 'UTC');
 }

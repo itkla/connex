@@ -20,6 +20,7 @@ import ooo.klae.connex.backend.mappers.ShareMapper;
 import ooo.klae.connex.backend.mappers.TaskMapper;
 import ooo.klae.connex.backend.mappers.UserDashboardMapper;
 import ooo.klae.connex.backend.mappers.UserMapper;
+import ooo.klae.connex.backend.mappers.WorkspaceMapper;
 import ooo.klae.connex.backend.notifications.NotificationStateVersionService;
 
 /**
@@ -57,6 +58,7 @@ public class UserOffboardingService {
     private final SavedViewMapper savedViewMapper;
     private final UserDashboardMapper userDashboardMapper;
     private final UserMapper userMapper;
+    private final WorkspaceMapper workspaceMapper;
     private final NotificationStateVersionService notificationStateVersionService;
 
     /**
@@ -91,6 +93,27 @@ public class UserOffboardingService {
             throw new ConflictException(
                 "Account still owns authored content (" + notes + " notes, " + activities
                     + " activities, " + introductions + " introductions); reassign or delete it first");
+        }
+    }
+
+    /**
+     * Clears any notification rows addressed to a user who is about to receive
+     * a brand-new membership in the workspace. With the cross-plane cascades
+     * gone (#440 increment 3), a notification inserted while an earlier
+     * removal was committing survives as an orphan; without this clean it
+     * would resurface in the rejoiner's inbox, and a ghost deal-collaborator
+     * seat would silently resurrect access from a previous tenure. Guarded on
+     * the absence of ANY membership row so a pending invitee's legitimate
+     * notifications are never touched. Called by every fresh-membership path:
+     * invites, invite links, and SSO JIT provisioning.
+     *
+     * @param workspaceId the workspace being joined
+     * @param userId the joining user
+     */
+    public void prepareFreshMembership(int workspaceId, int userId) {
+        if (!workspaceMapper.isMemberIncludingPending(workspaceId, userId)) {
+            notificationMapper.deleteAllForRecipient(workspaceId, userId);
+            dealMapper.removeCollaboratorFromWorkspace(workspaceId, userId);
         }
     }
 

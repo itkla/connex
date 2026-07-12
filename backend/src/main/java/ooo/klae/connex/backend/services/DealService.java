@@ -1,7 +1,10 @@
 package ooo.klae.connex.backend.services;
 
+import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.YearMonth;
+import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
@@ -11,6 +14,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.TreeMap;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -41,7 +45,11 @@ import ooo.klae.connex.backend.dto.DealKpiClosedBucketDto;
 import ooo.klae.connex.backend.dto.DealKpiPeriodDto;
 import ooo.klae.connex.backend.dto.DealKpisDto;
 import ooo.klae.connex.backend.dto.DealMetricsDto;
+import ooo.klae.connex.backend.dto.DealMonthDecimalTotalDto;
+import ooo.klae.connex.backend.dto.DealMonthTotalDto;
 import ooo.klae.connex.backend.dto.DealPipelineValueDto;
+import ooo.klae.connex.backend.dto.DealRevenueMonthBoundary;
+import ooo.klae.connex.backend.dto.DealRevenueRangeDto;
 import ooo.klae.connex.backend.dto.DealRevenueSeriesDto;
 import ooo.klae.connex.backend.dto.DealStageDistributionDto;
 import ooo.klae.connex.backend.dto.DealSummaryDto;
@@ -81,6 +89,7 @@ public class DealService {
     private final AuditService auditService;
     private final WorkspaceService workspaceService;
     private final AuthService authService;
+    private final UserCalendarService userCalendarService;
     private final RuleTriggerPublisher ruleTriggers;
     private final NotificationChangePublisher notificationChanges;
     private final CustomFieldValueService customFieldValueService;
@@ -100,6 +109,7 @@ public class DealService {
     private static final String IN_APP = "in_app";
     private static final int SNIPPET_LENGTH = 140;
     private static final int KPI_SERIES_BUCKETS = 12;
+    private static final int MAX_REVENUE_MONTHS = 1200;
 
     private static final Set<String> AUDIT_FIELDS =
         Set.of("name", "value", "actualValue", "currency", "pipelineId", "stageId",
@@ -252,12 +262,70 @@ public class DealService {
         );
     }
 
-    public DealRevenueSeriesDto getRevenueTimeseries(String currency, String tzOffset) {
+    public DealRevenueSeriesDto getRevenueTimeseries(String currency, String timezone) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
+        ZoneId zone = ZoneId.of(TimezoneSupport.validate(timezone, "UTC"));
+        DealRevenueRangeDto range = dealMapper.revenueClosedEventRange(workspaceId, currency);
+        List<DealRevenueMonthBoundary> boundaries = revenueMonthBoundaries(range, zone);
+        List<DealMonthDecimalTotalDto> timezoneBucketed = boundaries.isEmpty()
+            ? List.of()
+            : dealMapper.revenueClosedByBoundaries(workspaceId, currency, boundaries);
         return new DealRevenueSeriesDto(
-            dealMapper.revenueClosedByMonth(workspaceId, currency, tzOffset),
-            dealMapper.revenueProjectedByMonth(workspaceId, currency)
+            revenueClosedByMonth(
+                dealMapper.revenueScheduledClosedByMonth(workspaceId, currency),
+                timezoneBucketed),
+            publicMonthTotals(dealMapper.revenueProjectedByMonth(workspaceId, currency))
         );
+    }
+
+    static List<DealMonthTotalDto> revenueClosedByMonth(
+            List<DealMonthDecimalTotalDto> scheduled,
+            List<DealMonthDecimalTotalDto> timezoneBucketed) {
+        Map<YearMonth, BigDecimal> totals = new TreeMap<>();
+        for (DealMonthDecimalTotalDto month : scheduled) {
+            totals.merge(
+                YearMonth.of(month.year(), month.month()), month.total(), BigDecimal::add);
+        }
+        for (DealMonthDecimalTotalDto month : timezoneBucketed) {
+            totals.merge(
+                YearMonth.of(month.year(), month.month()), month.total(), BigDecimal::add);
+        }
+        return totals.entrySet().stream()
+            .map(entry -> new DealMonthTotalDto(
+                entry.getKey().getYear(), entry.getKey().getMonthValue(), entry.getValue()))
+            .toList();
+    }
+
+    private static List<DealMonthTotalDto> publicMonthTotals(
+            List<DealMonthDecimalTotalDto> totals) {
+        return totals.stream()
+            .map(total -> new DealMonthTotalDto(
+                total.year(), total.month(), total.total()))
+            .toList();
+    }
+
+    static List<DealRevenueMonthBoundary> revenueMonthBoundaries(DealRevenueRangeDto range, ZoneId timezone) {
+        if (range == null || range.earliest() == null || range.latest() == null) {
+            return List.of();
+        }
+        YearMonth first = YearMonth.from(
+            range.earliest().atZone(ZoneOffset.UTC).withZoneSameInstant(timezone));
+        YearMonth last = YearMonth.from(
+            range.latest().atZone(ZoneOffset.UTC).withZoneSameInstant(timezone));
+        long months = java.time.temporal.ChronoUnit.MONTHS.between(first, last) + 1;
+        if (months > MAX_REVENUE_MONTHS) {
+            throw new BadRequestException("Revenue history spans too many calendar months");
+        }
+        List<DealRevenueMonthBoundary> boundaries = new ArrayList<>((int) months);
+        for (YearMonth month = first; !month.isAfter(last); month = month.plusMonths(1)) {
+            LocalDateTime startUtc = month.atDay(1).atStartOfDay(timezone)
+                .withZoneSameInstant(ZoneOffset.UTC).toLocalDateTime();
+            LocalDateTime endUtc = month.plusMonths(1).atDay(1).atStartOfDay(timezone)
+                .withZoneSameInstant(ZoneOffset.UTC).toLocalDateTime();
+            boundaries.add(new DealRevenueMonthBoundary(
+                month.getYear(), month.getMonthValue(), startUtc, endUtc));
+        }
+        return List.copyOf(boundaries);
     }
 
     public List<DealStageDistributionDto> getStageDistribution(String currency) {
@@ -329,7 +397,13 @@ public class DealService {
     }
 
     public CountDto getClosingSoonCount(int days) {
-        return new CountDto(dealMapper.closingSoonCount(workspaceService.getCurrentWorkspaceId(), days));
+        return new CountDto(dealMapper.closingSoonCount(
+            workspaceService.getCurrentWorkspaceId(), userCalendarService.today(), days));
+    }
+
+    public List<Deal> getClosingSoonDeals(int days, int limit) {
+        return dealMapper.closingSoonDeals(
+            workspaceService.getCurrentWorkspaceId(), userCalendarService.today(), days, limit);
     }
 
     private static List<Double> emptyKpiSeries() {
@@ -450,7 +524,8 @@ public class DealService {
             User owner = userMapper.getUserById(deal.getOwnerId());
             if (owner != null) ownerName = owner.getDisplayName();
         }
-        return new DealSummaryDto(deal.getId(), deal.getName(), deal.getValue(), deal.getCurrency(),
+        return new DealSummaryDto(
+            deal.getId(), deal.getName(), deal.getValue(), deal.getActualValue(), deal.getCurrency(),
             status, deal.getExpectedCloseDate(), stageName, pipelineName, companyName, ownerName);
     }
 

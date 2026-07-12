@@ -6,7 +6,7 @@ import { useLocale, useTranslations } from 'next-intl';
 
 import { ChartContainer, type ChartConfig } from '@/components/ui/chart';
 import { type DealMonthTotal, type DealRevenueSeries } from '@/app/lib/types';
-import { formatCompactCurrency } from '@/app/lib/utils';
+import { formatCompactCurrency, yearMonthInTimezone } from '@/app/lib/utils';
 import { type RangeKey } from '@/app/components/overview/analytics/metrics';
 
 const MIN_MONTHS_FORWARD = 3;
@@ -15,9 +15,7 @@ const MONTHS_BACK: Record<RangeKey, number> = { '30d': 4, '90d': 7, '12m': 12 };
 
 type Bucket = { key: string; label: string; won: number; projected: number };
 
-function forwardHorizon(series: DealRevenueSeries, now: number): number {
-    const reference = new Date(now);
-    const base = reference.getFullYear() * 12 + reference.getMonth();
+function forwardHorizon(series: DealRevenueSeries, base: number): number {
     let furthest = MIN_MONTHS_FORWARD;
     for (const point of [...series.closed, ...series.projected]) {
         const offset = point.year * 12 + (point.month - 1) - base;
@@ -26,28 +24,29 @@ function forwardHorizon(series: DealRevenueSeries, now: number): number {
     return Math.min(MAX_MONTHS_FORWARD, Math.max(MIN_MONTHS_FORWARD, furthest));
 }
 
-function buildBuckets(series: DealRevenueSeries, now: number, locale: string, range: RangeKey) {
-    const start = new Date(now);
-    start.setDate(1);
-    start.setHours(0, 0, 0, 0);
-    start.setMonth(start.getMonth() - (MONTHS_BACK[range] - 1));
+function buildBuckets(series: DealRevenueSeries, now: number, locale: string, range: RangeKey, timezone: string) {
+    const current = yearMonthInTimezone(now, timezone);
+    const currentIndex = current.year * 12 + current.month - 1;
+    const startIndex = currentIndex - (MONTHS_BACK[range] - 1);
 
-    const monthLabel = new Intl.DateTimeFormat(locale, { month: 'short' });
-    const monthYearLabel = new Intl.DateTimeFormat(locale, { month: 'short', year: '2-digit' });
+    const monthLabel = new Intl.DateTimeFormat(locale, { month: 'short', timeZone: 'UTC' });
+    const monthYearLabel = new Intl.DateTimeFormat(locale, { month: 'short', year: '2-digit', timeZone: 'UTC' });
     const buckets: Bucket[] = [];
     const keyToIndex = new Map<string, number>();
-    const total = MONTHS_BACK[range] + forwardHorizon(series, now);
+    const total = MONTHS_BACK[range] + forwardHorizon(series, currentIndex);
 
     for (let i = 0; i < total; i++) {
-        const d = new Date(start.getFullYear(), start.getMonth() + i, 1);
-        const key = `${d.getFullYear()}-${d.getMonth()}`;
+        const monthIndex = startIndex + i;
+        const year = Math.floor(monthIndex / 12);
+        const month = ((monthIndex % 12) + 12) % 12;
+        const d = new Date(Date.UTC(year, month, 1));
+        const key = `${year}-${month}`;
         keyToIndex.set(key, buckets.length);
-        const label = d.getMonth() === 0 || i === 0 ? monthYearLabel.format(d) : monthLabel.format(d);
+        const label = month === 0 || i === 0 ? monthYearLabel.format(d) : monthLabel.format(d);
         buckets.push({ key, label, won: 0, projected: 0 });
     }
 
-    const today = new Date(now);
-    const todayKey = `${today.getFullYear()}-${today.getMonth()}`;
+    const todayKey = `${current.year}-${current.month - 1}`;
 
     const bucketKeyOf = (point: DealMonthTotal) => `${point.year}-${point.month - 1}`;
     for (const point of series.closed) {
@@ -71,17 +70,19 @@ export default function RevenueTrend({
     series,
     currency,
     range,
+    timezone,
 }: {
     series: DealRevenueSeries;
     currency: string;
     range: RangeKey;
+    timezone: string;
 }) {
     const t = useTranslations('AnalyticsRevenue');
     const locale = useLocale();
     const [now] = useState(() => Date.now());
     const { data, todayKey } = useMemo(
-        () => buildBuckets(series, now, locale, range),
-        [series, now, locale, range],
+        () => buildBuckets(series, now, locale, range, timezone),
+        [series, now, locale, range, timezone],
     );
 
     const labelByKey = useMemo(() => {
@@ -90,7 +91,7 @@ export default function RevenueTrend({
         return map;
     }, [data]);
 
-    const hasData = data.some((b) => b.won > 0 || b.projected > 0);
+    const hasData = data.some((b) => b.won !== 0 || b.projected !== 0);
 
     const chartConfig = {
         won: { label: t('actual'), color: 'var(--color-brand)' },

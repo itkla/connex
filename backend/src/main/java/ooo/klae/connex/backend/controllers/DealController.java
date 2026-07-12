@@ -57,10 +57,12 @@ import ooo.klae.connex.backend.services.WorkspaceService;
 import ooo.klae.connex.backend.util.LikePattern;
 import ooo.klae.connex.backend.util.PageBounds;
 
+import java.time.DateTimeException;
+import java.time.ZoneId;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.regex.Pattern;
 
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -76,7 +78,6 @@ import lombok.RequiredArgsConstructor;
 public class DealController {
     private static final Set<String> DEAL_STATUSES = Set.of("open", "closed", "won", "lost");
     private static final Set<String> SORT_DIRECTIONS = Set.of("asc", "desc");
-    private static final Pattern TZ_OFFSET = Pattern.compile("^[+-]\\d{2}:\\d{2}$");
     private static final Set<String> ANALYTICS_RANGES = Set.of("30d", "90d", "12m");
 
     private final DealService dealService;
@@ -171,10 +172,11 @@ public class DealController {
     @GetMapping("/revenue-timeseries")
     public DealRevenueSeriesDto getRevenueTimeseries(
         @RequestParam(required = false) String currency,
+        @RequestParam(required = false) String timezone,
         @RequestParam(required = false) String tzOffset
     ) {
         String normalizedCurrency = (currency == null || currency.isBlank()) ? null : currency;
-        return dealService.getRevenueTimeseries(normalizedCurrency, validateTzOffset(tzOffset));
+        return dealService.getRevenueTimeseries(normalizedCurrency, resolveTimezone(timezone, tzOffset));
     }
 
     /**
@@ -242,6 +244,18 @@ public class DealController {
         return dealService.getClosingSoonCount(validatePositiveDays(days));
     }
 
+    /** Returns the earliest open deals in the current user's local closing-soon window. */
+    @GetMapping("/closing-soon")
+    public List<DealDto> getClosingSoonDeals(
+            @RequestParam(defaultValue = "7") int days,
+            @RequestParam(defaultValue = "6") int limit) {
+        if (limit < 1 || limit > 50) {
+            throw new BadRequestException("limit must be between 1 and 50");
+        }
+        return dealService.getClosingSoonDeals(validatePositiveDays(days), limit)
+            .stream().map(DealDto::from).toList();
+    }
+
     private static int analyticsRangeDays(String range) {
         String normalizedRange = validateOptionalValue(range, ANALYTICS_RANGES, "range");
         return switch (normalizedRange == null ? "90d" : normalizedRange) {
@@ -272,14 +286,23 @@ public class DealController {
         return days;
     }
 
-    private static String validateTzOffset(String value) {
-        if (value == null || value.isBlank()) {
+    private static String resolveTimezone(String timezone, String tzOffset) {
+        boolean hasTimezone = timezone != null && !timezone.isBlank();
+        boolean hasOffset = tzOffset != null && !tzOffset.isBlank();
+        if (hasTimezone && hasOffset) {
+            throw new BadRequestException("Specify either timezone or tzOffset, not both");
+        }
+        if (!hasTimezone && !hasOffset) {
             return null;
         }
-        if (!TZ_OFFSET.matcher(value).matches()) {
-            throw new BadRequestException("tzOffset must be a UTC offset like +09:00 or -05:00");
+        String value = hasTimezone ? timezone.trim() : tzOffset.trim();
+        try {
+            return hasTimezone ? ZoneId.of(value).getId() : ZoneOffset.of(value).getId();
+        } catch (DateTimeException exception) {
+            throw new BadRequestException(hasTimezone
+                ? "Invalid timezone: " + value
+                : "tzOffset must be a UTC offset like +09:00 or -05:00");
         }
-        return value;
     }
 
     /**

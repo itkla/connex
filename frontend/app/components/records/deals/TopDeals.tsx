@@ -21,12 +21,14 @@ export default function TopDeals({ data }: { data: DealTop }) {
             <Section
                 title={t('biggestOpenDeals')}
                 deals={data.topOpen}
+                valueField="value"
                 emptyLabel={t('noOpenDeals')}
                 rankLabels={[t('firstPlace'), t('secondPlace'), t('thirdPlace')]}
             />
             <Section
                 title={t('topWins')}
                 deals={data.topWon}
+                valueField="actualValue"
                 emptyLabel={t('noClosedDeals')}
                 rankLabels={[t('firstPlace'), t('secondPlace'), t('thirdPlace')]}
             />
@@ -37,11 +39,13 @@ export default function TopDeals({ data }: { data: DealTop }) {
 function Section({
     title,
     deals,
+    valueField,
     emptyLabel,
     rankLabels,
 }: {
     title: string;
     deals: DealSummary[];
+    valueField: 'value' | 'actualValue';
     emptyLabel: string;
     rankLabels: readonly string[];
 }) {
@@ -73,7 +77,7 @@ function Section({
                                     </span>
                                 </span>
                                 <span className="shrink-0 font-medium text-foreground">
-                                    {formatCompactCurrency(d.value ?? 0, d.currency || 'USD', locale)}
+                                    {formatCompactCurrency(d[valueField], d.currency || 'USD', locale)}
                                 </span>
                             </Link>
                         </li>

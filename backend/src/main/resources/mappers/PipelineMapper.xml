@@ -97,6 +97,16 @@
               WHERE ps.pipeline_id = pipeline.id AND ps.workspace_id = #{workspaceId}))
   </select>
 
+  <select id="getAllStages" resultMap="StageResult">
+    SELECT id, workspace_id, name, pipeline_id, position, is_success, is_failure FROM stage
+    WHERE stage.workspace_id = #{workspaceId}
+       OR EXISTS (SELECT 1 FROM pipeline_share ps
+          JOIN workspace vws ON vws.id = ps.workspace_id
+          JOIN workspace ows ON ows.id = stage.workspace_id AND ows.org_id = vws.org_id
+          WHERE ps.pipeline_id = stage.pipeline_id AND ps.workspace_id = #{workspaceId})
+    ORDER BY pipeline_id, position
+  </select>
+
   <select id="getStagesByPipelineId" resultMap="StageResult">
     SELECT stage.id, stage.workspace_id, stage.name, stage.pipeline_id, stage.position,
            stage.is_success, stage.is_failure
