@@ -29,6 +29,7 @@ import ooo.klae.connex.backend.mail.MailProperties;
 import ooo.klae.connex.backend.mail.MailService;
 import ooo.klae.connex.backend.mail.ResolvedMailConfig;
 import ooo.klae.connex.backend.mail.SecretCipher;
+import ooo.klae.connex.backend.mail.SmtpDestinationGuard;
 import ooo.klae.connex.backend.mappers.MailConfigMapper;
 import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.tenant.Permission;
@@ -60,8 +61,8 @@ class WorkspaceMailConfigServiceTest {
 
     private WorkspaceMailConfigService service() {
         return new WorkspaceMailConfigService(mailConfigMapper, workspaceService, auditService,
-                secretCipher, mailConfigResolver, mailService, templateRenderer, userMapper, mailProperties,
-                sessionSecurityService);
+                secretCipher, mailConfigResolver, mailService, templateRenderer, userMapper,
+                sessionSecurityService, new SmtpDestinationGuard(mailProperties));
     }
 
     private MailConfigRequest enabledRequest() {
@@ -209,6 +210,20 @@ class WorkspaceMailConfigServiceTest {
     }
 
     @Test
+    void saveConfig_omittedPortUsesTheInstanceDefaultForValidation() {
+        mailProperties.setAllowInternalHosts(false);
+        MailConfigRequest req = enabledRequest();
+        req.setHost("8.8.8.8");
+        req.setPort(null);
+
+        service().saveConfig(3, 9, req);
+
+        ArgumentCaptor<WorkspaceMailConfig> captor = ArgumentCaptor.forClass(WorkspaceMailConfig.class);
+        verify(mailConfigMapper).upsert(captor.capture());
+        assertEquals(null, captor.getValue().getPort());
+    }
+
+    @Test
     void saveConfig_disallowedPort_rejectedWhenInternalHostsBlocked() {
         mailProperties.setAllowInternalHosts(false);
         MailConfigRequest req = enabledRequest();
@@ -234,7 +249,7 @@ class WorkspaceMailConfigServiceTest {
         actor.setEmail("owner@test");
         when(userMapper.getUserById(9)).thenReturn(actor);
         ResolvedMailConfig internal = new ResolvedMailConfig("127.0.0.1", 587, null, null,
-                "no-reply@test", "Connex", true, false, false, 10000, 10000, 10000);
+                "no-reply@test", "Connex", true, false, false, 10000, 10000, 10000, true);
         when(mailConfigResolver.resolveWorkspaceOnly(3)).thenReturn(internal);
 
         assertFalse(service().sendTest(3, 9).success());

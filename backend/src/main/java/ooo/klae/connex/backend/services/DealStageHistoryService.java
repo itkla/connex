@@ -35,7 +35,7 @@ public class DealStageHistoryService {
 
     /** Records that {@code dealId} reached {@code stageId} as of now, snapshotting the stage name. */
     public void record(int workspaceId, int dealId, int stageId) {
-        Stage stage = pipelineMapper.getStageById(workspaceId, stageId);
+        Stage stage = pipelineMapper.getVisibleStageById(workspaceId, stageId);
         DealStageHistory history = new DealStageHistory();
         history.setWorkspaceId(workspaceId);
         history.setDealId(dealId);
