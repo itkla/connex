@@ -1,5 +1,7 @@
 package ooo.klae.connex.backend.mappers;
 
+import java.util.List;
+
 import org.apache.ibatis.annotations.Param;
 
 import ooo.klae.connex.backend.beans.OrgPlacement;
@@ -38,4 +40,13 @@ public interface OrgPlacementMapper {
      * @param placement the placement to insert
      */
     void insert(OrgPlacement placement);
+
+    /**
+     * Every distinct catalog handle a dedicated-database placement points at.
+     * Backs the scheduler catalog fan-out (#485): background sweeps must
+     * enumerate each active catalog, not just the default one.
+     *
+     * @return the distinct dedicated catalog handles, sorted
+     */
+    List<String> distinctDedicatedHandles();
 }

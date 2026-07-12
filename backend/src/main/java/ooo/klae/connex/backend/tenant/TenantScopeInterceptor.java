@@ -24,7 +24,11 @@ import ooo.klae.connex.backend.exceptions.ForbiddenException;
  * error instead of a silent cross-tenant leak. It never rewrites SQL; the
  * explicit {@code workspace_id} predicates in the mappers remain the primary
  * mechanism. Off the request thread (scheduled jobs that pass an explicit
- * workspaceId) it does nothing.
+ * workspaceId) it does nothing in {@code single-database} mode; when catalog
+ * routing is enabled it additionally requires a resolved scope or a
+ * {@code TenantWorkScope} catalog override, so a future async path that
+ * forgets to route fails loudly instead of silently reading the default
+ * catalog (#485).
  */
 @Intercepts({
     @Signature(type = Executor.class, method = "update",
@@ -167,6 +171,7 @@ public class TenantScopeInterceptor implements Interceptor {
 
     private final TenantContext tenantContext;
     private final boolean enforce;
+    private final boolean routingEnabled;
 
     @Override
     public Object intercept(Invocation invocation) throws Throwable {
@@ -186,6 +191,11 @@ public class TenantScopeInterceptor implements Interceptor {
             return;
         }
         if (RequestContextHolder.getRequestAttributes() == null) {
+            if (routingEnabled && !tenantContext.isResolved() && !tenantContext.hasCatalogOverride()) {
+                throw new IllegalStateException("Tenant-scoped statement " + statementId
+                    + " ran off the request thread with no catalog scope while catalog routing is enabled; "
+                    + "wrap the work in TenantWorkScope so it routes to the workspace's catalog (#485)");
+            }
             return;
         }
         if (!tenantContext.isResolved()) {

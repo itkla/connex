@@ -6,6 +6,8 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.util.Objects;
+
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.dao.DataAccessException;
@@ -127,5 +129,19 @@ class OrgPlacementMapperTest extends AbstractMapperTest {
         org.setSlug("org-" + unique());
         organizationMapper.insert(org);
         return org;
+    }
+
+    @Test
+    void distinctDedicatedHandlesListsOnlyDedicatedCatalogs() {
+        Organization dedicated = newOrg();
+        String handle = "cnx_" + unique();
+        OrgPlacement placement = OrgPlacement.sharedDefault(dedicated.getId());
+        placement.setPlacementMode("dedicated_database");
+        placement.setDatabaseHandle(handle);
+        orgPlacementMapper.insert(placement);
+        newOrg();
+
+        assertTrue(orgPlacementMapper.distinctDedicatedHandles().contains(handle));
+        assertFalse(orgPlacementMapper.distinctDedicatedHandles().stream().anyMatch(Objects::isNull));
     }
 }

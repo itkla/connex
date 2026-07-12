@@ -20,9 +20,9 @@ import lombok.Data;
  * deployments) never switches catalogs and fails closed when an organization's
  * placement demands routing. {@code catalog-per-placement} switches the pooled
  * connection to the org's {@code database_handle} at checkout and resets it on
- * return; it must not be enabled in production until the control-plane split
- * increment has landed and off-request-thread work (async rule triggers,
- * scheduled rule/notification jobs) resolves the tenant catalog.
+ * return; off-request-thread work resolves the tenant catalog via
+ * {@code TenantWorkScope}. It must not be enabled in production until the
+ * flag-enable gate (#485) clears.
  */
 @Data
 @Validated

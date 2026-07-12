@@ -9,6 +9,7 @@ import org.springframework.stereotype.Component;
 import lombok.RequiredArgsConstructor;
 
 import ooo.klae.connex.backend.mappers.RuleMapper;
+import ooo.klae.connex.backend.tenant.TenantWorkScope;
 
 /**
  * Periodically evaluates time-based (schedule) rules. Mirrors the notification scheduler: it fans out
@@ -21,6 +22,8 @@ import ooo.klae.connex.backend.mappers.RuleMapper;
 public class RuleScheduler {
 
     private final RuleMapper ruleMapper;
+    private final PlacementRegistry placementRegistry;
+    private final TenantWorkScope tenantWorkScope;
     private final RuleEngineService ruleEngineService;
 
     private static final Logger log = LoggerFactory.getLogger(RuleScheduler.class);
@@ -36,13 +39,35 @@ public class RuleScheduler {
         if (!schedulingEnabled) {
             return;
         }
-        for (int workspaceId : ruleMapper.workspaceIdsWithEnabledScheduleRules()) {
-            for (String cadence : CADENCES) {
-                try {
-                    ruleEngineService.runSchedule(workspaceId, cadence);
-                } catch (Exception e) {
-                    log.warn("Schedule evaluation failed for workspace {} cadence {}: {}", workspaceId, cadence, e.getMessage());
-                }
+        for (String catalog : placementRegistry.activeCatalogs()) {
+            try {
+                evaluateCatalog(catalog);
+            } catch (Exception e) {
+                log.warn("Schedule sweep failed for catalog {}: {}", catalog == null ? "(default)" : catalog, e.getMessage());
+            }
+        }
+    }
+
+    /**
+     * Enumerates and runs one catalog's schedule rules. The {@code rule} table
+     * is org-data, so the enumeration must run inside the catalog being swept;
+     * failures are isolated per catalog by the caller and per workspace here,
+     * so one bad placement never starves the rest of the fleet.
+     */
+    private void evaluateCatalog(String catalog) {
+        for (int workspaceId : tenantWorkScope.withCatalog(catalog, ruleMapper::workspaceIdsWithEnabledScheduleRules)) {
+            try {
+                tenantWorkScope.inWorkspace(workspaceId, () -> {
+                    for (String cadence : CADENCES) {
+                        try {
+                            ruleEngineService.runSchedule(workspaceId, cadence);
+                        } catch (Exception e) {
+                            log.warn("Schedule evaluation failed for workspace {} cadence {}: {}", workspaceId, cadence, e.getMessage());
+                        }
+                    }
+                });
+            } catch (Exception e) {
+                log.warn("Schedule evaluation skipped for workspace {}: {}", workspaceId, e.getMessage());
             }
         }
     }
