@@ -274,7 +274,7 @@ export default function NewActivityDialog({
                                 {t('cancel')}
                             </Button>
                         </ResponsiveDialogClose>
-                        <Button type="submit" disabled={submitting || succeeded} className="min-w-24 bg-brand text-white shadow-sm transition hover:bg-brand-hover hover:shadow-md">
+                        <Button type="submit" variant="brand" disabled={submitting || succeeded} className="min-w-24 shadow-sm transition hover:shadow-md">
                             {submitting ? <Loader2Icon className="size-4 animate-spin" /> : t('log')}
                         </Button>
                     </ResponsiveDialogFooter>

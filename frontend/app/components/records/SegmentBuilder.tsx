@@ -245,7 +245,7 @@ export default function SegmentBuilder({
                 <SparklesIcon className="size-4" />
                 {t("title")}
                 {total > 0 && (
-                    <span className="flex size-5 items-center justify-center rounded-full bg-brand text-xs font-semibold text-white">
+                    <span className="flex size-5 items-center justify-center rounded-full bg-brand text-xs font-semibold text-brand-foreground">
                         {total}
                     </span>
                 )}
@@ -276,7 +276,7 @@ export default function SegmentBuilder({
                             </Button>
                         )}
                         <DialogClose asChild>
-                            <Button className="bg-brand text-white hover:bg-brand-hover">{t("done")}</Button>
+                            <Button variant="brand">{t("done")}</Button>
                         </DialogClose>
                     </DialogFooter>
                 </DialogContent>

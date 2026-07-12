@@ -35,7 +35,7 @@ const ProfileCard = async ({
                     className="aspect-[4/5] w-full bg-muted"
                     aria-hidden="true"
                 />
-                <div className="flex items-end justify-between bg-brand px-5 pt-4 pb-5 text-white">
+                <div className="flex items-end justify-between bg-brand px-5 pt-4 pb-5 text-brand-foreground">
                     <div>
                         <div className="text-lg font-semibold">{t('sampleName')}</div>
                         <div className="text-base opacity-90">{t('sampleCompany')}</div>

@@ -274,7 +274,7 @@ function NameForm({
                         {t("cancel")}
                     </Button>
                 </DialogClose>
-                <Button type="submit" disabled={saving || !name.trim()} className="bg-brand text-white hover:bg-brand-hover">
+                <Button type="submit" variant="brand" disabled={saving || !name.trim()}>
                     {t("save")}
                 </Button>
             </DialogFooter>

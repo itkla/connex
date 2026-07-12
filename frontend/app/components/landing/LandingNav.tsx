@@ -79,7 +79,7 @@ export default function LandingNav({ ctaHref, ctaLabel }: { ctaHref: string; cta
                     </Link>
                     <Link
                         href={ctaHref}
-                        className="rounded-full bg-brand px-4 py-2 text-sm font-semibold text-neutral-950 transition-[transform,background-color] duration-150 ease-out hover:bg-brand-hover active:scale-[0.97]"
+                        className="rounded-full bg-brand px-4 py-2 text-sm font-semibold text-brand-foreground transition-[transform,background-color] duration-150 ease-out hover:bg-brand-hover active:scale-[0.97]"
                     >
                         {ctaLabel}
                     </Link>
@@ -134,7 +134,7 @@ export default function LandingNav({ ctaHref, ctaLabel }: { ctaHref: string; cta
                         <Link
                             href={ctaHref}
                             onClick={() => setOpen(false)}
-                            className="mt-2 rounded-full bg-brand px-4 py-3 text-center text-base font-semibold text-neutral-950 transition active:scale-[0.98]"
+                            className="mt-2 rounded-full bg-brand px-4 py-3 text-center text-base font-semibold text-brand-foreground transition active:scale-[0.98]"
                         >
                             {ctaLabel}
                         </Link>

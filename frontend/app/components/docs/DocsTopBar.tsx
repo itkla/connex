@@ -85,7 +85,7 @@ export default function DocsTopBar({ authed }: { authed: boolean }) {
                     {authed ? (
                         <Link
                             href="/dashboard"
-                            className="rounded-full bg-brand px-4 py-2 text-sm font-semibold text-neutral-950 transition-[transform,background-color] duration-150 ease-out hover:bg-brand-hover active:scale-[0.97]"
+                            className="rounded-full bg-brand px-4 py-2 text-sm font-semibold text-brand-foreground transition-[transform,background-color] duration-150 ease-out hover:bg-brand-hover active:scale-[0.97]"
                         >
                             {t("openApp")}
                         </Link>
@@ -99,7 +99,7 @@ export default function DocsTopBar({ authed }: { authed: boolean }) {
                             </Link>
                             <Link
                                 href="/auth/register"
-                                className="rounded-full bg-brand px-4 py-2 text-sm font-semibold text-neutral-950 transition-[transform,background-color] duration-150 ease-out hover:bg-brand-hover active:scale-[0.97]"
+                                className="rounded-full bg-brand px-4 py-2 text-sm font-semibold text-brand-foreground transition-[transform,background-color] duration-150 ease-out hover:bg-brand-hover active:scale-[0.97]"
                             >
                                 {t("getStarted")}
                             </Link>

@@ -311,7 +311,7 @@ function StepRail({ step }: { step: Step }) {
                         <span
                             className={cn(
                                 'flex size-5 shrink-0 items-center justify-center rounded-full text-xs font-semibold transition-colors',
-                                i < current && 'bg-brand text-white',
+                                i < current && 'bg-brand text-brand-foreground',
                                 i === current && 'bg-foreground text-background',
                                 i > current && 'bg-muted text-muted-foreground',
                             )}
