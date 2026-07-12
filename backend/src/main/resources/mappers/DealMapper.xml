@@ -701,4 +701,23 @@
         #{userId}
       </foreach>
   </insert>
+
+  <update id="clearMemberDealOwnership">
+    UPDATE deal SET owner_id = NULL
+    WHERE workspace_id = #{workspaceId} AND owner_id = #{userId}
+  </update>
+
+  <update id="clearOwnershipAnywhere">
+    UPDATE deal SET owner_id = NULL WHERE owner_id = #{userId}
+  </update>
+
+  <delete id="removeCollaboratorFromWorkspace">
+    DELETE FROM deal_collaborator
+    WHERE workspace_id = #{workspaceId} AND user_id = #{userId}
+  </delete>
+
+  <delete id="removeCollaboratorAnywhere">
+    DELETE FROM deal_collaborator WHERE user_id = #{userId}
+  </delete>
+
 </mapper>

@@ -122,12 +122,38 @@ public class TenantScopeInterceptor implements Interceptor {
      * org-scoped audit reads are org-filtered ({@code org_id}) and gated by org
      * membership (an org admin needn't have any active workspace), so they too may
      * run without a resolved workspace context.
+     *
+     * <p>The offboarding statements (#440 increment 3) replace the dropped
+     * cross-plane foreign keys. The {@code *Anywhere} guards and erasures run
+     * during self-serve account deletion, which is identity-scoped
+     * ({@code requireSelf}) and deliberately spans every workspace — including
+     * ones the user has left, where no tenant context could be resolved. The
+     * recipient-scoped notification delete backs invitation decline, which a
+     * user with no active workspace may perform; it anchors
+     * {@code workspace_id} and {@code recipient_id} in SQL.
      */
     private static final Set<String> EXEMPT_STATEMENTS = Set.of(
         MAPPERS + "AuditLogMapper.insert",
         MAPPERS + "AuditLogMapper.findRecentByOrg",
         MAPPERS + "AuditLogMapper.findOrgExport",
-        MAPPERS + "RoleMapper.findPermissions"
+        MAPPERS + "RoleMapper.findPermissions",
+        MAPPERS + "NoteMapper.countAuthoredAnywhere",
+        MAPPERS + "ActivityMapper.countCreatedAnywhere",
+        MAPPERS + "IntroductionMapper.countIntroducedAnywhere",
+        MAPPERS + "NotificationMapper.deleteAllForRecipient",
+        MAPPERS + "NotificationMapper.deleteAllForRecipientAnywhere",
+        MAPPERS + "NotificationMapper.clearActorAnywhere",
+        MAPPERS + "DealMapper.clearOwnershipAnywhere",
+        MAPPERS + "DealMapper.removeCollaboratorAnywhere",
+        MAPPERS + "TaskMapper.unassignAnywhere",
+        MAPPERS + "AttachmentMapper.clearUploaderAnywhere",
+        MAPPERS + "RuleMapper.clearRunAsAnywhere",
+        MAPPERS + "RuleMapper.clearCreatedByAnywhere",
+        MAPPERS + "ShareMapper.clearCompanyShareGrantedByAnywhere",
+        MAPPERS + "ShareMapper.clearPersonShareGrantedByAnywhere",
+        MAPPERS + "ShareMapper.clearPipelineShareGrantedByAnywhere",
+        MAPPERS + "SavedViewMapper.deleteForUserAnywhere",
+        MAPPERS + "UserDashboardMapper.deleteForUserAnywhere"
     );
 
     private final TenantContext tenantContext;

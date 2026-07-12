@@ -17,6 +17,7 @@ import ooo.klae.connex.backend.beans.Activity;
 import ooo.klae.connex.backend.beans.Company;
 import ooo.klae.connex.backend.beans.Deal;
 import ooo.klae.connex.backend.beans.Note;
+import ooo.klae.connex.backend.beans.Notification;
 import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.beans.Pipeline;
 import ooo.klae.connex.backend.beans.Stage;
@@ -33,6 +34,7 @@ import ooo.klae.connex.backend.mappers.PipelineMapper;
 import ooo.klae.connex.backend.mappers.TagMapper;
 import ooo.klae.connex.backend.mappers.TaskMapper;
 import ooo.klae.connex.backend.mappers.UserMapper;
+import ooo.klae.connex.backend.mappers.NotificationMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
 import ooo.klae.connex.backend.tenant.TenantContext;
 
@@ -50,6 +52,7 @@ abstract class AbstractServiceTest {
     @Autowired protected NoteMapper noteMapper;
     @Autowired protected TaskMapper taskMapper;
     @Autowired protected WorkspaceMapper workspaceMapper;
+    @Autowired protected NotificationMapper notificationMapper;
     @Autowired protected TenantContext tenantContext;
 
     protected Workspace workspace;
@@ -128,6 +131,21 @@ abstract class AbstractServiceTest {
         userMapper.insert(user);
         workspaceMapper.addPendingMember(workspace.getId(), user.getId(), "member");
         return user;
+    }
+
+    protected Notification newNotification(int workspaceId, int recipientId) {
+        Notification notification = new Notification();
+        notification.setWorkspaceId(workspaceId);
+        notification.setRecipientId(recipientId);
+        notification.setType("task.assigned");
+        notification.setCategory("tasks");
+        notification.setSeverity("info");
+        notification.setTemplateVersion(1);
+        notification.setTitle("Notification " + unique());
+        notification.setDedupeKey("fixture-" + unique());
+        notification.setTriggeredAt("2026-07-11 00:00:00");
+        notificationMapper.upsert(notification);
+        return notification;
     }
 
     protected Company newCompany() {

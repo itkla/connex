@@ -102,4 +102,9 @@
     FROM introduction
     WHERE workspace_id = #{workspaceId}
   </select>
+
+  <select id="countIntroducedAnywhere" resultType="int">
+    SELECT COUNT(*) FROM introduction WHERE introducer_user_id = #{userId} FOR UPDATE
+  </select>
+
 </mapper>
