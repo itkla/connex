@@ -44,16 +44,6 @@ const PANEL_WIDTH = 380;
 const PANEL_GAP = 12;
 const VIEWPORT_MARGIN = 16;
 
-const SHORTCUT_GLYPHS: Record<string, string> = { mod: '⌘', ctrl: '⌃', alt: '⌥', shift: '⇧' };
-
-/** Renders a normalized chord as compact glyphs for the selector's keyboard hint. */
-function formatShortcut(chord: string): string {
-    return chord
-        .split('+')
-        .map((part) => SHORTCUT_GLYPHS[part] ?? part.toUpperCase())
-        .join('');
-}
-
 type Anchor = { top: number; left: number; maxHeight: number };
 
 const MOBILE_QUERY = '(max-width: 767px)';
@@ -522,11 +512,6 @@ function TypeSelector({
                             {Icon ? <Icon className="size-4" /> : null}
                         </span>
                         <span className="flex-1 text-sm font-medium text-foreground">{t(action.labelKey)}</span>
-                        {action.shortcut ? (
-                            <kbd className="pointer-events-none shrink-0 select-none rounded border border-border bg-background px-1.5 py-0.5 font-mono text-[10px] font-medium text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100">
-                                {formatShortcut(action.shortcut)}
-                            </kbd>
-                        ) : null}
                     </motion.button>
                 );
             })}
