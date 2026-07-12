@@ -8,14 +8,14 @@ import { Loader2Icon } from 'lucide-react';
 import { ClipboardDocumentCheckIcon, Bars3BottomLeftIcon, CalendarIcon, UserCircleIcon, UserIcon, BriefcaseIcon } from '@heroicons/react/24/outline';
 
 import {
-    Dialog,
-    DialogContent,
-    DialogHeader,
-    DialogTitle,
-    DialogDescription,
-    DialogFooter,
-    DialogClose,
-} from '@/components/ui/dialog';
+    ResponsiveDialog,
+    ResponsiveDialogContent,
+    ResponsiveDialogHeader,
+    ResponsiveDialogTitle,
+    ResponsiveDialogDescription,
+    ResponsiveDialogFooter,
+    ResponsiveDialogClose,
+} from '@/components/ui/responsive-dialog';
 import {
     Combobox,
     ComboboxContent,
@@ -69,10 +69,18 @@ export default function TaskDialog({
         onOpenChange(next);
     };
 
+    const [prevOpen, setPrevOpen] = useState(open);
+    const [openCount, setOpenCount] = useState(0);
+    if (open !== prevOpen) {
+        setPrevOpen(open);
+        if (open) setOpenCount((count) => count + 1);
+    }
+
     return (
-        <Dialog open={open} onOpenChange={handleOpenChange}>
-            <DialogContent className="gap-0 overflow-hidden p-0 sm:max-w-lg">
+        <ResponsiveDialog open={open} onOpenChange={handleOpenChange}>
+            <ResponsiveDialogContent className="gap-0 overflow-hidden p-0 sm:max-w-lg">
                 <TaskDialogForm
+                    key={openCount}
                     persons={persons}
                     deals={deals}
                     users={users}
@@ -86,8 +94,8 @@ export default function TaskDialog({
                     }}
                     onClose={() => onOpenChange(false)}
                 />
-            </DialogContent>
-        </Dialog>
+            </ResponsiveDialogContent>
+        </ResponsiveDialog>
     );
 }
 
@@ -105,7 +113,7 @@ type TaskDialogFormProps = {
 };
 
 /**
- * The task-create form. It lives inside {@code DialogContent} — which unmounts on
+ * The task-create form. It lives inside {@code ResponsiveDialogContent} — which unmounts on
  * close — so its state initializes fresh from props on each open, with no reset effect.
  */
 function TaskDialogForm({
@@ -187,17 +195,17 @@ function TaskDialogForm({
             <DialogStatusCover status={status} />
 
             <div className="px-6 pb-6">
-                <DialogHeader className="ncd-rise -mt-12" style={{ animationDelay: '40ms' }}>
+                <ResponsiveDialogHeader className="ncd-rise -mt-12" style={{ animationDelay: '40ms' }}>
                     <div className="flex items-start gap-3">
                         <span className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-brand-light text-brand-dark">
                             <ClipboardDocumentCheckIcon className="size-5" />
                         </span>
                         <div className="space-y-1">
-                            <DialogTitle className="text-xl font-semibold tracking-tight">{t('titleCreate')}</DialogTitle>
-                            <DialogDescription>{t('description')}</DialogDescription>
+                            <ResponsiveDialogTitle className="text-xl font-semibold tracking-tight">{t('titleCreate')}</ResponsiveDialogTitle>
+                            <ResponsiveDialogDescription>{t('description')}</ResponsiveDialogDescription>
                         </div>
                     </div>
-                </DialogHeader>
+                </ResponsiveDialogHeader>
 
                 <form onSubmit={handleSubmit} className="grid gap-5">
                     <div className="ncd-rise grid gap-1.5" style={{ animationDelay: '90ms' }}>
@@ -329,12 +337,12 @@ function TaskDialogForm({
                         </div>
                     </div>
 
-                    <DialogFooter className="ncd-rise" style={{ animationDelay: '240ms' }}>
-                        <DialogClose asChild>
+                    <ResponsiveDialogFooter className="ncd-rise" style={{ animationDelay: '240ms' }}>
+                        <ResponsiveDialogClose asChild>
                             <Button type="button" variant="outline" disabled={submitting}>
                                 {t('cancel')}
                             </Button>
-                        </DialogClose>
+                        </ResponsiveDialogClose>
                         <Button
                             type="submit"
                             variant="brand"
@@ -347,7 +355,7 @@ function TaskDialogForm({
                                 t('create')
                             )}
                         </Button>
-                    </DialogFooter>
+                    </ResponsiveDialogFooter>
                 </form>
             </div>
         </>
