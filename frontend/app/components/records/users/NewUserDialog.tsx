@@ -13,15 +13,15 @@ import {
 import { Loader2Icon } from "lucide-react";
 
 import {
-    Dialog,
-    DialogClose,
-    DialogContent,
-    DialogDescription,
-    DialogFooter,
-    DialogHeader,
-    DialogTitle,
-    DialogTrigger,
-} from "@/components/ui/dialog";
+    ResponsiveDialog,
+    ResponsiveDialogClose,
+    ResponsiveDialogContent,
+    ResponsiveDialogDescription,
+    ResponsiveDialogFooter,
+    ResponsiveDialogHeader,
+    ResponsiveDialogTitle,
+    ResponsiveDialogTrigger,
+} from "@/components/ui/responsive-dialog";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import {
@@ -158,21 +158,21 @@ export default function NewUserDialog() {
     };
 
     return (
-        <Dialog open={open} onOpenChange={handleOpenChange}>
-            <DialogTrigger asChild>
+        <ResponsiveDialog open={open} onOpenChange={handleOpenChange}>
+            <ResponsiveDialogTrigger asChild>
                 <Button className="bg-brand text-white" aria-label={t("newAria")}>
                     <PlusIcon strokeWidth={2.5} />
                     {t("new")}
                 </Button>
-            </DialogTrigger>
-            <DialogContent className="gap-0 overflow-hidden p-0 sm:max-w-lg">
+            </ResponsiveDialogTrigger>
+            <ResponsiveDialogContent className="gap-0 overflow-hidden p-0 sm:max-w-lg">
                 <DialogStatusCover status={status} />
 
                 <div className="px-6 pb-6">
-                    <DialogHeader className="ncd-rise -mt-12 mb-5" style={{ animationDelay: "40ms" }}>
-                        <DialogTitle className="text-xl font-semibold tracking-tight">{t("dialogTitle")}</DialogTitle>
-                        <DialogDescription>{t("description")}</DialogDescription>
-                    </DialogHeader>
+                    <ResponsiveDialogHeader className="ncd-rise -mt-12 mb-5" style={{ animationDelay: "40ms" }}>
+                        <ResponsiveDialogTitle className="text-xl font-semibold tracking-tight">{t("dialogTitle")}</ResponsiveDialogTitle>
+                        <ResponsiveDialogDescription>{t("description")}</ResponsiveDialogDescription>
+                    </ResponsiveDialogHeader>
 
                     <form
                         onSubmit={(e) => {
@@ -232,12 +232,12 @@ export default function NewUserDialog() {
                             />
                         </div>
 
-                        <DialogFooter className="ncd-rise mt-5" style={{ animationDelay: "290ms" }}>
-                            <DialogClose asChild>
+                        <ResponsiveDialogFooter className="ncd-rise mt-5" style={{ animationDelay: "290ms" }}>
+                            <ResponsiveDialogClose asChild>
                                 <Button type="button" variant="outline" disabled={isCreating}>
                                     {t("cancel")}
                                 </Button>
-                            </DialogClose>
+                            </ResponsiveDialogClose>
                             <Button
                                 type="submit"
                                 disabled={isCreating || succeeded || !canSubmit}
@@ -245,10 +245,10 @@ export default function NewUserDialog() {
                             >
                                 {isCreating ? <Loader2Icon className="size-4 animate-spin" /> : t("create")}
                             </Button>
-                        </DialogFooter>
+                        </ResponsiveDialogFooter>
                     </form>
                 </div>
-            </DialogContent>
-        </Dialog>
+            </ResponsiveDialogContent>
+        </ResponsiveDialog>
     );
 }

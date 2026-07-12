@@ -9,12 +9,13 @@ import { PlusIcon } from '@heroicons/react/16/solid';
 import { ArrowLeftIcon, XMarkIcon } from '@heroicons/react/24/outline';
 
 import {
-    Sheet,
-    SheetContent,
-    SheetHeader,
-    SheetTitle,
-    SheetDescription,
-} from '@/components/ui/sheet';
+    Drawer,
+    DrawerContent,
+    DrawerHeader,
+    DrawerTitle,
+    DrawerDescription,
+} from '@/components/ui/drawer';
+import { useIsMobile } from '@/app/hooks/useIsMobile';
 import { useActions, useAvailableActions } from '@/app/hooks/useActions';
 import { deriveCreateDefaults } from '@/app/lib/actions/createDefaults';
 import { easeOut, instant, springJiggle } from '@/app/lib/motion';
@@ -46,26 +47,11 @@ const VIEWPORT_MARGIN = 16;
 
 type Anchor = { top: number; left: number; maxHeight: number };
 
-const MOBILE_QUERY = '(max-width: 767px)';
-
 /** True once mounted on the client; false during SSR so portals/sheets only render after hydration. */
 function useIsClient(): boolean {
     return useSyncExternalStore(
         () => () => {},
         () => true,
-        () => false,
-    );
-}
-
-/** Tracks the mobile viewport breakpoint via `matchMedia`, SSR-safe (server snapshot is desktop). */
-function useIsMobile(): boolean {
-    return useSyncExternalStore(
-        (onChange) => {
-            const mql = window.matchMedia(MOBILE_QUERY);
-            mql.addEventListener('change', onChange);
-            return () => mql.removeEventListener('change', onChange);
-        },
-        () => window.matchMedia(MOBILE_QUERY).matches,
         () => false,
     );
 }
@@ -245,13 +231,9 @@ export default function QuickCreateLauncher() {
             </motion.button>
 
             {mounted && isMobile ? (
-                <Sheet open={open} onOpenChange={(next) => (next ? openLauncher() : closeLauncher())}>
-                    <SheetContent
-                        side="bottom"
-                        showCloseButton={false}
-                        className="max-h-[85dvh] gap-0 rounded-t-2xl p-0"
-                    >
-                        <SheetHeader className="flex-row items-center gap-2 border-b border-border px-5 py-4">
+                <Drawer open={open} onOpenChange={(next) => (next ? openLauncher() : closeLauncher())} swipeDirection="down">
+                    <DrawerContent showCloseButton={false} className="max-h-[85dvh] gap-0 rounded-t-2xl p-0">
+                        <DrawerHeader className="flex-row items-center gap-2 border-b border-border px-5 py-4">
                             {view !== 'selector' ? (
                                 <button
                                     type="button"
@@ -263,10 +245,10 @@ export default function QuickCreateLauncher() {
                                     <ArrowLeftIcon className="size-4" />
                                 </button>
                             ) : null}
-                            <SheetTitle className="flex-1">
+                            <DrawerTitle className="flex-1">
                                 {view === 'selector' ? t('quickCreate.title') : t(`create.${view}`)}
-                            </SheetTitle>
-                            <SheetDescription className="sr-only">{t('quickCreate.description')}</SheetDescription>
+                            </DrawerTitle>
+                            <DrawerDescription className="sr-only">{t('quickCreate.description')}</DrawerDescription>
                             <button
                                 type="button"
                                 onClick={closeLauncher}
@@ -276,10 +258,10 @@ export default function QuickCreateLauncher() {
                             >
                                 <XMarkIcon className="size-4" />
                             </button>
-                        </SheetHeader>
+                        </DrawerHeader>
                         <div className="overflow-y-auto px-5 pb-6 pt-4">{body}</div>
-                    </SheetContent>
-                </Sheet>
+                    </DrawerContent>
+                </Drawer>
             ) : null}
 
             {mounted && !isMobile
