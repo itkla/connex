@@ -32,6 +32,8 @@ import ooo.klae.connex.backend.tenant.TablePlaneRegistry;
  * {@code TablePlaneArchTest}'s live-schema wall check and human review, not
  * relied on alone. It errs toward false positives: an unrecognized token is a
  * violation, so exotic SQL should be rare and deliberate in these lineages.
+ * Known gaps the layered checks cover instead: comma-separated multi-table
+ * DML and string literals containing {@code --}.
  */
 class MigrationLineageArchTest {
 
@@ -46,11 +48,17 @@ class MigrationLineageArchTest {
             "(?:CREATE(?:\\s+UNIQUE|\\s+FULLTEXT|\\s+SPATIAL)?|DROP)\\s+INDEX\\s+[`\"]?\\w+[`\"]?\\s+ON\\s+[`\"]?(\\w+)",
             Pattern.CASE_INSENSITIVE),
         Pattern.compile(
-            "^\\s*(?:INSERT\\s+INTO|REPLACE\\s+INTO|UPDATE|DELETE\\s+FROM)\\s+[`\"]?(\\w+)",
+            "(?:^|;)\\s*(?:INSERT\\s+INTO|REPLACE\\s+INTO|UPDATE|DELETE\\s+FROM)\\s+[`\"]?(\\w+)",
             Pattern.CASE_INSENSITIVE | Pattern.MULTILINE),
         Pattern.compile(
-            "(?:FROM|JOIN)\\s+[`\"]?([a-z_]\\w*)[`\"]?(?:\\s|$)",
-            Pattern.CASE_INSENSITIVE | Pattern.MULTILINE));
+            "(?:FROM|JOIN)\\s+[`\"]?([a-z_]\\w*)",
+            Pattern.CASE_INSENSITIVE),
+        Pattern.compile(
+            "REFERENCES\\s+[`\"]?(\\w+)",
+            Pattern.CASE_INSENSITIVE));
+
+    /** Keywords the FROM/JOIN and DML scans can capture that are not table names. */
+    private static final Set<String> SQL_NOISE = Set.of("DUAL", "SELECT", "CURRENT_TIMESTAMP");
 
     @Test
     void tenantLineageTouchesOnlyOrgDataTables() throws IOException {
@@ -60,6 +68,28 @@ class MigrationLineageArchTest {
     @Test
     void controlLineageTouchesOnlyControlPlaneTables() throws IOException {
         assertLineagePurity("control", TablePlaneRegistry.CONTROL_PLANE_TABLES);
+    }
+
+    /**
+     * The interleaved root lineage is frozen at V65 (the FK-drop migration):
+     * every migration after the split must land in one of the pure lineage
+     * folders, or the purity guarantees above cover nothing.
+     */
+    @Test
+    void rootLineageIsFrozenAtTheSplit() throws IOException {
+        Path root = repoRoot().resolve("backend/src/main/resources/db/migration");
+        List<String> escapees = new ArrayList<>();
+        try (Stream<Path> files = Files.list(root)) {
+            for (Path file : files.filter(path -> path.getFileName().toString().matches("V\\d+__.*\\.sql")).toList()) {
+                int version = Integer.parseInt(file.getFileName().toString().substring(1).split("__")[0]);
+                if (version > 65) {
+                    escapees.add(file.getFileName().toString());
+                }
+            }
+        }
+        assertTrue(escapees.isEmpty(),
+            "The root migration lineage is frozen at V65; place new migrations under db/migration/tenant "
+                + "or db/migration/control (see backend/AGENTS.md): " + escapees);
     }
 
     private void assertLineagePurity(String lineage, Set<String> allowedTables) throws IOException {
@@ -93,11 +123,8 @@ class MigrationLineageArchTest {
                 + "placement on #440: " + violations);
     }
 
-    /** Keywords the FROM/JOIN and DML scans can capture that are not table names. */
-    private static final Set<String> SQL_NOISE = Set.of("DUAL", "SELECT", "CURRENT_TIMESTAMP");
-
     private static String stripComments(String sql) {
-        return sql.replaceAll("--[^\\n]*", "").replaceAll("/\\*.*?\\*/", "");
+        return sql.replaceAll("--[^\\n]*", "").replaceAll("(?s)/\\*.*?\\*/", "");
     }
 
     private Path repoRoot() {

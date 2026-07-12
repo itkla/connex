@@ -37,7 +37,7 @@ This is the most load-bearing property of Connex. A change that leaks data acros
 
 ## Data, migrations & MyBatis
 
-- **Schema changes go through Flyway.** Add a new migration in `src/main/resources/db/migration` named `V{next}__{snake_case_description}.sql`, using the next sequential number after the highest existing `V`. Never edit or renumber an applied migration. Make migrations forward-only and mind MySQL specifics.
+- **Schema changes go through Flyway.** Add new migrations under `db/migration/tenant/` (org-data tables only — the future per-org catalog lineage) or `db/migration/control/` (control-plane tables only), named `V{next}__{snake_case_description}.sql` with the next sequential number after the highest existing `V` across ALL migration folders; the interleaved V1–V65 root lineage is frozen history. `MigrationLineageArchTest` enforces purity against `TablePlaneRegistry`, and `TablePlaneArchTest` requires every new table to get an explicit plane placement; no foreign key may cross the plane wall in either direction — replace it with service-layer validation (`UserOffboardingService` is the pattern). Never edit or renumber an applied migration. Make migrations forward-only and mind MySQL specifics.
 - New tenant-scoped tables need their workspace column from day one — follow the `*_workspace` migrations as the pattern.
 - **MyBatis mappers:** Java interface in `mappers/`, XML in `src/main/resources/mappers/{Entity}Mapper.xml`. Mirror an existing mapper pair. All data access lives here — no SQL elsewhere. Use `#{}` bindings.
 
@@ -99,4 +99,3 @@ Rules for any new AI-powered feature:
 - Build: `./gradlew build`
 - DB up: create `backend/.env` from `backend/.env.example`, fill local-only passwords, then run `docker compose up -d db` (from `backend/`)
 - Routing integration test: `TenantCatalogRoutingIntegrationTest` creates a scratch catalog `connexdb_routing_it`; when the test DB user lacks the privilege (CI runs as root and has it) the test self-skips with instructions. To run it locally, grant once as root: ``GRANT ALL PRIVILEGES ON `connexdb\_routing\_%`.* TO 'connexuser'@'%';``
-- Migrations: new migrations go under `db/migration/tenant/` (org-data tables only — the future per-org catalog lineage) or `db/migration/control/` (control-plane tables only); `MigrationLineageArchTest` enforces purity against `TablePlaneRegistry`, and `TablePlaneArchTest` requires every new table to get an explicit plane placement there. The interleaved V1–V65 root lineage is frozen history. Version numbers stay globally unique across all three folders. No foreign key may cross the plane wall in either direction — replace with service-layer validation (`UserOffboardingService` is the pattern).

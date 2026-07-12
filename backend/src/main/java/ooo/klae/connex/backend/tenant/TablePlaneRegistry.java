@@ -101,8 +101,4 @@ public final class TablePlaneRegistry {
         "tag",
         "task",
         "user_dashboard");
-
-    /** Neither plane: migration bookkeeping owned by Flyway itself. */
-    public static final Set<String> INFRASTRUCTURE_TABLES = Set.of(
-        "flyway_schema_history");
 }

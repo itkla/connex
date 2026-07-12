@@ -7,6 +7,7 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 
 import javax.sql.DataSource;
 
@@ -27,6 +28,9 @@ import ooo.klae.connex.backend.tenant.TablePlaneRegistry;
 @SpringBootTest
 class TablePlaneArchTest {
 
+    /** Neither plane: migration bookkeeping owned by Flyway itself. */
+    private static final Set<String> INFRASTRUCTURE_TABLES = Set.of("flyway_schema_history");
+
     @Autowired private DataSource dataSource;
 
     @Test
@@ -42,7 +46,7 @@ class TablePlaneArchTest {
                 int planes = 0;
                 if (TablePlaneRegistry.CONTROL_PLANE_TABLES.contains(table)) planes++;
                 if (TablePlaneRegistry.ORG_DATA_TABLES.contains(table)) planes++;
-                if (TablePlaneRegistry.INFRASTRUCTURE_TABLES.contains(table)) planes++;
+                if (INFRASTRUCTURE_TABLES.contains(table)) planes++;
                 if (planes != 1) {
                     unclassified.add(table);
                 }

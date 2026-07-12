@@ -195,6 +195,7 @@ public class WorkspaceService {
         workspace.setName(name.trim());
         workspace.setSlug(generateSlug(name));
         workspaceMapper.insert(workspace);
+        userOffboardingService.prepareFreshMembership(workspace.getId(), ownerUserId);
         workspaceMapper.addMember(workspace.getId(), ownerUserId, "owner");
         auditService.record("org.workspace.create", "organization", orgId, workspace.getName(),
                 "Workspace created", Map.of("workspaceId", workspace.getId(), "ownerUserId", ownerUserId));
@@ -531,6 +532,7 @@ public class WorkspaceService {
      * @param userId the user to add
      * @param role the role to grant on a fresh join
      */
+    @Transactional
     public void ensureActiveMember(int workspaceId, int userId, String role) {
         if (isMember(workspaceId, userId)) {
             return;

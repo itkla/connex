@@ -125,6 +125,7 @@ public class InviteService {
     }
 
     /** Redeems an invite for the authenticated user whose email it targets. */
+    @Transactional
     public WorkspaceMembershipDto acceptInvite(String token, User user) {
         WorkspaceInvite invite = inviteMapper.findByToken(token);
         if (invite == null) {

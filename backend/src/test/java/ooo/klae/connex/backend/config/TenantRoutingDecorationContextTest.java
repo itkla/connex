@@ -3,9 +3,6 @@ package ooo.klae.connex.backend.config;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
-
 import javax.sql.DataSource;
 
 import org.junit.jupiter.api.Test;
@@ -36,8 +33,6 @@ class TenantRoutingDecorationContextTest {
 
     static final String CONTROL_POOL = "controlPlanePool";
 
-    private static final Pattern JDBC_URL_DATABASE = Pattern.compile("^jdbc:mysql://[^/]+/([^?/]+)");
-
     @Autowired private ApplicationContext context;
 
     @DynamicPropertySource
@@ -47,12 +42,12 @@ class TenantRoutingDecorationContextTest {
     }
 
     private static String databaseFromEnv() {
-        String url = System.getenv("CONNEX_DB_URL");
-        if (url == null) {
-            return "connexdb";
+        String database = TenantRoutingConfig.databaseFromJdbcUrl(System.getenv("CONNEX_DB_URL"));
+        if (database != null) {
+            return database;
         }
-        Matcher matcher = JDBC_URL_DATABASE.matcher(url);
-        return matcher.find() ? matcher.group(1) : "connexdb";
+        String name = System.getenv("CONNEX_DB_NAME");
+        return name != null ? name : "connexdb";
     }
 
     /**
@@ -88,7 +83,7 @@ class TenantRoutingDecorationContextTest {
 
     @Test
     void tenantPoolIsWrappedByTheRoutingDecorator() {
-        assertTrue(context.getBean("dataSource", DataSource.class) instanceof TenantRoutingDataSource,
+        assertTrue(context.getBean(TenantRoutingConfig.TENANT_DATASOURCE_BEAN, DataSource.class) instanceof TenantRoutingDataSource,
             "the primary datasource must be tenant-routed when catalog-per-placement is enabled");
     }
 
