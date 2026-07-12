@@ -29,6 +29,7 @@ import {
     updateMemberRole,
 } from "@/app/lib/api";
 import { useWorkspace } from "@/app/hooks/useWorkspace";
+import { usePasskeyStepUpErrorHandler } from "@/app/hooks/usePasskeyStepUpError";
 import { useFieldErrors } from "@/app/hooks/useFieldErrors";
 import { toastError, toastSuccess } from "@/app/lib/toast";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -91,6 +92,7 @@ function EmptyRow({ children }: { children: React.ReactNode }) {
 
 export default function MembersPanel({ currentUserId }: { currentUserId: number | null }) {
     const t = useTranslations("WorkspaceMembers");
+    const handlePasskeyStepUpError = usePasskeyStepUpErrorHandler();
     const { activeWorkspaceId, activeWorkspace } = useWorkspace();
     const workspaceId = activeWorkspaceId;
     const role = activeWorkspace?.role;
@@ -171,7 +173,9 @@ export default function MembersPanel({ currentUserId }: { currentUserId: number 
             setMembers((prev) => prev.map((m) => (m.id === userId ? updated : m)));
             toastSuccess(t("roleChanged"));
         } catch (err) {
-            toastError(err instanceof Error ? err.message : t("roleChangeFailed"));
+            if (!handlePasskeyStepUpError(err)) {
+                toastError(err instanceof Error ? err.message : t("roleChangeFailed"));
+            }
         } finally {
             setBusyMemberId(null);
         }
@@ -185,7 +189,9 @@ export default function MembersPanel({ currentUserId }: { currentUserId: number 
             setMembers((prev) => prev.map((m) => (m.id === userId ? updated : m)));
             toastSuccess(t("roleChanged"));
         } catch (err) {
-            toastError(err instanceof Error ? err.message : t("roleChangeFailed"));
+            if (!handlePasskeyStepUpError(err)) {
+                toastError(err instanceof Error ? err.message : t("roleChangeFailed"));
+            }
         } finally {
             setBusyMemberId(null);
         }
@@ -200,7 +206,9 @@ export default function MembersPanel({ currentUserId }: { currentUserId: number 
             toastSuccess(t("removed"));
             setRemoveTarget(null);
         } catch (err) {
-            toastError(err instanceof Error ? err.message : t("removeFailed"));
+            if (!handlePasskeyStepUpError(err)) {
+                toastError(err instanceof Error ? err.message : t("removeFailed"));
+            }
         } finally {
             setIsRemoving(false);
         }
@@ -239,7 +247,7 @@ export default function MembersPanel({ currentUserId }: { currentUserId: number 
                 toastError(t("inviteFailed"));
             }
         } catch (err) {
-            if (!captureFieldErrors(err)) {
+            if (!handlePasskeyStepUpError(err) && !captureFieldErrors(err)) {
                 toastError(err instanceof Error ? err.message : t("inviteFailed"));
             }
         } finally {
@@ -255,7 +263,9 @@ export default function MembersPanel({ currentUserId }: { currentUserId: number 
             setInvites((prev) => prev.filter((i) => i.id !== inviteId));
             toastSuccess(t("revoked"));
         } catch (err) {
-            toastError(err instanceof Error ? err.message : t("revokeFailed"));
+            if (!handlePasskeyStepUpError(err)) {
+                toastError(err instanceof Error ? err.message : t("revokeFailed"));
+            }
         } finally {
             setBusyInviteId(null);
         }
@@ -294,7 +304,9 @@ export default function MembersPanel({ currentUserId }: { currentUserId: number 
             await copyShareLink(link);
             toastSuccess(t("linkCreated"));
         } catch (err) {
-            toastError(err instanceof Error ? err.message : t("linkCreateFailed"));
+            if (!handlePasskeyStepUpError(err)) {
+                toastError(err instanceof Error ? err.message : t("linkCreateFailed"));
+            }
         } finally {
             setCreatingLink(false);
         }
@@ -308,7 +320,9 @@ export default function MembersPanel({ currentUserId }: { currentUserId: number 
             setInviteLinks((prev) => prev.filter((l) => l.id !== linkId));
             toastSuccess(t("linkRevoked"));
         } catch (err) {
-            toastError(err instanceof Error ? err.message : t("linkRevokeFailed"));
+            if (!handlePasskeyStepUpError(err)) {
+                toastError(err instanceof Error ? err.message : t("linkRevokeFailed"));
+            }
         } finally {
             setBusyLinkId(null);
         }
@@ -324,7 +338,7 @@ export default function MembersPanel({ currentUserId }: { currentUserId: number 
             setDomainInput("");
             toastSuccess(t("domainAdded"));
         } catch (err) {
-            if (!captureFieldErrors(err)) {
+            if (!handlePasskeyStepUpError(err) && !captureFieldErrors(err)) {
                 toastError(err instanceof Error ? err.message : t("domainAddFailed"));
             }
         } finally {
@@ -340,7 +354,9 @@ export default function MembersPanel({ currentUserId }: { currentUserId: number 
             setAllowedDomains((prev) => prev.filter((d) => d !== domain));
             toastSuccess(t("domainRemoved"));
         } catch (err) {
-            toastError(err instanceof Error ? err.message : t("domainRemoveFailed"));
+            if (!handlePasskeyStepUpError(err)) {
+                toastError(err instanceof Error ? err.message : t("domainRemoveFailed"));
+            }
         } finally {
             setBusyDomain(null);
         }

@@ -72,6 +72,22 @@ class MembershipLifecycleTest extends AbstractServiceTest {
     }
 
     @Test
+    void leaveWorkspaceAndSelectNextPersistsRemainingMembership() {
+        WorkspaceMembershipDto first = workspaceService.createWorkspace("Leave First", currentUser.getId());
+        WorkspaceMembershipDto second = workspaceService.createWorkspace("Leave Second", currentUser.getId());
+        User member = newUser();
+        workspaceMapper.removeMember(workspace.getId(), member.getId());
+        workspaceMapper.addMember(first.getId(), member.getId(), "member");
+        workspaceMapper.addMember(second.getId(), member.getId(), "member");
+        workspaceService.rememberActive(member.getId(), first.getId());
+
+        Integer nextWorkspaceId = workspaceService.leaveWorkspaceAndSelectNext(first.getId(), member.getId());
+
+        assertEquals(second.getId(), nextWorkspaceId);
+        assertEquals(second.getId(), workspaceMapper.getLastActiveWorkspaceId(member.getId()));
+    }
+
+    @Test
     void leaveWorkspace_lastOwnerCannotLeave() {
         WorkspaceMembershipDto ws = workspaceService.createWorkspace("Solo WS", currentUser.getId());
         assertThrows(BadRequestException.class,

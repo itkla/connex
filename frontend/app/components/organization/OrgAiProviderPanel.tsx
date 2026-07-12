@@ -6,6 +6,7 @@ import { useTranslations } from "next-intl";
 import type { AiProviderConfig, AiProviderConfigRequest, AiProviderKind } from "@/app/lib/types";
 import { getAiProviderConfig, revokeAiProviderConfig, saveAiProviderConfig, ApiError } from "@/app/lib/api";
 import { useWorkspace } from "@/app/hooks/useWorkspace";
+import { usePasskeyStepUpErrorHandler } from "@/app/hooks/usePasskeyStepUpError";
 import { toastError, toastSuccess } from "@/app/lib/toast";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -138,6 +139,7 @@ function buildRequest(state: FormState): AiProviderConfigRequest {
 
 export default function OrgAiProviderPanel() {
     const t = useTranslations("OrgAi");
+    const handlePasskeyStepUpError = usePasskeyStepUpErrorHandler();
     const { activeWorkspaceId } = useWorkspace();
 
     const [form, setForm] = useState<FormState | null>(null);
@@ -204,6 +206,9 @@ export default function OrgAiProviderPanel() {
             applySaved(saved);
             toastSuccess(t("saved"));
         } catch (err) {
+            if (handlePasskeyStepUpError(err)) {
+                return;
+            }
             if (err instanceof ApiError && err.status === 403) {
                 toastError(t("stepUpRequired"));
             } else {
@@ -225,6 +230,9 @@ export default function OrgAiProviderPanel() {
             setCredentialLast4(null);
             toastSuccess(t("revoked"));
         } catch (err) {
+            if (handlePasskeyStepUpError(err)) {
+                return;
+            }
             if (err instanceof ApiError && err.status === 403) {
                 toastError(t("stepUpRequired"));
             } else {

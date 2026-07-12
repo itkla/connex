@@ -21,6 +21,7 @@ import {
     updateWorkspaceRole,
 } from "@/app/lib/api";
 import { useWorkspace } from "@/app/hooks/useWorkspace";
+import { usePasskeyStepUpErrorHandler } from "@/app/hooks/usePasskeyStepUpError";
 import { toastError, toastSuccess } from "@/app/lib/toast";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -89,6 +90,7 @@ function PermissionSummary({
 
 export default function RolesPanel() {
     const t = useTranslations("WorkspaceRoles");
+    const handlePasskeyStepUpError = usePasskeyStepUpErrorHandler();
     const { activeWorkspaceId } = useWorkspace();
     const workspaceId = activeWorkspaceId;
 
@@ -160,7 +162,9 @@ export default function RolesPanel() {
                 toastSuccess(t("created"));
             }
         } catch (err) {
-            toastError(err instanceof Error ? err.message : t("saveFailed"));
+            if (!handlePasskeyStepUpError(err)) {
+                toastError(err instanceof Error ? err.message : t("saveFailed"));
+            }
             throw err;
         }
     };
@@ -174,7 +178,9 @@ export default function RolesPanel() {
             toastSuccess(t("deleted"));
             setRemoveTarget(null);
         } catch (err) {
-            toastError(err instanceof Error ? err.message : t("deleteFailed"));
+            if (!handlePasskeyStepUpError(err)) {
+                toastError(err instanceof Error ? err.message : t("deleteFailed"));
+            }
         } finally {
             setIsRemoving(false);
         }

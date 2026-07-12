@@ -375,6 +375,74 @@ class DatabaseTransportSecurityEnvironmentPostProcessorTest {
     }
 
     @Test
+    void failsOutsideDevAndTestWhenFlywayUrlDisablesTls() {
+        MockEnvironment environment = productionEnvironment()
+            .withProperty("spring.datasource.url", "jdbc:mysql://db.example.com:3306/connexdb?sslMode=VERIFY_CA")
+            .withProperty("spring.datasource.username", "connex")
+            .withProperty("spring.datasource.password", "x")
+            .withProperty("spring.flyway.url", "jdbc:mysql://db.example.com:3306/connexdb?sslMode=DISABLED");
+
+        assertThrows(IllegalStateException.class, () -> postProcessor.postProcessEnvironment(environment, null));
+    }
+
+    @Test
+    void failsOutsideDevAndTestWhenEnvironmentStyleFlywayUrlDisablesTls() {
+        MockEnvironment environment = productionEnvironment()
+            .withProperty("spring.datasource.url", "jdbc:mysql://db.example.com:3306/connexdb?sslMode=VERIFY_CA")
+            .withProperty("spring.datasource.username", "connex")
+            .withProperty("spring.datasource.password", "x")
+            .withProperty("SPRING_FLYWAY_URL", "jdbc:mysql://db.example.com:3306/connexdb?sslMode=DISABLED");
+
+        assertThrows(IllegalStateException.class, () -> postProcessor.postProcessEnvironment(environment, null));
+    }
+
+    @Test
+    void failsOutsideDevAndTestWhenFlywayJdbcPropertiesDisableTls() {
+        MockEnvironment environment = productionEnvironment()
+            .withProperty("spring.datasource.url", "jdbc:mysql://db.example.com:3306/connexdb?sslMode=VERIFY_CA")
+            .withProperty("spring.datasource.username", "connex")
+            .withProperty("spring.datasource.password", "x")
+            .withProperty("spring.flyway.url",
+                "jdbc:mysql://migrations.example.com:3306/connexdb?sslMode=VERIFY_IDENTITY")
+            .withProperty("spring.flyway.jdbc-properties.sslMode", "DISABLED");
+
+        assertThrows(IllegalStateException.class, () -> postProcessor.postProcessEnvironment(environment, null));
+    }
+
+    @Test
+    void failsOutsideDevAndTestWhenEnvironmentStyleFlywayJdbcPropertiesDisableTls() {
+        MockEnvironment environment = productionEnvironment()
+            .withProperty("spring.datasource.url", "jdbc:mysql://db.example.com:3306/connexdb?sslMode=VERIFY_CA")
+            .withProperty("spring.datasource.username", "connex")
+            .withProperty("spring.datasource.password", "x")
+            .withProperty("SPRING_FLYWAY_JDBC_PROPERTIES_SSLMODE", "DISABLED");
+
+        assertThrows(IllegalStateException.class, () -> postProcessor.postProcessEnvironment(environment, null));
+    }
+
+    @Test
+    void allowsVerifiedFlywayUrlOutsideDevAndTest() {
+        MockEnvironment environment = productionEnvironment()
+            .withProperty("spring.datasource.url", "jdbc:mysql://db.example.com:3306/connexdb?sslMode=VERIFY_CA")
+            .withProperty("spring.datasource.username", "connex")
+            .withProperty("spring.datasource.password", "x")
+            .withProperty("spring.flyway.url", "jdbc:mysql://migrations.example.com:3306/connexdb?sslMode=VERIFY_IDENTITY");
+
+        assertDoesNotThrow(() -> postProcessor.postProcessEnvironment(environment, null));
+    }
+
+    @Test
+    void allowsLocalSystemdStagingLoopbackPlaintextFlywayUrl() {
+        MockEnvironment environment = localSystemdStagingEnvironment()
+            .withProperty("spring.datasource.url", "jdbc:mysql://localhost:3306/connexdb?sslMode=DISABLED")
+            .withProperty("spring.datasource.username", "connex")
+            .withProperty("spring.datasource.password", "x")
+            .withProperty("spring.flyway.url", "jdbc:mysql://127.0.0.1:3306/connexdb?sslMode=DISABLED");
+
+        assertDoesNotThrow(() -> postProcessor.postProcessEnvironment(environment, null));
+    }
+
+    @Test
     void allowsVerifyIdentityOutsideDevAndTest() {
         MockEnvironment environment = productionEnvironment()
             .withProperty(

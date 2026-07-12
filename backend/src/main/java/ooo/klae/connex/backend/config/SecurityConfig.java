@@ -5,6 +5,8 @@ import static org.springframework.security.config.Customizer.withDefaults;
 import java.util.List;
 
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.servlet.filter.OrderedFormContentFilter;
+import org.springframework.boot.web.servlet.FilterRegistrationBean;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.convert.converter.Converter;
@@ -48,6 +50,7 @@ import jakarta.servlet.http.HttpServletResponse;
 import ooo.klae.connex.backend.sso.DbRelyingPartyRegistrationRepository;
 import ooo.klae.connex.backend.sso.SsoAuthenticationSuccessHandler;
 import ooo.klae.connex.backend.services.SessionSecurityService;
+import ooo.klae.connex.backend.tenant.WorkspaceCookie;
 
 /**
  * Spring Security configuration.
@@ -134,12 +137,11 @@ public class SecurityConfig {
             SocialLoginClientRegistrations socialLoginClientRegistrations,
             DbRelyingPartyRegistrationRepository dbRelyingPartyRegistrationRepository,
             SsoAuthenticationSuccessHandler ssoAuthenticationSuccessHandler,
-            RequestBodySizeProperties requestBodySizeProperties,
             SessionSecurityService sessionSecurityService,
+            WorkspaceCookie workspaceCookie,
             @Value("${connex.security.csrf-enabled:true}") boolean csrfEnabled,
             @Value("${connex.sso.enabled:false}") boolean ssoEnabled) throws Exception {
         boolean oauthEnabled = ssoEnabled || socialLoginClientRegistrations.anyEnabled();
-        http.addFilterBefore(new ApiRequestBodySizeFilter(requestBodySizeProperties), SecurityContextHolderFilter.class);
         http.addFilterAfter(new AbsoluteSessionTimeoutFilter(sessionSecurityService), SecurityContextHolderFilter.class);
         http.cors(withDefaults());
         if (csrfEnabled) {
@@ -197,7 +199,10 @@ public class SecurityConfig {
                 .invalidateHttpSession(true)
                 .clearAuthentication(true)
                 .deleteCookies("JSESSIONID")
-                .logoutSuccessHandler((req, res, auth) -> res.setStatus(200))
+                .logoutSuccessHandler((req, res, auth) -> {
+                    workspaceCookie.clear(res);
+                    res.setStatus(200);
+                })
             );
         if (oauthEnabled) {
             http
@@ -222,6 +227,15 @@ public class SecurityConfig {
             );
         }
         return http.build();
+    }
+
+    @Bean
+    FilterRegistrationBean<ApiRequestBodySizeFilter> apiRequestBodySizeFilterRegistration(
+            RequestBodySizeProperties requestBodySizeProperties) {
+        FilterRegistrationBean<ApiRequestBodySizeFilter> registration =
+            new FilterRegistrationBean<>(new ApiRequestBodySizeFilter(requestBodySizeProperties));
+        registration.setOrder(OrderedFormContentFilter.DEFAULT_ORDER - 1);
+        return registration;
     }
 
     /**

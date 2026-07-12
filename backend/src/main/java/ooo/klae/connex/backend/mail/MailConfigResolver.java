@@ -89,7 +89,8 @@ public class MailConfigResolver {
                 properties.isAuth(),
                 properties.getConnectionTimeoutMs(),
                 properties.getTimeoutMs(),
-                properties.getWriteTimeoutMs());
+                properties.getWriteTimeoutMs(),
+                false);
     }
 
     private ResolvedMailConfig fromWorkspace(WorkspaceMailConfig ws) {
@@ -112,6 +113,7 @@ public class MailConfigResolver {
                 ws.isAuth(),
                 properties.getConnectionTimeoutMs(),
                 properties.getTimeoutMs(),
-                properties.getWriteTimeoutMs());
+                properties.getWriteTimeoutMs(),
+                true);
     }
 }

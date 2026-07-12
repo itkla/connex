@@ -3,7 +3,7 @@
 import { Dispatch, FormEvent, SetStateAction, WheelEvent, useEffect } from 'react';
 import { useTranslations } from 'next-intl';
 import { useFieldErrors } from '@/app/hooks/useFieldErrors';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogClose } from '@/components/ui/dialog';
+import { ResponsiveDialog, ResponsiveDialogContent, ResponsiveDialogHeader, ResponsiveDialogTitle, ResponsiveDialogDescription, ResponsiveDialogFooter, ResponsiveDialogClose } from '@/components/ui/responsive-dialog';
 import { Button } from '@/components/ui/button';
 import { Loader2Icon } from 'lucide-react';
 import { Combobox, ComboboxItem, ComboboxList, ComboboxContent, ComboboxEmpty, ComboboxInput } from '@/components/ui/combobox';
@@ -107,15 +107,15 @@ export default function NewDealDialog({
     const status = resolveDialogStatus({ isLoading: isCreating, hasErrors, isSuccess });
 
     return (
-        <Dialog open={open} onOpenChange={handleOpenChange}>
-            <DialogContent className="gap-0 overflow-hidden p-0 sm:max-w-lg">
+        <ResponsiveDialog open={open} onOpenChange={handleOpenChange}>
+            <ResponsiveDialogContent className="gap-0 overflow-hidden p-0 sm:max-w-lg">
                 <DialogStatusCover status={status} />
 
                 <div className="px-6 pb-6">
-                    <DialogHeader className="ncd-rise -mt-12 mb-5" style={{ animationDelay: '40ms' }}>
-                        <DialogTitle className="text-xl font-semibold tracking-tight">{t('title')}</DialogTitle>
-                        <DialogDescription>{t('description')}</DialogDescription>
-                    </DialogHeader>
+                    <ResponsiveDialogHeader className="ncd-rise -mt-12 mb-5" style={{ animationDelay: '40ms' }}>
+                        <ResponsiveDialogTitle className="text-xl font-semibold tracking-tight">{t('title')}</ResponsiveDialogTitle>
+                        <ResponsiveDialogDescription>{t('description')}</ResponsiveDialogDescription>
+                    </ResponsiveDialogHeader>
 
                     <form onSubmit={handleSubmit} className="grid gap-5">
                         <div className="ncd-rise grid gap-1.5" style={{ animationDelay: '90ms' }}>
@@ -313,10 +313,10 @@ export default function NewDealDialog({
                             </div>
                         </div>
 
-                        <DialogFooter className="ncd-rise mt-5" style={{ animationDelay: '340ms' }}>
-                            <DialogClose asChild>
+                        <ResponsiveDialogFooter className="ncd-rise mt-5" style={{ animationDelay: '340ms' }}>
+                            <ResponsiveDialogClose asChild>
                                 <Button type="button" variant="outline" disabled={isCreating}>{t('cancel')}</Button>
-                            </DialogClose>
+                            </ResponsiveDialogClose>
                             <Button
                                 type="submit"
                                 disabled={isCreating || isSuccess}
@@ -324,10 +324,10 @@ export default function NewDealDialog({
                             >
                                 {isCreating ? <Loader2Icon className="size-4 animate-spin" /> : t('create')}
                             </Button>
-                        </DialogFooter>
+                        </ResponsiveDialogFooter>
                     </form>
                 </div>
-            </DialogContent>
-        </Dialog>
+            </ResponsiveDialogContent>
+        </ResponsiveDialog>
     );
 }

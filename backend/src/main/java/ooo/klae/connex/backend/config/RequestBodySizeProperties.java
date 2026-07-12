@@ -10,7 +10,9 @@ import org.springframework.stereotype.Component;
 @ConfigurationProperties(prefix = "connex.request-limits")
 public class RequestBodySizeProperties {
     private long maxBodyBytes = 10L * 1024L * 1024L;
+    private long importMaxBodyBytes = 64L * 1024L * 1024L;
     private long webauthnMaxBodyBytes = 64L * 1024L;
+    private long formMaxBodyBytes = 1L * 1024L * 1024L;
 
     public long getMaxBodyBytes() {
         return maxBodyBytes;
@@ -20,11 +22,31 @@ public class RequestBodySizeProperties {
         this.maxBodyBytes = maxBodyBytes;
     }
 
+    public long getImportMaxBodyBytes() {
+        return importMaxBodyBytes;
+    }
+
+    public void setImportMaxBodyBytes(long importMaxBodyBytes) {
+        this.importMaxBodyBytes = importMaxBodyBytes;
+    }
+
     public long getWebauthnMaxBodyBytes() {
         return webauthnMaxBodyBytes;
     }
 
     public void setWebauthnMaxBodyBytes(long webauthnMaxBodyBytes) {
         this.webauthnMaxBodyBytes = webauthnMaxBodyBytes;
+    }
+
+    public long getFormMaxBodyBytes() {
+        return formMaxBodyBytes;
+    }
+
+    public void setFormMaxBodyBytes(long formMaxBodyBytes) {
+        this.formMaxBodyBytes = formMaxBodyBytes;
+    }
+
+    public long getLargestBodyLimit() {
+        return Math.max(Math.max(maxBodyBytes, importMaxBodyBytes), webauthnMaxBodyBytes);
     }
 }

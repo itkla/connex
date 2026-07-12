@@ -28,6 +28,7 @@ import ooo.klae.connex.backend.util.ClientIpResolver;
 
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import jakarta.servlet.http.HttpSession;
 
 import lombok.RequiredArgsConstructor;
 
@@ -194,8 +195,15 @@ public class AuthService {
         userMapper.updateLastLoginAt(user.getId());
         User refreshedUser = userMapper.getUserById(user.getId());
 
-        if (httpRequest.getSession(false) != null) {
-            httpRequest.changeSessionId();
+        HttpSession existingSession = httpRequest.getSession(false);
+        if (existingSession != null) {
+            Object boundUserId = existingSession.getAttribute(SessionSecurityService.AUTHENTICATED_USER_ATTR);
+            if (boundUserId instanceof Number number && number.intValue() != refreshedUser.getId()) {
+                existingSession.invalidate();
+                SecurityContextHolder.clearContext();
+            } else {
+                httpRequest.changeSessionId();
+            }
         }
 
         SecurityContext context = SecurityContextHolder.createEmptyContext();
@@ -212,6 +220,8 @@ public class AuthService {
         if (activeWorkspaceId != null) {
             workspaceService.rememberActive(refreshedUser.getId(), activeWorkspaceId);
             workspaceCookie.set(httpResponse, activeWorkspaceId);
+        } else {
+            workspaceCookie.clear(httpResponse);
         }
         return refreshedUser;
     }
@@ -231,6 +241,40 @@ public class AuthService {
             throw new BadCredentialsException("Incorrect password");
         }
         loginRateLimiter.recordSuccess(username);
+    }
+
+    /**
+     * Authorizes first-passkey enrollment using the account's existing authentication method.
+     * Password-backed accounts must confirm their password; passwordless accounts must have a
+     * freshly established, same-user federated session.
+     * @param userId the authenticated account
+     * @param password the submitted current password, when the account has one
+     * @param httpRequest the current request carrying the authenticated session
+     */
+    public void requireFirstPasskeyBootstrapAuthentication(int userId, String password,
+            HttpServletRequest httpRequest) {
+        User user = userMapper.getUserById(userId);
+        if (user == null) {
+            throw new BadCredentialsException("Incorrect password");
+        }
+        if (user.getPassword() == null) {
+            sessionSecurityService.requireFreshAuthenticatedSession(httpRequest, userId);
+            return;
+        }
+        requireCurrentPassword(userId, password, clientIpResolver.resolve(httpRequest));
+    }
+
+    /**
+     * Reports whether an account has a password credential that must be confirmed for bootstrap.
+     * @param userId the authenticated account
+     * @return true when the account has a password hash
+     */
+    public boolean hasPasswordCredential(int userId) {
+        User user = userMapper.getUserById(userId);
+        if (user == null) {
+            throw new ResourceNotFoundException("Not authenticated");
+        }
+        return user.getPassword() != null;
     }
 
     /**

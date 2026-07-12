@@ -521,6 +521,41 @@ class DealServiceTest extends AbstractServiceTest {
     }
 
     @Test
+    void create_rejectsForeignRelatedRecords() {
+        Workspace foreignWorkspace = newWorkspace();
+        Pipeline foreignPipeline = newPipelineIn(foreignWorkspace);
+        Stage foreignStage = newStageIn(foreignWorkspace, foreignPipeline);
+        Company foreignCompany = newCompanyIn(foreignWorkspace);
+        Deal draft = dealDraft(foreignPipeline, foreignStage, foreignCompany);
+
+        assertThrows(BadRequestException.class, () -> dealService.create(draft));
+    }
+
+    @Test
+    void create_rejectsStageOutsideSelectedPipeline() {
+        Pipeline selectedPipeline = newPipeline();
+        Pipeline otherPipeline = newPipeline();
+        Stage otherStage = newStage(otherPipeline, 0);
+        Deal draft = dealDraft(selectedPipeline, otherStage, newCompany());
+
+        assertThrows(BadRequestException.class, () -> dealService.create(draft));
+    }
+
+    @Test
+    void update_rejectsForeignCompanyWithoutMutatingDeal() {
+        Pipeline pipeline = newPipeline();
+        Stage stage = newStage(pipeline, 0);
+        Company originalCompany = newCompany();
+        Deal deal = newDeal(pipeline, stage, originalCompany);
+        Workspace foreignWorkspace = newWorkspace();
+        deal.setCompanyId(newCompanyIn(foreignWorkspace).getId());
+
+        assertThrows(BadRequestException.class, () -> dealService.update(deal.getId(), deal));
+
+        assertEquals(originalCompany.getId(), dealMapper.getDealById(workspace.getId(), deal.getId()).getCompanyId());
+    }
+
+    @Test
     void move_acrossStages_recordsStageHistory() {
         Pipeline pipeline = newPipeline();
         Stage from = newStage(pipeline, 0);
@@ -647,6 +682,7 @@ class DealServiceTest extends AbstractServiceTest {
         workspaceMapper.addMember(activeWorkspace.getId(), currentUser.getId(), "owner");
         workspace = activeWorkspace;
         authenticateAs(currentUser, workspace.getId());
+
         Pipeline pipeline = newPipeline();
         Stage stage = newStage(pipeline, 0);
         Company company = newCompany();
@@ -701,6 +737,17 @@ class DealServiceTest extends AbstractServiceTest {
         company.setWorkspaceId(targetWorkspace.getId());
         companyMapper.insert(company);
         return company;
+    }
+
+    private Deal dealDraft(Pipeline pipeline, Stage stage, Company company) {
+        Deal deal = new Deal();
+        deal.setName("Deal " + unique());
+        deal.setValue(1000.0);
+        deal.setCurrency("JPY");
+        deal.setPipelineId(pipeline.getId());
+        deal.setStageId(stage.getId());
+        deal.setCompanyId(company.getId());
+        return deal;
     }
 
     private Deal updateDeal(Deal deal, String name, double value, double actualValue,

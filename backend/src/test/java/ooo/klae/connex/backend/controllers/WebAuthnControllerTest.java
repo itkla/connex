@@ -1,12 +1,16 @@
 package ooo.klae.connex.backend.controllers;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -100,15 +104,66 @@ class WebAuthnControllerTest {
             new UsernamePasswordAuthenticationToken(user, null, user.getAuthorities()));
         when(authService.getCurrentUser()).thenReturn(user);
         when(webAuthnService.hasPasskey(7)).thenReturn(false);
-        when(clientIpResolver.resolve(request)).thenReturn("127.0.0.1");
         when(webAuthnService.createRegistrationOptions(any())).thenReturn(options);
         when(mapper.write(options)).thenReturn("{}");
 
         registrationController.registerOptions(body, request, response);
 
-        verify(authService).requireCurrentPassword(7, "Str0ng!Pass", "127.0.0.1");
+        verify(authService).requireFirstPasskeyBootstrapAuthentication(7, "Str0ng!Pass", request);
         verify(sessionSecurityService, never()).requireRecentAuthentication(7);
-        assertEquals(7, request.getSession().getAttribute("connex.firstPasskeyBootstrapUserId"));
+        verify(sessionSecurityService).markFirstPasskeyBootstrap(request, 7);
+    }
+
+    @Test
+    void registerOptions_failedBootstrapProofDoesNotCreateChallengeOrMarker() {
+        User user = user(7);
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        PasskeyRegistrationOptionsRequest body = new PasskeyRegistrationOptionsRequest();
+        body.setCurrentPassword("wrong");
+        SecurityContextHolder.getContext().setAuthentication(
+            new UsernamePasswordAuthenticationToken(user, null, user.getAuthorities()));
+        when(authService.getCurrentUser()).thenReturn(user);
+        when(webAuthnService.hasPasskey(7)).thenReturn(false);
+        doThrow(new BadCredentialsException("Incorrect password"))
+            .when(authService).requireFirstPasskeyBootstrapAuthentication(7, "wrong", request);
+
+        assertThrows(BadCredentialsException.class,
+            () -> controller.registerOptions(body, request, response));
+
+        verify(webAuthnService, never()).createRegistrationOptions(any());
+        verify(sessionSecurityService, never()).markFirstPasskeyBootstrap(any(), anyInt());
+        verify(sessionSecurityService).clearFirstPasskeyBootstrap(request);
+    }
+
+    @Test
+    void registrationRequirements_firstPasswordBackedPasskeyRequiresCurrentPassword() {
+        User user = user(7);
+        when(authService.getCurrentUser()).thenReturn(user);
+        when(webAuthnService.hasPasskey(7)).thenReturn(false);
+        when(authService.hasPasswordCredential(7)).thenReturn(true);
+
+        assertTrue(controller.registrationRequirements().currentPasswordRequired());
+    }
+
+    @Test
+    void registrationRequirements_passwordlessAccountDoesNotRequireCurrentPassword() {
+        User user = user(7);
+        when(authService.getCurrentUser()).thenReturn(user);
+        when(webAuthnService.hasPasskey(7)).thenReturn(false);
+        when(authService.hasPasswordCredential(7)).thenReturn(false);
+
+        assertFalse(controller.registrationRequirements().currentPasswordRequired());
+    }
+
+    @Test
+    void registrationRequirements_existingPasskeyDoesNotRequireCurrentPassword() {
+        User user = user(7);
+        when(authService.getCurrentUser()).thenReturn(user);
+        when(webAuthnService.hasPasskey(7)).thenReturn(true);
+
+        assertFalse(controller.registrationRequirements().currentPasswordRequired());
+        verify(authService, never()).hasPasswordCredential(anyInt());
     }
 
     @Test
@@ -129,7 +184,7 @@ class WebAuthnControllerTest {
         registrationController.registerOptions(null, request, response);
 
         verify(sessionSecurityService).requireRecentAuthentication(7);
-        verify(authService, never()).requireCurrentPassword(anyInt(), any(), any());
+        verify(authService, never()).requireFirstPasskeyBootstrapAuthentication(anyInt(), any(), any());
     }
 
     @Test
@@ -143,7 +198,7 @@ class WebAuthnControllerTest {
         assertThrows(BadRequestException.class,
             () -> controller.registerVerify("work key", "{}", request, response));
 
-        verify(webAuthnService, never()).finishRegistration(any(), any(), any());
+        verify(webAuthnService, never()).finishRegistration(anyInt(), any(), any(), any());
     }
 
     @Test

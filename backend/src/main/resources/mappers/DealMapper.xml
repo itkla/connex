@@ -67,6 +67,33 @@
     d.closed_reason, d.won, d.risk_excluded, d.created_at, d.updated_at
   </sql>
 
+  <sql id="visibleCompanyJoin">
+    (c.workspace_id = #{workspaceId}
+     OR EXISTS (SELECT 1 FROM company_share cs
+        JOIN workspace vws ON vws.id = cs.workspace_id
+        JOIN workspace ows ON ows.id = c.workspace_id AND ows.org_id = vws.org_id
+        WHERE cs.company_id = c.id AND cs.workspace_id = #{workspaceId}))
+  </sql>
+
+  <sql id="visiblePipelineJoin">
+    (p.workspace_id = #{workspaceId}
+     OR EXISTS (SELECT 1 FROM pipeline_share ps
+        JOIN workspace vws ON vws.id = ps.workspace_id
+        JOIN workspace ows ON ows.id = p.workspace_id AND ows.org_id = vws.org_id
+        WHERE ps.pipeline_id = p.id AND ps.workspace_id = #{workspaceId}))
+  </sql>
+
+  <sql id="visibleStageJoin">
+    EXISTS (SELECT 1
+      FROM pipeline sp
+      WHERE sp.id = s.pipeline_id AND sp.workspace_id = s.workspace_id
+        AND (sp.workspace_id = #{workspaceId}
+          OR EXISTS (SELECT 1 FROM pipeline_share ps
+            JOIN workspace vws ON vws.id = ps.workspace_id
+            JOIN workspace ows ON ows.id = sp.workspace_id AND ows.org_id = vws.org_id
+            WHERE ps.pipeline_id = sp.id AND ps.workspace_id = #{workspaceId})))
+  </sql>
+
   <sql id="dealFilterWhere">
     <where>
       AND d.workspace_id = #{workspaceId}
@@ -167,9 +194,10 @@
   <select id="getDealsPage" resultMap="DealResult">
     SELECT <include refid="qualifiedDealColumns"/>
     FROM deal d
-    LEFT JOIN company c ON c.id = d.company_id
-    LEFT JOIN pipeline p ON p.id = d.pipeline_id
-    LEFT JOIN stage s ON s.id = d.stage_id
+    LEFT JOIN company c ON c.id = d.company_id AND <include refid="visibleCompanyJoin"/>
+    LEFT JOIN pipeline p ON p.id = d.pipeline_id AND <include refid="visiblePipelineJoin"/>
+    LEFT JOIN stage s ON s.id = d.stage_id AND s.pipeline_id = d.pipeline_id
+      AND <include refid="visibleStageJoin"/>
     <include refid="dealFilterWhere"/>
     <include refid="dealPageOrderBy"/>
     LIMIT #{limit} OFFSET #{offset}
@@ -546,7 +574,7 @@
   <select id="search" resultMap="DealResult">
     SELECT <include refid="qualifiedDealColumns"/>
     FROM deal d
-    LEFT JOIN company c ON c.id = d.company_id
+    LEFT JOIN company c ON c.id = d.company_id AND <include refid="visibleCompanyJoin"/>
     WHERE d.workspace_id = #{workspaceId}
       AND (d.name LIKE #{query} OR d.currency LIKE #{query} OR c.name LIKE #{query})
     ORDER BY d.name
@@ -632,13 +660,15 @@
 
   <select id="getStageOutcome" resultType="string">
     SELECT CASE WHEN is_success THEN 'won' WHEN is_failure THEN 'lost' ELSE 'normal' END
-    FROM stage WHERE workspace_id = #{workspaceId} AND id = #{stageId}
+    FROM stage s
+    WHERE s.id = #{stageId} AND <include refid="visibleStageJoin"/>
   </select>
 
   <select id="getLastNormalStageId" resultType="java.lang.Integer">
-    SELECT id FROM stage
-    WHERE workspace_id = #{workspaceId} AND pipeline_id = #{pipelineId} AND is_success = FALSE AND is_failure = FALSE
-    ORDER BY position DESC
+    SELECT s.id FROM stage s
+    WHERE s.pipeline_id = #{pipelineId} AND <include refid="visibleStageJoin"/>
+      AND s.is_success = FALSE AND s.is_failure = FALSE
+    ORDER BY s.position DESC
     LIMIT 1
   </select>
 

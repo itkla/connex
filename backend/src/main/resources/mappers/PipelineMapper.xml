@@ -48,6 +48,11 @@
     WHERE <include refid="visible"/> AND id = #{id}
   </select>
 
+  <select id="getOwnedPipelineById" resultMap="PipelineFullResult">
+    SELECT id, workspace_id, name, created_at, updated_at FROM pipeline
+    WHERE workspace_id = #{workspaceId} AND id = #{id}
+  </select>
+
   <select id="search" resultType="Pipeline">
     SELECT id, workspace_id, name, created_at, updated_at FROM pipeline
     WHERE <include refid="visible"/> AND name LIKE #{query}
@@ -72,8 +77,24 @@
   <delete id="deletePipeline">DELETE FROM pipeline WHERE workspace_id = #{workspaceId} AND id = #{id}</delete>
 
   <select id="getStageById" resultMap="StageResult">
-    SELECT id, workspace_id, name, pipeline_id, position, is_success, is_failure FROM stage
-    WHERE workspace_id = #{workspaceId} AND id = #{id}
+    SELECT stage.id, stage.workspace_id, stage.name, stage.pipeline_id, stage.position,
+           stage.is_success, stage.is_failure
+    FROM stage
+    JOIN pipeline ON pipeline.id = stage.pipeline_id AND pipeline.workspace_id = stage.workspace_id
+    WHERE pipeline.workspace_id = #{workspaceId} AND stage.id = #{id}
+  </select>
+
+  <select id="getVisibleStageById" resultMap="StageResult">
+    SELECT stage.id, stage.workspace_id, stage.name, stage.pipeline_id, stage.position,
+           stage.is_success, stage.is_failure
+    FROM stage
+    JOIN pipeline ON pipeline.id = stage.pipeline_id AND pipeline.workspace_id = stage.workspace_id
+    WHERE stage.id = #{id}
+      AND (pipeline.workspace_id = #{workspaceId}
+           OR EXISTS (SELECT 1 FROM pipeline_share ps
+              JOIN workspace vws ON vws.id = ps.workspace_id
+              JOIN workspace ows ON ows.id = pipeline.workspace_id AND ows.org_id = vws.org_id
+              WHERE ps.pipeline_id = pipeline.id AND ps.workspace_id = #{workspaceId}))
   </select>
 
   <select id="getAllStages" resultMap="StageResult">
@@ -87,14 +108,17 @@
   </select>
 
   <select id="getStagesByPipelineId" resultMap="StageResult">
-    SELECT id, workspace_id, name, pipeline_id, position, is_success, is_failure FROM stage
-    WHERE pipeline_id = #{pipelineId}
-      AND (stage.workspace_id = #{workspaceId}
+    SELECT stage.id, stage.workspace_id, stage.name, stage.pipeline_id, stage.position,
+           stage.is_success, stage.is_failure
+    FROM stage
+    JOIN pipeline ON pipeline.id = stage.pipeline_id AND pipeline.workspace_id = stage.workspace_id
+    WHERE pipeline.id = #{pipelineId}
+      AND (pipeline.workspace_id = #{workspaceId}
            OR EXISTS (SELECT 1 FROM pipeline_share ps
               JOIN workspace vws ON vws.id = ps.workspace_id
-              JOIN workspace ows ON ows.id = stage.workspace_id AND ows.org_id = vws.org_id
-              WHERE ps.pipeline_id = #{pipelineId} AND ps.workspace_id = #{workspaceId}))
-    ORDER BY position
+              JOIN workspace ows ON ows.id = pipeline.workspace_id AND ows.org_id = vws.org_id
+              WHERE ps.pipeline_id = pipeline.id AND ps.workspace_id = #{workspaceId}))
+    ORDER BY stage.position
   </select>
 
   <insert id="insertStage" useGeneratedKeys="true" keyProperty="id">

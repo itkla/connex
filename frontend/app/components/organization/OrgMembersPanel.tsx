@@ -15,6 +15,7 @@ import {
 } from "@/app/lib/api";
 import { useWorkspace } from "@/app/hooks/useWorkspace";
 import { useFieldErrors } from "@/app/hooks/useFieldErrors";
+import { usePasskeyStepUpErrorHandler } from "@/app/hooks/usePasskeyStepUpError";
 import { toastError, toastSuccess } from "@/app/lib/toast";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
@@ -53,6 +54,7 @@ function initial(name: string) {
 
 export default function OrgMembersPanel({ currentUserId }: { currentUserId: number | null }) {
     const t = useTranslations("OrgMembers");
+    const handlePasskeyStepUpError = usePasskeyStepUpErrorHandler();
     const { activeWorkspace } = useWorkspace();
     const orgId = activeWorkspace?.orgId ?? null;
     const isOwner = activeWorkspace?.orgRole === "owner";
@@ -105,7 +107,9 @@ export default function OrgMembersPanel({ currentUserId }: { currentUserId: numb
             await reload(orgId);
             toastSuccess(t("roleUpdatedToast"));
         } catch (err) {
-            toastError(err instanceof Error ? err.message : String(err));
+            if (!handlePasskeyStepUpError(err)) {
+                toastError(err instanceof Error ? err.message : String(err));
+            }
         } finally {
             setBusy(null);
         }
@@ -120,7 +124,9 @@ export default function OrgMembersPanel({ currentUserId }: { currentUserId: numb
             toastSuccess(t("removedToast"));
             setRemoveTarget(null);
         } catch (err) {
-            toastError(err instanceof Error ? err.message : String(err));
+            if (!handlePasskeyStepUpError(err)) {
+                toastError(err instanceof Error ? err.message : String(err));
+            }
         } finally {
             setIsRemoving(false);
         }
@@ -136,7 +142,7 @@ export default function OrgMembersPanel({ currentUserId }: { currentUserId: numb
             toastSuccess(t("addedToast"));
         } catch (err) {
             if (err instanceof ApiError && err.fieldErrors) setFieldErrors(err.fieldErrors);
-            else toastError(err instanceof Error ? err.message : String(err));
+            else if (!handlePasskeyStepUpError(err)) toastError(err instanceof Error ? err.message : String(err));
         } finally {
             setAdding(false);
         }

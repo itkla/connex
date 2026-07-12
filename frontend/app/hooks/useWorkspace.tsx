@@ -6,12 +6,6 @@ import { useRouter } from "next/navigation";
 import type { Workspace } from "@/app/lib/types";
 import { createWorkspace, switchWorkspace } from "@/app/lib/api";
 
-const WORKSPACE_COOKIE = "connex_workspace";
-
-function writeWorkspaceCookie(id: number) {
-    document.cookie = `${WORKSPACE_COOKIE}=${id};path=/;max-age=31536000;samesite=lax`;
-}
-
 type WorkspaceContextValue = {
     workspaces: Workspace[];
     activeWorkspaceId: number | null;
@@ -43,7 +37,6 @@ export function WorkspaceProvider({
             setSwitching(true);
             try {
                 await switchWorkspace(id);
-                writeWorkspaceCookie(id);
                 setActiveWorkspaceId(id);
                 router.replace("/dashboard");
                 router.refresh();
@@ -57,7 +50,6 @@ export function WorkspaceProvider({
     const create = useCallback(
         async (name: string) => {
             const workspace = await createWorkspace(name);
-            writeWorkspaceCookie(workspace.id);
             setWorkspaces((prev) => [...prev, workspace]);
             setActiveWorkspaceId(workspace.id);
             router.replace("/dashboard");
