@@ -45,6 +45,7 @@ import ooo.klae.connex.backend.dto.DealKpisDto;
 import ooo.klae.connex.backend.dto.DealMetricsDto;
 import ooo.klae.connex.backend.dto.DealRiskDto;
 import ooo.klae.connex.backend.dto.DealPipelineValueDto;
+import ooo.klae.connex.backend.dto.DealPrimaryContactDto;
 import ooo.klae.connex.backend.dto.DealRevenueSeriesDto;
 import ooo.klae.connex.backend.dto.DealStageDistributionDto;
 import ooo.klae.connex.backend.dto.DealSummaryDto;
@@ -466,6 +467,12 @@ public class DealService {
         return dealMapper.getDealsByCompanyId(workspaceService.getCurrentWorkspaceId(), companyId);
     }
 
+    /** Returns the bounded, outcome-prioritized company deal history used by AI relationship context. */
+    public List<Deal> getAccountHistoryDeals(int companyId, int excludeDealId, int limit) {
+        return dealMapper.getAccountHistoryDeals(
+            workspaceService.getCurrentWorkspaceId(), companyId, excludeDealId, limit);
+    }
+
     /**
      * Retrieves all {@code Deal} records by person ID.
      * @param personId
@@ -836,6 +843,15 @@ public class DealService {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         if (dealMapper.getDealById(workspaceId, dealId) == null) throw new ResourceNotFoundException("Deal not found with id: " + dealId);
         return dealMapper.getDealPeopleByDealId(workspaceId, dealId);
+    }
+
+    /** Returns at most one visible contact per requested workspace deal. */
+    public List<DealPrimaryContactDto> getPrimaryContacts(List<Integer> dealIds) {
+        if (dealIds == null || dealIds.isEmpty()) {
+            return List.of();
+        }
+        return dealMapper.getPrimaryContactsByDealIds(
+            workspaceService.getCurrentWorkspaceId(), dealIds);
     }
 
     /**

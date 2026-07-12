@@ -89,6 +89,14 @@
     AND n.recipient_id = #{recipientId}
   </sql>
 
+  <sql id="visiblePersonJoin">
+    (p.workspace_id = #{workspaceId}
+     OR EXISTS (SELECT 1 FROM person_share ps
+        JOIN workspace vws ON vws.id = ps.workspace_id
+        JOIN workspace ows ON ows.id = p.workspace_id AND ows.org_id = vws.org_id
+        WHERE ps.person_id = p.id AND ps.workspace_id = #{workspaceId}))
+  </sql>
+
   <!-- Reconciliation-managed reminder types. Every reconcile/resolve/purge statement scopes to
        this list so a new reminder producer only has to extend it here, in one place. -->
   <sql id="reminderTypes">
@@ -348,8 +356,8 @@
       ON d.workspace_id = t.workspace_id
      AND d.id = t.deal_id
     LEFT JOIN person p
-      ON p.workspace_id = t.workspace_id
-     AND p.id = t.person_id
+      ON p.id = t.person_id
+     AND <include refid="visiblePersonJoin"/>
     WHERE t.workspace_id = #{workspaceId}
       AND t.completed = FALSE
       AND t.due_date IS NOT NULL
@@ -405,7 +413,7 @@
     JOIN deal_person dp ON dp.deal_id = d.id
     JOIN person p
       ON p.id = dp.person_id
-     AND p.workspace_id = d.workspace_id
+     AND <include refid="visiblePersonJoin"/>
     LEFT JOIN stage s
       ON s.id = d.stage_id
      AND s.workspace_id = d.workspace_id

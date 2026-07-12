@@ -98,7 +98,8 @@ public class ScoringService {
      * Scores every contact in the workspace as of now, including those with no activity (band "cold").
      */
     public List<RelationshipTemperatureDto> scoreContacts(int workspaceId) {
-        return computeContactScores(workspaceId, Instant.now(clock).toEpochMilli(), Long.MAX_VALUE);
+        long reference = Instant.now(clock).toEpochMilli();
+        return computeContactScores(workspaceId, reference, reference);
     }
 
     /** Scores all contacts and companies from compact aggregates computed by the database. */
@@ -180,7 +181,7 @@ public class ScoringService {
         List<RelationshipTemperatureDto> out = new ArrayList<>(existing.size());
         for (Integer personId : requested) {
             if (existing.contains(personId)) {
-                out.add(temperature(personId, touches.getOrDefault(personId, List.of()), reference, Long.MAX_VALUE));
+                out.add(temperature(personId, touches.getOrDefault(personId, List.of()), reference, reference));
             }
         }
         return out;
@@ -224,7 +225,8 @@ public class ScoringService {
      * are scoped elsewhere).
      */
     public List<RelationshipTemperatureDto> scoreCompanies(int workspaceId) {
-        return computeCompanyScores(workspaceId, Instant.now(clock).toEpochMilli(), Long.MAX_VALUE);
+        long reference = Instant.now(clock).toEpochMilli();
+        return computeCompanyScores(workspaceId, reference, reference);
     }
 
     public List<RelationshipTemperatureDto> coolingCompanies(int workspaceId, int limit) {
@@ -273,7 +275,7 @@ public class ScoringService {
         for (Company company : companies) {
             scores.put(company.getId(), temperature(
                 company.getId(), byCompany.getOrDefault(company.getId(), List.of()),
-                reference, Long.MAX_VALUE));
+                reference, reference));
         }
         return requested.stream().map(scores::get).filter(java.util.Objects::nonNull).toList();
     }
@@ -524,9 +526,9 @@ public class ScoringService {
 
     /**
      * Collapses a contact's or company's touches into a single temperature reading, decayed against
-     * {@code reference} and counting only touches timestamped at or before {@code cutoff}. Pass
-     * {@code Long.MAX_VALUE} as the cutoff for a live reading; the replay passes the frame instant so
-     * a future-dated touch is skipped before the age clamp and never leaks into a past frame.
+     * {@code reference} and counting only touches timestamped at or before {@code cutoff}. Live and
+     * replay readings both use their reference instant as the cutoff, so future-dated touches are
+     * skipped before the age calculation.
      */
     private RelationshipTemperatureDto temperature(int id, List<Touch> touches, long reference, long cutoff) {
         double raw = 0, recent = 0, prior = 0;

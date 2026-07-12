@@ -19,6 +19,7 @@ import ooo.klae.connex.backend.beans.Company;
 import ooo.klae.connex.backend.beans.Deal;
 import ooo.klae.connex.backend.beans.DealStageHistory;
 import ooo.klae.connex.backend.beans.Note;
+import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.beans.Pipeline;
 import ooo.klae.connex.backend.beans.Stage;
 import ooo.klae.connex.backend.beans.Task;
@@ -31,6 +32,7 @@ import ooo.klae.connex.backend.dto.DealKpisDto;
 import ooo.klae.connex.backend.dto.DealMetricsDto;
 import ooo.klae.connex.backend.dto.DealMonthTotalDto;
 import ooo.klae.connex.backend.dto.DealPipelineValueDto;
+import ooo.klae.connex.backend.dto.DealPrimaryContactDto;
 import ooo.klae.connex.backend.dto.DealRevenueSeriesDto;
 import ooo.klae.connex.backend.dto.DealStageDistributionDto;
 import ooo.klae.connex.backend.dto.DealSummaryDto;
@@ -38,11 +40,13 @@ import ooo.klae.connex.backend.dto.DealTopDto;
 import ooo.klae.connex.backend.dto.FacetCount;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
+import ooo.klae.connex.backend.mappers.ShareMapper;
 
 class DealServiceTest extends AbstractServiceTest {
 
     @Autowired DealService dealService;
     @Autowired JdbcTemplate jdbcTemplate;
+    @Autowired ShareMapper shareMapper;
 
     @Test
     void aggregateReadsAreAssembledAndIsolatedByWorkspace() {
@@ -657,6 +661,61 @@ class DealServiceTest extends AbstractServiceTest {
             dealService.getClosingSoonDeals(7, 6).stream().map(Deal::getId).toList());
     }
 
+    @Test
+    void primaryContactsBatchReturnsOneAlphabeticalVisibleContactPerDeal() {
+        Pipeline pipeline = newPipeline();
+        Stage stage = newStage(pipeline, 0);
+        Deal firstDeal = newDeal(pipeline, stage, newCompany());
+        Deal secondDeal = newDeal(pipeline, stage, newCompany());
+        Person zulu = personNamed("Zulu Contact");
+        Person alpha = personNamed("Alpha Contact");
+        Person second = personNamed("Second Contact");
+        dealMapper.addPerson(workspace.getId(), firstDeal.getId(), zulu.getId(), null);
+        dealMapper.addPerson(workspace.getId(), firstDeal.getId(), alpha.getId(), null);
+        dealMapper.addPerson(workspace.getId(), secondDeal.getId(), second.getId(), null);
+
+        List<DealPrimaryContactDto> contacts = dealService.getPrimaryContacts(
+            List.of(secondDeal.getId(), firstDeal.getId()));
+
+        assertEquals(2, contacts.size());
+        assertEquals(alpha.getId(), contacts.stream()
+            .filter(contact -> contact.dealId() == firstDeal.getId())
+            .findFirst().orElseThrow().personId());
+        assertEquals(second.getId(), contacts.stream()
+            .filter(contact -> contact.dealId() == secondDeal.getId())
+            .findFirst().orElseThrow().personId());
+        assertTrue(dealService.getPrimaryContacts(List.of()).isEmpty());
+    }
+
+    @Test
+    void sharedPersonCanBeRemovedFromOwnedDealAfterShareRevocation() {
+        Pipeline pipeline = newPipeline();
+        Stage stage = newStage(pipeline, 0);
+        Deal deal = newDeal(pipeline, stage, newCompany());
+        Workspace sibling = new Workspace();
+        sibling.setName("Sibling " + unique());
+        sibling.setSlug("sibling-" + unique());
+        Integer orgId = workspaceMapper.getOrgId(workspace.getId());
+        assertNotNull(orgId);
+        sibling.setOrgId(orgId);
+        workspaceMapper.insert(sibling);
+        Person shared = new Person();
+        shared.setWorkspaceId(sibling.getId());
+        shared.setName("Shared " + unique());
+        personMapper.insert(shared);
+        assertEquals(1, shareMapper.sharePerson(
+            shared.getId(), sibling.getId(), workspace.getId(), currentUser.getId(), false));
+        dealService.addPerson(deal.getId(), shared.getId(), "champion");
+        assertEquals(1, shareMapper.unsharePerson(
+            shared.getId(), sibling.getId(), workspace.getId()));
+
+        dealService.removePerson(deal.getId(), shared.getId());
+
+        assertEquals(0, jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM deal_person WHERE deal_id = ? AND person_id = ?",
+            Integer.class, deal.getId(), shared.getId()));
+    }
+
     private Workspace newWorkspace() {
         Workspace created = new Workspace();
         created.setName("Workspace " + unique());
@@ -689,6 +748,14 @@ class DealServiceTest extends AbstractServiceTest {
         company.setWorkspaceId(targetWorkspace.getId());
         companyMapper.insert(company);
         return company;
+    }
+
+    private Person personNamed(String name) {
+        Person person = new Person();
+        person.setWorkspaceId(workspace.getId());
+        person.setName(name);
+        personMapper.insert(person);
+        return person;
     }
 
     private Deal updateDeal(Deal deal, String name, double value, double actualValue,

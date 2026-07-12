@@ -34,6 +34,7 @@ import CompanyAvatar from '@/app/components/records/companies/CompanyAvatar';
 import NewCompanyDialog from '@/app/components/records/companies/NewCompanyDialog';
 import { type PendingContact, type PendingContactDraft } from '@/app/components/records/companies/CompanyContactsField';
 import QuickEditCompanySheet, { type CompanyDraft } from '@/app/components/records/companies/QuickEditCompanySheet';
+import { evaluableSegmentDefinition, hasSegmentConditions } from '@/app/lib/segmentDefinition';
 import { createCompany, createContact, updateContact, getUsers, updateCompany, getCompaniesPage, getCompaniesSegmentPage, getCompanyEngagement, getCompanyFacets, getCompanyIds, getCompanySegmentIds, getCompanyTemperatures, isFieldError, getSegmentFields, getTags, bulkAddTagToCompanies, bulkRemoveTagFromCompanies, bulkDeleteCompanies } from '@/app/lib/api';
 import BulkTagDialog from '@/app/components/records/BulkTagDialog';
 import { notifyBulkResult } from '@/app/lib/bulkToast';
@@ -113,15 +114,9 @@ export default function CompaniesBrowser({ savedViews }: { savedViews: SavedView
 
     const [definition, setDefinition] = useState<SegmentDefinition>(EMPTY_DEFINITION);
     const [segmentFields, setSegmentFields] = useState<SegmentFields | null>(null);
-    const evaluable = useMemo<SegmentDefinition>(
-        () => ({
-            match: definition.match,
-            conditions: definition.conditions.filter((condition) => condition.type === 'predicate' || (condition.value ?? '').trim() !== ''),
-        }),
-        [definition],
-    );
+    const evaluable = useMemo(() => evaluableSegmentDefinition(definition), [definition]);
     const segmentsKey = useMemo(() => JSON.stringify(evaluable), [evaluable]);
-    const hasSegments = evaluable.conditions.length > 0;
+    const hasSegments = hasSegmentConditions(evaluable);
     const failedSegmentKeyRef = useRef<string | null>(null);
     const [segmentErrorKey, setSegmentErrorKey] = useState<string | null>(null);
     useEffect(() => {
@@ -564,7 +559,7 @@ export default function CompaniesBrowser({ savedViews }: { savedViews: SavedView
         if (companyFacets.hasNoIndustry) options.push({ key: FILTER_EMPTY, label: t('filterNoIndustry') });
         return options.length ? [{ key: 'industry', label: t('columnIndustry'), options }] : [];
     }, [companyFacets, t]);
-    const hasActiveFilters = query.trim() !== '' || countActiveFilters(filterState) > 0 || evaluable.conditions.length > 0;
+    const hasActiveFilters = query.trim() !== '' || countActiveFilters(filterState) > 0 || hasSegments;
     const clearAll = useCallback(() => { setQuery(''); setFilterState({}); setDefinition(EMPTY_DEFINITION); }, [setQuery, setFilterState]);
     const resolveTagName = useCallback(
         (id: string) => segmentFields?.tags.find((tag) => String(tag.id) === id)?.name ?? id,

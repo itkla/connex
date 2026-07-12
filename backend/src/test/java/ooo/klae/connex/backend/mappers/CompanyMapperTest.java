@@ -475,6 +475,24 @@ class CompanyMapperTest extends AbstractMapperTest {
         activity.setCreatedBy(user);
         activity.setTimestamp("2026-07-10 00:00:00");
         activityMapper.insert(activity);
+        Activity boundary = new Activity();
+        boundary.setWorkspaceId(workspace.getId());
+        boundary.setType("meeting");
+        boundary.setSubject("Boundary scoring meeting");
+        boundary.setPerson(person);
+        boundary.setDeal(deal);
+        boundary.setCreatedBy(user);
+        boundary.setTimestamp("2026-07-11 00:00:00");
+        activityMapper.insert(boundary);
+        Activity future = new Activity();
+        future.setWorkspaceId(workspace.getId());
+        future.setType("meeting");
+        future.setSubject("Future scoring meeting");
+        future.setPerson(person);
+        future.setDeal(deal);
+        future.setCreatedBy(user);
+        future.setTimestamp("2026-07-11 00:00:01");
+        activityMapper.insert(future);
         Task task = new Task();
         task.setWorkspaceId(workspace.getId());
         task.setDescription("Scoring task");
@@ -514,12 +532,12 @@ class CompanyMapperTest extends AbstractMapperTest {
             .filter(score -> score.id() == company.getId())
             .findFirst().orElseThrow();
 
-        assertEquals(3, personScore.recentTouchCount());
-        assertEquals(3, companyScore.recentTouchCount());
-        assertEquals(1.7, personScore.recentWeight(), 0.000001);
-        assertEquals(1.7, companyScore.recentWeight(), 0.000001);
-        assertEquals("2026-07-10 00:00:00", personScore.lastTouchAt());
-        assertEquals("2026-07-10 00:00:00", companyScore.lastTouchAt());
+        assertEquals(4, personScore.recentTouchCount());
+        assertEquals(4, companyScore.recentTouchCount());
+        assertEquals(2.7, personScore.recentWeight(), 0.000001);
+        assertEquals(2.7, companyScore.recentWeight(), 0.000001);
+        assertEquals("2026-07-11 00:00:00", personScore.lastTouchAt());
+        assertEquals("2026-07-11 00:00:00", companyScore.lastTouchAt());
         assertTrue(personScore.rawWeight() > 0);
         assertTrue(companyScore.rawWeight() > 0);
     }

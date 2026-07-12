@@ -112,7 +112,7 @@
           WHERE t.workspace_id = #{workspaceId} AND d.workspace_id = #{workspaceId}
             AND d.company_id IS NOT NULL
         ) source
-        WHERE source.touched_at IS NOT NULL
+        WHERE source.touched_at IS NOT NULL AND source.touched_at &lt;= #{reference}
         GROUP BY source.touch_kind, source.touch_id, source.company_id,
                  source.touched_at, source.weight
       ) attributed

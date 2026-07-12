@@ -19,6 +19,7 @@ import ooo.klae.connex.backend.dto.CompanyDto;
 import ooo.klae.connex.backend.dto.DashboardCompanyTemperatureDto;
 import ooo.klae.connex.backend.dto.DashboardContactTemperatureDto;
 import ooo.klae.connex.backend.dto.DashboardDealRiskDto;
+import ooo.klae.connex.backend.dto.DashboardDealRiskResult;
 import ooo.klae.connex.backend.dto.DealDto;
 import ooo.klae.connex.backend.dto.DealRiskDto;
 import ooo.klae.connex.backend.dto.PersonDto;
@@ -49,8 +50,9 @@ public class RelationshipDashboardService {
         List<RelationshipTemperatureDto> coolingCompanies = cooling(companyScores);
         Map<Integer, RelationshipTemperatureDto> warmth = new HashMap<>();
         for (RelationshipTemperatureDto score : contactScores) warmth.put(score.getId(), score);
-        List<DealRiskDto> risks = dealRiskService.assessDashboard(
+        DashboardDealRiskResult riskResult = dealRiskService.assessDashboard(
             workspaceId, warmth, DASHBOARD_LIMIT);
+        List<DealRiskDto> risks = riskResult.items();
 
         Map<Integer, Person> people = peopleById(workspaceId, coolingContacts);
         Map<Integer, Deal> deals = dealsById(workspaceId, risks);
@@ -83,7 +85,8 @@ public class RelationshipDashboardService {
             scoringService.summarizeScores(contactScores, companyScores),
             contactItems,
             companyItems,
-            riskItems
+            riskItems,
+            riskResult.truncated()
         );
     }
 

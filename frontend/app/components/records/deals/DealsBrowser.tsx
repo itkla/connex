@@ -52,7 +52,7 @@ import {
     getDealStageDistribution,
     getPipelines,
     getStagesByPipelineId,
-    getDealPeople,
+    getDealPrimaryContacts,
     getDealRisks,
     getTags,
     getActiveWorkspaceMembers,
@@ -61,6 +61,7 @@ import {
     bulkDeleteDeals,
     bulkAssignDealOwner,
     bulkChangeDealStage,
+    ApiError,
     isFieldError,
 } from '@/app/lib/api';
 import BulkTagDialog from '@/app/components/records/BulkTagDialog';
@@ -157,6 +158,18 @@ function resolveNamedFacetIds<T extends { id: number; name: string }>(values: st
     return values.some((value) => value !== FILTER_EMPTY) ? [0] : undefined;
 }
 
+function resolveCompanyFacetIds(values: string[] | undefined, facets: DealFacets['companies']): number[] | undefined {
+    if (!values?.length) return undefined;
+    const ids = values.flatMap((value) => {
+        if (value === FILTER_EMPTY) return [];
+        const id = Number(value);
+        if (Number.isInteger(id) && id > 0) return [id];
+        return facets.flatMap((facet) => facet.label === value ? [Number(facet.key)] : []);
+    }).filter((id) => Number.isInteger(id) && id > 0);
+    if (ids.length > 0) return Array.from(new Set(ids));
+    return values.some((value) => value !== FILTER_EMPTY) ? [0] : undefined;
+}
+
 function normalizeDealFilters(filters: FilterState): FilterState {
     const normalized: FilterState = {};
     for (const key of DEAL_FILTER_KEYS) {
@@ -183,6 +196,13 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
     const [dealMetrics, setDealMetrics] = useState(initialMetrics);
     const [dealFacets, setDealFacets] = useState(initialFacets);
     const [dataRevision, setDataRevision] = useState(0);
+    const [pageRequestError, setPageRequestError] = useState<string | null>(null);
+    const [metricsRequestError, setMetricsRequestError] = useState<string | null>(null);
+    const requestError = pageRequestError ?? metricsRequestError;
+    const loadErrorMessage = useCallback((error: unknown, riskActive: boolean) =>
+        error instanceof ApiError && error.status === 400 && riskActive
+            ? t('riskFilterTooBroad')
+            : t('loadFailed'), [t]);
     const requestIdRef = useRef(0);
     const loadDealsPage = useCallback(async (params: DealsPageParams) => {
         const requestId = requestIdRef.current + 1;
@@ -193,16 +213,18 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
             if (requestId !== requestIdRef.current) return;
             setDeals(response.items);
             setTotal(response.total);
+            setPageRequestError(null);
             const maxPage = Math.max(1, Math.ceil(response.total / (params.size ?? 25)));
             if ((params.page ?? 1) > maxPage) setPage(maxPage);
-        } catch {
+        } catch (error: unknown) {
             if (requestId !== requestIdRef.current) return;
-            setDeals([]);
-            setTotal(0);
+            const message = loadErrorMessage(error, (params.risk?.length ?? 0) > 0);
+            setPageRequestError(message);
+            toastError(message);
         } finally {
             if (requestId === requestIdRef.current) setLoadingPage(false);
         }
-    }, []);
+    }, [loadErrorMessage]);
     const refreshData = useCallback(() => setDataRevision((revision) => revision + 1), []);
 
     const [companies, setCompanies] = useState<Company[]>([]);
@@ -237,22 +259,25 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
 
     useEffect(() => {
         let cancelled = false;
-        const freelancerDeals = deals.filter((d) => d.company == null);
-        const request = freelancerDeals.length === 0
-            ? Promise.resolve([] as readonly (readonly [number, Contact | undefined])[])
-            : Promise.all(
-                freelancerDeals.map(async (d) => {
-                    const people = await getDealPeople(d.id).catch(() => [] as Contact[]);
-                    return [d.id, people[0]] as const;
-                }),
-            );
-        request.then((entries) => {
+        const freelancerDealIds = deals.flatMap((deal) => deal.company == null ? [deal.id] : []);
+        getDealPrimaryContacts(freelancerDealIds).then((entries) => {
             if (cancelled) return;
             const m = new Map<number, Contact>();
-            for (const [id, contact] of entries) {
-                if (contact) m.set(id, contact);
+            for (const entry of entries) {
+                m.set(entry.dealId, {
+                    id: entry.personId,
+                    name: entry.name,
+                    imageUrl: entry.imageUrl,
+                    email: '',
+                    phone: '',
+                    title: '',
+                    createdAt: '',
+                    updatedAt: '',
+                });
             }
             setContactByDealId(m);
+        }).catch(() => {
+            if (!cancelled) setContactByDealId(new Map());
         });
         return () => {
             cancelled = true;
@@ -356,27 +381,30 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
         return {
             status: status?.length ? status : undefined,
             risk: risk?.length ? risk : undefined,
-            companyId: resolveNamedFacetIds(activeFilterState.company, companies),
+            companyId: resolveCompanyFacetIds(activeFilterState.company, dealFacets.companies),
             noCompany: activeFilterState.company?.includes(FILTER_EMPTY) || undefined,
             pipelineId: resolveNamedFacetIds(activeFilterState.pipeline, pipelines),
             stageId: resolveNamedFacetIds(activeFilterState.stage, allStages),
         };
-    }, [activeFilterState, companies, pipelines, allStages]);
+    }, [activeFilterState, dealFacets.companies, pipelines, allStages]);
     const serverFilterKey = useMemo(() => JSON.stringify(serverFilters), [serverFilters]);
     const deferredQuery = useDeferredValue(query.trim());
 
     useEffect(() => {
         let active = true;
         getDealMetrics({ ...serverFilters, q: deferredQuery || undefined })
-            .then((nextMetrics) => { if (active) setDealMetrics(nextMetrics); })
-            .catch(() => {
+            .then((nextMetrics) => {
                 if (!active) return;
-                setDealMetrics(EMPTY_DEAL_METRICS);
-                setRevenueSeries({ closed: [], projected: [] });
-                setStageDistribution([]);
+                setDealMetrics(nextMetrics);
+                setMetricsRequestError(null);
+            })
+            .catch((error: unknown) => {
+                if (!active) return;
+                const message = loadErrorMessage(error, (serverFilters.risk?.length ?? 0) > 0);
+                setMetricsRequestError(message);
             });
         return () => { active = false; };
-    }, [serverFilterKey, deferredQuery, dataRevision, serverFilters]);
+    }, [serverFilterKey, deferredQuery, dataRevision, serverFilters, loadErrorMessage]);
 
     useEffect(() => {
         let active = true;
@@ -412,17 +440,11 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
     }, [setSelectedIds]);
     const changeQuery = useCallback((nextQuery: string) => {
         setSelectedIds(new Set());
-        setDealMetrics(EMPTY_DEAL_METRICS);
-        setRevenueSeries({ closed: [], projected: [] });
-        setStageDistribution([]);
         setQuery(nextQuery);
         setPage(1);
     }, [setQuery, setSelectedIds]);
     const changeFilters = useCallback((nextFilters: FilterState) => {
         setSelectedIds(new Set());
-        setDealMetrics(EMPTY_DEAL_METRICS);
-        setRevenueSeries({ closed: [], projected: [] });
-        setStageDistribution([]);
         setFilterState(normalizeDealFilters(nextFilters));
         setPage(1);
     }, [setFilterState, setSelectedIds]);
@@ -1056,6 +1078,15 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
                         />
                     </FilterBar>
                 </Rise>
+
+                {requestError && (
+                    <div
+                        role="alert"
+                        className="rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive"
+                    >
+                        {requestError}
+                    </div>
+                )}
 
                 <Rise delay={0.3}>
                     {displayMode === 'kanban' ? (

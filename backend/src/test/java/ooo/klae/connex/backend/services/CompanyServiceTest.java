@@ -16,6 +16,7 @@ import static org.mockito.ArgumentMatchers.anyString;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.jdbc.core.JdbcTemplate;
 
 import ooo.klae.connex.backend.beans.Company;
 import ooo.klae.connex.backend.beans.Activity;
@@ -24,7 +25,9 @@ import ooo.klae.connex.backend.beans.Note;
 import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.beans.Pipeline;
 import ooo.klae.connex.backend.beans.Stage;
+import ooo.klae.connex.backend.beans.Tag;
 import ooo.klae.connex.backend.beans.Task;
+import ooo.klae.connex.backend.beans.Workspace;
 import ooo.klae.connex.backend.dto.CompanyEngagementCountsDto;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
@@ -33,12 +36,45 @@ import ooo.klae.connex.backend.mappers.ActivityMapper;
 import ooo.klae.connex.backend.mappers.DealMapper;
 import ooo.klae.connex.backend.mappers.NoteMapper;
 import ooo.klae.connex.backend.mappers.PersonMapper;
+import ooo.klae.connex.backend.mappers.ShareMapper;
 import ooo.klae.connex.backend.mappers.TagMapper;
 import ooo.klae.connex.backend.mappers.TaskMapper;
 
 class CompanyServiceTest extends AbstractServiceTest {
 
     @Autowired CompanyService companyService;
+    @Autowired ShareMapper shareMapper;
+    @Autowired JdbcTemplate jdbcTemplate;
+
+    @Test
+    void coreMutationsRejectSharedInCompanyBeforeSideEffects() {
+        Workspace ownerWorkspace = newWorkspaceInSameOrg();
+        Company shared = companyInWorkspace(ownerWorkspace);
+        shareMapper.shareCompany(
+            shared.getId(), ownerWorkspace.getId(), workspace.getId(), currentUser.getId(), true);
+        Tag tag = newTag();
+        int auditBefore = jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM audit_log WHERE workspace_id = ? AND entity_type = 'company' AND entity_id = ?",
+            Integer.class, workspace.getId(), shared.getId());
+        Company update = new Company();
+        update.setName("Rejected update");
+
+        assertThrows(ResourceNotFoundException.class,
+            () -> companyService.updateCompany(shared.getId(), update));
+        assertThrows(ResourceNotFoundException.class,
+            () -> companyService.addTag(shared.getId(), tag.getId()));
+        assertThrows(ResourceNotFoundException.class,
+            () -> companyService.removeTag(shared.getId(), tag.getId()));
+        assertThrows(ResourceNotFoundException.class,
+            () -> companyService.replaceTags(shared.getId(), List.of(tag.getId())));
+        assertThrows(ResourceNotFoundException.class,
+            () -> companyService.deleteCompany(shared.getId()));
+
+        assertTrue(companyMapper.existsOwned(ownerWorkspace.getId(), shared.getId()));
+        assertEquals(auditBefore, jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM audit_log WHERE workspace_id = ? AND entity_type = 'company' AND entity_id = ?",
+            Integer.class, workspace.getId(), shared.getId()));
+    }
 
     @Test
     void getPersonsByCompanyId_returnsOnlyMatchingPeople() {
@@ -207,5 +243,22 @@ class CompanyServiceTest extends AbstractServiceTest {
             mock(ReferenceService.class),
             Clock.systemUTC()
         );
+    }
+
+    private Workspace newWorkspaceInSameOrg() {
+        Workspace other = new Workspace();
+        other.setName("Other Workspace");
+        other.setSlug("other-" + unique());
+        other.setOrgId(workspaceMapper.getOrgId(workspace.getId()));
+        workspaceMapper.insert(other);
+        return other;
+    }
+
+    private Company companyInWorkspace(Workspace target) {
+        Company company = new Company();
+        company.setName("Company " + unique());
+        company.setWorkspaceId(target.getId());
+        companyMapper.insert(company);
+        return company;
     }
 }

@@ -36,6 +36,7 @@ import ooo.klae.connex.backend.dto.DealMetricsDto;
 import ooo.klae.connex.backend.dto.DealMoveRequest;
 import ooo.klae.connex.backend.dto.DealOwnerDto;
 import ooo.klae.connex.backend.dto.DealPipelineValueDto;
+import ooo.klae.connex.backend.dto.DealPrimaryContactDto;
 import ooo.klae.connex.backend.dto.DealRationaleDto;
 import ooo.klae.connex.backend.dto.DealRevenueSeriesDto;
 import ooo.klae.connex.backend.dto.DealRescheduleRequest;
@@ -186,6 +187,14 @@ public class DealController {
     @GetMapping("/facets")
     public DealFacets getDealFacets() {
         return dealService.getDealFacets();
+    }
+
+    /** Returns the first visible contact for each requested deal without per-deal fan-out. */
+    @GetMapping("/people/primary")
+    public List<DealPrimaryContactDto> getPrimaryContacts(
+            @RequestParam(required = false) List<Integer> ids) {
+        List<Integer> normalizedIds = normalizeIds(ids, "ids");
+        return normalizedIds == null ? List.of() : dealService.getPrimaryContacts(normalizedIds);
     }
 
     /**

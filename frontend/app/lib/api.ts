@@ -1151,7 +1151,7 @@ export async function getContactTemperatures(ids: number[], init: RequestInit = 
                 init,
             )),
     );
-    return batches.flat();
+    return batches.flat().sort((left, right) => right.score - left.score);
 }
 
 export function getContactTemperaturesFromCookie(cookie: string | null, ids: number[]) {
@@ -1512,9 +1512,22 @@ export function getDealStageHistory(id: number, init: RequestInit = {}) {
 }
 
 /** Risk assessment for a bounded requested deal set, highest risk first. */
-export function getDealRisks(ids: number[], init: RequestInit = {}) {
+export async function getDealRisks(ids: number[], init: RequestInit = {}) {
     if (ids.length === 0) return Promise.resolve([] as Types.DealRisk[]);
-    return getJson<Types.DealRisk[]>(`/api/deals/risk${buildQuery({ ids })}`, init);
+    const uniqueIds = Array.from(new Set(ids));
+    const batches = await Promise.all(
+        Array.from({ length: Math.ceil(uniqueIds.length / WORKSPACE_LIST_PAGE_SIZE) }, (_, index) =>
+            getJson<Types.DealRisk[]>(
+                `/api/deals/risk${buildQuery({
+                    ids: uniqueIds.slice(
+                        index * WORKSPACE_LIST_PAGE_SIZE,
+                        (index + 1) * WORKSPACE_LIST_PAGE_SIZE,
+                    ),
+                })}`,
+                init,
+            )),
+    );
+    return batches.flat();
 }
 
 /** Risk assessment for a single deal; {@code level} is {@code "none"} when it is not at risk. */
@@ -1630,6 +1643,11 @@ export function replaceDealCollaborators(id: number, userIds: number[]) {
 
 export function getDealPeople(id: number, init: RequestInit = {}) {
     return getJson<Types.Contact[]>(`/api/deals/${id}/people`, init);
+}
+
+export function getDealPrimaryContacts(ids: number[], init: RequestInit = {}) {
+    if (ids.length === 0) return Promise.resolve([] as Types.DealPrimaryContact[]);
+    return getJson<Types.DealPrimaryContact[]>(`/api/deals/people/primary${buildQuery({ ids })}`, init);
 }
 
 export function addDealPerson(id: number, personId: number, role: string, init: RequestInit = {}) {

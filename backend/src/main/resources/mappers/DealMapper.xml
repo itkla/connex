@@ -58,6 +58,14 @@
         WHERE cs.company_id = c.id AND cs.workspace_id = #{workspaceId}))
   </sql>
 
+  <sql id="visiblePersonJoin">
+    (p.workspace_id = #{workspaceId}
+     OR EXISTS (SELECT 1 FROM person_share ps
+        JOIN workspace vws ON vws.id = ps.workspace_id
+        JOIN workspace ows ON ows.id = p.workspace_id AND ows.org_id = vws.org_id
+        WHERE ps.person_id = p.id AND ps.workspace_id = #{workspaceId}))
+  </sql>
+
   <sql id="visiblePipelineJoin">
     (p.workspace_id = #{workspaceId}
      OR EXISTS (SELECT 1 FROM pipeline_share ps
@@ -176,13 +184,32 @@
 
   <select id="getDealPeopleByDealId" resultMap="DealPersonResult">
     SELECT dp.person_id AS deal_person_pid,
-           p.id, p.name, p.email, p.phone, p.company_id, p.title, p.created_at, p.updated_at,
+           p.id, p.workspace_id, p.name, p.email, p.phone, p.title, p.created_at, p.updated_at,
+           p.image_url, p.risk_excluded, p.intro_excluded,
+           c.id AS company_id, c.name AS company_name, c.logo_url AS company_logo_url,
            dp.role
     FROM deal_person dp
     JOIN deal d ON d.id = dp.deal_id
-    JOIN person p ON p.id = dp.person_id
+    JOIN person p ON p.id = dp.person_id AND <include refid="visiblePersonJoin"/>
+    LEFT JOIN company c ON c.id = p.company_id AND <include refid="visibleCompanyJoin"/>
     WHERE d.workspace_id = #{workspaceId} AND dp.deal_id = #{dealId}
     ORDER BY p.name
+  </select>
+
+  <select id="getPrimaryContactsByDealIds"
+          resultType="ooo.klae.connex.backend.dto.DealPrimaryContactDto">
+    SELECT ranked.deal_id, ranked.person_id, ranked.name, ranked.image_url
+    FROM (
+      SELECT dp.deal_id, p.id AS person_id, p.name, p.image_url,
+             ROW_NUMBER() OVER (PARTITION BY dp.deal_id ORDER BY p.name, p.id) AS position
+      FROM deal_person dp
+      JOIN deal d ON d.id = dp.deal_id AND d.workspace_id = #{workspaceId}
+      JOIN person p ON p.id = dp.person_id AND <include refid="visiblePersonJoin"/>
+      WHERE dp.deal_id IN
+      <foreach item="id" collection="dealIds" open="(" separator="," close=")">#{id}</foreach>
+    ) ranked
+    WHERE ranked.position = 1
+    ORDER BY ranked.deal_id
   </select>
 
   <select id="getAllDealStakeholders" resultMap="DealStakeholderResult">
@@ -193,7 +220,7 @@
            p.risk_excluded AS person_risk_excluded
     FROM deal_person dp
     JOIN deal d ON d.id = dp.deal_id AND d.workspace_id = #{workspaceId}
-    JOIN person p ON p.id = dp.person_id AND p.workspace_id = d.workspace_id
+    JOIN person p ON p.id = dp.person_id AND <include refid="visiblePersonJoin"/>
     WHERE d.workspace_id = #{workspaceId}
     ORDER BY dp.deal_id, p.name
   </select>
@@ -206,7 +233,7 @@
            p.risk_excluded AS person_risk_excluded
     FROM deal_person dp
     JOIN deal d ON d.id = dp.deal_id AND d.workspace_id = #{workspaceId}
-    JOIN person p ON p.id = dp.person_id AND p.workspace_id = d.workspace_id
+    JOIN person p ON p.id = dp.person_id AND <include refid="visiblePersonJoin"/>
     WHERE d.workspace_id = #{workspaceId} AND dp.deal_id = #{dealId}
     ORDER BY p.name
   </select>
@@ -219,7 +246,7 @@
            p.risk_excluded AS person_risk_excluded
     FROM deal_person dp
     JOIN deal d ON d.id = dp.deal_id AND d.workspace_id = #{workspaceId}
-    JOIN person p ON p.id = dp.person_id AND p.workspace_id = d.workspace_id
+    JOIN person p ON p.id = dp.person_id AND <include refid="visiblePersonJoin"/>
     WHERE d.workspace_id = #{workspaceId}
       AND dp.deal_id IN
       <foreach item="id" collection="dealIds" open="(" separator="," close=")">#{id}</foreach>
@@ -645,10 +672,21 @@
     LIMIT #{limit}
   </select>
 
+  <select id="getAccountHistoryDeals" resultMap="DealResult">
+    SELECT <include refid="dealColumns"/>
+    FROM deal
+    WHERE workspace_id = #{workspaceId}
+      AND company_id = #{companyId}
+      AND id &lt;&gt; #{excludeDealId}
+    ORDER BY (won IS NULL), COALESCE(closed_at, expected_close_date) DESC, id
+    LIMIT #{limit}
+  </select>
+
   <select id="getDealsByPersonId" resultMap="DealResult">
     SELECT <include refid="qualifiedDealColumns"/>
     FROM deal d
     JOIN deal_person dp ON dp.deal_id = d.id
+    JOIN person p ON p.id = dp.person_id AND <include refid="visiblePersonJoin"/>
     WHERE d.workspace_id = #{workspaceId} AND dp.person_id = #{personId}
   </select>
 
@@ -822,8 +860,9 @@
 
   <insert id="addPerson">
     INSERT INTO deal_person (deal_id, person_id, role)
-    SELECT d.id, #{personId}, #{role}
+    SELECT d.id, p.id, #{role}
     FROM deal d
+    JOIN person p ON p.id = #{personId} AND <include refid="visiblePersonJoin"/>
     WHERE d.workspace_id = #{workspaceId} AND d.id = #{dealId}
     ON DUPLICATE KEY UPDATE role = VALUES(role)
   </insert>
@@ -831,6 +870,7 @@
   <update id="updatePersonRole">
     UPDATE deal_person dp
     JOIN deal d ON d.id = dp.deal_id
+    JOIN person p ON p.id = dp.person_id AND <include refid="visiblePersonJoin"/>
     SET dp.role = #{role}
     WHERE d.workspace_id = #{workspaceId}
       AND dp.deal_id = #{dealId}

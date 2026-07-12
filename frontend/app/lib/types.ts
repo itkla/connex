@@ -719,6 +719,13 @@ export type Deal = {
     updatedAt: string;
 };
 
+export type DealPrimaryContact = {
+    dealId: number;
+    personId: number;
+    name: string;
+    imageUrl: string;
+};
+
 export type UpdateContactEvaluationPayload = {
     riskExcluded?: boolean;
     introExcluded?: boolean;
@@ -1210,6 +1217,7 @@ export type RelationshipDashboard = {
     coolingContacts: Array<{ contact: Contact; temperature: RelationshipTemperature }>;
     coolingCompanies: Array<{ company: Company; temperature: RelationshipTemperature }>;
     dealRisks: Array<{ deal: Deal; company: Company | null; risk: DealRisk }>;
+    dealRisksTruncated: boolean;
 };
 
 /** One month's aggregated total; {@code month} is 1-12 (MySQL MONTH()). */

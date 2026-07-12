@@ -827,6 +827,39 @@ class DealMapperTest extends AbstractMapperTest {
         assertNull(matched.stream().filter(x -> x.getId() == deal1.getId()).findFirst().orElseThrow().getNotes());
     }
 
+    @Test
+    void accountHistoryIsBoundedOutcomePrioritizedAndExcludesCurrentDeal() {
+        Pipeline pipeline = newPipeline();
+        Stage stage = newStage(pipeline, 0);
+        Company company = newCompany();
+        Deal current = newDeal(pipeline, stage, company);
+        Deal newerClosed = updateChartDeal(
+            newDeal(pipeline, stage, company), 100, 90, "JPY", true,
+            "2026-04-01", "2026-06-01 00:00:00");
+        Deal olderClosed = updateChartDeal(
+            newDeal(pipeline, stage, company), 100, 0, "JPY", false,
+            "2026-03-01", "2026-05-01 00:00:00");
+        Deal newerOpen = updateChartDeal(
+            newDeal(pipeline, stage, company), 100, 0, "JPY", null,
+            "2027-01-01", null);
+        Deal olderOpen = updateChartDeal(
+            newDeal(pipeline, stage, company), 100, 0, "JPY", null,
+            "2026-12-01", null);
+        Deal otherCompany = updateChartDeal(
+            newDeal(pipeline, stage, newCompany()), 100, 90, "JPY", true,
+            "2030-01-01", "2030-01-01 00:00:00");
+
+        List<Deal> history = dealMapper.getAccountHistoryDeals(
+            workspace.getId(), company.getId(), current.getId(), 3);
+
+        assertEquals(
+            List.of(newerClosed.getId(), olderClosed.getId(), newerOpen.getId()),
+            history.stream().map(Deal::getId).toList());
+        assertTrue(history.stream().noneMatch(deal -> deal.getId() == current.getId()));
+        assertTrue(history.stream().noneMatch(deal -> deal.getId() == olderOpen.getId()));
+        assertTrue(history.stream().noneMatch(deal -> deal.getId() == otherCompany.getId()));
+    }
+
     /**
      * Adds a person to a deal and checks if the returned list includes the inserted deal.
      */

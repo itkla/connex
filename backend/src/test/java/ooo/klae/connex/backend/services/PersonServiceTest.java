@@ -15,6 +15,7 @@ import static org.mockito.Mockito.when;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.jdbc.core.JdbcTemplate;
 
 import ooo.klae.connex.backend.beans.Activity;
 import ooo.klae.connex.backend.beans.Company;
@@ -42,6 +43,7 @@ class PersonServiceTest extends AbstractServiceTest {
 
     @Autowired PersonService personService;
     @Autowired ShareMapper shareMapper;
+    @Autowired JdbcTemplate jdbcTemplate;
 
     @Test
     void updateEvaluationExclusions_updatesOwnedContactOnly() {
@@ -73,6 +75,40 @@ class PersonServiceTest extends AbstractServiceTest {
         Person ownerView = personMapper.getPersonById(other.getId(), foreign.getId());
         assertFalse(ownerView.isRiskExcluded());
         assertFalse(ownerView.isIntroExcluded());
+    }
+
+    @Test
+    void coreMutationsRejectSharedInContactBeforeSideEffects() {
+        Workspace ownerWorkspace = newWorkspaceInSameOrg();
+        Person shared = personInWorkspace(ownerWorkspace);
+        shareMapper.sharePerson(
+            shared.getId(), ownerWorkspace.getId(), workspace.getId(), currentUser.getId(), true);
+        Tag tag = newTag();
+        int employmentBefore = jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM person_employment WHERE workspace_id = ? AND person_id = ?",
+            Integer.class, workspace.getId(), shared.getId());
+        int auditBefore = jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM audit_log WHERE workspace_id = ? AND entity_type = 'person' AND entity_id = ?",
+            Integer.class, workspace.getId(), shared.getId());
+
+        assertThrows(ResourceNotFoundException.class,
+            () -> personService.update(shared.getId(), personDraft(null)));
+        assertThrows(ResourceNotFoundException.class,
+            () -> personService.addTag(shared.getId(), tag.getId()));
+        assertThrows(ResourceNotFoundException.class,
+            () -> personService.removeTag(shared.getId(), tag.getId()));
+        assertThrows(ResourceNotFoundException.class,
+            () -> personService.replaceTags(shared.getId(), List.of(tag.getId())));
+        assertThrows(ResourceNotFoundException.class,
+            () -> personService.delete(shared.getId()));
+
+        assertTrue(personMapper.existsOwned(ownerWorkspace.getId(), shared.getId()));
+        assertEquals(employmentBefore, jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM person_employment WHERE workspace_id = ? AND person_id = ?",
+            Integer.class, workspace.getId(), shared.getId()));
+        assertEquals(auditBefore, jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM audit_log WHERE workspace_id = ? AND entity_type = 'person' AND entity_id = ?",
+            Integer.class, workspace.getId(), shared.getId()));
     }
 
     @Test

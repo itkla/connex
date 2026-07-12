@@ -326,8 +326,7 @@ public class CompanyService {
     @RequirePermission(Permission.COMPANY_UPDATE)
     public Company updateCompany(int id, Company company) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        Company before = companyMapper.getCompanyById(workspaceId, id);
-        if (before == null) throw new ResourceNotFoundException("Company not found with id: " + id);
+        Company before = requireOwnedCompany(workspaceId, id);
         company.setId(id);
         company.setWorkspaceId(workspaceId);
         assertUniqueWebsite(company);
@@ -348,8 +347,7 @@ public class CompanyService {
     @RequirePermission(Permission.COMPANY_DELETE)
     public void deleteCompany(int id) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        Company before = companyMapper.getCompanyById(workspaceId, id);
-        if (before == null) throw new ResourceNotFoundException("Company not found with id: " + id);
+        Company before = requireOwnedCompany(workspaceId, id);
         customFieldValueService.deleteByEntity("company", id);
         companyMapper.delete(workspaceId, id);
         auditService.record("company.delete", "company", id, before.getName(),
@@ -371,7 +369,7 @@ public class CompanyService {
     @RequirePermission(Permission.COMPANY_UPDATE)
     public void addTag(int companyId, int tagId) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        Company company = requireCompany(workspaceId, companyId);
+        Company company = requireOwnedCompany(workspaceId, companyId);
         Tag tag = tagMapper.getTagById(workspaceId, tagId);
         if (tag == null) throw new ResourceNotFoundException("Tag not found with id: " + tagId);
         companyMapper.addTag(workspaceId, companyId, tagId);
@@ -386,7 +384,7 @@ public class CompanyService {
     @RequirePermission(Permission.COMPANY_UPDATE)
     public void removeTag(int companyId, int tagId) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        Company company = requireCompany(workspaceId, companyId);
+        Company company = requireOwnedCompany(workspaceId, companyId);
         Tag tag = tagMapper.getTagById(workspaceId, tagId);
         companyMapper.removeTag(workspaceId, companyId, tagId);
         String tagName = tag != null ? tag.getName() : "#" + tagId;
@@ -402,7 +400,7 @@ public class CompanyService {
     @RequirePermission(Permission.COMPANY_UPDATE)
     public List<Tag> replaceTags(int companyId, List<Integer> tagIds) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        Company company = requireCompany(companyId);
+        Company company = requireOwnedCompany(workspaceId, companyId);
         List<String> before = tagMapper.getTagsByCompanyId(workspaceId, companyId).stream().map(Tag::getName).toList();
         companyMapper.clearTags(workspaceId, companyId);
         if (tagIds != null && !tagIds.isEmpty()) companyMapper.insertTags(workspaceId, companyId, tagIds);
@@ -481,5 +479,12 @@ public class CompanyService {
         Company company = companyMapper.getCompanyById(workspaceId, companyId);
         if (company == null) throw new ResourceNotFoundException("Company not found with id: " + companyId);
         return company;
+    }
+
+    private Company requireOwnedCompany(int workspaceId, int companyId) {
+        if (!companyMapper.existsOwned(workspaceId, companyId)) {
+            throw new ResourceNotFoundException("Company not found with id: " + companyId);
+        }
+        return requireCompany(workspaceId, companyId);
     }
 }

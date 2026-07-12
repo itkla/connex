@@ -133,6 +133,7 @@ const EMPTY_RELATIONSHIP_DASHBOARD: RelationshipDashboard = {
     coolingContacts: [],
     coolingCompanies: [],
     dealRisks: [],
+    dealRisksTruncated: false,
 };
 
 const DASHBOARD_RANGE: RangeKey = '90d';
@@ -271,7 +272,9 @@ export default async function Dashboard() {
         ),
         pipeline: <PipelineChart series={revenueSeries} currency={currency} range={DASHBOARD_RANGE} />,
         tasks: <TaskSummary summary={taskSummary} upcoming={upcomingTasks} />,
-        atRiskDeals: <AtRiskDeals items={atRiskDeals} />,
+        atRiskDeals: (
+            <AtRiskDeals items={atRiskDeals} truncated={relationshipDashboard.dealRisksTruncated} />
+        ),
         coolingRelationships: <CoolingRelationships items={coolingContacts} currentUserId={user.id} />,
         recentMoves: <RecentMoves moves={recentMoves} />,
         introOpportunities: <IntroOpportunities items={introSuggestions} />,

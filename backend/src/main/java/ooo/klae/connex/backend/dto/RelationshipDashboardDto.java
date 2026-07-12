@@ -7,5 +7,6 @@ public record RelationshipDashboardDto(
     WarmthSummaryDto warmthSummary,
     List<DashboardContactTemperatureDto> coolingContacts,
     List<DashboardCompanyTemperatureDto> coolingCompanies,
-    List<DashboardDealRiskDto> dealRisks
+    List<DashboardDealRiskDto> dealRisks,
+    boolean dealRisksTruncated
 ) {}

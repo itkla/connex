@@ -104,7 +104,7 @@
         FROM task t
         WHERE t.workspace_id = #{workspaceId} AND t.person_id IS NOT NULL
       ) source
-      WHERE source.touched_at IS NOT NULL
+      WHERE source.touched_at IS NOT NULL AND source.touched_at &lt;= #{reference}
     ) touch ON touch.entity_id = p.id
     WHERE <include refid="visible"/>
     GROUP BY p.id
@@ -150,7 +150,8 @@
     FROM person p
     <include refid="companyJoin"/>
     JOIN deal_person dp ON dp.person_id = p.id
-    WHERE p.workspace_id = #{workspaceId} AND dp.deal_id = #{dealId}
+    JOIN deal d ON d.id = dp.deal_id AND d.workspace_id = #{workspaceId}
+    WHERE <include refid="visible"/> AND dp.deal_id = #{dealId}
     ORDER BY p.name
   </select>
 
@@ -295,12 +296,14 @@
 
   <!-- Contacts the team has engaged (any activity, note, or task): warm-intro entry points. -->
   <select id="getEngagedPersonIds" resultType="int">
-    SELECT DISTINCT person_id FROM (
+    SELECT DISTINCT engaged.person_id FROM (
       SELECT person_id FROM activity WHERE workspace_id = #{workspaceId} AND person_id IS NOT NULL
       UNION SELECT person_id FROM note
         WHERE workspace_id = #{workspaceId} AND visibility = 'workspace' AND person_id IS NOT NULL
       UNION SELECT person_id FROM task WHERE workspace_id = #{workspaceId} AND person_id IS NOT NULL
     ) engaged
+    JOIN person p ON p.id = engaged.person_id
+    WHERE <include refid="visible"/>
   </select>
 
   <select id="search" resultMap="PersonResult">

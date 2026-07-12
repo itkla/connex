@@ -47,8 +47,8 @@ import ooo.klae.connex.backend.mappers.TaskMapper;
 
 /**
  * Unit tests for the as-of scoring behaviour that the time-travel replay (#48) relies on: a
- * past-instant reading must decay against that instant and exclude touches logged after it, while
- * the no-arg "now" reading stays byte-identical to its previous behaviour.
+ * past-instant reading must decay against that instant and exclude touches logged after it. Live
+ * readings apply the same cutoff at the injected clock instant.
  */
 class ScoringServiceTest {
 
@@ -84,19 +84,89 @@ class ScoringServiceTest {
     }
 
     @Test
-    void asOf_excludesTouchesAfterTheInstant_butLiveStillCountsThem() {
-        Person p = person(1, null);
+    void futureTouchesAreExcludedFromLiveAndReplayContactAndCompanyScores() {
+        Person p = person(1, 10);
         ScoringService service = service(NOW,
-            List.of(p), List.of(), List.of(),
+            List.of(p), List.of(company(10)), List.of(),
             List.of(activity(p, "meeting", "2026-07-15 09:00:00")),
             List.of(), List.of());
 
         RelationshipTemperatureDto asOfNow = scoreFor(service.scoreContacts(WS, NOW), 1);
         RelationshipTemperatureDto live = scoreFor(service.scoreContacts(WS), 1);
+        RelationshipTemperatureDto companyAsOfNow = scoreFor(service.scoreCompanies(WS, NOW), 10);
+        RelationshipTemperatureDto companyLive = scoreFor(service.scoreCompanies(WS), 10);
 
         assertEquals("cold", asOfNow.getBand());
         assertEquals(0, asOfNow.getScore());
-        assertNotEquals("cold", live.getBand());
+        assertEquals(0, asOfNow.getTouchCount());
+        assertEquals(asOfNow, live);
+        assertEquals("cold", companyAsOfNow.getBand());
+        assertEquals(0, companyAsOfNow.getTouchCount());
+        assertEquals(companyAsOfNow, companyLive);
+    }
+
+    @Test
+    void exactBoundaryTouchCountsForLiveAndReplayContactAndCompanyScores() {
+        Person p = person(1, 10);
+        ScoringService service = service(NOW,
+            List.of(p), List.of(company(10)), List.of(),
+            List.of(activity(p, "meeting", "2026-06-30 00:00:00")),
+            List.of(), List.of());
+
+        RelationshipTemperatureDto contactLive = scoreFor(service.scoreContacts(WS), 1);
+        RelationshipTemperatureDto contactAsOf = scoreFor(service.scoreContacts(WS, NOW), 1);
+        RelationshipTemperatureDto companyLive = scoreFor(service.scoreCompanies(WS), 10);
+        RelationshipTemperatureDto companyAsOf = scoreFor(service.scoreCompanies(WS, NOW), 10);
+
+        assertEquals(1, contactLive.getTouchCount());
+        assertNotEquals("cold", contactLive.getBand());
+        assertEquals(contactLive, contactAsOf);
+        assertEquals(1, companyLive.getTouchCount());
+        assertNotEquals("cold", companyLive.getBand());
+        assertEquals(companyLive, companyAsOf);
+    }
+
+    @Test
+    void subsetScoresIncludeBoundaryAndExcludeFutureTouches() {
+        PersonMapper personMapper = mock(PersonMapper.class);
+        CompanyMapper companyMapper = mock(CompanyMapper.class);
+        DealMapper dealMapper = mock(DealMapper.class);
+        ActivityMapper activityMapper = mock(ActivityMapper.class);
+        NoteMapper noteMapper = mock(NoteMapper.class);
+        TaskMapper taskMapper = mock(TaskMapper.class);
+        Person person = person(1, 10);
+        Company company = company(10);
+        Deal deal = new Deal();
+        deal.setId(20);
+        deal.setCompanyId(10);
+        Activity boundary = activity(person, "meeting", "2026-06-30 00:00:00");
+        boundary.setId(30);
+        boundary.setDeal(deal);
+        Activity future = activity(person, "meeting", "2026-06-30 00:00:01");
+        future.setId(31);
+        future.setDeal(deal);
+        List<Activity> activities = List.of(boundary, future);
+        when(personMapper.getExistingPersonIds(WS, List.of(1))).thenReturn(List.of(1));
+        when(activityMapper.getActivitiesByPersonIds(WS, List.of(1))).thenReturn(activities);
+        when(noteMapper.getNotesByPersonIds(WS, List.of(1))).thenReturn(List.of());
+        when(taskMapper.getTasksByPersonIds(WS, List.of(1))).thenReturn(List.of());
+        when(companyMapper.getByIds(WS, List.of(10))).thenReturn(List.of(company));
+        when(personMapper.getPersonsByCompanyIds(WS, List.of(10))).thenReturn(List.of(person));
+        when(dealMapper.getDealsByCompanyIds(WS, List.of(10))).thenReturn(List.of(deal));
+        when(activityMapper.getActivitiesByCompanyIds(WS, List.of(10))).thenReturn(activities);
+        when(noteMapper.getWorkspaceNotesByCompanyIds(WS, List.of(10))).thenReturn(List.of());
+        when(taskMapper.getTasksByCompanyIds(WS, List.of(10))).thenReturn(List.of());
+        ScoringService service = new ScoringService(
+            personMapper, companyMapper, dealMapper, activityMapper,
+            noteMapper, taskMapper, Clock.fixed(NOW, ZoneOffset.UTC));
+
+        RelationshipTemperatureDto contact = service.scoreContacts(WS, Set.of(1)).getFirst();
+        RelationshipTemperatureDto companyScore = service.scoreCompanies(WS, Set.of(10)).getFirst();
+
+        assertEquals(1, contact.getTouchCount());
+        assertEquals("2026-06-30 00:00:00", contact.getLastTouchAt());
+        assertEquals(1, companyScore.getTouchCount());
+        assertEquals("2026-06-30 00:00:00", companyScore.getLastTouchAt());
     }
 
     @Test

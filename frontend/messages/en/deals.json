@@ -185,6 +185,8 @@
     "quickEdit": "Quick edit",
     "delete": "Delete",
     "searchPlaceholder": "Search deals",
+    "loadFailed": "Couldn't load the current deal view. Try again.",
+    "riskFilterTooBroad": "This risk filter is too broad. Add another filter to narrow the set below 1,000 deals.",
     "freelancer": "Freelancer",
     "riskNone": "No current risk",
     "currency": "Currency",

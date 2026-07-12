@@ -13,6 +13,7 @@ import ooo.klae.connex.backend.dto.DealKpiClosedBucketDto;
 import ooo.klae.connex.backend.dto.DealKpiPeriodDto;
 import ooo.klae.connex.backend.dto.DealMonthTotalDto;
 import ooo.klae.connex.backend.dto.DealPipelineValueDto;
+import ooo.klae.connex.backend.dto.DealPrimaryContactDto;
 import ooo.klae.connex.backend.dto.DealStageDistributionDto;
 import ooo.klae.connex.backend.dto.DealTouchDto;
 import ooo.klae.connex.backend.dto.FacetCount;
@@ -173,6 +174,9 @@ public interface DealMapper {
     List<Deal> getDealsByCompanyId(@Param("workspaceId") int workspaceId, @Param("companyId") int companyId);
     List<Deal> getDealsByCompanyIdPage(@Param("workspaceId") int workspaceId,
             @Param("companyId") int companyId, @Param("limit") int limit);
+    List<Deal> getAccountHistoryDeals(@Param("workspaceId") int workspaceId,
+            @Param("companyId") int companyId, @Param("excludeDealId") int excludeDealId,
+            @Param("limit") int limit);
     List<Deal> getDealsByPersonId(@Param("workspaceId") int workspaceId, @Param("personId") int personId);
     List<Deal> getDealsByTagId(@Param("workspaceId") int workspaceId, @Param("tagId") int tagId);
     Deal getDealById(@Param("workspaceId") int workspaceId, @Param("id") int id);
@@ -224,6 +228,10 @@ public interface DealMapper {
     List<DealPerson> getDealPeopleByDealId(
         @Param("workspaceId") int workspaceId,
         @Param("dealId") int dealId
+    );
+    List<DealPrimaryContactDto> getPrimaryContactsByDealIds(
+        @Param("workspaceId") int workspaceId,
+        @Param("dealIds") List<Integer> dealIds
     );
     /** Every deal stakeholder in the workspace as {@code (dealId, personId, name, role)} rows; for deal-risk scoring. */
     List<DealStakeholder> getAllDealStakeholders(int workspaceId);

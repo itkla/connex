@@ -72,6 +72,17 @@ class DealRiskServiceTest extends AbstractServiceTest {
         activityMapper.insert(activity);
     }
 
+    private void touch(Person person, String timestamp) {
+        Activity activity = new Activity();
+        activity.setWorkspaceId(workspace.getId());
+        activity.setType("meeting");
+        activity.setSubject("subj_" + unique());
+        activity.setPerson(person);
+        activity.setCreatedBy(currentUser);
+        activity.setTimestamp(timestamp);
+        activityMapper.insert(activity);
+    }
+
     private void closeDateOf(Deal deal, String date) {
         deal.setExpectedCloseDate(date);
         dealMapper.update(deal);
@@ -401,6 +412,40 @@ class DealRiskServiceTest extends AbstractServiceTest {
         DealRiskDto risk = service.assessDeal(workspace.getId(), deal.getId());
 
         assertThat(factor(risk, "stalled")).isNotNull();
+    }
+
+    @Test
+    void futureStakeholderTouchLeavesColdRiskWhileExactBoundaryTouchClearsIt() {
+        Deal deal = openDeal();
+        closeDateOf(deal, "2126-12-31");
+        touch(deal, "2126-06-20 10:00:00");
+        Person stakeholder = newPerson(company);
+        dealMapper.addPerson(workspace.getId(), deal.getId(), stakeholder.getId(), "Champion");
+        touch(stakeholder, "2126-06-23 15:30:01");
+        ScoringService actualScoring = new ScoringService(
+            personMapper, companyMapper, dealMapper, activityMapper, noteMapper, taskMapper, CLOCK);
+        DealRiskService actualService = new DealRiskService(
+            dealMapper, activityMapper, noteMapper, taskMapper, actualScoring, CLOCK);
+
+        RelationshipTemperatureDto futureOnly = actualScoring
+            .scoreContacts(workspace.getId(), java.util.Set.of(stakeholder.getId()))
+            .getFirst();
+        DealRiskDto futureRisk = actualService.assessDeal(workspace.getId(), deal.getId());
+
+        assertThat(futureOnly.getBand()).isEqualTo("cold");
+        assertThat(futureOnly.getTouchCount()).isZero();
+        assertThat(factor(futureRisk, "stakeholder_cold")).isNotNull();
+
+        touch(stakeholder, "2126-06-23 15:30:00");
+
+        RelationshipTemperatureDto boundary = actualScoring
+            .scoreContacts(workspace.getId(), java.util.Set.of(stakeholder.getId()))
+            .getFirst();
+        DealRiskDto boundaryRisk = actualService.assessDeal(workspace.getId(), deal.getId());
+
+        assertThat(boundary.getBand()).isNotEqualTo("cold");
+        assertThat(boundary.getTouchCount()).isEqualTo(1);
+        assertThat(factor(boundaryRisk, "stakeholder_cold")).isNull();
     }
 
     @Test

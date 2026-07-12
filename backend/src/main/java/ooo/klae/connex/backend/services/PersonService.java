@@ -177,7 +177,7 @@ public class PersonService {
     @RequirePermission(Permission.PERSON_UPDATE)
     public Person update(int id, Person person) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        Person before = requirePerson(workspaceId, id);
+        Person before = requireOwnedPerson(workspaceId, id);
         validateCompanyVisible(workspaceId, person);
         person.setId(id);
         person.setWorkspaceId(workspaceId);
@@ -245,7 +245,7 @@ public class PersonService {
     @RequirePermission(Permission.PERSON_DELETE)
     public void delete(int id) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        Person before = requirePerson(workspaceId, id);
+        Person before = requireOwnedPerson(workspaceId, id);
         customFieldValueService.deleteByEntity("person", id);
         personMapper.delete(workspaceId, id);
         auditService.record("person.delete", "person", id, before.getName(),
@@ -267,7 +267,7 @@ public class PersonService {
     @RequirePermission(Permission.PERSON_UPDATE)
     public void addTag(int personId, int tagId) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        Person person = requirePerson(workspaceId, personId);
+        Person person = requireOwnedPerson(workspaceId, personId);
         Tag tag = tagMapper.getTagById(workspaceId, tagId);
         if (tag == null) throw new ResourceNotFoundException("Tag not found with id: " + tagId);
         personMapper.addTag(workspaceId, personId, tagId);
@@ -282,7 +282,7 @@ public class PersonService {
     @RequirePermission(Permission.PERSON_UPDATE)
     public void removeTag(int personId, int tagId) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        Person person = requirePerson(workspaceId, personId);
+        Person person = requireOwnedPerson(workspaceId, personId);
         Tag tag = tagMapper.getTagById(workspaceId, tagId);
         personMapper.removeTag(workspaceId, personId, tagId);
         String tagName = tag != null ? tag.getName() : "#" + tagId;
@@ -298,7 +298,7 @@ public class PersonService {
     @RequirePermission(Permission.PERSON_UPDATE)
     public List<Tag> replaceTags(int personId, List<Integer> tagIds) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        Person person = requirePerson(workspaceId, personId);
+        Person person = requireOwnedPerson(workspaceId, personId);
         List<String> before = tagMapper.getTagsByPersonId(workspaceId, personId).stream().map(Tag::getName).toList();
         personMapper.clearTags(workspaceId, personId);
         if (tagIds != null && !tagIds.isEmpty()) personMapper.insertTags(workspaceId, personId, tagIds);

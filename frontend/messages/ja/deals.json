@@ -185,6 +185,8 @@
     "quickEdit": "クイック編集",
     "delete": "削除",
     "searchPlaceholder": "案件を検索",
+    "loadFailed": "現在の案件ビューを読み込めませんでした。もう一度お試しください。",
+    "riskFilterTooBroad": "このリスクフィルターは対象が広すぎます。別のフィルターを追加して 1,000 件未満に絞り込んでください。",
     "freelancer": "フリーランス",
     "riskNone": "現在のリスクなし",
     "currency": "通貨",

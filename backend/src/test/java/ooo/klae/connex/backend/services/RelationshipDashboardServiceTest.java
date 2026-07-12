@@ -8,6 +8,7 @@ import ooo.klae.connex.backend.beans.Company;
 import ooo.klae.connex.backend.beans.Deal;
 import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.dto.DealRiskDto;
+import ooo.klae.connex.backend.dto.DashboardDealRiskResult;
 import ooo.klae.connex.backend.dto.RelationshipDashboardDto;
 import ooo.klae.connex.backend.dto.RelationshipTemperatureDto;
 import ooo.klae.connex.backend.mappers.CompanyMapper;
@@ -47,7 +48,7 @@ class RelationshipDashboardServiceTest {
             org.mockito.ArgumentMatchers.eq(workspaceId),
             argThat(map -> map.size() == 2 && map.get(1) == coolingContact),
             org.mockito.ArgumentMatchers.eq(6)))
-            .thenReturn(List.of(risk));
+            .thenReturn(new DashboardDealRiskResult(List.of(risk), true));
         Person person = new Person();
         person.setId(1);
         person.setName("Cooling contact");
@@ -72,6 +73,7 @@ class RelationshipDashboardServiceTest {
         assertEquals(1, dashboard.coolingContacts().size());
         assertEquals(1, dashboard.coolingCompanies().size());
         assertEquals(1, dashboard.dealRisks().size());
+        assertEquals(true, dashboard.dealRisksTruncated());
         assertEquals("At-risk deal", dashboard.dealRisks().getFirst().deal().getName());
         verify(scoring, times(1)).scoreWorkspace(workspaceId);
         verify(riskService, times(1)).assessDashboard(

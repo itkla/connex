@@ -30,6 +30,7 @@ import ooo.klae.connex.backend.beans.Task;
 import ooo.klae.connex.backend.dto.DealRiskDto;
 import ooo.klae.connex.backend.dto.DealRiskAnalyticsDto;
 import ooo.klae.connex.backend.dto.DealRiskCurrencySummaryDto;
+import ooo.klae.connex.backend.dto.DashboardDealRiskResult;
 import ooo.klae.connex.backend.dto.DealRiskFactor;
 import ooo.klae.connex.backend.dto.DealRiskFactorCountDto;
 import ooo.klae.connex.backend.dto.DealTouchDto;
@@ -196,12 +197,14 @@ public class DealRiskService {
     }
 
     /** Returns the highest-risk dashboard deals from a fixed candidate ceiling. */
-    public List<DealRiskDto> assessDashboard(
+    public DashboardDealRiskResult assessDashboard(
             int workspaceId,
             Map<Integer, RelationshipTemperatureDto> warmth,
             int limit) {
         RiskCandidateBatch candidates = riskCandidates(workspaceId);
-        return assessDeals(workspaceId, candidates.ids(), warmth).stream().limit(limit).toList();
+        List<DealRiskDto> items = assessDeals(workspaceId, candidates.ids(), warmth)
+            .stream().limit(limit).toList();
+        return new DashboardDealRiskResult(items, candidates.truncated());
     }
 
     /** Returns compact per-currency analytics over a fixed interactive candidate ceiling. */

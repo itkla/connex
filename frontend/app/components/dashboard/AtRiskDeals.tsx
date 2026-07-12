@@ -15,14 +15,16 @@ export type AtRiskItem = { deal: Deal; risk: DealRisk; company?: Company };
  * Dashboard widget: open deals the risk engine has flagged, highest risk first, each with its
  * top contributing factor and a risk pill. Purely informational — the row links to the deal.
  */
-export default function AtRiskDeals({ items }: { items: AtRiskItem[] }) {
+export default function AtRiskDeals({ items, truncated }: { items: AtRiskItem[]; truncated: boolean }) {
     const t = useTranslations('AtRiskDeals');
     const { factorText } = useRiskText();
 
     return (
         <div className="flex h-full flex-col overflow-hidden rounded-2xl border border-border bg-card">
             {items.length === 0 ? (
-                <p className="flex-1 px-4 py-10 text-center text-sm text-muted-foreground">{t('empty')}</p>
+                <p className="flex-1 px-4 py-10 text-center text-sm text-muted-foreground">
+                    {t(truncated ? 'truncatedEmpty' : 'empty')}
+                </p>
             ) : (
                 <ul className="flex-1 divide-y divide-border">
                     {items.map(({ deal, risk, company }) => (
@@ -51,6 +53,11 @@ export default function AtRiskDeals({ items }: { items: AtRiskItem[] }) {
                         </li>
                     ))}
                 </ul>
+            )}
+            {truncated && items.length > 0 && (
+                <p className="border-t border-border px-4 py-2 text-xs text-muted-foreground">
+                    {t('truncated')}
+                </p>
             )}
         </div>
     );

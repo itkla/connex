@@ -27,6 +27,7 @@ import ooo.klae.connex.backend.dto.DecayCounts;
 import ooo.klae.connex.backend.dto.DealAgingDto;
 import ooo.klae.connex.backend.dto.DealKpisDto;
 import ooo.klae.connex.backend.dto.DealPipelineValueDto;
+import ooo.klae.connex.backend.dto.DealPrimaryContactDto;
 import ooo.klae.connex.backend.dto.DealRiskAnalyticsDto;
 import ooo.klae.connex.backend.dto.DealRevenueSeriesDto;
 import ooo.klae.connex.backend.dto.DealStageDistributionDto;
@@ -345,6 +346,25 @@ class RecordListControllerTest {
         assertThrows(BadRequestException.class, () -> controller.getDealBoard(0));
 
         verify(dealService).getDealBoard(4);
+    }
+
+    @Test
+    void dealPrimaryContactsNormalizeAndDelegateTheBoundedIdBatch() {
+        DealController controller = new DealController(
+            dealService, bulkOperationService, dealRiskService, dealBriefService,
+            dealRiskRationaleService, workspaceService);
+        List<DealPrimaryContactDto> contacts = List.of(
+            new DealPrimaryContactDto(4, 9, "Primary", null));
+        when(dealService.getPrimaryContacts(List.of(4, 2))).thenReturn(contacts);
+
+        assertSame(contacts, controller.getPrimaryContacts(List.of(4, 2, 4)));
+        assertTrue(controller.getPrimaryContacts(null).isEmpty());
+        assertThrows(BadRequestException.class,
+            () -> controller.getPrimaryContacts(List.of(4, 0)));
+        assertThrows(BadRequestException.class, () -> controller.getPrimaryContacts(
+            java.util.stream.IntStream.rangeClosed(1, 101).boxed().toList()));
+
+        verify(dealService).getPrimaryContacts(List.of(4, 2));
     }
 
     @Test
