@@ -195,6 +195,7 @@ public class WorkspaceService {
         workspace.setName(name.trim());
         workspace.setSlug(generateSlug(name));
         workspaceMapper.insert(workspace);
+        userOffboardingService.prepareFreshMembership(workspace.getId(), ownerUserId);
         workspaceMapper.addMember(workspace.getId(), ownerUserId, "owner");
         auditService.record("org.workspace.create", "organization", orgId, workspace.getName(),
                 "Workspace created", Map.of("workspaceId", workspace.getId(), "ownerUserId", ownerUserId));
@@ -505,8 +506,16 @@ public class WorkspaceService {
                 "Removed " + target.getDisplayName() + " from the workspace", null);
     }
 
-    /** Adds a user as a PENDING member and notifies them to accept; they aren't a real member until they do. */
+    /**
+     * Adds a user as a PENDING member and notifies them to accept; they aren't a
+     * real member until they do. Any notification rows left over from an earlier
+     * membership are cleaned first — with the cross-plane cascades gone (#440
+     * increment 3) a row inserted while a removal was committing could otherwise
+     * resurface in the re-invited member's inbox.
+     */
+    @Transactional
     public MemberDto addPendingMember(int workspaceId, User actor, User target, String role) {
+        userOffboardingService.prepareFreshMembership(workspaceId, target.getId());
         workspaceMapper.addPendingMember(workspaceId, target.getId(), role);
         notifyJoinRequest(workspaceId, target.getId(), actor);
         auditService.record("workspace.member.invite", "workspace", workspaceId, target.getDisplayName(),
@@ -523,10 +532,12 @@ public class WorkspaceService {
      * @param userId the user to add
      * @param role the role to grant on a fresh join
      */
+    @Transactional
     public void ensureActiveMember(int workspaceId, int userId, String role) {
         if (isMember(workspaceId, userId)) {
             return;
         }
+        userOffboardingService.prepareFreshMembership(workspaceId, userId);
         workspaceMapper.addMember(workspaceId, userId, role);
         int orgId = workspaceMapper.getOrgId(workspaceId);
         auditService.record("org.workspace_member.sso_provision", "organization", orgId, null,

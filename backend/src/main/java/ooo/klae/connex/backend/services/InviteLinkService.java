@@ -37,6 +37,7 @@ public class InviteLinkService {
 
     private final InviteLinkMapper inviteLinkMapper;
     private final WorkspaceMapper workspaceMapper;
+    private final UserOffboardingService userOffboardingService;
     private final UserMapper userMapper;
     private final AuditService auditService;
     private final WorkspaceService workspaceService;
@@ -131,6 +132,7 @@ public class InviteLinkService {
         if (!inviteLinkMapper.hasRedeemed(link.getId(), user.getId())) {
             inviteLinkMapper.recordRedemption(link.getId(), user.getId());
         }
+        userOffboardingService.prepareFreshMembership(workspaceId, user.getId());
         workspaceMapper.addMember(workspaceId, user.getId(), link.getRole());
         auditService.record("workspace.invite_link.accept", "workspace", workspaceId, user.getDisplayName(),
                 user.getDisplayName() + " joined via an invite link", null);
