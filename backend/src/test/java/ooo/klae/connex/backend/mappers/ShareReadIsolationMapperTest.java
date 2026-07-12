@@ -14,6 +14,7 @@ import ooo.klae.connex.backend.beans.Company;
 import ooo.klae.connex.backend.beans.Organization;
 import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.beans.Pipeline;
+import ooo.klae.connex.backend.beans.Stage;
 import ooo.klae.connex.backend.beans.Workspace;
 
 /**
@@ -74,11 +75,25 @@ class ShareReadIsolationMapperTest extends AbstractMapperTest {
     void crossOrgPipelineShare_grantsNoReadVisibility() {
         Workspace foreign = newWorkspaceInOrg(newOrganization().getId());
         Pipeline pipeline = newPipelineIn(foreign);
+        Stage stage = newStageIn(foreign, pipeline);
         insertShare("pipeline_share", "pipeline_id", pipeline.getId(), workspace.getId());
 
         assertFalse(pipelineMapper.pipelineExists(workspace.getId(), pipeline.getId()));
         assertTrue(pipelineMapper.getAllPipelines(workspace.getId()).stream()
             .noneMatch(p -> p.getId() == pipeline.getId()));
+        assertTrue(pipelineMapper.getAllStages(workspace.getId()).stream()
+            .noneMatch(candidate -> candidate.getId() == stage.getId()));
+    }
+
+    @Test
+    void sameOrgPipelineShareGrantsBatchStageVisibility() {
+        Workspace sibling = newWorkspaceInOrg(orgIdOf(workspace));
+        Pipeline pipeline = newPipelineIn(sibling);
+        Stage stage = newStageIn(sibling, pipeline);
+        insertShare("pipeline_share", "pipeline_id", pipeline.getId(), workspace.getId());
+
+        assertTrue(pipelineMapper.getAllStages(workspace.getId()).stream()
+            .anyMatch(candidate -> candidate.getId() == stage.getId()));
     }
 
     private void insertShare(String table, String fkColumn, int entityId, int granteeWorkspaceId) {
@@ -133,5 +148,14 @@ class ShareReadIsolationMapperTest extends AbstractMapperTest {
         pipeline.setWorkspaceId(ws.getId());
         pipelineMapper.insertPipeline(pipeline);
         return pipeline;
+    }
+
+    private Stage newStageIn(Workspace ws, Pipeline pipeline) {
+        Stage stage = new Stage();
+        stage.setName("Stage " + unique());
+        stage.setWorkspaceId(ws.getId());
+        stage.setPipeline(pipeline);
+        pipelineMapper.insertStage(stage);
+        return stage;
     }
 }

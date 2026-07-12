@@ -91,6 +91,14 @@ public class PipelineController {
     }
 
     /**
+     * GET endpoint to retrieve every visible stage in one workspace-scoped query.
+     */
+    @GetMapping("/stages")
+    public List<StageDto> getAllStages() {
+        return pipelineService.getAllStages().stream().map(StageDto::from).toList();
+    }
+
+    /**
      * GET endpoint to retrieve a single stage by ID.
      * @param id
      * @return

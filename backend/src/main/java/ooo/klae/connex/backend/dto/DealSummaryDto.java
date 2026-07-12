@@ -16,6 +16,7 @@ public class DealSummaryDto {
     private int id;
     private String name;
     private double value;
+    private double actualValue;
     private String currency;
     private String status;
     private String expectedCloseDate;

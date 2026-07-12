@@ -42,6 +42,20 @@ class PipelineServiceTest extends AbstractServiceTest {
     }
 
     @Test
+    void getAllStagesReturnsOneWorkspaceScopedBatchWithoutDealHydration() {
+        Pipeline first = newPipeline();
+        Pipeline second = newPipeline();
+        Stage firstStage = newStage(first, 0);
+        Stage secondStage = newStage(second, 0);
+
+        List<Stage> stages = pipelineService.getAllStages();
+
+        assertTrue(stages.stream().anyMatch(stage -> stage.getId() == firstStage.getId()));
+        assertTrue(stages.stream().anyMatch(stage -> stage.getId() == secondStage.getId()));
+        assertTrue(stages.stream().allMatch(stage -> stage.getDeals() == null));
+    }
+
+    @Test
     void getDealsByStageId_returnsOnlyDealsInStage() {
         Pipeline pipeline = newPipeline();
         Stage stage1 = newStage(pipeline, 0);

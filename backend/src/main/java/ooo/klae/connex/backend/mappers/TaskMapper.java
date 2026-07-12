@@ -5,6 +5,7 @@ import org.apache.ibatis.annotations.Param;
 import ooo.klae.connex.backend.beans.Task;
 import ooo.klae.connex.backend.dto.TaskSummaryDto;
 
+import java.time.LocalDate;
 import java.util.List;
 
 /**
@@ -17,7 +18,10 @@ public interface TaskMapper {
     List<Task> getAllTasks(int workspaceId);
     List<Task> getTasksPage(@Param("workspaceId") int workspaceId, @Param("limit") int limit, @Param("offset") int offset);
     long countTasks(int workspaceId);
-    TaskSummaryDto taskSummary(int workspaceId);
+    TaskSummaryDto taskSummary(
+        @Param("workspaceId") int workspaceId,
+        @Param("today") LocalDate today
+    );
     List<Task> getTasksByAssignedToId(
         @Param("workspaceId") int workspaceId,
         @Param("assignedToId") int assignedToId

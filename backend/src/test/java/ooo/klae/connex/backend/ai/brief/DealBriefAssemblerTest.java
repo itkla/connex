@@ -62,6 +62,7 @@ class DealBriefAssemblerTest {
                 DEAL_ID,
                 "Acme expansion",
                 125000,
+                0,
                 "USD",
                 "open",
                 "2026-08-31",

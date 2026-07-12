@@ -224,12 +224,48 @@
     ORDER BY d.currency
   </select>
 
-  <sql id="realizedClosedAt"><choose><when test="tzOffset != null">CONVERT_TZ(d.closed_at, '+00:00', #{tzOffset})</when><otherwise>d.closed_at</otherwise></choose></sql>
-  <sql id="revenueRealizedMonth">CASE WHEN d.won = TRUE THEN COALESCE(d.expected_close_date, <include refid="realizedClosedAt"/>) ELSE <include refid="realizedClosedAt"/> END</sql>
+  <select id="revenueClosedEventRange" resultType="ooo.klae.connex.backend.dto.DealRevenueRangeDto">
+    SELECT MIN(d.closed_at) AS earliest, MAX(d.closed_at) AS latest
+    FROM deal d
+    WHERE d.workspace_id = #{workspaceId}
+    <if test="currency != null">
+      AND d.currency = #{currency}
+    </if>
+      AND d.closed_at IS NOT NULL
+      AND (d.won = FALSE OR d.expected_close_date IS NULL)
+      AND d.actual_value != 0
+  </select>
 
-  <select id="revenueClosedByMonth" resultType="ooo.klae.connex.backend.dto.DealMonthTotalDto">
-    SELECT YEAR(<include refid="revenueRealizedMonth"/>) AS year,
-           MONTH(<include refid="revenueRealizedMonth"/>) AS month,
+  <select id="revenueClosedByBoundaries" resultType="ooo.klae.connex.backend.dto.DealMonthDecimalTotalDto">
+    SELECT boundary.local_year AS year,
+           boundary.local_month AS month,
+           (
+             SELECT SUM(d.actual_value)
+             FROM deal d FORCE INDEX FOR JOIN (idx_deal_workspace_closed_at)
+             WHERE d.workspace_id = #{workspaceId}
+             <if test="currency != null">
+               AND d.currency = #{currency}
+             </if>
+               AND d.closed_at &gt;= boundary.start_utc
+               AND d.closed_at &lt; boundary.end_utc
+               AND (d.won = FALSE OR d.expected_close_date IS NULL)
+               AND d.actual_value != 0
+           ) AS total
+    FROM (
+      <foreach collection="boundaries" item="boundary" separator=" UNION ALL ">
+        SELECT #{boundary.year} AS local_year,
+               #{boundary.month} AS local_month,
+               #{boundary.startUtc} AS start_utc,
+               #{boundary.endUtc} AS end_utc
+      </foreach>
+    ) boundary
+    HAVING total IS NOT NULL
+    ORDER BY boundary.local_year, boundary.local_month
+  </select>
+
+  <select id="revenueScheduledClosedByMonth" resultType="ooo.klae.connex.backend.dto.DealMonthDecimalTotalDto">
+    SELECT YEAR(d.expected_close_date) AS year,
+           MONTH(d.expected_close_date) AS month,
            COALESCE(SUM(d.actual_value), 0) AS total
     FROM deal d
     WHERE d.workspace_id = #{workspaceId}
@@ -237,11 +273,12 @@
       AND d.currency = #{currency}
     </if>
       AND d.closed_at IS NOT NULL
-    GROUP BY YEAR(<include refid="revenueRealizedMonth"/>),
-             MONTH(<include refid="revenueRealizedMonth"/>)
+      AND d.won = TRUE
+      AND d.expected_close_date IS NOT NULL
+    GROUP BY YEAR(d.expected_close_date), MONTH(d.expected_close_date)
   </select>
 
-  <select id="revenueProjectedByMonth" resultType="ooo.klae.connex.backend.dto.DealMonthTotalDto">
+  <select id="revenueProjectedByMonth" resultType="ooo.klae.connex.backend.dto.DealMonthDecimalTotalDto">
     SELECT YEAR(d.expected_close_date) AS year,
            MONTH(d.expected_close_date) AS month,
            COALESCE(SUM(d.value), 0) AS total
@@ -289,7 +326,8 @@
                AND d.closed_at &lt;= NOW() THEN d.value END), 0) AS lost_value,
            COALESCE(AVG(CASE WHEN d.won = TRUE
                AND d.closed_at &gt;= DATE_SUB(NOW(), INTERVAL #{days} DAY)
-               AND d.closed_at &lt;= NOW() THEN DATEDIFF(d.closed_at, d.created_at) END), 0) AS avg_cycle_days
+               AND d.closed_at &lt;= NOW()
+               AND d.closed_at &gt;= d.created_at THEN DATEDIFF(d.closed_at, d.created_at) END), 0) AS avg_cycle_days
     FROM deal d
     WHERE d.workspace_id = #{workspaceId}
     <if test="currency != null">
@@ -323,6 +361,7 @@
            COALESCE(AVG(CASE WHEN d.won = TRUE
                AND d.closed_at &gt;= DATE_SUB(NOW(), INTERVAL #{previousDays} DAY)
                AND d.closed_at &lt; DATE_SUB(NOW(), INTERVAL #{days} DAY)
+               AND d.closed_at &gt;= d.created_at
                THEN DATEDIFF(d.closed_at, d.created_at) END), 0) AS avg_cycle_days
     FROM deal d
     WHERE d.workspace_id = #{workspaceId}
@@ -337,7 +376,7 @@
            COALESCE(SUM(CASE WHEN d.won = TRUE THEN d.actual_value END), 0) AS won_value,
            COUNT(CASE WHEN d.won = TRUE THEN 1 END) AS won_count,
            COUNT(CASE WHEN d.won = FALSE THEN 1 END) AS lost_count,
-           COALESCE(AVG(CASE WHEN d.won = TRUE
+           COALESCE(AVG(CASE WHEN d.won = TRUE AND d.closed_at &gt;= d.created_at
                THEN DATEDIFF(d.closed_at, d.created_at) END), 0) AS avg_cycle_days
     FROM deal d
     WHERE d.workspace_id = #{workspaceId}
@@ -407,8 +446,20 @@
     WHERE d.workspace_id = #{workspaceId}
       AND d.won IS NULL
       AND d.closed_at IS NULL
-      AND d.expected_close_date &gt;= CURDATE()
-      AND d.expected_close_date &lt;= DATE_ADD(CURDATE(), INTERVAL #{days} DAY)
+      AND d.expected_close_date &gt;= #{today}
+      AND d.expected_close_date &lt;= DATE_ADD(#{today}, INTERVAL #{days} DAY)
+  </select>
+
+  <select id="closingSoonDeals" resultMap="DealResult">
+    SELECT <include refid="dealColumns"/>
+    FROM deal d
+    WHERE d.workspace_id = #{workspaceId}
+      AND d.won IS NULL
+      AND d.closed_at IS NULL
+      AND d.expected_close_date &gt;= #{today}
+      AND d.expected_close_date &lt;= DATE_ADD(#{today}, INTERVAL #{days} DAY)
+    ORDER BY d.expected_close_date, d.id
+    LIMIT #{limit}
   </select>
 
   <select id="topOpenDeals" resultMap="DealResult">

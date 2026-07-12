@@ -65,7 +65,7 @@ import BulkTagDialog from '@/app/components/records/BulkTagDialog';
 import BulkAssignOwnerDialog from '@/app/components/records/BulkAssignOwnerDialog';
 import BulkChangeStageDialog from '@/app/components/records/BulkChangeStageDialog';
 import { notifyBulkResult } from '@/app/lib/bulkToast';
-import { browserTimezoneOffset, formatCompactCurrency, formatDate, formatDateTime, parseCalendarDate } from '@/app/lib/utils';
+import { formatCompactCurrency, formatDate, formatDateTime, parseCalendarDate } from '@/app/lib/utils';
 import {
     type Company,
     type CreateDealPayload,
@@ -138,7 +138,21 @@ const DEAL_SORT_TOKENS: Record<string, string> = {
     updatedAt: 'updated_at',
 };
 
-export default function DealsBrowser({ deals: initialDeals, total: initialTotal, metrics, serverFacets, savedViews }: { deals: Deal[]; total: number; metrics: DealMetrics; serverFacets: DealFacets; savedViews: SavedView[] }) {
+export default function DealsBrowser({
+    deals: initialDeals,
+    total: initialTotal,
+    metrics,
+    serverFacets,
+    savedViews,
+    timezone,
+}: {
+    deals: Deal[];
+    total: number;
+    metrics: DealMetrics;
+    serverFacets: DealFacets;
+    savedViews: SavedView[];
+    timezone: string;
+}) {
     const router = useRouter();
     const t = useTranslations('DealsBrowser');
     const tf = useTranslations('Filters');
@@ -152,6 +166,11 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
     const [loadingPage, setLoadingPage] = useState(false);
     const [sortKey, setSortKey] = useState<string | null>(null);
     const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
+    const [analyticsRevision, setAnalyticsRevision] = useState(0);
+    const refreshAfterDealMutation = useCallback(() => {
+        setAnalyticsRevision((revision) => revision + 1);
+        router.refresh();
+    }, [router]);
     const sizeRef = useRef(size);
     useEffect(() => {
         sizeRef.current = size;
@@ -288,18 +307,40 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
     const activeCurrency = selectedCurrency && currencyCounts.has(selectedCurrency)
         ? selectedCurrency
         : dominantCurrency;
-    const [revenueSeries, setRevenueSeries] = useState<DealRevenueSeries>({ closed: [], projected: [] });
-    const [stageDistribution, setStageDistribution] = useState<DealStageDistribution[]>([]);
+    const revenueScope = `${activeCurrency}:${timezone}:${analyticsRevision}`;
+    const stageScope = `${activeCurrency}:${analyticsRevision}`;
+    const [revenueResult, setRevenueResult] = useState<{
+        scope: string;
+        data: DealRevenueSeries;
+    }>({ scope: '', data: { closed: [], projected: [] } });
+    const [stageResult, setStageResult] = useState<{
+        scope: string;
+        data: DealStageDistribution[];
+    }>({ scope: '', data: [] });
+    const revenueSeries = revenueResult.scope === revenueScope
+        ? revenueResult.data
+        : { closed: [], projected: [] };
+    const stageDistribution = stageResult.scope === stageScope ? stageResult.data : [];
     useEffect(() => {
         let cancelled = false;
-        getDealRevenueTimeseries(activeCurrency, browserTimezoneOffset())
-            .then((series) => { if (!cancelled) setRevenueSeries(series); })
-            .catch(() => { if (!cancelled) setRevenueSeries({ closed: [], projected: [] }); });
+        getDealRevenueTimeseries(activeCurrency, timezone)
+            .then((series) => {
+                if (!cancelled) setRevenueResult({ scope: revenueScope, data: series });
+            })
+            .catch(() => {
+                if (!cancelled) {
+                    setRevenueResult({ scope: revenueScope, data: { closed: [], projected: [] } });
+                }
+            });
         getDealStageDistribution(activeCurrency)
-            .then((distribution) => { if (!cancelled) setStageDistribution(distribution); })
-            .catch(() => { if (!cancelled) setStageDistribution([]); });
+            .then((distribution) => {
+                if (!cancelled) setStageResult({ scope: stageScope, data: distribution });
+            })
+            .catch(() => {
+                if (!cancelled) setStageResult({ scope: stageScope, data: [] });
+            });
         return () => { cancelled = true; };
-    }, [activeCurrency]);
+    }, [activeCurrency, revenueScope, stageScope, timezone]);
 
     const searchFields = useCallback((d: Deal) => [
         d.name,
@@ -375,7 +416,7 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
             setCreationSucceeded(true);
             setTimeout(() => {
                 closeNewDialog(false);
-                router.refresh();
+                refreshAfterDealMutation();
             }, 900);
         } catch (err) {
             if (isFieldError(err)) {
@@ -444,7 +485,7 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
                 changed.length === 1 ? t('dealUpdated') : t('dealsUpdated', { count: changed.length }),
             );
             setEditSheetOpen(false);
-            router.refresh();
+            refreshAfterDealMutation();
         } catch (err) {
             toastError(err instanceof Error ? err.message : t('failedToSave'));
         } finally {
@@ -478,7 +519,7 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
             setDeleteDialogOpen(false);
             if (anySucceeded) {
                 setSelectedIds(new Set());
-                router.refresh();
+                refreshAfterDealMutation();
             }
         } catch (err) {
             toastError(err instanceof Error ? err.message : t('failedToDelete'));
@@ -514,7 +555,10 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
             ? bulkAddTagToDeals(selectedDealIds, tagId)
             : bulkRemoveTagFromDeals(selectedDealIds, tagId);
     }, [bulkTag.mode, selectedDealIds]);
-    const onBulkSuccess = useCallback(() => { setSelectedIds(new Set()); router.refresh(); }, [setSelectedIds, router]);
+    const onBulkSuccess = useCallback(() => {
+        setSelectedIds(new Set());
+        refreshAfterDealMutation();
+    }, [setSelectedIds, refreshAfterDealMutation]);
 
     const viewSelected = () => {
         if (selectedDeals.length === 1) {
@@ -529,11 +573,11 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
             if (won === null) await reopenDeal(deal.id);
             else await closeDeal(deal.id, { won });
             toastSuccess(won === null ? t('dealReopened') : t('dealClosed'));
-            router.refresh();
+            refreshAfterDealMutation();
         } catch (err) {
             toastError(err instanceof Error ? err.message : t('failedToUpdateStatus'));
         }
-    }, [router, t]);
+    }, [refreshAfterDealMutation, t]);
 
     const summary = useMemo(() => {
         const m = metrics.byCurrency.find((c) => c.currency === activeCurrency);
@@ -800,7 +844,7 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
                                 onNew={() => setNewDialogOpen(true)}
                                 newLabel={t('newButton')}
                                 newAriaLabel={t('addDeal')}
-                                onImported={() => router.refresh()}
+                                onImported={refreshAfterDealMutation}
                                 exportIds={visibleDeals.map((d) => d.id)}
                             />
                         </div>
@@ -811,7 +855,7 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
                     <section>
                         <SectionHeader title={t('sectionPerformance')} />
                         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                            <SummaryTile className="sm:col-span-2" label={t('revenueTrend')} value={<DealsRevenueChart series={revenueSeries} currency={activeCurrency} />} />
+                            <SummaryTile className="sm:col-span-2" label={t('revenueTrend')} value={<DealsRevenueChart series={revenueSeries} currency={activeCurrency} timezone={timezone} />} />
                             <SummaryTile label={t('stageRatio')} value={<StageRatio distribution={stageDistribution} currency={activeCurrency} />} />
                         </div>
                     </section>
@@ -932,7 +976,7 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
                             riskByDealId={riskByDealId}
                             onQuickEdit={quickEditOne}
                             onDelete={deleteOne}
-                            onMoved={() => router.refresh()}
+                            onMoved={refreshAfterDealMutation}
                             reduce={reduce}
                         />
                     ) : (

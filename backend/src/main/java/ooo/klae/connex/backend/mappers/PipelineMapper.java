@@ -23,6 +23,7 @@ public interface PipelineMapper {
     int deletePipeline(@Param("workspaceId") int workspaceId, @Param("id") int id);
 
     Stage getStageById(@Param("workspaceId") int workspaceId, @Param("id") int id);
+    List<Stage> getAllStages(int workspaceId);
     /** A stage visible through ownership or a same-organization pipeline share. */
     Stage getVisibleStageById(@Param("workspaceId") int workspaceId, @Param("id") int id);
     List<Stage> getStagesByPipelineId(@Param("workspaceId") int workspaceId, @Param("pipelineId") int pipelineId);

@@ -49,5 +49,14 @@ export default async function DealsPage({ searchParams }: { searchParams: Promis
     ]);
     const dealsPage: Page<Deal> = await getDealsPage({ page: 1, size: 25, status, currency: dominantCurrency(metrics) }, init);
 
-    return <DealsBrowser deals={dealsPage.items} total={dealsPage.total} metrics={metrics} serverFacets={facets} savedViews={savedViews} />;
+    return (
+        <DealsBrowser
+            deals={dealsPage.items}
+            total={dealsPage.total}
+            metrics={metrics}
+            serverFacets={facets}
+            savedViews={savedViews}
+            timezone={user.timezone}
+        />
+    );
 }
