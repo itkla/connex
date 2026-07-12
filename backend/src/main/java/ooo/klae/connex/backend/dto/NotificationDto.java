@@ -12,6 +12,8 @@ import ooo.klae.connex.backend.beans.Notification;
 @Data
 @NoArgsConstructor
 public class NotificationDto {
+    private static final String MENTION_SUFFIX = ".mention";
+
     private int id;
     private int workspaceId;
     private String workspaceName;
@@ -38,6 +40,7 @@ public class NotificationDto {
     private String snoozedUntil;
     private String createdAt;
     private String updatedAt;
+    private long stateVersion;
 
     @JsonRawValue
     public String getData() {
@@ -59,7 +62,9 @@ public class NotificationDto {
         dto.setActorLabel(notification.getActorLabel());
         dto.setSourceType(notification.getSourceType());
         dto.setSourceId(notification.getSourceId());
-        dto.setSourceLabel(notification.getSourceLabel());
+        dto.setSourceLabel(notification.getType() != null && notification.getType().endsWith(MENTION_SUFFIX)
+            ? null
+            : notification.getSourceLabel());
         dto.setContextType(notification.getContextType());
         dto.setContextId(notification.getContextId());
         dto.setContextLabel(notification.getContextLabel());

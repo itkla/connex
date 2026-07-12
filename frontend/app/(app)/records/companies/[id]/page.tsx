@@ -115,7 +115,7 @@ export default async function CompanyPage({ params }: { params: { id: number } }
                                     {company.industry ? (
                                         <Link
                                             href={`/records/companies?industry=${company.industry}`}
-                                            className="rounded-md bg-muted px-2 py-1 text-muted-foreground transition-colors duration-200 hover:bg-brand-hover hover:text-white"
+                                            className="rounded-md bg-muted px-2 py-1 text-muted-foreground transition-colors duration-200 hover:bg-brand-hover hover:text-brand-foreground"
                                         >
                                             {company.industry}
                                         </Link>

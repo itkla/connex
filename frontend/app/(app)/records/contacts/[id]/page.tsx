@@ -44,7 +44,7 @@ export default async function ContactPage({ params }: { params: { id: number } }
         getContacts({}, init).catch(() => [] as Contact[]),
         getDeals(init).catch(() => [] as Deal[]),
         getAttachmentsFromCookie("person", id, cookie),
-        getContextNotifications("person", id, init).catch(() => ({ items: [], total: 0 })),
+        getContextNotifications("person", id, init).catch(() => ({ items: [], total: 0, stateVersion: 0 })),
         getContactEmployment(id, init).catch(() => [] as PersonEmployment[]),
         getContactConnections(id, init).catch(() => [] as PersonConnection[]),
         getContactIntroPath(id, init).catch(() => ({ reachable: false, directlyKnown: false, steps: [] }) as IntroPath),
@@ -108,7 +108,7 @@ export default async function ContactPage({ params }: { params: { id: number } }
                                 </div>
                                 <h3 className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
                                     {contact.title ? (
-                                        <Link href={`/records/contacts?title=${contact.title}`} className="rounded-md bg-muted px-2 py-1 text-muted-foreground transition-colors duration-200 hover:bg-brand-hover hover:text-white">
+                                        <Link href={`/records/contacts?title=${contact.title}`} className="rounded-md bg-muted px-2 py-1 text-muted-foreground transition-colors duration-200 hover:bg-brand-hover hover:text-brand-foreground">
                                             {contact.title}
                                         </Link>
                                     ) : null}
@@ -117,7 +117,7 @@ export default async function ContactPage({ params }: { params: { id: number } }
                                             <span>@</span>
                                             <Link
                                                 href={`/records/companies/${contact.company.id}`}
-                                                className="rounded-md bg-muted px-2 py-1 text-muted-foreground transition-colors duration-200 hover:bg-brand-hover hover:text-white"
+                                                className="rounded-md bg-muted px-2 py-1 text-muted-foreground transition-colors duration-200 hover:bg-brand-hover hover:text-brand-foreground"
                                             >
                                                 {contact.company.name}
                                             </Link>
@@ -173,7 +173,13 @@ export default async function ContactPage({ params }: { params: { id: number } }
                             deals={allDeals}
                         />
                     </div>
-                    <EntityNotificationBanner initialNotifications={notificationPage.items} />
+                    <EntityNotificationBanner
+                        key={`${notificationPage.stateVersion}:${notificationPage.items.map((item) => item.id).join(",")}`}
+                        initialNotifications={notificationPage.items}
+                        contextType="person"
+                        contextId={id}
+                        initialStateVersion={notificationPage.stateVersion}
+                    />
                 </Rise>
 
                 <div className="grid grid-cols-1 gap-8 md:grid-cols-[minmax(0,1fr)_minmax(0,2fr)]">

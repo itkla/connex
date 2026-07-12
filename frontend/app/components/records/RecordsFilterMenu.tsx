@@ -62,7 +62,7 @@ export default function RecordsFilterMenu<T extends { id: SelectionId }>({
                 >
                     <FunnelIcon className={`size-4 ${activeCount > 0 ? 'text-brand' : 'text-muted-foreground'}`} />
                     {activeCount > 0 && (
-                        <span className="flex h-4 min-w-4 items-center justify-center rounded-full bg-brand px-1 text-xs font-semibold text-white">
+                        <span className="flex h-4 min-w-4 items-center justify-center rounded-full bg-brand px-1 text-xs font-semibold text-brand-foreground">
                             {activeCount}
                         </span>
                     )}

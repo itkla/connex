@@ -8,6 +8,7 @@ import org.springframework.transaction.event.TransactionPhase;
 import org.springframework.transaction.event.TransactionalEventListener;
 
 import lombok.RequiredArgsConstructor;
+import ooo.klae.connex.backend.mappers.NotificationMapper;
 
 /**
  * Pushes queued realtime frames after the originating transaction commits,
@@ -20,12 +21,16 @@ public class NotificationPushListener {
     private static final Logger log = LoggerFactory.getLogger(NotificationPushListener.class);
 
     private final NotificationRealtimePublisher realtimePublisher;
+    private final NotificationMapper notificationMapper;
 
     @Async
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT, fallbackExecution = true)
     public void onPush(NotificationPushEvent event) {
         try {
-            realtimePublisher.send(event.recipientId(), event.payload());
+            long stateVersion = notificationMapper.getStateVersion(event.recipientId());
+            RealtimeNotificationPayload payload = new RealtimeNotificationPayload(
+                event.kind(), event.notification(), event.dedupeKey(), stateVersion);
+            realtimePublisher.send(event.recipientId(), payload);
         } catch (RuntimeException exception) {
             log.warn("Realtime notification push failed for recipient {}: {}",
                     event.recipientId(), exception.getMessage());

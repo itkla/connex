@@ -3,6 +3,8 @@ package ooo.klae.connex.backend.services;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -59,6 +61,73 @@ class SessionSecurityServiceTest {
         assertEquals(7, request.getSession().getAttribute(SessionSecurityService.AUTHENTICATED_USER_ATTR));
         assertNull(request.getSession().getAttribute(SessionSecurityService.WEBAUTHN_STEP_UP_AT_ATTR));
         assertNull(request.getSession().getAttribute(SessionSecurityService.WEBAUTHN_STEP_UP_USER_ATTR));
+    }
+
+    @Test
+    void markAuthenticatedRotatesOpaqueRequestIdentityForEverySessionGeneration() {
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        authenticateUser(7);
+
+        service.markAuthenticated(request, 7);
+        String first = service.requestIdentity(request);
+        service.markAuthenticated(request, 7);
+        String second = service.requestIdentity(request);
+
+        assertNotNull(first);
+        assertNotNull(second);
+        assertNotEquals(first, second);
+        assertEquals(7, request.getSession().getAttribute(SessionSecurityService.REQUEST_IDENTITY_USER_ATTR));
+    }
+
+    @Test
+    void requestIdentityRebindsWhenAuthenticatedPrincipalChanges() {
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        authenticateUser(7);
+        service.markAuthenticated(request, 7);
+        String first = service.requestIdentity(request);
+
+        authenticateUser(8);
+        String second = service.requestIdentity(request);
+
+        assertNotNull(second);
+        assertNotEquals(first, second);
+        assertEquals(8, request.getSession().getAttribute(SessionSecurityService.REQUEST_IDENTITY_USER_ATTR));
+    }
+
+    @Test
+    void requestIdentityRotatesWhenServletSessionIdChanges() {
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        authenticateUser(7);
+        service.markAuthenticated(request, 7);
+        String first = service.requestIdentity(request);
+
+        request.changeSessionId();
+        String second = service.requestIdentity(request);
+
+        assertNotNull(second);
+        assertNotEquals(first, second);
+        assertEquals(request.getSession().getId(),
+                request.getSession().getAttribute(SessionSecurityService.REQUEST_IDENTITY_SESSION_ATTR));
+    }
+
+    @Test
+    void requestIdentityLazilyInitializesLegacyAuthenticatedSession() {
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        request.getSession();
+        authenticateUser(7);
+
+        String identity = service.requestIdentity(request);
+
+        assertNotNull(identity);
+        assertEquals(identity, service.requestIdentity(request));
+    }
+
+    @Test
+    void requestIdentityIsAbsentWithoutAuthenticatedPrincipal() {
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        request.getSession();
+
+        assertNull(service.requestIdentity(request));
     }
 
     @Test

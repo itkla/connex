@@ -45,6 +45,7 @@ public final class TablePlaneRegistry {
         "email_change_token",
         "federated_identity",
         "notification_preference",
+        "notification_recipient_state",
         "org_allowed_domain",
         "org_member",
         "org_placement",

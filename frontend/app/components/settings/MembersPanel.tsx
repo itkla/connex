@@ -529,8 +529,9 @@ export default function MembersPanel({ currentUserId }: { currentUserId: number 
                         </Select>
                         <Button
                             type="submit"
+                            variant="brand"
                             disabled={sending || inviteEmail.trim().length === 0}
-                            className="min-w-28 bg-brand text-white hover:bg-brand-hover"
+                            className="min-w-28"
                         >
                             {sending ? <Loader2Icon className="size-4 animate-spin" /> : t("sendInvite")}
                         </Button>
@@ -639,8 +640,9 @@ export default function MembersPanel({ currentUserId }: { currentUserId: number 
                             />
                             <Button
                                 type="submit"
+                                variant="brand"
                                 disabled={creatingLink}
-                                className="min-w-28 bg-brand text-white hover:bg-brand-hover"
+                                className="min-w-28"
                             >
                                 {creatingLink ? <Loader2Icon className="size-4 animate-spin" /> : t("createLink")}
                             </Button>
@@ -757,8 +759,9 @@ export default function MembersPanel({ currentUserId }: { currentUserId: number 
                             </div>
                             <Button
                                 type="submit"
+                                variant="brand"
                                 disabled={addingDomain || domainInput.trim().length === 0}
-                                className="min-w-28 bg-brand text-white hover:bg-brand-hover"
+                                className="min-w-28"
                             >
                                 {addingDomain ? <Loader2Icon className="size-4 animate-spin" /> : t("addDomain")}
                             </Button>

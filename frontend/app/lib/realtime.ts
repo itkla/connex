@@ -19,11 +19,12 @@ export type RealtimeStatus = "connecting" | "connected" | "disconnected";
 
 /**
  * A frame pushed by the backend on the recipient's per-user queue. `created`
- * carries a brand-new notification worth surfacing; `updated` a materially
- * changed one worth a silent refresh.
+ * carries a brand-new notification worth surfacing; `updated` and `invalidated`
+ * represent durable inbox changes worth a silent refresh.
  */
 export type RealtimeNotificationFrame = {
-    kind: "created" | "updated";
+    kind: "created" | "updated" | "invalidated";
+    stateVersion: number;
     notification?: Notification | null;
     dedupeKey?: string | null;
 };
@@ -69,7 +70,11 @@ function parseFrame(message: IMessage): RealtimeNotificationFrame | null {
         return null;
     }
     const kind = (parsed as { kind?: unknown }).kind;
-    if (kind !== "created" && kind !== "updated") {
+    const stateVersion = (parsed as { stateVersion?: unknown }).stateVersion;
+    if (kind !== "created" && kind !== "updated" && kind !== "invalidated") {
+        return null;
+    }
+    if (typeof stateVersion !== "number" || !Number.isSafeInteger(stateVersion) || stateVersion < 0) {
         return null;
     }
     return parsed as RealtimeNotificationFrame;

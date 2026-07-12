@@ -199,8 +199,9 @@ export default function ContactSubView({ mode, initial, onDone, onBack, disabled
                 <Button
                     type="button"
                     onClick={submit}
+                    variant="brand"
                     disabled={disabled}
-                    className="min-w-24 bg-brand text-white shadow-sm transition hover:bg-brand-hover hover:shadow-md active:scale-[0.98]"
+                    className="min-w-24 shadow-sm transition hover:shadow-md active:scale-[0.98]"
                 >
                     {t('contactDone')}
                 </Button>

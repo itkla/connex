@@ -36,10 +36,10 @@ public class EmailNotificationDispatcher implements NotificationDispatcher {
     }
 
     @Override
-    public void dispatch(Notification notification) {
+    public int dispatch(Notification notification) {
         User recipient = userMapper.getUserById(notification.getRecipientId());
         if (recipient == null || recipient.getEmail() == null || recipient.getEmail().isBlank()) {
-            return;
+            return 0;
         }
 
         String actionUrl = notification.getActionUrl() == null ? mailProperties.getAppBaseUrl()
@@ -60,5 +60,6 @@ public class EmailNotificationDispatcher implements NotificationDispatcher {
 
         mailService.sendForWorkspace(notification.getWorkspaceId(),
                 MailMessage.html(recipient.getEmail(), subject, body));
+        return 1;
     }
 }

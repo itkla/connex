@@ -1,6 +1,10 @@
 package ooo.klae.connex.backend.ai.masking;
 
 import java.text.Normalizer;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
+import java.time.format.DateTimeParseException;
 import java.util.Arrays;
 import java.util.Objects;
 import java.util.regex.Matcher;
@@ -30,6 +34,11 @@ public final class MaskingEngine {
 
     /** Catch-all detector for long account or identifier digit runs. */
     private static final Pattern LONG_DIGIT_RUN = Pattern.compile("(?<![0-9])[0-9]{9,}(?![0-9])");
+
+    private static final Pattern ISO_TEMPORAL = Pattern.compile(
+            "(?<![0-9])[0-9]{4}-[0-9]{2}-[0-9]{2}"
+                    + "(?:[T ][0-9]{2}:[0-9]{2}(?::[0-9]{2}(?:\\.[0-9]{1,9})?)?"
+                    + "(?:Z|[+\\-][0-9]{2}:[0-9]{2})?)?(?![0-9])");
 
     /** Whitespace detector used to make multi-word identifier matching flexible. */
     private static final Pattern WHITESPACE = Pattern.compile("\\s+");
@@ -64,6 +73,25 @@ public final class MaskingEngine {
         masked = PHONE_LIKE_RUN.matcher(masked).replaceAll(Matcher.quoteReplacement(REDACTED));
         masked = LONG_DIGIT_RUN.matcher(masked).replaceAll(Matcher.quoteReplacement(REDACTED));
         return masked;
+    }
+
+    /**
+     * Preserves a validated structured ISO date or timestamp while retaining free-text redaction
+     * for every value that is not exactly a supported temporal representation.
+     * @param value structured temporal field value
+     * @param ctx request-local masking context
+     * @return validated temporal value or the normally masked fallback
+     */
+    public static String maskTemporal(String value, MaskingContext ctx) {
+        Objects.requireNonNull(ctx, "ctx");
+        if (value == null || value.isBlank()) {
+            return "";
+        }
+        String normalized = normalizeSeparators(Normalizer.normalize(value, Normalizer.Form.NFKC)).strip();
+        if (ISO_TEMPORAL.matcher(normalized).matches() && isValidIsoTemporal(normalized)) {
+            return normalized;
+        }
+        return maskFreeText(normalized, ctx);
     }
 
     /**
@@ -122,4 +150,30 @@ public final class MaskingEngine {
                 || codePoint >= 'A' && codePoint <= 'Z'
                 || codePoint >= 'a' && codePoint <= 'z';
     }
+
+    private static boolean isValidIsoTemporal(String value) {
+        try {
+            if (value.length() == 10) {
+                LocalDate.parse(value);
+            } else {
+                String normalized = value.replace(' ', 'T');
+                if (normalized.endsWith("Z") || hasOffset(normalized)) {
+                    OffsetDateTime.parse(normalized);
+                } else {
+                    LocalDateTime.parse(normalized);
+                }
+            }
+            return true;
+        } catch (DateTimeParseException exception) {
+            return false;
+        }
+    }
+
+    private static boolean hasOffset(String value) {
+        int timeSeparator = value.indexOf('T');
+        int plus = value.lastIndexOf('+');
+        int minus = value.lastIndexOf('-');
+        return plus > timeSeparator || minus > timeSeparator;
+    }
+
 }

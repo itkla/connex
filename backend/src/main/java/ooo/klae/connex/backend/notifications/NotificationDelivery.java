@@ -6,6 +6,7 @@ import java.util.Objects;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.annotation.Transactional;
 
 import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.beans.Notification;
@@ -32,12 +33,12 @@ import ooo.klae.connex.backend.mappers.PreferenceMapper;
  * first two, so the every-cycle re-dispatch of an unchanged reminder never
  * re-notifies a live client.
  *
- * <p>The pre-read is not transactionally isolated across concurrent reconcile
- * passes: two passes for the same workspace can each observe "new" and both
- * email — and both push a {@code created} frame — once. This is bounded to a
- * single duplicate per brand-new reminder (repeat reminders are always
- * suppressed), absorbed client-side by dedupe-key suppression, and tracked for a
- * claim-based hardening.
+ * <p>The in-app affected-row count closes a stale-pre-read race for existing rows:
+ * if another transaction changes a notification between the pre-read and upsert,
+ * an overwrite still advances the version and pushes an update. Two concurrent
+ * passes can each observe a brand-new reminder and both email and push it once;
+ * that bounded first-occurrence duplicate is absorbed client-side by dedupe-key
+ * suppression and tracked for claim-based hardening.
  */
 @Component
 @RequiredArgsConstructor
@@ -50,22 +51,29 @@ public class NotificationDelivery {
     private final NotificationMapper notificationMapper;
     private final PreferenceMapper preferenceMapper;
     private final NotificationPushPublisher pushPublisher;
+    private final NotificationStateVersionService stateVersionService;
 
     /**
      * Delivers a notification across every eligible channel.
      * @param notification the generated notification
      */
+    @Transactional
     public void deliver(Notification notification) {
         Notification existing = findExisting(notification);
         boolean firstOccurrence = existing == null;
+        boolean changed = firstOccurrence || isVisibleChange(existing, notification);
 
+        int inAppRows = 0;
         for (NotificationDispatcher dispatcher : dispatchers) {
             if (IN_APP.equals(dispatcher.channel())) {
-                dispatcher.dispatch(notification);
+                inAppRows = Math.max(inAppRows, dispatcher.dispatch(notification));
             }
         }
 
-        pushRealtime(notification, existing);
+        boolean persistedChange = changed || (!firstOccurrence && inAppRows > 1);
+        if (persistedChange) {
+            pushRealtime(notification, existing, persistedChange);
+        }
 
         if (!firstOccurrence) {
             return;
@@ -89,17 +97,20 @@ public class NotificationDelivery {
                 notification.getWorkspaceId(), notification.getRecipientId(), notification.getDedupeKey());
     }
 
-    private void pushRealtime(Notification notification, Notification existing) {
+    private void pushRealtime(
+            Notification notification, Notification existing, boolean persistedChange) {
         boolean created = existing == null;
-        boolean updated = !created && isMaterialChange(existing, notification);
+        boolean updated = !created && persistedChange;
         if (!created && !updated) {
             return;
         }
         int id = created ? notification.getId() : existing.getId();
         Notification persisted = notificationMapper.findById(notification.getRecipientId(), id);
         if (persisted == null) {
+            stateVersionService.markChanged(notification.getRecipientId());
             return;
         }
+        stateVersionService.markChangedWithDetailedPush(notification.getRecipientId());
         NotificationDto dto = NotificationDto.from(persisted);
         if (created) {
             pushPublisher.created(notification.getRecipientId(), dto, notification.getDedupeKey());
@@ -113,9 +124,24 @@ public class NotificationDelivery {
      * previously resolved row is revived — the same condition under which the in-app
      * upsert clears read/dismiss/snooze state, so a live client should refresh.
      */
-    private boolean isMaterialChange(Notification existing, Notification incoming) {
+    private boolean isVisibleChange(Notification existing, Notification incoming) {
         return !Objects.equals(existing.getSeverity(), incoming.getSeverity())
-                || existing.getResolvedAt() != null;
+                || existing.getResolvedAt() != null
+                || !Objects.equals(existing.getType(), incoming.getType())
+                || !Objects.equals(existing.getCategory(), incoming.getCategory())
+                || existing.getTemplateVersion() != incoming.getTemplateVersion()
+                || !Objects.equals(existing.getTitle(), incoming.getTitle())
+                || !Objects.equals(existing.getBody(), incoming.getBody())
+                || !Objects.equals(existing.getActorId(), incoming.getActorId())
+                || !Objects.equals(existing.getActorLabel(), incoming.getActorLabel())
+                || !Objects.equals(existing.getSourceType(), incoming.getSourceType())
+                || !Objects.equals(existing.getSourceId(), incoming.getSourceId())
+                || !Objects.equals(existing.getSourceLabel(), incoming.getSourceLabel())
+                || !Objects.equals(existing.getContextType(), incoming.getContextType())
+                || !Objects.equals(existing.getContextId(), incoming.getContextId())
+                || !Objects.equals(existing.getContextLabel(), incoming.getContextLabel())
+                || !Objects.equals(existing.getActionUrl(), incoming.getActionUrl())
+                || !Objects.equals(existing.getData(), incoming.getData());
     }
 
     private void safeDispatch(NotificationDispatcher dispatcher, Notification notification) {

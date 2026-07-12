@@ -8,7 +8,7 @@ import lombok.Data;
 /**
  * Instance-wide AI configuration, bound from {@code connex.ai.*} /
  * {@code CONNEX_AI_*}. The feature gate also requires a per-org configured and
- * enabled BYOP provider, arriving in a later PR, so AI features fail closed.
+ * enabled BYOP provider, so AI features fail closed.
  */
 @Data
 @Component
@@ -18,8 +18,7 @@ public class AiProperties {
     /**
      * Instance-level kill switch for all AI features. Defaults to false so a
      * deployment ships with AI dormant; the feature gate additionally requires a
-     * per-org configured and enabled BYOP provider, arriving in a later PR, so AI
-     * features fail closed.
+     * per-org configured and enabled BYOP provider, so AI features fail closed.
      */
     private boolean enabled = false;
 
@@ -31,6 +30,13 @@ public class AiProperties {
      * LAN inference server).
      */
     private boolean allowInternalEndpoints = false;
+
+    /**
+     * Comma-separated RFC 6052 network-specific prefixes used by this deployment's IPv4/IPv6
+     * translators. Prefixes are validated at startup and let the egress policy classify translated
+     * destinations exactly, including private translations for explicitly enabled internal endpoints.
+     */
+    private String nat64Prefixes = "";
 
     /**
      * AI provider outbound TCP connect timeout in milliseconds. Kept short by default so AI

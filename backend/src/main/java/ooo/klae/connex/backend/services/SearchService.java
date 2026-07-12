@@ -67,7 +67,8 @@ public class SearchService {
         return new SearchResultsDto(
             companyMapper.search(workspaceId, pattern).stream().map(CompanyDto::from).toList(),
             personMapper.search(workspaceId, pattern).stream().map(PersonDto::from).toList(),
-            dealMapper.search(workspaceId, pattern).stream().map(DealDto::from).toList(),
+            referenceService.hydrateDeals(workspaceId, dealMapper.search(workspaceId, pattern))
+                .stream().map(DealDto::from).toList(),
             pipelineMapper.search(workspaceId, pattern).stream().map(PipelineDto::from).toList(),
             tagMapper.search(workspaceId, pattern).stream().map(TagDto::from).toList(),
             referenceService.hydrateActivities(workspaceId, activityMapper.search(workspaceId, pattern)).stream().map(ActivityDto::from).toList(),

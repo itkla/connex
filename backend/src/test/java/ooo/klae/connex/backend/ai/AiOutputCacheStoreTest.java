@@ -45,6 +45,11 @@ class AiOutputCacheStoreTest {
     }
 
     @Test
+    void contentHash_usesFailClosedStructuredOutputPolicyVersion() {
+        assertEquals("v2-structured-json-fail-closed", AiOutputCacheStore.HASH_VERSION);
+    }
+
+    @Test
     void contentHash_differsWhenIdentityBindingsDiffer() {
         assertNotEquals(store.contentHash(prompt("Owner: {{P1}}"), context("Mina Patel")),
                 store.contentHash(prompt("Owner: {{P1}}"), context("Mina Shah")));

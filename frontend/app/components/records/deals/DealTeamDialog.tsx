@@ -184,8 +184,9 @@ export default function DealTeamDialog({
                             <Button
                                 type="button"
                                 onClick={() => void save()}
+                                variant="brand"
                                 disabled={saving || success}
-                                className="min-w-24 bg-brand text-white shadow-sm transition hover:bg-brand-hover hover:shadow-md"
+                                className="min-w-24 shadow-sm transition hover:shadow-md"
                             >
                                 {saving ? <Loader2Icon className="size-4 animate-spin" /> : t('saveTeam')}
                             </Button>

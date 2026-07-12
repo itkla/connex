@@ -173,6 +173,28 @@ class DealRiskRationaleServiceTest {
     }
 
     @Test
+    void generate_japaneseLocaleReadsSeparateCacheEntry() {
+        LocaleContextHolder.setLocale(Locale.JAPANESE);
+        RationaleAssembly assembly = assembly();
+        DealRiskDto risk = atRisk();
+        when(aiFeatureGate.isAiUsable()).thenReturn(true);
+        when(dealRiskService.assessDeal(WORKSPACE_ID, DEAL_ID)).thenReturn(risk);
+        when(dealRiskRationaleAssembler.assemble(WORKSPACE_ID, DEAL_ID, risk)).thenReturn(assembly);
+        when(aiOutputCacheStore.contentHash(assembly.prompt(), assembly.context())).thenReturn(HASH);
+        when(aiOutputCacheStore.find(
+                WORKSPACE_ID, "deal.risk_rationale:ja", DEAL_ID, AiOutputCacheStore.NO_SUBJECT))
+                .thenReturn(Optional.of(row(HASH, 0, "2026-07-01T09:00:00Z")));
+        when(aiOutputCacheStore.read("payload", DealRiskRationaleContent.class))
+                .thenReturn(Optional.of(new DealRiskRationaleContent("保存済みの説明。", List.of())));
+
+        DealRationaleDto result = service.generate(DEAL_ID);
+
+        assertTrue(result.isAvailable());
+        assertEquals("保存済みの説明。", result.getNarrative());
+        verify(aiInvocationService, never()).completeStructured(any(), any());
+    }
+
+    @Test
     void generate_contentHashMismatch_regenerates() {
         RationaleAssembly assembly = assembly();
         DealRiskDto risk = atRisk();

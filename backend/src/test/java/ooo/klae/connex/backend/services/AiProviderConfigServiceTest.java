@@ -7,6 +7,8 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doThrow;
@@ -28,6 +30,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 import ooo.klae.connex.backend.ai.AiProperties;
 import ooo.klae.connex.backend.ai.AiProviderSecretCipher;
+import ooo.klae.connex.backend.ai.egress.AiEndpointAddressValidator;
 import ooo.klae.connex.backend.ai.provider.AiProviderException;
 import ooo.klae.connex.backend.ai.provider.ResolvedAiProvider;
 import ooo.klae.connex.backend.beans.AiProviderConfig;
@@ -50,6 +53,7 @@ class AiProviderConfigServiceTest {
     @Mock private WorkspaceMapper workspaceMapper;
     @Mock private OrgMemberService orgMemberService;
     @Mock private AiProviderSecretCipher aiProviderSecretCipher;
+    @Mock private AiEndpointAddressValidator aiEndpointAddressValidator;
     @Mock private AuditService auditService;
     @Mock private SessionSecurityService sessionSecurityService;
 
@@ -59,11 +63,13 @@ class AiProviderConfigServiceTest {
     @BeforeEach
     void setUp() {
         service = new AiProviderConfigService(aiProperties, aiProviderConfigMapper, workspaceMapper,
-                orgMemberService, aiProviderSecretCipher, auditService, sessionSecurityService,
+                orgMemberService, aiProviderSecretCipher, aiEndpointAddressValidator, auditService,
+                sessionSecurityService,
                 new ObjectMapper());
         lenient().when(workspaceMapper.getOrgId(WORKSPACE_ID)).thenReturn(ORG_ID);
         lenient().when(aiProviderConfigMapper.findByOrg(ORG_ID)).thenAnswer(invocation -> stored);
         lenient().when(aiProviderSecretCipher.isAvailable()).thenReturn(true);
+        lenient().when(aiEndpointAddressValidator.isFetchable(anyString(), anyBoolean())).thenReturn(true);
         lenient().doAnswer(invocation -> {
             stored = copy(invocation.getArgument(0));
             stored.setUpdatedAt(LocalDateTime.now());
@@ -180,6 +186,27 @@ class AiProviderConfigServiceTest {
         assertThrows(BadRequestException.class,
                 () -> service.save(WORKSPACE_ID, ACTOR_ID, request));
         verify(aiProviderConfigMapper, never()).upsert(any(AiProviderConfig.class));
+    }
+
+    @Test
+    void save_openAiCompatiblePrivateHttpsRequiresBothInternalEndpointGates() {
+        AiProviderConfigRequest request = genericRequest("https://10.0.0.12:11434/v1", null);
+        when(aiEndpointAddressValidator.isFetchable("10.0.0.12", false)).thenReturn(false);
+
+        assertThrows(BadRequestException.class,
+                () -> service.save(WORKSPACE_ID, ACTOR_ID, request));
+
+        request.setAllowInternalEndpoint(true);
+        assertThrows(BadRequestException.class,
+                () -> service.save(WORKSPACE_ID, ACTOR_ID, request));
+
+        when(aiProperties.isAllowInternalEndpoints()).thenReturn(true);
+        when(aiEndpointAddressValidator.isFetchable("10.0.0.12", true)).thenReturn(true);
+
+        AiProviderConfigDto saved = service.save(WORKSPACE_ID, ACTOR_ID, request);
+
+        assertEquals("https://10.0.0.12:11434/v1", saved.getEndpoint());
+        assertTrue(saved.isAllowInternalEndpoint());
     }
 
     @Test
@@ -356,6 +383,20 @@ class AiProviderConfigServiceTest {
     }
 
     @Test
+    void isReadyForOrg_rechecksOpenAiCompatibleEndpointAddressPolicy() {
+        stored = readyOpenAiCompatibleConfig("https://10.0.0.12:11434/v1");
+        when(aiEndpointAddressValidator.isFetchable("10.0.0.12", false)).thenReturn(false);
+
+        assertFalse(service.isReadyForOrg(ORG_ID));
+
+        stored.setAllowInternalEndpoint(true);
+        when(aiProperties.isAllowInternalEndpoints()).thenReturn(true);
+        when(aiEndpointAddressValidator.isFetchable("10.0.0.12", true)).thenReturn(true);
+
+        assertTrue(service.isReadyForOrg(ORG_ID));
+    }
+
+    @Test
     void savedProvidersAreAdapterReady() {
         lenient().when(aiProperties.isAllowInternalEndpoints()).thenReturn(true);
         when(aiProviderSecretCipher.encryptCredential(eq(ORG_ID), any()))
@@ -493,7 +534,8 @@ class AiProviderConfigServiceTest {
 
     @Test
     void save_vertexUnsupportedModelId_isRejected() {
-        for (String modelId : List.of("gemini/2.5-pro", "mistral-large", "gemini..pro")) {
+        for (String modelId : List.of(
+                "gemini/2.5-pro", "mistral-large", "gemini..pro", "Gemini-2.5-pro", "gemini-Pro")) {
             AiProviderConfigRequest request = vertexRequest();
             request.setModelId(modelId);
             assertThrows(BadRequestException.class, () -> service.save(WORKSPACE_ID, ACTOR_ID, request));
@@ -601,6 +643,18 @@ class AiProviderConfigServiceTest {
         config.setModelId("anthropic.claude-3-5-sonnet-20240620-v1:0");
         config.setCredentialRef("secret:v1:88");
         config.setCredentialLast4("CDEF");
+        config.setNoTrainingAttested(true);
+        config.setAttestedAt(LocalDateTime.now());
+        config.setEnabled(true);
+        return config;
+    }
+
+    private static AiProviderConfig readyOpenAiCompatibleConfig(String endpoint) {
+        AiProviderConfig config = new AiProviderConfig();
+        config.setOrgId(ORG_ID);
+        config.setProvider("openai_compatible");
+        config.setEndpoint(endpoint);
+        config.setModelId("gpt-4o");
         config.setNoTrainingAttested(true);
         config.setAttestedAt(LocalDateTime.now());
         config.setEnabled(true);

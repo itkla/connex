@@ -333,7 +333,8 @@ export default function ActivitiesBrowser({ activities, persons, deals, users, c
                             <p className="mt-1 text-sm text-muted-foreground">{t('subtitle')}</p>
                         </div>
                         <Button
-                            className="bg-brand text-white shadow-sm transition-transform hover:bg-brand-dark active:scale-[0.98]"
+                            variant="brand"
+                            className="shadow-sm transition-transform active:scale-[0.98]"
                             aria-label={t('newAria')}
                             onClick={() => setCreating(true)}
                         >

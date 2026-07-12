@@ -406,7 +406,7 @@ export function AuthForm({
                                 className={`connex-rise mt-2 flex w-full items-center justify-center gap-2 rounded-full px-6 py-3.5 text-base font-semibold transition-[transform,background-color,opacity] duration-150 ease-out active:scale-[0.98] disabled:cursor-not-allowed ${
                                     hasFieldErrors
                                         ? "bg-muted text-muted-foreground"
-                                        : "bg-brand text-neutral-950 hover:bg-brand-hover disabled:opacity-70"
+                                        : "bg-brand text-brand-foreground hover:bg-brand-hover disabled:opacity-70"
                                 }`}
                             >
                                 {submitting ? (

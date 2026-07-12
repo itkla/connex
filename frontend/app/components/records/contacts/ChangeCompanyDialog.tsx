@@ -56,6 +56,7 @@ export default function ChangeCompanyDialog({ open, onOpenChange, contacts, onSu
         : defaultCompanyId;
     const [isSaving, setIsSaving] = useState(false);
     const [succeeded, setSucceeded] = useState(false);
+    const [prevOpen, setPrevOpen] = useState(open);
     const currentCompany = contacts.length === 1 ? contacts[0].company ?? null : null;
     const companySearch = useCompanySearch(
         open,
@@ -65,6 +66,14 @@ export default function ChangeCompanyDialog({ open, onOpenChange, contacts, onSu
     const selected = companySearch.companies.find(
         (company) => company.id === selectedCompanyId,
     ) ?? (currentCompany?.id === selectedCompanyId ? currentCompany : null);
+
+    if (open !== prevOpen) {
+        setPrevOpen(open);
+        if (open) {
+            setSucceeded(false);
+            setSelection({ scope: selectionScope, companyId: defaultCompanyId });
+        }
+    }
 
     useEffect(() => {
         if (companySearch.error) toastError(t('companySearchFailed'));
@@ -188,8 +197,9 @@ export default function ChangeCompanyDialog({ open, onOpenChange, contacts, onSu
                             </DialogClose>
                             <Button
                                 type="submit"
+                                variant="brand"
                                 disabled={isSaving || succeeded || !selected}
-                                className="min-w-24 bg-brand text-white shadow-sm transition hover:bg-brand-hover hover:shadow-md"
+                                className="min-w-24 shadow-sm transition hover:shadow-md"
                             >
                                 {isSaving ? <Loader2Icon className="size-4 animate-spin" /> : t('save')}
                             </Button>

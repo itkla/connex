@@ -97,7 +97,7 @@ export default async function DealPage({ params }: { params: { id: number } }) {
             getDeals(init).catch(() => [] as Deal[]),
             getUsers(init).catch(() => [] as User[]),
             getAttachmentsFromCookie("deal", id, cookie),
-            getContextNotifications("deal", id, init).catch(() => ({ items: [], total: 0 })),
+            getContextNotifications("deal", id, init).catch(() => ({ items: [], total: 0, stateVersion: 0 })),
             getDealCollaborators(id, init).catch(() => [] as User[]),
             getEntityCustomFieldsFromCookie("deal", id, cookie),
             getDealRisk(id, init).catch(() => null),
@@ -191,7 +191,7 @@ export default async function DealPage({ params }: { params: { id: number } }) {
                                 {company ? (
                                     <Link
                                         href={`/records/companies/${company.id}`}
-                                        className="inline-flex items-center gap-1 rounded-md bg-muted px-2 py-1 transition-colors duration-200 hover:bg-brand-hover hover:text-white"
+                                        className="inline-flex items-center gap-1 rounded-md bg-muted px-2 py-1 transition-colors duration-200 hover:bg-brand-hover hover:text-brand-foreground"
                                     >
                                         <BuildingOffice2Icon className="size-3.5" />
                                         {company.name}
@@ -238,7 +238,13 @@ export default async function DealPage({ params }: { params: { id: number } }) {
                             collaborators={collaborators}
                         />
                     </div>
-                    <EntityNotificationBanner initialNotifications={notificationPage.items} />
+                    <EntityNotificationBanner
+                        key={`${notificationPage.stateVersion}:${notificationPage.items.map((item) => item.id).join(',')}`}
+                        initialNotifications={notificationPage.items}
+                        contextType="deal"
+                        contextId={id}
+                        initialStateVersion={notificationPage.stateVersion}
+                    />
                     <DealRiskPanel risk={risk} />
                 </Rise>
 
@@ -311,8 +317,16 @@ export default async function DealPage({ params }: { params: { id: number } }) {
 
                 <Rise delay={0.15}>
                     <div className="flex flex-col gap-6 lg:flex-row lg:items-stretch lg:gap-4">
-                        <DealBriefPanel dealId={deal.id} className="min-w-0 lg:flex-[2]" />
-                        <DealRationalePanel dealId={deal.id} className="min-w-0 lg:flex-[1]" />
+                        <DealBriefPanel
+                            key={`deal-brief-${deal.id}`}
+                            dealId={deal.id}
+                            className="min-w-0 lg:flex-[2]"
+                        />
+                        <DealRationalePanel
+                            key={`deal-rationale-${deal.id}`}
+                            dealId={deal.id}
+                            className="min-w-0 lg:flex-[1]"
+                        />
                     </div>
                 </Rise>
 
@@ -486,7 +500,7 @@ function StatusPill({ outcome, t }: { outcome: DealOutcome; t: (key: string) => 
         );
     }
     return (
-        <span className="rounded-full bg-brand px-2.5 py-0.5 text-[10px] font-medium uppercase tracking-wider text-white">
+        <span className="rounded-full bg-brand px-2.5 py-0.5 text-[10px] font-medium uppercase tracking-wider text-brand-foreground">
             {t('statusOpen')}
         </span>
     );

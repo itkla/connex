@@ -20,7 +20,7 @@ public class InAppNotificationDispatcher implements NotificationDispatcher {
     }
 
     @Override
-    public void dispatch(Notification notification) {
-        notificationMapper.upsert(notification);
+    public int dispatch(Notification notification) {
+        return notificationMapper.upsert(notification);
     }
 }

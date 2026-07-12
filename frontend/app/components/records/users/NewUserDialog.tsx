@@ -160,7 +160,7 @@ export default function NewUserDialog() {
     return (
         <ResponsiveDialog open={open} onOpenChange={handleOpenChange}>
             <ResponsiveDialogTrigger asChild>
-                <Button className="bg-brand text-white" aria-label={t("newAria")}>
+                <Button variant="brand" aria-label={t("newAria")}>
                     <PlusIcon strokeWidth={2.5} />
                     {t("new")}
                 </Button>
@@ -240,8 +240,9 @@ export default function NewUserDialog() {
                             </ResponsiveDialogClose>
                             <Button
                                 type="submit"
+                                variant="brand"
                                 disabled={isCreating || succeeded || !canSubmit}
-                                className="min-w-24 bg-brand text-white shadow-sm transition hover:bg-brand-hover hover:shadow-md"
+                                className="min-w-24 shadow-sm transition hover:shadow-md"
                             >
                                 {isCreating ? <Loader2Icon className="size-4 animate-spin" /> : t("create")}
                             </Button>

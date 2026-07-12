@@ -204,11 +204,12 @@ export default function ContactConnections({
                 </Select>
                 <Button
                     type="button"
+                    variant="brand"
                     size="icon"
                     onClick={add}
                     disabled={!selected || busy}
                     aria-label={t('add')}
-                    className="shrink-0 bg-brand text-white"
+                    className="shrink-0"
                 >
                     <PlusIcon className="size-4" strokeWidth={2.5} />
                 </Button>

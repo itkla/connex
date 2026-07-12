@@ -3,6 +3,7 @@ package ooo.klae.connex.backend.services;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -11,6 +12,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 
 import ooo.klae.connex.backend.beans.Company;
 import ooo.klae.connex.backend.beans.Notification;
+import ooo.klae.connex.backend.beans.Note;
 import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.dto.IntroductionDto;
@@ -19,6 +21,7 @@ import ooo.klae.connex.backend.mappers.NotificationMapper;
 class IntroductionMentionTest extends AbstractServiceTest {
 
     @Autowired IntroductionService introductionService;
+    @Autowired NoteService noteService;
     @Autowired NotificationMapper notificationMapper;
 
     private String mention(String label, User user) {
@@ -93,5 +96,29 @@ class IntroductionMentionTest extends AbstractServiceTest {
         assertNotNull(fromLineage.getReferences());
         assertEquals(1, fromLineage.getReferences().size());
         assertEquals(mentioned.getId(), fromLineage.getReferences().get(0).getId());
+    }
+
+    @Test
+    void lineage_redactsPrivateNoteTargetsForAnotherMember() {
+        Note privateDraft = new Note();
+        privateDraft.setContent("private introduction context");
+        privateDraft.setVisibility("private");
+        Note privateNote = noteService.create(privateDraft);
+        Company company = newCompany();
+        Person a = newPerson(company);
+        Person b = newPerson(company);
+        IntroductionDto created = introductionService.createIntroduction(
+            a.getId(), b.getId(), "See [Secret](note:" + privateNote.getId() + ")");
+        User other = newUser();
+        authenticateAs(other, workspace.getId());
+
+        IntroductionDto fromLineage = introductionService.getLineage(1, 50).items().stream()
+            .filter(item -> item.getId() == created.getId())
+            .findFirst()
+            .orElseThrow();
+
+        assertEquals("See (private note)", fromLineage.getNote());
+        assertFalse(fromLineage.getReferences().stream()
+            .anyMatch(reference -> "note".equals(reference.getType())));
     }
 }

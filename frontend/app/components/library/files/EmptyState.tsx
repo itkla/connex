@@ -18,7 +18,7 @@ export default function EmptyState({ t }: { t: T }) {
             </div>
             <h2 className="mt-5 text-lg font-semibold text-foreground">{t('emptyTitle')}</h2>
             <p className="mx-auto mt-1.5 max-w-sm text-sm text-muted-foreground">{t('emptyBody')}</p>
-            <Button asChild className="mt-6 bg-brand text-white hover:bg-brand-dark">
+            <Button asChild variant="brand" className="mt-6">
                 <Link href="/records/companies">{t('emptyCta')}</Link>
             </Button>
         </div>

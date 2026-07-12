@@ -426,7 +426,8 @@ public class CompanyService {
     public List<Deal> getDealsByCompanyId(int companyId, int limit) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         requireCompany(workspaceId, companyId);
-        return dealMapper.getDealsByCompanyIdPage(workspaceId, companyId, limit);
+        return referenceService.hydrateDeals(
+            workspaceId, dealMapper.getDealsByCompanyIdPage(workspaceId, companyId, limit));
     }
 
     /**

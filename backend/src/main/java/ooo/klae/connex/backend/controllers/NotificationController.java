@@ -15,7 +15,7 @@ import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.dto.NotificationCountsDto;
 import ooo.klae.connex.backend.dto.NotificationDto;
 import ooo.klae.connex.backend.dto.NotificationPreferenceDto;
-import ooo.klae.connex.backend.dto.PageResponse;
+import ooo.klae.connex.backend.dto.NotificationPageDto;
 import ooo.klae.connex.backend.dto.SnoozeRequest;
 import ooo.klae.connex.backend.services.NotificationPreferenceService;
 import ooo.klae.connex.backend.services.NotificationService;
@@ -30,7 +30,7 @@ public class NotificationController {
     private final NotificationPreferenceService preferenceService;
 
     @GetMapping("/api/notifications")
-    public PageResponse<NotificationDto> getNotifications(
+    public NotificationPageDto getNotifications(
         @RequestParam(defaultValue = "active") String state,
         @RequestParam(required = false) String category,
         @RequestParam(required = false) String contextType,

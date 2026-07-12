@@ -40,6 +40,7 @@ class SecurityHeadersTest {
     void responsesCarryCspAndFrameOptions() throws Exception {
         mockMvc.perform(get("/api/auth/csrf"))
             .andExpect(header().string("Content-Security-Policy", containsString("frame-ancestors 'none'")))
+            .andExpect(header().string("Cache-Control", containsString("no-store")))
             .andExpect(header().string("X-Frame-Options", "DENY"));
     }
 

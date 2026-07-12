@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useLocale, useTranslations } from 'next-intl';
 import { ArrowPathIcon, LightBulbIcon } from '@heroicons/react/24/outline';
 
-import { getDealRationale } from '@/app/lib/api';
+import { generateDealRationale } from '@/app/lib/api';
 import type { DealRationale } from '@/app/lib/types';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
@@ -15,6 +15,8 @@ type RationaleState =
     | { status: 'hidden' }
     | { status: 'error' }
     | { status: 'ready'; rationale: DealRationale };
+
+type DealRationaleState = RationaleState & { dealId: number };
 
 /**
  * AI-generated "before you act" narrative for an at-risk deal — the presentation-only companion of
@@ -27,7 +29,8 @@ type RationaleState =
 export default function DealRationalePanel({ dealId, className }: { dealId: number; className?: string }) {
     const t = useTranslations('DealRationale');
     const locale = useLocale();
-    const [state, setState] = useState<RationaleState>({ status: 'loading' });
+    const [storedState, setStoredState] = useState<DealRationaleState>({ dealId, status: 'loading' });
+    const state: RationaleState = storedState.dealId === dealId ? storedState : { status: 'loading' };
 
     const [reloadKey, setReloadKey] = useState(0);
     const refreshNext = useRef(false);
@@ -38,17 +41,17 @@ export default function DealRationalePanel({ dealId, className }: { dealId: numb
         refreshNext.current = false;
         (async () => {
             try {
-                const rationale = await getDealRationale(dealId, refresh);
+                const rationale = await generateDealRationale(dealId, refresh);
                 if (cancelled) return;
                 if (rationale.available && (rationale.narrative || rationale.rationale)) {
-                    setState({ status: 'ready', rationale });
+                    setStoredState({ dealId, status: 'ready', rationale });
                 } else if (rationale.reason === 'provider_error') {
-                    setState({ status: 'error' });
+                    setStoredState({ dealId, status: 'error' });
                 } else {
-                    setState({ status: 'hidden' });
+                    setStoredState({ dealId, status: 'hidden' });
                 }
             } catch {
-                if (!cancelled) setState({ status: 'error' });
+                if (!cancelled) setStoredState({ dealId, status: 'error' });
             }
         })();
         return () => {
@@ -57,13 +60,13 @@ export default function DealRationalePanel({ dealId, className }: { dealId: numb
     }, [dealId, reloadKey]);
 
     const retry = () => {
-        setState({ status: 'loading' });
+        setStoredState({ dealId, status: 'loading' });
         setReloadKey((key) => key + 1);
     };
 
     const regenerate = () => {
         refreshNext.current = true;
-        setState({ status: 'loading' });
+        setStoredState({ dealId, status: 'loading' });
         setReloadKey((key) => key + 1);
     };
 

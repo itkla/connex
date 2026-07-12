@@ -204,7 +204,7 @@ export default function RolesPanel() {
                         title={t("defaultRolesLabel")}
                         action={
                             !loading && (
-                                <Button onClick={openCreate} className="bg-brand text-white hover:bg-brand-hover">
+                                <Button onClick={openCreate} variant="brand">
                                     <PlusIcon className="size-4" />
                                     {t("newRole")}
                                 </Button>

@@ -144,9 +144,9 @@ export default function MembershipPanel() {
                                     </Button>
                                     <Button
                                         size="sm"
+                                        variant="brand"
                                         disabled={busy}
                                         onClick={() => accept(workspace)}
-                                        className="bg-brand text-white hover:bg-brand-hover"
                                     >
                                         {busy ? <Loader2Icon className="size-4 animate-spin" /> : t("accept")}
                                     </Button>

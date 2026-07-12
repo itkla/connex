@@ -460,7 +460,8 @@ export default function TasksBrowser({ tasks: initialTasks, persons, deals, user
                                 </button>
                             </div>
                             <Button
-                                className="bg-brand text-white shadow-sm transition-transform hover:bg-brand-dark active:scale-[0.98]"
+                                variant="brand"
+                                className="shadow-sm transition-transform active:scale-[0.98]"
                                 aria-label={t('newAria')}
                                 onClick={() => setCreating(true)}
                             >
@@ -868,7 +869,7 @@ function TaskRow({
                     onCheckedChange={(value) => onToggle(value === true)}
                     disabled={pending && !checked}
                     aria-label={ariaCompleteLabel}
-                    className="size-[18px] rounded-full border-border transition data-[state=checked]:border-brand data-[state=checked]:bg-brand data-[state=checked]:text-white"
+                    className="size-[18px] rounded-full border-border transition data-[state=checked]:border-brand data-[state=checked]:bg-brand data-[state=checked]:text-brand-foreground"
                 />
             </div>
 

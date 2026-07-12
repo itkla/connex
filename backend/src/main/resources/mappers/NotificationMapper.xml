@@ -126,9 +126,9 @@
   </sql>
 
   <!-- A snoozed notification is hidden from the active inbox and unread count until its snooze
-       window passes; timestamps are stored in UTC, so compare against UTC_TIMESTAMP(). -->
+       window passes. Every query in a page/count snapshot binds the same database UTC instant. -->
   <sql id="notSnoozed">
-    AND (n.snoozed_until IS NULL OR n.snoozed_until &lt;= UTC_TIMESTAMP())
+    AND (n.snoozed_until IS NULL OR n.snoozed_until &lt;= #{asOf})
   </sql>
 
   <sql id="inboxFilters">
@@ -172,13 +172,63 @@
 
   <select id="getUnreadCounts"
           resultType="ooo.klae.connex.backend.dto.NotificationCountsDto">
-    SELECT COUNT(*) AS unread
+    SELECT COUNT(*) AS unread,
+      COALESCE((
+        SELECT state_version
+        FROM notification_recipient_state
+        WHERE recipient_id = #{recipientId}
+      ), 0) AS state_version
     FROM notification n
     WHERE <include refid="inboxScope"/>
       AND n.dismissed_at IS NULL
       AND n.resolved_at IS NULL
       AND n.read_at IS NULL
       <include refid="notSnoozed"/>
+  </select>
+
+  <select id="getNextSnoozeExpiry" resultType="string">
+    SELECT DATE_FORMAT(MIN(n.snoozed_until), '%Y-%m-%d %H:%i:%s')
+    FROM notification n
+    WHERE <include refid="inboxScope"/>
+      AND n.dismissed_at IS NULL
+      AND n.resolved_at IS NULL
+      AND n.snoozed_until &gt; #{asOf}
+  </select>
+
+  <select id="getStateVersion" resultType="long">
+    SELECT COALESCE((
+      SELECT state_version
+      FROM notification_recipient_state
+      WHERE recipient_id = #{recipientId}
+    ), 0)
+  </select>
+
+  <insert id="bumpStateVersions">
+    INSERT INTO notification_recipient_state (recipient_id, state_version)
+    VALUES
+    <foreach collection="recipientIds" item="recipientId" separator=",">
+      (#{recipientId}, 1)
+    </foreach>
+    ON DUPLICATE KEY UPDATE
+      state_version = notification_recipient_state.state_version + 1
+  </insert>
+
+  <select id="lockRecipientMemberships" resultType="int">
+    SELECT workspace_id
+    FROM workspace_member
+    WHERE user_id = #{recipientId}
+    ORDER BY workspace_id
+    FOR UPDATE
+  </select>
+
+  <select id="getInboxCutoffId" resultType="long">
+    SELECT COALESCE(MAX(n.id), 0)
+    FROM notification n
+    WHERE <include refid="inboxScope"/>
+  </select>
+
+  <select id="getDatabaseUtcTimestamp" resultType="string">
+    SELECT DATE_FORMAT(UTC_TIMESTAMP(), '%Y-%m-%d %H:%i:%s')
   </select>
 
   <select id="findById" resultMap="NotificationResult">
@@ -232,13 +282,14 @@
   </update>
 
   <update id="markAllRead">
-    UPDATE notification
-    SET read_at = CURRENT_TIMESTAMP
-    WHERE recipient_id = #{recipientId}
+    UPDATE notification n
+    SET read_at = #{readAt}
+    WHERE <include refid="inboxScope"/>
+      AND n.id &lt;= #{cutoffId}
       AND dismissed_at IS NULL
       AND resolved_at IS NULL
       AND read_at IS NULL
-      AND (snoozed_until IS NULL OR snoozed_until &lt;= UTC_TIMESTAMP())
+      AND (snoozed_until IS NULL OR snoozed_until &lt;= #{readAt})
   </update>
 
   <insert id="upsert" useGeneratedKeys="true" keyProperty="id">
@@ -250,7 +301,8 @@
     )
     VALUES (
       #{workspaceId}, #{recipientId}, #{type}, #{category}, #{severity},
-      #{templateVersion}, #{title}, #{body}, #{actorId}, #{actorLabel},
+      #{templateVersion}, #{title}, #{body},
+      (SELECT id FROM app_user WHERE id = #{actorId} FOR SHARE), #{actorLabel},
       #{sourceType}, #{sourceId}, #{sourceLabel}, #{contextType}, #{contextId},
       #{contextLabel}, #{actionUrl}, #{data}, #{dedupeKey}, #{triggeredAt}
     ) AS incoming
@@ -304,7 +356,7 @@
   </insert>
 
   <select id="findByDedupe" resultMap="NotificationResult">
-    SELECT n.id, n.severity, n.resolved_at
+    SELECT <include refid="notificationColumns"/>
     FROM notification n
     WHERE n.workspace_id = #{workspaceId}
       AND n.recipient_id = #{recipientId}
@@ -502,6 +554,31 @@
     FROM workspace_member
     WHERE workspace_id = #{workspaceId}
     ORDER BY user_id
+  </select>
+
+  <select id="findPurgeRecipientIds" resultType="int">
+    SELECT DISTINCT recipient_id
+    FROM notification
+    WHERE workspace_id = #{workspaceId}
+      AND type IN (<include refid="reminderTypes"/>)
+      AND resolved_at IS NOT NULL
+      AND resolved_at &lt; #{cutoff}
+    ORDER BY recipient_id
+  </select>
+
+  <select id="findRecipientIdsByActor" resultType="int">
+    SELECT DISTINCT recipient_id
+    FROM notification
+    WHERE actor_id = #{userId}
+    ORDER BY recipient_id
+  </select>
+
+  <select id="lockRecipientIdsByActor" resultType="int">
+    SELECT recipient_id
+    FROM notification
+    WHERE actor_id = #{userId}
+    ORDER BY recipient_id, id
+    FOR UPDATE
   </select>
 
   <delete id="purgeReminderHistory">

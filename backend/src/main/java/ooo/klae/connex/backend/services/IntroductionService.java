@@ -430,8 +430,17 @@ public class IntroductionService {
         }
         Map<Integer, List<EntityReference>> bySource = referenceService.referencesBySource(
             workspaceId, ReferenceService.SOURCE_INTRODUCTION, items.stream().map(IntroductionDto::getId).toList());
-        for (IntroductionDto item : items) {
-            item.setReferences(bySource.getOrDefault(item.getId(), List.of())
+        List<ReferenceService.ReaderVisibleContent> visible = referenceService.redactInvisibleNoteTargets(
+            workspaceId,
+            items.stream()
+                .map(item -> new ReferenceService.ReaderVisibleContent(
+                    item.getNote(), bySource.getOrDefault(item.getId(), List.of())))
+                .toList());
+        for (int index = 0; index < items.size(); index++) {
+            IntroductionDto item = items.get(index);
+            ReferenceService.ReaderVisibleContent content = visible.get(index);
+            item.setNote(content.content());
+            item.setReferences(content.references()
                 .stream().map(ReferenceDto::from).toList());
         }
     }

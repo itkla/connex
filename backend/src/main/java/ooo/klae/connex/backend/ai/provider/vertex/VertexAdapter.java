@@ -30,7 +30,7 @@ public class VertexAdapter implements AiProvider {
     private static final String ANTHROPIC_VERSION = "vertex-2023-10-16";
     private static final Pattern VERTEX_PROJECT_ID = Pattern.compile("^[a-z][a-z0-9-]{4,28}[a-z0-9]$");
     private static final Pattern VERTEX_REGION = Pattern.compile("^[a-z]+-[a-z]+[0-9]{1,2}$");
-    private static final Pattern VERTEX_MODEL_ID = Pattern.compile("^[A-Za-z0-9._@\\-]{1,128}$");
+    private static final Pattern VERTEX_MODEL_ID = Pattern.compile("^[a-z0-9._@\\-]{1,128}$");
 
     private final VertexClient vertexClient;
     private final GoogleAccessTokenClient googleAccessTokenClient;

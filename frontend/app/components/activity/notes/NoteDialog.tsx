@@ -289,8 +289,9 @@ function NoteDialogForm({
                         </DialogClose>
                         <Button
                             type="submit"
+                            variant="brand"
                             disabled={submitting || succeeded || !content.trim()}
-                            className="min-w-24 bg-brand text-white shadow-sm transition hover:bg-brand-hover hover:shadow-md"
+                            className="min-w-24 shadow-sm transition hover:shadow-md"
                         >
                             {submitting ? (
                                 <Loader2Icon className="size-4 animate-spin" />

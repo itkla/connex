@@ -54,14 +54,23 @@ class TenantScopeArchTest {
      * and the org-scoped audit reads are org-filtered ({@code #{orgId}}) and gated by
      * org membership (MULTITENANCY_PLAN §0.6). The {@code count*Anywhere} selects are
      * the account-offboarding guards (#440 increment 3): identity-scoped counts that
-     * mirror the dropped RESTRICT constraints across every workspace.
+     * mirror the dropped RESTRICT constraints across every workspace. The
+     * recipient membership lock and actor-recipient projection are identity-scoped
+     * coordination reads for notification offboarding.
      */
     private static final Set<String> EXEMPT_SELECTS = Set.of(
         "ooo.klae.connex.backend.mappers.NotificationMapper.findPage",
         "ooo.klae.connex.backend.mappers.NotificationMapper.countPage",
         "ooo.klae.connex.backend.mappers.NotificationMapper.getUnreadCounts",
+        "ooo.klae.connex.backend.mappers.NotificationMapper.getNextSnoozeExpiry",
+        "ooo.klae.connex.backend.mappers.NotificationMapper.getStateVersion",
+        "ooo.klae.connex.backend.mappers.NotificationMapper.lockRecipientMemberships",
+        "ooo.klae.connex.backend.mappers.NotificationMapper.getInboxCutoffId",
+        "ooo.klae.connex.backend.mappers.NotificationMapper.getDatabaseUtcTimestamp",
         "ooo.klae.connex.backend.mappers.NotificationMapper.findById",
         "ooo.klae.connex.backend.mappers.NotificationMapper.findWorkspaceIds",
+        "ooo.klae.connex.backend.mappers.NotificationMapper.findRecipientIdsByActor",
+        "ooo.klae.connex.backend.mappers.NotificationMapper.lockRecipientIdsByActor",
         "ooo.klae.connex.backend.mappers.RuleMapper.workspaceIdsWithEnabledScheduleRules",
         "ooo.klae.connex.backend.mappers.AuditLogMapper.findRecentByOrg",
         "ooo.klae.connex.backend.mappers.AuditLogMapper.findOrgExport",
@@ -102,7 +111,8 @@ class TenantScopeArchTest {
         "ooo.klae.connex.backend.mappers.ShareMapper.clearPersonShareGrantedByAnywhere",
         "ooo.klae.connex.backend.mappers.ShareMapper.clearPipelineShareGrantedByAnywhere",
         "ooo.klae.connex.backend.mappers.SavedViewMapper.deleteForUserAnywhere",
-        "ooo.klae.connex.backend.mappers.UserDashboardMapper.deleteForUserAnywhere"
+        "ooo.klae.connex.backend.mappers.UserDashboardMapper.deleteForUserAnywhere",
+        "ooo.klae.connex.backend.mappers.NotificationMapper.bumpStateVersions"
     );
 
     /**

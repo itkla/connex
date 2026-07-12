@@ -132,7 +132,10 @@ public class TenantScopeInterceptor implements Interceptor {
      * fresh-membership ghost clean (invites, invite links, SSO JIT
      * provisioning — see {@code UserOffboardingService.prepareFreshMembership}),
      * all of which a user with no active workspace may reach; it anchors
-     * {@code workspace_id} and {@code recipient_id} in SQL.
+     * {@code workspace_id} and {@code recipient_id} in SQL. The recipient
+     * membership lock, actor-recipient projection and per-recipient
+     * state-version bump are identity-scoped coordination writes for those same
+     * offboarding flows.
      */
     private static final Set<String> EXEMPT_STATEMENTS = Set.of(
         MAPPERS + "AuditLogMapper.insert",
@@ -142,6 +145,9 @@ public class TenantScopeInterceptor implements Interceptor {
         MAPPERS + "NoteMapper.countAuthoredAnywhere",
         MAPPERS + "ActivityMapper.countCreatedAnywhere",
         MAPPERS + "IntroductionMapper.countIntroducedAnywhere",
+        MAPPERS + "NotificationMapper.lockRecipientMemberships",
+        MAPPERS + "NotificationMapper.findRecipientIdsByActor",
+        MAPPERS + "NotificationMapper.lockRecipientIdsByActor",
         MAPPERS + "NotificationMapper.deleteAllForRecipient",
         MAPPERS + "NotificationMapper.deleteAllForRecipientAnywhere",
         MAPPERS + "NotificationMapper.clearActorAnywhere",
@@ -155,7 +161,8 @@ public class TenantScopeInterceptor implements Interceptor {
         MAPPERS + "ShareMapper.clearPersonShareGrantedByAnywhere",
         MAPPERS + "ShareMapper.clearPipelineShareGrantedByAnywhere",
         MAPPERS + "SavedViewMapper.deleteForUserAnywhere",
-        MAPPERS + "UserDashboardMapper.deleteForUserAnywhere"
+        MAPPERS + "UserDashboardMapper.deleteForUserAnywhere",
+        MAPPERS + "NotificationMapper.bumpStateVersions"
     );
 
     private final TenantContext tenantContext;

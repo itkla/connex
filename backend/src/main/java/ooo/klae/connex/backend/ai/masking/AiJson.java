@@ -1,6 +1,8 @@
 package ooo.klae.connex.backend.ai.masking;
 
 import java.util.Objects;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import tools.jackson.core.JacksonException;
 import tools.jackson.core.JsonParser;
@@ -10,14 +12,16 @@ import tools.jackson.databind.node.ObjectNode;
 
 /**
  * Extracts a single JSON object from a possibly noisy provider completion. Providers may wrap the
- * object in code fences, a prose preamble, or trailing commentary; this locates the first substring
- * that parses cleanly as a JSON object and returns it, ignoring everything around it. The scan hands
- * each candidate to Jackson rather than counting braces, so string literals, escapes, and
- * placeholder tokens such as {@code {{P1}}} can never confuse the boundary detection.
+ * object in code fences, a prose preamble, or trailing commentary; this locates the first plausible
+ * JSON-object start and returns it only when it parses cleanly. A malformed object fails closed so a
+ * complete nested object cannot be mistaken for the provider's top-level response. Placeholder
+ * tokens such as {@code {{P1}}} are not considered JSON-object starts.
  */
 public final class AiJson {
     private static final int MAX_SCAN_CHARS = 100_000;
     private static final int MAX_CANDIDATES = 256;
+    private static final Pattern PLACEHOLDER_TOKEN =
+            Pattern.compile("\\{\\{\\s*[A-Z][1-9][0-9]*\\s*}}");
 
     private AiJson() {
     }
@@ -37,17 +41,19 @@ public final class AiJson {
             return null;
         }
         String scan = text.length() > MAX_SCAN_CHARS ? text.substring(0, MAX_SCAN_CHARS) : text;
+        Matcher placeholder = PLACEHOLDER_TOKEN.matcher(scan);
         int from = 0;
         for (int attempt = 0; attempt < MAX_CANDIDATES; attempt++) {
             int brace = scan.indexOf('{', from);
             if (brace < 0) {
                 return null;
             }
-            ObjectNode object = tryParseObject(scan.substring(brace), mapper);
-            if (object != null) {
-                return object;
+            placeholder.region(brace, scan.length());
+            if (placeholder.lookingAt()) {
+                from = placeholder.end();
+                continue;
             }
-            from = brace + 1;
+            return tryParseObject(scan.substring(brace), mapper);
         }
         return null;
     }

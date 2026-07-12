@@ -520,7 +520,7 @@ export default function PipelinesBrowser({ pipelines }: { pipelines: Pipeline[] 
                 <Rise>
                     <div className="flex items-center justify-between">
                         <h1 className="text-4xl font-extrabold">{t('title')}</h1>
-                        <Button className="bg-brand text-white" aria-label={t('addPipelineAriaLabel')} onClick={() => setNewPipelineDialogOpen(true)}>
+                        <Button variant="brand" aria-label={t('addPipelineAriaLabel')} onClick={() => setNewPipelineDialogOpen(true)}>
                             <PlusIcon strokeWidth={2.5} />
                             {t('new')}
                         </Button>

@@ -1,5 +1,9 @@
 package ooo.klae.connex.backend.services;
 
+import java.util.List;
+import java.util.Set;
+import java.util.TreeSet;
+
 import org.springframework.stereotype.Service;
 
 import lombok.RequiredArgsConstructor;
@@ -15,7 +19,9 @@ import ooo.klae.connex.backend.mappers.SavedViewMapper;
 import ooo.klae.connex.backend.mappers.ShareMapper;
 import ooo.klae.connex.backend.mappers.TaskMapper;
 import ooo.klae.connex.backend.mappers.UserDashboardMapper;
+import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
+import ooo.klae.connex.backend.notifications.NotificationStateVersionService;
 
 /**
  * Service-layer replacement for the database-level fan-out that account
@@ -34,6 +40,12 @@ import ooo.klae.connex.backend.mappers.WorkspaceMapper;
 @RequiredArgsConstructor
 public class UserOffboardingService {
 
+    record AccountNotificationLocks(List<Integer> actorRecipientIds) {
+        AccountNotificationLocks {
+            actorRecipientIds = List.copyOf(new TreeSet<>(actorRecipientIds));
+        }
+    }
+
     private final NoteMapper noteMapper;
     private final ActivityMapper activityMapper;
     private final IntroductionMapper introductionMapper;
@@ -45,7 +57,9 @@ public class UserOffboardingService {
     private final ShareMapper shareMapper;
     private final SavedViewMapper savedViewMapper;
     private final UserDashboardMapper userDashboardMapper;
+    private final UserMapper userMapper;
     private final WorkspaceMapper workspaceMapper;
+    private final NotificationStateVersionService notificationStateVersionService;
 
     /**
      * Refuses deletion while the user still owns authored content, mirroring
@@ -115,6 +129,7 @@ public class UserOffboardingService {
      * @param userId the departing member
      */
     public void detachMemberContent(int workspaceId, int userId) {
+        notificationMapper.lockRecipientMemberships(userId);
         taskMapper.unassignMemberTasks(workspaceId, userId);
         dealMapper.clearMemberDealOwnership(workspaceId, userId);
         dealMapper.removeCollaboratorFromWorkspace(workspaceId, userId);
@@ -130,15 +145,43 @@ public class UserOffboardingService {
      * grantors). Statements are grouped deletes-then-nulls for readability;
      * no data dependency exists between them, so the order is otherwise
      * immaterial. Must run inside the caller's deletion transaction.
+     * Recipient memberships are locked in user-id order before notification
+     * rows so concurrent inbox mutations use the same membership-to-notification
+     * lock order. Recipients whose actor reference is cleared receive a
+     * notification-state invalidation after commit.
      *
      * @param userId the account being deleted
      */
     public void eraseOrgDataReferences(int userId) {
+        userMapper.lockById(userId);
+        AccountNotificationLocks locks = snapshotAccountNotificationRecipients(userId);
+        lockAccountNotificationRecipientMemberships(userId, locks);
+        eraseOrgDataReferences(userId, locks);
+    }
+
+    AccountNotificationLocks snapshotAccountNotificationRecipients(int userId) {
+        return new AccountNotificationLocks(notificationMapper.findRecipientIdsByActor(userId));
+    }
+
+    void lockAccountNotificationRecipientMemberships(int userId, AccountNotificationLocks locks) {
+        Set<Integer> recipientIdsToLock = new TreeSet<>(locks.actorRecipientIds());
+        recipientIdsToLock.add(userId);
+        recipientIdsToLock.forEach(notificationMapper::lockRecipientMemberships);
+    }
+
+    void eraseOrgDataReferences(int userId, AccountNotificationLocks locks) {
+        Set<Integer> actorRecipientIds = new TreeSet<>(locks.actorRecipientIds());
+        actorRecipientIds.addAll(notificationMapper.lockRecipientIdsByActor(userId));
         savedViewMapper.deleteForUserAnywhere(userId);
         userDashboardMapper.deleteForUserAnywhere(userId);
         notificationMapper.deleteAllForRecipientAnywhere(userId);
         dealMapper.removeCollaboratorAnywhere(userId);
-        notificationMapper.clearActorAnywhere(userId);
+        int clearedActorRows = notificationMapper.clearActorAnywhere(userId);
+        if (clearedActorRows > 0) {
+            actorRecipientIds.stream()
+                .filter(recipientId -> recipientId != userId)
+                .forEach(notificationStateVersionService::markChanged);
+        }
         dealMapper.clearOwnershipAnywhere(userId);
         taskMapper.unassignAnywhere(userId);
         attachmentMapper.clearUploaderAnywhere(userId);

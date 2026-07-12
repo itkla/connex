@@ -55,7 +55,7 @@ import type {
     DealPipelineValue,
     DealRevenueSeries,
     DealStageDistribution,
-    Notification,
+    NotificationPage,
     Page,
     RelationshipDashboard,
     Task,
@@ -190,9 +190,8 @@ export default async function Dashboard() {
             getIntroSuggestionsFromCookie(cookie, 4),
             getRelationshipDashboardFromCookie(cookie).catch(() => EMPTY_RELATIONSHIP_DASHBOARD),
             getDashboardLayoutFromCookie(cookie),
-            getNotifications({ state: 'unread', page: 1, size: 6 }, init).catch(
-                () => ({ items: [], total: 0 }) as Page<Notification>,
-            ),
+            getNotifications({ state: 'unread', page: 1, size: 6 }, init)
+                .catch(() => ({ items: [], total: 0, stateVersion: 0 }) as NotificationPage),
             getDealMetricsFromCookie(cookie).catch(() => ({ byCurrency: [], totalCount: 0 }) as DealMetrics),
             getCompaniesPage({ size: 1 }, init).catch(() => ({ items: [], total: 0 }) as Page<Company>),
             getContactsPage({ size: 1 }, init).catch(() => ({ items: [], total: 0 }) as Page<Contact>),
@@ -290,7 +289,14 @@ export default async function Dashboard() {
                 <NoteList notes={notes} />
             </div>
         ),
-        notifications: <NotificationsCard items={notifications.items} />,
+        notifications: (
+            <NotificationsCard
+                key={`${notifications.stateVersion}:${notifications.items.map((item) => item.id).join(',')}`}
+                items={notifications.items}
+                recipientId={user.id}
+                initialStateVersion={notifications.stateVersion}
+            />
+        ),
         quickActions: (
             <div className="flex h-full items-center justify-center rounded-2xl border border-border bg-card p-6">
                 <QuickCreate />

@@ -11,14 +11,14 @@ import type {
 } from '@simplewebauthn/browser';
 
 import * as Types from '@/app/lib/types';
+import { localeFromCookieHeader } from '@/i18n/config';
 // Types
 
-function clientLocale(): string | null {
-    if (typeof document === "undefined") {
-        return null;
-    }
-    const match = document.cookie.match(/(?:^|;\s*)NEXT_LOCALE=([^;]+)/);
-    return match ? decodeURIComponent(match[1]) : null;
+function requestLocale(init: RequestInit): string {
+    const cookieHeader = typeof document === "undefined"
+        ? new Headers(init.headers).get("cookie")
+        : document.cookie;
+    return localeFromCookieHeader(cookieHeader);
 }
 
 // The active workspace, read from the non-HttpOnly connex_workspace cookie and sent as a
@@ -34,16 +34,53 @@ function clientWorkspaceId(): string | null {
 // CSRF token, fetched once from the backend and echoed in a header on state-changing requests.
 // The frontend and backend can be different origins, so the token is delivered via this endpoint
 // rather than a cookie the JS would otherwise be unable to read cross-origin.
-let csrfTokenCache: { token: string; headerName: string } | null = null;
+type CsrfBootstrap = {
+    token: string;
+    headerName: string;
+    requestIdentity: string | null;
+};
 
-async function fetchCsrfToken(): Promise<{ token: string; headerName: string } | null> {
+type InFlightAiMutation = {
+    controller: AbortController;
+    request: Promise<unknown>;
+};
+
+const CLIENT_IDENTITY_EVENT_KEY = "connex:client-request-identity";
+let csrfTokenCache: CsrfBootstrap | null = null;
+let clientRequestIdentityEpoch = 0;
+const inFlightAiMutations = new Map<string, InFlightAiMutation>();
+
+if (typeof window !== "undefined") {
+    window.addEventListener("storage", (event) => {
+        if (event.key === CLIENT_IDENTITY_EVENT_KEY) {
+            invalidateClientRequestIdentity();
+            if (event.newValue?.startsWith("refresh:")) {
+                window.location.reload();
+            }
+        }
+    });
+}
+
+async function fetchCsrfToken(): Promise<CsrfBootstrap | null> {
     try {
-        const res = await fetch(`${API_BASE}/api/auth/csrf`, { credentials: "include" });
+        const res = await fetch(`${API_BASE}/api/auth/csrf`, { credentials: "include", cache: "no-store" });
         if (!res.ok) return null;
         const text = await res.text();
         if (!text) return null;
-        const data = JSON.parse(text) as { token?: string; headerName?: string };
-        return data.token && data.headerName ? { token: data.token, headerName: data.headerName } : null;
+        const data = JSON.parse(text) as {
+            token?: string;
+            headerName?: string;
+            requestIdentity?: string | null;
+        };
+        return data.token && data.headerName
+            ? {
+                token: data.token,
+                headerName: data.headerName,
+                requestIdentity: typeof data.requestIdentity === "string" && data.requestIdentity.length > 0
+                    ? data.requestIdentity
+                    : null,
+            }
+            : null;
     } catch {
         return null;
     }
@@ -61,6 +98,76 @@ export async function csrfHeader(forceRefresh = false): Promise<Record<string, s
     if (forceRefresh) csrfTokenCache = null;
     if (!csrfTokenCache) csrfTokenCache = await fetchCsrfToken();
     return csrfTokenCache ? { [csrfTokenCache.headerName]: csrfTokenCache.token } : {};
+}
+
+function invalidateClientRequestIdentity() {
+    csrfTokenCache = null;
+    clientRequestIdentityEpoch += 1;
+    for (const mutation of inFlightAiMutations.values()) {
+        mutation.controller.abort();
+    }
+    inFlightAiMutations.clear();
+}
+
+function broadcastClientRequestIdentityTransition(refreshTabs: boolean) {
+    if (typeof window === "undefined") return;
+    try {
+        const eventId = typeof window.crypto.randomUUID === "function"
+            ? window.crypto.randomUUID()
+            : `${Date.now()}:${clientRequestIdentityEpoch}`;
+        const action = refreshTabs ? "refresh" : "invalidate";
+        window.localStorage.setItem(CLIENT_IDENTITY_EVENT_KEY, `${action}:${eventId}`);
+    } catch {
+        return;
+    }
+}
+
+function signalClientRequestIdentityTransition(refreshTabs: boolean) {
+    invalidateClientRequestIdentity();
+    broadcastClientRequestIdentityTransition(refreshTabs);
+}
+
+async function currentClientRequestIdentity(): Promise<string | null> {
+    const workspaceId = clientWorkspaceId();
+    const currentCsrf = await fetchCsrfToken();
+    if (workspaceId == null || currentCsrf == null || currentCsrf.requestIdentity == null) {
+        return null;
+    }
+    const previousCsrf = csrfTokenCache;
+    if (previousCsrf != null && (
+        previousCsrf.token !== currentCsrf.token
+        || previousCsrf.headerName !== currentCsrf.headerName
+        || previousCsrf.requestIdentity !== currentCsrf.requestIdentity
+    )) {
+        const serverIdentityChanged = previousCsrf.requestIdentity !== currentCsrf.requestIdentity;
+        invalidateClientRequestIdentity();
+        if (serverIdentityChanged) {
+            broadcastClientRequestIdentityTransition(true);
+        }
+    }
+    csrfTokenCache = currentCsrf;
+    const locale = localeFromCookieHeader(document.cookie);
+    return [
+        clientRequestIdentityEpoch,
+        workspaceId,
+        locale,
+        currentCsrf.requestIdentity,
+        currentCsrf.headerName,
+        currentCsrf.token,
+    ]
+        .join("\u0000");
+}
+
+async function withClientRequestIdentityReset<T>(request: () => Promise<T>): Promise<T> {
+    signalClientRequestIdentityTransition(false);
+    try {
+        const result = await request();
+        signalClientRequestIdentityTransition(true);
+        return result;
+    } catch (error) {
+        invalidateClientRequestIdentity();
+        throw error;
+    }
 }
 
 function isMutating(method?: string): boolean {
@@ -99,7 +206,7 @@ async function requestJson<T>(
     path: string,
     init: RequestInit = {},
 ): Promise<T> {
-    const locale = clientLocale();
+    const locale = requestLocale(init);
     const workspaceId = clientWorkspaceId();
     const mutating = isMutating(init.method);
     const stepUpGeneration = passkeyStepUpGeneration;
@@ -110,7 +217,7 @@ async function requestJson<T>(
             credentials: "include",
             headers: {
                 ...(init.body ? { "Content-Type": "application/json" } : {}),
-                ...(locale ? { "Accept-Language": locale } : {}),
+                "Accept-Language": locale,
                 ...(workspaceId ? { "X-Workspace-Id": workspaceId } : {}),
                 ...csrf,
                 ...init.headers,
@@ -244,22 +351,36 @@ async function getJson<T>(path: string, init: RequestInit = {}): Promise<T> {
     return requestJson<T>(path, { ...init, method: "GET" });
 }
 
-const inFlightGets = new Map<string, Promise<unknown>>();
-
 /**
- * De-duplicates concurrent GETs to the same path so a double-mounted effect (React Strict Mode) or
- * a fast remount shares one in-flight request instead of racing several. Load-bearing for the slow
- * AI endpoints, where two concurrent generations can leave one succeeding and the other erroring.
+ * De-duplicates concurrent AI mutations only within one opaque server-issued authenticated-session
+ * generation, active workspace, and locale. Requests without a provable identity bypass de-duplication.
  */
-function dedupedGet<T>(path: string, init: RequestInit = {}): Promise<T> {
-    const existing = inFlightGets.get(path);
-    if (existing) {
-        return existing as Promise<T>;
+async function dedupedAiPost<T>(path: string, init: RequestInit = {}): Promise<T> {
+    if (typeof window === "undefined" || Object.keys(init).length > 0) {
+        return postJson<T>(path, {}, init);
     }
-    const request = getJson<T>(path, init).finally(() => {
-        inFlightGets.delete(path);
+    const identity = await currentClientRequestIdentity();
+    if (identity == null) {
+        return postJson<T>(path, {}, init);
+    }
+    const key = `${identity}\u0000${path}`;
+    const existing = inFlightAiMutations.get(key);
+    if (existing) {
+        return existing.request as Promise<T>;
+    }
+    const controller = new AbortController();
+    const request = (async () => {
+        const response = await postJson<T>(path, {}, { signal: controller.signal });
+        if (await currentClientRequestIdentity() !== identity) {
+            throw new Error("AI request identity changed before completion");
+        }
+        return response;
+    })().finally(() => {
+        if (inFlightAiMutations.get(key)?.request === request) {
+            inFlightAiMutations.delete(key);
+        }
     });
-    inFlightGets.set(path, request);
+    inFlightAiMutations.set(key, { controller, request });
     return request;
 }
 
@@ -474,7 +595,7 @@ async function getApiError(res: Response): Promise<ApiError> {
  * @throws An error if the login request fails, including the response text if available
  */
 export function login(payload: Types.LoginPayload) {
-    return postJson<Types.AuthResponse>("/api/auth/login", payload);
+    return withClientRequestIdentityReset(() => postJson<Types.AuthResponse>("/api/auth/login", payload));
 }
 
 /**
@@ -484,7 +605,7 @@ export function login(payload: Types.LoginPayload) {
  * @return
  */
 export function register(payload: Types.RegisterPayload) {
-    return postJson<Types.AuthResponse>("/api/auth/register", payload);
+    return withClientRequestIdentityReset(() => postJson<Types.AuthResponse>("/api/auth/register", payload));
 }
 
 /**
@@ -564,7 +685,7 @@ export async function workspaceCanAccessEntity(
 }
 
 export function logout() {
-    return postJson<void>("/api/auth/logout");
+    return withClientRequestIdentityReset(() => postJson<void>("/api/auth/logout"));
 }
 
 /**
@@ -653,7 +774,9 @@ export function beginPasskeyAuthentication() {
 }
 
 export function finishPasskeyAuthentication(credential: AuthenticationResponseJSON) {
-    return postJson<Types.AuthResponse>("/api/auth/webauthn/authenticate", credential);
+    return withClientRequestIdentityReset(
+        () => postJson<Types.AuthResponse>("/api/auth/webauthn/authenticate", credential),
+    );
 }
 
 export function beginPasskeyStepUp() {
@@ -709,7 +832,9 @@ export function saveSsoConfig(workspaceId: number, request: Types.SsoConnectionR
 }
 
 export function confirmSsoLink(token: string, password: string) {
-    return postJson<Types.AuthResponse>("/api/auth/sso/link/confirm", { token, password });
+    return withClientRequestIdentityReset(
+        () => postJson<Types.AuthResponse>("/api/auth/sso/link/confirm", { token, password }),
+    );
 }
 
 /**
@@ -1084,12 +1209,12 @@ export function commitImport(entity: Types.ImportEntity, body: Types.ImportReque
  * not carry the workspace context) and triggers a browser download.
  */
 export async function downloadCsv(path: string, filename: string): Promise<void> {
-    const locale = clientLocale();
+    const locale = localeFromCookieHeader(document.cookie);
     const workspaceId = clientWorkspaceId();
     const res = await fetch(`${API_BASE}${path}`, {
         credentials: "include",
         headers: {
-            ...(locale ? { "Accept-Language": locale } : {}),
+            "Accept-Language": locale,
             ...(workspaceId ? { "X-Workspace-Id": workspaceId } : {}),
         },
     });
@@ -1303,10 +1428,10 @@ export function getIntroSuggestions(init: RequestInit = {}, limit?: number) {
 /**
  * AI-generated "why introduce them" rationale for a suggested reverse introduction. Returns a graceful
  * unavailability result (never an error) when AI is not configured or the pair is not a current
- * suggestion; generation is slow (an LLM call), so fetch client-side. Mirrors {@link getDealRationale}.
+ * suggestion; generation is slow (an LLM call), so invoke client-side. Mirrors {@link generateDealRationale}.
  */
-export function getIntroRationale(personAId: number, personBId: number, init: RequestInit = {}) {
-    return dedupedGet<Types.IntroRationale>(
+export function generateIntroRationale(personAId: number, personBId: number, init: RequestInit = {}) {
+    return dedupedAiPost<Types.IntroRationale>(
         `/api/introductions/suggestions/rationale${buildQuery({ personA: personAId, personB: personBId })}`,
         init,
     );
@@ -1644,19 +1769,22 @@ export function getDealRiskAnalyticsFromCookie(cookie: string | null) {
 
 /**
  * AI-generated brief for a deal. Returns a graceful unavailability result (never an error) when AI
- * is not configured for the organization; generation is slow (an LLM call), so fetch client-side.
+ * is not configured for the organization; generation is slow (an LLM call), so invoke client-side.
  */
-export function getDealBrief(id: number, refresh = false, init: RequestInit = {}) {
-    return dedupedGet<Types.DealBrief>(`/api/deals/${id}/brief${refresh ? buildQuery({ refresh: true }) : ''}`, init);
+export function generateDealBrief(id: number, refresh = false, init: RequestInit = {}) {
+    return dedupedAiPost<Types.DealBrief>(
+        `/api/deals/${id}/brief${refresh ? buildQuery({ refresh: true }) : ''}`,
+        init,
+    );
 }
 
 /**
  * AI-generated risk rationale for a deal. Returns a graceful unavailability result (never an error)
  * when the deal is not at risk or AI is not configured for the organization; generation is slow (an
- * LLM call), so fetch client-side.
+ * LLM call), so invoke client-side.
  */
-export function getDealRationale(id: number, refresh = false, init: RequestInit = {}) {
-    return dedupedGet<Types.DealRationale>(
+export function generateDealRationale(id: number, refresh = false, init: RequestInit = {}) {
+    return dedupedAiPost<Types.DealRationale>(
         `/api/deals/${id}/rationale${refresh ? buildQuery({ refresh: true }) : ''}`,
         init,
     );
@@ -1800,7 +1928,7 @@ export function replaceTagsForDeal(id: number, tagIds: number[], init: RequestIn
 */
 
 export function getNotifications(params: Types.NotificationParams = {}, init: RequestInit = {}) {
-    return getJson<Types.Page<Types.Notification>>(`/api/notifications${buildQuery(params)}`, {
+    return getJson<Types.NotificationPage>(`/api/notifications${buildQuery(params)}`, {
         cache: "no-store",
         ...init,
     });
@@ -1856,7 +1984,7 @@ export function snoozeNotification(id: number, hours: number) {
 }
 
 export function markAllNotificationsRead() {
-    return postJson<Types.NotificationCounts>("/api/notifications/read-all");
+    return postJson<Types.NotificationMarkAllResult>("/api/notifications/read-all");
 }
 
 /*
@@ -2119,11 +2247,11 @@ export async function getMyWorkspacesFromCookie(cookie: string | null): Promise<
 }
 
 export function createWorkspace(name: string) {
-    return postJson<Types.Workspace>(`/api/workspaces`, { name });
+    return withClientRequestIdentityReset(() => postJson<Types.Workspace>(`/api/workspaces`, { name }));
 }
 
 export function switchWorkspace(id: number) {
-    return postJson<void>(`/api/workspaces/${id}/switch`, {});
+    return withClientRequestIdentityReset(() => postJson<void>(`/api/workspaces/${id}/switch`, {}));
 }
 
 export function getPendingWorkspaces(init: RequestInit = {}) {
@@ -2131,7 +2259,7 @@ export function getPendingWorkspaces(init: RequestInit = {}) {
 }
 
 export function acceptWorkspace(id: number) {
-    return postJson<Types.Workspace>(`/api/workspaces/${id}/accept`, {});
+    return withClientRequestIdentityReset(() => postJson<Types.Workspace>(`/api/workspaces/${id}/accept`, {}));
 }
 
 export function declineWorkspace(id: number) {
@@ -2139,7 +2267,7 @@ export function declineWorkspace(id: number) {
 }
 
 export function leaveWorkspace(id: number) {
-    return postJson<void>(`/api/workspaces/${id}/leave`, {});
+    return withClientRequestIdentityReset(() => postJson<void>(`/api/workspaces/${id}/leave`, {}));
 }
 
 export function getWorkspaceMembers(workspaceId: number, init: RequestInit = {}) {
@@ -2415,7 +2543,9 @@ export function getInvitePreview(token: string, init: RequestInit = {}) {
 }
 
 export function acceptInvite(token: string) {
-    return postJson<Types.Workspace>(`/api/invites/${token}/accept`, {});
+    return withClientRequestIdentityReset(
+        () => postJson<Types.Workspace>(`/api/invites/${token}/accept`, {}),
+    );
 }
 
 export function getWorkspaceInviteLinks(workspaceId: number, init: RequestInit = {}) {
@@ -2438,7 +2568,9 @@ export function getInviteLinkPreview(token: string, init: RequestInit = {}) {
 }
 
 export function acceptInviteLink(token: string) {
-    return postJson<Types.Workspace>(`/api/invite-links/${token}/accept`, {});
+    return withClientRequestIdentityReset(
+        () => postJson<Types.Workspace>(`/api/invite-links/${token}/accept`, {}),
+    );
 }
 
 export function getWorkspaceAllowedDomains(workspaceId: number, init: RequestInit = {}) {

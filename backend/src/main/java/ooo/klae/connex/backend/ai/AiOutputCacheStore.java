@@ -38,7 +38,7 @@ public class AiOutputCacheStore {
      * a purely prompt-derived hash would not otherwise reflect — invalidate previously stored rows on
      * deploy. Bump this when output-shaping logic changes without a corresponding prompt change.
      */
-    private static final String HASH_VERSION = "v1";
+    static final String HASH_VERSION = "v2-structured-json-fail-closed";
 
     private final AiOutputCacheMapper aiOutputCacheMapper;
     private final ObjectMapper objectMapper;

@@ -227,6 +227,8 @@
     "pickTag": "タグを選択",
     "removeAction": "アクションを削除",
     "runAsLabel": "実行者",
+    "systemRunAsRestricted": "このルールを保存するには「自分」を選択してください。自動化として実行できるのはワークスペースのオーナーと管理者のみです。",
+    "systemToggleRestricted": "自動化ルールを有効または無効にできるのは、ワークスペースのオーナーと管理者のみです。",
     "nameRequired": "ルール名を入力してください",
     "eventsRequired": "イベントを1つ以上選択してください",
     "conditionRequired": "スケジュールルールには条件が1つ以上必要です",
@@ -286,7 +288,7 @@
       },
       "system": {
         "title": "自動化",
-        "hint": "ワークスペースとして実行（管理者のみ）"
+        "hint": "ワークスペースとして実行（オーナー・管理者のみ）"
       }
     },
     "summaryEntity": "{record}が{events}のとき",

@@ -5,13 +5,17 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
+import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.bind.MissingServletRequestParameterException;
 
 /**
@@ -31,6 +35,16 @@ class GlobalExceptionHandlerTest {
 
         assertEquals(HttpStatus.BAD_REQUEST, response.getStatusCode());
         assertEquals("Missing required parameter: personA", response.getBody());
+    }
+
+    @Test
+    void unsupportedMethod_mapsTo405WithoutLoggingAnInternalError() {
+        ResponseEntity<String> response = handler.methodNotSupported(
+                new HttpRequestMethodNotSupportedException("GET", List.of("POST")));
+
+        assertEquals(HttpStatus.METHOD_NOT_ALLOWED, response.getStatusCode());
+        assertEquals(Set.of(HttpMethod.POST), response.getHeaders().getAllow());
+        assertEquals("Request method is not supported", response.getBody());
     }
 
     @Test

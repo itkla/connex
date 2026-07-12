@@ -55,7 +55,7 @@ function pageList(current: number, total: number): (number | 'gap')[] {
     out.push(total);
     return out;
 }
-const CHECKBOX_CLASS = 'size-[18px] border-border data-[state=checked]:border-brand data-[state=checked]:bg-brand data-[state=checked]:text-white data-[state=indeterminate]:border-brand data-[state=indeterminate]:bg-brand data-[state=indeterminate]:text-white';
+const CHECKBOX_CLASS = 'size-[18px] border-border data-[state=checked]:border-brand data-[state=checked]:bg-brand data-[state=checked]:text-brand-foreground data-[state=indeterminate]:border-brand data-[state=indeterminate]:bg-brand data-[state=indeterminate]:text-brand-foreground';
 
 function isSortableColumn<T>(column: ColumnDef<T>): boolean {
     return column.sortable !== false && !!column.getSortValue;
@@ -258,7 +258,7 @@ export default function RecordsRenderView<T extends { id: SelectionId; name?: st
                 >
                     <div className="pointer-events-auto flex items-center gap-1.5 rounded-full bg-card py-1.5 pr-1.5 pl-2 shadow-lg ring-1 ring-border">
                         <span className="flex items-center gap-2 pr-1 pl-1">
-                            <span className="flex h-6 min-w-6 items-center justify-center rounded-full bg-brand px-1.5 text-xs font-semibold tabular-nums text-white">
+                            <span className="flex h-6 min-w-6 items-center justify-center rounded-full bg-brand px-1.5 text-xs font-semibold tabular-nums text-brand-foreground">
                                 {selectedIds.size}
                             </span>
                             <span className="hidden text-sm text-muted-foreground sm:inline">{t('selectedLabel')}</span>
