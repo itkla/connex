@@ -48,4 +48,11 @@ public interface ActivityMapper {
     int insert(Activity activity);
     int update(Activity activity);
     int delete(@Param("workspaceId") int workspaceId, @Param("id") int id);
+
+    /**
+     * Counts activities created by a user across all workspaces. Service-layer
+     * mirror of the {@code activity.created_by_id} ON DELETE RESTRICT (#440
+     * increment 3).
+     */
+    int countCreatedAnywhere(@Param("userId") int userId);
 }

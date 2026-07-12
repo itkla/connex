@@ -61,4 +61,17 @@ public interface TaskMapper {
         @Param("id") int id,
         @Param("dueDate") String dueDate
     );
+
+    /**
+     * Unassigns a member's tasks within one workspace. Moved from
+     * {@code WorkspaceMapper} so the control plane never writes org-data tables
+     * (#440 increment 3).
+     */
+    void unassignMemberTasks(@Param("workspaceId") int workspaceId, @Param("userId") int userId);
+
+    /**
+     * Unassigns a user's tasks across all workspaces. Offboarding replacement
+     * for the {@code task.assigned_to_id} ON DELETE SET NULL (#440 increment 3).
+     */
+    void unassignAnywhere(@Param("userId") int userId);
 }

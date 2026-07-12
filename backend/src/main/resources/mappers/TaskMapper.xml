@@ -179,4 +179,13 @@
     )
   </select>
 
+  <update id="unassignMemberTasks">
+    UPDATE task SET assigned_to_id = NULL
+    WHERE workspace_id = #{workspaceId} AND assigned_to_id = #{userId}
+  </update>
+
+  <update id="unassignAnywhere">
+    UPDATE task SET assigned_to_id = NULL WHERE assigned_to_id = #{userId}
+  </update>
+
 </mapper>

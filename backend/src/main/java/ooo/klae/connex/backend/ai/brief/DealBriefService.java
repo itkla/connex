@@ -6,6 +6,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 
+import org.springframework.context.i18n.LocaleContextHolder;
 import org.springframework.stereotype.Service;
 
 import lombok.RequiredArgsConstructor;
@@ -67,9 +68,10 @@ public class DealBriefService {
         }
 
         BriefAssembly assembly = dealBriefAssembler.assemble(workspaceId, dealId);
+        String cacheFeature = cacheFeature();
         String contentHash = aiOutputCacheStore.contentHash(assembly.prompt(), assembly.context());
         if (!refresh) {
-            DealBriefDto cached = cached(workspaceId, dealId, contentHash);
+            DealBriefDto cached = cached(workspaceId, cacheFeature, dealId, contentHash);
             if (cached != null) {
                 return cached;
             }
@@ -87,7 +89,7 @@ public class DealBriefService {
                 return DealBriefDto.unavailable(dealId, PROVIDER_ERROR);
             }
             String generatedAt = Instant.now(clock).toString();
-            aiOutputCacheStore.save(workspaceId, FEATURE, dealId, AiOutputCacheStore.NO_SUBJECT,
+            aiOutputCacheStore.save(workspaceId, cacheFeature, dealId, AiOutputCacheStore.NO_SUBJECT,
                     contentHash, new DealBriefContent(sections), parsed.demaskWarnings(), generatedAt);
             return DealBriefDto.of(dealId, toDtoSections(sections), generatedAt, parsed.demaskWarnings());
         } catch (MaskingLeakException | AiProviderException exception) {
@@ -97,9 +99,9 @@ public class DealBriefService {
         }
     }
 
-    private DealBriefDto cached(int workspaceId, int dealId, String contentHash) {
+    private DealBriefDto cached(int workspaceId, String cacheFeature, int dealId, String contentHash) {
         Optional<AiOutputCache> row = aiOutputCacheStore.find(
-                workspaceId, FEATURE, dealId, AiOutputCacheStore.NO_SUBJECT);
+                workspaceId, cacheFeature, dealId, AiOutputCacheStore.NO_SUBJECT);
         if (row.isEmpty() || !contentHash.equals(row.get().getContentHash())) {
             return null;
         }
@@ -138,6 +140,11 @@ public class DealBriefService {
         return sections.stream()
                 .map(section -> new DealBriefDto.Section(section.title(), section.body()))
                 .toList();
+    }
+
+    private static String cacheFeature() {
+        String language = LocaleContextHolder.getLocale().getLanguage();
+        return FEATURE + ':' + (language.isBlank() ? "en" : language);
     }
 
     private static String truncate(String value, int maxCodePoints) {
