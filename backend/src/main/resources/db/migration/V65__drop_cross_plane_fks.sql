@@ -19,6 +19,7 @@
 
 ALTER TABLE activity DROP FOREIGN KEY fk_activity_created_by;
 ALTER TABLE activity DROP FOREIGN KEY fk_activity_workspace;
+ALTER TABLE ai_output_cache DROP FOREIGN KEY fk_ai_output_cache_workspace;
 ALTER TABLE attachment DROP FOREIGN KEY fk_attachment_uploaded_by;
 ALTER TABLE attachment DROP FOREIGN KEY fk_attachment_workspace;
 ALTER TABLE company DROP FOREIGN KEY fk_company_workspace;
