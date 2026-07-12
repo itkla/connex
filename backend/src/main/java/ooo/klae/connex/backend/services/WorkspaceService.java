@@ -505,8 +505,16 @@ public class WorkspaceService {
                 "Removed " + target.getDisplayName() + " from the workspace", null);
     }
 
-    /** Adds a user as a PENDING member and notifies them to accept; they aren't a real member until they do. */
+    /**
+     * Adds a user as a PENDING member and notifies them to accept; they aren't a
+     * real member until they do. Any notification rows left over from an earlier
+     * membership are cleaned first — with the cross-plane cascades gone (#440
+     * increment 3) a row inserted while a removal was committing could otherwise
+     * resurface in the re-invited member's inbox.
+     */
+    @Transactional
     public MemberDto addPendingMember(int workspaceId, User actor, User target, String role) {
+        notificationMapper.deleteAllForRecipient(workspaceId, target.getId());
         workspaceMapper.addPendingMember(workspaceId, target.getId(), role);
         notifyJoinRequest(workspaceId, target.getId(), actor);
         auditService.record("workspace.member.invite", "workspace", workspaceId, target.getDisplayName(),

@@ -1,11 +1,13 @@
 package ooo.klae.connex.backend.config;
 
 import java.sql.SQLException;
+import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 import javax.sql.DataSource;
 
+import org.springframework.beans.factory.ListableBeanFactory;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.SmartInitializingSingleton;
 import org.springframework.beans.factory.config.BeanPostProcessor;
@@ -32,6 +34,15 @@ import ooo.klae.connex.backend.tenant.TenantRoutingProperties;
 @ConditionalOnProperty(name = "connex.tenancy.routing.mode", havingValue = "catalog-per-placement")
 public class TenantRoutingConfig {
 
+    /**
+     * The tenant pool's bean name — Spring Boot's auto-configured primary
+     * datasource. Decoration targets this bean by identity, not by type: when
+     * the control-plane split (#440 increment 3) adds a second pool, a
+     * type-based hook would tenant-route the control-plane pool too, making
+     * placement lookups self-referential.
+     */
+    static final String TENANT_DATASOURCE_BEAN = "dataSource";
+
     private static final Pattern JDBC_URL_DATABASE = Pattern.compile("^jdbc:mysql://[^/]+/([^?/]+)");
 
     @Bean
@@ -41,7 +52,7 @@ public class TenantRoutingConfig {
         return new BeanPostProcessor() {
             @Override
             public Object postProcessAfterInitialization(Object bean, String beanName) {
-                if (!(bean instanceof HikariDataSource hikari)) {
+                if (!(bean instanceof HikariDataSource hikari) || !TENANT_DATASOURCE_BEAN.equals(beanName)) {
                     return bean;
                 }
                 return decorate(hikari, properties.getObject(), tenantContext.getObject());
@@ -50,20 +61,31 @@ public class TenantRoutingConfig {
     }
 
     /**
-     * Fails startup when routing is enabled but the primary datasource was not
-     * wrapped by {@link TenantRoutingDataSource} — e.g. a datasource type or
-     * ordered wrapper the decorator's {@code instanceof HikariDataSource} hook
-     * did not match. Without this guard the app would run every dedicated org
-     * silently unrouted on the shared catalog; refusing to start is fail-closed.
+     * Fails startup unless decoration landed exactly where intended: the
+     * tenant pool ({@link #TENANT_DATASOURCE_BEAN}) must be wrapped by
+     * {@link TenantRoutingDataSource}, and no other datasource bean may be —
+     * an unwrapped tenant pool serves every dedicated org silently unrouted,
+     * and a wrapped control-plane pool would tenant-route placement lookups
+     * themselves. Refusing to start is fail-closed in both directions.
      */
     @Bean
-    static SmartInitializingSingleton tenantRoutingDecorationVerifier(ObjectProvider<DataSource> dataSource) {
+    static SmartInitializingSingleton tenantRoutingDecorationVerifier(ListableBeanFactory beanFactory) {
         return () -> {
-            DataSource resolved = dataSource.getIfAvailable();
-            if (resolved == null || !routes(resolved)) {
+            Map<String, DataSource> dataSources = beanFactory.getBeansOfType(DataSource.class);
+            DataSource tenantPool = dataSources.get(TENANT_DATASOURCE_BEAN);
+            if (tenantPool == null || !routes(tenantPool)) {
                 throw new IllegalStateException(
-                    "connex.tenancy.routing.mode=catalog-per-placement is enabled but the datasource is not wrapped "
-                        + "by TenantRoutingDataSource; refusing to start rather than serve tenants unrouted");
+                    "connex.tenancy.routing.mode=catalog-per-placement is enabled but the '" + TENANT_DATASOURCE_BEAN
+                        + "' datasource is not wrapped by TenantRoutingDataSource; refusing to start rather than "
+                        + "serve tenants unrouted");
+            }
+            for (Map.Entry<String, DataSource> entry : dataSources.entrySet()) {
+                if (!TENANT_DATASOURCE_BEAN.equals(entry.getKey()) && routes(entry.getValue())) {
+                    throw new IllegalStateException(
+                        "Datasource bean '" + entry.getKey() + "' is tenant-routed but only '"
+                            + TENANT_DATASOURCE_BEAN + "' may be; a routed control-plane pool would make "
+                            + "placement lookups self-referential");
+                }
             }
         };
     }

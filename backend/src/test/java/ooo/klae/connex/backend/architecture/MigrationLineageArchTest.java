@@ -1,0 +1,83 @@
+package ooo.klae.connex.backend.architecture;
+
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Locale;
+import java.util.Set;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+import java.util.stream.Stream;
+
+import org.junit.jupiter.api.Test;
+
+import ooo.klae.connex.backend.tenant.TablePlaneRegistry;
+
+/**
+ * Keeps the split migration lineages pure (#440 increment 3): a migration
+ * under {@code db/migration/tenant} may only touch org-data tables (it will
+ * run against every per-org catalog in Phase 4), and one under
+ * {@code db/migration/control} may only touch control-plane tables. The
+ * legacy interleaved lineage ({@code db/migration} root, V1–V65) predates the
+ * split and is exempt; new migrations belong in one of the two subfolders.
+ * Flyway scans location subdirectories recursively, so no configuration
+ * change is involved — only placement.
+ */
+class MigrationLineageArchTest {
+
+    private static final Pattern TABLE_STATEMENT = Pattern.compile(
+        "(?:CREATE|ALTER|DROP|RENAME|TRUNCATE)\\s+TABLE\\s+(?:IF\\s+(?:NOT\\s+)?EXISTS\\s+)?[`\"]?(\\w+)",
+        Pattern.CASE_INSENSITIVE);
+    private static final Pattern DML_STATEMENT = Pattern.compile(
+        "(?:INSERT\\s+INTO|UPDATE|DELETE\\s+FROM)\\s+[`\"]?(\\w+)",
+        Pattern.CASE_INSENSITIVE);
+
+    @Test
+    void tenantLineageTouchesOnlyOrgDataTables() throws IOException {
+        assertLineagePurity("tenant", TablePlaneRegistry.ORG_DATA_TABLES);
+    }
+
+    @Test
+    void controlLineageTouchesOnlyControlPlaneTables() throws IOException {
+        assertLineagePurity("control", TablePlaneRegistry.CONTROL_PLANE_TABLES);
+    }
+
+    private void assertLineagePurity(String lineage, Set<String> allowedTables) throws IOException {
+        Path directory = repoRoot().resolve("backend/src/main/resources/db/migration/" + lineage);
+        assertTrue(Files.isDirectory(directory),
+            "Missing lineage directory " + directory + " — the split location must exist even while empty.");
+
+        List<String> violations = new ArrayList<>();
+        try (Stream<Path> files = Files.list(directory)) {
+            for (Path file : files.filter(path -> path.getFileName().toString().endsWith(".sql")).toList()) {
+                String sql = Files.readString(file);
+                for (Pattern pattern : List.of(TABLE_STATEMENT, DML_STATEMENT)) {
+                    Matcher matcher = pattern.matcher(sql);
+                    while (matcher.find()) {
+                        String table = matcher.group(1);
+                        if (!allowedTables.contains(table) && !allowedTables.contains(table.toUpperCase(Locale.ROOT))) {
+                            violations.add(file.getFileName() + " touches " + table);
+                        }
+                    }
+                }
+            }
+        }
+        assertTrue(violations.isEmpty(),
+            "Migrations in db/migration/" + lineage + " may only touch " + lineage + "-plane tables "
+                + "(TablePlaneRegistry); move the statement to the other lineage or revisit the table's "
+                + "placement on #440: " + violations);
+    }
+
+    private Path repoRoot() {
+        Path current = Path.of("").toAbsolutePath();
+        while (current != null && !Files.exists(current.resolve("backend/src/main/resources/db/migration"))) {
+            current = current.getParent();
+        }
+        assertTrue(current != null, "Could not locate the repository root from " + Path.of("").toAbsolutePath());
+        return current;
+    }
+}
