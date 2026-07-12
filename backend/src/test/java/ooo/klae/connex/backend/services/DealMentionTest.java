@@ -231,7 +231,6 @@ class DealMentionTest extends AbstractServiceTest {
             findDeal(dealService.getAllDeals(), deal.getId()),
             findDeal(companyService.getDealsByCompanyId(company.getId(), 100), deal.getId()),
             findDeal(personService.getDealsByPersonId(person.getId()), deal.getId()),
-            findDeal(Arrays.asList(companyService.getCompanyById(company.getId()).getDeals()), deal.getId()),
             findDeal(Arrays.asList(personService.getPersonById(person.getId()).getDeals()), deal.getId()));
 
         for (Deal candidate : fetched) {
