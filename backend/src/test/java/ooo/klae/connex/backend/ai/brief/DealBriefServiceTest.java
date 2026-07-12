@@ -16,14 +16,17 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.List;
+import java.util.Locale;
 import java.util.Optional;
 
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.context.i18n.LocaleContextHolder;
 
 import ooo.klae.connex.backend.ai.AiFeatureGate;
 import ooo.klae.connex.backend.ai.AiInvocation;
@@ -46,6 +49,7 @@ class DealBriefServiceTest {
     private static final int WORKSPACE_ID = 17;
     private static final int DEAL_ID = 29;
     private static final String FEATURE = "deal.brief";
+    private static final String CACHE_FEATURE = "deal.brief:en";
     private static final String HASH = "content-hash-1";
     private static final Instant NOW = Instant.parse("2026-07-09T18:30:00Z");
 
@@ -67,6 +71,12 @@ class DealBriefServiceTest {
                 workspaceService,
                 Clock.fixed(NOW, ZoneOffset.UTC));
         when(workspaceService.getCurrentWorkspaceId()).thenReturn(WORKSPACE_ID);
+        LocaleContextHolder.setLocale(Locale.ENGLISH);
+    }
+
+    @AfterEach
+    void tearDown() {
+        LocaleContextHolder.resetLocaleContext();
     }
 
     @Test
@@ -111,7 +121,7 @@ class DealBriefServiceTest {
         verify(aiInvocationService).completeStructured(invocation.capture(), eq(DealBriefContent.class));
         assertEquals(FEATURE, invocation.getValue().feature());
         assertEquals(DealBriefService.MAX_TOKENS, invocation.getValue().maxTokens());
-        verify(aiOutputCacheStore).save(eq(WORKSPACE_ID), eq(FEATURE), eq(DEAL_ID),
+        verify(aiOutputCacheStore).save(eq(WORKSPACE_ID), eq(CACHE_FEATURE), eq(DEAL_ID),
                 eq(AiOutputCacheStore.NO_SUBJECT), eq(HASH), any(DealBriefContent.class), eq(2), eq(NOW.toString()));
     }
 
@@ -121,7 +131,7 @@ class DealBriefServiceTest {
         when(aiFeatureGate.isAiUsable()).thenReturn(true);
         when(dealBriefAssembler.assemble(WORKSPACE_ID, DEAL_ID)).thenReturn(assembly);
         when(aiOutputCacheStore.contentHash(assembly.prompt(), assembly.context())).thenReturn(HASH);
-        when(aiOutputCacheStore.find(WORKSPACE_ID, FEATURE, DEAL_ID, AiOutputCacheStore.NO_SUBJECT))
+        when(aiOutputCacheStore.find(WORKSPACE_ID, CACHE_FEATURE, DEAL_ID, AiOutputCacheStore.NO_SUBJECT))
                 .thenReturn(Optional.of(row(HASH, 3, "2026-07-01T09:00:00Z")));
         when(aiOutputCacheStore.read("payload", DealBriefContent.class))
                 .thenReturn(Optional.of(new DealBriefContent(List.of(
@@ -143,7 +153,7 @@ class DealBriefServiceTest {
         when(aiFeatureGate.isAiUsable()).thenReturn(true);
         when(dealBriefAssembler.assemble(WORKSPACE_ID, DEAL_ID)).thenReturn(assembly);
         when(aiOutputCacheStore.contentHash(assembly.prompt(), assembly.context())).thenReturn(HASH);
-        when(aiOutputCacheStore.find(WORKSPACE_ID, FEATURE, DEAL_ID, AiOutputCacheStore.NO_SUBJECT))
+        when(aiOutputCacheStore.find(WORKSPACE_ID, CACHE_FEATURE, DEAL_ID, AiOutputCacheStore.NO_SUBJECT))
                 .thenReturn(Optional.of(row("stale-hash", 0, "2026-07-01T09:00:00Z")));
         when(aiInvocationService.completeStructured(any(AiInvocation.class), eq(DealBriefContent.class)))
                 .thenReturn(new AiStructuredOutcome.Parsed<>(
@@ -155,7 +165,7 @@ class DealBriefServiceTest {
         assertEquals("Fresh.", result.getSections().get(0).body());
         assertEquals(NOW.toString(), result.getGeneratedAt());
         verify(aiInvocationService).completeStructured(any(AiInvocation.class), eq(DealBriefContent.class));
-        verify(aiOutputCacheStore).save(eq(WORKSPACE_ID), eq(FEATURE), eq(DEAL_ID),
+        verify(aiOutputCacheStore).save(eq(WORKSPACE_ID), eq(CACHE_FEATURE), eq(DEAL_ID),
                 eq(AiOutputCacheStore.NO_SUBJECT), eq(HASH), any(DealBriefContent.class), eq(0), eq(NOW.toString()));
     }
 
@@ -175,7 +185,7 @@ class DealBriefServiceTest {
         assertEquals("Fresh take.", result.getSections().get(0).body());
         verify(aiInvocationService).completeStructured(any(AiInvocation.class), eq(DealBriefContent.class));
         verify(aiOutputCacheStore, never()).find(anyInt(), any(), anyInt(), anyInt());
-        verify(aiOutputCacheStore).save(eq(WORKSPACE_ID), eq(FEATURE), eq(DEAL_ID),
+        verify(aiOutputCacheStore).save(eq(WORKSPACE_ID), eq(CACHE_FEATURE), eq(DEAL_ID),
                 eq(AiOutputCacheStore.NO_SUBJECT), eq(HASH), any(DealBriefContent.class), eq(0), eq(NOW.toString()));
     }
 
@@ -237,7 +247,7 @@ class DealBriefServiceTest {
         when(aiFeatureGate.isAiUsable()).thenReturn(true);
         when(dealBriefAssembler.assemble(WORKSPACE_ID, DEAL_ID)).thenReturn(assembly);
         when(aiOutputCacheStore.contentHash(assembly.prompt(), assembly.context())).thenReturn(HASH);
-        when(aiOutputCacheStore.find(WORKSPACE_ID, FEATURE, DEAL_ID, AiOutputCacheStore.NO_SUBJECT))
+        when(aiOutputCacheStore.find(WORKSPACE_ID, CACHE_FEATURE, DEAL_ID, AiOutputCacheStore.NO_SUBJECT))
                 .thenReturn(Optional.empty());
     }
 

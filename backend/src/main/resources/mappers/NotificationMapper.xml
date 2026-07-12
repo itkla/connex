@@ -511,4 +511,18 @@
       AND resolved_at IS NOT NULL
       AND resolved_at &lt; #{cutoff}
   </delete>
+
+  <delete id="deleteAllForRecipient">
+    DELETE FROM notification
+    WHERE workspace_id = #{workspaceId} AND recipient_id = #{recipientId}
+  </delete>
+
+  <delete id="deleteAllForRecipientAnywhere">
+    DELETE FROM notification WHERE recipient_id = #{recipientId}
+  </delete>
+
+  <update id="clearActorAnywhere">
+    UPDATE notification SET actor_id = NULL WHERE actor_id = #{userId}
+  </update>
+
 </mapper>

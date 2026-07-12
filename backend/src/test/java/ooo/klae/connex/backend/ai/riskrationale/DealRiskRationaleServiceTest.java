@@ -15,14 +15,17 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.context.i18n.LocaleContextHolder;
 
 import ooo.klae.connex.backend.ai.AiFeatureGate;
 import ooo.klae.connex.backend.ai.AiInvocation;
@@ -48,7 +51,7 @@ import ooo.klae.connex.backend.services.WorkspaceService;
 class DealRiskRationaleServiceTest {
     private static final int WORKSPACE_ID = 17;
     private static final int DEAL_ID = 29;
-    private static final String FEATURE = "deal.risk_rationale";
+    private static final String CACHE_FEATURE = "deal.risk_rationale:en";
     private static final String HASH = "content-hash-1";
     private static final Instant NOW = Instant.parse("2026-07-09T18:30:00Z");
 
@@ -72,6 +75,12 @@ class DealRiskRationaleServiceTest {
                 workspaceService,
                 Clock.fixed(NOW, ZoneOffset.UTC));
         when(workspaceService.getCurrentWorkspaceId()).thenReturn(WORKSPACE_ID);
+        LocaleContextHolder.setLocale(Locale.ENGLISH);
+    }
+
+    @AfterEach
+    void tearDown() {
+        LocaleContextHolder.resetLocaleContext();
     }
 
     @Test
@@ -134,7 +143,7 @@ class DealRiskRationaleServiceTest {
                 result.getRationale());
         assertEquals(NOW.toString(), result.getGeneratedAt());
         assertEquals(2, result.getWarnings());
-        verify(aiOutputCacheStore).save(eq(WORKSPACE_ID), eq(FEATURE), eq(DEAL_ID),
+        verify(aiOutputCacheStore).save(eq(WORKSPACE_ID), eq(CACHE_FEATURE), eq(DEAL_ID),
                 eq(AiOutputCacheStore.NO_SUBJECT), eq(HASH), any(DealRiskRationaleContent.class), eq(2),
                 eq(NOW.toString()));
     }
@@ -147,7 +156,7 @@ class DealRiskRationaleServiceTest {
         when(dealRiskService.assessDeal(WORKSPACE_ID, DEAL_ID)).thenReturn(risk);
         when(dealRiskRationaleAssembler.assemble(WORKSPACE_ID, DEAL_ID, risk)).thenReturn(assembly);
         when(aiOutputCacheStore.contentHash(assembly.prompt(), assembly.context())).thenReturn(HASH);
-        when(aiOutputCacheStore.find(WORKSPACE_ID, FEATURE, DEAL_ID, AiOutputCacheStore.NO_SUBJECT))
+        when(aiOutputCacheStore.find(WORKSPACE_ID, CACHE_FEATURE, DEAL_ID, AiOutputCacheStore.NO_SUBJECT))
                 .thenReturn(Optional.of(row(HASH, 1, "2026-07-01T09:00:00Z")));
         when(aiOutputCacheStore.read("payload", DealRiskRationaleContent.class))
                 .thenReturn(Optional.of(new DealRiskRationaleContent("Stored narrative.", List.of("Stored action."))));
@@ -171,7 +180,7 @@ class DealRiskRationaleServiceTest {
         when(dealRiskService.assessDeal(WORKSPACE_ID, DEAL_ID)).thenReturn(risk);
         when(dealRiskRationaleAssembler.assemble(WORKSPACE_ID, DEAL_ID, risk)).thenReturn(assembly);
         when(aiOutputCacheStore.contentHash(assembly.prompt(), assembly.context())).thenReturn(HASH);
-        when(aiOutputCacheStore.find(WORKSPACE_ID, FEATURE, DEAL_ID, AiOutputCacheStore.NO_SUBJECT))
+        when(aiOutputCacheStore.find(WORKSPACE_ID, CACHE_FEATURE, DEAL_ID, AiOutputCacheStore.NO_SUBJECT))
                 .thenReturn(Optional.of(row("stale-hash", 0, "2026-07-01T09:00:00Z")));
         when(aiInvocationService.completeStructured(any(AiInvocation.class), eq(DealRiskRationaleContent.class)))
                 .thenReturn(new AiStructuredOutcome.Parsed<>(
@@ -182,7 +191,7 @@ class DealRiskRationaleServiceTest {
         assertEquals("Fresh narrative.", result.getNarrative());
         assertEquals(NOW.toString(), result.getGeneratedAt());
         verify(aiInvocationService).completeStructured(any(AiInvocation.class), eq(DealRiskRationaleContent.class));
-        verify(aiOutputCacheStore).save(eq(WORKSPACE_ID), eq(FEATURE), eq(DEAL_ID),
+        verify(aiOutputCacheStore).save(eq(WORKSPACE_ID), eq(CACHE_FEATURE), eq(DEAL_ID),
                 eq(AiOutputCacheStore.NO_SUBJECT), eq(HASH), any(DealRiskRationaleContent.class), eq(0),
                 eq(NOW.toString()));
     }
@@ -204,7 +213,7 @@ class DealRiskRationaleServiceTest {
         assertEquals("Fresh narrative.", result.getNarrative());
         verify(aiInvocationService).completeStructured(any(AiInvocation.class), eq(DealRiskRationaleContent.class));
         verify(aiOutputCacheStore, never()).find(anyInt(), any(), anyInt(), anyInt());
-        verify(aiOutputCacheStore).save(eq(WORKSPACE_ID), eq(FEATURE), eq(DEAL_ID),
+        verify(aiOutputCacheStore).save(eq(WORKSPACE_ID), eq(CACHE_FEATURE), eq(DEAL_ID),
                 eq(AiOutputCacheStore.NO_SUBJECT), eq(HASH), any(DealRiskRationaleContent.class), eq(0),
                 eq(NOW.toString()));
     }
@@ -262,7 +271,7 @@ class DealRiskRationaleServiceTest {
         when(dealRiskService.assessDeal(WORKSPACE_ID, DEAL_ID)).thenReturn(risk);
         when(dealRiskRationaleAssembler.assemble(WORKSPACE_ID, DEAL_ID, risk)).thenReturn(assembly);
         when(aiOutputCacheStore.contentHash(assembly.prompt(), assembly.context())).thenReturn(HASH);
-        when(aiOutputCacheStore.find(WORKSPACE_ID, FEATURE, DEAL_ID, AiOutputCacheStore.NO_SUBJECT))
+        when(aiOutputCacheStore.find(WORKSPACE_ID, CACHE_FEATURE, DEAL_ID, AiOutputCacheStore.NO_SUBJECT))
                 .thenReturn(Optional.empty());
     }
 

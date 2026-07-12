@@ -47,4 +47,9 @@
     DELETE FROM saved_view
     WHERE workspace_id = #{workspaceId} AND user_id = #{userId} AND id = #{id}
   </delete>
+
+  <delete id="deleteForUserAnywhere">
+    DELETE FROM saved_view WHERE user_id = #{userId}
+  </delete>
+
 </mapper>
