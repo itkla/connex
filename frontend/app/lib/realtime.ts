@@ -24,6 +24,7 @@ export type RealtimeStatus = "connecting" | "connected" | "disconnected";
  */
 export type RealtimeNotificationFrame = {
     kind: "created" | "updated";
+    stateVersion: number;
     notification?: Notification | null;
     dedupeKey?: string | null;
 };
@@ -69,7 +70,11 @@ function parseFrame(message: IMessage): RealtimeNotificationFrame | null {
         return null;
     }
     const kind = (parsed as { kind?: unknown }).kind;
+    const stateVersion = (parsed as { stateVersion?: unknown }).stateVersion;
     if (kind !== "created" && kind !== "updated") {
+        return null;
+    }
+    if (typeof stateVersion !== "number" || !Number.isSafeInteger(stateVersion) || stateVersion < 0) {
         return null;
     }
     return parsed as RealtimeNotificationFrame;

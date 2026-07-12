@@ -15,25 +15,30 @@ import ooo.klae.connex.backend.dto.NotificationDto;
 public record RealtimeNotificationPayload(
         String kind,
         NotificationDto notification,
-        String dedupeKey) {
+        String dedupeKey,
+        long stateVersion) {
 
     /**
      * Builds a frame for a newly created notification.
      * @param notification the rendered notification
      * @param dedupeKey the notification's dedupe key
+     * @param stateVersion the recipient's notification-state version
      * @return the payload
      */
-    public static RealtimeNotificationPayload created(NotificationDto notification, String dedupeKey) {
-        return new RealtimeNotificationPayload("created", notification, dedupeKey);
+    public static RealtimeNotificationPayload created(
+            NotificationDto notification, String dedupeKey, long stateVersion) {
+        return new RealtimeNotificationPayload("created", notification, dedupeKey, stateVersion);
     }
 
     /**
      * Builds a frame for a materially updated notification.
      * @param notification the rendered notification
      * @param dedupeKey the notification's dedupe key
+     * @param stateVersion the recipient's notification-state version
      * @return the payload
      */
-    public static RealtimeNotificationPayload updated(NotificationDto notification, String dedupeKey) {
-        return new RealtimeNotificationPayload("updated", notification, dedupeKey);
+    public static RealtimeNotificationPayload updated(
+            NotificationDto notification, String dedupeKey, long stateVersion) {
+        return new RealtimeNotificationPayload("updated", notification, dedupeKey, stateVersion);
     }
 }

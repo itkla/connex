@@ -1537,7 +1537,7 @@ export function replaceTagsForDeal(id: number, tagIds: number[], init: RequestIn
 */
 
 export function getNotifications(params: Types.NotificationParams = {}, init: RequestInit = {}) {
-    return getJson<Types.Page<Types.Notification>>(`/api/notifications${buildQuery(params)}`, {
+    return getJson<Types.NotificationPage>(`/api/notifications${buildQuery(params)}`, {
         cache: "no-store",
         ...init,
     });
@@ -1593,7 +1593,7 @@ export function snoozeNotification(id: number, hours: number) {
 }
 
 export function markAllNotificationsRead() {
-    return postJson<Types.NotificationCounts>("/api/notifications/read-all");
+    return postJson<Types.NotificationMarkAllResult>("/api/notifications/read-all");
 }
 
 /*

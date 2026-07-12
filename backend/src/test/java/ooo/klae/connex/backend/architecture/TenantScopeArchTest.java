@@ -60,6 +60,11 @@ class TenantScopeArchTest {
         "ooo.klae.connex.backend.mappers.NotificationMapper.findPage",
         "ooo.klae.connex.backend.mappers.NotificationMapper.countPage",
         "ooo.klae.connex.backend.mappers.NotificationMapper.getUnreadCounts",
+        "ooo.klae.connex.backend.mappers.NotificationMapper.getNextSnoozeExpiry",
+        "ooo.klae.connex.backend.mappers.NotificationMapper.getStateVersion",
+        "ooo.klae.connex.backend.mappers.NotificationMapper.lockRecipientMemberships",
+        "ooo.klae.connex.backend.mappers.NotificationMapper.getInboxCutoffId",
+        "ooo.klae.connex.backend.mappers.NotificationMapper.getDatabaseUtcTimestamp",
         "ooo.klae.connex.backend.mappers.NotificationMapper.findById",
         "ooo.klae.connex.backend.mappers.NotificationMapper.findWorkspaceIds",
         "ooo.klae.connex.backend.mappers.RuleMapper.workspaceIdsWithEnabledScheduleRules",
@@ -102,7 +107,8 @@ class TenantScopeArchTest {
         "ooo.klae.connex.backend.mappers.ShareMapper.clearPersonShareGrantedByAnywhere",
         "ooo.klae.connex.backend.mappers.ShareMapper.clearPipelineShareGrantedByAnywhere",
         "ooo.klae.connex.backend.mappers.SavedViewMapper.deleteForUserAnywhere",
-        "ooo.klae.connex.backend.mappers.UserDashboardMapper.deleteForUserAnywhere"
+        "ooo.klae.connex.backend.mappers.UserDashboardMapper.deleteForUserAnywhere",
+        "ooo.klae.connex.backend.mappers.NotificationMapper.bumpStateVersions"
     );
 
     /**

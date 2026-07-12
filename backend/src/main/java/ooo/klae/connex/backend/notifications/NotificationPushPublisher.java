@@ -25,7 +25,7 @@ public class NotificationPushPublisher {
      */
     public void created(int recipientId, NotificationDto notification, String dedupeKey) {
         eventPublisher.publishEvent(new NotificationPushEvent(
-                recipientId, RealtimeNotificationPayload.created(notification, dedupeKey)));
+                recipientId, "created", notification, dedupeKey));
     }
 
     /**
@@ -36,6 +36,6 @@ public class NotificationPushPublisher {
      */
     public void updated(int recipientId, NotificationDto notification, String dedupeKey) {
         eventPublisher.publishEvent(new NotificationPushEvent(
-                recipientId, RealtimeNotificationPayload.updated(notification, dedupeKey)));
+                recipientId, "updated", notification, dedupeKey));
     }
 }

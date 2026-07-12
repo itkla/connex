@@ -3,6 +3,7 @@ package ooo.klae.connex.backend.mappers;
 import org.apache.ibatis.annotations.Param;
 
 import ooo.klae.connex.backend.beans.Note;
+import ooo.klae.connex.backend.beans.DealNoteId;
 import java.util.List;
 
 /**
@@ -23,6 +24,7 @@ public interface NoteMapper {
     long countVisibleNotes(@Param("workspaceId") int workspaceId, @Param("currentUserId") int currentUserId);
     List<Note> getVisibleNotesByPersonId(@Param("workspaceId") int workspaceId, @Param("personId") int personId, @Param("currentUserId") int currentUserId);
     List<Note> getVisibleNotesByDealId(@Param("workspaceId") int workspaceId, @Param("dealId") int dealId, @Param("currentUserId") int currentUserId);
+    List<DealNoteId> getVisibleNoteIdsByDealIds(@Param("workspaceId") int workspaceId, @Param("dealIds") List<Integer> dealIds, @Param("currentUserId") int currentUserId);
     List<Note> getVisibleNotesByAuthorId(@Param("workspaceId") int workspaceId, @Param("authorId") int authorId, @Param("currentUserId") int currentUserId);
     Note getVisibleNoteById(@Param("workspaceId") int workspaceId, @Param("id") int id, @Param("currentUserId") int currentUserId);
     List<Note> searchVisible(@Param("workspaceId") int workspaceId, @Param("query") String query, @Param("currentUserId") int currentUserId);

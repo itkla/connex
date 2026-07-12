@@ -2,29 +2,83 @@
 
 import { BellAlertIcon, XMarkIcon } from "@heroicons/react/24/outline";
 import { useLocale, useTranslations } from "next-intl";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
-import { completeTask, dismissNotification } from "@/app/lib/api";
+import { completeTask, dismissNotification, getContextNotifications } from "@/app/lib/api";
 import { type Notification } from "@/app/lib/types";
 import { toastError } from "@/app/lib/toast";
 import { useNotifications } from "@/app/hooks/useNotifications";
 import { notificationContent, notificationSeverityStyle } from "@/app/components/notifications/notificationContent";
+import {
+    emitNotificationStateChanged,
+    onNotificationStateChanged,
+} from "@/app/components/notifications/notificationEvents";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
 export default function EntityNotificationBanner({
     initialNotifications,
+    contextType,
+    contextId,
+    initialStateVersion,
 }: {
     initialNotifications: Notification[];
+    contextType: string;
+    contextId: number;
+    initialStateVersion: number;
 }) {
     const t = useTranslations("Notifications");
     const locale = useLocale();
-    const { refreshUnread } = useNotifications();
+    const { recipientId, refreshUnread } = useNotifications();
     const [items, setItems] = useState(initialNotifications);
+
+    useEffect(() => {
+        let active = true;
+        let generation = 0;
+        let reconciledVersion = initialStateVersion;
+        let requiredVersion = 0;
+        let retryId: number | null = null;
+        const reconcile = async (stateVersion: number, canRetry: boolean, forceRefresh = false) => {
+            requiredVersion = Math.max(requiredVersion, stateVersion);
+            if (!forceRefresh && requiredVersion <= reconciledVersion) return;
+            const requestGeneration = ++generation;
+            try {
+                const page = await getContextNotifications(contextType, contextId);
+                if (!active || requestGeneration !== generation) return;
+                if (page.stateVersion < requiredVersion && canRetry) {
+                    if (retryId != null) window.clearTimeout(retryId);
+                    retryId = window.setTimeout(
+                        () => void reconcile(requiredVersion, false, forceRefresh),
+                        250,
+                    );
+                    return;
+                }
+                if (page.stateVersion < requiredVersion) return;
+                reconciledVersion = page.stateVersion;
+                setItems(page.items);
+            } catch {
+                return;
+            }
+        };
+        const stopStateChanged = onNotificationStateChanged(
+            recipientId,
+            ({ stateVersion, forceRefresh }) => void reconcile(stateVersion, true, forceRefresh),
+            { replay: true },
+        );
+        return () => {
+            active = false;
+            generation += 1;
+            if (retryId != null) window.clearTimeout(retryId);
+            stopStateChanged();
+        };
+    }, [contextId, contextType, initialStateVersion, recipientId]);
 
     async function dismiss(item: Notification) {
         try {
-            await dismissNotification(item.id);
+            const updated = await dismissNotification(item.id);
+            if (updated.stateVersion != null) {
+                emitNotificationStateChanged(recipientId, updated.stateVersion);
+            }
             setItems((current) => current.filter((entry) => entry.id !== item.id));
             await refreshUnread();
         } catch {

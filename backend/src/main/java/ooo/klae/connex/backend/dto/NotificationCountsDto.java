@@ -10,4 +10,9 @@ import lombok.NoArgsConstructor;
 @NoArgsConstructor
 public class NotificationCountsDto {
     private long unread;
+    private long stateVersion;
+    private long cutoffId;
+    private String readAt;
+    private String asOf;
+    private String nextSnoozeExpiry;
 }

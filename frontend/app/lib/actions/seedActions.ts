@@ -29,7 +29,6 @@ const RECORD_PATHS: Record<RecordType, string | null> = {
     note: "/activity/notes",
 };
 
-/** Resolves the canonical in-app path for a record, or null when the type has no detail route. */
 function recordHref(record: ActiveRecordRef): string | null {
     const base = RECORD_PATHS[record.type];
     return base ? `${base}/${record.id}` : null;

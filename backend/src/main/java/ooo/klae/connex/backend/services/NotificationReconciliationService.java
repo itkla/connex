@@ -38,6 +38,7 @@ import ooo.klae.connex.backend.mappers.NotificationMapper;
 import ooo.klae.connex.backend.mappers.PreferenceMapper;
 import ooo.klae.connex.backend.notifications.NotificationDelivery;
 import ooo.klae.connex.backend.notifications.NotificationProperties;
+import ooo.klae.connex.backend.notifications.NotificationStateVersionService;
 import tools.jackson.databind.ObjectMapper;
 
 /**
@@ -72,6 +73,7 @@ public class NotificationReconciliationService {
     private final NotificationMapper notificationMapper;
     private final PreferenceMapper preferenceMapper;
     private final NotificationDelivery notificationDelivery;
+    private final NotificationStateVersionService stateVersionService;
     private final NotificationProperties properties;
     private final ScoringService scoringService;
     private final IntroductionService introductionService;
@@ -131,12 +133,15 @@ public class NotificationReconciliationService {
             if (notification.getResolvedAt() == null
                     && managedTypes.contains(notification.getType())
                     && !expected.containsKey(entry.getKey())) {
-                notificationMapper.resolveReminder(
+                int rows = notificationMapper.resolveReminder(
                     workspaceId,
                     notification.getRecipientId(),
                     notification.getId(),
                     triggeredAt
                 );
+                if (rows > 0) {
+                    stateVersionService.markChanged(notification.getRecipientId());
+                }
             }
         }
     }
@@ -508,7 +513,12 @@ public class NotificationReconciliationService {
     public int purgeWorkspace(int workspaceId) {
         int retentionDays = Math.max(1, properties.getRetentionDays());
         String cutoff = utcTimestamp(clock.instant().minusSeconds(retentionDays * 86_400L));
-        return notificationMapper.purgeWorkspaceReminderHistory(workspaceId, cutoff);
+        List<Integer> recipientIds = notificationMapper.findWorkspaceRecipientIds(workspaceId);
+        int rows = notificationMapper.purgeWorkspaceReminderHistory(workspaceId, cutoff);
+        if (rows > 0) {
+            recipientIds.forEach(stateVersionService::markChanged);
+        }
+        return rows;
     }
 
     static String classify(

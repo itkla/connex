@@ -153,7 +153,8 @@ public class TenantScopeInterceptor implements Interceptor {
         MAPPERS + "ShareMapper.clearPersonShareGrantedByAnywhere",
         MAPPERS + "ShareMapper.clearPipelineShareGrantedByAnywhere",
         MAPPERS + "SavedViewMapper.deleteForUserAnywhere",
-        MAPPERS + "UserDashboardMapper.deleteForUserAnywhere"
+        MAPPERS + "UserDashboardMapper.deleteForUserAnywhere",
+        MAPPERS + "NotificationMapper.bumpStateVersions"
     );
 
     private final TenantContext tenantContext;

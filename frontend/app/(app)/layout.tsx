@@ -32,7 +32,7 @@ export default async function AppLayout({
 
     return (
         <WorkspaceProvider initialWorkspaces={workspaces} initialActiveId={activeWorkspaceId}>
-            <NotificationProvider>
+            <NotificationProvider key={user.id} recipientId={user.id}>
                 <NavTrailProvider>
                     <ActionProvider user={user}>
                         <NotificationActionsBridge />

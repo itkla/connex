@@ -10,16 +10,18 @@ import java.util.Locale;
 import java.util.Set;
 
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.beans.Notification;
 import ooo.klae.connex.backend.dto.NotificationCountsDto;
 import ooo.klae.connex.backend.dto.NotificationDto;
-import ooo.klae.connex.backend.dto.PageResponse;
+import ooo.klae.connex.backend.dto.NotificationPageDto;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.NotificationMapper;
 import ooo.klae.connex.backend.notifications.NotificationProperties;
+import ooo.klae.connex.backend.notifications.NotificationStateVersionService;
 
 /**
  * Authenticated notification inbox operations.
@@ -33,8 +35,10 @@ public class NotificationService {
     private final NotificationMapper notificationMapper;
     private final AuthService authService;
     private final NotificationProperties properties;
+    private final NotificationStateVersionService stateVersionService;
 
-    public PageResponse<NotificationDto> getPage(
+    @Transactional(readOnly = true)
+    public NotificationPageDto getPage(
         String state,
         String category,
         String contextType,
@@ -54,12 +58,14 @@ public class NotificationService {
             throw new BadRequestException("Notification page is too large");
         }
         int offset = (int) offsetValue;
+        String asOf = notificationMapper.getDatabaseUtcTimestamp();
         List<NotificationDto> items = notificationMapper.findPage(
             recipientId,
             normalizedState,
             normalizedCategory,
             normalizedContextType,
             contextId,
+            asOf,
             cappedSize,
             offset
         ).stream().map(NotificationDto::from).toList();
@@ -68,76 +74,115 @@ public class NotificationService {
             normalizedState,
             normalizedCategory,
             normalizedContextType,
-            contextId
+            contextId,
+            asOf
         );
-        return new PageResponse<>(items, total);
+        long stateVersion = notificationMapper.getStateVersion(recipientId);
+        return new NotificationPageDto(items, total, stateVersion);
     }
 
+    @Transactional(readOnly = true)
     public NotificationCountsDto getUnreadCounts() {
-        return notificationMapper.getUnreadCounts(currentRecipientId());
+        int recipientId = currentRecipientId();
+        String asOf = notificationMapper.getDatabaseUtcTimestamp();
+        return countsAt(recipientId, asOf);
     }
 
+    @Transactional
     public NotificationDto markRead(int id) {
         int recipientId = currentRecipientId();
         Notification current = requireNotification(recipientId, id);
         if (current.getReadAt() != null) {
-            return NotificationDto.from(current);
+            return response(recipientId, current);
         }
         requireMutation(notificationMapper.markRead(recipientId, id), id);
-        return NotificationDto.from(requireNotification(recipientId, id));
+        return mutationResponse(recipientId, requireNotification(recipientId, id));
     }
 
+    @Transactional
     public NotificationDto markUnread(int id) {
         int recipientId = currentRecipientId();
         Notification current = requireNotification(recipientId, id);
         if (current.getReadAt() == null) {
-            return NotificationDto.from(current);
+            return response(recipientId, current);
         }
         requireMutation(notificationMapper.markUnread(recipientId, id), id);
-        return NotificationDto.from(requireNotification(recipientId, id));
+        return mutationResponse(recipientId, requireNotification(recipientId, id));
     }
 
+    @Transactional
     public NotificationDto dismiss(int id) {
         int recipientId = currentRecipientId();
         Notification current = requireNotification(recipientId, id);
         if (current.getDismissedAt() != null || current.getResolvedAt() != null) {
-            return NotificationDto.from(current);
+            return response(recipientId, current);
         }
         requireMutation(notificationMapper.dismiss(recipientId, id), id);
-        return NotificationDto.from(requireNotification(recipientId, id));
+        return mutationResponse(recipientId, requireNotification(recipientId, id));
     }
 
+    @Transactional
     public NotificationDto restore(int id) {
         int recipientId = currentRecipientId();
         Notification current = requireNotification(recipientId, id);
         if (current.getDismissedAt() == null && current.getResolvedAt() == null) {
-            return NotificationDto.from(current);
+            return response(recipientId, current);
         }
         requireMutation(notificationMapper.restore(recipientId, id), id);
-        return NotificationDto.from(requireNotification(recipientId, id));
+        return mutationResponse(recipientId, requireNotification(recipientId, id));
     }
 
     /**
      * Hides an active notification from the inbox for {@code hours} hours, after which the next
      * inbox read surfaces it again. A dismissed or resolved notification is left untouched.
      */
+    @Transactional
     public NotificationDto snooze(int id, int hours) {
         int recipientId = currentRecipientId();
         Notification current = requireNotification(recipientId, id);
         if (current.getDismissedAt() != null || current.getResolvedAt() != null) {
-            return NotificationDto.from(current);
+            return response(recipientId, current);
         }
         String snoozedUntil = LocalDateTime
             .ofInstant(Instant.now().plus(Duration.ofHours(hours)), ZoneOffset.UTC)
             .format(UTC_DATETIME);
         requireMutation(notificationMapper.snooze(recipientId, id, snoozedUntil), id);
-        return NotificationDto.from(requireNotification(recipientId, id));
+        return mutationResponse(recipientId, requireNotification(recipientId, id));
     }
 
+    @Transactional
     public NotificationCountsDto markAllRead() {
         int recipientId = currentRecipientId();
-        notificationMapper.markAllRead(recipientId);
-        return notificationMapper.getUnreadCounts(recipientId);
+        notificationMapper.lockRecipientMemberships(recipientId);
+        String readAt = notificationMapper.getDatabaseUtcTimestamp();
+        long cutoffId = notificationMapper.getInboxCutoffId(recipientId);
+        int rows = notificationMapper.markAllRead(recipientId, cutoffId, readAt);
+        if (rows > 0) {
+            stateVersionService.bumpNow(recipientId);
+        }
+        NotificationCountsDto counts = countsAt(recipientId, readAt);
+        counts.setCutoffId(cutoffId);
+        counts.setReadAt(readAt);
+        return counts;
+    }
+
+    private NotificationDto response(int recipientId, Notification notification) {
+        NotificationDto dto = NotificationDto.from(notification);
+        dto.setStateVersion(notificationMapper.getStateVersion(recipientId));
+        return dto;
+    }
+
+    private NotificationDto mutationResponse(int recipientId, Notification notification) {
+        NotificationDto dto = NotificationDto.from(notification);
+        dto.setStateVersion(stateVersionService.bumpNow(recipientId));
+        return dto;
+    }
+
+    private NotificationCountsDto countsAt(int recipientId, String asOf) {
+        NotificationCountsDto counts = notificationMapper.getUnreadCounts(recipientId, asOf);
+        counts.setAsOf(asOf);
+        counts.setNextSnoozeExpiry(notificationMapper.getNextSnoozeExpiry(recipientId, asOf));
+        return counts;
     }
 
     private int currentRecipientId() {

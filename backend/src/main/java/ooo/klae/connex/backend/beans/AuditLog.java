@@ -32,6 +32,7 @@ public class AuditLog {
     private String rowHash;
     private String createdAt;
     private String currentActorLabel;
+    private boolean contentRedacted;
 
     public int getId() {
         return id;
@@ -225,5 +226,13 @@ public class AuditLog {
 
     public void setCurrentActorLabel(String currentActorLabel) {
         this.currentActorLabel = currentActorLabel;
+    }
+
+    public boolean isContentRedacted() {
+        return contentRedacted;
+    }
+
+    public void setContentRedacted(boolean contentRedacted) {
+        this.contentRedacted = contentRedacted;
     }
 }

@@ -5,6 +5,7 @@ import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.function.BiConsumer;
 import java.util.function.Function;
@@ -13,8 +14,11 @@ import java.util.regex.Pattern;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.util.HtmlUtils;
 
 import ooo.klae.connex.backend.beans.Activity;
+import ooo.klae.connex.backend.beans.Deal;
+import ooo.klae.connex.backend.beans.DealNoteId;
 import ooo.klae.connex.backend.beans.EntityReference;
 import ooo.klae.connex.backend.beans.Note;
 import ooo.klae.connex.backend.beans.Task;
@@ -69,9 +73,33 @@ public class ReferenceService {
     static final String TYPE_ACTIVITY = "activity";
     private static final int MAX_REFERENCES = 100;
     private static final int MAX_LABEL_LENGTH = 255;
-    private static final Pattern TOKEN =
-        Pattern.compile("\\[([^\\]]+)\\]\\((user|person|deal|company|note|file|task|activity):(\\d+)\\)");
-    private static final Pattern NOTE_TOKEN = Pattern.compile("\\[([^\\]]+)\\]\\(note:(\\d+)\\)");
+    private static final int BATCH_SIZE = 500;
+    private static final String REFERENCE_SEPARATOR = "(?::|&colon;|\\\\:)";
+    private static final Pattern TOKEN = Pattern.compile(
+        "\\[([^\\]]+)\\]\\((user|person|deal|company|note|file|task|activity)"
+            + REFERENCE_SEPARATOR + "(\\d+)\\)");
+    private static final Pattern NOTE_TOKEN = Pattern.compile(
+        "\\[([^\\]]+)\\]\\(note" + REFERENCE_SEPARATOR + "(\\d+)\\)");
+    private static final Pattern NOTE_REFERENCE_DEFINITION = Pattern.compile(
+        "(?im)^[ \\t]{0,3}\\[(?:\\\\.|[^\\]\\\\])+\\]:[ \\t]*"
+            + "(?:\\r?\\n[ \\t]+)?<?note:(\\d+)>?(?:[ \\t]+.*)?$");
+
+    /**
+     * Reader-scoped prose and structured references after private-note targets are removed.
+     * @param content reader-safe prose
+     * @param references reader-visible structured references
+     */
+    public record ReaderVisibleContent(String content, List<EntityReference> references) {
+        public ReaderVisibleContent {
+            references = references == null ? List.of() : List.copyOf(references);
+        }
+    }
+
+    private record MarkdownNoteTargets(List<Integer> ids, boolean hasUnparseableId) {
+        private boolean isEmpty() {
+            return ids.isEmpty() && !hasUnparseableId;
+        }
+    }
 
     /**
      * Re-derives and persists a source entity's @/# references from its content,
@@ -202,6 +230,53 @@ public class ReferenceService {
     }
 
     /**
+     * Attaches reader-visible references to deals and masks private-note targets in their close reasons.
+     * The references and note visibility are resolved in batches, and the input order is preserved.
+     * @param workspaceId the owning workspace
+     * @param deals the deals to hydrate
+     * @return the same deals with reader-scoped close reasons and references
+     */
+    public List<Deal> hydrateDeals(int workspaceId, List<Deal> deals) {
+        if (deals == null || deals.isEmpty()) {
+            return deals;
+        }
+        Map<Integer, List<EntityReference>> bySource = referencesBySource(
+            workspaceId, SOURCE_DEAL, deals.stream().map(Deal::getId).toList());
+        List<ReaderVisibleContent> visible = redactInvisibleNoteTargets(
+            workspaceId,
+            deals.stream()
+                .map(deal -> new ReaderVisibleContent(
+                    deal.getClosedReason(), bySource.getOrDefault(deal.getId(), List.of())))
+                .toList());
+        for (int index = 0; index < deals.size(); index++) {
+            Deal deal = deals.get(index);
+            ReaderVisibleContent content = visible.get(index);
+            deal.setClosedReason(content.content());
+            deal.setReferences(content.references());
+        }
+        hydrateVisibleDealNotes(workspaceId, deals);
+        return deals;
+    }
+
+    private void hydrateVisibleDealNotes(int workspaceId, List<Deal> deals) {
+        Map<Integer, List<Note>> notesByDeal = new LinkedHashMap<>();
+        int currentUserId = workspaceService.getCurrentUserId();
+        List<Integer> dealIds = deals.stream().map(Deal::getId).toList();
+        for (int start = 0; start < dealIds.size(); start += BATCH_SIZE) {
+            List<Integer> batch = dealIds.subList(start, Math.min(start + BATCH_SIZE, dealIds.size()));
+            for (DealNoteId noteId : noteMapper.getVisibleNoteIdsByDealIds(
+                    workspaceId, batch, currentUserId)) {
+                Note note = new Note();
+                note.setId(noteId.getNoteId());
+                notesByDeal.computeIfAbsent(noteId.getDealId(), key -> new ArrayList<>()).add(note);
+            }
+        }
+        for (Deal deal : deals) {
+            deal.setNotes(notesByDeal.getOrDefault(deal.getId(), List.of()).toArray(Note[]::new));
+        }
+    }
+
+    /**
      * Attaches each activity's resolved references in a single batch query, so any
      * read path returns activities the frontend can render as chips. Mutates the
      * activities in place and returns them. Scoped to {@code workspaceId}.
@@ -240,10 +315,56 @@ public class ReferenceService {
         if (sourceIds == null || sourceIds.isEmpty()) {
             return bySource;
         }
-        for (EntityReference reference : entityReferenceMapper.findBySources(workspaceId, sourceType, sourceIds)) {
-            bySource.computeIfAbsent(reference.getSourceId(), key -> new ArrayList<>()).add(reference);
+        for (int start = 0; start < sourceIds.size(); start += BATCH_SIZE) {
+            List<Integer> batch = sourceIds.subList(start, Math.min(start + BATCH_SIZE, sourceIds.size()));
+            for (EntityReference reference : entityReferenceMapper.findBySources(
+                    workspaceId, sourceType, batch)) {
+                bySource.computeIfAbsent(reference.getSourceId(), key -> new ArrayList<>()).add(reference);
+            }
         }
         return bySource;
+    }
+
+    /**
+     * Removes private-note targets from prose and structured references for the current reader.
+     * The input list is resolved in one visibility query and the returned list preserves its order.
+     * @param workspaceId the owning workspace
+     * @param items prose/reference pairs to scope
+     * @return reader-visible pairs in input order
+     */
+    public List<ReaderVisibleContent> redactInvisibleNoteTargets(
+            int workspaceId, List<ReaderVisibleContent> items) {
+        if (items == null || items.isEmpty()) {
+            return List.of();
+        }
+        Set<Integer> targetNoteIds = new HashSet<>();
+        boolean containsNoteTarget = false;
+        for (ReaderVisibleContent item : items) {
+            for (EntityReference reference : item.references()) {
+                if (TYPE_NOTE.equals(reference.getRefType())) {
+                    containsNoteTarget = true;
+                    targetNoteIds.add(reference.getRefId());
+                }
+            }
+            MarkdownNoteTargets markdownTargets = markdownNoteTargets(item.content());
+            if (!markdownTargets.isEmpty()) {
+                containsNoteTarget = true;
+                targetNoteIds.addAll(markdownTargets.ids());
+            }
+        }
+        if (!containsNoteTarget) {
+            return List.copyOf(items);
+        }
+        int currentUserId = workspaceService.getCurrentUserId();
+        Set<Integer> visible = visibleNoteIds(workspaceId, targetNoteIds, currentUserId);
+        return items.stream()
+            .map(item -> new ReaderVisibleContent(
+                redactNoteTokens(item.content(), visible),
+                item.references().stream()
+                    .filter(reference -> !TYPE_NOTE.equals(reference.getRefType())
+                        || visible.contains(reference.getRefId()))
+                    .toList()))
+            .toList();
     }
 
     private List<EntityReference> resolve(
@@ -321,39 +442,14 @@ public class ReferenceService {
             BiConsumer<T, List<EntityReference>> setReferences,
             Function<T, String> getContent,
             BiConsumer<T, String> setContent) {
-        Set<Integer> targetNoteIds = new HashSet<>();
-        for (T item : items) {
-            List<EntityReference> references = getReferences.apply(item);
-            if (references != null) {
-                for (EntityReference reference : references) {
-                    if (TYPE_NOTE.equals(reference.getRefType())) {
-                        targetNoteIds.add(reference.getRefId());
-                    }
-                }
-            }
-            String content = getContent.apply(item);
-            if (content != null) {
-                Matcher matcher = NOTE_TOKEN.matcher(content);
-                while (matcher.find()) {
-                    targetNoteIds.add(Integer.parseInt(matcher.group(2)));
-                }
-            }
-        }
-        if (targetNoteIds.isEmpty()) {
-            return;
-        }
-        int currentUserId = workspaceService.getCurrentUserId();
-        Set<Integer> visible = new HashSet<>(
-            noteMapper.getVisibleNoteIdsIn(workspaceId, new ArrayList<>(targetNoteIds), currentUserId));
-        for (T item : items) {
-            List<EntityReference> references = getReferences.apply(item);
-            if (references != null) {
-                setReferences.accept(item, references.stream()
-                    .filter(reference -> !TYPE_NOTE.equals(reference.getRefType())
-                        || visible.contains(reference.getRefId()))
-                    .toList());
-            }
-            setContent.accept(item, redactNoteTokens(getContent.apply(item), visible));
+        List<ReaderVisibleContent> redacted = redactInvisibleNoteTargets(workspaceId, items.stream()
+            .map(item -> new ReaderVisibleContent(getContent.apply(item), getReferences.apply(item)))
+            .toList());
+        for (int index = 0; index < items.size(); index++) {
+            T item = items.get(index);
+            ReaderVisibleContent visible = redacted.get(index);
+            setReferences.accept(item, visible.references());
+            setContent.accept(item, visible.content());
         }
     }
 
@@ -361,10 +457,139 @@ public class ReferenceService {
         if (content == null) {
             return null;
         }
-        return NOTE_TOKEN.matcher(content).replaceAll(match ->
-            visibleNoteIds.contains(Integer.parseInt(match.group(2)))
-                ? Matcher.quoteReplacement(match.group())
-                : "(private note)");
+        String redacted = NOTE_TOKEN.matcher(content).replaceAll(match ->
+            parseNoteId(match.group(2))
+                .filter(visibleNoteIds::contains)
+                .map(ignored -> Matcher.quoteReplacement(match.group()))
+                .orElse("(private note)"));
+        MarkdownNoteTargets targets = markdownNoteTargets(redacted);
+        if (targets.hasUnparseableId()
+                || targets.ids().stream().anyMatch(id -> !visibleNoteIds.contains(id))) {
+            return "(private note)";
+        }
+        return redacted;
+    }
+
+    private static MarkdownNoteTargets markdownNoteTargets(String content) {
+        if (content == null || content.isBlank()) {
+            return new MarkdownNoteTargets(List.of(), false);
+        }
+        String normalized = HtmlUtils.htmlUnescape(content.replace("&colon;", ":")).replace("\\:", ":");
+        List<Integer> ids = new ArrayList<>();
+        boolean hasUnparseableLink = collectInlineNoteTargetIds(normalized, ids);
+        boolean hasUnparseableDefinition = collectNoteTargetIds(
+            NOTE_REFERENCE_DEFINITION.matcher(normalized), ids);
+        return new MarkdownNoteTargets(
+            List.copyOf(ids), hasUnparseableLink || hasUnparseableDefinition);
+    }
+
+    private static boolean collectNoteTargetIds(Matcher matcher, List<Integer> ids) {
+        boolean hasUnparseableId = false;
+        while (matcher.find()) {
+            Optional<Integer> noteId = parseNoteId(matcher.group(1));
+            if (noteId.isPresent()) {
+                ids.add(noteId.get());
+            } else {
+                hasUnparseableId = true;
+            }
+        }
+        return hasUnparseableId;
+    }
+
+    private static boolean collectInlineNoteTargetIds(String content, List<Integer> ids) {
+        boolean hasUnparseableId = false;
+        for (int index = 0; index < content.length(); index++) {
+            if (content.charAt(index) != '[' || isEscaped(content, index)) {
+                continue;
+            }
+            int labelEnd = findLabelEnd(content, index);
+            if (labelEnd < 0) {
+                continue;
+            }
+            int destinationStart = skipWhitespace(content, labelEnd + 1);
+            if (destinationStart >= content.length() || content.charAt(destinationStart) != '(') {
+                index = labelEnd;
+                continue;
+            }
+            destinationStart = skipWhitespace(content, destinationStart + 1);
+            if (destinationStart < content.length() && content.charAt(destinationStart) == '<') {
+                destinationStart++;
+            }
+            if (!content.regionMatches(true, destinationStart, "note:", 0, 5)) {
+                index = labelEnd;
+                continue;
+            }
+            int idStart = destinationStart + 5;
+            int idEnd = idStart;
+            while (idEnd < content.length() && Character.isDigit(content.charAt(idEnd))) {
+                idEnd++;
+            }
+            if (idEnd == idStart) {
+                hasUnparseableId = true;
+            } else {
+                Optional<Integer> noteId = parseNoteId(content.substring(idStart, idEnd));
+                if (noteId.isPresent()) {
+                    ids.add(noteId.get());
+                } else {
+                    hasUnparseableId = true;
+                }
+            }
+            index = labelEnd;
+        }
+        return hasUnparseableId;
+    }
+
+    private static int findLabelEnd(String content, int labelStart) {
+        int depth = 1;
+        for (int index = labelStart + 1; index < content.length(); index++) {
+            if (isEscaped(content, index)) {
+                continue;
+            }
+            char value = content.charAt(index);
+            if (value == '[') {
+                depth++;
+            } else if (value == ']' && --depth == 0) {
+                return index;
+            }
+        }
+        return -1;
+    }
+
+    private static boolean isEscaped(String content, int index) {
+        int backslashes = 0;
+        for (int cursor = index - 1; cursor >= 0 && content.charAt(cursor) == '\\'; cursor--) {
+            backslashes++;
+        }
+        return backslashes % 2 == 1;
+    }
+
+    private static int skipWhitespace(String content, int index) {
+        int cursor = index;
+        while (cursor < content.length() && Character.isWhitespace(content.charAt(cursor))) {
+            cursor++;
+        }
+        return cursor;
+    }
+
+    private Set<Integer> visibleNoteIds(int workspaceId, Set<Integer> targetNoteIds, int currentUserId) {
+        if (targetNoteIds.isEmpty()) {
+            return Set.of();
+        }
+        List<Integer> ids = new ArrayList<>(targetNoteIds);
+        Set<Integer> visible = new HashSet<>();
+        for (int start = 0; start < ids.size(); start += BATCH_SIZE) {
+            List<Integer> batch = ids.subList(start, Math.min(start + BATCH_SIZE, ids.size()));
+            visible.addAll(noteMapper.getVisibleNoteIdsIn(workspaceId, batch, currentUserId));
+        }
+        return visible;
+    }
+
+    private static Optional<Integer> parseNoteId(String value) {
+        try {
+            return Optional.of(Integer.parseInt(value));
+        } catch (NumberFormatException exception) {
+            return Optional.empty();
+        }
     }
 
     private EntityReference build(
@@ -403,9 +628,10 @@ public class ReferenceService {
         if (content == null) {
             return "";
         }
-        return TOKEN.matcher(content).replaceAll(match ->
+        String redacted = TOKEN.matcher(content).replaceAll(match ->
             TYPE_NOTE.equals(match.group(2))
                 ? "a note"
                 : "@" + Matcher.quoteReplacement(match.group(1)));
+        return markdownNoteTargets(redacted).isEmpty() ? redacted : "a note";
     }
 }

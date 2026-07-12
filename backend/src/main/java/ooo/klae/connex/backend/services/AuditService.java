@@ -23,6 +23,7 @@ import ooo.klae.connex.backend.util.ClientIpResolver;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -167,11 +168,11 @@ public class AuditService {
             entry.setAction(truncate(action, ACTION_MAX));
             entry.setEntityType(truncate(entityType, ENTITY_TYPE_MAX));
             entry.setEntityId(entityId);
-            entry.setTargetLabel(truncate(targetLabel, LABEL_MAX));
+            entry.setTargetLabel(truncate(sanitizeAuditText(targetLabel), LABEL_MAX));
             entry.setOutcome(outcome);
-            entry.setSummary(truncate(summary, SUMMARY_MAX));
-            entry.setChanges(toJson(changes));
-            entry.setContext(toJson(context));
+            entry.setSummary(truncate(sanitizeAuditText(summary), SUMMARY_MAX));
+            entry.setChanges(toSanitizedJson(changes));
+            entry.setContext(toSanitizedJson(context));
 
             if (explicitScope) {
                 entry.setWorkspaceId(workspaceId);
@@ -211,8 +212,8 @@ public class AuditService {
             Object newVal = afterMap.get(field);
             if (!Objects.equals(oldVal, newVal)) {
                 Map<String, Object> delta = new LinkedHashMap<>();
-                delta.put("old", oldVal);
-                delta.put("new", newVal);
+                delta.put("old", sanitizeAuditValue(oldVal).value());
+                delta.put("new", sanitizeAuditValue(newVal).value());
                 changes.put(field, delta);
             }
         }
@@ -228,8 +229,8 @@ public class AuditService {
      */
     public Map<String, Object> singleChange(String field, Object oldVal, Object newVal) {
         Map<String, Object> delta = new LinkedHashMap<>();
-        delta.put("old", oldVal);
-        delta.put("new", newVal);
+        delta.put("old", sanitizeAuditValue(oldVal).value());
+        delta.put("new", sanitizeAuditValue(newVal).value());
         Map<String, Object> changes = new LinkedHashMap<>();
         changes.put(field, delta);
         return changes;
@@ -242,7 +243,8 @@ public class AuditService {
      * @return the page of events
      */
     public List<AuditLog> recent(int limit, int offset) {
-        return auditLogMapper.findRecent(tenantContext.getWorkspaceId(), cap(limit), offset(offset));
+        return redactAuditEntries(
+                auditLogMapper.findRecent(tenantContext.getWorkspaceId(), cap(limit), offset(offset)));
     }
 
     /**
@@ -254,7 +256,8 @@ public class AuditService {
      * @return the page of events
      */
     public List<AuditLog> forEntity(String entityType, int entityId, int limit, int offset) {
-        return auditLogMapper.findByEntity(tenantContext.getWorkspaceId(), entityType, entityId, cap(limit), offset(offset));
+        return redactAuditEntries(auditLogMapper.findByEntity(
+                tenantContext.getWorkspaceId(), entityType, entityId, cap(limit), offset(offset)));
     }
 
     /**
@@ -266,7 +269,7 @@ public class AuditService {
      * @return the page of events
      */
     public List<AuditLog> recentForOrg(int orgId, int limit, int offset) {
-        return auditLogMapper.findRecentByOrg(orgId, cap(limit), offset(offset));
+        return redactAuditEntries(auditLogMapper.findRecentByOrg(orgId, cap(limit), offset(offset)));
     }
 
     /**
@@ -370,17 +373,118 @@ public class AuditService {
      * @param value
      * @return
      */
-    private String toJson(Object value) {
-        if (value == null)
-            return null;
-        if (value instanceof String s)
-            return s;
-        try {
-            return objectMapper.writeValueAsString(value);
-        } catch (Exception e) {
-            log.warn("Failed to serialize audit changes", e);
+    private String toSanitizedJson(Object value) {
+        if (value == null) {
             return null;
         }
+        try {
+            Object jsonValue = value instanceof String string
+                    ? objectMapper.readValue(string, Object.class)
+                    : value;
+            return objectMapper.writeValueAsString(sanitizeAuditValue(jsonValue).value());
+        } catch (Exception e) {
+            if (value instanceof String string) {
+                try {
+                    return objectMapper.writeValueAsString(sanitizeAuditText(string));
+                } catch (Exception serializationException) {
+                    log.warn("Failed to serialize sanitized audit content", serializationException);
+                    return null;
+                }
+            }
+            log.warn("Failed to serialize audit content", e);
+            return null;
+        }
+    }
+
+    private SanitizedValue sanitizeAuditValue(Object value) {
+        if (value instanceof String string) {
+            String sanitized = sanitizeAuditText(string);
+            return new SanitizedValue(sanitized, !Objects.equals(string, sanitized));
+        }
+        if (value instanceof Map<?, ?> map) {
+            Map<String, Object> sanitized = new LinkedHashMap<>();
+            boolean changed = false;
+            for (Map.Entry<?, ?> entry : map.entrySet()) {
+                SanitizedValue child = sanitizeAuditValue(entry.getValue());
+                sanitized.put(String.valueOf(entry.getKey()), child.value());
+                changed |= child.changed();
+            }
+            return new SanitizedValue(sanitized, changed);
+        }
+        if (value instanceof Iterable<?> iterable) {
+            List<Object> sanitized = new ArrayList<>();
+            boolean changed = false;
+            for (Object item : iterable) {
+                SanitizedValue child = sanitizeAuditValue(item);
+                sanitized.add(child.value());
+                changed |= child.changed();
+            }
+            return new SanitizedValue(sanitized, changed);
+        }
+        if (value != null
+                && !(value instanceof Number)
+                && !(value instanceof Boolean)
+                && !(value instanceof Character)
+                && !(value instanceof Enum<?>)) {
+            try {
+                Object converted = objectMapper.convertValue(value, Object.class);
+                if (converted != null && !converted.getClass().equals(value.getClass())) {
+                    return sanitizeAuditValue(converted);
+                }
+            } catch (Exception exception) {
+                log.warn("Failed to inspect audit content for reference tokens", exception);
+            }
+        }
+        return new SanitizedValue(value, false);
+    }
+
+    private List<AuditLog> redactAuditEntries(List<AuditLog> entries) {
+        entries.forEach(this::redactAuditEntry);
+        return entries;
+    }
+
+    private void redactAuditEntry(AuditLog entry) {
+        String targetLabel = sanitizeAuditText(entry.getTargetLabel());
+        String summary = sanitizeAuditText(entry.getSummary());
+        SanitizedJson changes = sanitizeAuditJson(entry.getChanges());
+        SanitizedJson context = sanitizeAuditJson(entry.getContext());
+        boolean redacted = entry.isContentRedacted()
+                || !Objects.equals(entry.getTargetLabel(), targetLabel)
+                || !Objects.equals(entry.getSummary(), summary)
+                || changes.changed()
+                || context.changed();
+        entry.setTargetLabel(targetLabel);
+        entry.setSummary(summary);
+        entry.setChanges(changes.value());
+        entry.setContext(context.value());
+        entry.setContentRedacted(redacted);
+    }
+
+    private SanitizedJson sanitizeAuditJson(String json) {
+        if (json == null) {
+            return new SanitizedJson(null, false);
+        }
+        try {
+            SanitizedValue sanitized = sanitizeAuditValue(objectMapper.readValue(json, Object.class));
+            return sanitized.changed()
+                    ? new SanitizedJson(objectMapper.writeValueAsString(sanitized.value()), true)
+                    : new SanitizedJson(json, false);
+        } catch (Exception exception) {
+            String sanitized = sanitizeAuditText(json);
+            if (Objects.equals(json, sanitized)) {
+                return new SanitizedJson(json, false);
+            }
+            try {
+                return new SanitizedJson(objectMapper.writeValueAsString(sanitized), true);
+            } catch (Exception serializationException) {
+                log.warn("Failed to serialize a redacted audit projection", serializationException);
+                return new SanitizedJson("null", true);
+            }
+        }
+    }
+
+    private static String sanitizeAuditText(String value) {
+        return value == null ? null : ReferenceService.toPlainText(value);
     }
 
     /**
@@ -465,8 +569,10 @@ public class AuditService {
                 "actorId", "actorLabel", "currentActorLabel", "targetLabel", "outcome", "summary",
                 "changes", "context", "ipAddress", "userAgent", "sessionId", "requestId",
                 "chainScopeType", "chainScopeId", "chainIndex", "prevHash", "rowHash", "createdAt",
-                "integrityPayload"));
+                "contentRedacted", "integrityPayloadRedacted"));
         for (AuditLog entry : entries) {
+            SanitizedJson integrityPayload = sanitizeAuditJson(auditIntegrityService.integrityPayload(entry));
+            redactAuditEntry(entry);
             writeCsvRow(sb, List.of(
                     csvCell(entry.getId()),
                     csvCell(entry.getWorkspaceId()),
@@ -492,7 +598,8 @@ public class AuditService {
                     csvCell(entry.getPrevHash()),
                     csvCell(entry.getRowHash()),
                     csvCell(entry.getCreatedAt()),
-                    csvCell(auditIntegrityService.integrityPayload(entry))));
+                    csvCell(entry.isContentRedacted() || integrityPayload.changed()),
+                    csvCell(integrityPayload.value())));
         }
         return sb.toString();
     }
@@ -524,5 +631,11 @@ public class AuditService {
             s = "\"" + s.replace("\"", "\"\"") + "\"";
         }
         return s;
+    }
+
+    private record SanitizedValue(Object value, boolean changed) {
+    }
+
+    private record SanitizedJson(String value, boolean changed) {
     }
 }

@@ -339,6 +339,7 @@
     "saveError": "保存できませんでした",
     "untitled": "無題",
     "titlePlaceholder": "無題のノート",
+    "titleTooLong": "タイトルは{max}文字以内で入力してください。",
     "visibilityPrivate": "非公開",
     "visibilityWorkspace": "ワークスペース",
     "visibilityAria": "ノートの公開範囲",

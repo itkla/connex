@@ -37,6 +37,7 @@ class NotificationDeliveryTest {
     @Mock private NotificationMapper notificationMapper;
     @Mock private PreferenceMapper preferenceMapper;
     @Mock private NotificationPushPublisher pushPublisher;
+    @Mock private NotificationStateVersionService stateVersionService;
 
     private NotificationDelivery delivery;
 
@@ -45,7 +46,8 @@ class NotificationDeliveryTest {
         lenient().when(inApp.channel()).thenReturn("in_app");
         lenient().when(email.channel()).thenReturn("email");
         delivery = new NotificationDelivery(
-                List.of(inApp, email), notificationMapper, preferenceMapper, pushPublisher);
+                List.of(inApp, email), notificationMapper, preferenceMapper, pushPublisher,
+                stateVersionService);
     }
 
     private Notification notification() {
@@ -61,6 +63,7 @@ class NotificationDeliveryTest {
     private Notification existingRow(int id, String severity, String resolvedAt) {
         Notification n = new Notification();
         n.setId(id);
+        n.setType("note.mention");
         n.setSeverity(severity);
         n.setResolvedAt(resolvedAt);
         return n;
@@ -157,6 +160,7 @@ class NotificationDeliveryTest {
 
         verify(pushPublisher).created(eq(9), any(NotificationDto.class), eq("note.mention:5:9"));
         verify(pushPublisher, never()).updated(anyInt(), any(), any());
+        verify(stateVersionService).markChanged(9);
     }
 
     @Test
@@ -187,6 +191,21 @@ class NotificationDeliveryTest {
     }
 
     @Test
+    void changedVisibleContentAdvancesStateAndPushesUpdatedFrame() {
+        Notification n = notification();
+        n.setTitle("New title");
+        Notification existing = existingRow(77, "info", null);
+        existing.setTitle("Old title");
+        when(notificationMapper.findByDedupe(1, 9, n.getDedupeKey())).thenReturn(existing);
+        when(notificationMapper.findById(9, 77)).thenReturn(existingRow(77, "info", null));
+
+        delivery.deliver(n);
+
+        verify(stateVersionService).markChanged(9);
+        verify(pushPublisher).updated(eq(9), any(NotificationDto.class), eq("note.mention:5:9"));
+    }
+
+    @Test
     void unchangedRedelivery_pushesNothing() {
         Notification n = notification();
         when(notificationMapper.findByDedupe(1, 9, n.getDedupeKey()))
@@ -197,6 +216,7 @@ class NotificationDeliveryTest {
         verify(notificationMapper, never()).findById(anyInt(), anyInt());
         verify(pushPublisher, never()).created(anyInt(), any(), any());
         verify(pushPublisher, never()).updated(anyInt(), any(), any());
+        verify(stateVersionService, never()).markChanged(anyInt());
     }
 
     @Test

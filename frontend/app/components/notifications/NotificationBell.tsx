@@ -4,7 +4,7 @@ import { BellIcon, CheckCircleIcon, CheckIcon, EyeIcon, XMarkIcon } from "@heroi
 import { CheckCheck } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useLocale, useTranslations } from "next-intl";
 import { DropdownMenu } from "radix-ui";
 
@@ -22,28 +22,52 @@ import { useNotifications } from "@/app/hooks/useNotifications";
 import { notificationContent, notificationIcon, notificationSeverityStyle, safeNotificationUrl } from "@/app/components/notifications/notificationContent";
 import { Checkbox } from "@/components/ui/checkbox";
 import { cn } from "@/lib/utils";
+import {
+    emitAllNotificationsRead,
+    emitNotificationStateChanged,
+    onNotificationStateChanged,
+} from "@/app/components/notifications/notificationEvents";
 
 export default function NotificationBell() {
     const t = useTranslations("Notifications");
     const locale = useLocale();
     const router = useRouter();
-    const { unread, adjustUnread, refreshUnread, setUnread } = useNotifications();
+    const { recipientId, unread, refreshUnread } = useNotifications();
     const [items, setItems] = useState<Notification[]>([]);
     const [completing, setCompleting] = useState<Set<number>>(new Set());
     const [loading, setLoading] = useState(false);
+    const loadGenerationRef = useRef(0);
+    const openRef = useRef(false);
+    const loadedStateVersionRef = useRef(0);
+    const requiredStateVersionRef = useRef(0);
 
-    async function load(open: boolean) {
+    const load = useCallback(async (open: boolean) => {
         if (!open) return;
+        const generation = ++loadGenerationRef.current;
         setLoading(true);
         try {
             const page = await getNotifications({ state: "unread", page: 1, size: 8 });
-            setItems(page.items);
+            if (loadGenerationRef.current === generation) {
+                if (page.stateVersion < requiredStateVersionRef.current) return;
+                loadedStateVersionRef.current = page.stateVersion;
+                setItems(page.items);
+            }
         } catch {
-            toastError(t("loadError"));
+            if (loadGenerationRef.current === generation) toastError(t("loadError"));
         } finally {
-            setLoading(false);
+            if (loadGenerationRef.current === generation) setLoading(false);
         }
-    }
+    }, [t]);
+
+    useEffect(
+        () => onNotificationStateChanged(recipientId, ({ stateVersion, forceRefresh }) => {
+            if (!openRef.current
+                || (!forceRefresh && stateVersion <= loadedStateVersionRef.current)) return;
+            requiredStateVersionRef.current = Math.max(requiredStateVersionRef.current, stateVersion);
+            void load(true);
+        }),
+        [load, recipientId],
+    );
 
     function openItem(item: Notification) {
         const url = safeNotificationUrl(item.actionUrl);
@@ -52,9 +76,12 @@ export default function NotificationBell() {
 
     async function resolve(item: Notification) {
         try {
-            await markNotificationRead(item.id);
-            adjustUnread(-1);
+            const updated = await markNotificationRead(item.id);
+            if (updated.stateVersion != null) {
+                emitNotificationStateChanged(recipientId, updated.stateVersion);
+            }
             setItems((current) => current.filter((entry) => entry.id !== item.id));
+            await refreshUnread();
         } catch {
             toastError(t("actionError"));
         }
@@ -80,9 +107,12 @@ export default function NotificationBell() {
 
     async function dismiss(item: Notification) {
         try {
-            await dismissNotification(item.id);
-            if (!item.readAt) adjustUnread(-1);
+            const updated = await dismissNotification(item.id);
+            if (updated.stateVersion != null) {
+                emitNotificationStateChanged(recipientId, updated.stateVersion);
+            }
             setItems((current) => current.filter((entry) => entry.id !== item.id));
+            await refreshUnread();
         } catch {
             toastError(t("actionError"));
         }
@@ -90,16 +120,18 @@ export default function NotificationBell() {
 
     async function readAll() {
         try {
-            const counts = await markAllNotificationsRead();
-            setItems([]);
-            setUnread(counts.unread);
+            const result = await markAllNotificationsRead();
+            emitAllNotificationsRead(recipientId, result);
         } catch {
             toastError(t("actionError"));
         }
     }
 
     return (
-        <DropdownMenu.Root onOpenChange={(open) => void load(open)}>
+        <DropdownMenu.Root onOpenChange={(open) => {
+            openRef.current = open;
+            void load(open);
+        }}>
             <DropdownMenu.Trigger asChild>
                 <button
                     type="button"

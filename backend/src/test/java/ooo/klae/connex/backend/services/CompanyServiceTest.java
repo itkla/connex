@@ -116,7 +116,8 @@ class CompanyServiceTest extends AbstractServiceTest {
             mock(AuditService.class),
             mock(RuleTriggerPublisher.class),
             workspaceService,
-            mock(CustomFieldValueService.class)
+            mock(CustomFieldValueService.class),
+            mock(ReferenceService.class)
         );
     }
 }

@@ -2,13 +2,17 @@ package ooo.klae.connex.backend.services;
 
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.List;
+import java.util.Map;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
@@ -23,8 +27,9 @@ import ooo.klae.connex.backend.util.ClientIpResolver;
 class AuditServiceTest {
     @Mock private AuditLogMapper auditLogMapper;
     @Mock private AuditIntegrityService auditIntegrityService;
-    @Mock private ObjectMapper objectMapper;
     @Mock private TenantContext tenantContext;
+
+    private final ObjectMapper objectMapper = new ObjectMapper();
 
     private AuditService service;
 
@@ -87,19 +92,60 @@ class AuditServiceTest {
     void exportRecentScopesToWorkspaceAndCapsLimitAtTenThousand() {
         AuditLog entry = new AuditLog();
         entry.setAction("audit.export");
-        entry.setSummary("=formula");
+        entry.setSummary("=formula [Private](note:42)");
         entry.setRowHash("abc123");
         when(auditLogMapper.findWorkspaceExport(7, 10_000, 0)).thenReturn(List.of(entry));
-        when(auditIntegrityService.integrityPayload(entry)).thenReturn("{\"summary\":\"=formula\"}");
+        when(auditIntegrityService.integrityPayload(entry))
+            .thenReturn("{\"summary\":\"=formula [Private](note:42)\"}");
 
         String csv = service.exportRecent(50_000, -1);
 
         verify(auditLogMapper).findWorkspaceExport(7, 10_000, 0);
         assertTrue(csv.contains("rowHash"));
-        assertTrue(csv.contains("integrityPayload"));
-        assertTrue(csv.contains("'=formula"));
-        assertTrue(csv.contains("\"{\"\"summary\"\":\"\"=formula\"\"}\""));
+        assertTrue(csv.contains("integrityPayloadRedacted"));
+        assertTrue(csv.contains("contentRedacted"));
+        assertTrue(csv.contains("'=formula a note"));
+        assertFalse(csv.contains("Private"));
         assertTrue(csv.contains("abc123"));
+    }
+
+    @Test
+    void recordSanitizesReferenceContentBeforeIntegrityHashing() {
+        service.record(
+            "deal.update",
+            "deal",
+            12,
+            "Deal [Private](note:42)",
+            "Updated [Private](note:42)",
+            Map.of("closedReason", Map.of("old", "", "new", "See [Private](note:42)"))
+        );
+
+        ArgumentCaptor<AuditLog> captor = ArgumentCaptor.forClass(AuditLog.class);
+        verify(auditIntegrityService).append(captor.capture());
+        AuditLog entry = captor.getValue();
+        assertEquals("Deal a note", entry.getTargetLabel());
+        assertEquals("Updated a note", entry.getSummary());
+        assertFalse(entry.getChanges().contains("Private"));
+        assertTrue(entry.getChanges().contains("See a note"));
+    }
+
+    @Test
+    void recentRedactsLegacyContentWithoutChangingIntegrityMetadata() {
+        AuditLog entry = new AuditLog();
+        entry.setTargetLabel("Task [Private](note:42)");
+        entry.setSummary("Updated [Private](note:42)");
+        entry.setChanges("{\"description\":{\"new\":\"Review [Private](note:42)\"}}");
+        entry.setRowHash("raw-row-hash");
+        when(auditLogMapper.findRecent(7, 25, 0)).thenReturn(List.of(entry));
+
+        AuditLog result = service.recent(25, 0).getFirst();
+
+        assertEquals("Task a note", result.getTargetLabel());
+        assertEquals("Updated a note", result.getSummary());
+        assertFalse(result.getChanges().contains("Private"));
+        assertTrue(result.getChanges().contains("Review a note"));
+        assertEquals("raw-row-hash", result.getRowHash());
+        assertTrue(result.isContentRedacted());
     }
 
     @Test

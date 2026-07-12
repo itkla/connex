@@ -1049,10 +1049,23 @@ export type Notification = {
     snoozedUntil?: string | null;
     createdAt: string;
     updatedAt: string;
+    stateVersion?: number;
 };
 
 export type NotificationCounts = {
     unread: number;
+    stateVersion: number;
+    asOf: string;
+    nextSnoozeExpiry?: string | null;
+};
+
+export type NotificationMarkAllResult = NotificationCounts & {
+    cutoffId: number;
+    readAt: string;
+};
+
+export type NotificationPage = Page<Notification> & {
+    stateVersion: number;
 };
 
 export type NotificationParams = {
@@ -1504,6 +1517,7 @@ export type AuditLogEntry = {
     requestId?: string | null;
     createdAt: string;
     currentActorLabel?: string | null;
+    contentRedacted?: boolean;
 };
 
 export type AuditLogParams = PageParams & {

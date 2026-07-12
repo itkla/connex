@@ -107,6 +107,14 @@
     ORDER BY created_at DESC, id DESC
   </select>
 
+  <select id="getVisibleNoteIdsByDealIds" resultType="ooo.klae.connex.backend.beans.DealNoteId">
+    SELECT deal_id, id AS note_id FROM note
+    WHERE workspace_id = #{workspaceId}
+      AND deal_id IN <foreach item="dealId" collection="dealIds" open="(" separator="," close=")">#{dealId}</foreach>
+      AND (visibility = 'workspace' OR author_id = #{currentUserId})
+    ORDER BY deal_id, created_at DESC, id DESC
+  </select>
+
   <select id="getVisibleNotesByAuthorId" resultMap="NoteResult">
     SELECT <include refid="noteColumns"/> FROM note
     WHERE workspace_id = #{workspaceId} AND author_id = #{authorId}

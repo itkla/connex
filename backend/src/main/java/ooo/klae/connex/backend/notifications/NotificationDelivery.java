@@ -6,6 +6,7 @@ import java.util.Objects;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.annotation.Transactional;
 
 import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.beans.Notification;
@@ -50,14 +51,17 @@ public class NotificationDelivery {
     private final NotificationMapper notificationMapper;
     private final PreferenceMapper preferenceMapper;
     private final NotificationPushPublisher pushPublisher;
+    private final NotificationStateVersionService stateVersionService;
 
     /**
      * Delivers a notification across every eligible channel.
      * @param notification the generated notification
      */
+    @Transactional
     public void deliver(Notification notification) {
         Notification existing = findExisting(notification);
         boolean firstOccurrence = existing == null;
+        boolean changed = firstOccurrence || isVisibleChange(existing, notification);
 
         for (NotificationDispatcher dispatcher : dispatchers) {
             if (IN_APP.equals(dispatcher.channel())) {
@@ -65,7 +69,10 @@ public class NotificationDelivery {
             }
         }
 
-        pushRealtime(notification, existing);
+        if (changed) {
+            stateVersionService.markChanged(notification.getRecipientId());
+            pushRealtime(notification, existing);
+        }
 
         if (!firstOccurrence) {
             return;
@@ -91,7 +98,7 @@ public class NotificationDelivery {
 
     private void pushRealtime(Notification notification, Notification existing) {
         boolean created = existing == null;
-        boolean updated = !created && isMaterialChange(existing, notification);
+        boolean updated = !created && isVisibleChange(existing, notification);
         if (!created && !updated) {
             return;
         }
@@ -113,9 +120,24 @@ public class NotificationDelivery {
      * previously resolved row is revived — the same condition under which the in-app
      * upsert clears read/dismiss/snooze state, so a live client should refresh.
      */
-    private boolean isMaterialChange(Notification existing, Notification incoming) {
+    private boolean isVisibleChange(Notification existing, Notification incoming) {
         return !Objects.equals(existing.getSeverity(), incoming.getSeverity())
-                || existing.getResolvedAt() != null;
+                || existing.getResolvedAt() != null
+                || !Objects.equals(existing.getType(), incoming.getType())
+                || !Objects.equals(existing.getCategory(), incoming.getCategory())
+                || existing.getTemplateVersion() != incoming.getTemplateVersion()
+                || !Objects.equals(existing.getTitle(), incoming.getTitle())
+                || !Objects.equals(existing.getBody(), incoming.getBody())
+                || !Objects.equals(existing.getActorId(), incoming.getActorId())
+                || !Objects.equals(existing.getActorLabel(), incoming.getActorLabel())
+                || !Objects.equals(existing.getSourceType(), incoming.getSourceType())
+                || !Objects.equals(existing.getSourceId(), incoming.getSourceId())
+                || !Objects.equals(existing.getSourceLabel(), incoming.getSourceLabel())
+                || !Objects.equals(existing.getContextType(), incoming.getContextType())
+                || !Objects.equals(existing.getContextId(), incoming.getContextId())
+                || !Objects.equals(existing.getContextLabel(), incoming.getContextLabel())
+                || !Objects.equals(existing.getActionUrl(), incoming.getActionUrl())
+                || !Objects.equals(existing.getData(), incoming.getData());
     }
 
     private void safeDispatch(NotificationDispatcher dispatcher, Notification notification) {

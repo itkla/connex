@@ -244,6 +244,66 @@ class NoteMentionTest extends AbstractServiceTest {
         assertTrue(asOther.getContent().contains("(private note)"));
     }
 
+    @Test
+    void privateReferenceStyleNoteTarget_isRedactedForNonAuthor() {
+        Note privateDraft = draft("secret acquisition plan");
+        privateDraft.setVisibility("private");
+        Note privateNote = noteService.create(privateDraft);
+
+        Note workspaceDraft = draft(
+            "[Secret \\] Plan][n]\n\n[n]:\n  note:" + privateNote.getId());
+        Note workspaceNote = noteService.create(workspaceDraft);
+
+        User other = newUser();
+        SecurityContextHolder.getContext().setAuthentication(
+            new UsernamePasswordAuthenticationToken(other, null, other.getAuthorities()));
+
+        Note asOther = noteService.getNoteById(workspaceNote.getId());
+        assertEquals("(private note)", asOther.getContent());
+    }
+
+    @Test
+    void escapedAndEntityEncodedPrivateNoteTargets_areRedactedForNonAuthor() {
+        Note privateDraft = draft("secret acquisition plan");
+        privateDraft.setVisibility("private");
+        Note privateNote = noteService.create(privateDraft);
+        String id = Integer.toString(privateNote.getId());
+        String encodedFirstDigit = "&#" + (int) id.charAt(0) + ";" + id.substring(1);
+        List<Note> sources = List.of(
+            noteService.create(draft("[Secret][n]\n\n[n]: note\\:" + id)),
+            noteService.create(draft("[Secret][n]\n\n[n]: note&#58;" + id)),
+            noteService.create(draft("[Secret][n]\n\n[n]: note:" + encodedFirstDigit)),
+            noteService.create(draft("[Secret][n]\n\n[n]: note&colon;" + id)));
+        User other = newUser();
+        authenticateAs(other, workspace.getId());
+
+        for (Note source : sources) {
+            assertEquals("(private note)", noteService.getNoteById(source.getId()).getContent());
+        }
+    }
+
+    @Test
+    void oversizedNoteTarget_isRedactedWithoutBreakingReads() {
+        Note created = noteService.create(draft(
+            "[Invalid](note:999999999999999999999999999999999999)"));
+
+        Note fetched = noteService.getNoteById(created.getId());
+
+        assertEquals("(private note)", fetched.getContent());
+    }
+
+    @Test
+    void emptyLabelPrivateNoteTarget_isRedactedForNonAuthor() {
+        Note privateDraft = draft("secret acquisition plan");
+        privateDraft.setVisibility("private");
+        Note privateNote = noteService.create(privateDraft);
+        Note source = noteService.create(draft("[](note:" + privateNote.getId() + ")"));
+        User other = newUser();
+        authenticateAs(other, workspace.getId());
+
+        assertEquals("(private note)", noteService.getNoteById(source.getId()).getContent());
+    }
+
     /**
      * Loading a contact hydrates references on its embedded notes so mentions render as chips.
      */

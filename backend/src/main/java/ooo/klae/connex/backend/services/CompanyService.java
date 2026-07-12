@@ -42,6 +42,7 @@ public class CompanyService {
     private final RuleTriggerPublisher ruleTriggers;
     private final WorkspaceService workspaceService;
     private final CustomFieldValueService customFieldValueService;
+    private final ReferenceService referenceService;
 
     private static final Set<String> AUDIT_FIELDS =
         Set.of("name", "website", "industry", "phone", "address", "logoUrl");
@@ -112,7 +113,8 @@ public class CompanyService {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         Company company = companyMapper.getCompanyById(workspaceId, id);
         if (company == null) throw new ResourceNotFoundException("Company not found with id: " + id);
-        company.setDeals(dealMapper.getDealsByCompanyId(workspaceId, id).toArray(Deal[]::new));
+        company.setDeals(referenceService.hydrateDeals(
+            workspaceId, dealMapper.getDealsByCompanyId(workspaceId, id)).toArray(Deal[]::new));
         return company;
     }
 
@@ -265,7 +267,8 @@ public class CompanyService {
     public List<Deal> getDealsByCompanyId(int companyId) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         requireCompany(workspaceId, companyId);
-        return dealMapper.getDealsByCompanyId(workspaceId, companyId);
+        return referenceService.hydrateDeals(
+            workspaceId, dealMapper.getDealsByCompanyId(workspaceId, companyId));
     }
 
     /**
