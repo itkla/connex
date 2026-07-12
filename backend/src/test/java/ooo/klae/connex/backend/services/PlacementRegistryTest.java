@@ -121,6 +121,16 @@ class PlacementRegistryTest {
     }
 
     @Test
+    void activeCatalogsSkipsUnservableHandles() {
+        properties.setMode(TenantRoutingProperties.MODE_CATALOG_PER_PLACEMENT);
+        properties.setDefaultCatalog("connexdb");
+        when(orgPlacementMapper.distinctDedicatedHandles())
+            .thenReturn(java.util.List.of("mysql", "ConnexDB", "cnx_ok", "bad-handle"));
+
+        assertEquals(java.util.Arrays.asList(null, "cnx_ok"), placementRegistry.activeCatalogs());
+    }
+
+    @Test
     void zeroTtlDisablesCaching() {
         properties.setPlacementCacheTtl(Duration.ZERO);
         when(orgPlacementMapper.findEffectiveByOrg(7)).thenReturn(OrgPlacement.sharedDefault(7));

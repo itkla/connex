@@ -40,13 +40,27 @@ public class RuleScheduler {
             return;
         }
         for (String catalog : placementRegistry.activeCatalogs()) {
-            for (int workspaceId : tenantWorkScope.withCatalog(catalog, ruleMapper::workspaceIdsWithEnabledScheduleRules)) {
-                for (String cadence : CADENCES) {
-                    try {
-                        tenantWorkScope.inWorkspace(workspaceId, () -> ruleEngineService.runSchedule(workspaceId, cadence));
-                    } catch (Exception e) {
-                        log.warn("Schedule evaluation failed for workspace {} cadence {}: {}", workspaceId, cadence, e.getMessage());
-                    }
+            try {
+                evaluateCatalog(catalog);
+            } catch (Exception e) {
+                log.warn("Schedule sweep failed for catalog {}: {}", catalog == null ? "(default)" : catalog, e.getMessage());
+            }
+        }
+    }
+
+    /**
+     * Enumerates and runs one catalog's schedule rules. The {@code rule} table
+     * is org-data, so the enumeration must run inside the catalog being swept;
+     * failures are isolated per catalog by the caller and per workspace here,
+     * so one bad placement never starves the rest of the fleet.
+     */
+    private void evaluateCatalog(String catalog) {
+        for (int workspaceId : tenantWorkScope.withCatalog(catalog, ruleMapper::workspaceIdsWithEnabledScheduleRules)) {
+            for (String cadence : CADENCES) {
+                try {
+                    tenantWorkScope.inWorkspace(workspaceId, () -> ruleEngineService.runSchedule(workspaceId, cadence));
+                } catch (Exception e) {
+                    log.warn("Schedule evaluation failed for workspace {} cadence {}: {}", workspaceId, cadence, e.getMessage());
                 }
             }
         }

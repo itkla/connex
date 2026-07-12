@@ -7,13 +7,15 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 import lombok.RequiredArgsConstructor;
-import ooo.klae.connex.backend.services.PlacementRegistry;
 import ooo.klae.connex.backend.tenant.TenantWorkScope;
 import ooo.klae.connex.backend.mappers.NotificationMapper;
 import ooo.klae.connex.backend.services.NotificationReconciliationService;
 
 /**
  * Runs reconciliation per explicit workspace without an authentication context.
+ * Workspace enumeration reads the control-plane {@code workspace} table (which
+ * only exists on the default catalog), so it runs unrouted — no catalog
+ * fan-out; {@code inWorkspace} then pins each workspace's own catalog.
  */
 @Component
 @RequiredArgsConstructor
@@ -27,7 +29,6 @@ public class NotificationScheduler {
     private static final Logger log = LoggerFactory.getLogger(NotificationScheduler.class);
 
     private final NotificationMapper notificationMapper;
-    private final PlacementRegistry placementRegistry;
     private final TenantWorkScope tenantWorkScope;
     private final NotificationReconciliationService reconciliationService;
 
@@ -36,16 +37,14 @@ public class NotificationScheduler {
         initialDelayString = "${connex.notifications.initial-delay-ms:300000}"
     )
     public void reconcileAndPurge() {
-        for (String catalog : placementRegistry.activeCatalogs()) {
-            for (Integer workspaceId : tenantWorkScope.withCatalog(catalog, notificationMapper::findWorkspaceIds)) {
-                try {
-                    tenantWorkScope.inWorkspace(workspaceId, () -> {
-                        reconciliationService.reconcileWorkspace(workspaceId, true);
-                        reconciliationService.purgeWorkspace(workspaceId);
-                    });
-                } catch (Exception exception) {
-                    log.error("Scheduled notification reconciliation failed for workspace={}", workspaceId, exception);
-                }
+        for (Integer workspaceId : tenantWorkScope.unrouted(notificationMapper::findWorkspaceIds)) {
+            try {
+                tenantWorkScope.inWorkspace(workspaceId, () -> {
+                    reconciliationService.reconcileWorkspace(workspaceId, true);
+                    reconciliationService.purgeWorkspace(workspaceId);
+                });
+            } catch (Exception exception) {
+                log.error("Scheduled notification reconciliation failed for workspace={}", workspaceId, exception);
             }
         }
     }

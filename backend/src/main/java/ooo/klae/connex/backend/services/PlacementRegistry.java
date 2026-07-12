@@ -5,11 +5,14 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.beans.OrgPlacement;
 import ooo.klae.connex.backend.mappers.OrgPlacementMapper;
+import ooo.klae.connex.backend.tenant.DatabaseHandles;
 import ooo.klae.connex.backend.tenant.TenantRoutingProperties;
 
 /**
@@ -22,6 +25,8 @@ import ooo.klae.connex.backend.tenant.TenantRoutingProperties;
 @Service
 @RequiredArgsConstructor
 public class PlacementRegistry {
+
+    private static final Logger log = LoggerFactory.getLogger(PlacementRegistry.class);
 
     private static final long MAX_CACHE_TTL_NANOS = Duration.ofDays(365).toNanos();
 
@@ -106,7 +111,9 @@ public class PlacementRegistry {
      * handle when catalog routing is enabled. In {@code single-database} mode
      * only the default catalog is returned — dedicated placements are refused
      * fail-closed on the request path and receive no background processing
-     * either (#485).
+     * either (#485). Handles are validated through {@code DatabaseHandles} so
+     * a malformed or reserved registry row is skipped (and logged) rather than
+     * pinned verbatim.
      *
      * @return the catalogs to sweep; {@code null} means the default catalog
      */
@@ -114,7 +121,13 @@ public class PlacementRegistry {
         List<String> catalogs = new ArrayList<>();
         catalogs.add(null);
         if (routingProperties.isCatalogPerPlacement()) {
-            catalogs.addAll(orgPlacementMapper.distinctDedicatedHandles());
+            for (String handle : orgPlacementMapper.distinctDedicatedHandles()) {
+                if (DatabaseHandles.servable(handle, routingProperties.getDefaultCatalog())) {
+                    catalogs.add(handle);
+                } else {
+                    log.warn("Skipping unservable placement handle '{}' in the catalog sweep", handle);
+                }
+            }
         }
         return catalogs;
     }
