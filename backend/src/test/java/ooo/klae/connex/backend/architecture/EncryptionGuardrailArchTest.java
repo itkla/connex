@@ -290,6 +290,7 @@ class EncryptionGuardrailArchTest {
         "ooo/klae/connex/backend/dto/InviteDto.java#token",
         "ooo/klae/connex/backend/dto/InviteLinkDto.java#token",
         "ooo/klae/connex/backend/dto/MailConfigDto.java#hasPassword",
+        "ooo/klae/connex/backend/dto/PasskeyRegistrationRequirementsDto.java#currentPasswordRequired",
         "ooo/klae/connex/backend/dto/SecretStoreSecretDiagnosticDto.java#secretId",
         "ooo/klae/connex/backend/dto/SsoConnectionDto.java#hasClientSecret");
 
