@@ -129,11 +129,18 @@ public class UserService implements UserDetailsService {
     @Transactional
     public void delete(int id) {
         workspaceService.requireSelf(id);
-        workspaceService.assertNotSoleOwnerOfAnyWorkspace(id);
+        if (userMapper.lockById(id) == null) {
+            throw new ResourceNotFoundException("User not found with id: " + id);
+        }
+        List<Integer> ownedWorkspaceIds = workspaceService.lockOwnedWorkspaceRoots(id);
+        UserOffboardingService.AccountNotificationLocks notificationLocks =
+            userOffboardingService.snapshotAccountNotificationRecipients(id);
+        userOffboardingService.lockAccountNotificationRecipientMemberships(id, notificationLocks);
+        workspaceService.assertNotSoleOwnerOfWorkspaces(ownedWorkspaceIds);
         orgMemberService.assertNotSoleOwnerOfAnyOrg(id);
         userOffboardingService.assertNoAuthoredContent(id);
         User before = getUserById(id);
-        userOffboardingService.eraseOrgDataReferences(id);
+        userOffboardingService.eraseOrgDataReferences(id, notificationLocks);
         auditService.record("user.delete", "user", id, before.getUsername(),
             "Deleted user " + before.getUsername(),
             auditService.diff(before, null, AUDIT_FIELDS));

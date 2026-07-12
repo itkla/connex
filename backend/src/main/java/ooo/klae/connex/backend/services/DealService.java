@@ -156,8 +156,7 @@ public class DealService {
     }
 
     private Deal hydrateReferences(int workspaceId, Deal deal) {
-        deal.setReferences(referenceService.referencesFor(workspaceId, ReferenceService.SOURCE_DEAL, deal.getId()));
-        return deal;
+        return referenceService.hydrateDeals(workspaceId, List.of(deal)).get(0);
     }
 
     private User currentActorOrNull() {
@@ -225,13 +224,15 @@ public class DealService {
      * @return
      */
     public List<Deal> getAllDeals() {
-        return dealMapper.getAllDeals(workspaceService.getCurrentWorkspaceId());
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        return referenceService.hydrateDeals(workspaceId, dealMapper.getAllDeals(workspaceId));
     }
 
     public List<Deal> getDealsPage(String query, String sort, String dir, String currency,
             Integer pipelineId, Integer stageId, Integer companyId, String status, int limit, int offset) {
-        return dealMapper.getDealsPage(workspaceService.getCurrentWorkspaceId(), query, sort, dir,
-            currency, pipelineId, stageId, companyId, status, limit, offset);
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        return referenceService.hydrateDeals(workspaceId, dealMapper.getDealsPage(
+            workspaceId, query, sort, dir, currency, pipelineId, stageId, companyId, status, limit, offset));
     }
 
     public long countDeals(String query, String currency, Integer pipelineId, Integer stageId,
@@ -415,7 +416,9 @@ public class DealService {
      * @return
      */
     public List<Deal> getDealsByPipelineId(int pipelineId) {
-        return dealMapper.getDealsByPipelineId(workspaceService.getCurrentWorkspaceId(), pipelineId);
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        return referenceService.hydrateDeals(
+            workspaceId, dealMapper.getDealsByPipelineId(workspaceId, pipelineId));
     }
 
     /**
@@ -424,7 +427,8 @@ public class DealService {
      * @return
      */
     public List<Deal> getDealsByStageId(int stageId) {
-        return dealMapper.getDealsByStageId(workspaceService.getCurrentWorkspaceId(), stageId);
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        return referenceService.hydrateDeals(workspaceId, dealMapper.getDealsByStageId(workspaceId, stageId));
     }
 
     /**
@@ -433,7 +437,9 @@ public class DealService {
      * @return
      */
     public List<Deal> getDealsByCompanyId(int companyId) {
-        return dealMapper.getDealsByCompanyId(workspaceService.getCurrentWorkspaceId(), companyId);
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        return referenceService.hydrateDeals(
+            workspaceId, dealMapper.getDealsByCompanyId(workspaceId, companyId));
     }
 
     /**
@@ -442,7 +448,8 @@ public class DealService {
      * @return
      */
     public List<Deal> getDealsByPersonId(int personId) {
-        return dealMapper.getDealsByPersonId(workspaceService.getCurrentWorkspaceId(), personId);
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        return referenceService.hydrateDeals(workspaceId, dealMapper.getDealsByPersonId(workspaceId, personId));
     }
 
     /**
@@ -451,7 +458,8 @@ public class DealService {
      * @return
      */
     public List<Deal> getDealsByTagId(int tagId) {
-        return dealMapper.getDealsByTagId(workspaceService.getCurrentWorkspaceId(), tagId);
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        return referenceService.hydrateDeals(workspaceId, dealMapper.getDealsByTagId(workspaceId, tagId));
     }
 
     /**
@@ -635,7 +643,7 @@ public class DealService {
             auditService.singleChange("expectedCloseDate", before.getExpectedCloseDate(), expectedCloseDate));
         notificationChanges.publish(workspaceId, "deal", id);
         ruleTriggers.publish(workspaceId, "deal", id, "deal.updated");
-        return after;
+        return hydrateReferences(workspaceId, after);
     }
 
     /**
@@ -1085,7 +1093,7 @@ public class DealService {
             auditService.diff(before, deal, AUDIT_FIELDS));
         notificationChanges.publish(workspaceId, "deal", dealId);
         ruleTriggers.publish(workspaceId, "deal", dealId, publishStageChanged ? "deal.stage_changed" : "deal.updated");
-        return dealMapper.getDealById(workspaceId, dealId);
+        return hydrateReferences(workspaceId, dealMapper.getDealById(workspaceId, dealId));
     }
 
     @Transactional
@@ -1106,7 +1114,7 @@ public class DealService {
         if (!Objects.equals(deal.getOwnerId(), ownerId)) {
             ruleTriggers.publish(workspaceId, "deal", dealId, "deal.owner_changed");
         }
-        return dealMapper.getDealById(workspaceId, dealId);
+        return hydrateReferences(workspaceId, dealMapper.getDealById(workspaceId, dealId));
     }
 
     /**
@@ -1125,7 +1133,7 @@ public class DealService {
             (riskExcluded ? "Excluded " + deal.getName() + " from" : "Included " + deal.getName() + " in")
                 + " risk evaluation",
             auditService.singleChange("riskExcluded", deal.isRiskExcluded(), riskExcluded));
-        return dealMapper.getDealById(workspaceId, dealId);
+        return hydrateReferences(workspaceId, dealMapper.getDealById(workspaceId, dealId));
     }
 
     public List<User> getCollaborators(int dealId) {

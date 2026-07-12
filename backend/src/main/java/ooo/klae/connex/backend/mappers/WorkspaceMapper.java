@@ -26,6 +26,7 @@ public interface WorkspaceMapper {
     int setMemberCustomRole(@Param("workspaceId") int workspaceId, @Param("userId") int userId, @Param("roleId") int roleId);
     int countOwners(int workspaceId);
     java.util.List<Integer> workspaceIdsOwnedBy(@Param("userId") int userId);
+    Integer lockWorkspace(@Param("workspaceId") int workspaceId);
     java.util.List<Integer> lockOwnerIds(@Param("workspaceId") int workspaceId);
     int removeMember(@Param("workspaceId") int workspaceId, @Param("userId") int userId);
     Integer getLastActiveWorkspaceId(int userId);

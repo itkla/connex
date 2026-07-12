@@ -21,6 +21,7 @@ import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.InviteMapper;
 import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
+import ooo.klae.connex.backend.notifications.NotificationStateVersionService;
 import ooo.klae.connex.backend.tenant.Permission;
 
 /**
@@ -44,6 +45,7 @@ public class InviteService {
     private final AuditService auditService;
     private final InviteEmailService inviteEmailService;
     private final SessionSecurityService sessionSecurityService;
+    private final NotificationStateVersionService notificationStateVersionService;
 
     /**
      * Invites someone to a workspace by email. An address that already belongs to
@@ -146,6 +148,7 @@ public class InviteService {
         if (!workspaceMapper.isMember(workspaceId, user.getId())) {
             userOffboardingService.prepareFreshMembership(workspaceId, user.getId());
             workspaceMapper.addMember(workspaceId, user.getId(), invite.getRole());
+            notificationStateVersionService.markChanged(user.getId());
         }
         inviteMapper.markAccepted(invite.getId(), user.getId());
         auditService.record("workspace.invite.accept", "workspace", workspaceId, user.getDisplayName(),

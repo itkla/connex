@@ -339,6 +339,7 @@
     "saveError": "Couldn't save",
     "untitled": "Untitled",
     "titlePlaceholder": "Untitled note",
+    "titleTooLong": "Keep the title to {max} characters or fewer.",
     "visibilityPrivate": "Private",
     "visibilityWorkspace": "Workspace",
     "visibilityAria": "Note visibility",

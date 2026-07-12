@@ -3,8 +3,7 @@
 import { ArrowUturnLeftIcon, CheckCircleIcon, XMarkIcon } from "@heroicons/react/24/outline";
 import { CheckCheck } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
-import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import {
     dismissNotification,
@@ -20,7 +19,13 @@ import { formatRelativeTime } from "@/app/lib/utils";
 import { toastError } from "@/app/lib/toast";
 import { useNotifications } from "@/app/hooks/useNotifications";
 import { notificationContent, notificationIcon, notificationSeverityStyle, safeNotificationUrl } from "@/app/components/notifications/notificationContent";
+import {
+    emitAllNotificationsRead,
+    emitNotificationStateChanged,
+    onNotificationStateChanged,
+} from "@/app/components/notifications/notificationEvents";
 import { SnoozeMenu } from "@/app/components/notifications/SnoozeMenu";
+import { useNotificationWorkspaceActions } from "@/app/components/notifications/useNotificationWorkspaceActions";
 import { cn } from "@/lib/utils";
 import { SegmentedToggle } from "@/app/components/filters";
 import Rise from "@/app/components/motion/Rise";
@@ -51,20 +56,28 @@ function matchesState(n: Notification, state: NotificationState): boolean {
 export default function NotificationsInbox() {
     const t = useTranslations("Notifications");
     const locale = useLocale();
-    const router = useRouter();
-    const { unread, refreshUnread, setUnread } = useNotifications();
+    const { recipientId, unread, refreshUnread } = useNotifications();
+    const { openInNotificationWorkspace } = useNotificationWorkspaceActions();
     const [state, setState] = useState<NotificationState>("active");
     const [items, setItems] = useState<Notification[]>([]);
     const [page, setPage] = useState(1);
     const [total, setTotal] = useState(0);
     const [loading, setLoading] = useState(true);
+    const [refreshKey, setRefreshKey] = useState(0);
+    const loadGenerationRef = useRef(0);
+    const requestRef = useRef<AbortController | null>(null);
+    const serverStateVersionRef = useRef(0);
+    const requiredStateVersionRef = useRef(0);
 
     useEffect(() => {
         const controller = new AbortController();
-        let active = true;
+        const generation = ++loadGenerationRef.current;
+        requestRef.current = controller;
         getNotifications({ state, page, size: PAGE_SIZE }, { signal: controller.signal })
             .then((result) => {
-                if (!active) return;
+                if (loadGenerationRef.current !== generation) return;
+                if (result.stateVersion < requiredStateVersionRef.current) return;
+                serverStateVersionRef.current = result.stateVersion;
                 setItems(result.items);
                 setTotal(result.total);
             })
@@ -74,19 +87,37 @@ export default function NotificationsInbox() {
                 }
             })
             .finally(() => {
-                if (active) setLoading(false);
+                if (loadGenerationRef.current === generation) {
+                    requestRef.current = null;
+                    setLoading(false);
+                }
             });
         return () => {
-            active = false;
             controller.abort();
         };
-    }, [page, state, t]);
+    }, [page, state, t, refreshKey]);
+
+    useEffect(
+        () => onNotificationStateChanged(recipientId, ({ stateVersion, forceRefresh }) => {
+            if (!forceRefresh && stateVersion <= serverStateVersionRef.current) return;
+            requiredStateVersionRef.current = Math.max(requiredStateVersionRef.current, stateVersion);
+            loadGenerationRef.current += 1;
+            requestRef.current?.abort();
+            requestRef.current = null;
+            setLoading(true);
+            setRefreshKey((current) => current + 1);
+        }),
+        [recipientId],
+    );
 
     async function toggleRead(item: Notification) {
         try {
             const updated = item.readAt
                 ? await markNotificationUnread(item.id)
                 : await markNotificationRead(item.id);
+            if (updated.stateVersion != null) {
+                emitNotificationStateChanged(recipientId, updated.stateVersion);
+            }
             if (matchesState(updated, state)) {
                 setItems((current) => current.map((entry) => entry.id === updated.id ? updated : entry));
             } else {
@@ -101,7 +132,10 @@ export default function NotificationsInbox() {
 
     async function dismiss(item: Notification) {
         try {
-            await dismissNotification(item.id);
+            const updated = await dismissNotification(item.id);
+            if (updated.stateVersion != null) {
+                emitNotificationStateChanged(recipientId, updated.stateVersion);
+            }
             setItems((current) => current.filter((entry) => entry.id !== item.id));
             setTotal((value) => Math.max(0, value - 1));
             await refreshUnread();
@@ -112,7 +146,10 @@ export default function NotificationsInbox() {
 
     async function snooze(item: Notification, hours: number) {
         try {
-            await snoozeNotification(item.id, hours);
+            const updated = await snoozeNotification(item.id, hours);
+            if (updated.stateVersion != null) {
+                emitNotificationStateChanged(recipientId, updated.stateVersion);
+            }
             setItems((current) => current.filter((entry) => entry.id !== item.id));
             setTotal((value) => Math.max(0, value - 1));
             await refreshUnread();
@@ -121,14 +158,24 @@ export default function NotificationsInbox() {
         }
     }
 
-    function logTouch(item: Notification) {
-        if (item.sourceId == null) return;
-        router.push(`/records/contacts/${item.sourceId}`);
+    async function logTouch(item: Notification) {
+        const sourceId = item.sourceId;
+        if (sourceId == null) return;
+        try {
+            const opened = await openInNotificationWorkspace(
+                item, `/records/contacts/${sourceId}`);
+            if (!opened) toastError(t("actionError"));
+        } catch {
+            toastError(t("actionError"));
+        }
     }
 
     async function restore(item: Notification) {
         try {
             const updated = await restoreNotification(item.id);
+            if (updated.stateVersion != null) {
+                emitNotificationStateChanged(recipientId, updated.stateVersion);
+            }
             if (matchesState(updated, state)) {
                 setItems((current) => current.map((entry) => entry.id === updated.id ? updated : entry));
             } else {
@@ -143,18 +190,27 @@ export default function NotificationsInbox() {
 
     async function readAll() {
         try {
-            const counts = await markAllNotificationsRead();
-            setItems((current) => current.map((item) => ({ ...item, readAt: new Date().toISOString() })));
-            setUnread(counts.unread);
+            const result = await markAllNotificationsRead();
+            emitAllNotificationsRead(recipientId, result);
         } catch {
             toastError(t("actionError"));
         }
     }
 
     async function navigate(item: Notification) {
-        if (!item.readAt) await toggleRead(item);
         const url = safeNotificationUrl(item.actionUrl);
-        if (url) router.push(url);
+        if (!url) {
+            if (!item.readAt) await toggleRead(item);
+            return;
+        }
+        try {
+            const opened = await openInNotificationWorkspace(item, url, async () => {
+                if (!item.readAt) await toggleRead(item);
+            });
+            if (!opened) toastError(t("actionError"));
+        } catch {
+            toastError(t("actionError"));
+        }
     }
 
     const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
@@ -286,7 +342,7 @@ export default function NotificationsInbox() {
                                                     <Button
                                                         variant="ghost"
                                                         size="sm"
-                                                        onClick={() => logTouch(item)}
+                                                        onClick={() => void logTouch(item)}
                                                     >
                                                         {t("logTouch")}
                                                     </Button>

@@ -58,7 +58,6 @@ type ActionContributorValue = {
 
 const ActionContributorContext = createContext<ActionContributorValue | null>(null);
 
-/** Whether any live registration except `exceptToken` contains an action matching `predicate`. */
 function someLiveAction(
     registrations: Map<RegistrationToken, readonly AppAction[]>,
     exceptToken: RegistrationToken,
@@ -71,10 +70,6 @@ function someLiveAction(
     return false;
 }
 
-/**
- * Validates and accepts a token's incoming actions against the live set, stripping conflicting
- * shortcuts and dropping colliding ids. Collisions fail loudly in development.
- */
 function acceptRegistration(
     registrations: Map<RegistrationToken, readonly AppAction[]>,
     token: RegistrationToken,

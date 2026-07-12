@@ -31,9 +31,6 @@
     <collection property="activities" ofType="Activity"
                 column="{workspaceId=workspace_id,dealId=id}"
                 select="ooo.klae.connex.backend.mappers.ActivityMapper.getActivitiesByDealId"/>
-    <collection property="notes" ofType="Note"
-                column="{workspaceId=workspace_id,dealId=id}"
-                select="ooo.klae.connex.backend.mappers.NoteMapper.getNotesByDealId"/>
     <collection property="tasks" ofType="Task"
                 column="{workspaceId=workspace_id,dealId=id}"
                 select="ooo.klae.connex.backend.mappers.TaskMapper.getTasksByDealId"/>

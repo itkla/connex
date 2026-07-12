@@ -1,9 +1,10 @@
 package ooo.klae.connex.backend.mappers;
 
+import java.util.List;
+
 import org.apache.ibatis.annotations.Param;
 
 import ooo.klae.connex.backend.beans.Note;
-import java.util.List;
 
 /**
  * Mapper interface for {@code Note} persistence.

@@ -1,8 +1,10 @@
 package ooo.klae.connex.backend.services;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.nio.charset.StandardCharsets;
 import java.util.List;
@@ -15,6 +17,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
 
 import ooo.klae.connex.backend.beans.AuditLog;
+import ooo.klae.connex.backend.mappers.AuditLogMapper;
 
 class AuditIntegrityServiceTest extends AbstractServiceTest {
 
@@ -24,6 +27,7 @@ class AuditIntegrityServiceTest extends AbstractServiceTest {
 
     @Autowired private AuditService auditService;
     @Autowired private AuditIntegrityService auditIntegrityService;
+    @Autowired private AuditLogMapper auditLogMapper;
     @Autowired private JdbcTemplate jdbcTemplate;
 
     @Test
@@ -66,6 +70,33 @@ class AuditIntegrityServiceTest extends AbstractServiceTest {
         assertEquals(64, entry.getRowHash().length());
     }
 
+    @Test
+    void legacyReferenceContentIsRedactedWithoutRewritingTheStoredChain() {
+        AuditLog legacy = new AuditLog();
+        legacy.setWorkspaceId(workspace.getId());
+        legacy.setOrgId(workspaceMapper.getOrgId(workspace.getId()));
+        legacy.setAction("deal.update");
+        legacy.setEntityType("deal");
+        legacy.setEntityId(99);
+        legacy.setTargetLabel("Deal [Private](note:4242)");
+        legacy.setOutcome("success");
+        legacy.setSummary("Updated [Private](note:4242)");
+        legacy.setChanges("{\"closedReason\":{\"new\":\"See [Private](note:4242)\"}}");
+        auditIntegrityService.append(legacy);
+
+        AuditLog stored = findById(
+            auditLogMapper.findRecent(workspace.getId(), 50, 0), legacy.getId());
+        assertTrue(stored.getChanges().contains("Private"));
+        assertEquals(expectedHmac(auditIntegrityService.integrityPayload(stored)), stored.getRowHash());
+
+        AuditLog projected = findById(auditService.recent(50, 0), legacy.getId());
+        assertFalse(projected.getTargetLabel().contains("Private"));
+        assertFalse(projected.getSummary().contains("Private"));
+        assertFalse(projected.getChanges().contains("Private"));
+        assertEquals(stored.getRowHash(), projected.getRowHash());
+        assertTrue(projected.isContentRedacted());
+    }
+
     private int checkpointCount(int auditLogId) {
         Integer count = jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM audit_log_integrity_checkpoint WHERE audit_log_id = ?",
@@ -91,6 +122,13 @@ class AuditIntegrityServiceTest extends AbstractServiceTest {
     private static AuditLog findBySummary(List<AuditLog> entries, String summary) {
         return entries.stream()
             .filter(entry -> summary.equals(entry.getSummary()))
+            .findFirst()
+            .orElseThrow();
+    }
+
+    private static AuditLog findById(List<AuditLog> entries, int id) {
+        return entries.stream()
+            .filter(entry -> entry.getId() == id)
             .findFirst()
             .orElseThrow();
     }

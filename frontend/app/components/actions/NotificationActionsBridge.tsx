@@ -9,6 +9,7 @@ import { toastSuccess } from "@/app/lib/toast";
 import { useNotifications } from "@/app/hooks/useNotifications";
 import { useRegisterActions } from "@/app/hooks/useActions";
 import type { AppAction } from "@/app/lib/actions/types";
+import { emitAllNotificationsRead } from "@/app/components/notifications/notificationEvents";
 
 /**
  * Registers the notification actions that depend on the live notification context — currently "mark
@@ -16,7 +17,7 @@ import type { AppAction } from "@/app/lib/actions/types";
  * provider so it can bridge {@link useNotifications} into the registry. Renders nothing.
  */
 export default function NotificationActionsBridge(): null {
-    const { setUnread } = useNotifications();
+    const { recipientId } = useNotifications();
     const t = useTranslations("Actions");
 
     const actions = useMemo<readonly AppAction[]>(
@@ -28,13 +29,13 @@ export default function NotificationActionsBridge(): null {
                 icon: BellAlertIcon,
                 order: 20,
                 execute: async () => {
-                    const counts = await markAllNotificationsRead();
-                    setUnread(counts.unread);
+                    const result = await markAllNotificationsRead();
+                    emitAllNotificationsRead(recipientId, result);
                     toastSuccess(t("feedback.allNotificationsRead"));
                 },
             },
         ],
-        [setUnread, t],
+        [recipientId, t],
     );
 
     useRegisterActions(actions);

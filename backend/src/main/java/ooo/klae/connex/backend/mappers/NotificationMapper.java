@@ -15,25 +15,87 @@ import ooo.klae.connex.backend.dto.NotificationCountsDto;
  * Mapper for notification inbox lifecycle and reminder reconciliation.
  */
 public interface NotificationMapper {
+    default List<Notification> findPage(
+        int recipientId,
+        String state,
+        String category,
+        String contextType,
+        Integer contextId,
+        int limit,
+        int offset
+    ) {
+        return findPage(
+            recipientId,
+            state,
+            category,
+            contextType,
+            contextId,
+            getDatabaseUtcTimestamp(),
+            limit,
+            offset
+        );
+    }
+
     List<Notification> findPage(
         @Param("recipientId") int recipientId,
         @Param("state") String state,
         @Param("category") String category,
         @Param("contextType") String contextType,
         @Param("contextId") Integer contextId,
+        @Param("asOf") String asOf,
         @Param("limit") int limit,
         @Param("offset") int offset
     );
+
+    default long countPage(
+        int recipientId,
+        String state,
+        String category,
+        String contextType,
+        Integer contextId
+    ) {
+        return countPage(
+            recipientId,
+            state,
+            category,
+            contextType,
+            contextId,
+            getDatabaseUtcTimestamp()
+        );
+    }
 
     long countPage(
         @Param("recipientId") int recipientId,
         @Param("state") String state,
         @Param("category") String category,
         @Param("contextType") String contextType,
-        @Param("contextId") Integer contextId
+        @Param("contextId") Integer contextId,
+        @Param("asOf") String asOf
     );
 
-    NotificationCountsDto getUnreadCounts(@Param("recipientId") int recipientId);
+    NotificationCountsDto getUnreadCounts(
+        @Param("recipientId") int recipientId,
+        @Param("asOf") String asOf
+    );
+
+    default NotificationCountsDto getUnreadCounts(int recipientId) {
+        return getUnreadCounts(recipientId, getDatabaseUtcTimestamp());
+    }
+
+    String getNextSnoozeExpiry(
+        @Param("recipientId") int recipientId,
+        @Param("asOf") String asOf
+    );
+
+    long getStateVersion(@Param("recipientId") int recipientId);
+
+    int bumpStateVersions(@Param("recipientIds") List<Integer> recipientIds);
+
+    List<Integer> lockRecipientMemberships(@Param("recipientId") int recipientId);
+
+    long getInboxCutoffId(@Param("recipientId") int recipientId);
+
+    String getDatabaseUtcTimestamp();
 
     Notification findById(
         @Param("recipientId") int recipientId,
@@ -66,7 +128,11 @@ public interface NotificationMapper {
         @Param("snoozedUntil") String snoozedUntil
     );
 
-    int markAllRead(@Param("recipientId") int recipientId);
+    int markAllRead(
+        @Param("recipientId") int recipientId,
+        @Param("cutoffId") long cutoffId,
+        @Param("readAt") String readAt
+    );
 
     int upsert(Notification notification);
 
@@ -126,6 +192,15 @@ public interface NotificationMapper {
 
     List<Integer> findWorkspaceRecipientIds(@Param("workspaceId") int workspaceId);
 
+    List<Integer> findPurgeRecipientIds(
+        @Param("workspaceId") int workspaceId,
+        @Param("cutoff") String cutoff
+    );
+
+    List<Integer> findRecipientIdsByActor(@Param("userId") int userId);
+
+    List<Integer> lockRecipientIdsByActor(@Param("userId") int userId);
+
     int purgeReminderHistory(
         @Param("workspaceId") int workspaceId,
         @Param("recipientId") int recipientId,
@@ -136,7 +211,6 @@ public interface NotificationMapper {
         @Param("workspaceId") int workspaceId,
         @Param("cutoff") String cutoff
     );
-
     /**
      * Deletes every notification addressed to a recipient in one workspace.
      * Offboarding replacement for the {@code notification -> workspace_member}
@@ -160,5 +234,5 @@ public interface NotificationMapper {
      * Offboarding replacement for the {@code notification.actor_id} ON DELETE
      * SET NULL (#440 increment 3).
      */
-    void clearActorAnywhere(@Param("userId") int userId);
+    int clearActorAnywhere(@Param("userId") int userId);
 }

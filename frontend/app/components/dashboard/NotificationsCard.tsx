@@ -2,7 +2,11 @@
 
 import Link from 'next/link';
 import { useLocale, useTranslations } from 'next-intl';
+import { useCallback, useEffect, useState } from 'react';
 
+import { useNotificationWorkspaceActions } from '@/app/components/notifications/useNotificationWorkspaceActions';
+import { getNotifications } from '@/app/lib/api';
+import { toastError } from '@/app/lib/toast';
 import type { Notification } from '@/app/lib/types';
 import { formatRelativeTime } from '@/app/lib/utils';
 import {
@@ -12,15 +16,99 @@ import {
     safeNotificationUrl,
 } from '@/app/components/notifications/notificationContent';
 import { cn } from '@/lib/utils';
+import { onNotificationStateChanged } from '@/app/components/notifications/notificationEvents';
 
-export type NotificationsCardProps = { items: Notification[] };
+export type NotificationsCardProps = {
+    items: Notification[];
+    recipientId: number;
+    initialStateVersion: number;
+};
+
+type ReconciledNotifications = {
+    sourceItems: Notification[];
+    sourceStateVersion: number;
+    items: Notification[];
+};
+
+/** Keeps the dashboard notification snapshot reconciled with recipient-wide state changes. */
+export default function NotificationsCard({
+    items,
+    recipientId,
+    initialStateVersion,
+}: NotificationsCardProps) {
+    const t = useTranslations('Notifications');
+    const { openNotification } = useNotificationWorkspaceActions();
+    const [reconciled, setReconciled] = useState<ReconciledNotifications | null>(null);
+    const visibleItems = reconciled?.sourceItems === items
+        && reconciled.sourceStateVersion === initialStateVersion
+        ? reconciled.items
+        : items;
+
+    useEffect(() => {
+        let active = true;
+        let generation = 0;
+        let retryId: number | null = null;
+        let reconciledVersion = initialStateVersion;
+        const reconcile = async (requiredVersion: number, canRetry: boolean, forceRefresh = false) => {
+            if (!forceRefresh && requiredVersion <= reconciledVersion) return;
+            const requestGeneration = ++generation;
+            try {
+                const page = await getNotifications({ state: 'unread', page: 1, size: 6 });
+                if (!active || requestGeneration !== generation) return;
+                if (page.stateVersion < requiredVersion && canRetry) {
+                    retryId = window.setTimeout(
+                        () => void reconcile(requiredVersion, false, forceRefresh),
+                        250,
+                    );
+                    return;
+                }
+                if (page.stateVersion < requiredVersion) return;
+                reconciledVersion = page.stateVersion;
+                setReconciled({
+                    sourceItems: items,
+                    sourceStateVersion: initialStateVersion,
+                    items: page.items,
+                });
+            } catch {
+                return;
+            }
+        };
+        const stopStateChanged = onNotificationStateChanged(
+            recipientId,
+            ({ stateVersion, forceRefresh }) => void reconcile(stateVersion, true, forceRefresh),
+            { replay: true },
+        );
+        return () => {
+            active = false;
+            generation += 1;
+            if (retryId != null) window.clearTimeout(retryId);
+            stopStateChanged();
+        };
+    }, [initialStateVersion, items, recipientId]);
+
+    const handleOpen = useCallback((notification: Notification) => {
+        void openNotification(notification)
+            .then((opened) => {
+                if (!opened) toastError(t('actionError'));
+            })
+            .catch(() => toastError(t('actionError')));
+    }, [openNotification, t]);
+
+    return <NotificationsCardView items={visibleItems} onOpen={handleOpen} />;
+}
 
 /**
- * Dashboard widget: the most recent unread notifications, newest first. Each row shows the
- * severity-colored entity icon, the localized title/body, and a relative timestamp; rows with a
- * safe action URL link to the underlying record. Purely informational.
+ * Presentational dashboard widget for the most recent unread notifications, newest first.
+ * @param items the notifications to render
+ * @returns the notification card
  */
-export default function NotificationsCard({ items }: NotificationsCardProps) {
+export function NotificationsCardView({
+    items,
+    onOpen,
+}: {
+    items: Notification[];
+    onOpen?: (notification: Notification) => void;
+}) {
     const t = useTranslations('Notifications');
     const locale = useLocale();
 
@@ -58,6 +146,12 @@ export default function NotificationsCard({ items }: NotificationsCardProps) {
                                 {url ? (
                                     <Link
                                         href={url}
+                                        prefetch={onOpen ? false : undefined}
+                                        onClick={(event) => {
+                                            if (!onOpen) return;
+                                            event.preventDefault();
+                                            onOpen(item);
+                                        }}
                                         className="flex min-w-0 flex-1 items-center gap-3 transition-opacity hover:opacity-80"
                                     >
                                         {inner}

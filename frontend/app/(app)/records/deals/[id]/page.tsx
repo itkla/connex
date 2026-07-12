@@ -100,7 +100,7 @@ export default async function DealPage({ params }: { params: { id: number } }) {
             getDeals(init).catch(() => [] as Deal[]),
             getUsers(init).catch(() => [] as User[]),
             getAttachmentsFromCookie("deal", id, cookie),
-            getContextNotifications("deal", id, init).catch(() => ({ items: [], total: 0 })),
+            getContextNotifications("deal", id, init).catch(() => ({ items: [], total: 0, stateVersion: 0 })),
             getDealCollaborators(id, init).catch(() => [] as User[]),
             getEntityCustomFieldsFromCookie("deal", id, cookie),
             getDealRisk(id, init).catch(() => null),
@@ -242,7 +242,13 @@ export default async function DealPage({ params }: { params: { id: number } }) {
                             collaborators={collaborators}
                         />
                     </div>
-                    <EntityNotificationBanner initialNotifications={notificationPage.items} />
+                    <EntityNotificationBanner
+                        key={`${notificationPage.stateVersion}:${notificationPage.items.map((item) => item.id).join(',')}`}
+                        initialNotifications={notificationPage.items}
+                        contextType="deal"
+                        contextId={id}
+                        initialStateVersion={notificationPage.stateVersion}
+                    />
                     <DealRiskPanel risk={risk} />
                 </Rise>
 

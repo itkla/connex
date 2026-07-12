@@ -234,4 +234,5 @@ class ReferenceServiceTest extends AbstractServiceTest {
 
         assertTrue(stored(note).isEmpty());
     }
+
 }

@@ -79,6 +79,33 @@ class NotificationMapperTest extends AbstractMapperTest {
     }
 
     @Test
+    void upsertUpdateCountDistinguishesChangedRowsFromStableRedelivery() {
+        User recipient = newUser();
+        notificationMapper.upsert(reminder(recipient, "warning", "2026-06-23 00:00:00"));
+
+        int stableRows = notificationMapper.upsert(
+            reminder(recipient, "warning", "2026-06-23 00:00:00"));
+        int changedRows = notificationMapper.upsert(
+            reminder(recipient, "critical", "2026-06-24 00:00:00"));
+
+        assertTrue(stableRows <= 1);
+        assertTrue(changedRows > 1);
+    }
+
+    @Test
+    void upsertClearsAnActorThatNoLongerExists() {
+        User recipient = newUser();
+        User deletedActor = newUser();
+        Notification notification = reminder(recipient, "warning", "2026-06-23 00:00:00");
+        notification.setActorId(deletedActor.getId());
+        userMapper.delete(deletedActor.getId());
+
+        notificationMapper.upsert(notification);
+
+        assertNull(onlyReminder(recipient).getActorId());
+    }
+
+    @Test
     void lifecycleMutationCannotCrossRecipientScope() {
         User recipient = newUser();
         User otherRecipient = newUser();
@@ -141,6 +168,7 @@ class NotificationMapperTest extends AbstractMapperTest {
     @Test
     void purgeRemovesResolvedHistoryButKeepsDismissedActiveRows() {
         User recipient = newUser();
+        User unaffectedRecipient = newUser();
         Notification dismissed = reminder(recipient, "warning", "2026-01-01 00:00:00");
         notificationMapper.upsert(dismissed);
         Notification storedDismissed = onlyReminder(recipient);
@@ -161,6 +189,21 @@ class NotificationMapperTest extends AbstractMapperTest {
             recipient.getId(),
             storedResolved.getId(),
             "2026-01-02 00:00:00"
+        );
+        Notification newerResolved = reminder(
+            unaffectedRecipient, "warning", "2026-03-01 00:00:00", 93);
+        notificationMapper.upsert(newerResolved);
+        notificationMapper.resolveReminder(
+            workspace.getId(),
+            unaffectedRecipient.getId(),
+            onlyReminder(unaffectedRecipient).getId(),
+            "2026-03-02 00:00:00"
+        );
+
+        assertEquals(
+            List.of(recipient.getId()),
+            notificationMapper.findPurgeRecipientIds(
+                workspace.getId(), "2026-02-01 00:00:00")
         );
 
         assertEquals(
@@ -184,6 +227,26 @@ class NotificationMapperTest extends AbstractMapperTest {
         assertTrue(remaining.stream().anyMatch(
             notification -> "task.due:91".equals(notification.getDedupeKey())
         ));
+    }
+
+    @Test
+    void actorCleanupProjectsExactRecipientsAndReportsUpdatedRows() {
+        User actor = newUser();
+        User firstRecipient = newUser();
+        User secondRecipient = newUser();
+        Notification first = reminder(firstRecipient, "warning", "2026-06-23 00:00:00", 101);
+        first.setActorId(actor.getId());
+        Notification second = reminder(secondRecipient, "warning", "2026-06-23 00:00:00", 102);
+        second.setActorId(actor.getId());
+        notificationMapper.upsert(first);
+        notificationMapper.upsert(second);
+
+        assertEquals(
+            List.of(firstRecipient.getId(), secondRecipient.getId()).stream().sorted().toList(),
+            notificationMapper.findRecipientIdsByActor(actor.getId())
+        );
+        assertEquals(2, notificationMapper.clearActorAnywhere(actor.getId()));
+        assertTrue(notificationMapper.findRecipientIdsByActor(actor.getId()).isEmpty());
     }
 
     @Test
@@ -230,6 +293,81 @@ class NotificationMapperTest extends AbstractMapperTest {
         assertTrue(workspaceIds.contains(workspace.getId()));
         assertTrue(workspaceIds.contains(second.getId()));
         assertTrue(page.stream().allMatch(n -> n.getWorkspaceName() != null));
+    }
+
+    @Test
+    void markAllReadLeavesPendingWorkspaceContentUnreadUntilMembershipActivates() {
+        User recipient = newUser();
+        Workspace pendingWorkspace = new Workspace();
+        pendingWorkspace.setName("Pending WS");
+        pendingWorkspace.setSlug("pending-" + unique());
+        workspaceMapper.insert(pendingWorkspace);
+        workspaceMapper.addPendingMember(pendingWorkspace.getId(), recipient.getId(), "member");
+        Notification pending = reminder(recipient, "warning", "2026-06-24 00:00:00");
+        pending.setWorkspaceId(pendingWorkspace.getId());
+        pending.setDedupeKey("task.due:pending:" + unique());
+        notificationMapper.upsert(pending);
+
+        long cutoffId = notificationMapper.getInboxCutoffId(recipient.getId());
+        assertEquals(0, notificationMapper.markAllRead(
+            recipient.getId(), cutoffId, "2026-06-25 00:00:00"));
+
+        workspaceMapper.activateMember(pendingWorkspace.getId(), recipient.getId());
+        List<Notification> unread = notificationMapper.findPage(
+            recipient.getId(), "unread", null, null, null, 50, 0);
+        assertTrue(unread.stream().anyMatch(notification -> notification.getId() == pending.getId()));
+    }
+
+    @Test
+    void markAllReadReturnsAndUpdatesOnlyRowsEligibleAtItsCutoff() {
+        User recipient = newUser();
+        Notification eligible = reminder(recipient, "warning", "2026-06-20 00:00:00", 101);
+        Notification dismissed = reminder(recipient, "warning", "2026-06-21 00:00:00", 102);
+        Notification resolved = reminder(recipient, "warning", "2026-06-22 00:00:00", 103);
+        Notification snoozed = reminder(recipient, "warning", "2026-06-23 00:00:00", 104);
+        Notification alreadyRead = reminder(recipient, "warning", "2026-06-24 00:00:00", 105);
+        Notification boundarySnoozed = reminder(recipient, "warning", "2026-06-24 01:00:00", 107);
+        notificationMapper.upsert(eligible);
+        notificationMapper.upsert(dismissed);
+        notificationMapper.upsert(resolved);
+        notificationMapper.upsert(snoozed);
+        notificationMapper.upsert(alreadyRead);
+        notificationMapper.upsert(boundarySnoozed);
+        notificationMapper.dismiss(recipient.getId(), dismissed.getId());
+        notificationMapper.resolveReminder(
+            workspace.getId(), recipient.getId(), resolved.getId(), "2026-06-25 00:00:00");
+        notificationMapper.snooze(recipient.getId(), snoozed.getId(), "2999-01-01 00:00:00");
+        notificationMapper.markRead(recipient.getId(), alreadyRead.getId());
+
+        String readAt = notificationMapper.getDatabaseUtcTimestamp();
+        notificationMapper.snooze(recipient.getId(), boundarySnoozed.getId(), readAt);
+        long cutoffId = notificationMapper.getInboxCutoffId(recipient.getId());
+        Notification afterCutoff = reminder(recipient, "warning", "2026-06-26 00:00:00", 106);
+        notificationMapper.upsert(afterCutoff);
+        assertEquals(2, notificationMapper.markAllRead(recipient.getId(), cutoffId, readAt));
+        assertNotNull(notificationMapper.findById(recipient.getId(), eligible.getId()).getReadAt());
+        assertNull(notificationMapper.findById(recipient.getId(), dismissed.getId()).getReadAt());
+        assertNull(notificationMapper.findById(recipient.getId(), resolved.getId()).getReadAt());
+        assertNull(notificationMapper.findById(recipient.getId(), snoozed.getId()).getReadAt());
+        assertNotNull(notificationMapper.findById(recipient.getId(), alreadyRead.getId()).getReadAt());
+        assertNotNull(notificationMapper.findById(recipient.getId(), boundarySnoozed.getId()).getReadAt());
+        assertNull(notificationMapper.findById(recipient.getId(), afterCutoff.getId()).getReadAt());
+        assertEquals(1, notificationMapper.getUnreadCounts(recipient.getId()).getUnread());
+        assertEquals(
+            notificationMapper.getStateVersion(recipient.getId()),
+            notificationMapper.getUnreadCounts(recipient.getId()).getStateVersion());
+    }
+
+    @Test
+    void stateVersionBumpIsExplicitAndRecipientScoped() {
+        User recipient = newUser();
+        User other = newUser();
+
+        notificationMapper.bumpStateVersions(List.of(other.getId(), recipient.getId()));
+        notificationMapper.bumpStateVersions(List.of(recipient.getId()));
+
+        assertEquals(2, notificationMapper.getStateVersion(recipient.getId()));
+        assertEquals(1, notificationMapper.getStateVersion(other.getId()));
     }
 
     @Test
@@ -354,6 +492,10 @@ class NotificationMapperTest extends AbstractMapperTest {
     }
 
     private Notification reminder(User recipient, String severity, String triggeredAt) {
+        return reminder(recipient, severity, triggeredAt, 91);
+    }
+
+    private Notification reminder(User recipient, String severity, String triggeredAt, int sourceId) {
         Notification notification = new Notification();
         notification.setWorkspaceId(workspace.getId());
         notification.setRecipientId(recipient.getId());
@@ -364,11 +506,11 @@ class NotificationMapperTest extends AbstractMapperTest {
         notification.setTitle("Task due");
         notification.setBody("Task body");
         notification.setSourceType("task");
-        notification.setSourceId(91);
+        notification.setSourceId(sourceId);
         notification.setSourceLabel("Send proposal");
-        notification.setActionUrl("/activity/tasks?taskId=91");
-        notification.setData("{\"taskId\":91}");
-        notification.setDedupeKey("task.due:91");
+        notification.setActionUrl("/activity/tasks?taskId=" + sourceId);
+        notification.setData("{\"taskId\":" + sourceId + "}");
+        notification.setDedupeKey("task.due:" + sourceId);
         notification.setTriggeredAt(triggeredAt);
         return notification;
     }
