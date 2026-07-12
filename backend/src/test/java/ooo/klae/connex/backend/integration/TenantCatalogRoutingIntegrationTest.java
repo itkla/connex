@@ -51,7 +51,7 @@ class TenantCatalogRoutingIntegrationTest {
         password = System.getenv("CONNEX_DB_PASSWORD");
         assumeTrue(username != null && password != null,
             "CONNEX_DB_USERNAME/CONNEX_DB_PASSWORD not set; skipping catalog routing integration test");
-        defaultCatalog = catalogFromUrl(url);
+        defaultCatalog = TenantRoutingConfig.databaseFromJdbcUrl(url);
 
         try (Connection bootstrap = DriverManager.getConnection(url, username, password);
                 Statement statement = bootstrap.createStatement()) {
@@ -166,9 +166,5 @@ class TenantCatalogRoutingIntegrationTest {
         }
     }
 
-    private static String catalogFromUrl(String jdbcUrl) {
-        int slash = jdbcUrl.lastIndexOf('/');
-        int query = jdbcUrl.indexOf('?', slash);
-        return query < 0 ? jdbcUrl.substring(slash + 1) : jdbcUrl.substring(slash + 1, query);
-    }
+
 }
