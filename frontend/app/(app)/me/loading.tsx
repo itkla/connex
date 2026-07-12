@@ -3,7 +3,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 export default function MeLoading() {
     return (
         <div className="min-h-full bg-background px-2 pt-8 pb-12">
-            <div className="mx-auto flex w-full max-w-6xl flex-col gap-8">
+            <div className="mx-auto flex w-full max-w-[100rem] flex-col gap-8">
                 <div className="relative grid min-h-[30rem] place-items-center overflow-hidden rounded-3xl border border-border bg-card sm:min-h-[34rem]">
                     <Skeleton className="size-24 rounded-full sm:size-28" />
                     <div className="absolute left-6 top-6 space-y-2 sm:left-8 sm:top-8">
