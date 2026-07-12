@@ -156,6 +156,30 @@ class TaskMapperTest extends AbstractMapperTest {
         assertTrue(page.stream().noneMatch(task -> task.getId() == foreign.getId()));
     }
 
+    @Test
+    void upcomingOpenTasksAreExactBoundedAndExcludeCompletedRows() {
+        User user = newUser();
+        Task first = build("first", user, null, null);
+        first.setDueDate("2026-07-01");
+        taskMapper.insert(first);
+        Task second = build("second", user, null, null);
+        second.setDueDate("2026-07-02");
+        taskMapper.insert(second);
+        Task third = build("third", user, null, null);
+        third.setDueDate("2026-07-03");
+        taskMapper.insert(third);
+        Task completed = build("completed", user, null, null);
+        completed.setDueDate("2026-06-01");
+        completed.setCompleted(true);
+        completed.setStatus("done");
+        taskMapper.insert(completed);
+
+        List<Task> upcoming = taskMapper.getUpcomingOpenTasks(workspace.getId(), 2);
+
+        assertEquals(List.of(first.getId(), second.getId()), upcoming.stream().map(Task::getId).toList());
+        assertTrue(upcoming.stream().noneMatch(Task::isCompleted));
+    }
+
     /**
      * Updates a task and checks if the new values are persisted.
      */

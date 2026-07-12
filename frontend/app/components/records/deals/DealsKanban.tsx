@@ -9,7 +9,7 @@ import KanbanBoard, { type KanbanColumnDef } from '@/app/components/kanban/Kanba
 import { kanbanAccessibility } from '@/app/components/kanban/kanbanAccessibility';
 import DealKanbanCard from '@/app/components/records/deals/DealKanbanCard';
 import { classifyStage } from './dealOutcome';
-import { getDealBoard, getDealRisks, moveDeal } from '@/app/lib/api';
+import { getCompaniesByIds, getDealBoard, getDealRisks, moveDeal } from '@/app/lib/api';
 import { toastError } from '@/app/lib/toast';
 import type { Company, Deal, DealFilterParams, DealRisk, Pipeline, Stage } from '@/app/lib/types';
 
@@ -31,7 +31,7 @@ interface DealsKanbanProps {
     reduce: boolean;
 }
 
-const RISK_BATCH_SIZE = 200;
+const RISK_BATCH_SIZE = 100;
 
 async function loadBoardRisks(deals: Deal[]): Promise<DealRisk[]> {
     const risks: DealRisk[] = [];
@@ -78,17 +78,19 @@ export default function DealsKanban({
         let best: number | null = null;
         let bestCount = -1;
         for (const [pid, n] of counts) {
-            if (n > bestCount && stagesByPipeline[pid]?.length) {
+            if (n > bestCount && pipelineOptions.some((pipeline) => pipeline.id === pid)) {
                 best = pid;
                 bestCount = n;
             }
         }
         return best ?? pipelineOptions[0]?.id ?? null;
-    }, [deals, stagesByPipeline, pipelineOptions]);
+    }, [deals, pipelineOptions]);
 
     const [selected, setSelected] = useState<number | null>(null);
     const selectedPipelineId =
-        selected != null && (stagesByPipeline[selected]?.length ?? 0) > 0 ? selected : defaultPipelineId;
+        selected != null && pipelineOptions.some((pipeline) => pipeline.id === selected)
+            ? selected
+            : defaultPipelineId;
     const [boardRevision, setBoardRevision] = useState(0);
     const boardKey = selectedPipelineId == null ? null : `${selectedPipelineId}:${boardRevision}:${revision}`;
     const [boardState, setBoardState] = useState<{
@@ -123,10 +125,36 @@ export default function DealsKanban({
         () => boardState.key === boardKey ? boardState.deals : [],
         [boardKey, boardState],
     );
+    const [boardCompanies, setBoardCompanies] = useState<Map<number, Company>>(new Map());
+
+    useEffect(() => {
+        if (boardState.key !== boardKey) return;
+        let cancelled = false;
+        getCompaniesByIds(loadedBoardDeals.flatMap((deal) => deal.company == null ? [] : [deal.company]))
+            .then((loaded) => {
+                if (!cancelled) setBoardCompanies(new Map(loaded.map((company) => [company.id, company])));
+            })
+            .catch(() => {
+                if (!cancelled) {
+                    setBoardCompanies(new Map());
+                    toastError(t('companyLoadFailed'));
+                }
+            });
+        return () => {
+            cancelled = true;
+        };
+    }, [boardKey, boardState.key, loadedBoardDeals, t]);
+
+    const resolvedCompanyById = useMemo(() => {
+        const resolved = new Map(companyById);
+        boardCompanies.forEach((company, id) => resolved.set(id, company));
+        return resolved;
+    }, [boardCompanies, companyById]);
     const [boardRiskState, setBoardRiskState] = useState<{
         key: string | null;
         risks: Map<number, DealRisk>;
-    }>({ key: null, risks: new Map() });
+        error: string | null;
+    }>({ key: null, risks: new Map(), error: null });
 
     useEffect(() => {
         if (boardKey == null || boardState.key !== boardKey) return;
@@ -134,16 +162,26 @@ export default function DealsKanban({
         loadBoardRisks(loadedBoardDeals)
             .then((risks) => {
                 if (!cancelled) {
-                    setBoardRiskState({ key: boardKey, risks: new Map(risks.map((risk) => [risk.dealId, risk])) });
+                    setBoardRiskState({
+                        key: boardKey,
+                        risks: new Map(risks.map((risk) => [risk.dealId, risk])),
+                        error: null,
+                    });
                 }
             })
-            .catch(() => {
-                if (!cancelled) setBoardRiskState({ key: boardKey, risks: new Map() });
+            .catch((error: unknown) => {
+                if (!cancelled) {
+                    setBoardRiskState({
+                        key: boardKey,
+                        risks: new Map(),
+                        error: error instanceof Error ? error.message : t('riskLoadFailed'),
+                    });
+                }
             });
         return () => {
             cancelled = true;
         };
-    }, [boardKey, boardState.key, loadedBoardDeals]);
+    }, [boardKey, boardState.key, loadedBoardDeals, t]);
 
     const boardRisks = useMemo(() => {
         const combined = new Map(riskByDealId);
@@ -153,6 +191,7 @@ export default function DealsKanban({
         return combined;
     }, [boardKey, boardRiskState, riskByDealId]);
     const boardRiskLoading = Boolean(filters.risk?.length) && boardRiskState.key !== boardKey;
+    const boardRiskError = boardRiskState.key === boardKey ? boardRiskState.error : null;
 
     const matchesBoardDeal = useCallback((deal: Deal) => {
         const normalizedQuery = query.trim().toLocaleLowerCase();
@@ -160,7 +199,7 @@ export default function DealsKanban({
             const values = [
                 deal.name,
                 deal.currency,
-                deal.company != null ? companyById.get(deal.company)?.name : undefined,
+                deal.company != null ? resolvedCompanyById.get(deal.company)?.name : undefined,
                 deal.pipeline != null ? pipelineById.get(deal.pipeline)?.name : undefined,
                 deal.stage != null ? stageById.get(deal.stage)?.name : undefined,
             ];
@@ -186,7 +225,7 @@ export default function DealsKanban({
             if (!filters.risk.includes(level)) return false;
         }
         return true;
-    }, [boardRisks, companyById, currency, filters, pipelineById, query, stageById]);
+    }, [boardRisks, currency, filters, pipelineById, query, resolvedCompanyById, stageById]);
 
     const columns: KanbanColumnDef[] = useMemo(() => {
         const stages = selectedPipelineId != null ? stagesByPipeline[selectedPipelineId] ?? [] : [];
@@ -208,13 +247,13 @@ export default function DealsKanban({
         (deal: Deal) => (
             <DealKanbanCard
                 deal={deal}
-                company={deal.company != null ? companyById.get(deal.company) : undefined}
+                company={deal.company != null ? resolvedCompanyById.get(deal.company) : undefined}
                 risk={boardRisks.get(deal.id)}
                 onQuickEdit={() => onQuickEdit(deal)}
                 onDelete={() => onDelete(deal)}
             />
         ),
-        [boardRisks, companyById, onQuickEdit, onDelete],
+        [boardRisks, onQuickEdit, onDelete, resolvedCompanyById],
     );
 
     const onMove = useCallback(
@@ -271,9 +310,9 @@ export default function DealsKanban({
         <div aria-busy="true" className="rounded-2xl border border-border px-6 py-12 text-center text-sm text-muted-foreground">
             {t('loading')}
         </div>
-    ) : boardError ? (
+    ) : boardError || (filters.risk?.length && boardRiskError) ? (
         <div role="alert" className="rounded-2xl border border-destructive/30 bg-destructive/5 px-6 py-12 text-center text-sm text-destructive">
-            {boardError}
+            {boardError ?? boardRiskError}
         </div>
     ) : (
         <KanbanBoard<Deal>
@@ -293,6 +332,11 @@ export default function DealsKanban({
 
     return (
         <div className="flex flex-col gap-3">
+            {boardRiskError && !filters.risk?.length ? (
+                <div role="alert" className="rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
+                    {boardRiskError}
+                </div>
+            ) : null}
             {pipelineOptions.length > 1 && (
                 <div className="flex items-center gap-2">
                     <span className="text-sm text-muted-foreground">{t('pipelineLabel')}</span>

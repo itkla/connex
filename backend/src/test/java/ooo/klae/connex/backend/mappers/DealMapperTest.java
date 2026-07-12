@@ -16,10 +16,12 @@ import org.springframework.jdbc.core.JdbcTemplate;
 
 import ooo.klae.connex.backend.beans.Company;
 import ooo.klae.connex.backend.beans.Deal;
+import ooo.klae.connex.backend.beans.Note;
 import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.beans.Pipeline;
 import ooo.klae.connex.backend.beans.Stage;
 import ooo.klae.connex.backend.beans.Tag;
+import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.beans.Workspace;
 import ooo.klae.connex.backend.dto.DealAgingDto;
 import ooo.klae.connex.backend.dto.DealBucketValueDto;
@@ -34,6 +36,7 @@ import ooo.klae.connex.backend.dto.FacetCount;
 class DealMapperTest extends AbstractMapperTest {
 
     @Autowired private JdbcTemplate jdbcTemplate;
+    @Autowired private NoteMapper noteMapper;
 
     /**
      * Inserts a new deal and checks if the generated ID is not zero.
@@ -72,6 +75,25 @@ class DealMapperTest extends AbstractMapperTest {
         assertEquals(company.getId(), found.getCompanyId());
     }
 
+    @Test
+    void getDealByIdDoesNotEmbedPrivateNoteIdentifiers() {
+        Pipeline pipeline = newPipeline();
+        Stage stage = newStage(pipeline, 0);
+        Deal deal = newDeal(pipeline, stage, newCompany());
+        User author = newUser();
+        Note note = new Note();
+        note.setWorkspaceId(workspace.getId());
+        note.setContent("Private deal note");
+        note.setVisibility("private");
+        note.setAuthor(author);
+        note.setDeal(deal);
+        noteMapper.insert(note);
+
+        Deal found = dealMapper.getDealById(workspace.getId(), deal.getId());
+
+        assertNull(found.getNotes());
+    }
+
     /**
      * Gets a deal by ID and checks if the returned deal is null when the ID is negative.
      */
@@ -92,6 +114,25 @@ class DealMapperTest extends AbstractMapperTest {
         List<Deal> all = dealMapper.getAllDeals(workspace.getId());
 
         assertTrue(all.stream().anyMatch(x -> x.getId() == deal.getId()));
+    }
+
+    @Test
+    void riskCandidatesAreWorkspaceScopedAndBounded() {
+        Workspace target = newWorkspace();
+        Pipeline targetPipeline = newPipelineIn(target);
+        Stage targetStage = newStageIn(target, targetPipeline, 0);
+        Deal first = newDealIn(target, targetPipeline, targetStage);
+        Deal second = newDealIn(target, targetPipeline, targetStage);
+        newDealIn(target, targetPipeline, targetStage);
+        Pipeline foreignPipeline = newPipeline();
+        Stage foreignStage = newStage(foreignPipeline, 0);
+        Deal foreign = newDeal(foreignPipeline, foreignStage, newCompany());
+
+        List<Integer> candidates = dealMapper.getRiskCandidateIds(target.getId(), 2);
+
+        assertEquals(2, candidates.size());
+        assertTrue(candidates.contains(first.getId()) || candidates.contains(second.getId()));
+        assertTrue(candidates.stream().noneMatch(id -> id == foreign.getId()));
     }
 
     @Test
@@ -771,11 +812,19 @@ class DealMapperTest extends AbstractMapperTest {
         Company company2 = newCompany();
         Deal deal1 = newDeal(pipeline, stage, company1);
         Deal deal2 = newDeal(pipeline, stage, company2);
+        Note note = new Note();
+        note.setWorkspaceId(workspace.getId());
+        note.setContent("Private relation note");
+        note.setVisibility("private");
+        note.setAuthor(newUser());
+        note.setDeal(deal1);
+        noteMapper.insert(note);
 
         List<Deal> matched = dealMapper.getDealsByCompanyId(workspace.getId(), company1.getId());
 
         assertTrue(matched.stream().anyMatch(x -> x.getId() == deal1.getId()));
         assertTrue(matched.stream().noneMatch(x -> x.getId() == deal2.getId()));
+        assertNull(matched.stream().filter(x -> x.getId() == deal1.getId()).findFirst().orElseThrow().getNotes());
     }
 
     /**

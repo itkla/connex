@@ -69,13 +69,15 @@ export function computeCompanyMetrics(company: Company, lists: MetricsLists): Co
     let projectedRevenue = 0;
     for (const d of companyDeals) {
         if ((d.currency || 'USD') !== currency) continue;
-        if (isDealClosed(d)) pastRevenue += d.value ?? 0;
-        else projectedRevenue += d.value ?? 0;
+        if (d.won === true) pastRevenue += d.actualValue ?? 0;
+        else if (!isDealClosed(d)) projectedRevenue += d.value ?? 0;
     }
 
     return {
         persons,
+        personCount: persons.length,
         relatedUsers: users.filter((u) => userIds.has(u.id)),
+        relatedUserCount: userIds.size,
         pastRevenue,
         projectedRevenue,
         currency,

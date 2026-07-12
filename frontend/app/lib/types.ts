@@ -35,6 +35,10 @@ export type ActivitiesPageParams = PageParams & {
     createdById?: number;
 };
 
+export type NotesPageParams = PageParams & {
+    workspaceOnly?: boolean;
+};
+
 /** One record that a bulk operation could not apply, with its index in the request and the reason. */
 export type BulkOperationError = {
     rowIndex: number;
@@ -208,6 +212,21 @@ export type DealRisk = {
     assessedAt: string;
     value: number;
     currency: string;
+};
+
+export type DealRiskCurrencySummary = {
+    currency: string;
+    value: number;
+    count: number;
+    high: number;
+    medium: number;
+    low: number;
+    factors: Array<{ code: DealRiskFactorCode; count: number }>;
+};
+
+export type DealRiskAnalytics = {
+    currencies: DealRiskCurrencySummary[];
+    truncated: boolean;
 };
 
 /** Why an AI deal brief is unavailable: AI is not configured for the org, or the provider call failed. */
@@ -608,8 +627,10 @@ export type Company = {
 
 // metrics for a company, filled via relationship traversal
 export type CompanyMetrics = {
-    persons: Contact[];
+    persons: Array<Pick<Contact, 'id' | 'name' | 'imageUrl'>>;
+    personCount: number;
     relatedUsers: User[];
+    relatedUserCount: number;
     pastRevenue: number;
     projectedRevenue: number;
     currency: string;
@@ -1104,6 +1125,7 @@ export type CreateAttachmentPayload = {
 export type FacetCount = {
     key: string;
     count: number;
+    label?: string;
 };
 
 export type AttachmentsPageParams = PageParams & {
@@ -1161,13 +1183,33 @@ export type DealFacets = {
 };
 
 export type CompanyEngagement = {
-    persons: Contact[];
-    deals: Deal[];
-    touches: Array<{
-        kind: 'activities' | 'tasks' | 'notes';
-        touchedAt: string;
-        userId?: number;
-    }>;
+    persons: Array<Pick<Contact, 'id' | 'name' | 'imageUrl'>>;
+    personCount: number;
+    relatedUserIds: number[];
+    relatedUserCount: number;
+    pastRevenue: number;
+    projectedRevenue: number;
+    currency: string;
+    numDeals: number;
+    numTasks: number;
+    openTasks: number;
+    numActivities: number;
+    numNotes: number;
+    weeklyEngagement: CompanyMetrics['weeklyEngagement'];
+};
+
+export type CompanyTimeline = {
+    activities: Activity[];
+    tasks: Task[];
+    notes: Note[];
+};
+
+/** Coherent relationship snapshot computed once for all dashboard relationship widgets. */
+export type RelationshipDashboard = {
+    warmthSummary: WarmthSummary;
+    coolingContacts: Array<{ contact: Contact; temperature: RelationshipTemperature }>;
+    coolingCompanies: Array<{ company: Company; temperature: RelationshipTemperature }>;
+    dealRisks: Array<{ deal: Deal; company: Company | null; risk: DealRisk }>;
 };
 
 /** One month's aggregated total; {@code month} is 1-12 (MySQL MONTH()). */

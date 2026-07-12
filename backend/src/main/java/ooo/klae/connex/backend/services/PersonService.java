@@ -68,9 +68,7 @@ public class PersonService {
 
     public List<Person> getPersonsByCompanyId(int companyId) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        return personMapper.getPersonsByCompanyId(workspaceId, companyId).stream()
-            .map(person -> hydrateScopedRelationships(person, workspaceId))
-            .toList();
+        return personMapper.getPersonsByCompanyId(workspaceId, companyId, null);
     }
 
     public List<Person> getPersonsByTagId(int tagId) {

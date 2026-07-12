@@ -138,14 +138,24 @@ class TenantReadIsolationIntegrationTest {
                 .header("X-Workspace-Id", wsA.getId())
                 .session(aliceSession))
             .andExpect(status().isOk())
-            .andExpect(jsonPath("$.personIds", hasItem(contactA.getId())));
+            .andExpect(jsonPath("$.personIds").doesNotExist());
+        mockMvc.perform(get("/api/companies/" + companyA.getId() + "/people")
+                .header("X-Workspace-Id", wsA.getId())
+                .session(aliceSession))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$[*].id", hasItem(contactA.getId())));
 
         MockHttpSession bobSession = login(bob.getUsername());
         mockMvc.perform(get("/api/companies/" + companyA.getId())
                 .header("X-Workspace-Id", wsB.getId())
                 .session(bobSession))
             .andExpect(status().isOk())
-            .andExpect(jsonPath("$.personIds", not(hasItem(contactA.getId()))));
+            .andExpect(jsonPath("$.personIds").doesNotExist());
+        mockMvc.perform(get("/api/companies/" + companyA.getId() + "/people")
+                .header("X-Workspace-Id", wsB.getId())
+                .session(bobSession))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$[*].id", not(hasItem(contactA.getId()))));
     }
 
     @Test

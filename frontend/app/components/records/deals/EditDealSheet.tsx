@@ -9,7 +9,7 @@ import { useTranslations } from 'next-intl';
 import QuickEditDealSheet, { type DealDraft } from '@/app/components/records/deals/QuickEditDealSheet';
 import { CustomFieldsEditSection, type CustomFieldsEditHandle } from '@/app/components/records/CustomFieldsEditSection';
 import { updateDeal } from '@/app/lib/api';
-import { type Company, type Deal, type Pipeline, type Stage, type UpdateDealPayload } from '@/app/lib/types';
+import { type Deal, type Pipeline, type Stage, type UpdateDealPayload } from '@/app/lib/types';
 
 function toDraft(d: Deal): DealDraft {
     return {
@@ -31,14 +31,12 @@ export default function EditDealSheet({
     deal,
     open,
     onOpenChange,
-    companies,
     pipelines,
     stagesByPipeline,
 }: {
     deal: Deal;
     open: boolean;
     onOpenChange: (open: boolean) => void;
-    companies: Company[];
     pipelines: Pipeline[];
     stagesByPipeline: Record<number, Stage[]>;
 }) {
@@ -99,7 +97,6 @@ export default function EditDealSheet({
             selectedDeals={[deal]}
             drafts={{ [deal.id]: draft }}
             updateDraft={(_id, patch) => setDraft((prev) => ({ ...prev, ...patch }))}
-            companies={companies}
             pipelines={pipelines}
             stagesByPipeline={stagesByPipeline}
             isSaving={isSaving}

@@ -2,9 +2,19 @@ package ooo.klae.connex.backend.dto;
 
 import java.util.List;
 
-/** Complete company-scoped inputs for one expanded company card. */
+/** Bounded, aggregate-only company engagement summary for one expanded company card. */
 public record CompanyEngagementDto(
-    List<PersonDto> persons,
-    List<DealDto> deals,
-    List<CompanyEngagementTouchDto> touches
+    List<CompanyEngagementPersonDto> persons,
+    long personCount,
+    List<Integer> relatedUserIds,
+    long relatedUserCount,
+    double pastRevenue,
+    double projectedRevenue,
+    String currency,
+    long numDeals,
+    long numTasks,
+    long openTasks,
+    long numActivities,
+    long numNotes,
+    List<CompanyEngagementWeekDto> weeklyEngagement
 ) {}

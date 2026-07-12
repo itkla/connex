@@ -1,8 +1,8 @@
-import { getAttachmentsFromCookie, getCompanies, getContactById, getContactConnections, getContactEmployment, getContactIntroPath, getContacts, getContextNotifications, getCurrentUserFromCookie, getDeals, getEntityCustomFieldsFromCookie, getTags, getUserById } from "@/app/lib/api";
+import { getAttachmentsFromCookie, getContactById, getContactConnections, getContactEmployment, getContactIntroPath, getContacts, getContextNotifications, getCurrentUserFromCookie, getDeals, getEntityCustomFieldsFromCookie, getTags, getUserById } from "@/app/lib/api";
 import { notFound, redirect } from "next/navigation";
 import { CrumbLabel } from "@/app/hooks/useNavTrail";
 import ActionRecordBridge from "@/app/components/actions/ActionRecordBridge";
-import { type Company, type Deal, type Tag, type Contact, type IntroPath, type PersonConnection, type PersonEmployment, type User } from "@/app/lib/types";
+import { type Deal, type Tag, type Contact, type IntroPath, type PersonConnection, type PersonEmployment, type User } from "@/app/lib/types";
 import { cookies } from "next/headers";
 import Link from "next/link";
 import { ArrowLeftIcon, UserIcon } from "@heroicons/react/24/outline";
@@ -37,11 +37,10 @@ export default async function ContactPage({ params }: { params: { id: number } }
     const t = await getTranslations("ContactsPage");
     const locale = await getLocale();
 
-    const [contact, currentUser, allTags, allCompanies, allPersons, allDeals, attachments, notificationPage, employment, connections, introPath, customFields] = await Promise.all([
+    const [contact, currentUser, allTags, allPersons, allDeals, attachments, notificationPage, employment, connections, introPath, customFields] = await Promise.all([
         getContactById(id, init) as Promise<Contact>,
         getCurrentUserFromCookie(cookie),
         getTags(init).catch(() => [] as Tag[]),
-        getCompanies(init).catch(() => [] as Company[]),
         getContacts({}, init).catch(() => [] as Contact[]),
         getDeals(init).catch(() => [] as Deal[]),
         getAttachmentsFromCookie("person", id, cookie),
@@ -169,7 +168,6 @@ export default async function ContactPage({ params }: { params: { id: number } }
                     <div className="mt-4 flex justify-end">
                         <ContactActionsMenu
                             contact={contact}
-                            companies={allCompanies}
                             currentUserId={currentUser.id}
                             persons={allPersons}
                             deals={allDeals}

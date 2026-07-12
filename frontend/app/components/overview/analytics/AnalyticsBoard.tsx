@@ -19,7 +19,7 @@ import {
     type DealMetrics,
     type DealPipelineValue,
     type DealRevenueSeries,
-    type DealRisk,
+    type DealRiskAnalytics,
     type DealStageDistribution,
     type DealTop,
     type IntroSuggestion,
@@ -114,7 +114,7 @@ export default function AnalyticsBoard({
     pipelines,
     stages,
     users,
-    dealRisks,
+    dealRiskAnalytics,
     introSuggestions,
     introLineage,
     recentMoves,
@@ -125,7 +125,7 @@ export default function AnalyticsBoard({
     pipelines: Pipeline[];
     stages: Stage[];
     users: User[];
-    dealRisks: DealRisk[];
+    dealRiskAnalytics: DealRiskAnalytics;
     introSuggestions: IntroSuggestion[];
     introLineage: IntroductionRecord[];
     recentMoves: JobMove[];
@@ -228,22 +228,14 @@ export default function AnalyticsBoard({
         };
     }, [warmth]);
 
-    const dealRisksInCurrency = useMemo(
-        () => dealRisks.filter((r) => r.currency === currency),
-        [dealRisks, currency],
+    const riskSummary = useMemo(
+        () => dealRiskAnalytics.currencies.find((entry) => entry.currency === currency),
+        [dealRiskAnalytics, currency],
     );
-
-    const atRisk = useMemo(() => {
-        let value = 0;
-        let count = 0;
-        for (const r of dealRisksInCurrency) {
-            if (r.level !== 'none') {
-                value += r.value;
-                count += 1;
-            }
-        }
-        return { value, count };
-    }, [dealRisksInCurrency]);
+    const atRisk = useMemo(
+        () => ({ value: riskSummary?.value ?? 0, count: riskSummary?.count ?? 0 }),
+        [riskSummary],
+    );
 
     const relationshipKpis = useMemo(
         () => ({
@@ -265,7 +257,7 @@ export default function AnalyticsBoard({
     const hasRelationshipData =
         warm.tracked > 0 ||
         companiesTracked > 0 ||
-        dealRisks.length > 0 ||
+        dealRiskAnalytics.currencies.some((entry) => entry.count > 0) ||
         introSuggestions.length > 0 ||
         introLineage.length > 0 ||
         recentMoves.length > 0 ||
@@ -472,10 +464,9 @@ export default function AnalyticsBoard({
                             className="lg:col-span-3"
                         >
                             <DealRiskBreakdown
-                                risks={dealRisksInCurrency}
-                                pipelineAtRisk={atRisk.value}
-                                atRiskDeals={atRisk.count}
+                                summary={riskSummary}
                                 currency={currency}
+                                truncated={dealRiskAnalytics.truncated}
                             />
                         </Panel>
                         <Panel

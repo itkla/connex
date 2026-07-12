@@ -148,6 +148,31 @@ class NoteMapperTest extends AbstractMapperTest {
         assertTrue(page.stream().noneMatch(note -> note.getId() == otherPrivate.getId()));
     }
 
+    @Test
+    void workspaceNotesPageExcludesPrivateAndForeignRowsAndHonorsLimit() {
+        Workspace pageWorkspace = newWorkspace();
+        User user = newUser();
+        Note first = build("first workspace", user, null, null);
+        first.setWorkspaceId(pageWorkspace.getId());
+        noteMapper.insert(first);
+        Note second = build("second workspace", user, null, null);
+        second.setWorkspaceId(pageWorkspace.getId());
+        noteMapper.insert(second);
+        Note privateNote = build("private", user, null, null);
+        privateNote.setWorkspaceId(pageWorkspace.getId());
+        privateNote.setVisibility("private");
+        noteMapper.insert(privateNote);
+        Note foreign = build("foreign", user, null, null);
+        noteMapper.insert(foreign);
+
+        List<Note> page = noteMapper.getWorkspaceNotesPage(pageWorkspace.getId(), 1, 0);
+
+        assertEquals(1, page.size());
+        assertEquals(2, noteMapper.countWorkspaceNotes(pageWorkspace.getId()));
+        assertTrue(page.stream().noneMatch(note -> note.getId() == privateNote.getId()));
+        assertTrue(page.stream().noneMatch(note -> note.getId() == foreign.getId()));
+    }
+
     /**
      * Updates a note and checks if the new values are persisted.
      */

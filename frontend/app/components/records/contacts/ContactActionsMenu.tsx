@@ -29,18 +29,16 @@ import NewTaskDialog from '@/app/components/records/contacts/NewTaskDialog';
 import NewNoteDialog from '@/app/components/activity/notes/NoteDialog';
 
 import { deleteContact, updateContact } from '@/app/lib/api';
-import { type Company, type Contact, type Deal } from '@/app/lib/types';
+import { type Contact, type Deal } from '@/app/lib/types';
 import EditContactSheet from '@/app/components/records/contacts/EditContactSheet';
 
 export default function ContactActionsMenu({
     contact,
-    companies,
     currentUserId,
     persons = [],
     deals = [],
 }: {
     contact: Contact;
-    companies: Company[];
     currentUserId: number;
     persons?: Contact[];
     deals?: Deal[];
@@ -259,7 +257,6 @@ export default function ContactActionsMenu({
                     open={changeOpen}
                     onOpenChange={setChangeOpen}
                     contacts={[contact]}
-                    companies={companies}
                 />
                 <DeleteRecordDialog
                     open={deleteOpen}

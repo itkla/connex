@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.anyInt;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
@@ -15,9 +16,11 @@ import static org.mockito.Mockito.when;
 
 import java.time.Clock;
 import java.time.Instant;
+import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
@@ -31,6 +34,7 @@ import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.beans.Task;
 import ooo.klae.connex.backend.dto.BandCounts;
 import ooo.klae.connex.backend.dto.DecayCounts;
+import ooo.klae.connex.backend.dto.RelationshipScoreAggregateDto;
 import ooo.klae.connex.backend.dto.RelationshipTemperatureDto;
 import ooo.klae.connex.backend.dto.TrendCounts;
 import ooo.klae.connex.backend.dto.WarmthSummaryDto;
@@ -158,7 +162,7 @@ class ScoringServiceTest {
     }
 
     @Test
-    void scoreCompaniesSubsetDeduplicatesTouchesAndAvoidsWorkspaceScan() {
+    void scoreCompaniesSubsetUsesOnlyRequestedCompanyBatchesAndDeduplicatesTouches() {
         PersonMapper personMapper = mock(PersonMapper.class);
         CompanyMapper companyMapper = mock(CompanyMapper.class);
         DealMapper dealMapper = mock(DealMapper.class);
@@ -169,18 +173,16 @@ class ScoringServiceTest {
         Person person = person(1, 10);
         Deal deal = new Deal();
         deal.setId(20);
+        deal.setCompanyId(10);
         Activity activity = activity(person, "meeting", "2026-06-29 12:00:00");
         activity.setId(30);
         activity.setDeal(deal);
-        when(companyMapper.exists(WS, 10)).thenReturn(true);
-        when(personMapper.getPersonsByCompanyId(WS, 10)).thenReturn(List.of(person));
-        when(dealMapper.getDealsByCompanyId(WS, 10)).thenReturn(List.of(deal));
-        when(activityMapper.getActivitiesByPersonId(WS, 1)).thenReturn(List.of(activity));
-        when(noteMapper.getNotesByPersonId(WS, 1)).thenReturn(List.of());
-        when(taskMapper.getTasksByPersonId(WS, 1)).thenReturn(List.of());
-        when(activityMapper.getActivitiesByDealId(WS, 20)).thenReturn(List.of(activity));
-        when(noteMapper.getNotesByDealId(WS, 20)).thenReturn(List.of());
-        when(taskMapper.getTasksByDealId(WS, 20)).thenReturn(List.of());
+        when(companyMapper.getByIds(WS, List.of(10))).thenReturn(List.of(company));
+        when(personMapper.getPersonsByCompanyIds(WS, List.of(10))).thenReturn(List.of(person));
+        when(dealMapper.getDealsByCompanyIds(WS, List.of(10))).thenReturn(List.of(deal));
+        when(activityMapper.getActivitiesByCompanyIds(WS, List.of(10))).thenReturn(List.of(activity));
+        when(noteMapper.getWorkspaceNotesByCompanyIds(WS, List.of(10))).thenReturn(List.of());
+        when(taskMapper.getTasksByCompanyIds(WS, List.of(10))).thenReturn(List.of());
         ScoringService service = new ScoringService(personMapper, companyMapper, dealMapper,
             activityMapper, noteMapper, taskMapper, Clock.fixed(NOW, ZoneOffset.UTC));
 
@@ -189,7 +191,164 @@ class ScoringServiceTest {
         assertEquals(List.of(10), scores.stream().map(RelationshipTemperatureDto::getId).toList());
         assertEquals(1, scores.getFirst().getTouchCount());
         verify(companyMapper, never()).getAllCompanies(anyInt());
+        verify(personMapper, never()).getAllPersons(anyInt());
         verify(activityMapper, never()).getAllActivities(anyInt());
+        verify(companyMapper, never()).exists(anyInt(), anyInt());
+        verify(personMapper, never()).getPersonsByCompanyId(anyInt(), anyInt(), any());
+        verify(dealMapper, never()).getDealsByCompanyId(anyInt(), anyInt());
+    }
+
+    @Test
+    void mapCompanyScoringRejectsOversizedWorkspacesBeforeScanning() {
+        CompanyMapper companyMapper = mock(CompanyMapper.class);
+        when(companyMapper.countCompanies(WS, null, null, false, null)).thenReturn(2_001L);
+        PersonMapper personMapper = mock(PersonMapper.class);
+        ScoringService service = new ScoringService(
+            personMapper, companyMapper, mock(DealMapper.class), mock(ActivityMapper.class),
+            mock(NoteMapper.class), mock(TaskMapper.class), Clock.fixed(NOW, ZoneOffset.UTC));
+
+        assertThrows(ooo.klae.connex.backend.exceptions.BadRequestException.class,
+            () -> service.scoreCompaniesForMap(WS));
+
+        verify(companyMapper, never()).getAllCompanies(anyInt());
+        verify(personMapper, never()).getAllPersons(anyInt());
+        verify(companyMapper, never()).getRelationshipScoreAggregates(anyInt(), any());
+    }
+
+    @Test
+    void privateNotesDoNotAffectSharedContactOrCompanyScores() {
+        Person contact = person(1, 10);
+        Note privateNote = new Note();
+        privateNote.setVisibility("private");
+        privateNote.setPerson(contact);
+        privateNote.setCreatedAt("2026-06-29 12:00:00");
+        ScoringService service = service(
+            NOW, List.of(contact), List.of(company(10)), List.of(),
+            List.of(), List.of(privateNote), List.of());
+
+        assertEquals("cold", scoreFor(service.scoreContacts(WS), 1).getBand());
+        assertEquals(0, scoreFor(service.scoreContacts(WS), 1).getTouchCount());
+        assertEquals("cold", scoreFor(service.scoreCompanies(WS), 10).getBand());
+        assertEquals(0, scoreFor(service.scoreCompanies(WS), 10).getTouchCount());
+    }
+
+    @Test
+    void privateNotesDoNotAffectSubsetContactScores() {
+        PersonMapper personMapper = mock(PersonMapper.class);
+        NoteMapper noteMapper = mock(NoteMapper.class);
+        Person contact = person(1, null);
+        Note privateNote = new Note();
+        privateNote.setVisibility("private");
+        privateNote.setPerson(contact);
+        privateNote.setCreatedAt("2026-06-29 12:00:00");
+        when(personMapper.getExistingPersonIds(WS, List.of(1))).thenReturn(List.of(1));
+        when(noteMapper.getNotesByPersonIds(WS, List.of(1))).thenReturn(List.of(privateNote));
+        ActivityMapper activityMapper = mock(ActivityMapper.class);
+        TaskMapper taskMapper = mock(TaskMapper.class);
+        when(activityMapper.getActivitiesByPersonIds(WS, List.of(1))).thenReturn(List.of());
+        when(taskMapper.getTasksByPersonIds(WS, List.of(1))).thenReturn(List.of());
+        ScoringService service = new ScoringService(
+            personMapper, mock(CompanyMapper.class), mock(DealMapper.class), activityMapper,
+            noteMapper, taskMapper, Clock.fixed(NOW, ZoneOffset.UTC));
+
+        RelationshipTemperatureDto score = service.scoreContacts(WS, Set.of(1)).getFirst();
+
+        assertEquals("cold", score.getBand());
+        assertEquals(0, score.getTouchCount());
+    }
+
+    @Test
+    void privateNotesDoNotAffectSubsetCompanyScoresEvenIfMapperReturnsOne() {
+        PersonMapper personMapper = mock(PersonMapper.class);
+        CompanyMapper companyMapper = mock(CompanyMapper.class);
+        DealMapper dealMapper = mock(DealMapper.class);
+        ActivityMapper activityMapper = mock(ActivityMapper.class);
+        NoteMapper noteMapper = mock(NoteMapper.class);
+        TaskMapper taskMapper = mock(TaskMapper.class);
+        Company company = company(10);
+        Person contact = person(1, 10);
+        Note privateNote = new Note();
+        privateNote.setVisibility("private");
+        privateNote.setPerson(contact);
+        privateNote.setCreatedAt("2026-06-29 12:00:00");
+        when(companyMapper.getByIds(WS, List.of(10))).thenReturn(List.of(company));
+        when(personMapper.getPersonsByCompanyIds(WS, List.of(10))).thenReturn(List.of(contact));
+        when(dealMapper.getDealsByCompanyIds(WS, List.of(10))).thenReturn(List.of());
+        when(activityMapper.getActivitiesByCompanyIds(WS, List.of(10))).thenReturn(List.of());
+        when(noteMapper.getWorkspaceNotesByCompanyIds(WS, List.of(10))).thenReturn(List.of(privateNote));
+        when(taskMapper.getTasksByCompanyIds(WS, List.of(10))).thenReturn(List.of());
+        ScoringService service = new ScoringService(
+            personMapper, companyMapper, dealMapper, activityMapper,
+            noteMapper, taskMapper, Clock.fixed(NOW, ZoneOffset.UTC));
+
+        RelationshipTemperatureDto score = service.scoreCompanies(WS, Set.of(10)).getFirst();
+
+        assertEquals("cold", score.getBand());
+        assertEquals(0, score.getTouchCount());
+    }
+
+    @Test
+    void workspaceSnapshotUsesOnlyCompactScoringAggregates() {
+        PersonMapper personMapper = mock(PersonMapper.class);
+        CompanyMapper companyMapper = mock(CompanyMapper.class);
+        DealMapper dealMapper = mock(DealMapper.class);
+        ActivityMapper activityMapper = mock(ActivityMapper.class);
+        NoteMapper noteMapper = mock(NoteMapper.class);
+        TaskMapper taskMapper = mock(TaskMapper.class);
+        LocalDateTime reference = LocalDateTime.ofInstant(NOW, ZoneOffset.UTC);
+        RelationshipScoreAggregateDto contact = new RelationshipScoreAggregateDto(
+            1, 1.0, 1.0, 0.0, "2026-06-29 12:00:00", 1);
+        RelationshipScoreAggregateDto company = new RelationshipScoreAggregateDto(
+            10, 1.0, 1.0, 0.0, "2026-06-29 12:00:00", 1);
+        when(personMapper.getRelationshipScoreAggregates(WS, reference)).thenReturn(List.of(contact));
+        when(companyMapper.getRelationshipScoreAggregates(WS, reference)).thenReturn(List.of(company));
+        ScoringService service = new ScoringService(
+            personMapper, companyMapper, dealMapper, activityMapper,
+            noteMapper, taskMapper, Clock.fixed(NOW, ZoneOffset.UTC));
+
+        ScoringService.WorkspaceScores scores = service.scoreWorkspace(WS);
+
+        assertEquals(1, scores.contacts().size());
+        assertEquals(1, scores.companies().size());
+        assertEquals(1, scores.contacts().getFirst().getTouchCount());
+        assertEquals(1, scores.companies().getFirst().getTouchCount());
+        verify(personMapper).getRelationshipScoreAggregates(WS, reference);
+        verify(companyMapper).getRelationshipScoreAggregates(WS, reference);
+        verify(personMapper, never()).getAllPersons(anyInt());
+        verify(companyMapper, never()).getAllCompanies(anyInt());
+        verify(dealMapper, never()).getAllDeals(anyInt());
+        verify(activityMapper, never()).getAllActivities(anyInt());
+        verify(noteMapper, never()).getAllNotes(anyInt());
+        verify(taskMapper, never()).getAllTasks(anyInt());
+    }
+
+    @Test
+    void mapCompanyScoringUsesOnlyCompactAggregatesWithinTheCap() {
+        CompanyMapper companyMapper = mock(CompanyMapper.class);
+        LocalDateTime reference = LocalDateTime.ofInstant(NOW, ZoneOffset.UTC);
+        when(companyMapper.countCompanies(WS, null, null, false, null)).thenReturn(1L);
+        when(companyMapper.getRelationshipScoreAggregates(WS, reference)).thenReturn(List.of(
+            new RelationshipScoreAggregateDto(
+                10, 1.0, 1.0, 0.0, "2026-06-29 12:00:00", 1)));
+        PersonMapper personMapper = mock(PersonMapper.class);
+        DealMapper dealMapper = mock(DealMapper.class);
+        ActivityMapper activityMapper = mock(ActivityMapper.class);
+        NoteMapper noteMapper = mock(NoteMapper.class);
+        TaskMapper taskMapper = mock(TaskMapper.class);
+        ScoringService service = new ScoringService(
+            personMapper, companyMapper, dealMapper, activityMapper,
+            noteMapper, taskMapper, Clock.fixed(NOW, ZoneOffset.UTC));
+
+        List<RelationshipTemperatureDto> scores = service.scoreCompaniesForMap(WS);
+
+        assertEquals(List.of(10), scores.stream().map(RelationshipTemperatureDto::getId).toList());
+        verify(companyMapper).getRelationshipScoreAggregates(WS, reference);
+        verify(companyMapper, never()).getAllCompanies(anyInt());
+        verify(personMapper, never()).getAllPersons(anyInt());
+        verify(dealMapper, never()).getAllDeals(anyInt());
+        verify(activityMapper, never()).getAllActivities(anyInt());
+        verify(noteMapper, never()).getAllNotes(anyInt());
+        verify(taskMapper, never()).getAllTasks(anyInt());
     }
 
     @Test

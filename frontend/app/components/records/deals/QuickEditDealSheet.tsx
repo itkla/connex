@@ -1,6 +1,6 @@
 'use client';
 
-import { type ReactNode, type WheelEvent } from 'react';
+import { useEffect, type ReactNode, type WheelEvent } from 'react';
 import { useTranslations } from 'next-intl';
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
 import { BanknotesIcon } from '@heroicons/react/24/outline';
@@ -18,6 +18,8 @@ import {
     QuickEditRecordCard,
     QuickEditSheetShell,
 } from '@/app/components/records/quick-edit/QuickEditSheetShell';
+import { useCompanySearch } from '@/app/hooks/useCompanySearch';
+import { toastError } from '@/app/lib/toast';
 
 export type DealDraft = {
     name: string;
@@ -40,7 +42,6 @@ type Props = {
     selectedDeals: Deal[];
     drafts: Record<number, DealDraft>;
     updateDraft: (id: number, patch: Partial<DealDraft>) => void;
-    companies: Company[];
     pipelines: Pipeline[];
     stagesByPipeline: Record<number, Stage[]>;
     isSaving: boolean;
@@ -62,7 +63,6 @@ export default function QuickEditDealSheet({
     selectedDeals,
     drafts,
     updateDraft,
-    companies,
     pipelines,
     stagesByPipeline,
     isSaving,
@@ -72,6 +72,14 @@ export default function QuickEditDealSheet({
     const t = useTranslations('DealsQuickEditSheet');
     const reduce = useReducedMotion() ?? false;
     const total = selectedDeals.length;
+    const companySearch = useCompanySearch(
+        open,
+        Object.values(drafts).map((draft) => draft.company),
+    );
+
+    useEffect(() => {
+        if (companySearch.error) toastError(t('companySearchFailed'));
+    }, [companySearch.error, t]);
 
     const handleListWheel = (e: WheelEvent<HTMLDivElement>) => {
         const lineHeightPx = 16;
@@ -102,7 +110,7 @@ export default function QuickEditDealSheet({
                 const draft = drafts[d.id];
                 if (!draft) return null;
                 const selectedPipeline = pipelines.find((p) => p.id === draft.pipeline) ?? null;
-                const selectedCompany = companies.find((c) => c.id === draft.company) ?? null;
+                const selectedCompany = companySearch.companies.find((c) => c.id === draft.company) ?? null;
                 const stages = draft.pipeline ? stagesByPipeline[draft.pipeline] ?? [] : [];
                 const selectedStage = stages.find((s) => s.id === draft.stage) ?? null;
                 const expectedCloseDate = draft.expectedCloseDate ? draft.expectedCloseDate.slice(0, 10) : '';
@@ -210,16 +218,18 @@ export default function QuickEditDealSheet({
 
                         <QuickEditField label={t('company')} htmlFor={`deal-company-${d.id}`}>
                             <Combobox
-                                items={companies}
+                                items={companySearch.companies}
+                                filter={null}
                                 itemToStringLabel={(c: Company) => c.name}
                                 value={selectedCompany}
+                                onInputValueChange={companySearch.onInputValueChange}
                                 onValueChange={(c) => updateDraft(d.id, { company: (c as Company | null)?.id ?? null })}
                             >
                                 <ComboboxInput id={`deal-company-${d.id}`} placeholder={t('selectCompany')} showClear />
                                 <ComboboxContent className="pointer-events-auto">
                                     <ComboboxList onWheel={handleListWheel}>
                                         <ComboboxEmpty>{t('noCompanies')}</ComboboxEmpty>
-                                        {companies.map((c) => (
+                                        {companySearch.companies.map((c) => (
                                             <ComboboxItem key={c.id} value={c}>
                                                 {c.name}
                                             </ComboboxItem>

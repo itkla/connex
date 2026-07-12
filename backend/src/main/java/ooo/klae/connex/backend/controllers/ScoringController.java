@@ -5,6 +5,8 @@ import java.util.LinkedHashSet;
 import java.util.Set;
 
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -12,11 +14,14 @@ import org.springframework.web.bind.annotation.RestController;
 import lombok.RequiredArgsConstructor;
 
 import ooo.klae.connex.backend.dto.RelationshipTemperatureDto;
+import ooo.klae.connex.backend.dto.ScoringIdsRequest;
 import ooo.klae.connex.backend.dto.WarmthSummaryDto;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.services.ScoringService;
 import ooo.klae.connex.backend.services.WorkspaceService;
 import ooo.klae.connex.backend.util.PageBounds;
+
+import jakarta.validation.Valid;
 
 /**
  * Read-only relationship-temperature scores and workspace-wide warmth summaries.
@@ -47,6 +52,19 @@ public class ScoringController {
     @GetMapping("/companies")
     public List<RelationshipTemperatureDto> companies(@RequestParam(required = false) List<Integer> ids) {
         return scoringService.scoreCompanies(workspaceService.getCurrentWorkspaceId(), boundedIds(ids));
+    }
+
+    /** Warmth for up to 2,000 visible companies without expanding ids into the request URL. */
+    @PostMapping("/companies/batch")
+    public List<RelationshipTemperatureDto> companyBatch(@Valid @RequestBody ScoringIdsRequest request) {
+        return scoringService.scoreCompanies(
+            workspaceService.getCurrentWorkspaceId(), new LinkedHashSet<>(request.getIds()));
+    }
+
+    /** Warmth for the bounded company set used by the server-rendered relationship map. */
+    @GetMapping("/companies/map")
+    public List<RelationshipTemperatureDto> mapCompanies() {
+        return scoringService.scoreCompaniesForMap(workspaceService.getCurrentWorkspaceId());
     }
 
     /** Highest-priority cooling companies for dashboard cards. */

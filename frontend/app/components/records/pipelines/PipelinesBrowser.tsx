@@ -31,7 +31,7 @@ import {
     deleteStage,
     getActivities,
     getDeals,
-    getNotes,
+    getWorkspaceNotes,
     getStagesByPipelineId,
     getTasks,
     getUsers,
@@ -130,7 +130,7 @@ export default function PipelinesBrowser({ pipelines }: { pipelines: Pipeline[] 
             getDeals(),
             getTasks(),
             getActivities(),
-            getNotes(),
+            getWorkspaceNotes(),
             getUsers(),
         ])
             .then(([stagesPairs, deals, tasks, activities, notes, users]) => {

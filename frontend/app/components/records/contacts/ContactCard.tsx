@@ -21,10 +21,9 @@ import ChangeCompanyDialog from '@/app/components/records/contacts/ChangeCompany
 // import RemoveFromCompanyDialog from '@/app/components/records/contacts/RemoveFromCompanyDialog';
 import { updateContact } from '@/app/lib/api';
 import { uploadContactPicture } from '@/app/lib/utils';
-import type { Company, Contact, UpdateContactPayload } from '@/app/lib/types';
+import type { Contact, UpdateContactPayload } from '@/app/lib/types';
 import { BuildingOffice2Icon, NoSymbolIcon } from '@heroicons/react/24/outline';
 import type { Tag } from '@/app/lib/types';
-import { getCompanies } from '@/app/lib/api';
 
 function initialsOf(name: string): string {
     const parts = name.trim().split(/\s+/).filter(Boolean);
@@ -84,7 +83,6 @@ export default function ContactCard({
     const [draft, setDraft] = useState<ContactDraft>({ name: '', email: '', phone: '', title: '' });
     const [imageFile, setImageFile] = useState<File | null>(null);
     const [isSaving, setIsSaving] = useState(false);
-    const [companies, setCompanies] = useState<Company[]>([]);
     const [changeCompanyOpen, setChangeCompanyOpen] = useState(false);
     const [removeFromCompanyOpen, setRemoveFromCompanyOpen] = useState(false);
 
@@ -103,9 +101,7 @@ export default function ContactCard({
         setEditSheetOpen(true);
     }
 
-    // open the change company dialog so the user can select a new company for the contact
     function openChangeCompanyDialog() {
-        getCompanies({}).then(setCompanies).catch(() => setCompanies([]));
         setChangeCompanyOpen(true);
     }
 
@@ -287,7 +283,6 @@ export default function ContactCard({
             open={changeCompanyOpen}
             onOpenChange={setChangeCompanyOpen}
             contacts={[syntheticContact]}
-            companies={companies}
             onSuccess={() => {
                 toastSuccess(t('toastCompanyChanged'));
                 router.refresh();

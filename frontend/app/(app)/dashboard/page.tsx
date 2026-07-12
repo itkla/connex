@@ -10,41 +10,36 @@ import {
 } from '@heroicons/react/24/outline';
 
 import {
-    getActivitiesFromCookie,
+    getActivitiesPage,
     getActivityVolumeFromCookie,
     getAttachmentFacets,
     getAttachmentsPage,
     getCompanyById,
     getCompaniesPage,
-    getCoolingCompanyTemperaturesFromCookie,
-    getCoolingContactTemperaturesFromCookie,
-    getContactById,
-    getContactsFromCookie,
     getContactsPage,
     getCurrentUserFromCookie,
     getDashboardLayoutFromCookie,
-    getDealById,
     getDealClosingSoonFromCookie,
     getDealClosingSoonCountFromCookie,
     getDealKpisFromCookie,
     getDealMetricsFromCookie,
     getDealPipelineValueFromCookie,
     getDealRevenueTimeseries,
-    getDealRisksFromCookie,
     getDealStageDistribution,
-    getDealsFromCookie,
+    getDealsPage,
     getIntroSuggestionsFromCookie,
-    getNotesFromCookie,
+    getNotesPage,
     getNotifications,
     getPipelinesFromCookie,
     getRecentMovesFromCookie,
     getStagesByPipelineId,
     getTaskSummaryFromCookie,
-    getTasksFromCookie,
+    getTasksPage,
+    getUpcomingTasksFromCookie,
     getTeamLeaderboardFromCookie,
     getUpcomingActivityCountFromCookie,
     getUsers,
-    getWarmthSummaryFromCookie,
+    getRelationshipDashboardFromCookie,
 } from '@/app/lib/api';
 import type {
     ActivityVolumeBucket,
@@ -62,8 +57,9 @@ import type {
     DealStageDistribution,
     Notification,
     Page,
-    RelationshipTemperature,
+    RelationshipDashboard,
     Stage,
+    Task,
     TaskSummary as TaskSummaryCounts,
     TeamLeaderboardEntry,
     User,
@@ -132,6 +128,13 @@ const EMPTY_WARMTH_SUMMARY: WarmthSummary = {
     contactDecay: { soon: 0, mid: 0, later: 0 },
 };
 
+const EMPTY_RELATIONSHIP_DASHBOARD: RelationshipDashboard = {
+    warmthSummary: EMPTY_WARMTH_SUMMARY,
+    coolingContacts: [],
+    coolingCompanies: [],
+    dealRisks: [],
+};
+
 const DASHBOARD_RANGE: RangeKey = '90d';
 
 /**
@@ -168,14 +171,15 @@ export default async function Dashboard() {
 
     const init = { headers: { cookie: cookie ?? '' } } as const;
     const emptyFacets: AttachmentFacets = { sources: [], kinds: [], tags: [], orphaned: 0, total: 0, totalSize: 0 };
-    const [contacts, deals, pipelines, tasks, activities, notes, users, recentFiles, fileFacets, recentMoves, introSuggestions, dealRisks, layoutResponse, notifications, dealMetrics, companiesPage, contactsPage, activityVolume, leaderboard, taskSummary, upcomingActivityCount, closingSoonCount, warmthSummary, coolingContactTemps, coolingCompanyTemps, closingSoonDeals] =
+    const [contacts, deals, pipelines, tasks, upcomingTasks, activities, notes, users, recentFiles, fileFacets, recentMoves, introSuggestions, relationshipDashboard, layoutResponse, notifications, dealMetrics, companiesPage, contactsPage, activityVolume, leaderboard, taskSummary, upcomingActivityCount, closingSoonCount, closingSoonDeals] =
         await Promise.all([
-            getContactsFromCookie(cookie),
-            getDealsFromCookie(cookie),
+            getContactsPage({ page: 1, size: 100 }, init).then((response) => response.items),
+            getDealsPage({ page: 1, size: 100 }, init).then((response) => response.items),
             getPipelinesFromCookie(cookie),
-            getTasksFromCookie(cookie),
-            getActivitiesFromCookie(cookie),
-            getNotesFromCookie(cookie),
+            getTasksPage({ page: 1, size: 100 }, init).then((response) => response.items),
+            getUpcomingTasksFromCookie(cookie, 4).catch(() => [] as Task[]),
+            getActivitiesPage({ page: 1, size: 100 }, init).then((response) => response.items),
+            getNotesPage({ page: 1, size: 100 }, init).then((response) => response.items),
             getUsers(init).catch(() => [] as User[]),
             getAttachmentsPage({ size: 6, sort: 'newest' }, init).catch(
                 () => ({ items: [], total: 0 }) as Page<Attachment>,
@@ -183,7 +187,7 @@ export default async function Dashboard() {
             getAttachmentFacets(init).catch(() => emptyFacets),
             getRecentMovesFromCookie(cookie),
             getIntroSuggestionsFromCookie(cookie, 4),
-            getDealRisksFromCookie(cookie),
+            getRelationshipDashboardFromCookie(cookie).catch(() => EMPTY_RELATIONSHIP_DASHBOARD),
             getDashboardLayoutFromCookie(cookie),
             getNotifications({ state: 'unread', page: 1, size: 6 }, init).catch(
                 () => ({ items: [], total: 0 }) as Page<Notification>,
@@ -196,38 +200,22 @@ export default async function Dashboard() {
             getTaskSummaryFromCookie(cookie).catch(() => EMPTY_TASK_SUMMARY),
             getUpcomingActivityCountFromCookie(cookie, 7).catch(() => ({ count: 0 }) as Count),
             getDealClosingSoonCountFromCookie(cookie, 7).catch(() => ({ count: 0 }) as Count),
-            getWarmthSummaryFromCookie(cookie).catch(() => EMPTY_WARMTH_SUMMARY),
-            getCoolingContactTemperaturesFromCookie(cookie, 6).catch(
-                () => [] as RelationshipTemperature[],
-            ),
-            getCoolingCompanyTemperaturesFromCookie(cookie, 6).catch(
-                () => [] as RelationshipTemperature[],
-            ),
             getDealClosingSoonFromCookie(cookie, 7, 6).catch(() => [] as Deal[]),
         ]);
 
-    const topRisks = dealRisks.slice(0, 6);
-    const [riskDeals, coolingContactRecords, coolingCompanyRecords] = await Promise.all([
-        Promise.all(topRisks.map((risk) => getDealById(risk.dealId, init).catch(() => null))).then(
-            (items) => items.filter(present),
-        ),
-        Promise.all(coolingContactTemps.map((temp) => getContactById(temp.id, init).catch(() => null))).then(
-            (items) => items.filter(present),
-        ),
-        Promise.all(coolingCompanyTemps.map((temp) => getCompanyById(temp.id, init).catch(() => null))).then(
-            (items) => items.filter(present),
-        ),
-    ]);
-
     const relatedCompanyIds = new Set(
-        [...riskDeals, ...closingSoonDeals]
+        closingSoonDeals
             .map((deal) => deal.company)
             .filter((companyId): companyId is number => companyId != null),
     );
-    const loadedCoolingCompanyIds = new Set(coolingCompanyRecords.map((company) => company.id));
+    const insightCompanies = [
+        ...relationshipDashboard.coolingCompanies.map((item) => item.company),
+        ...relationshipDashboard.dealRisks.flatMap((item) => item.company ? [item.company] : []),
+    ];
+    const loadedInsightCompanyIds = new Set(insightCompanies.map((company) => company.id));
     const relatedCompanies = await Promise.all(
         [...relatedCompanyIds]
-            .filter((companyId) => !loadedCoolingCompanyIds.has(companyId))
+            .filter((companyId) => !loadedInsightCompanyIds.has(companyId))
             .map((companyId) => getCompanyById(companyId, init).catch(() => null)),
     ).then((items) => items.filter(present));
 
@@ -236,23 +224,17 @@ export default async function Dashboard() {
     ).flat();
 
     const companyById = new Map(
-        [...coolingCompanyRecords, ...relatedCompanies].map((company) => [company.id, company]),
+        [...insightCompanies, ...relatedCompanies].map((company) => [company.id, company]),
     );
-    const dealById = new Map(riskDeals.map((deal) => [deal.id, deal]));
-    const atRiskDeals: AtRiskItem[] = topRisks
-        .map((risk) => ({ risk, deal: dealById.get(risk.dealId) }))
-        .filter((entry): entry is { risk: (typeof dealRisks)[number]; deal: Deal } => entry.deal != null)
-        .map(({ risk, deal }) => ({
-            risk,
-            deal,
-            company: deal.company != null ? companyById.get(deal.company) : undefined,
-        }));
-
-    const coolingContactById = new Map(coolingContactRecords.map((contact) => [contact.id, contact]));
-    const coolingContacts: CoolingItem[] = coolingContactTemps.flatMap((temp) => {
-        const contact = coolingContactById.get(temp.id);
-        return contact ? [{ contact, temp }] : [];
-    });
+    const atRiskDeals: AtRiskItem[] = relationshipDashboard.dealRisks.map(({ risk, deal, company }) => ({
+        risk,
+        deal,
+        company: company ?? undefined,
+    }));
+    const coolingContacts: CoolingItem[] = relationshipDashboard.coolingContacts.map(
+        ({ contact, temperature }) => ({ contact, temp: temperature }),
+    );
+    const warmthSummary = relationshipDashboard.warmthSummary;
 
     const overdueTasks = taskSummary.overdue;
     const dueSoon = taskSummary.dueSoon;
@@ -267,10 +249,9 @@ export default async function Dashboard() {
         getDealStageDistribution(currency, init).catch(() => [] as DealStageDistribution[]),
     ]);
 
-    const companyWarmthItems: CompanyWarmthItem[] = coolingCompanyTemps.flatMap((temp) => {
-        const company = companyById.get(temp.id);
-        return company ? [{ company, temp }] : [];
-    });
+    const companyWarmthItems: CompanyWarmthItem[] = relationshipDashboard.coolingCompanies.map(
+        ({ company, temperature }) => ({ company, temp: temperature }),
+    );
 
     const closingSoonItems: ClosingSoonItem[] = closingSoonDeals
         .map((deal) => ({ deal, company: deal.company != null ? companyById.get(deal.company) : undefined }));
@@ -289,7 +270,7 @@ export default async function Dashboard() {
             </div>
         ),
         pipeline: <PipelineChart series={revenueSeries} currency={currency} range={DASHBOARD_RANGE} />,
-        tasks: <TaskSummary tasks={tasks} />,
+        tasks: <TaskSummary summary={taskSummary} upcoming={upcomingTasks} />,
         atRiskDeals: <AtRiskDeals items={atRiskDeals} />,
         coolingRelationships: <CoolingRelationships items={coolingContacts} currentUserId={user.id} />,
         recentMoves: <RecentMoves moves={recentMoves} />,

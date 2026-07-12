@@ -8,10 +8,13 @@ import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.jdbc.core.JdbcTemplate;
 
 import ooo.klae.connex.backend.beans.Activity;
 import ooo.klae.connex.backend.beans.Company;
 import ooo.klae.connex.backend.beans.Deal;
+import ooo.klae.connex.backend.beans.Note;
 import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.beans.Pipeline;
 import ooo.klae.connex.backend.beans.Stage;
@@ -39,6 +42,7 @@ class DealRiskServiceTest extends AbstractServiceTest {
     private Pipeline pipeline;
     private Stage stage;
     private Company company;
+    @Autowired private JdbcTemplate jdbcTemplate;
 
     @BeforeEach
     void setUpService() {
@@ -178,6 +182,28 @@ class DealRiskServiceTest extends AbstractServiceTest {
         assertThat(factor(risk, "stalled")).isNotNull();
         assertThat(factor(risk, "stalled").getParams()).containsKey("daysSinceTouch");
         assertThat(risk.getLevel()).isEqualTo("medium");
+    }
+
+    @Test
+    void privateDealNoteDoesNotRefreshSharedRiskRecency() {
+        Deal deal = openDeal();
+        Note note = new Note();
+        note.setWorkspaceId(workspace.getId());
+        note.setContent("Private touch");
+        note.setVisibility("private");
+        note.setAuthor(currentUser);
+        note.setDeal(deal);
+        noteMapper.insert(note);
+        jdbcTemplate.update(
+            "UPDATE note SET created_at = ? WHERE id = ?",
+            java.sql.Timestamp.valueOf("2126-06-22 10:00:00"),
+            note.getId());
+
+        DealRiskDto single = service.assessDeal(workspace.getId(), deal.getId());
+        DealRiskDto batched = service.assessDeals(workspace.getId(), List.of(deal.getId())).getFirst();
+
+        assertThat(factor(single, "stalled")).isNotNull();
+        assertThat(factor(batched, "stalled")).isNotNull();
     }
 
     @Test

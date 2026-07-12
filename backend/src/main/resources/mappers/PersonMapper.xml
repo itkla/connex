@@ -22,10 +22,12 @@
     </association>
   </resultMap>
 
-  <resultMap id="PersonFullResult" type="Person" extends="PersonResult">
-    <collection property="activities" ofType="Activity" column="{workspaceId=workspace_id,personId=id}" select="ooo.klae.connex.backend.mappers.ActivityMapper.getActivitiesByPersonId"/>
-    <collection property="notes" ofType="Note" column="{workspaceId=workspace_id,personId=id}" select="ooo.klae.connex.backend.mappers.NoteMapper.getNotesByPersonId"/>
-    <collection property="tags" ofType="Tag" column="{workspaceId=workspace_id,personId=id}" select="ooo.klae.connex.backend.mappers.TagMapper.getTagsByPersonId"/>
+  <resultMap id="PersonWithTagsResult" type="Person" extends="PersonResult">
+    <collection property="tags" ofType="Tag" notNullColumn="tag_id">
+      <id property="id" column="tag_id"/>
+      <result property="name" column="tag_name"/>
+      <result property="color" column="tag_color"/>
+    </collection>
   </resultMap>
 
   <sql id="personColumns">
@@ -67,11 +69,71 @@
     ORDER BY p.name
   </select>
 
-  <select id="getPersonsByCompanyId" resultMap="PersonFullResult">
-    SELECT <include refid="personColumns"/>, <include refid="companyJoinColumns"/>
+  <select id="getRelationshipScoreAggregates"
+          resultType="ooo.klae.connex.backend.dto.RelationshipScoreAggregateDto">
+    SELECT p.id,
+           COALESCE(SUM(touch.weight * POW(2.0, -touch.age_days / 30.0)), 0.0) AS raw_weight,
+           COALESCE(SUM(CASE WHEN touch.age_days &lt;= 21.0 THEN touch.weight ELSE 0.0 END), 0.0)
+             AS recent_weight,
+           COALESCE(SUM(CASE WHEN touch.age_days &gt; 21.0 AND touch.age_days &lt;= 120.0
+                             THEN touch.weight ELSE 0.0 END), 0.0) AS prior_weight,
+           DATE_FORMAT(MAX(touch.touched_at), '%Y-%m-%d %H:%i:%s') AS last_touch_at,
+           SUM(CASE WHEN touch.age_days &lt;= 21.0 THEN 1 ELSE 0 END) AS recent_touch_count
     FROM person p
+    LEFT JOIN (
+      SELECT source.entity_id, source.touched_at, source.weight,
+             GREATEST(0.0,
+               TIMESTAMPDIFF(MICROSECOND, source.touched_at, #{reference}) / 86400000000.0) AS age_days
+      FROM (
+        SELECT a.person_id AS entity_id, a.timestamp AS touched_at,
+               CASE LOWER(a.type)
+                 WHEN 'meeting' THEN 1.0
+                 WHEN 'call' THEN 0.8
+                 WHEN 'email' THEN 0.6
+                 ELSE 0.5
+               END AS weight
+        FROM activity a
+        WHERE a.workspace_id = #{workspaceId} AND a.person_id IS NOT NULL
+        UNION ALL
+        SELECT n.person_id AS entity_id, n.created_at AS touched_at, 0.4 AS weight
+        FROM note n
+        WHERE n.workspace_id = #{workspaceId} AND n.visibility = 'workspace'
+          AND n.person_id IS NOT NULL
+        UNION ALL
+        SELECT t.person_id AS entity_id, t.created_at AS touched_at, 0.3 AS weight
+        FROM task t
+        WHERE t.workspace_id = #{workspaceId} AND t.person_id IS NOT NULL
+      ) source
+      WHERE source.touched_at IS NOT NULL
+    ) touch ON touch.entity_id = p.id
+    WHERE <include refid="visible"/>
+    GROUP BY p.id
+    ORDER BY p.id
+  </select>
+
+  <select id="getPersonsByCompanyId" resultMap="PersonWithTagsResult">
+    SELECT <include refid="personColumns"/>, <include refid="companyJoinColumns"/>,
+           t.id AS tag_id, t.name AS tag_name, t.color AS tag_color
+    FROM (
+      SELECT person.*
+      FROM person
+      WHERE workspace_id = #{workspaceId} AND company_id = #{companyId}
+      ORDER BY name, id
+      <if test="limit != null">LIMIT #{limit}</if>
+    ) p
     <include refid="companyJoin"/>
-    WHERE p.workspace_id = #{workspaceId} AND p.company_id = #{companyId} ORDER BY p.name
+    LEFT JOIN person_tag pt ON pt.person_id = p.id
+    LEFT JOIN tag t ON t.id = pt.tag_id AND t.workspace_id = #{workspaceId}
+    ORDER BY p.name, p.id, t.name, t.id
+  </select>
+
+  <select id="getCompanyEngagementPeople"
+          resultType="ooo.klae.connex.backend.dto.CompanyEngagementPersonDto">
+    SELECT p.id, p.name, p.image_url
+    FROM person p
+    WHERE p.workspace_id = #{workspaceId} AND p.company_id = #{companyId}
+    ORDER BY p.name, p.id
+    LIMIT #{limit}
   </select>
 
   <select id="getPersonsByTagId" resultMap="PersonResult">
@@ -100,10 +162,30 @@
   </select>
 
   <select id="getExistingPersonIds" resultType="int">
-    SELECT id FROM person
-    WHERE workspace_id = #{workspaceId}
-      AND id IN
+    SELECT p.id FROM person p
+    WHERE <include refid="visible"/>
+      AND p.id IN
       <foreach item="id" collection="ids" open="(" separator="," close=")">#{id}</foreach>
+  </select>
+
+  <select id="getByIds" resultMap="PersonResult">
+    SELECT <include refid="personColumns"/>, <include refid="companyJoinColumns"/>
+    FROM person p
+    <include refid="companyJoin"/>
+    WHERE <include refid="visible"/>
+      AND p.id IN
+      <foreach item="id" collection="ids" open="(" separator="," close=")">#{id}</foreach>
+    ORDER BY p.name, p.id
+  </select>
+
+  <select id="getPersonsByCompanyIds" resultMap="PersonResult">
+    SELECT <include refid="personColumns"/>, <include refid="companyJoinColumns"/>
+    FROM person p
+    <include refid="companyJoin"/>
+    WHERE <include refid="visible"/>
+      AND p.company_id IN
+      <foreach item="id" collection="companyIds" open="(" separator="," close=")">#{id}</foreach>
+    ORDER BY p.id
   </select>
 
   <select id="exists" resultType="boolean">
@@ -215,7 +297,8 @@
   <select id="getEngagedPersonIds" resultType="int">
     SELECT DISTINCT person_id FROM (
       SELECT person_id FROM activity WHERE workspace_id = #{workspaceId} AND person_id IS NOT NULL
-      UNION SELECT person_id FROM note WHERE workspace_id = #{workspaceId} AND person_id IS NOT NULL
+      UNION SELECT person_id FROM note
+        WHERE workspace_id = #{workspaceId} AND visibility = 'workspace' AND person_id IS NOT NULL
       UNION SELECT person_id FROM task WHERE workspace_id = #{workspaceId} AND person_id IS NOT NULL
     ) engaged
   </select>

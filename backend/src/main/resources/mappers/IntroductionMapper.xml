@@ -83,7 +83,8 @@
       AND p.intro_excluded = FALSE
       AND (
         EXISTS (SELECT 1 FROM activity a WHERE a.workspace_id = #{workspaceId} AND a.person_id = p.id)
-        OR EXISTS (SELECT 1 FROM note n WHERE n.workspace_id = #{workspaceId} AND n.person_id = p.id)
+        OR EXISTS (SELECT 1 FROM note n
+          WHERE n.workspace_id = #{workspaceId} AND n.visibility = 'workspace' AND n.person_id = p.id)
         OR EXISTS (SELECT 1 FROM task t WHERE t.workspace_id = #{workspaceId} AND t.person_id = p.id)
       )
   </select>

@@ -76,7 +76,6 @@ export default function ContactsGrid({ contacts, company, allTags }: { contacts:
                 setNewContactPayload={setNewContactPayload}
                 imageFile={imageFile}
                 setImageFile={setImageFile}
-                companies={[company]}
                 selectedCompany={company}
                 isCreating={isCreating}
                 isSuccess={creationSucceeded}

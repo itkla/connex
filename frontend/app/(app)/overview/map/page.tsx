@@ -4,9 +4,9 @@ import { redirect } from "next/navigation";
 import { getTranslations } from "next-intl/server";
 import { ShareIcon } from "@heroicons/react/24/outline";
 import {
-    getCompanyTemperatures,
     getContactTemperatures,
     getCurrentUserFromCookie,
+    getMapCompanyTemperatures,
     getMyWorkspacesFromCookie,
     getPipelines,
     getRelationshipMapData,
@@ -56,7 +56,7 @@ export default async function MapPage({ searchParams }: { searchParams: Promise<
 
     const [contactTemps, companyTemps] = await Promise.all([
         getContactTemperatures(contacts.map((contact) => contact.id), init).catch(() => [] as RelationshipTemperature[]),
-        getCompanyTemperatures(companies.map((company) => company.id), init).catch(() => [] as RelationshipTemperature[]),
+        getMapCompanyTemperatures(init).catch(() => [] as RelationshipTemperature[]),
     ]);
 
     const contactWarmth = new Map<number, TemperatureBand>(contactTemps.map((t) => [t.id, t.band]));

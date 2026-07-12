@@ -62,6 +62,14 @@
     WHERE t.workspace_id = #{workspaceId}
   </select>
 
+  <select id="getUpcomingOpenTasks" resultMap="TaskResult">
+    SELECT <include refid="taskColumns"/>
+    FROM task
+    WHERE workspace_id = #{workspaceId} AND completed = FALSE
+    ORDER BY due_date IS NULL, due_date, id
+    LIMIT #{limit}
+  </select>
+
   <select id="getTasksByAssignedToId" resultMap="TaskResult">
     SELECT <include refid="taskColumns"/>
     FROM task
@@ -90,6 +98,36 @@
     FROM task
     WHERE workspace_id = #{workspaceId} AND deal_id = #{dealId}
     ORDER BY due_date IS NULL, due_date, id
+  </select>
+
+  <select id="getCompanyTasks" resultMap="TaskResult">
+    SELECT <include refid="taskColumns"/> FROM task t
+    WHERE t.workspace_id = #{workspaceId}
+      AND (EXISTS (SELECT 1 FROM person p
+          WHERE p.workspace_id = #{workspaceId} AND p.id = t.person_id AND p.company_id = #{companyId})
+        OR EXISTS (SELECT 1 FROM deal d
+          WHERE d.workspace_id = #{workspaceId} AND d.id = t.deal_id AND d.company_id = #{companyId}))
+    ORDER BY t.updated_at DESC, t.id DESC
+    LIMIT #{limit}
+  </select>
+
+  <select id="getTasksByCompanyIds" resultMap="TaskResult">
+    SELECT <include refid="taskColumns"/> FROM task t
+    WHERE t.workspace_id = #{workspaceId}
+      AND (EXISTS (SELECT 1 FROM person p
+          WHERE p.id = t.person_id
+            AND (p.workspace_id = #{workspaceId}
+              OR EXISTS (SELECT 1 FROM person_share ps
+                JOIN workspace vws ON vws.id = ps.workspace_id
+                JOIN workspace ows ON ows.id = p.workspace_id AND ows.org_id = vws.org_id
+                WHERE ps.person_id = p.id AND ps.workspace_id = #{workspaceId}))
+            AND p.company_id IN
+            <foreach item="id" collection="companyIds" open="(" separator="," close=")">#{id}</foreach>)
+        OR EXISTS (SELECT 1 FROM deal d
+          WHERE d.workspace_id = #{workspaceId} AND d.id = t.deal_id
+            AND d.company_id IN
+            <foreach item="id" collection="companyIds" open="(" separator="," close=")">#{id}</foreach>))
+    ORDER BY t.updated_at DESC, t.id DESC
   </select>
 
   <select id="getTaskById" resultMap="TaskResult">

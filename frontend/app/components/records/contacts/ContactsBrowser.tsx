@@ -36,9 +36,9 @@ import ContactAvatar from '@/app/components/records/contacts/ContactAvatar';
 import NewContactDialog from '@/app/components/records/contacts/NewContactDialog';
 import ChangeCompanyDialog from '@/app/components/records/contacts/ChangeCompanyDialog';
 import QuickEditSheet, { type ContactDraft } from '@/app/components/records/contacts/QuickEditSheet';
-import { updateContact, createContact, getCompanies, getContactsPage, getContactTemperatures, getPersonFacets, getTags, bulkAddTagToContacts, bulkRemoveTagFromContacts, bulkDeleteContacts, getContactIds, isFieldError } from '@/app/lib/api';
+import { updateContact, createContact, getContactsPage, getContactTemperatures, getPersonFacets, getTags, bulkAddTagToContacts, bulkRemoveTagFromContacts, bulkDeleteContacts, getContactIds, isFieldError } from '@/app/lib/api';
 import { uploadContactPicture } from '@/app/lib/utils';
-import { type Contact, type UpdateContactPayload, type Company, type CreateContactPayload, type ContactsPageParams, type PersonFacets, type RelationshipTemperature, type Tag } from '@/app/lib/types';
+import { type Contact, type UpdateContactPayload, type CreateContactPayload, type ContactsPageParams, type PersonFacets, type RelationshipTemperature, type Tag } from '@/app/lib/types';
 import TemperaturePill from '@/app/components/records/TemperaturePill';
 
 const NO_ITEMS: Contact[] = [];
@@ -184,11 +184,6 @@ export default function ContactsBrowser({ savedViews }: { savedViews: SavedView[
     const [changeCompanyOpen, setChangeCompanyOpen] = useState(false);
     const [isClearingCompany, setIsClearingCompany] = useState(false);
 
-    const [companies, setCompanies] = useState<Company[]>([]);
-    useEffect(() => {
-        getCompanies({}).then(setCompanies).catch(() => setCompanies([]));
-    }, []);
-
     const [tags, setTags] = useState<Tag[]>([]);
     useEffect(() => { getTags().then(setTags).catch(() => setTags([])); }, []);
 
@@ -235,11 +230,6 @@ export default function ContactsBrowser({ savedViews }: { savedViews: SavedView[
     const [creationSucceeded, setCreationSucceeded] = useState(false);
     const [newContactPayload, setNewContactPayload] = useState<CreateContactPayload>(emptyContactDraft);
     const [imageFile, setImageFile] = useState<File | null>(null);
-    const selectedCompany = useMemo(
-        () => companies.find((c) => c.id === newContactPayload.companyId) ?? null,
-        [companies, newContactPayload.companyId],
-    );
-
     const closeNewContactDialog = (open: boolean) => {
         setNewContactDialogOpen(open);
         if (!open) {
@@ -686,8 +676,6 @@ export default function ContactsBrowser({ savedViews }: { savedViews: SavedView[
                     setNewContactPayload={setNewContactPayload}
                     imageFile={imageFile}
                     setImageFile={setImageFile}
-                    companies={companies}
-                    selectedCompany={selectedCompany}
                     isCreating={isCreating}
                     isSuccess={creationSucceeded}
                     createNewContact={createNewContact}
@@ -708,7 +696,6 @@ export default function ContactsBrowser({ savedViews }: { savedViews: SavedView[
                     open={changeCompanyOpen}
                     onOpenChange={setChangeCompanyOpen}
                     contacts={selectedContacts}
-                    companies={companies}
                 />
 
                 <BulkTagDialog

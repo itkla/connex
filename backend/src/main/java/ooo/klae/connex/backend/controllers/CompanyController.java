@@ -11,6 +11,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import ooo.klae.connex.backend.beans.Company;
+import ooo.klae.connex.backend.dto.ActivityDto;
 import ooo.klae.connex.backend.dto.BulkDeleteRequest;
 import ooo.klae.connex.backend.dto.BulkOperationResult;
 import ooo.klae.connex.backend.dto.BulkTagRequest;
@@ -18,13 +19,16 @@ import ooo.klae.connex.backend.dto.CompanyDto;
 import ooo.klae.connex.backend.dto.CompanyEngagementDto;
 import ooo.klae.connex.backend.dto.CompanyFacets;
 import ooo.klae.connex.backend.dto.CompanySegmentQueryRequest;
+import ooo.klae.connex.backend.dto.CompanyTimelineDto;
 import ooo.klae.connex.backend.dto.CustomFieldEntryDto;
 import ooo.klae.connex.backend.dto.CustomFieldValueRequest;
 import ooo.klae.connex.backend.dto.CustomFieldValuesRequest;
 import ooo.klae.connex.backend.dto.DealDto;
+import ooo.klae.connex.backend.dto.NoteDto;
 import ooo.klae.connex.backend.dto.PageResponse;
 import ooo.klae.connex.backend.dto.PersonDto;
 import ooo.klae.connex.backend.dto.TagDto;
+import ooo.klae.connex.backend.dto.TaskDto;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.services.BulkOperationService;
 import ooo.klae.connex.backend.services.CompanyService;
@@ -85,16 +89,23 @@ public class CompanyController {
         return new PageResponse<>(items, companyService.countCompanies(query, industry, noIndustry, ids));
     }
 
-    /** Returns a lightweight, explicitly bounded company catalog for record selectors. */
-    @GetMapping("/catalog")
-    public List<CompanyDto> getCompanyCatalog() {
-        return companyService.getCompanyCatalog().stream().map(CompanyDto::from).toList();
-    }
-
-    /** Returns complete company-scoped engagement inputs for one expanded company card. */
+    /** Returns bounded company-scoped engagement aggregates for one expanded company card. */
     @GetMapping("/{id}/engagement")
     public CompanyEngagementDto getCompanyEngagement(@PathVariable int id) {
         return companyService.getCompanyEngagement(id);
+    }
+
+    /** Returns bounded company-scoped records for the detail timeline. */
+    @GetMapping("/{id}/timeline")
+    public CompanyTimelineDto getCompanyTimeline(
+            @PathVariable int id,
+            @RequestParam(defaultValue = "100") int limit) {
+        PageBounds bounds = PageBounds.of(1, limit);
+        CompanyService.CompanyTimelineData timeline = companyService.getCompanyTimeline(id, bounds.size());
+        return new CompanyTimelineDto(
+            timeline.activities().stream().map(ActivityDto::from).toList(),
+            timeline.tasks().stream().map(TaskDto::from).toList(),
+            timeline.notes().stream().map(NoteDto::from).toList());
     }
 
     /**
@@ -274,8 +285,11 @@ public class CompanyController {
      * @return
      */
     @GetMapping("/{id}/people")
-    public List<PersonDto> getPeopleForCompany(@PathVariable int id) {
-        return companyService.getPersonsByCompanyId(id).stream().map(PersonDto::from).toList();
+    public List<PersonDto> getPeopleForCompany(
+            @PathVariable int id,
+            @RequestParam(defaultValue = "100") int limit) {
+        PageBounds bounds = PageBounds.of(1, limit);
+        return companyService.getPersonsByCompanyId(id, bounds.size()).stream().map(PersonDto::from).toList();
     }
 
     /**
@@ -284,8 +298,11 @@ public class CompanyController {
      * @return
      */
     @GetMapping("/{id}/deals")
-    public List<DealDto> getDealsForCompany(@PathVariable int id) {
-        return companyService.getDealsByCompanyId(id).stream().map(DealDto::from).toList();
+    public List<DealDto> getDealsForCompany(
+            @PathVariable int id,
+            @RequestParam(defaultValue = "100") int limit) {
+        PageBounds bounds = PageBounds.of(1, limit);
+        return companyService.getDealsByCompanyId(id, bounds.size()).stream().map(DealDto::from).toList();
     }
 
     /**

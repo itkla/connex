@@ -24,23 +24,6 @@
     <result property="updatedAt" column="updated_at"/>
   </resultMap>
 
-  <resultMap id="DealFullResult" type="Deal" extends="DealResult">
-    <collection property="people" ofType="DealPerson"
-                column="{workspaceId=workspace_id,dealId=id}"
-                select="ooo.klae.connex.backend.mappers.DealMapper.getDealPeopleByDealId"/>
-    <collection property="activities" ofType="Activity"
-                column="{workspaceId=workspace_id,dealId=id}"
-                select="ooo.klae.connex.backend.mappers.ActivityMapper.getActivitiesByDealId"/>
-    <collection property="notes" ofType="Note"
-                column="{workspaceId=workspace_id,dealId=id}"
-                select="ooo.klae.connex.backend.mappers.NoteMapper.getNotesByDealId"/>
-    <collection property="tasks" ofType="Task"
-                column="{workspaceId=workspace_id,dealId=id}"
-                select="ooo.klae.connex.backend.mappers.TaskMapper.getTasksByDealId"/>
-    <collection property="tags" ofType="Tag" column="{workspaceId=workspace_id,dealId=id}"
-                select="ooo.klae.connex.backend.mappers.TagMapper.getTagsByDealId"/>
-  </resultMap>
-
   <resultMap id="DealPersonResult" type="DealPerson">
     <id column="deal_person_pid"/>
     <result property="role" column="role"/>
@@ -256,6 +239,7 @@
       SELECT n.deal_id, n.created_at AS touched_at
       FROM note n
       WHERE n.workspace_id = #{workspaceId}
+        AND n.visibility = 'workspace'
         AND n.deal_id IN
         <foreach item="id" collection="dealIds" open="(" separator="," close=")">#{id}</foreach>
         AND n.created_at &lt;= #{now}
@@ -608,12 +592,13 @@
   </select>
 
   <select id="countsByCompany" resultType="ooo.klae.connex.backend.dto.FacetCount">
-    SELECT CAST(d.company_id AS CHAR) AS `key`, COUNT(*) AS count
+    SELECT CAST(d.company_id AS CHAR) AS `key`, COUNT(*) AS count, c.name AS label
     FROM deal d
+    JOIN company c ON c.id = d.company_id AND <include refid="visibleCompanyJoin"/>
     WHERE d.workspace_id = #{workspaceId} AND d.company_id IS NOT NULL
-    GROUP BY d.company_id
+    GROUP BY d.company_id, c.name
     UNION ALL
-    SELECT '__empty__' AS `key`, COUNT(*) AS count
+    SELECT '__empty__' AS `key`, COUNT(*) AS count, NULL AS label
     FROM deal d
     WHERE d.workspace_id = #{workspaceId} AND d.company_id IS NULL
     HAVING COUNT(*) &gt; 0
@@ -645,13 +630,22 @@
     ORDER BY position, id
   </select>
 
-  <select id="getDealsByCompanyId" resultMap="DealFullResult">
+  <select id="getDealsByCompanyId" resultMap="DealResult">
     SELECT <include refid="dealColumns"/>
     FROM deal
     WHERE workspace_id = #{workspaceId} AND company_id = #{companyId}
+    ORDER BY stage_id, position, id
   </select>
 
-  <select id="getDealsByPersonId" resultMap="DealFullResult">
+  <select id="getDealsByCompanyIdPage" resultMap="DealResult">
+    SELECT <include refid="dealColumns"/>
+    FROM deal
+    WHERE workspace_id = #{workspaceId} AND company_id = #{companyId}
+    ORDER BY stage_id, position, id
+    LIMIT #{limit}
+  </select>
+
+  <select id="getDealsByPersonId" resultMap="DealResult">
     SELECT <include refid="qualifiedDealColumns"/>
     FROM deal d
     JOIN deal_person dp ON dp.deal_id = d.id
@@ -665,7 +659,7 @@
     WHERE d.workspace_id = #{workspaceId} AND dt.tag_id = #{tagId}
   </select>
 
-  <select id="getDealById" resultMap="DealFullResult">
+  <select id="getDealById" resultMap="DealResult">
     SELECT <include refid="dealColumns"/>
     FROM deal
     WHERE workspace_id = #{workspaceId} AND id = #{id}
@@ -698,6 +692,21 @@
     SELECT <include refid="dealColumns"/> FROM deal
     WHERE workspace_id = #{workspaceId} AND id IN
     <foreach collection="ids" item="id" open="(" separator="," close=")">#{id}</foreach>
+  </select>
+
+  <select id="getDealsByCompanyIds" resultMap="DealResult">
+    SELECT <include refid="dealColumns"/> FROM deal
+    WHERE workspace_id = #{workspaceId}
+      AND company_id IN
+      <foreach item="id" collection="companyIds" open="(" separator="," close=")">#{id}</foreach>
+    ORDER BY id
+  </select>
+
+  <select id="getRiskCandidateIds" resultType="int">
+    SELECT id FROM deal
+    WHERE workspace_id = #{workspaceId} AND won IS NULL AND risk_excluded = FALSE
+    ORDER BY expected_close_date IS NULL, expected_close_date, updated_at, id
+    LIMIT #{limit}
   </select>
 
   <insert id="insert" useGeneratedKeys="true" keyProperty="id">

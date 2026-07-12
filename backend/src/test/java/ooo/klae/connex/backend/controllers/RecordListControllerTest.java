@@ -27,12 +27,14 @@ import ooo.klae.connex.backend.dto.DecayCounts;
 import ooo.klae.connex.backend.dto.DealAgingDto;
 import ooo.klae.connex.backend.dto.DealKpisDto;
 import ooo.klae.connex.backend.dto.DealPipelineValueDto;
+import ooo.klae.connex.backend.dto.DealRiskAnalyticsDto;
 import ooo.klae.connex.backend.dto.DealRevenueSeriesDto;
 import ooo.klae.connex.backend.dto.DealStageDistributionDto;
 import ooo.klae.connex.backend.dto.DealTopDto;
 import ooo.klae.connex.backend.dto.PageResponse;
 import ooo.klae.connex.backend.dto.SegmentDefinition;
 import ooo.klae.connex.backend.dto.TaskSummaryDto;
+import ooo.klae.connex.backend.dto.ScoringIdsRequest;
 import ooo.klae.connex.backend.dto.TrendCounts;
 import ooo.klae.connex.backend.dto.WarmthSummaryDto;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
@@ -134,24 +136,43 @@ class RecordListControllerTest {
     }
 
     @Test
-    void companyCatalogDelegatesToBoundedServicePath() {
-        CompanyController controller = new CompanyController(companyService, bulkOperationService);
-        when(companyService.getCompanyCatalog()).thenReturn(List.of());
-
-        assertTrue(controller.getCompanyCatalog().isEmpty());
-
-        verify(companyService).getCompanyCatalog();
-    }
-
-    @Test
     void companyEngagementDelegatesTheVisibleCompanyId() {
         CompanyController controller = new CompanyController(companyService, bulkOperationService);
-        CompanyEngagementDto engagement = new CompanyEngagementDto(List.of(), List.of(), List.of());
+        CompanyEngagementDto engagement = new CompanyEngagementDto(
+            List.of(), 0, List.of(), 0, 0, 0, "USD", 0, 0, 0, 0, 0, List.of());
         when(companyService.getCompanyEngagement(17)).thenReturn(engagement);
 
         assertSame(engagement, controller.getCompanyEngagement(17));
 
         verify(companyService).getCompanyEngagement(17);
+    }
+
+    @Test
+    void companyTimelineClampsItsProjectionLimit() {
+        CompanyController controller = new CompanyController(companyService, bulkOperationService);
+        CompanyService.CompanyTimelineData timeline = new CompanyService.CompanyTimelineData(
+            List.of(), List.of(), List.of());
+        when(companyService.getCompanyTimeline(17, 100)).thenReturn(timeline);
+
+        var response = controller.getCompanyTimeline(17, 500);
+
+        assertTrue(response.activities().isEmpty());
+        assertTrue(response.tasks().isEmpty());
+        assertTrue(response.notes().isEmpty());
+        verify(companyService).getCompanyTimeline(17, 100);
+    }
+
+    @Test
+    void companyRelationListsClampTheirProjectionLimits() {
+        CompanyController controller = new CompanyController(companyService, bulkOperationService);
+        when(companyService.getPersonsByCompanyId(17, 100)).thenReturn(List.of());
+        when(companyService.getDealsByCompanyId(17, 100)).thenReturn(List.of());
+
+        assertTrue(controller.getPeopleForCompany(17, 500).isEmpty());
+        assertTrue(controller.getDealsForCompany(17, 500).isEmpty());
+
+        verify(companyService).getPersonsByCompanyId(17, 100);
+        verify(companyService).getDealsByCompanyId(17, 100);
     }
 
     @Test
@@ -423,6 +444,22 @@ class RecordListControllerTest {
     }
 
     @Test
+    void interactiveDealRiskRequiresIdsAndAnalyticsUsesBoundedProjection() {
+        DealController controller = new DealController(
+            dealService, bulkOperationService, dealRiskService, dealBriefService,
+            dealRiskRationaleService, workspaceService);
+        DealRiskAnalyticsDto analytics = new DealRiskAnalyticsDto(List.of(), false);
+        when(workspaceService.getCurrentWorkspaceId()).thenReturn(7);
+        when(dealRiskService.analytics(7)).thenReturn(analytics);
+
+        assertThrows(BadRequestException.class, () -> controller.getDealRisks(null));
+        assertSame(analytics, controller.getDealRiskAnalytics());
+
+        verify(dealRiskService, never()).assessWorkspace(anyInt());
+        verify(dealRiskService).analytics(7);
+    }
+
+    @Test
     void notesWithoutFilterRequirePageEndpoint() {
         NoteController controller = new NoteController(noteService);
 
@@ -434,13 +471,13 @@ class RecordListControllerTest {
     @Test
     void notesPageClampsSize() {
         NoteController controller = new NoteController(noteService);
-        when(noteService.getNotesPage(100, 0)).thenReturn(List.of());
-        when(noteService.countNotes()).thenReturn(0L);
+        when(noteService.getNotesPage(100, 0, false)).thenReturn(List.of());
+        when(noteService.countNotes(false)).thenReturn(0L);
 
-        var response = controller.getNotesPage(0, 500);
+        var response = controller.getNotesPage(0, 500, false);
 
         assertEquals(0, response.total());
-        verify(noteService).getNotesPage(100, 0);
+        verify(noteService).getNotesPage(100, 0, false);
     }
 
     @Test
@@ -471,6 +508,16 @@ class RecordListControllerTest {
         when(taskService.getTaskSummary()).thenReturn(summary);
 
         assertSame(summary, controller.getTaskSummary());
+    }
+
+    @Test
+    void upcomingTasksAreBoundedBeforeDelegation() {
+        TaskController controller = new TaskController(taskService);
+        when(taskService.getUpcomingOpenTasks(4)).thenReturn(List.of());
+
+        assertTrue(controller.getUpcomingTasks(4).isEmpty());
+        assertThrows(BadRequestException.class, () -> controller.getUpcomingTasks(21));
+        verify(taskService).getUpcomingOpenTasks(4);
     }
 
     @Test
@@ -526,6 +573,30 @@ class RecordListControllerTest {
         List<Integer> ids = java.util.stream.IntStream.rangeClosed(1, 101).boxed().toList();
 
         assertThrows(BadRequestException.class, () -> controller.companies(ids));
+    }
+
+    @Test
+    void scoringCompanyBatchUsesBodyIdsWithoutQueryStringLimit() {
+        ScoringController controller = new ScoringController(scoringService, workspaceService);
+        ScoringIdsRequest request = new ScoringIdsRequest();
+        request.setIds(List.of(3, 4, 4));
+        when(workspaceService.getCurrentWorkspaceId()).thenReturn(7);
+        when(scoringService.scoreCompanies(
+            7, new java.util.LinkedHashSet<>(List.of(3, 4)))).thenReturn(List.of());
+
+        assertTrue(controller.companyBatch(request).isEmpty());
+        verify(scoringService).scoreCompanies(7, new java.util.LinkedHashSet<>(List.of(3, 4)));
+    }
+
+    @Test
+    void mapCompanyScoresUseTheBoundedGetPath() {
+        ScoringController controller = new ScoringController(scoringService, workspaceService);
+        when(workspaceService.getCurrentWorkspaceId()).thenReturn(7);
+        when(scoringService.scoreCompaniesForMap(7)).thenReturn(List.of());
+
+        assertTrue(controller.mapCompanies().isEmpty());
+
+        verify(scoringService).scoreCompaniesForMap(7);
     }
 
     @Test

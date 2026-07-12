@@ -31,32 +31,44 @@ import { Label } from '@/components/ui/label';
 import { DialogStatusCover, resolveDialogStatus } from '@/components/ui/dialog-status-cover';
 import { updateContact } from '@/app/lib/api';
 import { type Company, type Contact } from '@/app/lib/types';
+import { useCompanySearch } from '@/app/hooks/useCompanySearch';
 
 type Props = {
     open: boolean;
     onOpenChange: (open: boolean) => void;
     contacts: Contact[];
-    companies: Company[];
     onSuccess?: () => void;
 };
 
-export default function ChangeCompanyDialog({ open, onOpenChange, contacts, companies, onSuccess }: Props) {
+export default function ChangeCompanyDialog({ open, onOpenChange, contacts, onSuccess }: Props) {
     const router = useRouter();
     const t = useTranslations('ContactsChangeCompanyDialog');
-    const [selected, setSelected] = useState<Company | null>(null);
+    const defaultCompanyId = contacts.length === 1
+        ? contacts[0].companyId ?? contacts[0].company?.id ?? null
+        : null;
+    const selectionScope = `${contacts.map((contact) => contact.id).join(',')}:${defaultCompanyId ?? ''}`;
+    const [selection, setSelection] = useState<{ scope: string; companyId: number | null }>({
+        scope: selectionScope,
+        companyId: defaultCompanyId,
+    });
+    const selectedCompanyId = selection.scope === selectionScope
+        ? selection.companyId
+        : defaultCompanyId;
     const [isSaving, setIsSaving] = useState(false);
     const [succeeded, setSucceeded] = useState(false);
+    const currentCompany = contacts.length === 1 ? contacts[0].company ?? null : null;
+    const companySearch = useCompanySearch(
+        open,
+        [defaultCompanyId, selectedCompanyId],
+        currentCompany ? [currentCompany] : [],
+    );
+    const selected = companySearch.companies.find(
+        (company) => company.id === selectedCompanyId,
+    ) ?? (currentCompany?.id === selectedCompanyId ? currentCompany : null);
 
     useEffect(() => {
-        if (!open) return;
-        setSucceeded(false);
-        if (contacts.length === 1) {
-            const current = companies.find((c) => c.id === contacts[0].companyId) ?? null;
-            setSelected(current);
-        } else {
-            setSelected(null);
-        }
-    }, [open, contacts, companies]);
+        if (companySearch.error) toastError(t('companySearchFailed'));
+    }, [companySearch.error, t]);
 
     const handleListWheel = (e: WheelEvent<HTMLDivElement>) => {
         const lineHeightPx = 16;
@@ -88,7 +100,11 @@ export default function ChangeCompanyDialog({ open, onOpenChange, contacts, comp
             setSucceeded(true);
             onSuccess?.();
             router.refresh();
-            setTimeout(() => onOpenChange(false), 900);
+            setTimeout(() => {
+                setSelection({ scope: selectionScope, companyId: defaultCompanyId });
+                setSucceeded(false);
+                onOpenChange(false);
+            }, 900);
         } catch (err) {
             toastError(err instanceof Error ? err.message : t('toastFailedUpdate'));
         } finally {
@@ -100,7 +116,10 @@ export default function ChangeCompanyDialog({ open, onOpenChange, contacts, comp
 
     const handleOpenChange = (next: boolean) => {
         if (!next && isSaving) return;
-        if (!next) setSucceeded(false);
+        if (!next) {
+            setSucceeded(false);
+            setSelection({ scope: selectionScope, companyId: defaultCompanyId });
+        }
         onOpenChange(next);
     };
 
@@ -131,10 +150,15 @@ export default function ChangeCompanyDialog({ open, onOpenChange, contacts, comp
                         <div className="ncd-rise grid gap-2" style={{ animationDelay: '90ms' }}>
                             <Label htmlFor="company">{t('companyLabel')}</Label>
                             <Combobox
-                                items={companies}
+                                items={companySearch.companies}
+                                filter={null}
                                 itemToStringLabel={(c: Company) => c.name}
                                 value={selected}
-                                onValueChange={(c) => setSelected((c as Company | null) ?? null)}
+                                onInputValueChange={companySearch.onInputValueChange}
+                                onValueChange={(c) => setSelection({
+                                    scope: selectionScope,
+                                    companyId: (c as Company | null)?.id ?? null,
+                                })}
                             >
                                 <ComboboxInput
                                     id="company"
@@ -148,7 +172,7 @@ export default function ChangeCompanyDialog({ open, onOpenChange, contacts, comp
                                 <ComboboxContent className="pointer-events-auto">
                                     <ComboboxList onWheel={handleListWheel}>
                                         <ComboboxEmpty>{t('noCompaniesFound')}</ComboboxEmpty>
-                                        {companies.map((company) => (
+                                        {companySearch.companies.map((company) => (
                                             <ComboboxItem key={company.id} value={company}>
                                                 {company.name}
                                             </ComboboxItem>

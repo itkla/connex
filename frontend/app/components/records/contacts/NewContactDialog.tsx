@@ -18,9 +18,11 @@ import {
     BuildingOffice2Icon,
 } from '@heroicons/react/24/outline';
 import { useTranslations } from 'next-intl';
-import { initials, uploadContactPicture } from '@/app/lib/utils';
+import { initials } from '@/app/lib/utils';
 import { isFieldError } from '@/app/lib/api';
 import { useFieldErrors } from '@/app/hooks/useFieldErrors';
+import { useCompanySearch } from '@/app/hooks/useCompanySearch';
+import { toastError } from '@/app/lib/toast';
 import { DialogStatusCover, resolveDialogStatus, fieldInputClass, fieldErrorClass, fieldLeadIconClass } from '@/components/ui/dialog-status-cover';
 
 type Props = {
@@ -30,8 +32,7 @@ type Props = {
     setNewContactPayload: Dispatch<SetStateAction<CreateContactPayload>>;
     imageFile: File | null;
     setImageFile: Dispatch<SetStateAction<File | null>>;
-    companies: Company[];
-    selectedCompany: Company | null;
+    selectedCompany?: Company | null;
     isCreating: boolean;
     isSuccess?: boolean;
     createNewContact: () => void | Promise<void>;
@@ -44,8 +45,7 @@ export default function NewContactDialog({
     setNewContactPayload,
     imageFile,
     setImageFile,
-    companies,
-    selectedCompany,
+    selectedCompany = null,
     isCreating,
     isSuccess = false,
     createNewContact,
@@ -53,6 +53,18 @@ export default function NewContactDialog({
     const t = useTranslations('ContactsNewContactDialog');
     const [imagePreview, setImagePreview] = useState<string | null>(null);
     const { fieldErrors, reset: resetFieldErrors, clearError, captureFieldErrors } = useFieldErrors();
+    const companySearch = useCompanySearch(
+        newContactDialogOpen,
+        [newContactPayload.companyId],
+        selectedCompany ? [selectedCompany] : [],
+    );
+    const resolvedCompany = companySearch.companies.find(
+        (company) => company.id === newContactPayload.companyId,
+    ) ?? (selectedCompany?.id === newContactPayload.companyId ? selectedCompany : null);
+
+    useEffect(() => {
+        if (companySearch.error) toastError(t('companySearchFailed'));
+    }, [companySearch.error, t]);
 
     const handleCreate = async () => {
         resetFieldErrors();
@@ -74,14 +86,6 @@ export default function NewContactDialog({
     };
 
     useEffect(() => {
-        if (!newContactDialogOpen && imagePreview) {
-            URL.revokeObjectURL(imagePreview);
-            setImagePreview(null);
-        }
-        if (!newContactDialogOpen) resetFieldErrors();
-    }, [newContactDialogOpen, imagePreview, resetFieldErrors]);
-
-    useEffect(() => {
         return () => {
             if (imagePreview) URL.revokeObjectURL(imagePreview);
         };
@@ -97,12 +101,18 @@ export default function NewContactDialog({
 
     const handleOpenChange = (next: boolean) => {
         if (!next && isCreating) return;
+        if (!next) {
+            if (imagePreview) URL.revokeObjectURL(imagePreview);
+            setImagePreview(null);
+            resetFieldErrors();
+        }
         setNewContactDialogOpen(next);
     };
 
     const hasErrors = Object.keys(fieldErrors).length > 0;
     const status = resolveDialogStatus({ isLoading: isCreating, hasErrors, isSuccess });
     const contactInitial = initials(newContactPayload.name || '');
+    const visibleImagePreview = imageFile ? imagePreview : null;
 
     return (
         <Dialog open={newContactDialogOpen} onOpenChange={handleOpenChange}>
@@ -115,8 +125,8 @@ export default function NewContactDialog({
                             htmlFor="imageUrl"
                             className="group relative flex size-20 cursor-pointer items-center justify-center overflow-hidden rounded-full bg-muted shadow-lg ring-4 ring-popover transition hover:ring-brand"
                         >
-                            {imagePreview ? (
-                                <img src={imagePreview} alt="" className="size-full object-cover" />
+                            {visibleImagePreview ? (
+                                <img src={visibleImagePreview} alt="" className="size-full object-cover" />
                             ) : contactInitial ? (
                                 <div className="flex size-full select-none items-center justify-center bg-brand-light text-2xl font-semibold text-brand-dark">
                                     {contactInitial}
@@ -127,7 +137,7 @@ export default function NewContactDialog({
                                 </div>
                             )}
 
-                            {(imagePreview || contactInitial) && (
+                            {(visibleImagePreview || contactInitial) && (
                                 <div className="absolute inset-0 flex items-center justify-center bg-black/45 opacity-0 transition group-hover:opacity-100">
                                     <CameraIcon className="size-5 text-white" />
                                 </div>
@@ -240,10 +250,11 @@ export default function NewContactDialog({
                         <div className="ncd-rise grid gap-1.5" style={{ animationDelay: '240ms' }}>
                             <Label htmlFor="company">{t('company')}</Label>
                             <Combobox
-                                items={companies}
+                                items={companySearch.companies}
+                                filter={null}
                                 itemToStringLabel={(c: Company) => c.name}
-                                value={selectedCompany}
-                                // disabled={isCreating}
+                                value={resolvedCompany}
+                                onInputValueChange={companySearch.onInputValueChange}
                                 onValueChange={(c) =>
                                     setNewContactPayload((prev) => ({
                                         ...prev,
@@ -263,7 +274,7 @@ export default function NewContactDialog({
                                 <ComboboxContent className="pointer-events-auto">
                                     <ComboboxList onWheel={handleListWheel}>
                                         <ComboboxEmpty>{t('noCompaniesFound')}</ComboboxEmpty>
-                                        {companies.map((company) => (
+                                        {companySearch.companies.map((company) => (
                                             <ComboboxItem key={company.id} value={company}>
                                                 {company.name}
                                             </ComboboxItem>

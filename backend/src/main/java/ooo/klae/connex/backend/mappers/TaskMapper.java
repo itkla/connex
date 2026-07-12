@@ -18,6 +18,7 @@ public interface TaskMapper {
     List<Task> getTasksPage(@Param("workspaceId") int workspaceId, @Param("limit") int limit, @Param("offset") int offset);
     long countTasks(int workspaceId);
     TaskSummaryDto taskSummary(int workspaceId);
+    List<Task> getUpcomingOpenTasks(@Param("workspaceId") int workspaceId, @Param("limit") int limit);
     List<Task> getTasksByAssignedToId(
         @Param("workspaceId") int workspaceId,
         @Param("assignedToId") int assignedToId
@@ -26,6 +27,10 @@ public interface TaskMapper {
     List<Task> getTasksByPersonIds(@Param("workspaceId") int workspaceId,
             @Param("personIds") List<Integer> personIds);
     List<Task> getTasksByDealId(@Param("workspaceId") int workspaceId, @Param("dealId") int dealId);
+    List<Task> getCompanyTasks(@Param("workspaceId") int workspaceId,
+            @Param("companyId") int companyId, @Param("limit") int limit);
+    List<Task> getTasksByCompanyIds(@Param("workspaceId") int workspaceId,
+            @Param("companyIds") List<Integer> companyIds);
     Task getTaskById(@Param("workspaceId") int workspaceId, @Param("id") int id);
     boolean exists(@Param("workspaceId") int workspaceId, @Param("id") int id);
     List<Task> search(@Param("workspaceId") int workspaceId, @Param("query") String query);

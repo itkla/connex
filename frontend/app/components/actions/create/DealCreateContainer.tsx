@@ -5,9 +5,9 @@ import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 
 import NewDealDialog from '@/app/components/records/deals/NewDealDialog';
-import { createDeal, getCompanies, getPipelines, getStagesByPipelineId } from '@/app/lib/api';
+import { createDeal, getPipelines, getStagesByPipelineId } from '@/app/lib/api';
 import { toastError, toastSuccess } from '@/app/lib/toast';
-import type { Company, CreateDealPayload, Pipeline, Stage } from '@/app/lib/types';
+import type { CreateDealPayload, Pipeline, Stage } from '@/app/lib/types';
 import type { CreateDefaults } from '@/app/lib/actions/types';
 
 const EMPTY_DRAFT: CreateDealPayload = {
@@ -23,7 +23,7 @@ const EMPTY_DRAFT: CreateDealPayload = {
 
 /**
  * Shell-owned deal quick-create. Reuses {@link NewDealDialog} and mirrors the DealsBrowser create
- * flow, lazily loading companies, pipelines and per-pipeline stages the first time it opens so the app
+ * flow, lazily loading pipelines and per-pipeline stages the first time it opens so the app
  * shell never fetches them just to render the launcher. Context prefills (company, pipeline) are seeded
  * on each open and remain fully editable.
  */
@@ -40,7 +40,6 @@ export default function DealCreateContainer({
     const t = useTranslations('Actions');
 
     const [loaded, setLoaded] = useState(false);
-    const [companies, setCompanies] = useState<Company[]>([]);
     const [pipelines, setPipelines] = useState<Pipeline[]>([]);
     const [stagesByPipeline, setStagesByPipeline] = useState<Record<number, Stage[]>>({});
     const stagesByPipelineRef = useRef<Record<number, Stage[]>>({});
@@ -56,12 +55,8 @@ export default function DealCreateContainer({
         if (!open || loaded) return;
         let cancelled = false;
         void (async () => {
-            const [nextCompanies, nextPipelines] = await Promise.all([
-                getCompanies().catch(() => [] as Company[]),
-                getPipelines().catch(() => [] as Pipeline[]),
-            ]);
+            const nextPipelines = await getPipelines().catch(() => [] as Pipeline[]);
             if (cancelled) return;
-            setCompanies(nextCompanies);
             setPipelines(nextPipelines);
             const entries = await Promise.all(
                 nextPipelines.map(
@@ -138,7 +133,6 @@ export default function DealCreateContainer({
             onOpenChange={handleOpenChange}
             payload={payload}
             setPayload={setPayload}
-            companies={companies}
             pipelines={pipelines}
             stagesByPipeline={stagesByPipeline}
             isCreating={creating}

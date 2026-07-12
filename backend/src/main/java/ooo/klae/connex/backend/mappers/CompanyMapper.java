@@ -1,10 +1,16 @@
 package ooo.klae.connex.backend.mappers;
 
+import java.time.LocalDateTime;
+import java.util.List;
+
 import org.apache.ibatis.annotations.Param;
 
 import ooo.klae.connex.backend.beans.Company;
-import ooo.klae.connex.backend.dto.CompanyEngagementTouchDto;
-import java.util.List;
+import ooo.klae.connex.backend.dto.CompanyEngagementCountsDto;
+import ooo.klae.connex.backend.dto.CompanyEngagementUserDto;
+import ooo.klae.connex.backend.dto.CompanyEngagementWeekBucketDto;
+import ooo.klae.connex.backend.dto.CompanyRevenueCurrencyDto;
+import ooo.klae.connex.backend.dto.RelationshipScoreAggregateDto;
 
 /**
  * mapper interface for {@code Company} persistence.
@@ -14,6 +20,9 @@ import java.util.List;
 
 public interface CompanyMapper {
     List<Company> getAllCompanies(int workspaceId);
+    List<RelationshipScoreAggregateDto> getRelationshipScoreAggregates(
+            @Param("workspaceId") int workspaceId,
+            @Param("reference") LocalDateTime reference);
     List<Company> getCompaniesPage(@Param("workspaceId") int workspaceId, @Param("query") String query,
             @Param("sort") String sort, @Param("dir") String dir,
             @Param("industry") List<String> industry, @Param("noIndustry") boolean noIndustry,
@@ -21,10 +30,33 @@ public interface CompanyMapper {
     long countCompanies(@Param("workspaceId") int workspaceId, @Param("query") String query,
             @Param("industry") List<String> industry, @Param("noIndustry") boolean noIndustry,
             @Param("ids") List<Integer> ids);
-    List<CompanyEngagementTouchDto> getCompanyEngagementTouches(
+    CompanyEngagementCountsDto getCompanyEngagementCounts(
+            @Param("workspaceId") int workspaceId,
+            @Param("companyId") int companyId);
+    List<CompanyEngagementUserDto> getCompanyEngagementUsers(
             @Param("workspaceId") int workspaceId,
             @Param("companyId") int companyId,
-            @Param("currentUserId") int currentUserId);
+            @Param("limit") int limit);
+    List<CompanyEngagementWeekBucketDto> getCompanyEngagementWeeks(
+            @Param("workspaceId") int workspaceId,
+            @Param("companyId") int companyId,
+            @Param("windowStart") String windowStart,
+            @Param("windowEnd") String windowEnd);
+    List<CompanyRevenueCurrencyDto> getCompanyRevenueByCurrency(
+            @Param("workspaceId") int workspaceId,
+            @Param("companyId") int companyId);
+    List<Company> getSegmentCompaniesPage(@Param("workspaceId") int workspaceId,
+            @Param("segmentIdsJson") String segmentIdsJson, @Param("query") String query,
+            @Param("sort") String sort, @Param("dir") String dir,
+            @Param("industry") List<String> industry, @Param("noIndustry") boolean noIndustry,
+            @Param("limit") int limit, @Param("offset") int offset);
+    long countSegmentCompanies(@Param("workspaceId") int workspaceId,
+            @Param("segmentIdsJson") String segmentIdsJson, @Param("query") String query,
+            @Param("industry") List<String> industry, @Param("noIndustry") boolean noIndustry);
+    List<Integer> getSegmentCompanyIdsFiltered(@Param("workspaceId") int workspaceId,
+            @Param("segmentIdsJson") String segmentIdsJson, @Param("query") String query,
+            @Param("industry") List<String> industry, @Param("noIndustry") boolean noIndustry,
+            @Param("limit") int limit);
     /** Ids only for the same filter predicates as {@code getCompaniesPage}; backs "select all matching". */
     List<Integer> getCompanyIdsFiltered(@Param("workspaceId") int workspaceId, @Param("query") String query,
             @Param("industry") List<String> industry, @Param("noIndustry") boolean noIndustry,

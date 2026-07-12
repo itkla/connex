@@ -39,6 +39,7 @@ import ooo.klae.connex.backend.dto.DealPipelineValueDto;
 import ooo.klae.connex.backend.dto.DealRationaleDto;
 import ooo.klae.connex.backend.dto.DealRevenueSeriesDto;
 import ooo.klae.connex.backend.dto.DealRescheduleRequest;
+import ooo.klae.connex.backend.dto.DealRiskAnalyticsDto;
 import ooo.klae.connex.backend.dto.DealRiskDto;
 import ooo.klae.connex.backend.dto.DealStageDistributionDto;
 import ooo.klae.connex.backend.dto.DealStageHistoryDto;
@@ -376,15 +377,22 @@ public class DealController {
         return DealDto.from(dealService.getDealById(id));
     }
 
-    /** Risk assessment for every at-risk open deal in the active workspace, highest risk first. */
+    /** Risk assessment for a bounded requested deal set, highest risk first. */
     @GetMapping("/risk")
     public List<DealRiskDto> getDealRisks(
             @RequestParam(required = false) List<Integer> ids) {
         List<Integer> normalizedIds = normalizeIds(ids, "ids");
-        int workspaceId = workspaceService.getCurrentWorkspaceId();
-        return normalizedIds == null
-            ? dealRiskService.assessWorkspace(workspaceId)
-            : dealRiskService.assessDeals(workspaceId, normalizedIds);
+        if (normalizedIds == null) {
+            throw new BadRequestException("ids are required for interactive deal-risk assessment");
+        }
+        return dealRiskService.assessDeals(
+            workspaceService.getCurrentWorkspaceId(), normalizedIds);
+    }
+
+    /** Compact bounded risk totals for analytics. */
+    @GetMapping("/risk/analytics")
+    public DealRiskAnalyticsDto getDealRiskAnalytics() {
+        return dealRiskService.analytics(workspaceService.getCurrentWorkspaceId());
     }
 
     /** Risk assessment for a single deal; {@code level} is {@code "none"} when it is not at risk. */

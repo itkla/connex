@@ -143,6 +143,7 @@
     "viewAllSr": "View all {label}"
   },
   "ContactsChangeCompanyDialog": {
+    "companySearchFailed": "Couldn't search companies. Try again.",
     "titleSingle": "Change company",
     "titleMultiple": "Change company for {count} contacts",
     "descriptionSingle": "Associate {name} with a company.",
@@ -204,6 +205,7 @@
     "toastFailedLoadDeals": "Failed to load deals"
   },
   "ContactsNewContactDialog": {
+    "companySearchFailed": "Couldn't search companies. Try again.",
     "dialogTitle": "New contact",
     "description": "Add a person to your contacts. These contacts will be shared with all users of this organization.",
     "name": "Name",

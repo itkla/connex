@@ -44,7 +44,7 @@ import {
     closeDeal,
     reopenDeal,
     updateDeal,
-    getCompanyCatalog,
+    getCompaniesByIds,
     getDealsPage,
     getDealMetrics,
     getDealFacets,
@@ -212,7 +212,6 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
     const [stagesByPipeline, setStagesByPipeline] = useState<Record<number, Stage[]>>({});
 
     useEffect(() => {
-        getCompanyCatalog().then(setCompanies).catch(() => setCompanies([]));
         getPipelines().then(async (ps) => {
             setPipelines(ps);
             const entries = await Promise.all(
@@ -221,6 +220,20 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
             setStagesByPipeline(Object.fromEntries(entries));
         }).catch(() => setPipelines([]));
     }, []);
+
+    useEffect(() => {
+        let cancelled = false;
+        getCompaniesByIds(deals.flatMap((deal) => deal.company == null ? [] : [deal.company]))
+            .then((loaded) => {
+                if (!cancelled) setCompanies(loaded);
+            })
+            .catch(() => {
+                if (!cancelled) setCompanies([]);
+            });
+        return () => {
+            cancelled = true;
+        };
+    }, [deals]);
 
     useEffect(() => {
         let cancelled = false;
@@ -790,8 +803,8 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
 
         const companyOptions = dealFacets.companies.flatMap((facet) => {
             if (facet.key === FILTER_EMPTY) return [{ key: FILTER_EMPTY, label: t('freelancer') }];
-            const company = companyById.get(Number(facet.key));
-            return company ? [{ key: facet.key, label: company.name }] : [];
+            const label = facet.label ?? companyById.get(Number(facet.key))?.name;
+            return label ? [{ key: facet.key, label }] : [];
         });
         if (companyOptions.length > 0) result.push({ key: 'company', label: t('columnCompany'), options: companyOptions });
 
@@ -1119,7 +1132,6 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
                     selectedDeals={selectedDeals}
                     drafts={drafts}
                     updateDraft={updateDraft}
-                    companies={companies}
                     pipelines={pipelines}
                     stagesByPipeline={stagesByPipeline}
                     isSaving={isSaving}
@@ -1131,7 +1143,6 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
                     onOpenChange={closeNewDialog}
                     payload={newPayload}
                     setPayload={setNewPayload}
-                    companies={companies}
                     pipelines={pipelines}
                     stagesByPipeline={stagesByPipeline}
                     isCreating={isCreating}

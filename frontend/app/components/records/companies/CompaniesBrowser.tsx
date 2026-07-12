@@ -37,10 +37,9 @@ import QuickEditCompanySheet, { type CompanyDraft } from '@/app/components/recor
 import { createCompany, createContact, updateContact, getUsers, updateCompany, getCompaniesPage, getCompaniesSegmentPage, getCompanyEngagement, getCompanyFacets, getCompanyIds, getCompanySegmentIds, getCompanyTemperatures, isFieldError, getSegmentFields, getTags, bulkAddTagToCompanies, bulkRemoveTagFromCompanies, bulkDeleteCompanies } from '@/app/lib/api';
 import BulkTagDialog from '@/app/components/records/BulkTagDialog';
 import { notifyBulkResult } from '@/app/lib/bulkToast';
-import { uploadCompanyLogo, uploadContactPicture, pickDominantCurrency, parseMysqlDateTime } from '@/app/lib/utils';
+import { uploadCompanyLogo, uploadContactPicture } from '@/app/lib/utils';
 import { type Company, type CompaniesPageParams, type CompanyEngagement, type CompanyFacets, type CreateCompanyPayload, type UpdateCompanyPayload, type User, type CompanyMetrics, type LoadStatus, type RelationshipTemperature, type SavedView, type SavedViewConfig, type SegmentDefinition, type SegmentFields, type Tag } from '@/app/lib/types';
 import TemperaturePill from '@/app/components/records/TemperaturePill';
-import { isDealClosed } from '@/app/components/records/deals/dealOutcome';
 
 function toDraft(c: Company): CompanyDraft {
     return {
@@ -62,48 +61,21 @@ function diffDraft(original: CompanyDraft, draft: CompanyDraft): boolean {
     );
 }
 
-function metricsFromEngagement(engagement: CompanyEngagement, users: User[], now: number): CompanyMetrics {
-    const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
-    const firstWeekStart = now - 11 * WEEK_MS;
-    const weeklyEngagement = Array.from({ length: 12 }, (_, index) => ({
-        weekStart: firstWeekStart + index * WEEK_MS,
-        count: 0,
-        activities: 0,
-        tasks: 0,
-        notes: 0,
-    }));
-    const relatedUserIds = new Set<number>();
-    for (const touch of engagement.touches) {
-        const timestamp = parseMysqlDateTime(touch.touchedAt);
-        const index = Math.floor((timestamp - firstWeekStart) / WEEK_MS);
-        if (Number.isFinite(timestamp) && index >= 0 && index < weeklyEngagement.length) {
-            weeklyEngagement[index][touch.kind]++;
-            weeklyEngagement[index].count++;
-        }
-        if (touch.userId != null) relatedUserIds.add(touch.userId);
-    }
-    const currency = pickDominantCurrency(engagement.deals);
-    let pastRevenue = 0;
-    let projectedRevenue = 0;
-    for (const deal of engagement.deals) {
-        if ((deal.currency || 'USD') !== currency) continue;
-        if (isDealClosed(deal)) {
-            pastRevenue += deal.value ?? 0;
-        } else {
-            projectedRevenue += deal.value ?? 0;
-        }
-    }
+function metricsFromEngagement(engagement: CompanyEngagement, users: User[]): CompanyMetrics {
+    const relatedUserIds = new Set(engagement.relatedUserIds);
     return {
         persons: engagement.persons,
+        personCount: engagement.personCount,
         relatedUsers: users.filter((user) => relatedUserIds.has(user.id)),
-        pastRevenue,
-        projectedRevenue,
-        currency,
-        numDeals: engagement.deals.length,
-        numTasks: engagement.touches.filter((touch) => touch.kind === 'tasks').length,
-        numActivities: engagement.touches.filter((touch) => touch.kind === 'activities').length,
-        numNotes: engagement.touches.filter((touch) => touch.kind === 'notes').length,
-        weeklyEngagement,
+        relatedUserCount: engagement.relatedUserCount,
+        pastRevenue: engagement.pastRevenue,
+        projectedRevenue: engagement.projectedRevenue,
+        currency: engagement.currency,
+        numDeals: engagement.numDeals,
+        numTasks: engagement.numTasks,
+        numActivities: engagement.numActivities,
+        numNotes: engagement.numNotes,
+        weeklyEngagement: engagement.weeklyEngagement,
     };
 }
 
@@ -365,7 +337,7 @@ export default function CompaniesBrowser({ savedViews }: { savedViews: SavedView
                 if (generation !== metricsGenerationRef.current
                     || metricsRequestRef.current.get(companyId) !== requestId) return;
                 setMetricsByCompanyId((current) =>
-                    new Map(current).set(companyId, metricsFromEngagement(engagement, users, Date.now())));
+                    new Map(current).set(companyId, metricsFromEngagement(engagement, users)));
                 setMetricsStatusByCompanyId((current) => new Map(current).set(companyId, 'ready'));
             })
             .catch(() => {

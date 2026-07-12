@@ -171,6 +171,8 @@ public interface DealMapper {
     long countDealsByPipelineId(@Param("workspaceId") int workspaceId, @Param("pipelineId") int pipelineId);
     List<Deal> getDealsByStageId(@Param("workspaceId") int workspaceId, @Param("stageId") int stageId);
     List<Deal> getDealsByCompanyId(@Param("workspaceId") int workspaceId, @Param("companyId") int companyId);
+    List<Deal> getDealsByCompanyIdPage(@Param("workspaceId") int workspaceId,
+            @Param("companyId") int companyId, @Param("limit") int limit);
     List<Deal> getDealsByPersonId(@Param("workspaceId") int workspaceId, @Param("personId") int personId);
     List<Deal> getDealsByTagId(@Param("workspaceId") int workspaceId, @Param("tagId") int tagId);
     Deal getDealById(@Param("workspaceId") int workspaceId, @Param("id") int id);
@@ -182,6 +184,10 @@ public interface DealMapper {
     List<Deal> getDealsForDedup(int workspaceId);
     /** Deals in the workspace with the given ids (workspace-scoped); for export of a selected view. */
     List<Deal> getByIds(@Param("workspaceId") int workspaceId, @Param("ids") List<Integer> ids);
+    List<Deal> getDealsByCompanyIds(@Param("workspaceId") int workspaceId,
+            @Param("companyIds") List<Integer> companyIds);
+    List<Integer> getRiskCandidateIds(@Param("workspaceId") int workspaceId,
+            @Param("limit") int limit);
     int insert(Deal deal);
     /** Bulk-insert deals in one statement (CSV import); generated ids are written back to each bean. */
     int insertBatch(List<Deal> deals);

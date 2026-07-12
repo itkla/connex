@@ -101,6 +101,18 @@
       AND (visibility = 'workspace' OR author_id = #{currentUserId})
   </select>
 
+  <select id="getWorkspaceNotesPage" resultMap="NoteResult">
+    SELECT <include refid="noteColumns"/> FROM note
+    WHERE workspace_id = #{workspaceId} AND visibility = 'workspace'
+    ORDER BY created_at DESC, id DESC
+    LIMIT #{limit} OFFSET #{offset}
+  </select>
+
+  <select id="countWorkspaceNotes" resultType="long">
+    SELECT COUNT(*) FROM note
+    WHERE workspace_id = #{workspaceId} AND visibility = 'workspace'
+  </select>
+
   <select id="getVisibleNotesByPersonId" resultMap="NoteResult">
     SELECT <include refid="noteColumns"/> FROM note
     WHERE workspace_id = #{workspaceId} AND person_id = #{personId}
@@ -120,6 +132,37 @@
     WHERE workspace_id = #{workspaceId} AND author_id = #{authorId}
       AND (visibility = 'workspace' OR author_id = #{currentUserId})
     ORDER BY created_at DESC, id DESC
+  </select>
+
+  <select id="getVisibleCompanyNotes" resultMap="NoteResult">
+    SELECT <include refid="noteColumns"/> FROM note n
+    WHERE n.workspace_id = #{workspaceId}
+      AND (n.visibility = 'workspace' OR n.author_id = #{currentUserId})
+      AND (EXISTS (SELECT 1 FROM person p
+          WHERE p.workspace_id = #{workspaceId} AND p.id = n.person_id AND p.company_id = #{companyId})
+        OR EXISTS (SELECT 1 FROM deal d
+          WHERE d.workspace_id = #{workspaceId} AND d.id = n.deal_id AND d.company_id = #{companyId}))
+    ORDER BY n.updated_at DESC, n.id DESC
+    LIMIT #{limit}
+  </select>
+
+  <select id="getWorkspaceNotesByCompanyIds" resultMap="NoteResult">
+    SELECT <include refid="noteColumns"/> FROM note n
+    WHERE n.workspace_id = #{workspaceId} AND n.visibility = 'workspace'
+      AND (EXISTS (SELECT 1 FROM person p
+          WHERE p.id = n.person_id
+            AND (p.workspace_id = #{workspaceId}
+              OR EXISTS (SELECT 1 FROM person_share ps
+                JOIN workspace vws ON vws.id = ps.workspace_id
+                JOIN workspace ows ON ows.id = p.workspace_id AND ows.org_id = vws.org_id
+                WHERE ps.person_id = p.id AND ps.workspace_id = #{workspaceId}))
+            AND p.company_id IN
+            <foreach item="id" collection="companyIds" open="(" separator="," close=")">#{id}</foreach>)
+        OR EXISTS (SELECT 1 FROM deal d
+          WHERE d.workspace_id = #{workspaceId} AND d.id = n.deal_id
+            AND d.company_id IN
+            <foreach item="id" collection="companyIds" open="(" separator="," close=")">#{id}</foreach>))
+    ORDER BY n.created_at DESC, n.id DESC
   </select>
 
   <select id="getNotesReferencing" resultMap="NoteResult">
