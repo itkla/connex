@@ -375,16 +375,24 @@ class RecordListControllerTest {
         DealRevenueSeriesDto series = new DealRevenueSeriesDto(List.of(), List.of());
         List<DealStageDistributionDto> distribution = List.of(
             new DealStageDistributionDto(1, 2, 3, 4.0, 5, 6.0));
-        when(dealService.getRevenueTimeseries("JPY", null)).thenReturn(series);
+        when(dealService.getRevenueTimeseries("JPY", "America/New_York")).thenReturn(series);
+        when(dealService.getRevenueTimeseries("JPY", "+09:00")).thenReturn(series);
         when(dealService.getStageDistribution("JPY")).thenReturn(distribution);
 
-        assertSame(series, controller.getRevenueTimeseries("JPY", null));
+        assertSame(series, controller.getRevenueTimeseries("JPY", "America/New_York", null));
+        assertSame(series, controller.getRevenueTimeseries("JPY", null, "+09:00"));
         assertSame(distribution, controller.getStageDistribution("JPY"));
 
-        controller.getRevenueTimeseries("  ", null);
+        controller.getRevenueTimeseries("  ", null, null);
         controller.getStageDistribution("");
 
-        verify(dealService).getRevenueTimeseries("JPY", null);
+        assertThrows(BadRequestException.class,
+            () -> controller.getRevenueTimeseries("JPY", "UTC", "+09:00"));
+        assertThrows(BadRequestException.class,
+            () -> controller.getRevenueTimeseries("JPY", "Mars/Olympus", null));
+
+        verify(dealService).getRevenueTimeseries("JPY", "America/New_York");
+        verify(dealService).getRevenueTimeseries("JPY", "+09:00");
         verify(dealService).getStageDistribution("JPY");
         verify(dealService).getRevenueTimeseries(null, null);
         verify(dealService).getStageDistribution(null);
@@ -450,16 +458,18 @@ class RecordListControllerTest {
     }
 
     @Test
-    void dealClosingSoonListValidatesDaysAndBoundsLimit() {
+    void dealClosingSoonListValidatesAndDelegatesBounds() {
         DealController controller = new DealController(
             dealService, bulkOperationService, dealRiskService, dealBriefService,
             dealRiskRationaleService, workspaceService);
-        when(dealService.getClosingSoonDeals(7, 100)).thenReturn(List.of());
+        when(dealService.getClosingSoonDeals(7, 6)).thenReturn(List.of());
 
-        assertTrue(controller.getClosingSoonDeals(7, 500).isEmpty());
+        assertEquals(List.of(), controller.getClosingSoonDeals(7, 6));
         assertThrows(BadRequestException.class, () -> controller.getClosingSoonDeals(0, 6));
+        assertThrows(BadRequestException.class, () -> controller.getClosingSoonDeals(7, 0));
+        assertThrows(BadRequestException.class, () -> controller.getClosingSoonDeals(7, 51));
 
-        verify(dealService).getClosingSoonDeals(7, 100);
+        verify(dealService).getClosingSoonDeals(7, 6);
         verify(dealService, never()).getClosingSoonDeals(0, 6);
     }
 

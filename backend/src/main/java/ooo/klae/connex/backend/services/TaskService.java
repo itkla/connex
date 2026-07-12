@@ -46,6 +46,7 @@ public class TaskService {
     private final AuditService auditService;
     private final WorkspaceService workspaceService;
     private final AuthService authService;
+    private final UserCalendarService userCalendarService;
     private final NotificationChangePublisher notificationChanges;
     private final ReferenceService referenceService;
     private final NotificationDelivery notificationDelivery;
@@ -83,7 +84,7 @@ public class TaskService {
     }
 
     public TaskSummaryDto getTaskSummary() {
-        return taskMapper.taskSummary(workspaceService.getCurrentWorkspaceId());
+        return taskMapper.taskSummary(workspaceService.getCurrentWorkspaceId(), userCalendarService.today());
     }
 
     public List<Task> getUpcomingOpenTasks(int limit) {

@@ -42,7 +42,7 @@ import {
     getDealTop,
     getTeamLeaderboard,
 } from '@/app/lib/api';
-import { browserTimezoneOffset, formatCompactCurrency } from '@/app/lib/utils';
+import { formatCompactCurrency } from '@/app/lib/utils';
 import DealsAging from '@/app/components/records/deals/DealsAging';
 import TopDeals from '@/app/components/records/deals/TopDeals';
 
@@ -85,6 +85,21 @@ const EMPTY_KPIS: DealKpis = {
 };
 
 const EMPTY_TOP: DealTop = { topOpen: [], topWon: [] };
+const EMPTY_REVENUE: DealRevenueSeries = { closed: [], projected: [] };
+const EMPTY_PIPELINE_VALUES: DealPipelineValue[] = [];
+const EMPTY_AGING: DealAging[] = [];
+const EMPTY_STAGE_DISTRIBUTION: DealStageDistribution[] = [];
+const EMPTY_ACTIVITY_BUCKETS: ActivityVolumeBucket[] = [];
+const EMPTY_LEADERBOARD: TeamLeaderboardEntry[] = [];
+
+type ScopedData<T> = {
+    scope: string;
+    data: T;
+};
+
+function dataForScope<T>(value: ScopedData<T>, scope: string, empty: T): T {
+    return value.scope === scope ? value.data : empty;
+}
 
 function Reveal({
     children,
@@ -111,6 +126,7 @@ function Reveal({
 
 export default function AnalyticsBoard({
     dealMetrics,
+    timezone,
     pipelines,
     stages,
     users,
@@ -122,6 +138,7 @@ export default function AnalyticsBoard({
     warmth,
 }: {
     dealMetrics: DealMetrics;
+    timezone: string;
     pipelines: Pipeline[];
     stages: Stage[];
     users: User[];
@@ -164,51 +181,81 @@ export default function AnalyticsBoard({
     const currency =
         selectedCurrency && currencyCounts.has(selectedCurrency) ? selectedCurrency : dominantCurrency;
 
-    const [kpis, setKpis] = useState<DealKpis>(EMPTY_KPIS);
-    const [pipelineValues, setPipelineValues] = useState<DealPipelineValue[]>([]);
-    const [aging, setAging] = useState<DealAging[]>([]);
-    const [topDeals, setTopDeals] = useState<DealTop>(EMPTY_TOP);
-    const [revenueSeries, setRevenueSeries] = useState<DealRevenueSeries>({ closed: [], projected: [] });
-    const [stageDistribution, setStageDistribution] = useState<DealStageDistribution[]>([]);
-    const [activityBuckets, setActivityBuckets] = useState<ActivityVolumeBucket[]>([]);
-    const [leaderboard, setLeaderboard] = useState<TeamLeaderboardEntry[]>([]);
+    const dealRangeScope = `${currency}:${range}`;
+    const revenueScope = `${currency}:${timezone}`;
+    const [kpisResult, setKpisResult] = useState<ScopedData<DealKpis>>({ scope: '', data: EMPTY_KPIS });
+    const [pipelineResult, setPipelineResult] = useState<ScopedData<DealPipelineValue[]>>({
+        scope: '',
+        data: EMPTY_PIPELINE_VALUES,
+    });
+    const [agingResult, setAgingResult] = useState<ScopedData<DealAging[]>>({ scope: '', data: EMPTY_AGING });
+    const [topDealsResult, setTopDealsResult] = useState<ScopedData<DealTop>>({ scope: '', data: EMPTY_TOP });
+    const [revenueResult, setRevenueResult] = useState<ScopedData<DealRevenueSeries>>({
+        scope: '',
+        data: EMPTY_REVENUE,
+    });
+    const [stageResult, setStageResult] = useState<ScopedData<DealStageDistribution[]>>({
+        scope: '',
+        data: EMPTY_STAGE_DISTRIBUTION,
+    });
+    const [activityResult, setActivityResult] = useState<ScopedData<ActivityVolumeBucket[]>>({
+        scope: '',
+        data: EMPTY_ACTIVITY_BUCKETS,
+    });
+    const [leaderboardResult, setLeaderboardResult] = useState<ScopedData<TeamLeaderboardEntry[]>>({
+        scope: '',
+        data: EMPTY_LEADERBOARD,
+    });
+
+    const kpis = dataForScope(kpisResult, dealRangeScope, EMPTY_KPIS);
+    const pipelineValues = dataForScope(pipelineResult, dealRangeScope, EMPTY_PIPELINE_VALUES);
+    const aging = dataForScope(agingResult, currency, EMPTY_AGING);
+    const topDeals = dataForScope(topDealsResult, currency, EMPTY_TOP);
+    const revenueSeries = dataForScope(revenueResult, revenueScope, EMPTY_REVENUE);
+    const stageDistribution = dataForScope(stageResult, currency, EMPTY_STAGE_DISTRIBUTION);
+    const activityBuckets = dataForScope(activityResult, range, EMPTY_ACTIVITY_BUCKETS);
+    const leaderboard = dataForScope(leaderboardResult, range, EMPTY_LEADERBOARD);
 
     useEffect(() => {
         let cancelled = false;
         getDealKpis(currency, range)
-            .then((data) => { if (!cancelled) setKpis(data); })
-            .catch(() => { if (!cancelled) setKpis(EMPTY_KPIS); });
+            .then((data) => { if (!cancelled) setKpisResult({ scope: dealRangeScope, data }); })
+            .catch(() => { if (!cancelled) setKpisResult({ scope: dealRangeScope, data: EMPTY_KPIS }); });
         getDealPipelineValue(currency, range)
-            .then((data) => { if (!cancelled) setPipelineValues(data); })
-            .catch(() => { if (!cancelled) setPipelineValues([]); });
+            .then((data) => { if (!cancelled) setPipelineResult({ scope: dealRangeScope, data }); })
+            .catch(() => {
+                if (!cancelled) setPipelineResult({ scope: dealRangeScope, data: EMPTY_PIPELINE_VALUES });
+            });
         return () => { cancelled = true; };
-    }, [currency, range]);
+    }, [currency, dealRangeScope, range]);
 
     useEffect(() => {
         let cancelled = false;
-        getDealRevenueTimeseries(currency, browserTimezoneOffset())
-            .then((data) => { if (!cancelled) setRevenueSeries(data); })
-            .catch(() => { if (!cancelled) setRevenueSeries({ closed: [], projected: [] }); });
+        getDealRevenueTimeseries(currency, timezone)
+            .then((data) => { if (!cancelled) setRevenueResult({ scope: revenueScope, data }); })
+            .catch(() => { if (!cancelled) setRevenueResult({ scope: revenueScope, data: EMPTY_REVENUE }); });
         getDealStageDistribution(currency)
-            .then((data) => { if (!cancelled) setStageDistribution(data); })
-            .catch(() => { if (!cancelled) setStageDistribution([]); });
+            .then((data) => { if (!cancelled) setStageResult({ scope: currency, data }); })
+            .catch(() => {
+                if (!cancelled) setStageResult({ scope: currency, data: EMPTY_STAGE_DISTRIBUTION });
+            });
         getDealAging(currency)
-            .then((data) => { if (!cancelled) setAging(data); })
-            .catch(() => { if (!cancelled) setAging([]); });
+            .then((data) => { if (!cancelled) setAgingResult({ scope: currency, data }); })
+            .catch(() => { if (!cancelled) setAgingResult({ scope: currency, data: EMPTY_AGING }); });
         getDealTop(currency)
-            .then((data) => { if (!cancelled) setTopDeals(data); })
-            .catch(() => { if (!cancelled) setTopDeals(EMPTY_TOP); });
+            .then((data) => { if (!cancelled) setTopDealsResult({ scope: currency, data }); })
+            .catch(() => { if (!cancelled) setTopDealsResult({ scope: currency, data: EMPTY_TOP }); });
         return () => { cancelled = true; };
-    }, [currency]);
+    }, [currency, revenueScope, timezone]);
 
     useEffect(() => {
         let cancelled = false;
         getActivityVolume(range)
-            .then((data) => { if (!cancelled) setActivityBuckets(data); })
-            .catch(() => { if (!cancelled) setActivityBuckets([]); });
+            .then((data) => { if (!cancelled) setActivityResult({ scope: range, data }); })
+            .catch(() => { if (!cancelled) setActivityResult({ scope: range, data: EMPTY_ACTIVITY_BUCKETS }); });
         getTeamLeaderboard(range)
-            .then((data) => { if (!cancelled) setLeaderboard(data); })
-            .catch(() => { if (!cancelled) setLeaderboard([]); });
+            .then((data) => { if (!cancelled) setLeaderboardResult({ scope: range, data }); })
+            .catch(() => { if (!cancelled) setLeaderboardResult({ scope: range, data: EMPTY_LEADERBOARD }); });
         return () => { cancelled = true; };
     }, [range]);
 
@@ -341,7 +388,7 @@ export default function AnalyticsBoard({
                         </div>
                     }
                 >
-                    <RevenueTrend series={revenueSeries} currency={currency} range={range} />
+                    <RevenueTrend series={revenueSeries} currency={currency} range={range} timezone={timezone} />
                 </Panel>
             </Reveal>
 

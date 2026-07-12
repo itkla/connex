@@ -13,13 +13,13 @@ import {
 import { LoaderCircle } from 'lucide-react';
 
 import {
-    Sheet,
-    SheetContent,
-    SheetDescription,
-    SheetFooter,
-    SheetHeader,
-    SheetTitle,
-} from '@/components/ui/sheet';
+    Drawer,
+    DrawerContent,
+    DrawerDescription,
+    DrawerFooter,
+    DrawerHeader,
+    DrawerTitle,
+} from '@/components/ui/drawer';
 import { Button } from '@/components/ui/button';
 
 import { getAttachments } from '@/app/lib/api';
@@ -85,21 +85,21 @@ export default function FileDetailSheet({
     const recordLabel = a?.entityLabel || t('unknownRecord');
 
     return (
-        <Sheet open={attachment !== null} onOpenChange={onOpenChange}>
-            <SheetContent side="right" className="w-full gap-0 p-0 sm:max-w-md">
+        <Drawer open={attachment !== null} onOpenChange={onOpenChange} swipeDirection="right">
+            <DrawerContent className="w-full gap-0 p-0 sm:max-w-md">
                 {a && (
                     <>
-                        <SheetHeader className="flex-row items-center gap-3 border-b border-border pr-12">
+                        <DrawerHeader className="flex-row items-center gap-3 border-b border-border pr-12">
                             <FileGlyph attachment={a} kind={kind} />
                             <div className="min-w-0">
-                                <SheetTitle className="truncate" title={a.fileName}>
+                                <DrawerTitle className="truncate" title={a.fileName}>
                                     {a.fileName}
-                                </SheetTitle>
-                                <SheetDescription className="truncate">
+                                </DrawerTitle>
+                                <DrawerDescription className="truncate">
                                     {t(KIND_LABEL_KEY[kind])} · {formatFileSize(a.size)}
-                                </SheetDescription>
+                                </DrawerDescription>
                             </div>
-                        </SheetHeader>
+                        </DrawerHeader>
 
                         <div className="flex-1 space-y-6 overflow-y-auto p-4">
                             <Preview attachment={a} kind={kind} noPreview={t('noPreview')} Icon={Icon} />
@@ -182,7 +182,7 @@ export default function FileDetailSheet({
                             </div>
                         </div>
 
-                        <SheetFooter className="flex-row gap-2 border-t border-border">
+                        <DrawerFooter className="flex-row gap-2 border-t border-border">
                             <Button asChild variant="outline" className="flex-1">
                                 <a href={safeHref(a.url)} target="_blank" rel="noopener noreferrer">
                                     <ArrowTopRightOnSquareIcon className="size-4" />
@@ -206,11 +206,11 @@ export default function FileDetailSheet({
                             >
                                 <TrashIcon className="size-4" />
                             </Button>
-                        </SheetFooter>
+                        </DrawerFooter>
                     </>
                 )}
-            </SheetContent>
-        </Sheet>
+            </DrawerContent>
+        </Drawer>
     );
 }
 

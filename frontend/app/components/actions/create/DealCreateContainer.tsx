@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 
 import NewDealDialog from '@/app/components/records/deals/NewDealDialog';
-import { createDeal, getPipelines, getStagesByPipelineId } from '@/app/lib/api';
+import { createDeal, getPipelines, getStagesByPipelineId, isFieldError } from '@/app/lib/api';
 import { toastError, toastSuccess } from '@/app/lib/toast';
 import type { CreateDealPayload, Pipeline, Stage } from '@/app/lib/types';
 import type { CreateDefaults } from '@/app/lib/actions/types';
@@ -123,6 +123,7 @@ export default function DealCreateContainer({
             }, 900);
         } catch (err) {
             setCreating(false);
+            if (isFieldError(err)) throw err;
             toastError(err instanceof Error ? err.message : t('feedback.createFailed'));
         }
     };

@@ -123,6 +123,25 @@ class PipelineMapperTest extends AbstractMapperTest {
         assertEquals(stage2.getId(), stages.get(2).getId());
     }
 
+    @Test
+    void getAllStagesReturnsOwnedStagesInPipelineAndPositionOrder() {
+        Pipeline secondPipeline = newPipeline();
+        Stage secondLater = newStage(secondPipeline, 2);
+        Stage secondEarlier = newStage(secondPipeline, 0);
+        Pipeline firstPipeline = newPipeline();
+        Stage first = newStage(firstPipeline, 1);
+
+        List<Integer> createdIds = List.of(first.getId(), secondEarlier.getId(), secondLater.getId());
+        List<Stage> stages = pipelineMapper.getAllStages(workspace.getId()).stream()
+            .filter(stage -> createdIds.contains(stage.getId()))
+            .toList();
+
+        List<Integer> expected = firstPipeline.getId() < secondPipeline.getId()
+            ? List.of(first.getId(), secondEarlier.getId(), secondLater.getId())
+            : List.of(secondEarlier.getId(), secondLater.getId(), first.getId());
+        assertEquals(expected, stages.stream().map(Stage::getId).toList());
+    }
+
     /**
      * Updates a stage and checks if the new values are persisted.
      */
@@ -199,6 +218,8 @@ class PipelineMapperTest extends AbstractMapperTest {
         assertNull(pipelineMapper.getPipelineById(workspace.getId(), foreignPipeline.getId()));
         assertFalse(pipelineMapper.pipelineExists(workspace.getId(), foreignPipeline.getId()));
         assertNull(pipelineMapper.getStageById(workspace.getId(), foreignStage.getId()));
+        assertTrue(pipelineMapper.getAllStages(workspace.getId()).stream()
+            .noneMatch(stage -> stage.getId() == foreignStage.getId()));
         assertTrue(pipelineMapper.getStagesByPipelineId(workspace.getId(), foreignPipeline.getId()).isEmpty());
         assertTrue(pipelineMapper.getAllPipelines(workspace.getId()).stream().noneMatch(p -> p.getId() == foreignPipeline.getId()));
         assertTrue(pipelineMapper.getAllPipelines(workspace.getId()).stream().anyMatch(p -> p.getId() == mine.getId()));

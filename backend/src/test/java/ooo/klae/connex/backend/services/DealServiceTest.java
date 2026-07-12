@@ -200,6 +200,29 @@ class DealServiceTest extends AbstractServiceTest {
     }
 
     @Test
+    void revenueTimeseriesUsesHistoricalIanaRulesPerClosedTimestamp() {
+        Workspace activeWorkspace = newWorkspace();
+        workspaceMapper.addMember(activeWorkspace.getId(), currentUser.getId(), "owner");
+        workspace = activeWorkspace;
+        authenticateAs(currentUser, workspace.getId());
+        Pipeline pipeline = newPipeline();
+        Stage stage = newStage(pipeline, 0);
+        Company company = newCompany();
+        updateChartDeal(newDeal(pipeline, stage, company),
+            100.0, 90.0, "USD", true, null, "2026-01-01 04:30:00");
+        updateChartDeal(newDeal(pipeline, stage, company),
+            20.0, 10.0, "USD", false, "2026-07-15", "2026-07-01 03:30:00");
+
+        DealRevenueSeriesDto utc = dealService.getRevenueTimeseries("USD", "UTC");
+        DealRevenueSeriesDto newYork = dealService.getRevenueTimeseries("USD", "America/New_York");
+
+        assertEquals(Map.of("2026-1", 90.0, "2026-7", 10.0), monthTotals(utc.closed()));
+        assertEquals(Map.of("2025-12", 90.0, "2026-6", 10.0), monthTotals(newYork.closed()));
+        assertEquals(Map.of("2026-1", 90.0, "2026-7", 10.0),
+            monthTotals(dealService.getRevenueTimeseries("USD", "+09:00").closed()));
+    }
+
+    @Test
     void analyticsAggregatesAssembleSeriesSummariesAndStayWorkspaceScoped() {
         Workspace activeWorkspace = newWorkspace();
         workspaceMapper.addMember(activeWorkspace.getId(), currentUser.getId(), "owner");
@@ -266,6 +289,8 @@ class DealServiceTest extends AbstractServiceTest {
         assertEquals(List.of(open.getId()), top.topOpen().stream().map(DealSummaryDto::getId).toList());
         assertEquals(List.of(currentWon.getId(), previousWon.getId()),
             top.topWon().stream().map(DealSummaryDto::getId).toList());
+        assertEquals(List.of(80.0, 40.0),
+            top.topWon().stream().map(DealSummaryDto::getActualValue).toList());
         assertTrue(top.topWon().stream().allMatch(summary -> company.getName().equals(summary.getCompanyName())));
     }
 
@@ -399,6 +424,7 @@ class DealServiceTest extends AbstractServiceTest {
         DealSummaryDto summary = dealService.getDealSummary(deal.getId());
 
         assertEquals(deal.getId(), summary.getId());
+        assertEquals(deal.getActualValue(), summary.getActualValue(), 0.0001);
         assertEquals(pipeline.getName(), summary.getPipelineName());
         assertEquals(stage.getName(), summary.getStageName());
         assertEquals(company.getName(), summary.getCompanyName());
@@ -509,6 +535,41 @@ class DealServiceTest extends AbstractServiceTest {
         List<DealStageHistory> history = dealService.getStageHistory(created.getId());
         assertEquals(1, history.size());
         assertEquals(stage.getId(), history.get(0).getStageId());
+    }
+
+    @Test
+    void create_rejectsForeignRelatedRecords() {
+        Workspace foreignWorkspace = newWorkspace();
+        Pipeline foreignPipeline = newPipelineIn(foreignWorkspace);
+        Stage foreignStage = newStageIn(foreignWorkspace, foreignPipeline);
+        Company foreignCompany = newCompanyIn(foreignWorkspace);
+        Deal draft = dealDraft(foreignPipeline, foreignStage, foreignCompany);
+
+        assertThrows(BadRequestException.class, () -> dealService.create(draft));
+    }
+
+    @Test
+    void create_rejectsStageOutsideSelectedPipeline() {
+        Pipeline selectedPipeline = newPipeline();
+        Pipeline otherPipeline = newPipeline();
+        Stage otherStage = newStage(otherPipeline, 0);
+        Deal draft = dealDraft(selectedPipeline, otherStage, newCompany());
+
+        assertThrows(BadRequestException.class, () -> dealService.create(draft));
+    }
+
+    @Test
+    void update_rejectsForeignCompanyWithoutMutatingDeal() {
+        Pipeline pipeline = newPipeline();
+        Stage stage = newStage(pipeline, 0);
+        Company originalCompany = newCompany();
+        Deal deal = newDeal(pipeline, stage, originalCompany);
+        Workspace foreignWorkspace = newWorkspace();
+        deal.setCompanyId(newCompanyIn(foreignWorkspace).getId());
+
+        assertThrows(BadRequestException.class, () -> dealService.update(deal.getId(), deal));
+
+        assertEquals(originalCompany.getId(), dealMapper.getDealById(workspace.getId(), deal.getId()).getCompanyId());
     }
 
     @Test
@@ -758,6 +819,17 @@ class DealServiceTest extends AbstractServiceTest {
         return person;
     }
 
+    private Deal dealDraft(Pipeline pipeline, Stage stage, Company company) {
+        Deal deal = new Deal();
+        deal.setName("Deal " + unique());
+        deal.setValue(1000.0);
+        deal.setCurrency("JPY");
+        deal.setPipelineId(pipeline.getId());
+        deal.setStageId(stage.getId());
+        deal.setCompanyId(company.getId());
+        return deal;
+    }
+
     private Deal updateDeal(Deal deal, String name, double value, double actualValue,
             String currency, Boolean won) {
         deal.setName(name);
@@ -826,6 +898,6 @@ class DealServiceTest extends AbstractServiceTest {
 
     private Map<String, Double> monthTotals(List<DealMonthTotalDto> totals) {
         return totals.stream().collect(Collectors.toMap(
-            total -> total.year() + "-" + total.month(), DealMonthTotalDto::total));
+            total -> total.year() + "-" + total.month(), total -> total.total().doubleValue()));
     }
 }

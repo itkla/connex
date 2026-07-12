@@ -287,19 +287,19 @@ class ActivityMapperTest extends AbstractMapperTest {
     }
 
     @Test
-    void activityVolumeUsesCanonicalTypesBucketsAndWorkspaceScope() {
+    void activityVolumeNormalizesTypeCasingAndPreservesWorkspaceScope() {
         Workspace target = newWorkspace();
         User user = newUser();
-        Activity call = build("Call", "call", null, null, user);
+        Activity call = build("call", "call", null, null, user);
         call.setWorkspaceId(target.getId());
         activityMapper.insert(call);
-        Activity email = build("Email", "email", null, null, user);
+        Activity email = build("  eMAIL  ", "email", null, null, user);
         email.setWorkspaceId(target.getId());
         activityMapper.insert(email);
-        Activity meeting = build("Meeting", "meeting", null, null, user);
+        Activity meeting = build("MEETING", "meeting", null, null, user);
         meeting.setWorkspaceId(target.getId());
         activityMapper.insert(meeting);
-        Activity note = build("Note", "note", null, null, user);
+        Activity note = build("nOtE", "note", null, null, user);
         note.setWorkspaceId(target.getId());
         activityMapper.insert(note);
         Activity other = build("Demo", "other", null, null, user);

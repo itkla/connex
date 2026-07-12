@@ -75,9 +75,19 @@ const CSRF_RETRY_EXEMPT_MUTATION_PATHS = new Set([
     "/api/auth/forgot-password",
     "/api/auth/reset-password",
     "/api/auth/sso/link/confirm",
-    "/api/auth/verify-email/confirm",
     "/api/auth/webauthn/authenticate",
 ]);
+
+const RECENT_AUTHENTICATION_REQUIRED_CODE = "RECENT_AUTHENTICATION_REQUIRED";
+export const PASSKEY_ENROLLMENT_REQUIRED_CODE = "PASSKEY_ENROLLMENT_REQUIRED";
+export const PASSKEY_STEP_UP_CANCELED_CODE = "PASSKEY_STEP_UP_CANCELED";
+export const PASSKEY_STEP_UP_FAILED_CODE = "PASSKEY_STEP_UP_FAILED";
+const PASSKEY_STEP_UP_PATHS = new Set([
+    "/api/auth/webauthn/step-up/options",
+    "/api/auth/webauthn/step-up",
+]);
+let passkeyStepUpPromise: Promise<void> | null = null;
+let passkeyStepUpGeneration = 0;
 
 function isCsrfRetryExemptMutation(path: string): boolean {
     const pathname = path.split("?")[0];
@@ -92,6 +102,7 @@ async function requestJson<T>(
     const locale = clientLocale();
     const workspaceId = clientWorkspaceId();
     const mutating = isMutating(init.method);
+    const stepUpGeneration = passkeyStepUpGeneration;
 
     const send = (csrf: Record<string, string>) =>
         fetch(`${API_BASE}${path}`, {
@@ -106,11 +117,20 @@ async function requestJson<T>(
             },
         });
 
-    let res = await send(mutating ? await csrfHeader() : {});
+    const sendWithCsrfRetry = async () => {
+        let response = await send(mutating ? await csrfHeader() : {});
+        if (await shouldRetryWithFreshCsrf(path, response, mutating)) {
+            response = await send(await csrfHeader(true));
+        }
+        return response;
+    };
 
-    // A stale or missing CSRF token surfaces as 403; refresh it once and retry.
-    if (await shouldRetryWithFreshCsrf(path, res, mutating)) {
-        res = await send(await csrfHeader(true));
+    let res = await sendWithCsrfRetry();
+    if (await shouldRetryAfterPasskeyStepUp(path, res, mutating)) {
+        if (stepUpGeneration === passkeyStepUpGeneration) {
+            await performPasskeyStepUp();
+        }
+        res = await sendWithCsrfRetry();
     }
 
     if (!res.ok) {
@@ -124,6 +144,70 @@ async function requestJson<T>(
     }
 
     return JSON.parse(text) as T;
+}
+
+async function shouldRetryAfterPasskeyStepUp(path: string, res: Response, mutating: boolean): Promise<boolean> {
+    const pathname = path.split("?")[0];
+    if (!mutating || res.status !== 403 || typeof window === "undefined" || PASSKEY_STEP_UP_PATHS.has(pathname)) {
+        return false;
+    }
+    const text = await res.clone().text().catch(() => "");
+    if (!text) return false;
+    try {
+        const data = JSON.parse(text) as unknown;
+        return isStringRecord(data) && data.code === RECENT_AUTHENTICATION_REQUIRED_CODE;
+    } catch {
+        return false;
+    }
+}
+
+async function performPasskeyStepUp(): Promise<void> {
+    if (passkeyStepUpPromise) {
+        return passkeyStepUpPromise;
+    }
+    const ceremony = completePasskeyStepUp();
+    passkeyStepUpPromise = ceremony;
+    try {
+        await ceremony;
+    } finally {
+        if (passkeyStepUpPromise === ceremony) {
+            passkeyStepUpPromise = null;
+        }
+    }
+}
+
+async function completePasskeyStepUp(): Promise<void> {
+    try {
+        const { startAuthentication } = await import('@simplewebauthn/browser');
+        const optionsJSON = await beginPasskeyStepUp();
+        const credential = await startAuthentication({ optionsJSON });
+        await finishPasskeyStepUp(credential);
+        passkeyStepUpGeneration += 1;
+    } catch (error) {
+        if (error instanceof ApiError && error.code === PASSKEY_ENROLLMENT_REQUIRED_CODE) throw error;
+        if (error instanceof ApiError) {
+            throw new ApiError("Passkey verification failed", error.status, PASSKEY_STEP_UP_FAILED_CODE);
+        }
+        const canceled = errorName(error) === "NotAllowedError" || errorCauseName(error) === "NotAllowedError";
+        throw new ApiError(
+            canceled ? "Passkey verification was canceled" : "Passkey verification failed",
+            400,
+            canceled ? PASSKEY_STEP_UP_CANCELED_CODE : PASSKEY_STEP_UP_FAILED_CODE,
+        );
+    }
+}
+
+function errorName(value: unknown): string | null {
+    if (value instanceof Error) return value.name;
+    if (typeof value === "object" && value !== null && "name" in value && typeof value.name === "string") {
+        return value.name;
+    }
+    return null;
+}
+
+function errorCauseName(value: unknown): string | null {
+    if (typeof value !== "object" || value === null || !("cause" in value)) return null;
+    return errorName(value.cause);
 }
 
 async function shouldRetryWithFreshCsrf(path: string, res: Response, mutating: boolean): Promise<boolean> {
@@ -543,8 +627,18 @@ export function getPasskeys(init: RequestInit = {}) {
     return getJson<Types.Passkey[]>("/api/auth/webauthn/credentials", { cache: "no-store", ...init });
 }
 
-export function beginPasskeyRegistration() {
-    return postJson<PublicKeyCredentialCreationOptionsJSON>("/api/auth/webauthn/register/options");
+export function getPasskeyRegistrationRequirements(init: RequestInit = {}) {
+    return getJson<{ currentPasswordRequired: boolean }>(
+        "/api/auth/webauthn/register/requirements",
+        { cache: "no-store", ...init },
+    );
+}
+
+export function beginPasskeyRegistration(currentPassword?: string) {
+    return postJson<PublicKeyCredentialCreationOptionsJSON>(
+        "/api/auth/webauthn/register/options",
+        currentPassword ? { currentPassword } : {},
+    );
 }
 
 export function finishPasskeyRegistration(label: string, credential: RegistrationResponseJSON) {
@@ -560,6 +654,14 @@ export function beginPasskeyAuthentication() {
 
 export function finishPasskeyAuthentication(credential: AuthenticationResponseJSON) {
     return postJson<Types.AuthResponse>("/api/auth/webauthn/authenticate", credential);
+}
+
+export function beginPasskeyStepUp() {
+    return postJson<PublicKeyCredentialRequestOptionsJSON>("/api/auth/webauthn/step-up/options");
+}
+
+export function finishPasskeyStepUp(credential: AuthenticationResponseJSON) {
+    return postJson<Types.AuthResponse>("/api/auth/webauthn/step-up", credential);
 }
 
 export function renamePasskey(credentialId: string, label: string) {
@@ -1372,11 +1474,11 @@ export function getDealFacets(init: RequestInit = {}) {
 
 /**
  * Server-computed monthly revenue trend (realized won revenue by scheduled close month, projected
- * by expected-close month) over ALL deals, optionally scoped to a currency. Replaces client-side
- * bucketing of a bounded page slice.
+ * by expected-close month) over ALL deals, optionally scoped to a currency. The IANA timezone
+ * applies the viewer's historical offset rules when bucketing realized revenue.
  */
-export function getDealRevenueTimeseries(currency?: string, tzOffset?: string, init: RequestInit = {}) {
-    return getJson<Types.DealRevenueSeries>(`/api/deals/revenue-timeseries${buildQuery({ currency, tzOffset })}`, init);
+export function getDealRevenueTimeseries(currency?: string, timezone?: string, init: RequestInit = {}) {
+    return getJson<Types.DealRevenueSeries>(`/api/deals/revenue-timeseries${buildQuery({ currency, timezone })}`, init);
 }
 
 const withCookie = (cookie: string | null): RequestInit => (cookie ? { headers: { cookie }, cache: "no-store" } : {});
@@ -1430,10 +1532,7 @@ export function getDealClosingSoonCountFromCookie(cookie: string | null, days?: 
 }
 
 export function getDealClosingSoonFromCookie(cookie: string | null, days = 7, limit = 6) {
-    return getJson<Types.Deal[]>(
-        `/api/deals/closing-soon${buildQuery({ days, limit })}`,
-        withCookie(cookie),
-    );
+    return getJson<Types.Deal[]>(`/api/deals/closing-soon${buildQuery({ days, limit })}`, withCookie(cookie));
 }
 
 /** Server-computed activity counts by type per time bucket over {@code range} (30d/90d/12m). */
@@ -1770,6 +1869,15 @@ export function getPipelines(init: RequestInit = {}) {
 
 export function getPipelinesFromCookie(cookie: string | null) {
     return safeWithCookie<Types.Pipeline>((init) => getPipelines(init), cookie);
+}
+
+/** Returns every pipeline stage visible in the active workspace in one request. */
+export function getAllStages(init: RequestInit = {}) {
+    return getJson<Types.Stage[]>(`/api/pipelines/stages`, init);
+}
+
+export function getAllStagesFromCookie(cookie: string | null) {
+    return safeWithCookie<Types.Stage>((init) => getAllStages(init), cookie);
 }
 
 export function getStagesByPipelineId(pipelineId: number, init: RequestInit = {}) {

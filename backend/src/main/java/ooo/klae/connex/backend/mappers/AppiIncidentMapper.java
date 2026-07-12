@@ -22,5 +22,10 @@ public interface AppiIncidentMapper {
     List<AppiIncidentScopeDto> scopeFromAudit(@Param("orgId") int orgId,
         @Param("occurredFrom") LocalDateTime occurredFrom,
         @Param("occurredTo") LocalDateTime occurredTo,
-        @Param("limit") int limit);
+        @Param("limit") int limit,
+        @Param("offset") long offset);
+
+    long countScopeFromAudit(@Param("orgId") int orgId,
+        @Param("occurredFrom") LocalDateTime occurredFrom,
+        @Param("occurredTo") LocalDateTime occurredTo);
 }

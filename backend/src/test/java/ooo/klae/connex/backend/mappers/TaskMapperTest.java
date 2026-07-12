@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.mappers;
 
+import java.time.LocalDate;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -292,6 +293,7 @@ class TaskMapperTest extends AbstractMapperTest {
 
     @Test
     void taskSummaryCountsStatusesAndDueWindowsWithinWorkspace() {
+        LocalDate today = LocalDate.of(2026, 7, 10);
         Workspace target = newWorkspace();
         User user = newUser();
         Task todo = build("todo", user, null, null);
@@ -309,18 +311,20 @@ class TaskMapperTest extends AbstractMapperTest {
         Task farFuture = build("far-future", user, null, null);
         farFuture.setWorkspaceId(target.getId());
         taskMapper.insert(farFuture);
+        Workspace foreignWorkspace = newWorkspace();
         Task foreign = build("foreign", user, null, null);
+        foreign.setWorkspaceId(foreignWorkspace.getId());
         taskMapper.insert(foreign);
-        jdbcTemplate.update("UPDATE task SET due_date = DATE_SUB(CURDATE(), INTERVAL 1 DAY) WHERE id = ?", todo.getId());
-        jdbcTemplate.update("UPDATE task SET due_date = DATE_ADD(CURDATE(), INTERVAL 7 DAY) WHERE id = ?", inProgress.getId());
-        jdbcTemplate.update("UPDATE task SET due_date = CURDATE() WHERE id = ?", done.getId());
-        jdbcTemplate.update("UPDATE task SET due_date = DATE_ADD(CURDATE(), INTERVAL 8 DAY) WHERE id = ?", farFuture.getId());
-        jdbcTemplate.update("UPDATE task SET due_date = CURDATE() WHERE id = ?", foreign.getId());
+        jdbcTemplate.update("UPDATE task SET due_date = ? WHERE id = ?", today.minusDays(1), todo.getId());
+        jdbcTemplate.update("UPDATE task SET due_date = ? WHERE id = ?", today.plusDays(7), inProgress.getId());
+        jdbcTemplate.update("UPDATE task SET due_date = ? WHERE id = ?", today, done.getId());
+        jdbcTemplate.update("UPDATE task SET due_date = ? WHERE id = ?", today.plusDays(8), farFuture.getId());
+        jdbcTemplate.update("UPDATE task SET due_date = ? WHERE id = ?", today, foreign.getId());
 
-        TaskSummaryDto summary = taskMapper.taskSummary(target.getId());
+        TaskSummaryDto summary = taskMapper.taskSummary(target.getId(), today);
 
         assertEquals(new TaskSummaryDto(2, 1, 1, 1, 1), summary);
-        assertEquals(new TaskSummaryDto(1, 0, 0, 0, 1), taskMapper.taskSummary(workspace.getId()));
+        assertEquals(new TaskSummaryDto(1, 0, 0, 0, 1), taskMapper.taskSummary(foreignWorkspace.getId(), today));
     }
 
     private Workspace newWorkspace() {

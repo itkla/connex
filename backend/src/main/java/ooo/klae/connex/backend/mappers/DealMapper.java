@@ -11,12 +11,15 @@ import ooo.klae.connex.backend.dto.DealBucketValueDto;
 import ooo.klae.connex.backend.dto.DealCurrencyMetricsDto;
 import ooo.klae.connex.backend.dto.DealKpiClosedBucketDto;
 import ooo.klae.connex.backend.dto.DealKpiPeriodDto;
-import ooo.klae.connex.backend.dto.DealMonthTotalDto;
+import ooo.klae.connex.backend.dto.DealMonthDecimalTotalDto;
 import ooo.klae.connex.backend.dto.DealPipelineValueDto;
 import ooo.klae.connex.backend.dto.DealPrimaryContactDto;
+import ooo.klae.connex.backend.dto.DealRevenueMonthBoundary;
+import ooo.klae.connex.backend.dto.DealRevenueRangeDto;
 import ooo.klae.connex.backend.dto.DealStageDistributionDto;
 import ooo.klae.connex.backend.dto.DealTouchDto;
 import ooo.klae.connex.backend.dto.FacetCount;
+import java.time.LocalDate;
 import java.util.List;
 
 /**
@@ -107,12 +110,20 @@ public interface DealMapper {
         @Param("riskIds") List<Integer> riskIds,
         @Param("limit") int limit
     );
-    List<DealMonthTotalDto> revenueClosedByMonth(
+    DealRevenueRangeDto revenueClosedEventRange(
+        @Param("workspaceId") int workspaceId,
+        @Param("currency") String currency
+    );
+    List<DealMonthDecimalTotalDto> revenueClosedByBoundaries(
         @Param("workspaceId") int workspaceId,
         @Param("currency") String currency,
-        @Param("tzOffset") String tzOffset
+        @Param("boundaries") List<DealRevenueMonthBoundary> boundaries
     );
-    List<DealMonthTotalDto> revenueProjectedByMonth(
+    List<DealMonthDecimalTotalDto> revenueScheduledClosedByMonth(
+        @Param("workspaceId") int workspaceId,
+        @Param("currency") String currency
+    );
+    List<DealMonthDecimalTotalDto> revenueProjectedByMonth(
         @Param("workspaceId") int workspaceId,
         @Param("currency") String currency
     );
@@ -152,9 +163,17 @@ public interface DealMapper {
         @Param("workspaceId") int workspaceId,
         @Param("currency") String currency
     );
-    long closingSoonCount(@Param("workspaceId") int workspaceId, @Param("days") int days);
-    List<Deal> closingSoonDeals(@Param("workspaceId") int workspaceId,
-            @Param("days") int days, @Param("limit") int limit);
+    long closingSoonCount(
+        @Param("workspaceId") int workspaceId,
+        @Param("today") LocalDate today,
+        @Param("days") int days
+    );
+    List<Deal> closingSoonDeals(
+        @Param("workspaceId") int workspaceId,
+        @Param("today") LocalDate today,
+        @Param("days") int days,
+        @Param("limit") int limit
+    );
     List<Deal> topOpenDeals(
         @Param("workspaceId") int workspaceId,
         @Param("currency") String currency

@@ -17,7 +17,8 @@ public record ResolvedMailConfig(
         boolean auth,
         int connectionTimeoutMs,
         int timeoutMs,
-        int writeTimeoutMs) {
+        int writeTimeoutMs,
+        boolean workspaceSupplied) {
 
     /**
      * Whether this config has the minimum needed to send (a host and a from address).
@@ -34,6 +35,6 @@ public record ResolvedMailConfig(
                 + ", password=<redacted>, fromAddress=" + fromAddress + ", fromName=" + fromName
                 + ", starttls=" + starttls + ", ssl=" + ssl + ", auth=" + auth
                 + ", connectionTimeoutMs=" + connectionTimeoutMs + ", timeoutMs=" + timeoutMs
-                + ", writeTimeoutMs=" + writeTimeoutMs + "]";
+                + ", writeTimeoutMs=" + writeTimeoutMs + ", workspaceSupplied=" + workspaceSupplied + "]";
     }
 }

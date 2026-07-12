@@ -539,6 +539,7 @@ export type DealSummary = {
     id: number;
     name: string;
     value: number;
+    actualValue: number;
     currency: string;
     status: string;
     expectedCloseDate?: string | null;

@@ -31,12 +31,12 @@ import { GripVertical } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import {
-    Sheet,
-    SheetContent,
-    SheetDescription,
-    SheetHeader,
-    SheetTitle,
-} from '@/components/ui/sheet';
+    Drawer,
+    DrawerContent,
+    DrawerDescription,
+    DrawerHeader,
+    DrawerTitle,
+} from '@/components/ui/drawer';
 import { toastError } from '@/app/lib/toast';
 import { resetDashboardLayout, saveDashboardLayout } from '@/app/lib/api';
 import type { DashboardWidgetInstance, DashboardWidgetType } from '@/app/lib/types';
@@ -321,12 +321,12 @@ export default function DashboardGrid({
                 </DndContext>
             )}
 
-            <Sheet open={trayOpen} onOpenChange={setTrayOpen}>
-                <SheetContent side="right" className="w-full gap-0 sm:max-w-sm">
-                    <SheetHeader>
-                        <SheetTitle>{t('trayTitle')}</SheetTitle>
-                        <SheetDescription>{t('trayDescription')}</SheetDescription>
-                    </SheetHeader>
+            <Drawer open={trayOpen} onOpenChange={setTrayOpen} swipeDirection="right">
+                <DrawerContent className="w-full gap-0 sm:max-w-sm">
+                    <DrawerHeader>
+                        <DrawerTitle>{t('trayTitle')}</DrawerTitle>
+                        <DrawerDescription>{t('trayDescription')}</DrawerDescription>
+                    </DrawerHeader>
                     <div className="flex flex-col gap-2 overflow-y-auto p-4">
                         {availableTypes.length === 0 ? (
                             <p className="rounded-xl border border-dashed border-border px-4 py-8 text-center text-sm text-muted-foreground">
@@ -349,8 +349,8 @@ export default function DashboardGrid({
                             ))
                         )}
                     </div>
-                </SheetContent>
-            </Sheet>
+                </DrawerContent>
+            </Drawer>
         </div>
     );
 }

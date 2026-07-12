@@ -12,6 +12,7 @@ import {
 import {
     getActivitiesPage,
     getActivityVolumeFromCookie,
+    getAllStagesFromCookie,
     getAttachmentFacets,
     getAttachmentsPage,
     getCompanyById,
@@ -32,7 +33,6 @@ import {
     getNotifications,
     getPipelinesFromCookie,
     getRecentMovesFromCookie,
-    getStagesByPipelineId,
     getTaskSummaryFromCookie,
     getTasksPage,
     getUpcomingTasksFromCookie,
@@ -58,7 +58,6 @@ import type {
     Notification,
     Page,
     RelationshipDashboard,
-    Stage,
     Task,
     TaskSummary as TaskSummaryCounts,
     TeamLeaderboardEntry,
@@ -172,11 +171,12 @@ export default async function Dashboard() {
 
     const init = { headers: { cookie: cookie ?? '' } } as const;
     const emptyFacets: AttachmentFacets = { sources: [], kinds: [], tags: [], orphaned: 0, total: 0, totalSize: 0 };
-    const [contacts, deals, pipelines, tasks, upcomingTasks, activities, notes, users, recentFiles, fileFacets, recentMoves, introSuggestions, relationshipDashboard, layoutResponse, notifications, dealMetrics, companiesPage, contactsPage, activityVolume, leaderboard, taskSummary, upcomingActivityCount, closingSoonCount, closingSoonDeals] =
+    const [contacts, deals, pipelines, stages, tasks, upcomingTasks, activities, notes, users, recentFiles, fileFacets, recentMoves, introSuggestions, relationshipDashboard, layoutResponse, notifications, dealMetrics, companiesPage, contactsPage, activityVolume, leaderboard, taskSummary, upcomingActivityCount, closingSoonCount, closingSoonDeals] =
         await Promise.all([
             getContactsPage({ page: 1, size: 100 }, init).then((response) => response.items),
             getDealsPage({ page: 1, size: 100 }, init).then((response) => response.items),
             getPipelinesFromCookie(cookie),
+            getAllStagesFromCookie(cookie),
             getTasksPage({ page: 1, size: 100 }, init).then((response) => response.items),
             getUpcomingTasksFromCookie(cookie, 4).catch(() => [] as Task[]),
             getActivitiesPage({ page: 1, size: 100 }, init).then((response) => response.items),
@@ -220,10 +220,6 @@ export default async function Dashboard() {
             .map((companyId) => getCompanyById(companyId, init).catch(() => null)),
     ).then((items) => items.filter(present));
 
-    const stages = (
-        await Promise.all(pipelines.map((pipeline) => getStagesByPipelineId(pipeline.id, init).catch(() => [] as Stage[])))
-    ).flat();
-
     const companyById = new Map(
         [...insightCompanies, ...relatedCompanies].map((company) => [company.id, company]),
     );
@@ -246,7 +242,9 @@ export default async function Dashboard() {
     const [dealKpis, pipelineValues, revenueSeries, stageDistribution] = await Promise.all([
         getDealKpisFromCookie(cookie, currency, DASHBOARD_RANGE).catch(() => EMPTY_DEAL_KPIS),
         getDealPipelineValueFromCookie(cookie, currency, DASHBOARD_RANGE).catch(() => [] as DealPipelineValue[]),
-        getDealRevenueTimeseries(currency, undefined, init).catch(() => ({ closed: [], projected: [] }) as DealRevenueSeries),
+        getDealRevenueTimeseries(currency, user.timezone, init).catch(
+            () => ({ closed: [], projected: [] }) as DealRevenueSeries,
+        ),
         getDealStageDistribution(currency, init).catch(() => [] as DealStageDistribution[]),
     ]);
 
@@ -299,7 +297,9 @@ export default async function Dashboard() {
             </div>
         ),
         analyticsKpis: <AnalyticsKpisWidget kpis={dealKpis} currency={currency} />,
-        revenueTrend: chartCard(<RevenueTrend series={revenueSeries} currency={currency} range={DASHBOARD_RANGE} />),
+        revenueTrend: chartCard(
+            <RevenueTrend series={revenueSeries} currency={currency} range={DASHBOARD_RANGE} timezone={user.timezone} />,
+        ),
         winRate: chartCard(<WinRateDonut kpis={dealKpis} currency={currency} />),
         pipelineValue: chartCard(
             <PipelineValue values={pipelineValues} pipelines={pipelines} currency={currency} />,

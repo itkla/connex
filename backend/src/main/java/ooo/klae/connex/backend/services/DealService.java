@@ -1,7 +1,10 @@
 package ooo.klae.connex.backend.services;
 
+import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.YearMonth;
+import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
@@ -13,6 +16,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.TreeMap;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -43,9 +47,13 @@ import ooo.klae.connex.backend.dto.DealKpiClosedBucketDto;
 import ooo.klae.connex.backend.dto.DealKpiPeriodDto;
 import ooo.klae.connex.backend.dto.DealKpisDto;
 import ooo.klae.connex.backend.dto.DealMetricsDto;
-import ooo.klae.connex.backend.dto.DealRiskDto;
+import ooo.klae.connex.backend.dto.DealMonthDecimalTotalDto;
+import ooo.klae.connex.backend.dto.DealMonthTotalDto;
 import ooo.klae.connex.backend.dto.DealPipelineValueDto;
 import ooo.klae.connex.backend.dto.DealPrimaryContactDto;
+import ooo.klae.connex.backend.dto.DealRevenueMonthBoundary;
+import ooo.klae.connex.backend.dto.DealRevenueRangeDto;
+import ooo.klae.connex.backend.dto.DealRiskDto;
 import ooo.klae.connex.backend.dto.DealRevenueSeriesDto;
 import ooo.klae.connex.backend.dto.DealStageDistributionDto;
 import ooo.klae.connex.backend.dto.DealSummaryDto;
@@ -87,6 +95,7 @@ public class DealService {
     private final AuditService auditService;
     private final WorkspaceService workspaceService;
     private final AuthService authService;
+    private final UserCalendarService userCalendarService;
     private final RuleTriggerPublisher ruleTriggers;
     private final NotificationChangePublisher notificationChanges;
     private final CustomFieldValueService customFieldValueService;
@@ -109,6 +118,7 @@ public class DealService {
     private static final int KPI_SERIES_BUCKETS = 12;
     private static final int MAX_RISK_CANDIDATES = 1000;
     private static final int MAX_BOARD_DEALS = 2000;
+    private static final int MAX_REVENUE_MONTHS = 1200;
 
     private static final Set<String> ALL_RISK_LEVELS = Set.of("high", "medium", "low", "none");
 
@@ -352,12 +362,70 @@ public class DealService {
         return dealMapper.getDealsByPipelineId(workspaceId, pipelineId);
     }
 
-    public DealRevenueSeriesDto getRevenueTimeseries(String currency, String tzOffset) {
+    public DealRevenueSeriesDto getRevenueTimeseries(String currency, String timezone) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
+        ZoneId zone = ZoneId.of(TimezoneSupport.validate(timezone, "UTC"));
+        DealRevenueRangeDto range = dealMapper.revenueClosedEventRange(workspaceId, currency);
+        List<DealRevenueMonthBoundary> boundaries = revenueMonthBoundaries(range, zone);
+        List<DealMonthDecimalTotalDto> timezoneBucketed = boundaries.isEmpty()
+            ? List.of()
+            : dealMapper.revenueClosedByBoundaries(workspaceId, currency, boundaries);
         return new DealRevenueSeriesDto(
-            dealMapper.revenueClosedByMonth(workspaceId, currency, tzOffset),
-            dealMapper.revenueProjectedByMonth(workspaceId, currency)
+            revenueClosedByMonth(
+                dealMapper.revenueScheduledClosedByMonth(workspaceId, currency),
+                timezoneBucketed),
+            publicMonthTotals(dealMapper.revenueProjectedByMonth(workspaceId, currency))
         );
+    }
+
+    static List<DealMonthTotalDto> revenueClosedByMonth(
+            List<DealMonthDecimalTotalDto> scheduled,
+            List<DealMonthDecimalTotalDto> timezoneBucketed) {
+        Map<YearMonth, BigDecimal> totals = new TreeMap<>();
+        for (DealMonthDecimalTotalDto month : scheduled) {
+            totals.merge(
+                YearMonth.of(month.year(), month.month()), month.total(), BigDecimal::add);
+        }
+        for (DealMonthDecimalTotalDto month : timezoneBucketed) {
+            totals.merge(
+                YearMonth.of(month.year(), month.month()), month.total(), BigDecimal::add);
+        }
+        return totals.entrySet().stream()
+            .map(entry -> new DealMonthTotalDto(
+                entry.getKey().getYear(), entry.getKey().getMonthValue(), entry.getValue()))
+            .toList();
+    }
+
+    private static List<DealMonthTotalDto> publicMonthTotals(
+            List<DealMonthDecimalTotalDto> totals) {
+        return totals.stream()
+            .map(total -> new DealMonthTotalDto(
+                total.year(), total.month(), total.total()))
+            .toList();
+    }
+
+    static List<DealRevenueMonthBoundary> revenueMonthBoundaries(DealRevenueRangeDto range, ZoneId timezone) {
+        if (range == null || range.earliest() == null || range.latest() == null) {
+            return List.of();
+        }
+        YearMonth first = YearMonth.from(
+            range.earliest().atZone(ZoneOffset.UTC).withZoneSameInstant(timezone));
+        YearMonth last = YearMonth.from(
+            range.latest().atZone(ZoneOffset.UTC).withZoneSameInstant(timezone));
+        long months = java.time.temporal.ChronoUnit.MONTHS.between(first, last) + 1;
+        if (months > MAX_REVENUE_MONTHS) {
+            throw new BadRequestException("Revenue history spans too many calendar months");
+        }
+        List<DealRevenueMonthBoundary> boundaries = new ArrayList<>((int) months);
+        for (YearMonth month = first; !month.isAfter(last); month = month.plusMonths(1)) {
+            LocalDateTime startUtc = month.atDay(1).atStartOfDay(timezone)
+                .withZoneSameInstant(ZoneOffset.UTC).toLocalDateTime();
+            LocalDateTime endUtc = month.plusMonths(1).atDay(1).atStartOfDay(timezone)
+                .withZoneSameInstant(ZoneOffset.UTC).toLocalDateTime();
+            boundaries.add(new DealRevenueMonthBoundary(
+                month.getYear(), month.getMonthValue(), startUtc, endUtc));
+        }
+        return List.copyOf(boundaries);
     }
 
     public List<DealStageDistributionDto> getStageDistribution(String currency) {
@@ -429,11 +497,13 @@ public class DealService {
     }
 
     public CountDto getClosingSoonCount(int days) {
-        return new CountDto(dealMapper.closingSoonCount(workspaceService.getCurrentWorkspaceId(), days));
+        return new CountDto(dealMapper.closingSoonCount(
+            workspaceService.getCurrentWorkspaceId(), userCalendarService.today(), days));
     }
 
     public List<Deal> getClosingSoonDeals(int days, int limit) {
-        return dealMapper.closingSoonDeals(workspaceService.getCurrentWorkspaceId(), days, limit);
+        return dealMapper.closingSoonDeals(
+            workspaceService.getCurrentWorkspaceId(), userCalendarService.today(), days, limit);
     }
 
     private static List<Double> emptyKpiSeries() {
@@ -540,7 +610,7 @@ public class DealService {
         }
         String stageName = null;
         if (deal.getStageId() != null) {
-            Stage stage = pipelineMapper.getStageById(workspaceId, deal.getStageId());
+            Stage stage = pipelineMapper.getVisibleStageById(workspaceId, deal.getStageId());
             if (stage != null) stageName = stage.getName();
         }
         String companyName = null;
@@ -553,7 +623,8 @@ public class DealService {
             User owner = userMapper.getUserById(deal.getOwnerId());
             if (owner != null) ownerName = owner.getDisplayName();
         }
-        return new DealSummaryDto(deal.getId(), deal.getName(), deal.getValue(), deal.getCurrency(),
+        return new DealSummaryDto(
+            deal.getId(), deal.getName(), deal.getValue(), deal.getActualValue(), deal.getCurrency(),
             status, deal.getExpectedCloseDate(), stageName, pipelineName, companyName, ownerName);
     }
 
@@ -568,6 +639,7 @@ public class DealService {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         deal.setWorkspaceId(workspaceId);
         deal.setOwnerId(authService.getCurrentUser().getId());
+        requireVisibleRelations(workspaceId, deal);
         reconcileCloseState(deal);
         if (deal.getStageId() != null) {
             deal.setPosition(dealMapper.nextDealPosition(workspaceId, deal.getStageId()));
@@ -600,6 +672,7 @@ public class DealService {
         deal.setId(id);
         deal.setWorkspaceId(workspaceId);
         deal.setOwnerId(before.getOwnerId());
+        requireVisibleRelations(workspaceId, deal);
         Integer beforeStage = before.getStageId();
         Integer newStage = deal.getStageId();
         boolean stageChanged = newStage != null && (beforeStage == null || !beforeStage.equals(newStage));
@@ -621,6 +694,25 @@ public class DealService {
         }
         syncClosedReasonMentions(workspaceId, deal);
         return hydrateReferences(workspaceId, deal);
+    }
+
+    private void requireVisibleRelations(int workspaceId, Deal deal) {
+        Integer pipelineId = deal.getPipelineId();
+        if (pipelineId == null || !pipelineMapper.pipelineExists(workspaceId, pipelineId)) {
+            throw new BadRequestException("Deal pipeline is not visible in this workspace");
+        }
+        Stage stage = deal.getStageId() == null
+            ? null
+            : pipelineMapper.getVisibleStageById(workspaceId, deal.getStageId());
+        Integer stagePipelineId = stage == null || stage.getPipeline() == null
+            ? null
+            : stage.getPipeline().getId();
+        if (stage == null || !pipelineId.equals(stagePipelineId)) {
+            throw new BadRequestException("Deal stage is not in the selected visible pipeline");
+        }
+        if (deal.getCompanyId() != null && !companyMapper.exists(workspaceId, deal.getCompanyId())) {
+            throw new BadRequestException("Deal company is not visible in this workspace");
+        }
     }
 
     /**
@@ -1066,11 +1158,10 @@ public class DealService {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         Deal before = dealMapper.getDealById(workspaceId, dealId);
         if (before == null) throw new ResourceNotFoundException("Deal not found with id: " + dealId);
-        Stage stage = pipelineMapper.getStageById(workspaceId, stageId);
+        Stage stage = pipelineMapper.getVisibleStageById(workspaceId, stageId);
         if (stage == null) throw new ResourceNotFoundException("Stage not found with id: " + stageId);
         Integer stagePipelineId = stage.getPipeline() != null ? stage.getPipeline().getId() : null;
-        if (before.getPipelineId() != null && stagePipelineId != null
-                && !before.getPipelineId().equals(stagePipelineId)) {
+        if (!Objects.equals(before.getPipelineId(), stagePipelineId)) {
             throw new BadRequestException(
                 "Stage " + stageId + " is not in deal " + dealId + "'s pipeline");
         }

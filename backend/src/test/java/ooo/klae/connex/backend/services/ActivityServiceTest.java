@@ -51,6 +51,16 @@ class ActivityServiceTest extends AbstractServiceTest {
     }
 
     @Test
+    void createAndUpdateTrimActivityType() {
+        Activity created = activityService.create(draftWithType("  Call  ", "trimmed-create"));
+        assertEquals("Call", activityMapper.getActivityById(workspace.getId(), created.getId()).getType());
+
+        activityService.update(created.getId(), draftWithType("  Email  ", "trimmed-update"));
+
+        assertEquals("Email", activityMapper.getActivityById(workspace.getId(), created.getId()).getType());
+    }
+
+    @Test
     void update_preservesOriginalCreatedBy_ignoringClient() {
         Activity created = activityService.create(draft("first", null, "2024-01-01 09:00:00"));
         User other = newUser();
@@ -62,6 +72,7 @@ class ActivityServiceTest extends AbstractServiceTest {
 
     @Test
     void getActivitiesPage_pagesInDatabaseOrder() {
+        useIsolatedWorkspace();
         Activity oldest = activityService.create(draft("oldest", null, "2024-01-01 09:00:00"));
         Activity middle = activityService.create(draft("middle", null, "2024-02-01 09:00:00"));
         Activity newest = activityService.create(draft("newest", null, "2024-03-01 09:00:00"));
@@ -90,6 +101,7 @@ class ActivityServiceTest extends AbstractServiceTest {
 
     @Test
     void analyticsReadsUseTheActiveWorkspaceForVolumeLeaderboardAndUpcomingCount() {
+        useIsolatedWorkspace();
         Activity recent = activityService.create(draft("recent", null, "2024-01-01 09:00:00"));
         recent.setType("Call");
         activityMapper.update(recent);
@@ -130,5 +142,21 @@ class ActivityServiceTest extends AbstractServiceTest {
         Activity activity = draft(subject, null, timestamp);
         activity.setPerson(person);
         return activity;
+    }
+
+    private Activity draftWithType(String type, String subject) {
+        Activity activity = draft(subject, null, "2024-01-01 09:00:00");
+        activity.setType(type);
+        return activity;
+    }
+
+    private void useIsolatedWorkspace() {
+        Workspace isolated = new Workspace();
+        isolated.setName("Activity " + unique());
+        isolated.setSlug("activity_" + unique());
+        workspaceMapper.insert(isolated);
+        workspaceMapper.addMember(isolated.getId(), currentUser.getId(), "owner");
+        workspace = isolated;
+        authenticateAs(currentUser, isolated.getId());
     }
 }

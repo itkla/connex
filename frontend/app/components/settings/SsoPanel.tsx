@@ -6,6 +6,7 @@ import { useTranslations } from "next-intl";
 import type { SsoConnectionDto, SsoConnectionRequest, SsoProtocol } from "@/app/lib/types";
 import { getSsoConfig, saveSsoConfig } from "@/app/lib/api";
 import { useWorkspace } from "@/app/hooks/useWorkspace";
+import { usePasskeyStepUpErrorHandler } from "@/app/hooks/usePasskeyStepUpError";
 import { toastError, toastSuccess } from "@/app/lib/toast";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -66,6 +67,7 @@ function toForm(config: SsoConnectionDto, fallbackWorkspaceId: number | null): F
 
 export default function SsoPanel() {
     const t = useTranslations("WorkspaceSso");
+    const handlePasskeyStepUpError = usePasskeyStepUpErrorHandler();
     const { activeWorkspaceId } = useWorkspace();
 
     const [form, setForm] = useState<FormState | null>(null);
@@ -143,7 +145,9 @@ export default function SsoPanel() {
             setSpCertificate(saved.samlSpCertificate);
             toastSuccess(t("saved"));
         } catch (err) {
-            toastError(err instanceof Error ? err.message : t("saveFailed"));
+            if (!handlePasskeyStepUpError(err)) {
+                toastError(err instanceof Error ? err.message : t("saveFailed"));
+            }
         } finally {
             setSaving(false);
         }

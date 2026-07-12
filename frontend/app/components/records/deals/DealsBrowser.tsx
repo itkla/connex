@@ -68,7 +68,7 @@ import BulkTagDialog from '@/app/components/records/BulkTagDialog';
 import BulkAssignOwnerDialog from '@/app/components/records/BulkAssignOwnerDialog';
 import BulkChangeStageDialog from '@/app/components/records/BulkChangeStageDialog';
 import { notifyBulkResult } from '@/app/lib/bulkToast';
-import { browserTimezoneOffset, formatCompactCurrency, formatDate, formatDateTime, parseCalendarDate } from '@/app/lib/utils';
+import { formatCompactCurrency, formatDate, formatDateTime, parseCalendarDate } from '@/app/lib/utils';
 import {
     type Company,
     type CreateDealPayload,
@@ -179,7 +179,7 @@ function normalizeDealFilters(filters: FilterState): FilterState {
     return normalized;
 }
 
-export default function DealsBrowser({ deals: initialDeals, total: initialTotal, metrics: initialMetrics, serverFacets: initialFacets, savedViews }: { deals: Deal[]; total: number; metrics: DealMetrics; serverFacets: DealFacets; savedViews: SavedView[] }) {
+export default function DealsBrowser({ deals: initialDeals, total: initialTotal, metrics: initialMetrics, serverFacets: initialFacets, savedViews, timezone }: { deals: Deal[]; total: number; metrics: DealMetrics; serverFacets: DealFacets; savedViews: SavedView[]; timezone: string }) {
     const router = useRouter();
     const t = useTranslations('DealsBrowser');
     const tf = useTranslations('Filters');
@@ -325,14 +325,14 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
                 cancelled = true;
             };
         }
-        getDealRevenueTimeseries(activeCurrency, browserTimezoneOffset())
+        getDealRevenueTimeseries(activeCurrency, timezone)
             .then((series) => { if (!cancelled) setRevenueSeries(series); })
             .catch(() => { if (!cancelled) setRevenueSeries({ closed: [], projected: [] }); });
         getDealStageDistribution(activeCurrency)
             .then((distribution) => { if (!cancelled) setStageDistribution(distribution); })
             .catch(() => { if (!cancelled) setStageDistribution([]); });
         return () => { cancelled = true; };
-    }, [activeCurrency, dataRevision]);
+    }, [activeCurrency, dataRevision, timezone]);
 
     const searchFields = useCallback((d: Deal) => [
         d.name,
@@ -970,7 +970,7 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
                     <section>
                         <SectionHeader title={t('sectionPerformance')} />
                         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                            <SummaryTile className="sm:col-span-2" label={t('revenueTrend')} value={<DealsRevenueChart series={revenueSeries} currency={displayCurrency} />} />
+                            <SummaryTile className="sm:col-span-2" label={t('revenueTrend')} value={<DealsRevenueChart series={revenueSeries} currency={displayCurrency} timezone={timezone} />} />
                             <SummaryTile label={t('stageRatio')} value={<StageRatio distribution={stageDistribution} currency={displayCurrency} />} />
                         </div>
                     </section>
