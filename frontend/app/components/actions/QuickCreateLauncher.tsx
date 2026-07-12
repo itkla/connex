@@ -9,14 +9,16 @@ import { PlusIcon } from '@heroicons/react/16/solid';
 import { ArrowLeftIcon, XMarkIcon } from '@heroicons/react/24/outline';
 
 import {
-    Sheet,
-    SheetContent,
-    SheetHeader,
-    SheetTitle,
-    SheetDescription,
-} from '@/components/ui/sheet';
+    Drawer,
+    DrawerContent,
+    DrawerHeader,
+    DrawerTitle,
+    DrawerDescription,
+} from '@/components/ui/drawer';
+import { useIsMobile } from '@/app/hooks/useIsMobile';
 import { useActions, useAvailableActions } from '@/app/hooks/useActions';
 import { deriveCreateDefaults } from '@/app/lib/actions/createDefaults';
+import { easeOut, instant, springJiggle } from '@/app/lib/motion';
 import type { AppAction, RecordType } from '@/app/lib/actions/types';
 
 const TaskQuickForm = dynamic(() => import('@/app/components/actions/create/TaskQuickForm'));
@@ -43,31 +45,13 @@ const PANEL_WIDTH = 380;
 const PANEL_GAP = 12;
 const VIEWPORT_MARGIN = 16;
 
-/** Strong ease-out curve; the built-in CSS/JS easings are too weak to feel intentional. */
-const EASE_OUT = [0.23, 1, 0.32, 1] as const;
-
 type Anchor = { top: number; left: number; maxHeight: number };
-
-const MOBILE_QUERY = '(max-width: 767px)';
 
 /** True once mounted on the client; false during SSR so portals/sheets only render after hydration. */
 function useIsClient(): boolean {
     return useSyncExternalStore(
         () => () => {},
         () => true,
-        () => false,
-    );
-}
-
-/** Tracks the mobile viewport breakpoint via `matchMedia`, SSR-safe (server snapshot is desktop). */
-function useIsMobile(): boolean {
-    return useSyncExternalStore(
-        (onChange) => {
-            const mql = window.matchMedia(MOBILE_QUERY);
-            mql.addEventListener('change', onChange);
-            return () => mql.removeEventListener('change', onChange);
-        },
-        () => window.matchMedia(MOBILE_QUERY).matches,
         () => false,
     );
 }
@@ -90,15 +74,17 @@ export default function QuickCreateLauncher() {
     const [open, setOpen] = useState(false);
     const [view, setView] = useState<View>('selector');
     const [anchor, setAnchor] = useState<Anchor | null>(null);
+    const [pending, setPending] = useState(false);
 
     const triggerRef = useRef<HTMLButtonElement>(null);
+    const rootRef = useRef<HTMLDivElement>(null);
     const panelRef = useRef<HTMLDivElement>(null);
     const titleId = useId();
 
     const currentUserId = context.user?.id ?? null;
 
     const computeAnchor = useCallback((): Anchor | null => {
-        const rect = triggerRef.current?.getBoundingClientRect();
+        const rect = rootRef.current?.getBoundingClientRect();
         if (!rect) return null;
         const top = rect.top;
         return {
@@ -108,18 +94,33 @@ export default function QuickCreateLauncher() {
         };
     }, []);
 
-    const closeLauncher = useCallback(() => {
+    const forceCloseLauncher = useCallback(() => {
+        setPending(false);
         setOpen(false);
         setView('selector');
         const trigger = triggerRef.current;
         if (trigger) requestAnimationFrame(() => trigger.focus());
     }, []);
 
+    const closeLauncher = useCallback(() => {
+        if (pending) return;
+        forceCloseLauncher();
+    }, [forceCloseLauncher, pending]);
+
     const openLauncher = useCallback(() => {
+        setPending(false);
         setView('selector');
         setAnchor(computeAnchor());
         setOpen(true);
     }, [computeAnchor]);
+
+    const returnToSelector = useCallback(() => {
+        if (!pending) setView('selector');
+    }, [pending]);
+
+    const handleCreated = useCallback(() => {
+        forceCloseLauncher();
+    }, [forceCloseLauncher]);
 
     useEffect(() => {
         if (!open || isMobile) return;
@@ -172,7 +173,7 @@ export default function QuickCreateLauncher() {
             if (event.key === 'Escape') {
                 event.preventDefault();
                 if (view === 'selector') closeLauncher();
-                else setView('selector');
+                else returnToSelector();
                 return;
             }
             if (event.key !== 'Tab' || !panelRef.current) return;
@@ -190,7 +191,7 @@ export default function QuickCreateLauncher() {
                 first.focus();
             }
         },
-        [view, closeLauncher],
+        [view, closeLauncher, returnToSelector],
     );
 
     const body = (
@@ -201,51 +202,66 @@ export default function QuickCreateLauncher() {
             currentUserId={currentUserId}
             titleId={titleId}
             onSelect={selectAction}
-            onBack={() => setView('selector')}
+            onBack={returnToSelector}
             onClose={closeLauncher}
-            onCreated={closeLauncher}
+            onCreated={handleCreated}
             onMoreDetails={escalateToDialog}
+            onPendingChange={setPending}
+            pending={pending}
             showChrome={!isMobile}
         />
     );
 
     return (
-        <div className="mb-5 shrink-0">
-            <button
+        <div ref={rootRef} className="mb-5 shrink-0">
+            <motion.button
                 ref={triggerRef}
                 type="button"
                 aria-haspopup="dialog"
                 aria-expanded={open}
                 aria-label={t('quickCreate.trigger')}
+                disabled={open && pending}
                 onClick={() => (open ? closeLauncher() : openLauncher())}
-                className="inline-flex w-full items-center gap-2 rounded-lg bg-brand px-3 py-2 text-sm font-semibold text-brand-foreground transition-[transform,background-color] duration-150 ease-out hover:bg-brand-hover active:scale-[0.99] motion-reduce:transition-none motion-reduce:active:scale-100"
+                whileTap={reduceMotion ? undefined : { scale: 0.95 }}
+                transition={reduceMotion ? instant : springJiggle}
+                className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-brand px-3 py-2.5 text-sm font-semibold text-brand-foreground shadow-sm transition-colors duration-150 hover:bg-brand-hover hover:shadow"
             >
                 <PlusIcon className="size-4" />
                 {t('quickCreate.trigger')}
-            </button>
+            </motion.button>
 
             {mounted && isMobile ? (
-                <Sheet open={open} onOpenChange={(next) => (next ? openLauncher() : closeLauncher())}>
-                    <SheetContent side="bottom" className="max-h-[85dvh] gap-0 rounded-t-2xl p-0">
-                        <SheetHeader className="flex-row items-center gap-2 border-b border-border px-5 py-4">
+                <Drawer open={open} onOpenChange={(next) => (next ? openLauncher() : closeLauncher())} swipeDirection="down">
+                    <DrawerContent showCloseButton={false} className="max-h-[85dvh] gap-0 rounded-t-2xl p-0">
+                        <DrawerHeader className="flex-row items-center gap-2 border-b border-border px-5 py-4">
                             {view !== 'selector' ? (
                                 <button
                                     type="button"
-                                    onClick={() => setView('selector')}
+                                    onClick={returnToSelector}
+                                    disabled={pending}
                                     aria-label={t('quickCreate.back')}
                                     className="grid size-7 shrink-0 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
                                 >
                                     <ArrowLeftIcon className="size-4" />
                                 </button>
                             ) : null}
-                            <SheetTitle className="flex-1">
+                            <DrawerTitle className="flex-1">
                                 {view === 'selector' ? t('quickCreate.title') : t(`create.${view}`)}
-                            </SheetTitle>
-                            <SheetDescription className="sr-only">{t('quickCreate.description')}</SheetDescription>
-                        </SheetHeader>
+                            </DrawerTitle>
+                            <DrawerDescription className="sr-only">{t('quickCreate.description')}</DrawerDescription>
+                            <button
+                                type="button"
+                                onClick={closeLauncher}
+                                disabled={pending}
+                                aria-label={t('quickCreate.close')}
+                                className="grid size-7 shrink-0 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
+                            >
+                                <XMarkIcon className="size-4" />
+                            </button>
+                        </DrawerHeader>
                         <div className="overflow-y-auto px-5 pb-6 pt-4">{body}</div>
-                    </SheetContent>
-                </Sheet>
+                    </DrawerContent>
+                </Drawer>
             ) : null}
 
             {mounted && !isMobile
@@ -258,6 +274,7 @@ export default function QuickCreateLauncher() {
                                       aria-hidden
                                       tabIndex={-1}
                                       onClick={closeLauncher}
+                                      disabled={pending}
                                       className="fixed inset-0 z-40 cursor-default"
                                   />
                                   <motion.div
@@ -266,18 +283,14 @@ export default function QuickCreateLauncher() {
                                       aria-modal="false"
                                       aria-labelledby={titleId}
                                       onKeyDown={handlePanelKeyDown}
-                                      initial={reduceMotion ? { opacity: 0 } : { opacity: 0, scale: 0.96, y: -6 }}
+                                      initial={reduceMotion ? { opacity: 0 } : { opacity: 0, scale: 0.9, y: -8 }}
                                       animate={reduceMotion ? { opacity: 1 } : { opacity: 1, scale: 1, y: 0 }}
                                       exit={
                                           reduceMotion
-                                              ? { opacity: 0, transition: { duration: 0.1, ease: EASE_OUT } }
-                                              : { opacity: 0, scale: 0.97, y: -4, transition: { duration: 0.13, ease: EASE_OUT } }
+                                              ? { opacity: 0, transition: { duration: 0.1, ease: easeOut } }
+                                              : { opacity: 0, scale: 0.97, y: -4, transition: { duration: 0.13, ease: easeOut } }
                                       }
-                                      transition={
-                                          reduceMotion
-                                              ? { duration: 0.12, ease: EASE_OUT }
-                                              : { type: 'spring', stiffness: 520, damping: 38, mass: 0.8 }
-                                      }
+                                      transition={reduceMotion ? { duration: 0.12, ease: easeOut } : springJiggle}
                                       style={{
                                           top: anchor?.top ?? 0,
                                           left: anchor?.left ?? 0,
@@ -285,7 +298,7 @@ export default function QuickCreateLauncher() {
                                           maxHeight: anchor?.maxHeight,
                                           transformOrigin: 'top left',
                                       }}
-                                      className="fixed z-50 flex flex-col overflow-hidden rounded-xl border border-border bg-popover text-popover-foreground shadow-xl ring-1 ring-foreground/5"
+                                      className="fixed z-50 flex flex-col overflow-hidden rounded-2xl border border-border bg-popover text-popover-foreground shadow-2xl ring-1 ring-foreground/5"
                                   >
                                       {body}
                                   </motion.div>
@@ -310,6 +323,8 @@ type PanelBodyProps = {
     onClose: () => void;
     onCreated: () => void;
     onMoreDetails: (kind: FormKind, draft: Record<string, string>) => void;
+    onPendingChange: (pending: boolean) => void;
+    pending: boolean;
     showChrome: boolean;
 };
 
@@ -329,6 +344,8 @@ function QuickCreatePanelBody({
     onClose,
     onCreated,
     onMoreDetails,
+    onPendingChange,
+    pending,
     showChrome,
 }: PanelBodyProps) {
     const t = useTranslations('Actions');
@@ -343,6 +360,7 @@ function QuickCreatePanelBody({
                         <button
                             type="button"
                             onClick={onBack}
+                            disabled={pending}
                             aria-label={t('quickCreate.back')}
                             className="grid size-7 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
                         >
@@ -355,6 +373,7 @@ function QuickCreatePanelBody({
                     <button
                         type="button"
                         onClick={onClose}
+                        disabled={pending}
                         aria-label={t('quickCreate.close')}
                         className="grid size-7 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
                     >
@@ -364,13 +383,13 @@ function QuickCreatePanelBody({
             ) : null}
 
             <div className="min-h-0 overflow-y-auto p-4">
-                <AnimatePresence mode="wait" initial={false}>
+                <AnimatePresence mode="wait">
                     <motion.div
                         key={view}
                         initial={reduceMotion ? { opacity: 0 } : { opacity: 0, y: 4 }}
                         animate={reduceMotion ? { opacity: 1 } : { opacity: 1, y: 0 }}
                         exit={reduceMotion ? { opacity: 0 } : { opacity: 0, y: -4 }}
-                        transition={{ duration: 0.12, ease: EASE_OUT }}
+                        transition={{ duration: 0.12, ease: easeOut }}
                     >
                         {view === 'selector' ? (
                             <TypeSelector actions={actions} onSelect={onSelect} />
@@ -380,6 +399,8 @@ function QuickCreatePanelBody({
                                 currentUserId={currentUserId}
                                 onCreated={onCreated}
                                 onMoreDetails={(draft) => onMoreDetails('task', draft)}
+                                onPendingChange={onPendingChange}
+                                pending={pending}
                             />
                         ) : view === 'note' ? (
                             <NoteQuickForm
@@ -387,6 +408,8 @@ function QuickCreatePanelBody({
                                 currentUserId={currentUserId}
                                 onCreated={onCreated}
                                 onMoreDetails={(draft) => onMoreDetails('note', draft)}
+                                onPendingChange={onPendingChange}
+                                pending={pending}
                             />
                         ) : (
                             <ActivityQuickForm
@@ -394,6 +417,8 @@ function QuickCreatePanelBody({
                                 currentUserId={currentUserId}
                                 onCreated={onCreated}
                                 onMoreDetails={(draft) => onMoreDetails('activity', draft)}
+                                onPendingChange={onPendingChange}
+                                pending={pending}
                             />
                         )}
                     </motion.div>
@@ -408,6 +433,12 @@ function QuickCreatePanelBody({
  * list: Arrow keys move between rows, Enter or click chooses one. The first row is auto-focused when the
  * launcher opens.
  */
+const SELECTOR_LIST_VARIANTS = { hidden: {}, show: { transition: { staggerChildren: 0.035, delayChildren: 0.03 } } };
+const SELECTOR_ITEM_VARIANTS = {
+    hidden: { opacity: 0, y: 8, scale: 0.96 },
+    show: { opacity: 1, y: 0, scale: 1, transition: springJiggle },
+};
+
 function TypeSelector({
     actions,
     onSelect,
@@ -416,6 +447,7 @@ function TypeSelector({
     onSelect: (action: AppAction) => void;
 }) {
     const t = useTranslations('Actions');
+    const reduceMotion = useReducedMotion() ?? false;
     const listRef = useRef<HTMLDivElement>(null);
 
     const handleKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
@@ -432,11 +464,20 @@ function TypeSelector({
     };
 
     return (
-        <div ref={listRef} role="listbox" aria-label={t('quickCreate.title')} onKeyDown={handleKeyDown} className="grid gap-1">
+        <motion.div
+            ref={listRef}
+            role="listbox"
+            aria-label={t('quickCreate.title')}
+            onKeyDown={handleKeyDown}
+            variants={reduceMotion ? undefined : SELECTOR_LIST_VARIANTS}
+            initial={reduceMotion ? undefined : 'hidden'}
+            animate={reduceMotion ? undefined : 'show'}
+            className="grid gap-1"
+        >
             {actions.map((action, index) => {
                 const Icon = action.icon;
                 return (
-                    <button
+                    <motion.button
                         key={action.id}
                         type="button"
                         role="option"
@@ -444,15 +485,18 @@ function TypeSelector({
                         tabIndex={index === 0 ? 0 : -1}
                         data-autofocus={index === 0 ? '' : undefined}
                         onClick={() => onSelect(action)}
-                        className="group flex items-center gap-3 rounded-lg px-2.5 py-2 text-left transition-[transform,background-color] duration-150 ease-out hover:bg-muted focus-visible:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand active:scale-[0.98] motion-reduce:transition-none motion-reduce:active:scale-100"
+                        variants={reduceMotion ? undefined : SELECTOR_ITEM_VARIANTS}
+                        whileTap={reduceMotion ? undefined : { scale: 0.97 }}
+                        transition={reduceMotion ? instant : springJiggle}
+                        className="group flex items-center gap-3 rounded-xl px-2.5 py-2.5 text-left transition-colors duration-150 hover:bg-muted focus-visible:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
                     >
                         <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-muted text-muted-foreground ring-1 ring-border transition-colors group-hover:bg-brand-light group-hover:text-brand-dark group-hover:ring-transparent group-focus-visible:bg-brand-light group-focus-visible:text-brand-dark">
                             {Icon ? <Icon className="size-4" /> : null}
                         </span>
                         <span className="flex-1 text-sm font-medium text-foreground">{t(action.labelKey)}</span>
-                    </button>
+                    </motion.button>
                 );
             })}
-        </div>
+        </motion.div>
     );
 }

@@ -102,7 +102,8 @@
        a mention queued while pending — but surfaces only once their membership activates, so workspace
        content is never disclosed to a not-yet-joined invitee. The sole exception is the
        'workspace.join' invitation itself, which carries no workspace content and must reach the
-       pending member so they can accept. Member removal cascades a member's content notifications. -->
+       pending member so they can accept. Member removal deletes a member's notifications in the service layer
+       (UserOffboardingService.detachMemberContent; the FK cascade was dropped in #440 increment 3). -->
   <sql id="inboxScope">
     n.recipient_id = #{recipientId}
       AND (
@@ -511,4 +512,18 @@
       AND resolved_at IS NOT NULL
       AND resolved_at &lt; #{cutoff}
   </delete>
+
+  <delete id="deleteAllForRecipient">
+    DELETE FROM notification
+    WHERE workspace_id = #{workspaceId} AND recipient_id = #{recipientId}
+  </delete>
+
+  <delete id="deleteAllForRecipientAnywhere">
+    DELETE FROM notification WHERE recipient_id = #{recipientId}
+  </delete>
+
+  <update id="clearActorAnywhere">
+    UPDATE notification SET actor_id = NULL WHERE actor_id = #{userId}
+  </update>
+
 </mapper>

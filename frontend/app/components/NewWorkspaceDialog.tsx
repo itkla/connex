@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { Loader2Icon } from 'lucide-react';
 import { Squares2X2Icon } from '@heroicons/react/24/outline';
@@ -42,16 +42,17 @@ export default function NewWorkspaceDialog({ open, onOpenChange }: Props) {
     const [name, setName] = useState('');
     const [isCreating, setIsCreating] = useState(false);
     const [succeeded, setSucceeded] = useState(false);
+    const [prevOpen, setPrevOpen] = useState(open);
 
-    // Reset everything whenever the dialog closes so it reopens clean.
-    useEffect(() => {
+    if (open !== prevOpen) {
+        setPrevOpen(open);
         if (!open) {
             setName('');
             setIsCreating(false);
             setSucceeded(false);
             resetFieldErrors();
         }
-    }, [open, resetFieldErrors]);
+    }
 
     const hasErrors = Object.keys(fieldErrors).length > 0;
     const status = resolveDialogStatus({ isLoading: isCreating, hasErrors, isSuccess: succeeded });

@@ -2,11 +2,14 @@
 
 import { useEffect, useState } from "react";
 import dynamic from "next/dynamic";
+import { useTranslations } from "next-intl";
 
-import { getContacts, getDeals, getUsers } from "@/app/lib/api";
+import { getContactById, getContacts, getDealById, getDeals, getUsers } from "@/app/lib/api";
 import type { Contact, Deal, User } from "@/app/lib/types";
 import type { CreateDefaults, OverlayRequest } from "@/app/lib/actions/types";
 import { ACTIVITY_TYPES } from "@/app/components/activity/activities/activityTypes";
+import { useWorkspace } from "@/app/hooks/useWorkspace";
+import { toastError } from "@/app/lib/toast";
 
 const TaskDialog = dynamic(() => import("@/app/components/activity/tasks/TaskDialog"));
 const NoteDialog = dynamic(() => import("@/app/components/activity/notes/NoteDialog"));
@@ -33,6 +36,28 @@ function resolveDeal(deals: Deal[], defaults: CreateDefaults | undefined): Deal 
     return deals.find((deal) => deal.id === defaults.dealId) ?? null;
 }
 
+function includeSelected<T extends { id: number }>(items: T[], selected: T | null): T[] {
+    if (!selected || items.some((item) => item.id === selected.id)) return items;
+    return [selected, ...items];
+}
+
+async function loadReferences(defaultPersonId?: number, defaultDealId?: number) {
+    const [fetchedPersons, fetchedDeals] = await Promise.all([
+        getContacts({}).catch(() => [] as Contact[]),
+        getDeals().catch(() => [] as Deal[]),
+    ]);
+    const selectedPerson = defaultPersonId != null && !fetchedPersons.some((person) => person.id === defaultPersonId)
+        ? await getContactById(defaultPersonId)
+        : null;
+    const selectedDeal = defaultDealId != null && !fetchedDeals.some((deal) => deal.id === defaultDealId)
+        ? await getDealById(defaultDealId)
+        : null;
+    return {
+        persons: includeSelected(fetchedPersons, selectedPerson),
+        deals: includeSelected(fetchedDeals, selectedDeal),
+    };
+}
+
 /**
  * Renders the shell-owned create overlays that registry actions open. Each form is code-split and
  * mounted only while its overlay is requested; the reference data a form needs (assignees for tasks,
@@ -49,49 +74,69 @@ export default function ActionOverlayHost({
     user: User | null;
     onClose: () => void;
 }) {
-    const [users, setUsers] = useState<User[]>([]);
-    const [persons, setPersons] = useState<Contact[]>([]);
-    const [deals, setDeals] = useState<Deal[]>([]);
-    const [referenceLoaded, setReferenceLoaded] = useState(false);
-    const [usersLoaded, setUsersLoaded] = useState(false);
+    const t = useTranslations("Actions");
+    const { activeWorkspaceId } = useWorkspace();
+    const [loadedUsers, setLoadedUsers] = useState<{
+        key: string;
+        request: OverlayRequest;
+        users: User[];
+    } | null>(null);
+    const [loadedReferences, setLoadedReferences] = useState<{
+        key: string;
+        request: OverlayRequest;
+        persons: Contact[];
+        deals: Deal[];
+    } | null>(null);
 
     const kind = overlay?.kind;
     const needsReference = kind !== undefined && REFERENCE_KINDS.has(kind);
     const needsUsers = kind === "create-task";
+    const defaults = overlay && "defaults" in overlay ? overlay.defaults : undefined;
+    const defaultPersonId = defaults?.personId;
+    const defaultDealId = defaults?.dealId;
+    const referenceKey = needsReference
+        ? [activeWorkspaceId, kind, defaultPersonId, defaultDealId].join(":")
+        : null;
+    const usersKey = needsUsers ? [activeWorkspaceId, kind].join(":") : null;
 
     useEffect(() => {
-        if (!needsReference) return;
+        if (!referenceKey || !overlay) return;
         let cancelled = false;
-        Promise.all([getContacts({}).catch(() => [] as Contact[]), getDeals().catch(() => [] as Deal[])])
-            .then(([fetchedPersons, fetchedDeals]) => {
+        loadReferences(defaultPersonId, defaultDealId)
+            .then((references) => {
                 if (cancelled) return;
-                setPersons(fetchedPersons);
-                setDeals(fetchedDeals);
-                setReferenceLoaded(true);
+                setLoadedReferences({
+                    key: referenceKey,
+                    request: overlay,
+                    ...references,
+                });
+            })
+            .catch(() => {
+                if (cancelled) return;
+                toastError(t("feedback.linkedRecordLoadFailed"));
+                onClose();
             });
         return () => {
             cancelled = true;
         };
-    }, [needsReference, kind]);
+    }, [defaultDealId, defaultPersonId, onClose, overlay, referenceKey, t]);
 
     useEffect(() => {
-        if (!needsUsers) return;
+        if (!usersKey || !overlay) return;
         let cancelled = false;
         getUsers()
             .then((fetched) => {
                 if (cancelled) return;
-                setUsers(fetched);
-                setUsersLoaded(true);
+                setLoadedUsers({ key: usersKey, request: overlay, users: fetched });
             })
             .catch(() => {
                 if (cancelled) return;
-                setUsers([]);
-                setUsersLoaded(true);
+                setLoadedUsers({ key: usersKey, request: overlay, users: [] });
             });
         return () => {
             cancelled = true;
         };
-    }, [needsUsers, kind]);
+    }, [overlay, usersKey]);
 
     if (!user) return null;
 
@@ -99,13 +144,20 @@ export default function ActionOverlayHost({
         if (!open) onClose();
     };
 
-    const defaults = overlay && "defaults" in overlay ? overlay.defaults : undefined;
+    const references = loadedReferences?.key === referenceKey && loadedReferences.request === overlay
+        ? loadedReferences
+        : null;
+    const users = loadedUsers?.key === usersKey && loadedUsers.request === overlay
+        ? loadedUsers.users
+        : null;
+    const persons = references?.persons ?? [];
+    const deals = references?.deals ?? [];
     const defaultPerson = resolvePerson(persons, defaults);
     const defaultDeal = resolveDeal(deals, defaults);
 
     return (
         <>
-            {overlay?.kind === "create-task" && usersLoaded && referenceLoaded ? (
+            {overlay?.kind === "create-task" && users && references ? (
                 <TaskDialog
                     open
                     onOpenChange={handleOpenChange}
@@ -119,7 +171,7 @@ export default function ActionOverlayHost({
                     defaultDescription={overlay.draft?.description ?? ""}
                 />
             ) : null}
-            {overlay?.kind === "create-note" && referenceLoaded ? (
+            {overlay?.kind === "create-note" && references ? (
                 <NoteDialog
                     open
                     onOpenChange={handleOpenChange}
@@ -132,7 +184,7 @@ export default function ActionOverlayHost({
                     defaultContent={overlay.draft?.content ?? ""}
                 />
             ) : null}
-            {overlay?.kind === "create-activity" && referenceLoaded ? (
+            {overlay?.kind === "create-activity" && references ? (
                 <ActivityDialog
                     open
                     onOpenChange={handleOpenChange}

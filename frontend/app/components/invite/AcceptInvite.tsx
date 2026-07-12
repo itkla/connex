@@ -17,8 +17,7 @@ export default function AcceptInvite({ token }: { token: string }) {
     const accept = async () => {
         setBusy(true);
         try {
-            const workspace = await acceptInvite(token);
-            document.cookie = `connex_workspace=${workspace.id};path=/;max-age=31536000;samesite=lax`;
+            await acceptInvite(token);
             router.replace("/dashboard");
             router.refresh();
         } catch (err) {

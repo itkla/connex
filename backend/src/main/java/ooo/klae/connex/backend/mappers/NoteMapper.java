@@ -31,4 +31,11 @@ public interface NoteMapper {
     int insert(Note note);
     int update(Note note);
     int delete(@Param("workspaceId") int workspaceId, @Param("id") int id);
+
+    /**
+     * Counts notes authored by a user across all workspaces. Service-layer
+     * mirror of the {@code note.author_id} ON DELETE RESTRICT: account deletion
+     * is refused while authored notes exist (#440 increment 3).
+     */
+    int countAuthoredAnywhere(@Param("userId") int userId);
 }

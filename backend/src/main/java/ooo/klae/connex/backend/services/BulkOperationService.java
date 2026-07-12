@@ -121,7 +121,7 @@ public class BulkOperationService {
     @RequirePermission(Permission.DEAL_UPDATE)
     public BulkOperationResult changeStageForDeals(List<Integer> ids, int stageId) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        if (pipelineMapper.getStageById(workspaceId, stageId) == null) {
+        if (pipelineMapper.getVisibleStageById(workspaceId, stageId) == null) {
             throw new ResourceNotFoundException("Stage not found with id: " + stageId);
         }
         return apply(ids, id -> dealMapper.existsOwned(workspaceId, id), id -> dealService.changeStage(id, stageId));

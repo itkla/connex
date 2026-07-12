@@ -1,6 +1,6 @@
 'use client';
 
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogClose } from '@/components/ui/dialog';
+import { ResponsiveDialog, ResponsiveDialogContent, ResponsiveDialogHeader, ResponsiveDialogTitle, ResponsiveDialogDescription, ResponsiveDialogFooter, ResponsiveDialogClose } from '@/components/ui/responsive-dialog';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Autocomplete, AutocompleteContent, AutocompleteList, AutocompleteItem, AutocompleteEmpty, AutocompleteInput } from '@/components/ui/autocomplete';
@@ -265,8 +265,8 @@ export default function NewCompanyDialog({
     }, [reduce, open]);
 
     return (
-        <Dialog open={open} onOpenChange={handleOpenChange}>
-            <DialogContent className="max-h-[90dvh] gap-0 overflow-hidden p-0 sm:max-w-lg">
+        <ResponsiveDialog open={open} onOpenChange={handleOpenChange}>
+            <ResponsiveDialogContent scrollable={false} className="max-h-[90dvh] gap-0 overflow-hidden p-0 sm:max-w-lg">
                 <motion.div
                     animate={reduce ? undefined : { height: stageHeight }}
                     transition={pageTransition}
@@ -342,10 +342,10 @@ export default function NewCompanyDialog({
                         )}
                     </div>
 
-                    <DialogHeader className="ncd-rise mb-5" style={{ animationDelay: '40ms' }}>
-                        <DialogTitle className="text-xl font-semibold tracking-tight">{t('title')}</DialogTitle>
-                        <DialogDescription>{t('description')}</DialogDescription>
-                    </DialogHeader>
+                    <ResponsiveDialogHeader className="ncd-rise mb-5" style={{ animationDelay: '40ms' }}>
+                        <ResponsiveDialogTitle className="text-xl font-semibold tracking-tight">{t('title')}</ResponsiveDialogTitle>
+                        <ResponsiveDialogDescription>{t('description')}</ResponsiveDialogDescription>
+                    </ResponsiveDialogHeader>
                 </div>
                                 </div>
 
@@ -508,12 +508,12 @@ export default function NewCompanyDialog({
                     </form>
                                 </div>
 
-                                <DialogFooter className="shrink-0 border-t border-border/60 bg-popover px-6 py-4">
-                                    <DialogClose asChild>
+                                <ResponsiveDialogFooter className="shrink-0 border-t border-border/60 bg-popover px-6 py-4">
+                                    <ResponsiveDialogClose asChild>
                                         <Button type="button" variant="outline" disabled={isCreating}>
                                             {t('cancel')}
                                         </Button>
-                                    </DialogClose>
+                                    </ResponsiveDialogClose>
                                     <Button
                                         type="submit"
                                         form="new-company-form"
@@ -530,7 +530,7 @@ export default function NewCompanyDialog({
                                             t('create')
                                         )}
                                     </Button>
-                                </DialogFooter>
+                                </ResponsiveDialogFooter>
                             </motion.div>
                         ) : (
                             <motion.div
@@ -556,8 +556,8 @@ export default function NewCompanyDialog({
                 <p aria-live="polite" className="sr-only">
                     {announcement}
                 </p>
-            </DialogContent>
-        </Dialog>
+            </ResponsiveDialogContent>
+        </ResponsiveDialog>
     );
 }
 

@@ -39,8 +39,9 @@ For minor changes to existing components/pages (spacing, copy, a single prop, a 
    - `--warmth-hot` / `--warmth-warm` / `--warmth-cool` / `--warmth-cold` for relationship temperature.
    - `--chart-*` (`chart-1..5`, `chart-won/lost/open`, `chart-grid/axis/stroke`) for data viz — use these with recharts/d3, not raw colors.
    - `--sidebar-*`, semantic `--background/--foreground/--muted/--accent/--destructive`, etc.
-3. **`emil-design-eng`** for the feel and the invisible details.
-4. **Live reference pages** — match these in look and behavior for any new UI:
+3. **Motion presets — `app/lib/motion.ts`.** Use the shared named springs/easings (`springJiggle` — the house bouncy "jiggle", `springSnappy`, `springSmooth`, `easeOut`, `instant`) instead of ad-hoc `{ type: 'spring', … }` literals, so motion feels consistent. Always pair with a `useReducedMotion()` fallback (`instant`).
+4. **`emil-design-eng`** for the feel and the invisible details.
+5. **Live reference pages** — match these in look and behavior for any new UI:
    - `app/(app)/overview/analytics`
    - `app/(app)/dashboard`
    - `app/(app)/records/*` (contacts, companies, deals, pipelines)

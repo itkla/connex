@@ -27,6 +27,7 @@ public class MailService {
 
     private final MailConfigResolver resolver;
     private final JavaMailSenderFactory senderFactory;
+    private final SmtpDestinationGuard smtpDestinationGuard;
 
     /**
      * Sends account-level mail through the instance default sender, off-thread.
@@ -76,7 +77,7 @@ public class MailService {
     }
 
     private void deliver(ResolvedMailConfig config, MailMessage message) {
-        JavaMailSender sender = senderFactory.forConfig(config);
+        JavaMailSender sender = senderFactory.forConfig(config, smtpDestinationGuard.resolveForSend(config));
         try {
             MimeMessage mime = sender.createMimeMessage();
             MimeMessageHelper helper = new MimeMessageHelper(mime, message.textBody() != null, "UTF-8");

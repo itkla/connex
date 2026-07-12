@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, type WheelEvent } from 'react';
+import { useState, type WheelEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { toast } from 'sonner';
@@ -46,17 +46,20 @@ export default function ChangeCompanyDialog({ open, onOpenChange, contacts, comp
     const [selected, setSelected] = useState<Company | null>(null);
     const [isSaving, setIsSaving] = useState(false);
     const [succeeded, setSucceeded] = useState(false);
+    const [prevOpen, setPrevOpen] = useState(open);
 
-    useEffect(() => {
-        if (!open) return;
-        setSucceeded(false);
-        if (contacts.length === 1) {
-            const current = companies.find((c) => c.id === contacts[0].companyId) ?? null;
-            setSelected(current);
-        } else {
-            setSelected(null);
+    if (open !== prevOpen) {
+        setPrevOpen(open);
+        if (open) {
+            setSucceeded(false);
+            if (contacts.length === 1) {
+                const current = companies.find((c) => c.id === contacts[0].companyId) ?? null;
+                setSelected(current);
+            } else {
+                setSelected(null);
+            }
         }
-    }, [open, contacts, companies]);
+    }
 
     const handleListWheel = (e: WheelEvent<HTMLDivElement>) => {
         const lineHeightPx = 16;

@@ -1,11 +1,15 @@
 package ooo.klae.connex.backend.config;
 
 import java.sql.SQLException;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 import javax.sql.DataSource;
 
+import org.springframework.beans.factory.ListableBeanFactory;
+import org.springframework.beans.factory.config.ConfigurableListableBeanFactory;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.SmartInitializingSingleton;
 import org.springframework.beans.factory.config.BeanPostProcessor;
@@ -32,6 +36,15 @@ import ooo.klae.connex.backend.tenant.TenantRoutingProperties;
 @ConditionalOnProperty(name = "connex.tenancy.routing.mode", havingValue = "catalog-per-placement")
 public class TenantRoutingConfig {
 
+    /**
+     * The tenant pool's bean name — Spring Boot's auto-configured primary
+     * datasource. Decoration targets this bean by identity, not by type: when
+     * the control-plane split (#440 increment 3) adds a second pool, a
+     * type-based hook would tenant-route the control-plane pool too, making
+     * placement lookups self-referential.
+     */
+    static final String TENANT_DATASOURCE_BEAN = "dataSource";
+
     private static final Pattern JDBC_URL_DATABASE = Pattern.compile("^jdbc:mysql://[^/]+/([^?/]+)");
 
     @Bean
@@ -41,7 +54,7 @@ public class TenantRoutingConfig {
         return new BeanPostProcessor() {
             @Override
             public Object postProcessAfterInitialization(Object bean, String beanName) {
-                if (!(bean instanceof HikariDataSource hikari)) {
+                if (!(bean instanceof HikariDataSource hikari) || !TENANT_DATASOURCE_BEAN.equals(beanName)) {
                     return bean;
                 }
                 return decorate(hikari, properties.getObject(), tenantContext.getObject());
@@ -50,22 +63,62 @@ public class TenantRoutingConfig {
     }
 
     /**
-     * Fails startup when routing is enabled but the primary datasource was not
-     * wrapped by {@link TenantRoutingDataSource} — e.g. a datasource type or
-     * ordered wrapper the decorator's {@code instanceof HikariDataSource} hook
-     * did not match. Without this guard the app would run every dedicated org
-     * silently unrouted on the shared catalog; refusing to start is fail-closed.
+     * Fails startup unless decoration landed exactly where intended: the
+     * tenant pool ({@link #TENANT_DATASOURCE_BEAN}) must be wrapped by
+     * {@link TenantRoutingDataSource}, and no other datasource bean may be —
+     * an unwrapped tenant pool serves every dedicated org silently unrouted,
+     * a wrapped control-plane pool would tenant-route placement lookups
+     * themselves, and a routed pool that is not the {@code @Primary}
+     * datasource would leave MyBatis on an unrouted pool while the guard
+     * stays green. Refusing to start is fail-closed in all three directions.
      */
     @Bean
-    static SmartInitializingSingleton tenantRoutingDecorationVerifier(ObjectProvider<DataSource> dataSource) {
+    static SmartInitializingSingleton tenantRoutingDecorationVerifier(ListableBeanFactory beanFactory) {
         return () -> {
-            DataSource resolved = dataSource.getIfAvailable();
-            if (resolved == null || !routes(resolved)) {
+            Map<String, DataSource> dataSources = dataSourcesForVerification(beanFactory);
+            DataSource tenantPool = dataSources.get(TENANT_DATASOURCE_BEAN);
+            if (tenantPool == null || !routes(tenantPool)) {
                 throw new IllegalStateException(
-                    "connex.tenancy.routing.mode=catalog-per-placement is enabled but the datasource is not wrapped "
-                        + "by TenantRoutingDataSource; refusing to start rather than serve tenants unrouted");
+                    "connex.tenancy.routing.mode=catalog-per-placement is enabled but the '" + TENANT_DATASOURCE_BEAN
+                        + "' datasource is not wrapped by TenantRoutingDataSource; refusing to start rather than "
+                        + "serve tenants unrouted");
+            }
+            if (beanFactory.getBean(DataSource.class) != tenantPool) {
+                throw new IllegalStateException(
+                    "The routed '" + TENANT_DATASOURCE_BEAN + "' datasource is not the primary DataSource; "
+                        + "MyBatis and the transaction manager follow @Primary, so tenant traffic would run "
+                        + "unrouted on a differently-named pool");
+            }
+            for (Map.Entry<String, DataSource> entry : dataSources.entrySet()) {
+                if (!TENANT_DATASOURCE_BEAN.equals(entry.getKey()) && routes(entry.getValue())) {
+                    throw new IllegalStateException(
+                        "Datasource bean '" + entry.getKey() + "' is tenant-routed but only '"
+                            + TENANT_DATASOURCE_BEAN + "' may be; a routed control-plane pool would make "
+                            + "placement lookups self-referential");
+                }
             }
         };
+    }
+
+    /**
+     * Resolves the datasource beans to verify without force-instantiating
+     * deliberately lazy ones: the tenant pool is fetched eagerly (it must
+     * exist), while the negative sweep only inspects beans that are already
+     * instantiated singletons.
+     */
+    private static Map<String, DataSource> dataSourcesForVerification(ListableBeanFactory beanFactory) {
+        Map<String, DataSource> dataSources = new LinkedHashMap<>();
+        for (String name : beanFactory.getBeanNamesForType(DataSource.class, true, false)) {
+            if (TENANT_DATASOURCE_BEAN.equals(name) || isInstantiatedSingleton(beanFactory, name)) {
+                dataSources.put(name, beanFactory.getBean(name, DataSource.class));
+            }
+        }
+        return dataSources;
+    }
+
+    private static boolean isInstantiatedSingleton(ListableBeanFactory beanFactory, String name) {
+        return beanFactory instanceof ConfigurableListableBeanFactory configurable
+            && configurable.containsSingleton(name);
     }
 
     private static boolean routes(DataSource dataSource) {
@@ -107,7 +160,12 @@ public class TenantRoutingConfig {
         return new TenantRoutingDataSource(hikari, tenantContext, defaultCatalog, hikari::evictConnection);
     }
 
-    private static String databaseFromJdbcUrl(String jdbcUrl) {
+    /**
+     * Extracts the database from a MySQL JDBC URL, or {@code null} when the
+     * URL carries none. Shared with the routing tests so every consumer parses
+     * the URL the same way.
+     */
+    public static String databaseFromJdbcUrl(String jdbcUrl) {
         if (jdbcUrl == null) {
             return null;
         }

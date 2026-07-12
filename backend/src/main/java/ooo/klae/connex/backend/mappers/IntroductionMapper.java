@@ -41,4 +41,11 @@ public interface IntroductionMapper {
     /** Pairs already recorded (made or dismissed), excluded from fresh suggestions. Only the
      *  {@code personAId}/{@code personBId} of each returned row are populated. */
     List<Introduction> findExistingPairs(@Param("workspaceId") int workspaceId);
+
+    /**
+     * Counts introductions brokered by a user across all workspaces.
+     * Service-layer mirror of the {@code introduction.introducer_user_id}
+     * ON DELETE RESTRICT (#440 increment 3).
+     */
+    int countIntroducedAnywhere(@Param("userId") int userId);
 }

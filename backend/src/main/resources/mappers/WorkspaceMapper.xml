@@ -124,16 +124,6 @@
     WHERE workspace_id = #{workspaceId} AND user_id = #{userId}
   </delete>
 
-  <update id="unassignMemberTasks">
-    UPDATE task SET assigned_to_id = NULL
-    WHERE workspace_id = #{workspaceId} AND assigned_to_id = #{userId}
-  </update>
-
-  <update id="clearMemberDealOwnership">
-    UPDATE deal SET owner_id = NULL
-    WHERE workspace_id = #{workspaceId} AND owner_id = #{userId}
-  </update>
-
   <insert id="insert" useGeneratedKeys="true" keyProperty="id">
     INSERT INTO workspace (name, slug<if test="orgId != 0">, org_id</if>)
     VALUES (#{name}, #{slug}<if test="orgId != 0">, #{orgId}</if>)

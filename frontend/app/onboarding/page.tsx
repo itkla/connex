@@ -37,8 +37,7 @@ export default function OnboardingPage() {
         }
         setSubmitting(true);
         try {
-            const workspace = await createWorkspace(trimmed);
-            document.cookie = `connex_workspace=${workspace.id};path=/;max-age=31536000;samesite=lax`;
+            await createWorkspace(trimmed);
             toastSuccess(t("created"));
             router.replace("/dashboard");
             router.refresh();

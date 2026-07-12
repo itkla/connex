@@ -15,6 +15,7 @@ import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.dto.AppiIncidentDto;
 import ooo.klae.connex.backend.dto.AppiIncidentRequest;
 import ooo.klae.connex.backend.dto.AppiIncidentScopeDto;
+import ooo.klae.connex.backend.dto.PageResponse;
 import ooo.klae.connex.backend.services.AppiIncidentService;
 import ooo.klae.connex.backend.services.AuthService;
 
@@ -54,14 +55,15 @@ class AppiIncidentControllerTest {
         AppiIncidentRequest request = new AppiIncidentRequest();
         when(appiIncidentService.get(3, 9L, 7)).thenReturn(new AppiIncidentDto());
         when(appiIncidentService.update(3, 9L, 7, request)).thenReturn(new AppiIncidentDto());
-        when(appiIncidentService.scope(3, 9L, 7)).thenReturn(List.of(new AppiIncidentScopeDto()));
+        when(appiIncidentService.scope(3, 9L, 7, 2, 25))
+            .thenReturn(new PageResponse<>(List.of(new AppiIncidentScopeDto()), 1));
 
         controller.get(3, 9L);
         controller.update(3, 9L, request);
-        controller.scope(3, 9L);
+        controller.scope(3, 9L, 2, 25);
 
         verify(appiIncidentService).get(3, 9L, 7);
         verify(appiIncidentService).update(3, 9L, 7, request);
-        verify(appiIncidentService).scope(3, 9L, 7);
+        verify(appiIncidentService).scope(3, 9L, 7, 2, 25);
     }
 }

@@ -101,8 +101,14 @@ public class WorkspaceController {
 
     @PostMapping("/{id}/leave")
     @ResponseStatus(HttpStatus.NO_CONTENT)
-    public void leave(@PathVariable int id) {
-        workspaceService.leaveWorkspace(id, authService.getCurrentUser().getId());
+    public void leave(@PathVariable int id, HttpServletResponse response) {
+        int userId = authService.getCurrentUser().getId();
+        Integer nextWorkspaceId = workspaceService.leaveWorkspaceAndSelectNext(id, userId);
+        if (nextWorkspaceId == null) {
+            workspaceCookie.clear(response);
+            return;
+        }
+        workspaceCookie.set(response, nextWorkspaceId);
     }
 
     @PostMapping("/{id}/invites")

@@ -27,6 +27,7 @@ import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.notifications.NotificationDelivery;
+import ooo.klae.connex.backend.mappers.NotificationMapper;
 import ooo.klae.connex.backend.mappers.OrganizationMapper;
 import ooo.klae.connex.backend.mappers.RoleMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
@@ -47,6 +48,8 @@ public class WorkspaceService {
     private final OrgMemberService orgMemberService;
     private final OrgAllowedDomainService orgAllowedDomainService;
     private final RoleMapper roleMapper;
+    private final NotificationMapper notificationMapper;
+    private final UserOffboardingService userOffboardingService;
     private final NotificationDelivery notificationDelivery;
     private final TenantContext tenantContext;
     private final AuditService auditService;
@@ -192,6 +195,7 @@ public class WorkspaceService {
         workspace.setName(name.trim());
         workspace.setSlug(generateSlug(name));
         workspaceMapper.insert(workspace);
+        userOffboardingService.prepareFreshMembership(workspace.getId(), ownerUserId);
         workspaceMapper.addMember(workspace.getId(), ownerUserId, "owner");
         auditService.record("org.workspace.create", "organization", orgId, workspace.getName(),
                 "Workspace created", Map.of("workspaceId", workspace.getId(), "ownerUserId", ownerUserId));
@@ -496,15 +500,22 @@ public class WorkspaceService {
                 throw new BadRequestException("A workspace must keep at least one owner");
             }
         }
-        workspaceMapper.unassignMemberTasks(workspaceId, targetUserId);
-        workspaceMapper.clearMemberDealOwnership(workspaceId, targetUserId);
+        userOffboardingService.detachMemberContent(workspaceId, targetUserId);
         workspaceMapper.removeMember(workspaceId, targetUserId);
         auditService.record("workspace.member.remove", "workspace", workspaceId, target.getDisplayName(),
                 "Removed " + target.getDisplayName() + " from the workspace", null);
     }
 
-    /** Adds a user as a PENDING member and notifies them to accept; they aren't a real member until they do. */
+    /**
+     * Adds a user as a PENDING member and notifies them to accept; they aren't a
+     * real member until they do. Any notification rows left over from an earlier
+     * membership are cleaned first — with the cross-plane cascades gone (#440
+     * increment 3) a row inserted while a removal was committing could otherwise
+     * resurface in the re-invited member's inbox.
+     */
+    @Transactional
     public MemberDto addPendingMember(int workspaceId, User actor, User target, String role) {
+        userOffboardingService.prepareFreshMembership(workspaceId, target.getId());
         workspaceMapper.addPendingMember(workspaceId, target.getId(), role);
         notifyJoinRequest(workspaceId, target.getId(), actor);
         auditService.record("workspace.member.invite", "workspace", workspaceId, target.getDisplayName(),
@@ -521,10 +532,12 @@ public class WorkspaceService {
      * @param userId the user to add
      * @param role the role to grant on a fresh join
      */
+    @Transactional
     public void ensureActiveMember(int workspaceId, int userId, String role) {
         if (isMember(workspaceId, userId)) {
             return;
         }
+        userOffboardingService.prepareFreshMembership(workspaceId, userId);
         workspaceMapper.addMember(workspaceId, userId, role);
         int orgId = workspaceMapper.getOrgId(workspaceId);
         auditService.record("org.workspace_member.sso_provision", "organization", orgId, null,
@@ -557,12 +570,14 @@ public class WorkspaceService {
             .orElseThrow(() -> new ResourceNotFoundException("Membership not found"));
     }
 
-    /** The user declines a pending invitation; the row (and its notification) is removed. */
+    /** The user declines a pending invitation; the row and its notifications are removed. */
+    @Transactional
     public void declineMembership(int workspaceId, int userId) {
         MemberDto member = workspaceMapper.getMember(workspaceId, userId);
         if (member == null || !"pending".equals(member.getStatus())) {
             throw new ResourceNotFoundException("No pending invitation for this workspace");
         }
+        notificationMapper.deleteAllForRecipient(workspaceId, userId);
         workspaceMapper.removeMember(workspaceId, userId);
         auditService.record("workspace.member.decline", "workspace", workspaceId, null, "Declined invitation", null);
     }
@@ -577,10 +592,25 @@ public class WorkspaceService {
         if ("owner".equals(role) && workspaceMapper.lockOwnerIds(workspaceId).size() <= 1) {
             throw new BadRequestException("Transfer ownership before leaving; a workspace must keep an owner");
         }
-        workspaceMapper.unassignMemberTasks(workspaceId, userId);
-        workspaceMapper.clearMemberDealOwnership(workspaceId, userId);
+        userOffboardingService.detachMemberContent(workspaceId, userId);
         workspaceMapper.removeMember(workspaceId, userId);
         auditService.record("workspace.member.leave", "workspace", workspaceId, null, "Left the workspace", null);
+    }
+
+    /**
+     * Leaves a workspace and atomically persists the caller's next active workspace.
+     * @param workspaceId the workspace being left
+     * @param userId the departing member
+     * @return the next active workspace id, or null when no membership remains
+     */
+    @Transactional
+    public Integer leaveWorkspaceAndSelectNext(int workspaceId, int userId) {
+        leaveWorkspace(workspaceId, userId);
+        Integer nextWorkspaceId = defaultWorkspaceIdFor(userId);
+        if (nextWorkspaceId != null) {
+            rememberActive(userId, nextWorkspaceId);
+        }
+        return nextWorkspaceId;
     }
 
     private void notifyJoinRequest(int workspaceId, int recipientId, User actor) {

@@ -74,6 +74,7 @@
       "personCreated": "連絡先を作成しました",
       "dealCreated": "取引を作成しました",
       "createFailed": "作成できませんでした。もう一度お試しください。",
+      "linkedRecordLoadFailed": "関連レコードを読み込めませんでした。もう一度お試しください。",
       "companyContactsAllFailed": "会社は作成しましたが、{count} 件の連絡先を追加できませんでした。",
       "companyContactsPartial": "{total} 件中 {succeeded} 件の連絡先を追加しました。",
       "taskCreated": "タスクを作成しました",

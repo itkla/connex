@@ -20,4 +20,11 @@ public interface SavedViewMapper {
     int insert(SavedView view);
     int update(SavedView view);
     int delete(@Param("workspaceId") int workspaceId, @Param("userId") int userId, @Param("id") int id);
+
+    /**
+     * Deletes every saved view owned by a user across all workspaces.
+     * Offboarding replacement for the {@code saved_view.user_id} ON DELETE
+     * CASCADE (#440 increment 3); personal data erased on account deletion.
+     */
+    void deleteForUserAnywhere(@Param("userId") int userId);
 }

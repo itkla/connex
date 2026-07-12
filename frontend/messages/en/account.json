@@ -50,6 +50,13 @@
     "renameTitle": "Rename passkey",
     "renameDescription": "Give this passkey a name you'll recognize, like the device it's on.",
     "labelField": "Name",
+    "passwordTitle": "Confirm your password",
+    "passwordDescription": "Enter your current password before adding your first passkey.",
+    "passwordLabel": "Current password",
+    "incorrectPassword": "That password is incorrect. Try again.",
+    "freshSignInRequired": "Sign out and sign in again before adding your first passkey.",
+    "stepUpCanceled": "Passkey verification was canceled.",
+    "continue": "Continue",
     "save": "Save",
     "cancel": "Cancel",
     "passkeyEntityLabel": "passkey",
@@ -62,6 +69,11 @@
     "removeFailed": "Couldn't remove that passkey. Please try again.",
     "loadFailed": "Couldn't load your passkeys.",
     "retry": "Try again"
+  },
+  "PasskeyStepUp": {
+    "canceled": "Passkey verification was canceled.",
+    "failed": "Passkey verification failed. Please try again.",
+    "enrollmentRequired": "Add a passkey in Account settings, then try this action again."
   },
   "AccountNotifications": {
     "title": "Notifications",

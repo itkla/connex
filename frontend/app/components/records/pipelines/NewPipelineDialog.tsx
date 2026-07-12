@@ -1,6 +1,6 @@
 'use client';
 
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogClose } from '@/components/ui/dialog';
+import { ResponsiveDialog, ResponsiveDialogContent, ResponsiveDialogHeader, ResponsiveDialogTitle, ResponsiveDialogDescription, ResponsiveDialogFooter, ResponsiveDialogClose } from '@/components/ui/responsive-dialog';
 import { Button } from '@/components/ui/button';
 import { Loader2Icon } from 'lucide-react';
 import { PlusIcon, XMarkIcon, FunnelIcon, FlagIcon } from '@heroicons/react/24/outline';
@@ -103,17 +103,17 @@ export default function NewPipelineDialog({
     };
 
     return (
-        <Dialog open={open} onOpenChange={handleOpenChange}>
-            <DialogContent className="gap-0 overflow-hidden p-0 sm:max-w-lg">
+        <ResponsiveDialog open={open} onOpenChange={handleOpenChange}>
+            <ResponsiveDialogContent className="gap-0 overflow-hidden p-0 sm:max-w-lg">
                 <DialogStatusCover status={status} />
 
                 <div className="px-6 pb-6">
-                    <DialogHeader className="ncd-rise -mt-12 mb-5" style={{ animationDelay: '40ms' }}>
-                        <DialogTitle className="text-xl font-semibold tracking-tight">{t('title')}</DialogTitle>
-                        <DialogDescription>
+                    <ResponsiveDialogHeader className="ncd-rise -mt-12 mb-5" style={{ animationDelay: '40ms' }}>
+                        <ResponsiveDialogTitle className="text-xl font-semibold tracking-tight">{t('title')}</ResponsiveDialogTitle>
+                        <ResponsiveDialogDescription>
                             {t('description')}
-                        </DialogDescription>
-                    </DialogHeader>
+                        </ResponsiveDialogDescription>
+                    </ResponsiveDialogHeader>
 
                     <form
                         onSubmit={(e) => {
@@ -209,10 +209,10 @@ export default function NewPipelineDialog({
                             )}
                         </div>
 
-                        <DialogFooter className="ncd-rise mt-5" style={{ animationDelay: '190ms' }}>
-                            <DialogClose asChild>
+                        <ResponsiveDialogFooter className="ncd-rise mt-5" style={{ animationDelay: '190ms' }}>
+                            <ResponsiveDialogClose asChild>
                                 <Button type="button" variant="outline" disabled={isCreating}>{t('cancel')}</Button>
-                            </DialogClose>
+                            </ResponsiveDialogClose>
                             <Button
                                 type="submit"
                                 variant="brand"
@@ -221,10 +221,10 @@ export default function NewPipelineDialog({
                             >
                                 {isCreating ? <Loader2Icon className="size-4 animate-spin" /> : t('create')}
                             </Button>
-                        </DialogFooter>
+                        </ResponsiveDialogFooter>
                     </form>
                 </div>
-            </DialogContent>
-        </Dialog>
+            </ResponsiveDialogContent>
+        </ResponsiveDialog>
     );
 }

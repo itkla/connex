@@ -41,7 +41,7 @@ A data subject (or authorized representative) may request, regarding their **ret
 - Respond **without undue delay**. Target: acknowledge within [3] business days; substantive response within [2] weeks, or explain the delay. Confirm concrete SLAs with counsel and align with customer DPAs.
 
 ## 8. Complaints
-- If the requester is dissatisfied, direct them to the contact point above; they may also contact the Personal Information Protection Commission (個人情報保護委員会). See the public [Data Disclosure page](frontend/app/disclosure) §6.
+- If the requester is dissatisfied, direct them to the contact point above; they may also contact the Personal Information Protection Commission (個人情報保護委員会). See the public [Data Disclosure page](../frontend/app/disclosure) §6.
 
 ---
 
