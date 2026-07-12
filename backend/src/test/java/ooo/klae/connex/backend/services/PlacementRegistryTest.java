@@ -108,6 +108,19 @@ class PlacementRegistryTest {
     }
 
     @Test
+    void activeCatalogsIsDefaultOnlyInSingleDatabaseMode() {
+        assertEquals(java.util.Collections.singletonList(null), placementRegistry.activeCatalogs());
+    }
+
+    @Test
+    void activeCatalogsFansOutOverDedicatedHandlesInCatalogMode() {
+        properties.setMode(TenantRoutingProperties.MODE_CATALOG_PER_PLACEMENT);
+        when(orgPlacementMapper.distinctDedicatedHandles()).thenReturn(java.util.List.of("cnx_a", "cnx_b"));
+
+        assertEquals(java.util.Arrays.asList(null, "cnx_a", "cnx_b"), placementRegistry.activeCatalogs());
+    }
+
+    @Test
     void zeroTtlDisablesCaching() {
         properties.setPlacementCacheTtl(Duration.ZERO);
         when(orgPlacementMapper.findEffectiveByOrg(7)).thenReturn(OrgPlacement.sharedDefault(7));

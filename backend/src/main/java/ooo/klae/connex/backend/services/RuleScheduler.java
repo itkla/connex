@@ -7,6 +7,7 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 import lombok.RequiredArgsConstructor;
+import ooo.klae.connex.backend.tenant.TenantWorkScope;
 
 import ooo.klae.connex.backend.mappers.RuleMapper;
 
@@ -21,6 +22,8 @@ import ooo.klae.connex.backend.mappers.RuleMapper;
 public class RuleScheduler {
 
     private final RuleMapper ruleMapper;
+    private final PlacementRegistry placementRegistry;
+    private final TenantWorkScope tenantWorkScope;
     private final RuleEngineService ruleEngineService;
 
     private static final Logger log = LoggerFactory.getLogger(RuleScheduler.class);
@@ -36,12 +39,14 @@ public class RuleScheduler {
         if (!schedulingEnabled) {
             return;
         }
-        for (int workspaceId : ruleMapper.workspaceIdsWithEnabledScheduleRules()) {
-            for (String cadence : CADENCES) {
-                try {
-                    ruleEngineService.runSchedule(workspaceId, cadence);
-                } catch (Exception e) {
-                    log.warn("Schedule evaluation failed for workspace {} cadence {}: {}", workspaceId, cadence, e.getMessage());
+        for (String catalog : placementRegistry.activeCatalogs()) {
+            for (int workspaceId : tenantWorkScope.withCatalog(catalog, ruleMapper::workspaceIdsWithEnabledScheduleRules)) {
+                for (String cadence : CADENCES) {
+                    try {
+                        tenantWorkScope.inWorkspace(workspaceId, () -> ruleEngineService.runSchedule(workspaceId, cadence));
+                    } catch (Exception e) {
+                        log.warn("Schedule evaluation failed for workspace {} cadence {}: {}", workspaceId, cadence, e.getMessage());
+                    }
                 }
             }
         }

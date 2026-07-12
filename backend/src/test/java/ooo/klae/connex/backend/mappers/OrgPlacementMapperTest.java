@@ -128,4 +128,18 @@ class OrgPlacementMapperTest extends AbstractMapperTest {
         organizationMapper.insert(org);
         return org;
     }
+
+    @Test
+    void distinctDedicatedHandlesListsOnlyDedicatedCatalogs() {
+        Organization dedicated = newOrg();
+        String handle = "cnx_" + unique();
+        OrgPlacement placement = OrgPlacement.sharedDefault(dedicated.getId());
+        placement.setPlacementMode("dedicated_database");
+        placement.setDatabaseHandle(handle);
+        orgPlacementMapper.insert(placement);
+        newOrg();
+
+        assertTrue(orgPlacementMapper.distinctDedicatedHandles().contains(handle));
+        assertFalse(orgPlacementMapper.distinctDedicatedHandles().stream().anyMatch(java.util.Objects::isNull));
+    }
 }

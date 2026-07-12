@@ -7,6 +7,8 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 import lombok.RequiredArgsConstructor;
+import ooo.klae.connex.backend.services.PlacementRegistry;
+import ooo.klae.connex.backend.tenant.TenantWorkScope;
 import ooo.klae.connex.backend.mappers.NotificationMapper;
 import ooo.klae.connex.backend.services.NotificationReconciliationService;
 
@@ -25,6 +27,8 @@ public class NotificationScheduler {
     private static final Logger log = LoggerFactory.getLogger(NotificationScheduler.class);
 
     private final NotificationMapper notificationMapper;
+    private final PlacementRegistry placementRegistry;
+    private final TenantWorkScope tenantWorkScope;
     private final NotificationReconciliationService reconciliationService;
 
     @Scheduled(
@@ -32,12 +36,16 @@ public class NotificationScheduler {
         initialDelayString = "${connex.notifications.initial-delay-ms:300000}"
     )
     public void reconcileAndPurge() {
-        for (Integer workspaceId : notificationMapper.findWorkspaceIds()) {
-            try {
-                reconciliationService.reconcileWorkspace(workspaceId, true);
-                reconciliationService.purgeWorkspace(workspaceId);
-            } catch (Exception exception) {
-                log.error("Scheduled notification reconciliation failed for workspace={}", workspaceId, exception);
+        for (String catalog : placementRegistry.activeCatalogs()) {
+            for (Integer workspaceId : tenantWorkScope.withCatalog(catalog, notificationMapper::findWorkspaceIds)) {
+                try {
+                    tenantWorkScope.inWorkspace(workspaceId, () -> {
+                        reconciliationService.reconcileWorkspace(workspaceId, true);
+                        reconciliationService.purgeWorkspace(workspaceId);
+                    });
+                } catch (Exception exception) {
+                    log.error("Scheduled notification reconciliation failed for workspace={}", workspaceId, exception);
+                }
             }
         }
     }

@@ -8,6 +8,7 @@ import org.springframework.transaction.event.TransactionPhase;
 import org.springframework.transaction.event.TransactionalEventListener;
 
 import lombok.RequiredArgsConstructor;
+import ooo.klae.connex.backend.tenant.TenantWorkScope;
 import ooo.klae.connex.backend.services.NotificationReconciliationService;
 
 /**
@@ -19,12 +20,14 @@ public class NotificationSourceChangedListener {
     private static final Logger log = LoggerFactory.getLogger(NotificationSourceChangedListener.class);
 
     private final NotificationReconciliationService reconciliationService;
+    private final TenantWorkScope tenantWorkScope;
 
     @Async
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT, fallbackExecution = true)
     public void onSourceChanged(NotificationSourceChangedEvent event) {
         try {
-            reconciliationService.reconcileWorkspace(event.workspaceId(), false);
+            tenantWorkScope.inWorkspace(event.workspaceId(), () ->
+                reconciliationService.reconcileWorkspace(event.workspaceId(), false));
         } catch (Exception exception) {
             log.error(
                 "Notification reconciliation failed after source change workspace={} sourceType={} sourceId={}",

@@ -1,6 +1,8 @@
 package ooo.klae.connex.backend.services;
 
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
 
 import org.springframework.stereotype.Service;
@@ -96,6 +98,25 @@ public class PlacementRegistry {
      */
     public void invalidate(int orgId) {
         effectiveCache.remove(orgId);
+    }
+
+    /**
+     * The catalogs background sweeps must fan out over: the default catalog
+     * (represented as {@code null}) plus every distinct dedicated-database
+     * handle when catalog routing is enabled. In {@code single-database} mode
+     * only the default catalog is returned — dedicated placements are refused
+     * fail-closed on the request path and receive no background processing
+     * either (#485).
+     *
+     * @return the catalogs to sweep; {@code null} means the default catalog
+     */
+    public List<String> activeCatalogs() {
+        List<String> catalogs = new ArrayList<>();
+        catalogs.add(null);
+        if (routingProperties.isCatalogPerPlacement()) {
+            catalogs.addAll(orgPlacementMapper.distinctDedicatedHandles());
+        }
+        return catalogs;
     }
 
     private void requirePositive(int orgId) {

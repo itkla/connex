@@ -87,10 +87,11 @@ connex:
             # an org whose placement row demands routing is refused with 503 rather than
             # silently served from shared storage. 'catalog-per-placement' switches the
             # pooled connection to the org's database_handle at checkout and resets it on
-            # return. DO NOT enable catalog-per-placement in production until the
-            # control-plane split increment (#440) lands AND off-request-thread work
-            # (@Async rule triggers, @Scheduled rule/notification jobs) resolves the org
-            # catalog — those paths currently run on the shared catalog.
+            # return. Off-request-thread work (@Async rule triggers, @Scheduled
+            # rule/notification jobs) resolves the org catalog via TenantWorkScope and
+            # the schedulers fan out over every active catalog. DO NOT enable
+            # catalog-per-placement in production until the remaining flag-enable gate
+            # (#485) clears.
             mode: ${CONNEX_TENANCY_ROUTING_MODE:single-database}
             # Control-plane/default catalog; required when mode=catalog-per-placement.
             default-catalog: ${CONNEX_TENANCY_ROUTING_DEFAULT_CATALOG:}
