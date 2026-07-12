@@ -33,12 +33,12 @@ import ooo.klae.connex.backend.mappers.PreferenceMapper;
  * first two, so the every-cycle re-dispatch of an unchanged reminder never
  * re-notifies a live client.
  *
- * <p>The pre-read is not transactionally isolated across concurrent reconcile
- * passes: two passes for the same workspace can each observe "new" and both
- * email — and both push a {@code created} frame — once. This is bounded to a
- * single duplicate per brand-new reminder (repeat reminders are always
- * suppressed), absorbed client-side by dedupe-key suppression, and tracked for a
- * claim-based hardening.
+ * <p>The in-app affected-row count closes a stale-pre-read race for existing rows:
+ * if another transaction changes a notification between the pre-read and upsert,
+ * an overwrite still advances the version and pushes an update. Two concurrent
+ * passes can each observe a brand-new reminder and both email and push it once;
+ * that bounded first-occurrence duplicate is absorbed client-side by dedupe-key
+ * suppression and tracked for claim-based hardening.
  */
 @Component
 @RequiredArgsConstructor
@@ -63,15 +63,16 @@ public class NotificationDelivery {
         boolean firstOccurrence = existing == null;
         boolean changed = firstOccurrence || isVisibleChange(existing, notification);
 
+        int inAppRows = 0;
         for (NotificationDispatcher dispatcher : dispatchers) {
             if (IN_APP.equals(dispatcher.channel())) {
-                dispatcher.dispatch(notification);
+                inAppRows = Math.max(inAppRows, dispatcher.dispatch(notification));
             }
         }
 
-        if (changed) {
-            stateVersionService.markChanged(notification.getRecipientId());
-            pushRealtime(notification, existing);
+        boolean persistedChange = changed || (!firstOccurrence && inAppRows > 1);
+        if (persistedChange) {
+            pushRealtime(notification, existing, persistedChange);
         }
 
         if (!firstOccurrence) {
@@ -96,17 +97,20 @@ public class NotificationDelivery {
                 notification.getWorkspaceId(), notification.getRecipientId(), notification.getDedupeKey());
     }
 
-    private void pushRealtime(Notification notification, Notification existing) {
+    private void pushRealtime(
+            Notification notification, Notification existing, boolean persistedChange) {
         boolean created = existing == null;
-        boolean updated = !created && isVisibleChange(existing, notification);
+        boolean updated = !created && persistedChange;
         if (!created && !updated) {
             return;
         }
         int id = created ? notification.getId() : existing.getId();
         Notification persisted = notificationMapper.findById(notification.getRecipientId(), id);
         if (persisted == null) {
+            stateVersionService.markChanged(notification.getRecipientId());
             return;
         }
+        stateVersionService.markChangedWithDetailedPush(notification.getRecipientId());
         NotificationDto dto = NotificationDto.from(persisted);
         if (created) {
             pushPublisher.created(notification.getRecipientId(), dto, notification.getDedupeKey());

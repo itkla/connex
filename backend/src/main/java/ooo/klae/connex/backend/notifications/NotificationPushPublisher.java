@@ -38,4 +38,13 @@ public class NotificationPushPublisher {
         eventPublisher.publishEvent(new NotificationPushEvent(
                 recipientId, "updated", notification, dedupeKey));
     }
+
+    /**
+     * Queues an {@code invalidated} frame when the durable inbox changed without a rendered item.
+     * @param recipientId the recipient user id
+     */
+    public void invalidated(int recipientId) {
+        eventPublisher.publishEvent(new NotificationPushEvent(
+                recipientId, "invalidated", null, null));
+    }
 }

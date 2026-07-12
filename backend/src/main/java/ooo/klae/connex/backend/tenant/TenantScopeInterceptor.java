@@ -130,7 +130,9 @@ public class TenantScopeInterceptor implements Interceptor {
      * ones the user has left, where no tenant context could be resolved. The
      * recipient-scoped notification delete backs invitation decline, which a
      * user with no active workspace may perform; it anchors
-     * {@code workspace_id} and {@code recipient_id} in SQL.
+     * {@code workspace_id} and {@code recipient_id} in SQL. The recipient
+     * membership lock and actor-recipient projection are identity-scoped
+     * coordination reads for those same offboarding flows.
      */
     private static final Set<String> EXEMPT_STATEMENTS = Set.of(
         MAPPERS + "AuditLogMapper.insert",
@@ -140,6 +142,9 @@ public class TenantScopeInterceptor implements Interceptor {
         MAPPERS + "NoteMapper.countAuthoredAnywhere",
         MAPPERS + "ActivityMapper.countCreatedAnywhere",
         MAPPERS + "IntroductionMapper.countIntroducedAnywhere",
+        MAPPERS + "NotificationMapper.lockRecipientMemberships",
+        MAPPERS + "NotificationMapper.findRecipientIdsByActor",
+        MAPPERS + "NotificationMapper.lockRecipientIdsByActor",
         MAPPERS + "NotificationMapper.deleteAllForRecipient",
         MAPPERS + "NotificationMapper.deleteAllForRecipientAnywhere",
         MAPPERS + "NotificationMapper.clearActorAnywhere",

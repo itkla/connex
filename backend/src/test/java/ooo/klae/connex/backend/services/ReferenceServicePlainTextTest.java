@@ -1,6 +1,9 @@
 package ooo.klae.connex.backend.services;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
+
+import java.time.Duration;
 
 import org.junit.jupiter.api.Test;
 
@@ -84,5 +87,29 @@ class ReferenceServicePlainTextTest {
             "[Roadmap [private appendix]](note:123)"));
         assertEquals("a note", ReferenceService.toPlainText(
             "![Diagram [private appendix]](<note:456> \"preview\")"));
+    }
+
+    @Test
+    void toPlainText_redactsNoteDestinationsAfterCodeSpanClosingBrackets() {
+        assertEquals("a note", ReferenceService.toPlainText(
+            "[Secret `]` appendix](note:123)"));
+        assertEquals("a note", ReferenceService.toPlainText(
+            "[Secret ``]` [appendix]`` details](note:456)"));
+    }
+
+    @Test
+    void toPlainText_preservesCodeSpanBracketsNearNoteLikeProse() {
+        String content = "Use `]` in prose before reviewing note:123";
+
+        assertEquals(content, ReferenceService.toPlainText(content));
+    }
+
+    @Test
+    void toPlainText_scansHostileUnmatchedLabelsInLinearTime() {
+        String noteLink = "[Secret](note:123)";
+        String content = "[".repeat(50_000 - noteLink.length()) + noteLink;
+
+        assertTimeoutPreemptively(Duration.ofSeconds(2), () ->
+            assertEquals("a note", ReferenceService.toPlainText(content)));
     }
 }

@@ -79,6 +79,33 @@ class NotificationMapperTest extends AbstractMapperTest {
     }
 
     @Test
+    void upsertUpdateCountDistinguishesChangedRowsFromStableRedelivery() {
+        User recipient = newUser();
+        notificationMapper.upsert(reminder(recipient, "warning", "2026-06-23 00:00:00"));
+
+        int stableRows = notificationMapper.upsert(
+            reminder(recipient, "warning", "2026-06-23 00:00:00"));
+        int changedRows = notificationMapper.upsert(
+            reminder(recipient, "critical", "2026-06-24 00:00:00"));
+
+        assertTrue(stableRows <= 1);
+        assertTrue(changedRows > 1);
+    }
+
+    @Test
+    void upsertClearsAnActorThatNoLongerExists() {
+        User recipient = newUser();
+        User deletedActor = newUser();
+        Notification notification = reminder(recipient, "warning", "2026-06-23 00:00:00");
+        notification.setActorId(deletedActor.getId());
+        userMapper.delete(deletedActor.getId());
+
+        notificationMapper.upsert(notification);
+
+        assertNull(onlyReminder(recipient).getActorId());
+    }
+
+    @Test
     void lifecycleMutationCannotCrossRecipientScope() {
         User recipient = newUser();
         User otherRecipient = newUser();
@@ -141,6 +168,7 @@ class NotificationMapperTest extends AbstractMapperTest {
     @Test
     void purgeRemovesResolvedHistoryButKeepsDismissedActiveRows() {
         User recipient = newUser();
+        User unaffectedRecipient = newUser();
         Notification dismissed = reminder(recipient, "warning", "2026-01-01 00:00:00");
         notificationMapper.upsert(dismissed);
         Notification storedDismissed = onlyReminder(recipient);
@@ -161,6 +189,21 @@ class NotificationMapperTest extends AbstractMapperTest {
             recipient.getId(),
             storedResolved.getId(),
             "2026-01-02 00:00:00"
+        );
+        Notification newerResolved = reminder(
+            unaffectedRecipient, "warning", "2026-03-01 00:00:00", 93);
+        notificationMapper.upsert(newerResolved);
+        notificationMapper.resolveReminder(
+            workspace.getId(),
+            unaffectedRecipient.getId(),
+            onlyReminder(unaffectedRecipient).getId(),
+            "2026-03-02 00:00:00"
+        );
+
+        assertEquals(
+            List.of(recipient.getId()),
+            notificationMapper.findPurgeRecipientIds(
+                workspace.getId(), "2026-02-01 00:00:00")
         );
 
         assertEquals(
@@ -184,6 +227,26 @@ class NotificationMapperTest extends AbstractMapperTest {
         assertTrue(remaining.stream().anyMatch(
             notification -> "task.due:91".equals(notification.getDedupeKey())
         ));
+    }
+
+    @Test
+    void actorCleanupProjectsExactRecipientsAndReportsUpdatedRows() {
+        User actor = newUser();
+        User firstRecipient = newUser();
+        User secondRecipient = newUser();
+        Notification first = reminder(firstRecipient, "warning", "2026-06-23 00:00:00", 101);
+        first.setActorId(actor.getId());
+        Notification second = reminder(secondRecipient, "warning", "2026-06-23 00:00:00", 102);
+        second.setActorId(actor.getId());
+        notificationMapper.upsert(first);
+        notificationMapper.upsert(second);
+
+        assertEquals(
+            List.of(firstRecipient.getId(), secondRecipient.getId()).stream().sorted().toList(),
+            notificationMapper.findRecipientIdsByActor(actor.getId())
+        );
+        assertEquals(2, notificationMapper.clearActorAnywhere(actor.getId()));
+        assertTrue(notificationMapper.findRecipientIdsByActor(actor.getId()).isEmpty());
     }
 
     @Test

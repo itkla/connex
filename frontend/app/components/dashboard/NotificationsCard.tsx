@@ -2,9 +2,11 @@
 
 import Link from 'next/link';
 import { useLocale, useTranslations } from 'next-intl';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 
+import { useNotificationWorkspaceActions } from '@/app/components/notifications/useNotificationWorkspaceActions';
 import { getNotifications } from '@/app/lib/api';
+import { toastError } from '@/app/lib/toast';
 import type { Notification } from '@/app/lib/types';
 import { formatRelativeTime } from '@/app/lib/utils';
 import {
@@ -34,6 +36,8 @@ export default function NotificationsCard({
     recipientId,
     initialStateVersion,
 }: NotificationsCardProps) {
+    const t = useTranslations('Notifications');
+    const { openNotification } = useNotificationWorkspaceActions();
     const [reconciled, setReconciled] = useState<ReconciledNotifications | null>(null);
     const visibleItems = reconciled?.sourceItems === items
         && reconciled.sourceStateVersion === initialStateVersion
@@ -82,7 +86,15 @@ export default function NotificationsCard({
         };
     }, [initialStateVersion, items, recipientId]);
 
-    return <NotificationsCardView items={visibleItems} />;
+    const handleOpen = useCallback((notification: Notification) => {
+        void openNotification(notification)
+            .then((opened) => {
+                if (!opened) toastError(t('actionError'));
+            })
+            .catch(() => toastError(t('actionError')));
+    }, [openNotification, t]);
+
+    return <NotificationsCardView items={visibleItems} onOpen={handleOpen} />;
 }
 
 /**
@@ -90,7 +102,13 @@ export default function NotificationsCard({
  * @param items the notifications to render
  * @returns the notification card
  */
-export function NotificationsCardView({ items }: { items: Notification[] }) {
+export function NotificationsCardView({
+    items,
+    onOpen,
+}: {
+    items: Notification[];
+    onOpen?: (notification: Notification) => void;
+}) {
     const t = useTranslations('Notifications');
     const locale = useLocale();
 
@@ -128,6 +146,12 @@ export function NotificationsCardView({ items }: { items: Notification[] }) {
                                 {url ? (
                                     <Link
                                         href={url}
+                                        prefetch={onOpen ? false : undefined}
+                                        onClick={(event) => {
+                                            if (!onOpen) return;
+                                            event.preventDefault();
+                                            onOpen(item);
+                                        }}
                                         className="flex min-w-0 flex-1 items-center gap-3 transition-opacity hover:opacity-80"
                                     >
                                         {inner}

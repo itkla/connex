@@ -513,7 +513,7 @@ public class NotificationReconciliationService {
     public int purgeWorkspace(int workspaceId) {
         int retentionDays = Math.max(1, properties.getRetentionDays());
         String cutoff = utcTimestamp(clock.instant().minusSeconds(retentionDays * 86_400L));
-        List<Integer> recipientIds = notificationMapper.findWorkspaceRecipientIds(workspaceId);
+        List<Integer> recipientIds = notificationMapper.findPurgeRecipientIds(workspaceId, cutoff);
         int rows = notificationMapper.purgeWorkspaceReminderHistory(workspaceId, cutoff);
         if (rows > 0) {
             recipientIds.forEach(stateVersionService::markChanged);

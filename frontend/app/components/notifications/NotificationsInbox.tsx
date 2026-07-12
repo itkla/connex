@@ -3,7 +3,6 @@
 import { ArrowUturnLeftIcon, CheckCircleIcon, XMarkIcon } from "@heroicons/react/24/outline";
 import { CheckCheck } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
-import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 
 import {
@@ -26,6 +25,7 @@ import {
     onNotificationStateChanged,
 } from "@/app/components/notifications/notificationEvents";
 import { SnoozeMenu } from "@/app/components/notifications/SnoozeMenu";
+import { useNotificationWorkspaceActions } from "@/app/components/notifications/useNotificationWorkspaceActions";
 import { cn } from "@/lib/utils";
 import { SegmentedToggle } from "@/app/components/filters";
 import Rise from "@/app/components/motion/Rise";
@@ -56,8 +56,8 @@ function matchesState(n: Notification, state: NotificationState): boolean {
 export default function NotificationsInbox() {
     const t = useTranslations("Notifications");
     const locale = useLocale();
-    const router = useRouter();
     const { recipientId, unread, refreshUnread } = useNotifications();
+    const { openInNotificationWorkspace } = useNotificationWorkspaceActions();
     const [state, setState] = useState<NotificationState>("active");
     const [items, setItems] = useState<Notification[]>([]);
     const [page, setPage] = useState(1);
@@ -158,9 +158,16 @@ export default function NotificationsInbox() {
         }
     }
 
-    function logTouch(item: Notification) {
-        if (item.sourceId == null) return;
-        router.push(`/records/contacts/${item.sourceId}`);
+    async function logTouch(item: Notification) {
+        const sourceId = item.sourceId;
+        if (sourceId == null) return;
+        try {
+            const opened = await openInNotificationWorkspace(
+                item, `/records/contacts/${sourceId}`);
+            if (!opened) toastError(t("actionError"));
+        } catch {
+            toastError(t("actionError"));
+        }
     }
 
     async function restore(item: Notification) {
@@ -191,9 +198,19 @@ export default function NotificationsInbox() {
     }
 
     async function navigate(item: Notification) {
-        if (!item.readAt) await toggleRead(item);
         const url = safeNotificationUrl(item.actionUrl);
-        if (url) router.push(url);
+        if (!url) {
+            if (!item.readAt) await toggleRead(item);
+            return;
+        }
+        try {
+            const opened = await openInNotificationWorkspace(item, url, async () => {
+                if (!item.readAt) await toggleRead(item);
+            });
+            if (!opened) toastError(t("actionError"));
+        } catch {
+            toastError(t("actionError"));
+        }
     }
 
     const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
@@ -325,7 +342,7 @@ export default function NotificationsInbox() {
                                                     <Button
                                                         variant="ghost"
                                                         size="sm"
-                                                        onClick={() => logTouch(item)}
+                                                        onClick={() => void logTouch(item)}
                                                     >
                                                         {t("logTouch")}
                                                     </Button>

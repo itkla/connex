@@ -3,7 +3,6 @@
 import { BellIcon, CheckCircleIcon, CheckIcon, EyeIcon, XMarkIcon } from "@heroicons/react/24/outline";
 import { CheckCheck } from "lucide-react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useLocale, useTranslations } from "next-intl";
 import { DropdownMenu } from "radix-ui";
@@ -19,7 +18,8 @@ import { type Notification } from "@/app/lib/types";
 import { formatRelativeTime } from "@/app/lib/utils";
 import { toastError } from "@/app/lib/toast";
 import { useNotifications } from "@/app/hooks/useNotifications";
-import { notificationContent, notificationIcon, notificationSeverityStyle, safeNotificationUrl } from "@/app/components/notifications/notificationContent";
+import { notificationContent, notificationIcon, notificationSeverityStyle } from "@/app/components/notifications/notificationContent";
+import { useNotificationWorkspaceActions } from "@/app/components/notifications/useNotificationWorkspaceActions";
 import { Checkbox } from "@/components/ui/checkbox";
 import { cn } from "@/lib/utils";
 import {
@@ -31,8 +31,8 @@ import {
 export default function NotificationBell() {
     const t = useTranslations("Notifications");
     const locale = useLocale();
-    const router = useRouter();
     const { recipientId, unread, refreshUnread } = useNotifications();
+    const { executeInNotificationWorkspace, openNotification } = useNotificationWorkspaceActions();
     const [items, setItems] = useState<Notification[]>([]);
     const [completing, setCompleting] = useState<Set<number>>(new Set());
     const [loading, setLoading] = useState(false);
@@ -69,9 +69,12 @@ export default function NotificationBell() {
         [load, recipientId],
     );
 
-    function openItem(item: Notification) {
-        const url = safeNotificationUrl(item.actionUrl);
-        if (url) router.push(url);
+    async function openItem(item: Notification) {
+        try {
+            if (!await openNotification(item)) toastError(t("actionError"));
+        } catch {
+            toastError(t("actionError"));
+        }
     }
 
     async function resolve(item: Notification) {
@@ -88,12 +91,16 @@ export default function NotificationBell() {
     }
 
     async function completeFromInbox(item: Notification) {
-        if (item.sourceType !== "task" || item.sourceId == null) return;
+        const taskId = item.sourceId;
+        if (item.sourceType !== "task" || taskId == null) return;
         setCompleting((current) => new Set(current).add(item.id));
         try {
-            await completeTask(item.sourceId);
-            setItems((current) => current.filter((entry) => entry.id !== item.id));
-            await refreshUnread();
+            const completed = await executeInNotificationWorkspace(item, async () => {
+                await completeTask(taskId);
+                setItems((current) => current.filter((entry) => entry.id !== item.id));
+                await refreshUnread();
+            });
+            if (!completed) toastError(t("completeError"));
         } catch {
             toastError(t("completeError"));
         } finally {
@@ -200,7 +207,7 @@ export default function NotificationBell() {
                                     className="group relative flex items-start gap-2 rounded-lg p-2 transition-colors hover:bg-muted"
                                 >
                                     <DropdownMenu.Item
-                                        onSelect={() => openItem(item)}
+                                        onSelect={() => void openItem(item)}
                                         className="flex min-w-0 flex-1 cursor-pointer items-start gap-3 rounded-md text-left outline-none data-[highlighted]:bg-muted"
                                     >
                                         <span

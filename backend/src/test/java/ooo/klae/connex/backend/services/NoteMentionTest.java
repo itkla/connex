@@ -263,6 +263,23 @@ class NoteMentionTest extends AbstractServiceTest {
     }
 
     @Test
+    void privateNoteTargetAfterCodeSpanBracket_isRedactedForNonAuthor() {
+        Note privateDraft = draft("secret acquisition plan");
+        privateDraft.setVisibility("private");
+        Note privateNote = noteService.create(privateDraft);
+        Note source = noteService.create(draft(
+            "[Secret `]` appendix](note:" + privateNote.getId() + ")"));
+        User other = newUser();
+        authenticateAs(other, workspace.getId());
+
+        Note asOther = noteService.getNoteById(source.getId());
+
+        assertEquals("(private note)", asOther.getContent());
+        assertTrue(asOther.getReferences().stream()
+            .noneMatch(reference -> "note".equals(reference.getRefType())));
+    }
+
+    @Test
     void escapedAndEntityEncodedPrivateNoteTargets_areRedactedForNonAuthor() {
         Note privateDraft = draft("secret acquisition plan");
         privateDraft.setVisibility("private");

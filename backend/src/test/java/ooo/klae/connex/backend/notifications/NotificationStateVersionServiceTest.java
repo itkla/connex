@@ -23,6 +23,7 @@ import ooo.klae.connex.backend.mappers.NotificationMapper;
 @ExtendWith(MockitoExtension.class)
 class NotificationStateVersionServiceTest {
     @Mock private NotificationMapper notificationMapper;
+    @Mock private NotificationPushPublisher pushPublisher;
 
     private NotificationStateVersionService service;
 
@@ -30,7 +31,7 @@ class NotificationStateVersionServiceTest {
     void setUp() {
         TransactionSynchronizationManager.setActualTransactionActive(true);
         TransactionSynchronizationManager.initSynchronization();
-        service = new NotificationStateVersionService(notificationMapper);
+        service = new NotificationStateVersionService(notificationMapper, pushPublisher);
     }
 
     @AfterEach
@@ -53,6 +54,9 @@ class NotificationStateVersionServiceTest {
         synchronization.beforeCommit(false);
 
         verify(notificationMapper).bumpStateVersions(List.of(2, 9));
+        InOrder pushOrder = inOrder(pushPublisher);
+        pushOrder.verify(pushPublisher).invalidated(2);
+        pushOrder.verify(pushPublisher).invalidated(9);
         synchronization.afterCompletion(TransactionSynchronization.STATUS_COMMITTED);
     }
 
@@ -66,12 +70,51 @@ class NotificationStateVersionServiceTest {
         TransactionSynchronization synchronization = onlySynchronization();
         synchronization.beforeCommit(false);
 
-        InOrder order = inOrder(notificationMapper);
+        InOrder order = inOrder(notificationMapper, pushPublisher);
         order.verify(notificationMapper).bumpStateVersions(List.of(9));
         order.verify(notificationMapper).getStateVersion(9);
+        order.verify(pushPublisher).invalidated(9);
         order.verify(notificationMapper).bumpStateVersions(List.of(2));
+        order.verify(pushPublisher).invalidated(2);
         assertEquals(17L, version);
         synchronization.afterCompletion(TransactionSynchronization.STATUS_COMMITTED);
+    }
+
+    @Test
+    void detailedPushSuppressesGenericInvalidationUnlessAnotherMutationRequiresIt() {
+        service.markChangedWithDetailedPush(9);
+        service.markChangedWithDetailedPush(2);
+        service.markChanged(9);
+
+        TransactionSynchronization synchronization = onlySynchronization();
+        synchronization.beforeCommit(false);
+
+        verify(notificationMapper).bumpStateVersions(List.of(2, 9));
+        verify(pushPublisher).invalidated(9);
+        verify(pushPublisher, never()).invalidated(2);
+        synchronization.afterCompletion(TransactionSynchronization.STATUS_COMMITTED);
+    }
+
+    @Test
+    void changeOutsideTransactionBumpsBeforePublishingInvalidation() {
+        TransactionSynchronizationManager.clearSynchronization();
+        TransactionSynchronizationManager.setActualTransactionActive(false);
+
+        service.markChanged(9);
+
+        InOrder order = inOrder(notificationMapper, pushPublisher);
+        order.verify(notificationMapper).bumpStateVersions(List.of(9));
+        order.verify(pushPublisher).invalidated(9);
+    }
+
+    @Test
+    void rolledBackChangePublishesNothing() {
+        service.markChanged(9);
+
+        onlySynchronization().afterCompletion(TransactionSynchronization.STATUS_ROLLED_BACK);
+
+        verify(notificationMapper, never()).bumpStateVersions(List.of(9));
+        verify(pushPublisher, never()).invalidated(9);
     }
 
     private static TransactionSynchronization onlySynchronization() {

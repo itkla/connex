@@ -41,6 +41,9 @@ class TenantScopeInterceptorTest {
         assertFalse(interceptor.requiresResolvedContext(NS + "PreferenceMapper.isEnabled"));
         assertFalse(interceptor.requiresResolvedContext(NS + "AuditLogMapper.insert"));
         assertFalse(interceptor.requiresResolvedContext(NS + "AuditLogMapper.findOrgExport"));
+        assertFalse(interceptor.requiresResolvedContext(NS + "NotificationMapper.lockRecipientMemberships"));
+        assertFalse(interceptor.requiresResolvedContext(NS + "NotificationMapper.findRecipientIdsByActor"));
+        assertFalse(interceptor.requiresResolvedContext(NS + "NotificationMapper.lockRecipientIdsByActor"));
     }
 
     @Test

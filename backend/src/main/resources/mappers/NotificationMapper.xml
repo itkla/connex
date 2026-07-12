@@ -292,7 +292,8 @@
     )
     VALUES (
       #{workspaceId}, #{recipientId}, #{type}, #{category}, #{severity},
-      #{templateVersion}, #{title}, #{body}, #{actorId}, #{actorLabel},
+      #{templateVersion}, #{title}, #{body},
+      (SELECT id FROM app_user WHERE id = #{actorId} FOR SHARE), #{actorLabel},
       #{sourceType}, #{sourceId}, #{sourceLabel}, #{contextType}, #{contextId},
       #{contextLabel}, #{actionUrl}, #{data}, #{dedupeKey}, #{triggeredAt}
     ) AS incoming
@@ -546,6 +547,31 @@
     ORDER BY user_id
   </select>
 
+  <select id="findPurgeRecipientIds" resultType="int">
+    SELECT DISTINCT recipient_id
+    FROM notification
+    WHERE workspace_id = #{workspaceId}
+      AND type IN (<include refid="reminderTypes"/>)
+      AND resolved_at IS NOT NULL
+      AND resolved_at &lt; #{cutoff}
+    ORDER BY recipient_id
+  </select>
+
+  <select id="findRecipientIdsByActor" resultType="int">
+    SELECT DISTINCT recipient_id
+    FROM notification
+    WHERE actor_id = #{userId}
+    ORDER BY recipient_id
+  </select>
+
+  <select id="lockRecipientIdsByActor" resultType="int">
+    SELECT recipient_id
+    FROM notification
+    WHERE actor_id = #{userId}
+    ORDER BY recipient_id, id
+    FOR UPDATE
+  </select>
+
   <delete id="purgeReminderHistory">
     DELETE FROM notification
     WHERE workspace_id = #{workspaceId}
@@ -562,6 +588,7 @@
       AND resolved_at IS NOT NULL
       AND resolved_at &lt; #{cutoff}
   </delete>
+
   <delete id="deleteAllForRecipient">
     DELETE FROM notification
     WHERE workspace_id = #{workspaceId} AND recipient_id = #{recipientId}

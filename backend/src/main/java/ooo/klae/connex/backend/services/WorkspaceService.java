@@ -342,12 +342,26 @@ public class WorkspaceService {
     /**
      * Refuses when the user is the only active owner of any workspace — deleting the account would
      * leave that workspace ownerless (workspace_member is {@code ON DELETE CASCADE}, bypassing the
-     * last-owner safeguards on the member operations). Each owned workspace's owner rows are read
-     * under a lock so concurrent co-owner deletions serialize; must run in a transaction. They must
-     * transfer ownership first.
+     * last-owner safeguards on the member operations). Owned workspace roots are locked in id
+     * order to serialize owner-sensitive operations, then all of the user's membership rows are
+     * locked in workspace order before the owner rows are read. This matches notification mark-all
+     * ordering while preserving the concurrent co-owner deletion guard; must run in a transaction.
+     * They must transfer ownership first.
      */
     public void assertNotSoleOwnerOfAnyWorkspace(int userId) {
-        for (int workspaceId : workspaceMapper.workspaceIdsOwnedBy(userId)) {
+        List<Integer> ownedWorkspaceIds = lockOwnedWorkspaceRoots(userId);
+        notificationMapper.lockRecipientMemberships(userId);
+        assertNotSoleOwnerOfWorkspaces(ownedWorkspaceIds);
+    }
+
+    List<Integer> lockOwnedWorkspaceRoots(int userId) {
+        List<Integer> ownedWorkspaceIds = workspaceMapper.workspaceIdsOwnedBy(userId);
+        ownedWorkspaceIds.forEach(workspaceMapper::lockWorkspace);
+        return List.copyOf(ownedWorkspaceIds);
+    }
+
+    void assertNotSoleOwnerOfWorkspaces(List<Integer> ownedWorkspaceIds) {
+        for (int workspaceId : ownedWorkspaceIds) {
             if (workspaceMapper.lockOwnerIds(workspaceId).size() <= 1) {
                 throw new BadRequestException("Transfer workspace ownership before deleting your account");
             }
@@ -472,6 +486,8 @@ public class WorkspaceService {
         }
         if ("owner".equals(target.getRole()) && newRole != Role.OWNER) {
             requireRole(workspaceId, actorId, Role.OWNER);
+            lockOwnedWorkspaceRoots(targetUserId);
+            notificationMapper.lockRecipientMemberships(targetUserId);
             if (workspaceMapper.lockOwnerIds(workspaceId).size() <= 1) {
                 throw new BadRequestException("A workspace must keep at least one owner");
             }
@@ -498,6 +514,8 @@ public class WorkspaceService {
         }
         if ("owner".equals(target.getRole())) {
             requireRole(workspaceId, actorId, Role.OWNER);
+            lockOwnedWorkspaceRoots(targetUserId);
+            notificationMapper.lockRecipientMemberships(targetUserId);
             if (workspaceMapper.lockOwnerIds(workspaceId).size() <= 1) {
                 throw new BadRequestException("A workspace must keep at least one owner");
             }
@@ -576,6 +594,7 @@ public class WorkspaceService {
         if (member == null || !"pending".equals(member.getStatus())) {
             throw new ResourceNotFoundException("No pending invitation for this workspace");
         }
+        notificationMapper.lockRecipientMemberships(userId);
         notificationMapper.deleteAllForRecipient(workspaceId, userId);
         workspaceMapper.removeMember(workspaceId, userId);
         notificationStateVersionService.markChanged(userId);
@@ -589,8 +608,12 @@ public class WorkspaceService {
         if (role == null) {
             throw new ResourceNotFoundException("You are not a member of this workspace");
         }
-        if ("owner".equals(role) && workspaceMapper.lockOwnerIds(workspaceId).size() <= 1) {
-            throw new BadRequestException("Transfer ownership before leaving; a workspace must keep an owner");
+        if ("owner".equals(role)) {
+            lockOwnedWorkspaceRoots(userId);
+            notificationMapper.lockRecipientMemberships(userId);
+            if (workspaceMapper.lockOwnerIds(workspaceId).size() <= 1) {
+                throw new BadRequestException("Transfer ownership before leaving; a workspace must keep an owner");
+            }
         }
         userOffboardingService.detachMemberContent(workspaceId, userId);
         workspaceMapper.removeMember(workspaceId, userId);

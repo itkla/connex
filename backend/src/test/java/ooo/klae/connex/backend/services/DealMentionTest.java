@@ -6,6 +6,7 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
@@ -200,7 +201,7 @@ class DealMentionTest extends AbstractServiceTest {
     }
 
     @Test
-    void dealReadsExposeOnlyNoteIdsVisibleToTheCurrentMember() {
+    void genericDealReadsOmitNoteIdsWhileDedicatedReadsEnforceVisibility() {
         Company company = newCompany();
         Pipeline pipeline = newPipeline();
         Stage stage = newStage(pipeline, 0);
@@ -218,9 +219,10 @@ class DealMentionTest extends AbstractServiceTest {
         workspaceDraft.setVisibility("workspace");
         workspaceDraft.setDeal(deal);
         Note workspaceNote = noteService.create(workspaceDraft);
+        assertNull(dealService.getDealById(deal.getId()).getNotes());
         assertEquals(
             List.of(privateNote.getId(), workspaceNote.getId()).stream().sorted().toList(),
-            noteIds(dealService.getDealById(deal.getId())).stream().sorted().toList());
+            dealService.getNotesByDealId(deal.getId()).stream().map(Note::getId).sorted().toList());
 
         User other = newUser();
         authenticateAs(other, workspace.getId());
@@ -233,20 +235,16 @@ class DealMentionTest extends AbstractServiceTest {
             findDeal(Arrays.asList(personService.getPersonById(person.getId()).getDeals()), deal.getId()));
 
         for (Deal candidate : fetched) {
-            assertEquals(List.of(workspaceNote.getId()), noteIds(candidate));
-            assertFalse(noteIds(candidate).contains(privateNote.getId()));
+            assertNull(candidate.getNotes());
         }
         DealDto searchResult = searchService.search(deal.getName()).getDeals().stream()
             .filter(candidate -> candidate.getId() == deal.getId())
             .findFirst()
             .orElseThrow();
-        assertEquals(List.of(workspaceNote.getId()), Arrays.stream(searchResult.getNoteIds()).boxed().toList());
-    }
-
-    private static List<Integer> noteIds(Deal deal) {
-        return deal.getNotes() == null
-            ? List.of()
-            : Arrays.stream(deal.getNotes()).map(Note::getId).toList();
+        assertNull(searchResult.getNoteIds());
+        assertEquals(
+            List.of(workspaceNote.getId()),
+            dealService.getNotesByDealId(deal.getId()).stream().map(Note::getId).toList());
     }
 
     private static Deal findDeal(List<Deal> deals, int dealId) {

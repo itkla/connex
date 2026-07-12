@@ -45,6 +45,7 @@ class NotificationDeliveryTest {
     void setUp() {
         lenient().when(inApp.channel()).thenReturn("in_app");
         lenient().when(email.channel()).thenReturn("email");
+        lenient().when(inApp.dispatch(any())).thenReturn(1);
         delivery = new NotificationDelivery(
                 List.of(inApp, email), notificationMapper, preferenceMapper, pushPublisher,
                 stateVersionService);
@@ -152,7 +153,7 @@ class NotificationDeliveryTest {
         when(notificationMapper.findByDedupe(1, 9, n.getDedupeKey())).thenReturn(null);
         doAnswer(invocation -> {
             invocation.<Notification>getArgument(0).setId(77);
-            return null;
+            return 1;
         }).when(inApp).dispatch(any());
         when(notificationMapper.findById(9, 77)).thenReturn(existingRow(77, "info", null));
 
@@ -160,7 +161,7 @@ class NotificationDeliveryTest {
 
         verify(pushPublisher).created(eq(9), any(NotificationDto.class), eq("note.mention:5:9"));
         verify(pushPublisher, never()).updated(anyInt(), any(), any());
-        verify(stateVersionService).markChanged(9);
+        verify(stateVersionService).markChangedWithDetailedPush(9);
     }
 
     @Test
@@ -201,7 +202,7 @@ class NotificationDeliveryTest {
 
         delivery.deliver(n);
 
-        verify(stateVersionService).markChanged(9);
+        verify(stateVersionService).markChangedWithDetailedPush(9);
         verify(pushPublisher).updated(eq(9), any(NotificationDto.class), eq("note.mention:5:9"));
     }
 
@@ -216,7 +217,21 @@ class NotificationDeliveryTest {
         verify(notificationMapper, never()).findById(anyInt(), anyInt());
         verify(pushPublisher, never()).created(anyInt(), any(), any());
         verify(pushPublisher, never()).updated(anyInt(), any(), any());
-        verify(stateVersionService, never()).markChanged(anyInt());
+        verify(stateVersionService, never()).markChangedWithDetailedPush(anyInt());
+    }
+
+    @Test
+    void staleUnchangedPreReadStillPushesWhenUpsertChangesTheLockedRow() {
+        Notification n = notification();
+        Notification existing = existingRow(77, "info", null);
+        when(notificationMapper.findByDedupe(1, 9, n.getDedupeKey())).thenReturn(existing);
+        when(inApp.dispatch(n)).thenReturn(2);
+        when(notificationMapper.findById(9, 77)).thenReturn(existingRow(77, "info", null));
+
+        delivery.deliver(n);
+
+        verify(stateVersionService).markChangedWithDetailedPush(9);
+        verify(pushPublisher).updated(eq(9), any(NotificationDto.class), eq("note.mention:5:9"));
     }
 
     @Test
@@ -225,7 +240,7 @@ class NotificationDeliveryTest {
         when(notificationMapper.findByDedupe(1, 9, n.getDedupeKey())).thenReturn(null);
         doAnswer(invocation -> {
             invocation.<Notification>getArgument(0).setId(77);
-            return null;
+            return 1;
         }).when(inApp).dispatch(any());
         when(notificationMapper.findById(9, 77)).thenReturn(null);
 
@@ -233,5 +248,6 @@ class NotificationDeliveryTest {
 
         verify(pushPublisher, never()).created(anyInt(), any(), any());
         verify(pushPublisher, never()).updated(anyInt(), any(), any());
+        verify(stateVersionService).markChanged(9);
     }
 }

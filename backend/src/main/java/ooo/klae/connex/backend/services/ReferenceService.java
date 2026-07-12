@@ -1,6 +1,10 @@
 package ooo.klae.connex.backend.services;
 
+import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Deque;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -18,7 +22,6 @@ import org.springframework.web.util.HtmlUtils;
 
 import ooo.klae.connex.backend.beans.Activity;
 import ooo.klae.connex.backend.beans.Deal;
-import ooo.klae.connex.backend.beans.DealNoteId;
 import ooo.klae.connex.backend.beans.EntityReference;
 import ooo.klae.connex.backend.beans.Note;
 import ooo.klae.connex.backend.beans.Task;
@@ -254,26 +257,7 @@ public class ReferenceService {
             deal.setClosedReason(content.content());
             deal.setReferences(content.references());
         }
-        hydrateVisibleDealNotes(workspaceId, deals);
         return deals;
-    }
-
-    private void hydrateVisibleDealNotes(int workspaceId, List<Deal> deals) {
-        Map<Integer, List<Note>> notesByDeal = new LinkedHashMap<>();
-        int currentUserId = workspaceService.getCurrentUserId();
-        List<Integer> dealIds = deals.stream().map(Deal::getId).toList();
-        for (int start = 0; start < dealIds.size(); start += BATCH_SIZE) {
-            List<Integer> batch = dealIds.subList(start, Math.min(start + BATCH_SIZE, dealIds.size()));
-            for (DealNoteId noteId : noteMapper.getVisibleNoteIdsByDealIds(
-                    workspaceId, batch, currentUserId)) {
-                Note note = new Note();
-                note.setId(noteId.getNoteId());
-                notesByDeal.computeIfAbsent(noteId.getDealId(), key -> new ArrayList<>()).add(note);
-            }
-        }
-        for (Deal deal : deals) {
-            deal.setNotes(notesByDeal.getOrDefault(deal.getId(), List.of()).toArray(Note[]::new));
-        }
     }
 
     /**
@@ -498,11 +482,12 @@ public class ReferenceService {
 
     private static boolean collectInlineNoteTargetIds(String content, List<Integer> ids) {
         boolean hasUnparseableId = false;
+        int[] labelEnds = matchingLabelEnds(content);
         for (int index = 0; index < content.length(); index++) {
             if (content.charAt(index) != '[' || isEscaped(content, index)) {
                 continue;
             }
-            int labelEnd = findLabelEnd(content, index);
+            int labelEnd = labelEnds[index];
             if (labelEnd < 0) {
                 continue;
             }
@@ -539,20 +524,67 @@ public class ReferenceService {
         return hasUnparseableId;
     }
 
-    private static int findLabelEnd(String content, int labelStart) {
-        int depth = 1;
-        for (int index = labelStart + 1; index < content.length(); index++) {
-            if (isEscaped(content, index)) {
+    private static int[] matchingLabelEnds(String content) {
+        int[] labelEnds = new int[content.length()];
+        Arrays.fill(labelEnds, -1);
+        int[] closingBacktickRuns = closingBacktickRuns(content);
+        Deque<Integer> labelStarts = new ArrayDeque<>();
+        int precedingBackslashes = 0;
+        for (int index = 0; index < content.length(); index++) {
+            char value = content.charAt(index);
+            if (value == '\\') {
+                precedingBackslashes++;
                 continue;
             }
-            char value = content.charAt(index);
-            if (value == '[') {
-                depth++;
-            } else if (value == ']' && --depth == 0) {
-                return index;
+            boolean escaped = precedingBackslashes % 2 == 1;
+            precedingBackslashes = 0;
+            if (escaped) {
+                continue;
+            }
+            if (value == '`') {
+                int delimiterLength = backtickRunLength(content, index);
+                int closingDelimiter = closingBacktickRuns[index];
+                if (closingDelimiter >= 0) {
+                    index = closingDelimiter + delimiterLength - 1;
+                } else {
+                    index += delimiterLength - 1;
+                }
+            } else if (value == '[') {
+                labelStarts.push(index);
+            } else if (value == ']' && !labelStarts.isEmpty()) {
+                labelEnds[labelStarts.pop()] = index;
             }
         }
-        return -1;
+        return labelEnds;
+    }
+
+    private static int backtickRunLength(String content, int start) {
+        int end = start;
+        while (end < content.length() && content.charAt(end) == '`') {
+            end++;
+        }
+        return end - start;
+    }
+
+    private static int[] closingBacktickRuns(String content) {
+        int[] closingRuns = new int[content.length()];
+        Arrays.fill(closingRuns, -1);
+        Map<Integer, Integer> nextRunByLength = new HashMap<>();
+        for (int end = content.length() - 1; end >= 0;) {
+            if (content.charAt(end) != '`') {
+                end--;
+                continue;
+            }
+            int start = end;
+            while (start > 0 && content.charAt(start - 1) == '`') {
+                start--;
+            }
+            int delimiterLength = end - start + 1;
+            closingRuns[start] = nextRunByLength.getOrDefault(delimiterLength, -1);
+            nextRunByLength.put(delimiterLength, start);
+            end = start - 1;
+        }
+        return closingRuns;
     }
 
     private static boolean isEscaped(String content, int index) {

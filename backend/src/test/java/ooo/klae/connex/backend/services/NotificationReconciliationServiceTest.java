@@ -406,7 +406,8 @@ class NotificationReconciliationServiceTest {
     }
 
     private static NotificationStateVersionService stateVersions(NotificationMapper notificationMapper) {
-        return new NotificationStateVersionService(notificationMapper);
+        return new NotificationStateVersionService(
+            notificationMapper, Mockito.mock(NotificationPushPublisher.class));
     }
 
     private static OpenDealRecipient recipient(int dealId, String dealLabel, int recipientId) {
@@ -561,12 +562,12 @@ class NotificationReconciliationServiceTest {
     }
 
     @Test
-    void purgeMarksEveryWorkspaceRecipientWhenRowsAreDeleted() {
+    void purgeMarksOnlyRecipientsWhoseRowsAreDeleted() {
         NotificationMapper notificationMapper = Mockito.mock(NotificationMapper.class);
         PreferenceMapper preferenceMapper = Mockito.mock(PreferenceMapper.class);
         NotificationDispatcher dispatcher = Mockito.mock(NotificationDispatcher.class);
         Clock clock = Clock.fixed(Instant.parse("2026-06-23T15:30:00Z"), ZoneOffset.UTC);
-        when(notificationMapper.findWorkspaceRecipientIds(7)).thenReturn(List.of(9, 42));
+        when(notificationMapper.findPurgeRecipientIds(eq(7), any())).thenReturn(List.of(9, 42));
         when(notificationMapper.purgeWorkspaceReminderHistory(eq(7), any())).thenReturn(3);
         NotificationReconciliationService service = nudgeService(
             notificationMapper,

@@ -192,6 +192,15 @@ public interface NotificationMapper {
 
     List<Integer> findWorkspaceRecipientIds(@Param("workspaceId") int workspaceId);
 
+    List<Integer> findPurgeRecipientIds(
+        @Param("workspaceId") int workspaceId,
+        @Param("cutoff") String cutoff
+    );
+
+    List<Integer> findRecipientIdsByActor(@Param("userId") int userId);
+
+    List<Integer> lockRecipientIdsByActor(@Param("userId") int userId);
+
     int purgeReminderHistory(
         @Param("workspaceId") int workspaceId,
         @Param("recipientId") int recipientId,
@@ -225,5 +234,5 @@ public interface NotificationMapper {
      * Offboarding replacement for the {@code notification.actor_id} ON DELETE
      * SET NULL (#440 increment 3).
      */
-    void clearActorAnywhere(@Param("userId") int userId);
+    int clearActorAnywhere(@Param("userId") int userId);
 }

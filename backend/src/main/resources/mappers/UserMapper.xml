@@ -17,6 +17,10 @@
     FROM app_user WHERE id = #{id}
   </select>
 
+  <select id="lockById" resultType="java.lang.Integer">
+    SELECT id FROM app_user WHERE id = #{id} FOR UPDATE
+  </select>
+
   <select id="getUserByUsername" resultType="User">
     SELECT <include refid="userColumns"/>
     FROM app_user WHERE username = #{username}

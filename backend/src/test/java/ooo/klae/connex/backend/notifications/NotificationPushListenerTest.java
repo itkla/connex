@@ -1,6 +1,7 @@
 package ooo.klae.connex.backend.notifications;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -34,5 +35,22 @@ class NotificationPushListenerTest {
         verify(realtimePublisher).send(org.mockito.ArgumentMatchers.eq(9), payload.capture());
         assertEquals(33L, payload.getValue().stateVersion());
         assertEquals("created", payload.getValue().kind());
+    }
+
+    @Test
+    void invalidationPushCarriesOnlyTheFinalStateVersion() {
+        when(notificationMapper.getStateVersion(9)).thenReturn(34L);
+        NotificationPushListener listener = new NotificationPushListener(
+            realtimePublisher, notificationMapper);
+
+        listener.onPush(new NotificationPushEvent(9, "invalidated", null, null));
+
+        ArgumentCaptor<RealtimeNotificationPayload> payload =
+            ArgumentCaptor.forClass(RealtimeNotificationPayload.class);
+        verify(realtimePublisher).send(org.mockito.ArgumentMatchers.eq(9), payload.capture());
+        assertEquals("invalidated", payload.getValue().kind());
+        assertEquals(34L, payload.getValue().stateVersion());
+        assertNull(payload.getValue().notification());
+        assertNull(payload.getValue().dedupeKey());
     }
 }

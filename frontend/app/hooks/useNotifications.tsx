@@ -3,10 +3,10 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
 
 import { useLocale, useTranslations } from "next-intl";
-import { useRouter } from "next/navigation";
 import { type ExternalToast } from "sonner";
 
 import { notificationContent, safeNotificationUrl } from "@/app/components/notifications/notificationContent";
+import { useNotificationWorkspaceActions } from "@/app/components/notifications/useNotificationWorkspaceActions";
 import {
     emitNotificationStateChanged,
     onAllNotificationsRead,
@@ -29,6 +29,8 @@ type NotificationContextValue = {
     unread: number;
     refreshUnread: () => Promise<void>;
 };
+
+const MAX_TIMEOUT_DELAY_MS = 2_147_483_647;
 
 const NotificationContext = createContext<NotificationContextValue | null>(null);
 
@@ -60,7 +62,7 @@ export function NotificationProvider({
 
     const t = useTranslations("Notifications");
     const locale = useLocale();
-    const router = useRouter();
+    const { openNotification } = useNotificationWorkspaceActions();
 
     const refreshUnread = useCallback(async () => {
         if (document.hidden) return;
@@ -106,7 +108,7 @@ export function NotificationProvider({
                                             snoozeExpiryDueRef.current = true;
                                             void refreshUnread();
                                         },
-                                        Math.max(0, delay + 100),
+                                        Math.min(MAX_TIMEOUT_DELAY_MS, Math.max(0, delay + 100)),
                                     );
                                 }
                             }
@@ -165,22 +167,31 @@ export function NotificationProvider({
             const url = safeNotificationUrl(notification.actionUrl);
             const options: ExternalToast = {
                 description: content.body,
-                ...(url ? { action: { label: t("viewAction"), onClick: () => router.push(url) } } : {}),
+                ...(url ? {
+                    action: {
+                        label: t("viewAction"),
+                        onClick: () => {
+                            void openNotification(notification)
+                                .then((opened) => {
+                                    if (!opened) toastError(t("actionError"));
+                                })
+                                .catch(() => toastError(t("actionError")));
+                        },
+                    },
+                } : {}),
             };
             if (notification.severity === "critical") toastError(content.title, options);
             else if (notification.severity === "warning") toastWarn(content.title, options);
             else toastInfo(content.title, options);
         },
-        [t, locale, router],
+        [t, locale, openNotification],
     );
 
     const handleFrame = useCallback(
         (frame: RealtimeNotificationFrame) => {
+            emitNotificationStateChanged(recipientId, frame.stateVersion);
             const notification = frame.notification ?? null;
-            if (frame.kind === "updated") {
-                emitNotificationStateChanged(recipientId, frame.stateVersion);
-                return;
-            }
+            if (frame.kind !== "created") return;
             const key = frame.dedupeKey ?? (notification ? `${notification.id}:${notification.triggeredAt}` : null);
             if (key) {
                 if (seenRef.current.has(key)) return;
@@ -190,7 +201,6 @@ export function NotificationProvider({
                     if (oldest !== undefined) seenRef.current.delete(oldest);
                 }
             }
-            emitNotificationStateChanged(recipientId, frame.stateVersion);
             if (notification && !document.hidden) toastNotification(notification);
         },
         [recipientId, toastNotification],

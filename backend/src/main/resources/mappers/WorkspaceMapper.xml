@@ -104,19 +104,21 @@
     WHERE workspace_id = #{workspaceId} AND role = 'owner' AND status = 'active'
   </select>
 
-  <!-- Workspaces this user actively owns, and a locking read of a workspace's active owner rows.
-       The account-deletion guard iterates the owned set and locks each owner set FOR UPDATE, so two
-       co-owners deleting concurrently serialize on the shared rows and cannot both pass to leave a
-       workspace ownerless (workspace_member is ON DELETE CASCADE). -->
   <select id="workspaceIdsOwnedBy" resultType="int">
     SELECT workspace_id FROM workspace_member
     WHERE user_id = #{userId} AND role = 'owner' AND status = 'active'
     ORDER BY workspace_id
   </select>
 
+  <select id="lockWorkspace" resultType="java.lang.Integer">
+    SELECT id FROM workspace WHERE id = #{workspaceId} FOR UPDATE
+  </select>
+
   <select id="lockOwnerIds" resultType="int">
     SELECT user_id FROM workspace_member
-    WHERE workspace_id = #{workspaceId} AND role = 'owner' AND status = 'active' FOR UPDATE
+    WHERE workspace_id = #{workspaceId} AND role = 'owner' AND status = 'active'
+    ORDER BY user_id
+    FOR UPDATE
   </select>
 
   <delete id="removeMember">
