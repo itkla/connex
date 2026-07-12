@@ -107,10 +107,7 @@ export default function EventDetailSheet({
 
     return (
         <Drawer open={open} onOpenChange={onOpenChange} swipeDirection="down">
-            <DrawerContent
-                initialFocus={false}
-                className="mx-auto max-h-[85vh] gap-0 rounded-t-2xl pb-[max(1rem,env(safe-area-inset-bottom))] sm:max-w-lg"
-            >
+            <DrawerContent className="mx-auto max-h-[85vh] gap-0 rounded-t-2xl pb-[max(1rem,env(safe-area-inset-bottom))] sm:max-w-lg">
                 <DrawerHeader className="gap-2">
                     <Badge variant="secondary" className="w-fit gap-1.5">
                         <Icon className="size-3.5" aria-hidden />

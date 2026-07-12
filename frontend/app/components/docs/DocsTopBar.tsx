@@ -57,7 +57,7 @@ export default function DocsTopBar({ authed }: { authed: boolean }) {
                             <DrawerTitle className="px-6 pt-6 text-sm font-medium uppercase tracking-[0.12em] text-muted-foreground">
                                 {t("browseDocs")}
                             </DrawerTitle>
-                            <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-8">
+                            <div className="min-h-0 flex-1 overflow-y-auto px-4 pt-4 pb-8">
                                 <DocsNav onNavigate={() => setNavOpen(false)} />
                             </div>
                         </DrawerContent>

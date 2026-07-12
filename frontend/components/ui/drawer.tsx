@@ -128,8 +128,8 @@ function DrawerContent({
   const layout =
     swipeAxis === "y"
       ? cn(
-          "h-auto max-h-[calc(100dvh-4rem)] w-full",
-          hasSnapPoints && "h-dvh",
+          "w-full",
+          hasSnapPoints ? "h-dvh" : "h-auto max-h-[calc(100dvh-4rem)]",
           "[transform:translateY(calc(var(--drawer-snap-point-offset,0px)+var(--drawer-swipe-movement-y,0px)))]",
           swipeDirection === "down"
             ? "rounded-t-2xl data-starting-style:[transform:translateY(100%)] data-ending-style:[transform:translateY(100%)]"
