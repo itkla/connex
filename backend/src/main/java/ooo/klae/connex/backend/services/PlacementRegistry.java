@@ -1,9 +1,7 @@
 package ooo.klae.connex.backend.services;
 
-import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.ConcurrentHashMap;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -28,12 +26,6 @@ public class PlacementRegistry {
 
     private static final Logger log = LoggerFactory.getLogger(PlacementRegistry.class);
 
-    private static final long MAX_CACHE_TTL_NANOS = Duration.ofDays(365).toNanos();
-
-    private record CachedEffective(OrgPlacement placement, long expiresAtNanos) {}
-
-    private final ConcurrentHashMap<Integer, CachedEffective> effectiveCache = new ConcurrentHashMap<>();
-
     private final OrgPlacementMapper orgPlacementMapper;
     private final TenantRoutingProperties routingProperties;
 
@@ -57,11 +49,15 @@ public class PlacementRegistry {
     }
 
     /**
-     * Existence-verified placement for the routing path: one indexed read of
-     * {@code organization LEFT JOIN org_placement}, cached per org for
-     * {@code connex.tenancy.routing.placement-cache-ttl} (misses cached too, so
-     * the request path costs at most one control-plane query per org per TTL
-     * window). Any future placement write path must call {@link #invalidate(int)}.
+     * Existence-verified placement for the routing path. Every resolution reads
+     * {@code organization LEFT JOIN org_placement} directly so all application
+     * instances observe placement changes from the same control-plane source of
+     * truth. This intentionally costs one indexed lookup per tenant-scope
+     * installation: a per-JVM cache can leave different instances writing to
+     * different catalogs during a placement change. Each installed scope then
+     * keeps that result for its whole logical operation; an eventual live
+     * cutover still requires a write fence, drain, final sync, and activation
+     * protocol before dedicated routing can be enabled.
      *
      * @param orgId the membership-validated organization to resolve
      * @return the effective placement ({@code shared}-shaped when no row exists),
@@ -70,39 +66,11 @@ public class PlacementRegistry {
      */
     public OrgPlacement effectivePlacementFor(int orgId) {
         requirePositive(orgId);
-        long now = System.nanoTime();
-        CachedEffective cached = effectiveCache.get(orgId);
-        if (cached != null && now - cached.expiresAtNanos() < 0) {
-            return cached.placement();
-        }
         OrgPlacement loaded = orgPlacementMapper.findEffectiveByOrg(orgId);
         if (loaded != null && loaded.getPlacementMode() == null) {
             loaded = OrgPlacement.sharedDefault(orgId);
         }
-        effectiveCache.put(orgId, new CachedEffective(loaded, now + cacheTtlNanos()));
         return loaded;
-    }
-
-    private long cacheTtlNanos() {
-        Duration ttl = routingProperties.getPlacementCacheTtl();
-        if (ttl == null || ttl.isNegative()) {
-            return 0;
-        }
-        try {
-            return Math.min(ttl.toNanos(), MAX_CACHE_TTL_NANOS);
-        } catch (ArithmeticException overflow) {
-            return MAX_CACHE_TTL_NANOS;
-        }
-    }
-
-    /**
-     * Drops the cached effective placement for one organization. Must be called
-     * by any code path that writes {@code org_placement}.
-     *
-     * @param orgId the organization whose cached placement to drop
-     */
-    public void invalidate(int orgId) {
-        effectiveCache.remove(orgId);
     }
 
     /**

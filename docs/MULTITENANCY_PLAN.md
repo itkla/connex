@@ -144,13 +144,17 @@ sub-partitions inside an org. Decisions locked 2026-07-03 (recorded on #313):
   "Connex-blind" guarantee stays on-prem (`ENCRYPTION_GUARANTEE_MATRIX.md`). This reinstates the silo tier that
   the 2026-07-03 record on #313 had dropped; #100 tracks it.
 - **Phase 3 shipped (2026-07-12, #440 — registry #441, routing #446, control-plane split #463/#479).**
-  `org_placement` resolves every org's placement (TTL-cached, `shared` default for row-less orgs, fail-closed
-  503 for anything this deployment cannot serve — missing org, silo, dedicated without routing, malformed or
-  reserved catalog handle). Catalog routing runs as a decorator over the shared Hikari pool
-  (`TenantRoutingDataSource`): the catalog resolves once at `TenantContext`-install, switches at checkout,
+  `org_placement` resolves every org's placement directly from the control plane for each tenant-scope
+  installation (`shared` default for row-less orgs, fail-closed 503 for anything this deployment cannot serve —
+  missing org, silo, dedicated without routing, malformed or reserved catalog handle). Catalog routing runs as a
+  decorator over the shared Hikari pool (`TenantRoutingDataSource`): the catalog resolves once at
+  `TenantContext`-install, switches at checkout,
   and resets on return with belt (service reset + evict-on-failure) and braces (armed HikariCP dirty-bit —
   which only fires when the pool `catalog` property is set); adversarial tests prove the same physical
-  connection cannot be recycled dirty. The control-plane wall is structural: V65 dropped all 39 org-data →
+  connection cannot be recycled dirty. Direct reads remove per-JVM TTL divergence for newly installed scopes;
+  each request or same-workspace background operation keeps one immutable catalog snapshot. Phase 4 still needs a
+  write fence, fleet drain, final sync, and activation protocol before a live shared→dedicated cutover. The
+  control-plane wall is structural: V65 dropped all 39 org-data →
   control-plane FKs (their semantics live in `UserOffboardingService` / `detachMemberContent` /
   `prepareFreshMembership` and a `FOR UPDATE` authored-content guard), `TablePlaneRegistry` classifies every
   table, and arch tests enforce the wall (no cross-plane FK either direction), migration-lineage purity

@@ -3,6 +3,9 @@ package ooo.klae.connex.backend.tenant;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import java.util.concurrent.atomic.AtomicReference;
@@ -57,6 +60,72 @@ class TenantWorkScopeTest {
     }
 
     @Test
+    void sameWorkspaceNestedScopeKeepsOneCatalogSnapshot() {
+        when(workspaceMapper.getOrgId(7)).thenReturn(42);
+        when(tenantCatalogResolver.resolveCatalog(42)).thenReturn("cnx_before", "cnx_after");
+
+        String nested = workScope.inWorkspace(7,
+            () -> workScope.inWorkspace(7, () -> tenantContext.getCatalog()));
+
+        assertEquals("cnx_before", nested);
+        verify(workspaceMapper, times(1)).getOrgId(7);
+        verify(tenantCatalogResolver, times(1)).resolveCatalog(42);
+    }
+
+    @Test
+    void differentWorkspaceNestedScopeResolvesItsOwnCatalog() {
+        when(workspaceMapper.getOrgId(7)).thenReturn(42);
+        when(workspaceMapper.getOrgId(8)).thenReturn(43);
+        when(tenantCatalogResolver.resolveCatalog(42)).thenReturn("cnx_outer");
+        when(tenantCatalogResolver.resolveCatalog(43)).thenReturn("cnx_inner");
+
+        String restored = workScope.inWorkspace(7, () -> {
+            assertEquals("cnx_inner", workScope.inWorkspace(8, () -> tenantContext.getCatalog()));
+            return tenantContext.getCatalog();
+        });
+
+        assertEquals("cnx_outer", restored);
+    }
+
+    @Test
+    void returningToAnOuterWorkspaceReusesItsOriginalSnapshot() {
+        when(workspaceMapper.getOrgId(7)).thenReturn(42);
+        when(workspaceMapper.getOrgId(8)).thenReturn(43);
+        when(tenantCatalogResolver.resolveCatalog(42)).thenReturn("cnx_before", "cnx_after");
+        when(tenantCatalogResolver.resolveCatalog(43)).thenReturn("cnx_other");
+
+        String returned = workScope.inWorkspace(7,
+            () -> workScope.inWorkspace(8,
+                () -> workScope.inWorkspace(7, () -> tenantContext.getCatalog())));
+
+        assertEquals("cnx_before", returned);
+        verify(tenantCatalogResolver, times(1)).resolveCatalog(42);
+        verify(tenantCatalogResolver, times(1)).resolveCatalog(43);
+    }
+
+    @Test
+    void returningToTheRequestWorkspaceReusesItsInstalledSnapshot() {
+        tenantContext.set(7, 42, 9, "owner", "cnx_request");
+        when(workspaceMapper.getOrgId(8)).thenReturn(43);
+        when(tenantCatalogResolver.resolveCatalog(43)).thenReturn("cnx_other");
+
+        String returned = workScope.inWorkspace(8,
+            () -> workScope.inWorkspace(7, () -> tenantContext.getCatalog()));
+
+        assertEquals("cnx_request", returned);
+        verify(tenantCatalogResolver, times(1)).resolveCatalog(43);
+    }
+
+    @Test
+    void sameResolvedRequestWorkspaceKeepsItsInstalledCatalog() {
+        tenantContext.set(7, 42, 9, "owner", "cnx_request");
+
+        assertEquals("cnx_request", workScope.inWorkspace(7, () -> tenantContext.getCatalog()));
+
+        verifyNoInteractions(workspaceMapper, tenantCatalogResolver);
+    }
+
+    @Test
     void resolutionRunsUnroutedEvenInsideARoutedScope() {
         tenantContext.set(1, 1, 1, "owner", "cnx_caller");
         AtomicReference<String> catalogDuringResolution = new AtomicReference<>("unset");
@@ -105,17 +174,4 @@ class TenantWorkScopeTest {
         assertThrows(IllegalStateException.class, () -> workScope.inWorkspace(7, () -> null));
     }
 
-    @Test
-    void resolveCatalogUnroutedMasksTheCallerScope() {
-        tenantContext.set(1, 1, 1, "owner", "cnx_caller");
-        AtomicReference<String> catalogDuringResolution = new AtomicReference<>("unset");
-        when(tenantCatalogResolver.resolveCatalog(42)).thenAnswer(invocation -> {
-            catalogDuringResolution.set(tenantContext.getCatalog());
-            return "cnx_target";
-        });
-
-        assertEquals("cnx_target", workScope.resolveCatalogUnrouted(42));
-        assertNull(catalogDuringResolution.get());
-        assertEquals("cnx_caller", tenantContext.getCatalog());
-    }
 }

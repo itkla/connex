@@ -95,9 +95,6 @@ connex:
             mode: ${CONNEX_TENANCY_ROUTING_MODE:single-database}
             # Control-plane/default catalog; required when mode=catalog-per-placement.
             default-catalog: ${CONNEX_TENANCY_ROUTING_DEFAULT_CATALOG:}
-            # How long a per-org placement lookup is cached on the request path.
-            # Placement writes must invalidate (PlacementRegistry.invalidate).
-            placement-cache-ttl: ${CONNEX_TENANCY_ROUTING_PLACEMENT_CACHE_TTL:30s}
     security:
         # CSRF protection for state-changing requests. The SPA fetches the token from
         # GET /api/auth/csrf and echoes it in the X-XSRF-TOKEN header. Kill-switch for cutover.

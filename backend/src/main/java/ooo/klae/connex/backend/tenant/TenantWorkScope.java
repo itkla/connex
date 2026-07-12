@@ -1,7 +1,11 @@
 package ooo.klae.connex.backend.tenant;
 
+import java.util.HashMap;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.function.BiFunction;
+import java.util.function.Function;
 import java.util.function.Supplier;
 
 import org.springframework.stereotype.Component;
@@ -17,7 +21,10 @@ import ooo.klae.connex.backend.mappers.WorkspaceMapper;
  * no principal, so before this primitive their queries always ran on the
  * default catalog — silently wrong for a dedicated-placement org once
  * {@code catalog-per-placement} is enabled. {@link #inWorkspace} resolves the
- * workspace's placement fail-closed and pins its catalog for the span;
+ * workspace's placement fail-closed and pins its catalog for the span.
+ * Same-workspace nested spans reuse that immutable operation snapshot, while
+ * a different workspace resolves independently so nested work cannot jump
+ * catalogs during a placement change or inherit the caller's placement;
  * {@link #unrouted} forces the default catalog for control-plane reads (most
  * importantly placement resolution itself, which must never run on a tenant
  * catalog — the nested-{@code runAs} cache-poisoning fix).
@@ -25,6 +32,15 @@ import ooo.klae.connex.backend.mappers.WorkspaceMapper;
 @Component
 @RequiredArgsConstructor
 public class TenantWorkScope {
+
+    private static final class WorkspaceRoutes {
+        private final Map<Integer, WorkspaceRoute> routes = new HashMap<>();
+        private int depth;
+    }
+
+    private record WorkspaceRoute(int orgId, String catalog) {}
+
+    private static final ThreadLocal<WorkspaceRoutes> CURRENT_WORKSPACE_ROUTES = new ThreadLocal<>();
 
     private final TenantContext tenantContext;
     private final TenantCatalogResolver tenantCatalogResolver;
@@ -61,7 +77,48 @@ public class TenantWorkScope {
      * @throws IllegalStateException when the workspace does not exist
      */
     public <T> T inWorkspace(int workspaceId, Supplier<T> work) {
-        return withCatalog(resolveCatalogForWorkspace(workspaceId), work);
+        return runInWorkspace(workspaceId, route -> work.get());
+    }
+
+    /**
+     * Runs work under the workspace's immutable operation placement and passes
+     * the matching organization and catalog to an identity-scope installer.
+     * Same-workspace nested calls receive the original pair without another
+     * control-plane query.
+     *
+     * @param <T> the work's result type
+     * @param workspaceId the workspace whose placement governs routing
+     * @param work the work receiving the pinned organization and catalog
+     * @return the work's result
+     */
+    public <T> T withWorkspacePlacement(int workspaceId, BiFunction<Integer, String, T> work) {
+        return runInWorkspace(workspaceId, route -> work.apply(route.orgId(), route.catalog()));
+    }
+
+    private <T> T runInWorkspace(int workspaceId, Function<WorkspaceRoute, T> work) {
+        WorkspaceRoutes routes = CURRENT_WORKSPACE_ROUTES.get();
+        boolean root = routes == null;
+        if (root) {
+            routes = new WorkspaceRoutes();
+            if (tenantContext.isResolved()) {
+                routes.routes.put(tenantContext.getWorkspaceId(),
+                    new WorkspaceRoute(tenantContext.getOrgId(), tenantContext.getScopeCatalog()));
+            }
+            CURRENT_WORKSPACE_ROUTES.set(routes);
+        }
+        try {
+            WorkspaceRoute route = routeFor(routes, workspaceId);
+            routes.depth++;
+            try {
+                return runWithOverride(Optional.ofNullable(route.catalog()), () -> work.apply(route));
+            } finally {
+                routes.depth--;
+            }
+        } finally {
+            if (root && routes.depth == 0) {
+                CURRENT_WORKSPACE_ROUTES.remove();
+            }
+        }
     }
 
     /**
@@ -91,6 +148,16 @@ public class TenantWorkScope {
         return runWithOverride(Optional.ofNullable(catalog), work);
     }
 
+    private WorkspaceRoute routeFor(WorkspaceRoutes routes, int workspaceId) {
+        WorkspaceRoute existing = routes.routes.get(workspaceId);
+        if (existing != null) {
+            return existing;
+        }
+        WorkspaceRoute resolved = resolveRouteForWorkspace(workspaceId);
+        routes.routes.put(workspaceId, resolved);
+        return resolved;
+    }
+
     private <T> T runWithOverride(Optional<String> override, Supplier<T> work) {
         if (TransactionSynchronizationManager.isActualTransactionActive()
                 && !Objects.equals(override.orElse(null), tenantContext.getCatalog())) {
@@ -107,25 +174,13 @@ public class TenantWorkScope {
         }
     }
 
-    /**
-     * Resolves an org's catalog with placement reads forced onto the default
-     * catalog — the only safe way to resolve while a routed scope may be
-     * active on the thread.
-     *
-     * @param orgId the membership-validated organization
-     * @return the catalog to pin, or {@code null} for the default catalog
-     */
-    public String resolveCatalogUnrouted(int orgId) {
-        return unrouted(() -> tenantCatalogResolver.resolveCatalog(orgId));
-    }
-
-    private String resolveCatalogForWorkspace(int workspaceId) {
+    private WorkspaceRoute resolveRouteForWorkspace(int workspaceId) {
         return unrouted(() -> {
             Integer orgId = workspaceMapper.getOrgId(workspaceId);
             if (orgId == null) {
                 throw new IllegalStateException("Workspace " + workspaceId + " does not exist");
             }
-            return tenantCatalogResolver.resolveCatalog(orgId);
+            return new WorkspaceRoute(orgId, tenantCatalogResolver.resolveCatalog(orgId));
         });
     }
 }
