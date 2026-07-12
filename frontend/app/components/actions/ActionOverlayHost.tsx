@@ -62,8 +62,11 @@ async function loadReferences(defaultPersonId?: number, defaultDealId?: number) 
  * Renders the shell-owned create overlays that registry actions open. Each form is code-split and
  * mounted only while its overlay is requested; the reference data a form needs (assignees for tasks,
  * and the person/deal roster so a context prefill can be preselected and stay editable) is fetched on
- * open, so nothing is loaded until the user actually creates something. Company, person and deal use
- * self-contained containers that load their own reference data.
+ * open, so nothing is loaded until the user actually creates something.
+ *
+ * The requested overlay is kept mounted through its close animation: the `visible` flag drives each
+ * dialog's `open` prop and flips to false when the request clears, while `rendered` (and its loaded
+ * reference data) persist so the dialog can play its exit transition instead of unmounting instantly.
  */
 export default function ActionOverlayHost({
     overlay,
@@ -76,22 +79,22 @@ export default function ActionOverlayHost({
 }) {
     const t = useTranslations("Actions");
     const { activeWorkspaceId } = useWorkspace();
-    const [loadedUsers, setLoadedUsers] = useState<{
-        key: string;
-        request: OverlayRequest;
-        users: User[];
-    } | null>(null);
+
+    const [rendered, setRendered] = useState<OverlayRequest | null>(overlay);
+    if (overlay && overlay !== rendered) setRendered(overlay);
+    const visible = overlay != null;
+
+    const [loadedUsers, setLoadedUsers] = useState<{ key: string; users: User[] } | null>(null);
     const [loadedReferences, setLoadedReferences] = useState<{
         key: string;
-        request: OverlayRequest;
         persons: Contact[];
         deals: Deal[];
     } | null>(null);
 
-    const kind = overlay?.kind;
+    const kind = rendered?.kind;
     const needsReference = kind !== undefined && REFERENCE_KINDS.has(kind);
     const needsUsers = kind === "create-task";
-    const defaults = overlay && "defaults" in overlay ? overlay.defaults : undefined;
+    const defaults = rendered && "defaults" in rendered ? rendered.defaults : undefined;
     const defaultPersonId = defaults?.personId;
     const defaultDealId = defaults?.dealId;
     const referenceKey = needsReference
@@ -100,16 +103,12 @@ export default function ActionOverlayHost({
     const usersKey = needsUsers ? [activeWorkspaceId, kind].join(":") : null;
 
     useEffect(() => {
-        if (!referenceKey || !overlay) return;
+        if (!referenceKey) return;
         let cancelled = false;
         loadReferences(defaultPersonId, defaultDealId)
             .then((references) => {
                 if (cancelled) return;
-                setLoadedReferences({
-                    key: referenceKey,
-                    request: overlay,
-                    ...references,
-                });
+                setLoadedReferences({ key: referenceKey, ...references });
             })
             .catch(() => {
                 if (cancelled) return;
@@ -119,24 +118,24 @@ export default function ActionOverlayHost({
         return () => {
             cancelled = true;
         };
-    }, [defaultDealId, defaultPersonId, onClose, overlay, referenceKey, t]);
+    }, [defaultDealId, defaultPersonId, onClose, referenceKey, t]);
 
     useEffect(() => {
-        if (!usersKey || !overlay) return;
+        if (!usersKey) return;
         let cancelled = false;
         getUsers()
             .then((fetched) => {
                 if (cancelled) return;
-                setLoadedUsers({ key: usersKey, request: overlay, users: fetched });
+                setLoadedUsers({ key: usersKey, users: fetched });
             })
             .catch(() => {
                 if (cancelled) return;
-                setLoadedUsers({ key: usersKey, request: overlay, users: [] });
+                setLoadedUsers({ key: usersKey, users: [] });
             });
         return () => {
             cancelled = true;
         };
-    }, [overlay, usersKey]);
+    }, [usersKey]);
 
     if (!user) return null;
 
@@ -144,12 +143,8 @@ export default function ActionOverlayHost({
         if (!open) onClose();
     };
 
-    const references = loadedReferences?.key === referenceKey && loadedReferences.request === overlay
-        ? loadedReferences
-        : null;
-    const users = loadedUsers?.key === usersKey && loadedUsers.request === overlay
-        ? loadedUsers.users
-        : null;
+    const references = loadedReferences?.key === referenceKey ? loadedReferences : null;
+    const users = loadedUsers?.key === usersKey ? loadedUsers.users : null;
     const persons = references?.persons ?? [];
     const deals = references?.deals ?? [];
     const defaultPerson = resolvePerson(persons, defaults);
@@ -157,9 +152,9 @@ export default function ActionOverlayHost({
 
     return (
         <>
-            {overlay?.kind === "create-task" && users && references ? (
+            {rendered?.kind === "create-task" && users && references ? (
                 <TaskDialog
-                    open
+                    open={visible}
                     onOpenChange={handleOpenChange}
                     persons={persons}
                     deals={deals}
@@ -167,13 +162,13 @@ export default function ActionOverlayHost({
                     currentUserId={user.id}
                     defaultPerson={defaultPerson}
                     defaultDeal={defaultDeal}
-                    defaultDueDate={overlay.draft?.dueDate ?? ""}
-                    defaultDescription={overlay.draft?.description ?? ""}
+                    defaultDueDate={rendered.draft?.dueDate ?? ""}
+                    defaultDescription={rendered.draft?.description ?? ""}
                 />
             ) : null}
-            {overlay?.kind === "create-note" && references ? (
+            {rendered?.kind === "create-note" && references ? (
                 <NoteDialog
-                    open
+                    open={visible}
                     onOpenChange={handleOpenChange}
                     note={null}
                     persons={persons}
@@ -181,31 +176,31 @@ export default function ActionOverlayHost({
                     currentUserId={user.id}
                     defaultPerson={defaultPerson}
                     defaultDeal={defaultDeal}
-                    defaultContent={overlay.draft?.content ?? ""}
+                    defaultContent={rendered.draft?.content ?? ""}
                 />
             ) : null}
-            {overlay?.kind === "create-activity" && references ? (
+            {rendered?.kind === "create-activity" && references ? (
                 <ActivityDialog
-                    open
+                    open={visible}
                     onOpenChange={handleOpenChange}
                     persons={persons}
                     deals={deals}
                     currentUserId={user.id}
                     defaultPerson={defaultPerson}
                     defaultDeal={defaultDeal}
-                    defaultType={ACTIVITY_TYPES.find((activityType) => activityType === overlay.draft?.type)}
-                    defaultSubject={overlay.draft?.subject ?? ""}
-                    defaultNotes={overlay.draft?.notes ?? ""}
+                    defaultType={ACTIVITY_TYPES.find((activityType) => activityType === rendered.draft?.type)}
+                    defaultSubject={rendered.draft?.subject ?? ""}
+                    defaultNotes={rendered.draft?.notes ?? ""}
                 />
             ) : null}
-            {overlay?.kind === "create-company" ? (
-                <CompanyCreateContainer open onOpenChange={handleOpenChange} />
+            {rendered?.kind === "create-company" ? (
+                <CompanyCreateContainer open={visible} onOpenChange={handleOpenChange} />
             ) : null}
-            {overlay?.kind === "create-person" ? (
-                <ContactCreateContainer open onOpenChange={handleOpenChange} defaults={overlay.defaults} />
+            {rendered?.kind === "create-person" ? (
+                <ContactCreateContainer open={visible} onOpenChange={handleOpenChange} defaults={rendered.defaults} />
             ) : null}
-            {overlay?.kind === "create-deal" ? (
-                <DealCreateContainer open onOpenChange={handleOpenChange} defaults={overlay.defaults} />
+            {rendered?.kind === "create-deal" ? (
+                <DealCreateContainer open={visible} onOpenChange={handleOpenChange} defaults={rendered.defaults} />
             ) : null}
         </>
     );
