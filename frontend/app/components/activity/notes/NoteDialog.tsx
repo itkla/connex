@@ -66,10 +66,18 @@ export default function NoteDialog({
         onOpenChange(next);
     };
 
+    const [prevOpen, setPrevOpen] = useState(open);
+    const [openCount, setOpenCount] = useState(0);
+    if (open !== prevOpen) {
+        setPrevOpen(open);
+        if (open) setOpenCount((count) => count + 1);
+    }
+
     return (
         <ResponsiveDialog open={open} onOpenChange={handleOpenChange}>
             <ResponsiveDialogContent className="gap-0 overflow-hidden p-0 sm:max-w-lg">
                 <NoteDialogForm
+                    key={openCount}
                     note={note}
                     persons={persons}
                     deals={deals}
