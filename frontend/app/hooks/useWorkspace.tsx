@@ -6,19 +6,6 @@ import { useRouter } from "next/navigation";
 import type { Workspace } from "@/app/lib/types";
 import { createWorkspace, switchWorkspace } from "@/app/lib/api";
 
-const WORKSPACE_COOKIE = "connex_workspace";
-
-function writeWorkspaceCookie(id: number) {
-    document.cookie = `${WORKSPACE_COOKIE}=${id};path=/;max-age=31536000;samesite=lax`;
-}
-
-function readWorkspaceCookie() {
-    const match = document.cookie.match(/(?:^|;\s*)connex_workspace=(\d+)/);
-    if (!match) return null;
-    const id = Number(match[1]);
-    return Number.isSafeInteger(id) && id > 0 ? id : null;
-}
-
 type WorkspaceContextValue = {
     workspaces: Workspace[];
     activeWorkspaceId: number | null;
@@ -55,15 +42,9 @@ export function WorkspaceProvider({
         switchingRef.current = true;
         setSwitching(true);
         try {
-            const cookieWorkspaceId = readWorkspaceCookie();
-            if (cookieWorkspaceId !== activeWorkspaceIdRef.current) {
-                activeWorkspaceIdRef.current = cookieWorkspaceId;
-                setActiveWorkspaceId(cookieWorkspaceId);
-            }
-            const switched = id !== cookieWorkspaceId;
+            const switched = id !== activeWorkspaceIdRef.current;
             if (switched) {
                 await switchWorkspace(id);
-                writeWorkspaceCookie(id);
                 activeWorkspaceIdRef.current = id;
                 setActiveWorkspaceId(id);
             }
@@ -92,7 +73,6 @@ export function WorkspaceProvider({
             setSwitching(true);
             try {
                 const workspace = await createWorkspace(name);
-                writeWorkspaceCookie(workspace.id);
                 setWorkspaces((prev) => [...prev, workspace]);
                 activeWorkspaceIdRef.current = workspace.id;
                 setActiveWorkspaceId(workspace.id);

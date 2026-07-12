@@ -44,6 +44,7 @@ public class DatabaseTransportSecurityEnvironmentPostProcessor implements Enviro
         "localhost"
     );
     private static final Set<String> HIKARI_JDBC_URL_PROPERTIES = Set.of("springdatasourcehikarijdbcurl");
+    private static final Set<String> FLYWAY_JDBC_URL_PROPERTIES = Set.of("springflywayurl");
     private static final Set<String> DATASOURCE_IMPLEMENTATION_OVERRIDE_PROPERTIES = Set.of(
         "springdatasourcetype",
         "springdatasourcejndiname",
@@ -75,6 +76,21 @@ public class DatabaseTransportSecurityEnvironmentPostProcessor implements Enviro
         "spring.datasource.hikari.dataSourceProperties.verifyServerCertificate"
     );
     private static final String HIKARI_DATA_SOURCE_PROPERTIES_PREFIX = "springdatasourcehikaridatasourceproperties";
+    private static final String FLYWAY_JDBC_PROPERTIES_PREFIX = "springflywayjdbcproperties";
+    private static final Set<String> DIRECT_FLYWAY_TLS_MODE_PROPERTIES = Set.of(
+        "spring.flyway.jdbc-properties.sslMode",
+        "spring.flyway.jdbc-properties.ssl-mode",
+        "spring.flyway.jdbc-properties.useSSL",
+        "spring.flyway.jdbc-properties.use-ssl",
+        "spring.flyway.jdbc-properties.requireSSL",
+        "spring.flyway.jdbc-properties.require-ssl",
+        "spring.flyway.jdbc-properties.verifyServerCertificate",
+        "spring.flyway.jdbc-properties.verify-server-certificate",
+        "spring.flyway.jdbcProperties.sslMode",
+        "spring.flyway.jdbcProperties.useSSL",
+        "spring.flyway.jdbcProperties.requireSSL",
+        "spring.flyway.jdbcProperties.verifyServerCertificate"
+    );
 
     @Override
     public void postProcessEnvironment(ConfigurableEnvironment environment, SpringApplication application) {
@@ -118,6 +134,7 @@ public class DatabaseTransportSecurityEnvironmentPostProcessor implements Enviro
 
     private static void validateOverridingDatasourceConfiguration(ConfigurableEnvironment environment) {
         Set<String> checkedHikariUrlProperties = new HashSet<>();
+        Set<String> checkedFlywayUrlProperties = new HashSet<>();
         Set<String> checkedTlsProperties = new HashSet<>();
 
         for (PropertySource<?> propertySource : environment.getPropertySources()) {
@@ -130,10 +147,15 @@ public class DatabaseTransportSecurityEnvironmentPostProcessor implements Enviro
                         );
                     }
                     if (HIKARI_JDBC_URL_PROPERTIES.contains(canonicalName)) {
-                        validateOptionalHikariUrl(environment, propertyName, propertySource.getProperty(propertyName));
+                        validateOptionalMysqlUrl(environment, propertyName, propertySource.getProperty(propertyName));
                         checkedHikariUrlProperties.add(canonicalName);
                     }
-                    if (isHikariTlsModeProperty(canonicalName)) {
+                    if (FLYWAY_JDBC_URL_PROPERTIES.contains(canonicalName)) {
+                        validateOptionalMysqlUrl(environment, propertyName, optionalProperty(environment, propertyName));
+                        checkedFlywayUrlProperties.add(canonicalName);
+                    }
+                    if (isHikariTlsModeProperty(canonicalName)
+                            || isFlywayTlsModeProperty(canonicalName)) {
                         checkedTlsProperties.add(canonicalName);
                         throw new IllegalStateException(
                             propertyName + " cannot override database TLS mode outside dev/test"
@@ -161,13 +183,23 @@ public class DatabaseTransportSecurityEnvironmentPostProcessor implements Enviro
         for (String propertyName : DIRECT_HIKARI_JDBC_URL_PROPERTIES) {
             String canonicalName = canonicalize(propertyName);
             if (!checkedHikariUrlProperties.contains(canonicalName)) {
-                validateOptionalHikariUrl(environment, propertyName, optionalProperty(environment, propertyName));
+                validateOptionalMysqlUrl(environment, propertyName, optionalProperty(environment, propertyName));
             }
+        }
+
+        String flywayPropertyName = "spring.flyway.url";
+        if (!checkedFlywayUrlProperties.contains(canonicalize(flywayPropertyName))) {
+            validateOptionalMysqlUrl(environment, flywayPropertyName, optionalProperty(environment, flywayPropertyName));
         }
 
         for (String propertyName : DIRECT_HIKARI_TLS_MODE_PROPERTIES) {
             String canonicalName = canonicalize(propertyName);
             if (!checkedTlsProperties.contains(canonicalName) && optionalProperty(environment, propertyName) != null) {
+                throw new IllegalStateException(propertyName + " cannot override database TLS mode outside dev/test");
+            }
+        }
+        for (String propertyName : DIRECT_FLYWAY_TLS_MODE_PROPERTIES) {
+            if (optionalProperty(environment, propertyName) != null) {
                 throw new IllegalStateException(propertyName + " cannot override database TLS mode outside dev/test");
             }
         }
@@ -181,7 +213,7 @@ public class DatabaseTransportSecurityEnvironmentPostProcessor implements Enviro
         }
     }
 
-    private static void validateOptionalHikariUrl(ConfigurableEnvironment environment, String propertyName, Object value) {
+    private static void validateOptionalMysqlUrl(ConfigurableEnvironment environment, String propertyName, Object value) {
         if (value == null) {
             return;
         }
@@ -369,6 +401,11 @@ public class DatabaseTransportSecurityEnvironmentPostProcessor implements Enviro
             return false;
         }
         return containsTlsModeProperty(canonicalName);
+    }
+
+    private static boolean isFlywayTlsModeProperty(String canonicalName) {
+        return canonicalName.startsWith(FLYWAY_JDBC_PROPERTIES_PREFIX)
+            && containsTlsModeProperty(canonicalName);
     }
 
     private static boolean containsTlsModeProperty(String canonicalName) {

@@ -14,20 +14,25 @@ contracted ability to control or disable the database storage key. It does not
 mean merely that Connex uses an AWS customer managed KMS key in a Connex-owned
 AWS account.
 
-The planned dedicated per-organization database tier may be sold today only as
-dedicated database isolation plus the hosted storage-encryption posture defined
-in [SAAS_STORAGE_ENCRYPTION_RUNBOOK.md](SAAS_STORAGE_ENCRYPTION_RUNBOOK.md).
-It is not a customer-managed-key tier by default.
+The planned dedicated per-organization database tier is not available for sale
+or contractual commitment while its provisioning, routing, isolation, and
+deployment-evidence gates remain incomplete. After those gates are implemented
+and verified, it may be offered as dedicated database isolation plus the hosted
+storage-encryption posture defined in
+[SAAS_STORAGE_ENCRYPTION_RUNBOOK.md](SAAS_STORAGE_ENCRYPTION_RUNBOOK.md). It is
+not a customer-managed-key tier by default.
 
 True customer-managed database key custody is supportable for Connex-operated
 SaaS only if the dedicated tier is implemented as an infrastructure unit whose
 database storage, snapshots, backups, replicas, and restore targets can all be
-created and verified under that organization's selected KMS key. That
-infrastructure unit is the **Connex-operated silo** (a dedicated single-tenant
-instance/cluster + isolated network, [#100]) — the same single-tenant deployable
-as on-prem, operated by Connex. The current [#313] `CREATE DATABASE cnx_<random>`
-shape on a shared database server is a dedicated database/catalog boundary, not a
-per-organization storage-key boundary, so it is not a CMK tier; the silo is.
+created and verified under that organization's selected immutable KMS key, and
+whose database log groups use the corresponding organization-approved KMS key.
+That infrastructure unit is the **Connex-operated silo** (a dedicated
+single-tenant instance/cluster + isolated network, [#100]) — the same
+single-tenant deployable as on-prem, operated by Connex. The current [#313]
+`CREATE DATABASE cnx_<random>` shape on a shared database server is a dedicated
+database/catalog boundary, not a per-organization storage-key boundary, so it
+is not a CMK tier; the silo is.
 A silo remains Connex-operated, so customer key custody there is storage-layer
 custody and revocation leverage, not application blindness.
 
@@ -41,7 +46,7 @@ exists should use the customer-operated/on-prem model in
 | --- | --- | --- |
 | Pooled SaaS database | Not feasible. Multiple organizations share the same database/storage key boundary. | "Hosted pooled SaaS uses Connex/cloud-controlled storage encryption when the `SAAS_STORAGE_ENCRYPTION_RUNBOOK.md` evidence gate is satisfied; it does not provide customer-managed database keys." |
 | Dedicated schema/catalog on a shared DB instance or cluster | Not a true per-org CMK boundary. For AWS RDS, this is an architectural inference from encryption being configured for DB instance/cluster storage resources, logs, backups, read replicas, and snapshots; a separate logical database name does not by itself create a separate KMS key boundary. | "Dedicated database isolation reduces shared-database blast radius, but the storage key is still Connex/cloud controlled unless a separate infrastructure-level CMK mode is implemented." |
-| Dedicated DB instance or cluster per organization (Connex-operated silo, #100) | Technically feasible on AWS RDS/Aurora when created with a customer-controlled or contractually dedicated KMS key and grant model. Operationally supportable only after per-org provisioning, grants, key-policy checks, backup/snapshot/restore handling, monitoring, revocation runbooks, and the hosted storage evidence gate exist. | "Dedicated CMK is available only for contracted dedicated infrastructure whose key, backups, replicas, and restore process are verified per organization. The running Connex app still processes plaintext." |
+| Dedicated DB instance or cluster per organization (Connex-operated silo, #100) | Technically feasible on AWS RDS/Aurora when created with a customer-controlled or contractually dedicated KMS key and grant model. Operationally supportable only after per-org provisioning, grants, key-policy checks, database-log KMS association, backup/snapshot/restore handling, monitoring, revocation runbooks, and the hosted storage evidence gate exist. | "Dedicated CMK may be offered only after the contracted dedicated infrastructure, immutable key identity, database logs, backups, replicas, and restore process are verified per organization. The running Connex app still processes plaintext." |
 | Customer-operated/on-prem | Supported outside Connex-operated SaaS. The customer controls the database/storage/keyring/KMS/HSM/KMIP/Vault layer and backup keys. | "Customer-operated deployments give the customer infrastructure and key custody; the running app still processes plaintext inside that environment." |
 
 ## Implementation Gates
@@ -52,18 +57,24 @@ implemented and verified:
 - A per-org infrastructure boundary exists for database storage encryption. A
   dedicated logical schema on a shared encrypted server is insufficient for a
   per-org storage-key claim.
-- Provisioning chooses the encryption mode and KMS key at database
-  instance/cluster creation time, before Connex migrations run.
+- Provisioning chooses the encryption mode and immutable KMS key ARN or provider
+  key id at database instance/cluster creation time, before Connex migrations
+  run. A mutable alias may be display metadata but is never the enforcement or
+  comparison identity.
+- Provisioning associates every database log group that may contain customer
+  data with the organization's recorded log KMS key before logs are emitted.
 - The provisioning credential can create the database resource and KMS grant,
   but the application credential cannot alter encryption, key policy, backups,
-  snapshots, or replica posture.
+  snapshots, replica posture, or database-log KMS association.
 - The registry described in [#313] records the key owner, encryption mode, KMS
-  key identifier or alias, KMS account/region, revocation semantics, backup
-  key mode, snapshot-copy policy, restore validation state, and evidence
-  timestamp for each dedicated organization.
-- Backup, snapshot, read-replica, restore, blue-green, and repointing flows
-  fail closed if the target encryption mode or KMS key does not match the
-  organization's contracted posture.
+  provider, immutable key ARN/id, KMS account and region, optional display
+  alias, database-log key posture, revocation semantics, backup key mode,
+  snapshot-copy policy, restore validation state, and evidence timestamp for
+  each dedicated organization.
+- Backup, snapshot, read-replica, restore, blue-green, and repointing flows fail
+  closed if the target encryption mode, immutable KMS key identity,
+  database-log key posture, key controller/provider, or revocation behavior
+  does not match the organization's contracted posture.
 - Key disablement, revocation, grant removal, and recovery are runbooked and
   tested for the selected provider. For AWS RDS, disabling the KMS key can make
   the DB instance inaccessible; revoking the original caller's key access after
@@ -85,8 +96,12 @@ equivalent structured values:
 | `storage_encryption_mode` | `provider_managed`, `connex_managed_cmk`, `customer_managed_cmk`, or `customer_operated`. |
 | `key_controller` | Connex, Connex cloud provider, customer, or customer-operated environment. |
 | `kms_provider` | Provider such as AWS KMS, external KMS/HSM/KMIP/Vault, or none. |
-| `kms_key_ref` | Non-secret key ARN/alias/id reference where applicable. |
-| `kms_key_region` | Region/account boundary for provider-managed keys. |
+| `kms_key_ref` | Immutable, non-secret full key ARN or provider key id used for enforcement and comparisons. Never store a mutable alias as this identity. |
+| `kms_key_alias` | Optional mutable alias for display or operator lookup only. |
+| `kms_key_account` | Provider account or tenant that owns the recorded key. |
+| `kms_key_region` | Provider region containing the recorded key. |
+| `database_log_encryption_mode` | KMS association required for database log groups that may contain customer data. |
+| `database_log_kms_key_ref` | Immutable full ARN/id of the organization-approved key associated with database log groups. |
 | `revocation_supported` | Whether customer action can make the dedicated environment unavailable. |
 | `revocation_effect` | Expected lockout and recovery behavior. |
 | `backup_encryption_mode` | Backup/snapshot key handling for the dedicated organization. |
@@ -99,8 +114,10 @@ equivalent structured values:
 - Restores must create a new target under the organization's recorded
   encryption posture before traffic moves.
 - Blue-green and repointing flows must compare source and target
-  `storage_encryption_mode`, `kms_key_ref`, `kms_key_region`,
-  `backup_encryption_mode`, and `revocation_supported`.
+  `storage_encryption_mode`, `key_controller`, `kms_provider`, `kms_key_ref`,
+  `kms_key_account`, `kms_key_region`, `database_log_encryption_mode`,
+  `database_log_kms_key_ref`, `backup_encryption_mode`,
+  `revocation_supported`, and `revocation_effect`.
 - Same-region replicas must preserve the expected key boundary. Cross-region
   replicas or copied snapshots must specify a destination-region key and update
   the registry only after verification.
@@ -110,12 +127,14 @@ equivalent structured values:
 ## Allowed Wording
 
 - "Dedicated database isolation is a tier-specific tenant-isolation control."
-- "Dedicated CMK is available only if the signed order form and deployment
-  evidence identify a per-organization infrastructure key boundary."
+- "Dedicated CMK is a future feasible topology and is not currently available."
+- "If the implementation gates are completed and the tier is launched,
+  dedicated CMK may be offered only when the signed order form and deployment
+  evidence identify and verify a per-organization infrastructure key boundary."
 - "Dedicated CMK changes storage custody and revocation behavior; it does not
   make the running Connex application blind to data."
-- "Customers requiring direct key custody without a hosted dedicated-CMK
-  contract should use customer-operated/on-prem deployment."
+- "Customers requiring direct key custody today should use
+  customer-operated/on-prem deployment."
 
 ## Blocked Wording
 

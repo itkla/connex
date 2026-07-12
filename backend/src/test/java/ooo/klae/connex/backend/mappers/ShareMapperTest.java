@@ -2,6 +2,8 @@ package ooo.klae.connex.backend.mappers;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.List;
@@ -13,6 +15,7 @@ import ooo.klae.connex.backend.beans.Company;
 import ooo.klae.connex.backend.beans.Organization;
 import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.beans.Pipeline;
+import ooo.klae.connex.backend.beans.Stage;
 import ooo.klae.connex.backend.beans.Workspace;
 import ooo.klae.connex.backend.dto.ShareDto;
 
@@ -77,6 +80,36 @@ class ShareMapperTest extends AbstractMapperTest {
 
         assertEquals(0, affected);
         assertFalse(pipelineMapper.pipelineExists(foreign.getId(), pipeline.getId()));
+    }
+
+    @Test
+    void sharePipeline_sameOrganizationGrantsReadOnlyStageVisibility() {
+        Workspace sibling = newWorkspaceInOrg(orgIdOf(workspace));
+        Pipeline pipeline = newPipeline();
+        Stage stage = newStage(pipeline, 0);
+
+        assertEquals(1, shareMapper.sharePipeline(
+            pipeline.getId(), workspace.getId(), sibling.getId(), newUser().getId(), false));
+
+        assertNotNull(pipelineMapper.getVisibleStageById(sibling.getId(), stage.getId()));
+        assertNull(pipelineMapper.getStageById(sibling.getId(), stage.getId()));
+    }
+
+    @Test
+    void sharedStageVisibilityRejectsRowsWhoseOwnerDiffersFromTheParentPipeline() {
+        Workspace sibling = newWorkspaceInOrg(orgIdOf(workspace));
+        Pipeline pipeline = newPipeline();
+        shareMapper.sharePipeline(
+            pipeline.getId(), workspace.getId(), sibling.getId(), newUser().getId(), false);
+        Stage mismatched = new Stage();
+        mismatched.setWorkspaceId(sibling.getId());
+        mismatched.setName("Mismatched");
+        mismatched.setPipeline(pipeline);
+        mismatched.setPosition(0);
+        pipelineMapper.insertStage(mismatched);
+
+        assertNull(pipelineMapper.getVisibleStageById(sibling.getId(), mismatched.getId()));
+        assertTrue(pipelineMapper.getStagesByPipelineId(sibling.getId(), pipeline.getId()).isEmpty());
     }
 
     @Test

@@ -437,7 +437,7 @@ public class DealService {
         }
         String stageName = null;
         if (deal.getStageId() != null) {
-            Stage stage = pipelineMapper.getStageById(workspaceId, deal.getStageId());
+            Stage stage = pipelineMapper.getVisibleStageById(workspaceId, deal.getStageId());
             if (stage != null) stageName = stage.getName();
         }
         String companyName = null;
@@ -465,6 +465,7 @@ public class DealService {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         deal.setWorkspaceId(workspaceId);
         deal.setOwnerId(authService.getCurrentUser().getId());
+        requireVisibleRelations(workspaceId, deal);
         reconcileCloseState(deal);
         if (deal.getStageId() != null) {
             deal.setPosition(dealMapper.nextDealPosition(workspaceId, deal.getStageId()));
@@ -497,6 +498,7 @@ public class DealService {
         deal.setId(id);
         deal.setWorkspaceId(workspaceId);
         deal.setOwnerId(before.getOwnerId());
+        requireVisibleRelations(workspaceId, deal);
         Integer beforeStage = before.getStageId();
         Integer newStage = deal.getStageId();
         boolean stageChanged = newStage != null && (beforeStage == null || !beforeStage.equals(newStage));
@@ -518,6 +520,25 @@ public class DealService {
         }
         syncClosedReasonMentions(workspaceId, deal);
         return hydrateReferences(workspaceId, deal);
+    }
+
+    private void requireVisibleRelations(int workspaceId, Deal deal) {
+        Integer pipelineId = deal.getPipelineId();
+        if (pipelineId == null || !pipelineMapper.pipelineExists(workspaceId, pipelineId)) {
+            throw new BadRequestException("Deal pipeline is not visible in this workspace");
+        }
+        Stage stage = deal.getStageId() == null
+            ? null
+            : pipelineMapper.getVisibleStageById(workspaceId, deal.getStageId());
+        Integer stagePipelineId = stage == null || stage.getPipeline() == null
+            ? null
+            : stage.getPipeline().getId();
+        if (stage == null || !pipelineId.equals(stagePipelineId)) {
+            throw new BadRequestException("Deal stage is not in the selected visible pipeline");
+        }
+        if (deal.getCompanyId() != null && !companyMapper.exists(workspaceId, deal.getCompanyId())) {
+            throw new BadRequestException("Deal company is not visible in this workspace");
+        }
     }
 
     /**
@@ -954,11 +975,10 @@ public class DealService {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         Deal before = dealMapper.getDealById(workspaceId, dealId);
         if (before == null) throw new ResourceNotFoundException("Deal not found with id: " + dealId);
-        Stage stage = pipelineMapper.getStageById(workspaceId, stageId);
+        Stage stage = pipelineMapper.getVisibleStageById(workspaceId, stageId);
         if (stage == null) throw new ResourceNotFoundException("Stage not found with id: " + stageId);
         Integer stagePipelineId = stage.getPipeline() != null ? stage.getPipeline().getId() : null;
-        if (before.getPipelineId() != null && stagePipelineId != null
-                && !before.getPipelineId().equals(stagePipelineId)) {
+        if (!Objects.equals(before.getPipelineId(), stagePipelineId)) {
             throw new BadRequestException(
                 "Stage " + stageId + " is not in deal " + dealId + "'s pipeline");
         }

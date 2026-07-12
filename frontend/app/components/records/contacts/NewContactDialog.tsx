@@ -1,6 +1,6 @@
 'use client';
 
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogClose } from '@/components/ui/dialog';
+import { ResponsiveDialog, ResponsiveDialogContent, ResponsiveDialogHeader, ResponsiveDialogTitle, ResponsiveDialogDescription, ResponsiveDialogFooter, ResponsiveDialogClose } from '@/components/ui/responsive-dialog';
 import { Button } from '@/components/ui/button';
 import { Loader2Icon } from 'lucide-react';
 import { Combobox, ComboboxItem, ComboboxList, ComboboxContent, ComboboxEmpty, ComboboxInput } from '@/components/ui/combobox';
@@ -52,6 +52,7 @@ export default function NewContactDialog({
 }: Props) {
     const t = useTranslations('ContactsNewContactDialog');
     const [imagePreview, setImagePreview] = useState<string | null>(null);
+    const [prevOpen, setPrevOpen] = useState(newContactDialogOpen);
     const { fieldErrors, reset: resetFieldErrors, clearError, captureFieldErrors } = useFieldErrors();
 
     const handleCreate = async () => {
@@ -73,13 +74,13 @@ export default function NewContactDialog({
         e.currentTarget.scrollTop += delta;
     };
 
-    useEffect(() => {
-        if (!newContactDialogOpen && imagePreview) {
-            URL.revokeObjectURL(imagePreview);
+    if (newContactDialogOpen !== prevOpen) {
+        setPrevOpen(newContactDialogOpen);
+        if (!newContactDialogOpen) {
             setImagePreview(null);
+            resetFieldErrors();
         }
-        if (!newContactDialogOpen) resetFieldErrors();
-    }, [newContactDialogOpen, imagePreview, resetFieldErrors]);
+    }
 
     useEffect(() => {
         return () => {
@@ -105,8 +106,8 @@ export default function NewContactDialog({
     const contactInitial = initials(newContactPayload.name || '');
 
     return (
-        <Dialog open={newContactDialogOpen} onOpenChange={handleOpenChange}>
-            <DialogContent className="gap-0 overflow-hidden p-0 sm:max-w-lg">
+        <ResponsiveDialog open={newContactDialogOpen} onOpenChange={handleOpenChange}>
+            <ResponsiveDialogContent className="gap-0 overflow-hidden p-0 sm:max-w-lg">
                 <DialogStatusCover status={status} />
 
                 <div className="px-6 pb-6">
@@ -143,10 +144,10 @@ export default function NewContactDialog({
                         </label>
                     </div>
 
-                    <DialogHeader className="ncd-rise mb-5" style={{ animationDelay: '40ms' }}>
-                        <DialogTitle className="text-xl font-semibold tracking-tight">{t('dialogTitle')}</DialogTitle>
-                        <DialogDescription>{t('description')}</DialogDescription>
-                    </DialogHeader>
+                    <ResponsiveDialogHeader className="ncd-rise mb-5" style={{ animationDelay: '40ms' }}>
+                        <ResponsiveDialogTitle className="text-xl font-semibold tracking-tight">{t('dialogTitle')}</ResponsiveDialogTitle>
+                        <ResponsiveDialogDescription>{t('description')}</ResponsiveDialogDescription>
+                    </ResponsiveDialogHeader>
 
                     <form
                         onSubmit={(e: FormEvent) => {
@@ -273,10 +274,10 @@ export default function NewContactDialog({
                             </Combobox>
                         </div>
 
-                        <DialogFooter className="ncd-rise mt-5" style={{ animationDelay: '290ms' }}>
-                            <DialogClose asChild>
+                        <ResponsiveDialogFooter className="ncd-rise mt-5" style={{ animationDelay: '290ms' }}>
+                            <ResponsiveDialogClose asChild>
                                 <Button type="button" variant="outline" disabled={isCreating}>{t('cancel')}</Button>
-                            </DialogClose>
+                            </ResponsiveDialogClose>
                             <Button
                                 type="submit"
                                 disabled={isCreating || isSuccess}
@@ -284,10 +285,10 @@ export default function NewContactDialog({
                             >
                                 {isCreating ? <Loader2Icon className="size-4 animate-spin" /> : t('create')}
                             </Button>
-                        </DialogFooter>
+                        </ResponsiveDialogFooter>
                     </form>
                 </div>
-            </DialogContent>
-        </Dialog>
+            </ResponsiveDialogContent>
+        </ResponsiveDialog>
     );
 }

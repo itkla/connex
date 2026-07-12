@@ -3,7 +3,9 @@ package ooo.klae.connex.backend.services;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.time.LocalDateTime;
 
@@ -68,6 +70,68 @@ class AppiIncidentServiceTest extends AbstractServiceTest {
         badWindow.setOccurredTo(LocalDateTime.now().minusHours(1));
         assertThrows(BadRequestException.class,
             () -> appiIncidentService.create(org.getId(), currentUser.getId(), badWindow));
+    }
+
+    @Test
+    void updatePreservesOmittedStateAndClearsOmittedNullableDetails() {
+        Organization org = orgOwnedByCurrentUser();
+        LocalDateTime occurredFrom = LocalDateTime.of(2026, 1, 2, 3, 0);
+        LocalDateTime occurredTo = occurredFrom.plusHours(4);
+        LocalDateTime detectedAt = occurredFrom.plusHours(1);
+        LocalDateTime customerNotifiedAt = occurredFrom.plusHours(2);
+        AppiIncidentRequest create = request("Initial");
+        create.setStatus("notified");
+        create.setSeverity("critical");
+        create.setReportable(true);
+        create.setOccurredFrom(occurredFrom);
+        create.setOccurredTo(occurredTo);
+        create.setDetectedAt(detectedAt);
+        create.setCustomerNotifiedAt(customerNotifiedAt);
+        create.setSummary("Initial summary");
+        create.setContainment("Initial containment");
+        AppiIncidentDto created = appiIncidentService.create(org.getId(), currentUser.getId(), create);
+
+        AppiIncidentDto updated = appiIncidentService.update(
+            org.getId(), created.getId(), currentUser.getId(), request("Retitled"));
+
+        assertEquals("notified", updated.getStatus());
+        assertEquals("critical", updated.getSeverity());
+        assertTrue(updated.isReportable());
+        assertNull(updated.getOccurredFrom());
+        assertNull(updated.getOccurredTo());
+        assertEquals(detectedAt, updated.getDetectedAt());
+        assertNull(updated.getCustomerNotifiedAt());
+        assertNull(updated.getSummary());
+        assertNull(updated.getContainment());
+
+        AppiIncidentRequest invalidWindow = request("Invalid window");
+        invalidWindow.setOccurredFrom(occurredTo.plusMinutes(1));
+        invalidWindow.setOccurredTo(occurredTo);
+        assertThrows(BadRequestException.class, () -> appiIncidentService.update(
+            org.getId(), created.getId(), currentUser.getId(), invalidWindow));
+    }
+
+    @Test
+    void scopeRequiresABoundedIncidentWindow() {
+        Organization org = orgOwnedByCurrentUser();
+        AppiIncidentDto created = appiIncidentService.create(
+            org.getId(), currentUser.getId(), request("Unbounded"));
+
+        assertThrows(BadRequestException.class,
+            () -> appiIncidentService.scope(org.getId(), created.getId(), currentUser.getId(), 1, 50));
+    }
+
+    @Test
+    void scopePaginationCanAdvanceBeyondTheGeneralListOffsetWindow() {
+        Organization org = orgOwnedByCurrentUser();
+        AppiIncidentRequest request = request("Bounded");
+        request.setOccurredFrom(LocalDateTime.of(2026, 1, 1, 0, 0));
+        request.setOccurredTo(LocalDateTime.of(2026, 1, 2, 0, 0));
+        AppiIncidentDto created = appiIncidentService.create(
+            org.getId(), currentUser.getId(), request);
+
+        assertTrue(appiIncidentService.scope(
+            org.getId(), created.getId(), currentUser.getId(), 1002, 100).items().isEmpty());
     }
 
     @Test
