@@ -54,19 +54,21 @@ export default async function MePage() {
     }
 
     const init = { headers: { cookie: cookie ?? "" } } as const;
-    const [contacts, deals, dealRisks, tasks, activities, notes, users] = await Promise.all([
+    const [contacts, deals, tasks, activities, notes, users] = await Promise.all([
         getContactsFromCookie(cookie).catch(() => [] as Contact[]),
         getDealsFromCookie(cookie).catch(() => [] as Deal[]),
-        getDealRisksFromCookie(cookie).catch(() => [] as DealRisk[]),
         getUserTasksFromCookie(user.id, cookie).catch(() => [] as Task[]),
         getUserActivitiesFromCookie(user.id, cookie).catch(() => [] as Activity[]),
         getUserNotesFromCookie(user.id, cookie).catch(() => [] as Note[]),
         getUsers(init).catch(() => [] as User[]),
     ]);
-    const temps = await getContactTemperaturesFromCookie(cookie, contacts.map((contact) => contact.id))
-        .catch(() => [] as RelationshipTemperature[]);
-
     const myDeals = deals.filter((deal) => deal.ownerId === user.id);
+    const [temps, dealRisks] = await Promise.all([
+        getContactTemperaturesFromCookie(cookie, contacts.map((contact) => contact.id))
+            .catch(() => [] as RelationshipTemperature[]),
+        getDealRisksFromCookie(cookie, myDeals.map((deal) => deal.id))
+            .catch(() => [] as DealRisk[]),
+    ]);
     const currency = pickDominantCurrency(myDeals);
     const kpis = personalKpis(myDeals);
     const distribution = warmthDistribution(temps);

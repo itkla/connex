@@ -94,8 +94,8 @@ export default function CompanyCard({ company, metrics, metricsStatus, onFirstEx
                     {metricsStatus === 'ready' && metrics && (
                         <>
                             <div className="flex flex-wrap items-start gap-8">
-                                <AvatarSection kind="employees" label={t('employees')} people={metrics.persons} fallbackKey="name" imageKey="imageUrl" />
-                                <AvatarSection kind="relations" label={t('relations')} people={metrics.relatedUsers} fallbackKey="displayName" imageKey="profilePictureUrl" />
+                                <AvatarSection kind="employees" label={t('employees')} people={metrics.persons} total={metrics.personCount} fallbackKey="name" imageKey="imageUrl" />
+                                <AvatarSection kind="relations" label={t('relations')} people={metrics.relatedUsers} total={metrics.relatedUserCount} fallbackKey="displayName" imageKey="profilePictureUrl" />
                             </div>
 
                             <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
@@ -126,19 +126,20 @@ function AvatarSection({
     kind,
     label,
     people,
+    total,
     fallbackKey,
     imageKey,
 }: {
     kind: 'employees' | 'relations';
     label: string;
     people: AvatarSubject[];
+    total: number;
     fallbackKey: 'name' | 'displayName';
     imageKey: 'imageUrl' | 'profilePictureUrl';
 }) {
     const visible = people.slice(0, 5);
-    const overflow = people.length - visible.length;
+    const overflow = Math.max(0, total - visible.length);
 
-    //TODO: clean up the avatar section so that they're distinct
     const router = useRouter();
 
     const handleClick = (id: number) => {
@@ -152,7 +153,7 @@ function AvatarSection({
     return (
         <div>
             <p className="text-xs font-medium tracking-[0.12em] text-muted-foreground uppercase mb-2">
-                {t('labelWithCount', { label, count: people.length })}
+                {t('labelWithCount', { label, count: total })}
             </p>
             <AvatarGroup>
                 {visible.map((p) => {

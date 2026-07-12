@@ -9,9 +9,10 @@ import DealsBrowser from "@/app/components/records/deals/DealsBrowser";
  * server render already reflects an active status filter (e.g. a bookmarked "Closed" view),
  * rather than loading the open-heavy first page and filtering it to nothing on the client.
  */
-function statusParam(raw: string | string[] | undefined): 'open' | 'closed' | undefined {
-    const value = Array.isArray(raw) ? raw[0] : raw;
-    return value === 'open' || value === 'closed' ? value : undefined;
+function statusParam(raw: string | string[] | undefined): Array<'open' | 'closed'> | undefined {
+    const values = Array.isArray(raw) ? raw : raw ? [raw] : [];
+    const normalized = values.filter((value): value is 'open' | 'closed' => value === 'open' || value === 'closed');
+    return normalized.length > 0 ? normalized : undefined;
 }
 
 /**
@@ -43,7 +44,7 @@ export default async function DealsPage({ searchParams }: { searchParams: Promis
     const status = statusParam((await searchParams).status);
     const init = { headers: { cookie: cookie ?? '' } } as const;
     const [metrics, facets, savedViews]: [DealMetrics, DealFacets, SavedView[]] = await Promise.all([
-        getDealMetricsFromCookie(cookie),
+        getDealMetricsFromCookie(cookie, { status }),
         getDealFacetsFromCookie(cookie),
         getSavedViewsFromCookie("deal", cookie),
     ]);

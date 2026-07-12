@@ -140,6 +140,14 @@
     WHERE workspace_id = #{workspaceId} AND person_id = #{personId} ORDER BY timestamp DESC, id DESC
   </select>
 
+  <select id="getActivitiesByPersonIds" resultMap="ActivityResult">
+    SELECT <include refid="activityColumns"/> FROM activity
+    WHERE workspace_id = #{workspaceId}
+      AND person_id IN
+      <foreach item="personId" collection="personIds" open="(" separator="," close=")">#{personId}</foreach>
+    ORDER BY timestamp DESC, id DESC
+  </select>
+
   <select id="getActivitiesByDealId" resultMap="ActivityResult">
     SELECT <include refid="activityColumns"/> FROM activity
     WHERE workspace_id = #{workspaceId} AND deal_id = #{dealId} ORDER BY timestamp DESC, id DESC
@@ -148,6 +156,36 @@
   <select id="getActivitiesByCreatedById" resultMap="ActivityResult">
     SELECT <include refid="activityColumns"/> FROM activity
     WHERE workspace_id = #{workspaceId} AND created_by_id = #{createdById} ORDER BY timestamp DESC, id DESC
+  </select>
+
+  <select id="getCompanyActivities" resultMap="ActivityResult">
+    SELECT <include refid="activityColumns"/> FROM activity a
+    WHERE a.workspace_id = #{workspaceId}
+      AND (EXISTS (SELECT 1 FROM person p
+          WHERE p.workspace_id = #{workspaceId} AND p.id = a.person_id AND p.company_id = #{companyId})
+        OR EXISTS (SELECT 1 FROM deal d
+          WHERE d.workspace_id = #{workspaceId} AND d.id = a.deal_id AND d.company_id = #{companyId}))
+    ORDER BY a.timestamp DESC, a.id DESC
+    LIMIT #{limit}
+  </select>
+
+  <select id="getActivitiesByCompanyIds" resultMap="ActivityResult">
+    SELECT <include refid="activityColumns"/> FROM activity a
+    WHERE a.workspace_id = #{workspaceId}
+      AND (EXISTS (SELECT 1 FROM person p
+          WHERE p.id = a.person_id
+            AND (p.workspace_id = #{workspaceId}
+              OR EXISTS (SELECT 1 FROM person_share ps
+                JOIN workspace vws ON vws.id = ps.workspace_id
+                JOIN workspace ows ON ows.id = p.workspace_id AND ows.org_id = vws.org_id
+                WHERE ps.person_id = p.id AND ps.workspace_id = #{workspaceId}))
+            AND p.company_id IN
+            <foreach item="id" collection="companyIds" open="(" separator="," close=")">#{id}</foreach>)
+        OR EXISTS (SELECT 1 FROM deal d
+          WHERE d.workspace_id = #{workspaceId} AND d.id = a.deal_id
+            AND d.company_id IN
+            <foreach item="id" collection="companyIds" open="(" separator="," close=")">#{id}</foreach>))
+    ORDER BY a.timestamp DESC, a.id DESC
   </select>
 
   <select id="getActivityById" resultMap="ActivityResult">

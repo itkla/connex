@@ -10,6 +10,8 @@ import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -48,12 +50,16 @@ import ooo.klae.connex.backend.dto.DealMetricsDto;
 import ooo.klae.connex.backend.dto.DealMonthDecimalTotalDto;
 import ooo.klae.connex.backend.dto.DealMonthTotalDto;
 import ooo.klae.connex.backend.dto.DealPipelineValueDto;
+import ooo.klae.connex.backend.dto.DealPrimaryContactDto;
 import ooo.klae.connex.backend.dto.DealRevenueMonthBoundary;
 import ooo.klae.connex.backend.dto.DealRevenueRangeDto;
+import ooo.klae.connex.backend.dto.DealRiskDto;
 import ooo.klae.connex.backend.dto.DealRevenueSeriesDto;
 import ooo.klae.connex.backend.dto.DealStageDistributionDto;
 import ooo.klae.connex.backend.dto.DealSummaryDto;
 import ooo.klae.connex.backend.dto.DealTopDto;
+import ooo.klae.connex.backend.dto.FacetCount;
+import ooo.klae.connex.backend.dto.PageResponse;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.tenant.Permission;
@@ -100,6 +106,7 @@ public class DealService {
     private final NotificationPreferenceService notificationPreferenceService;
     private final DealStageHistoryService dealStageHistoryService;
     private final ObjectMapper objectMapper;
+    private final DealRiskService dealRiskService;
 
     private static final DateTimeFormatter MYSQL_DATETIME = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
@@ -109,7 +116,11 @@ public class DealService {
     private static final String IN_APP = "in_app";
     private static final int SNIPPET_LENGTH = 140;
     private static final int KPI_SERIES_BUCKETS = 12;
+    private static final int MAX_RISK_CANDIDATES = 1000;
+    private static final int MAX_BOARD_DEALS = 2000;
     private static final int MAX_REVENUE_MONTHS = 1200;
+
+    private static final Set<String> ALL_RISK_LEVELS = Set.of("high", "medium", "low", "none");
 
     private static final Set<String> AUDIT_FIELDS =
         Set.of("name", "value", "actualValue", "currency", "pipelineId", "stageId",
@@ -251,15 +262,105 @@ public class DealService {
         return new DealMetricsDto(byCurrency, totalCount);
     }
 
+    /**
+     * Returns one page and its matching total for the complete server-representable deal filter.
+     */
+    public PageResponse<Deal> queryDealsPage(String query, String sort, String dir, String currency,
+            List<Integer> pipelineIds, List<Integer> stageIds, List<Integer> companyIds,
+            boolean noCompany, List<String> statuses, List<String> risks, int limit, int offset) {
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        List<Integer> riskIds = resolveRiskCandidates(
+            workspaceId, query, currency, pipelineIds, stageIds, companyIds,
+            noCompany, statuses, risks);
+        if (risks != null && !risks.isEmpty() && riskIds != null && riskIds.isEmpty()) {
+            return new PageResponse<>(List.of(), 0);
+        }
+        List<Deal> items = dealMapper.getDealsPageFiltered(
+            workspaceId, query, sort, dir, currency, pipelineIds, stageIds, companyIds,
+            noCompany, statuses, riskIds, limit, offset);
+        long total = dealMapper.countDealsFiltered(
+            workspaceId, query, currency, pipelineIds, stageIds, companyIds,
+            noCompany, statuses, riskIds);
+        return new PageResponse<>(items, total);
+    }
+
+    /**
+     * Returns currency metrics for the same complete server-representable filter used by the page.
+     */
+    public DealMetricsDto queryDealMetrics(String query, String currency, List<Integer> pipelineIds,
+            List<Integer> stageIds, List<Integer> companyIds, boolean noCompany,
+            List<String> statuses, List<String> risks) {
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        List<Integer> riskIds = resolveRiskCandidates(
+            workspaceId, query, currency, pipelineIds, stageIds, companyIds,
+            noCompany, statuses, risks);
+        if (risks != null && !risks.isEmpty() && riskIds != null && riskIds.isEmpty()) {
+            return new DealMetricsDto(List.of(), 0);
+        }
+        List<DealCurrencyMetricsDto> byCurrency = dealMapper.dealMetricsFiltered(
+            workspaceId, query, currency, pipelineIds, stageIds, companyIds,
+            noCompany, statuses, riskIds);
+        long totalCount = byCurrency.stream()
+            .mapToLong(metrics -> metrics.openCount() + metrics.closedCount())
+            .sum();
+        return new DealMetricsDto(byCurrency, totalCount);
+    }
+
+    private List<Integer> resolveRiskCandidates(int workspaceId, String query, String currency,
+            List<Integer> pipelineIds, List<Integer> stageIds, List<Integer> companyIds,
+            boolean noCompany, List<String> statuses, List<String> risks) {
+        if (risks == null || risks.isEmpty() || risks.containsAll(ALL_RISK_LEVELS)) {
+            return null;
+        }
+        List<Integer> baseIds = dealMapper.getFilteredDealIds(
+            workspaceId, query, currency, pipelineIds, stageIds, companyIds,
+            noCompany, statuses, null, MAX_RISK_CANDIDATES + 1);
+        if (baseIds.size() > MAX_RISK_CANDIDATES) {
+            throw new BadRequestException(
+                "Risk filter matches too many deals; narrow the other filters before loading records");
+        }
+        List<DealRiskDto> assessments = dealRiskService.assessDeals(workspaceId, baseIds);
+        Set<Integer> atRiskIds = assessments.stream().map(DealRiskDto::getDealId).collect(java.util.stream.Collectors.toSet());
+        Set<Integer> matches = new LinkedHashSet<>();
+        for (DealRiskDto assessment : assessments) {
+            if (risks.contains(assessment.getLevel())) {
+                matches.add(assessment.getDealId());
+            }
+        }
+        if (risks.contains("none")) {
+            for (Integer dealId : baseIds) {
+                if (!atRiskIds.contains(dealId)) {
+                    matches.add(dealId);
+                }
+            }
+        }
+        return matches.stream().sorted().toList();
+    }
+
     public DealFacets getDealFacets() {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
+        List<FacetCount> status = dealMapper.countsByStatus(workspaceId);
         return new DealFacets(
-            dealMapper.countsByStatus(workspaceId),
+            status,
             dealMapper.countsByStage(workspaceId),
             dealMapper.countsByPipeline(workspaceId),
             dealMapper.countsByCompany(workspaceId),
-            dealMapper.countsByCurrency(workspaceId)
+            dealMapper.countsByCurrency(workspaceId),
+            List.of()
         );
+    }
+
+    /**
+     * Returns a complete pipeline board when its absolute ordering can be represented safely.
+     */
+    public List<Deal> getDealBoard(int pipelineId) {
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        long total = dealMapper.countDealsByPipelineId(workspaceId, pipelineId);
+        if (total > MAX_BOARD_DEALS) {
+            throw new BadRequestException(
+                "This pipeline is too large for Kanban reordering; use the paginated table view");
+        }
+        return dealMapper.getDealsByPipelineId(workspaceId, pipelineId);
     }
 
     public DealRevenueSeriesDto getRevenueTimeseries(String currency, String timezone) {
@@ -440,6 +541,12 @@ public class DealService {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         return referenceService.hydrateDeals(
             workspaceId, dealMapper.getDealsByCompanyId(workspaceId, companyId));
+    }
+
+    /** Returns the bounded, outcome-prioritized company deal history used by AI relationship context. */
+    public List<Deal> getAccountHistoryDeals(int companyId, int excludeDealId, int limit) {
+        return dealMapper.getAccountHistoryDeals(
+            workspaceService.getCurrentWorkspaceId(), companyId, excludeDealId, limit);
     }
 
     /**
@@ -836,6 +943,15 @@ public class DealService {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         if (dealMapper.getDealById(workspaceId, dealId) == null) throw new ResourceNotFoundException("Deal not found with id: " + dealId);
         return dealMapper.getDealPeopleByDealId(workspaceId, dealId);
+    }
+
+    /** Returns at most one visible contact per requested workspace deal. */
+    public List<DealPrimaryContactDto> getPrimaryContacts(List<Integer> dealIds) {
+        if (dealIds == null || dealIds.isEmpty()) {
+            return List.of();
+        }
+        return dealMapper.getPrimaryContactsByDealIds(
+            workspaceService.getCurrentWorkspaceId(), dealIds);
     }
 
     /**

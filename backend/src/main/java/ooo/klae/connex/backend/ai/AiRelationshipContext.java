@@ -109,16 +109,8 @@ public class AiRelationshipContext {
             return List.of();
         }
         try {
-            List<Deal> deals = new ArrayList<>();
-            for (Deal deal : safeList(dealService.getDealsByCompanyId(companyId))) {
-                if (deal != null && deal.getId() != currentDealId) {
-                    deals.add(deal);
-                }
-            }
-            deals.sort(Comparator
-                    .comparing((Deal deal) -> deal.getWon() == null ? 1 : 0)
-                    .thenComparing(AiRelationshipContext::closeKey, Comparator.reverseOrder())
-                    .thenComparing(Deal::getId));
+            List<Deal> deals = safeList(
+                dealService.getAccountHistoryDeals(companyId, currentDealId, MAX_ACCOUNT_DEALS));
             List<String> lines = new ArrayList<>();
             for (Deal deal : deals) {
                 lines.add(accountHistoryLine(deal, context));
@@ -237,14 +229,6 @@ public class AiRelationshipContext {
         } catch (DateTimeParseException exception) {
             return null;
         }
-    }
-
-    private static String closeKey(Deal deal) {
-        String closedAt = deal.getClosedAt();
-        if (closedAt != null && !closedAt.isBlank()) {
-            return closedAt;
-        }
-        return deal.getExpectedCloseDate() == null ? "" : deal.getExpectedCloseDate();
     }
 
     private static String outcome(Boolean won) {

@@ -60,12 +60,13 @@ public class NoteController {
     @GetMapping("/page")
     public PageResponse<NoteDto> getNotesPage(
         @RequestParam(defaultValue = "1") int page,
-        @RequestParam(defaultValue = "25") int size
+        @RequestParam(defaultValue = "25") int size,
+        @RequestParam(defaultValue = "false") boolean workspaceOnly
     ) {
         PageBounds bounds = PageBounds.of(page, size);
-        List<NoteDto> items = noteService.getNotesPage(bounds.size(), bounds.offset())
+        List<NoteDto> items = noteService.getNotesPage(bounds.size(), bounds.offset(), workspaceOnly)
             .stream().map(NoteDto::from).toList();
-        return new PageResponse<>(items, noteService.countNotes());
+        return new PageResponse<>(items, noteService.countNotes(workspaceOnly));
     }
 
     /**

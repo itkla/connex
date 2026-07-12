@@ -1,6 +1,7 @@
 package ooo.klae.connex.backend.mappers;
 
 import java.sql.Timestamp;
+import java.time.LocalDateTime;
 import java.util.List;
 
 import javax.sql.DataSource;
@@ -16,12 +17,29 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
 
 import ooo.klae.connex.backend.beans.Company;
+import ooo.klae.connex.backend.beans.Activity;
+import ooo.klae.connex.backend.beans.Deal;
+import ooo.klae.connex.backend.beans.Note;
+import ooo.klae.connex.backend.beans.Person;
+import ooo.klae.connex.backend.beans.Pipeline;
+import ooo.klae.connex.backend.beans.Stage;
 import ooo.klae.connex.backend.beans.Tag;
+import ooo.klae.connex.backend.beans.Task;
+import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.beans.Workspace;
+import ooo.klae.connex.backend.dto.CompanyEngagementCountsDto;
+import ooo.klae.connex.backend.dto.CompanyEngagementPersonDto;
+import ooo.klae.connex.backend.dto.CompanyEngagementUserDto;
+import ooo.klae.connex.backend.dto.CompanyEngagementWeekBucketDto;
+import ooo.klae.connex.backend.dto.CompanyRevenueCurrencyDto;
+import ooo.klae.connex.backend.dto.RelationshipScoreAggregateDto;
 
 class CompanyMapperTest extends AbstractMapperTest {
 
     @Autowired private DataSource dataSource;
+    @Autowired private ActivityMapper activityMapper;
+    @Autowired private NoteMapper noteMapper;
+    @Autowired private TaskMapper taskMapper;
 
     /**
      * Inserts a new company and checks if the generated ID is not zero.
@@ -159,7 +177,7 @@ class CompanyMapperTest extends AbstractMapperTest {
             filteredCompanyIds(pageWorkspace, null, List.of("Technology"), true, null));
         assertEquals(List.of(finance.getId(), noIndustry.getId()),
             companyMapper.getCompanyIdsFiltered(pageWorkspace.getId(), null, null, false,
-                List.of(noIndustry.getId(), finance.getId(), foreign.getId()), 100));
+                List.of(noIndustry.getId(), finance.getId(), foreign.getId()), 100, 0));
         assertEquals(2, companyMapper.countCompanies(pageWorkspace.getId(), null, null, false,
             List.of(noIndustry.getId(), finance.getId(), foreign.getId())));
         assertFalse(filteredCompanyIds(pageWorkspace, null, List.of("Finance"), false, null)
@@ -183,11 +201,38 @@ class CompanyMapperTest extends AbstractMapperTest {
         long count = companyMapper.countCompanies(
             pageWorkspace.getId(), "%Target%", List.of("Technology"), false, ids);
         List<Integer> matchingIds = companyMapper.getCompanyIdsFiltered(
-            pageWorkspace.getId(), "%Target%", List.of("Technology"), false, ids, 100);
+            pageWorkspace.getId(), "%Target%", List.of("Technology"), false, ids, 100, 0);
 
         assertEquals(List.of(alpha.getId(), bravo.getId()), page.stream().map(Company::getId).toList());
         assertEquals(2, count);
         assertEquals(List.of(alpha.getId(), bravo.getId()), matchingIds);
+    }
+
+    @Test
+    void segmentJsonTableQueriesPageCountAndBoundIdsWithoutOffsetScanning() {
+        Workspace segmentWorkspace = newWorkspace();
+        Company alpha = newCompanyIn(
+            segmentWorkspace, "Target Alpha", "https://alpha.example.com", "Technology", "100", "A");
+        Company bravo = newCompanyIn(
+            segmentWorkspace, "Target Bravo", "https://bravo.example.com", "Technology", "200", "B");
+        Company excluded = newCompanyIn(
+            segmentWorkspace, "Target Finance", "https://finance.example.com", "Finance", "300", "C");
+        Company foreign = newCompanyIn(
+            newWorkspace(), "Target Foreign", "https://foreign.example.com", "Technology", "400", "D");
+        String idsJson = "[" + alpha.getId() + "," + bravo.getId() + ","
+            + excluded.getId() + "," + foreign.getId() + "]";
+
+        List<Company> page = companyMapper.getSegmentCompaniesPage(
+            segmentWorkspace.getId(), idsJson, "%Target%", "name", "asc",
+            List.of("Technology"), false, 1, 1);
+        long count = companyMapper.countSegmentCompanies(
+            segmentWorkspace.getId(), idsJson, "%Target%", List.of("Technology"), false);
+        List<Integer> ids = companyMapper.getSegmentCompanyIdsFiltered(
+            segmentWorkspace.getId(), idsJson, "%Target%", List.of("Technology"), false, 1001);
+
+        assertEquals(List.of(bravo.getId()), page.stream().map(Company::getId).toList());
+        assertEquals(2, count);
+        assertEquals(List.of(alpha.getId(), bravo.getId()), ids);
     }
 
     @Test
@@ -345,6 +390,187 @@ class CompanyMapperTest extends AbstractMapperTest {
         // cross-workspace mutation affects zero rows; the foreign row survives
         assertEquals(0, companyMapper.delete(workspace.getId(), foreign.getId()));
         assertTrue(companyMapper.exists(foreign.getWorkspaceId(), foreign.getId()));
+    }
+
+    @Test
+    void companyEngagementAggregatesExcludePrivateNotes() {
+        Company company = newCompany();
+        Person person = newPerson(company);
+        Pipeline pipeline = newPipeline();
+        Stage stage = newStage(pipeline, 0);
+        Deal deal = newDeal(pipeline, stage, company);
+        User current = newUser();
+        User other = newUser();
+        Activity activity = new Activity();
+        activity.setWorkspaceId(workspace.getId());
+        activity.setType("meeting");
+        activity.setSubject("Company meeting");
+        activity.setPerson(person);
+        activity.setDeal(deal);
+        activity.setCreatedBy(current);
+        activity.setTimestamp("2026-07-01 10:00:00");
+        activityMapper.insert(activity);
+        Task task = new Task();
+        task.setWorkspaceId(workspace.getId());
+        task.setDescription("Company task");
+        task.setStatus("todo");
+        task.setAssignedTo(current);
+        task.setPerson(person);
+        task.setDeal(deal);
+        taskMapper.insert(task);
+        Note visible = new Note();
+        visible.setWorkspaceId(workspace.getId());
+        visible.setContent("Visible");
+        visible.setAuthor(current);
+        visible.setPerson(person);
+        noteMapper.insert(visible);
+        Note ownPrivate = new Note();
+        ownPrivate.setWorkspaceId(workspace.getId());
+        ownPrivate.setContent("Own private");
+        ownPrivate.setVisibility("private");
+        ownPrivate.setAuthor(current);
+        ownPrivate.setDeal(deal);
+        noteMapper.insert(ownPrivate);
+        Note otherPrivate = new Note();
+        otherPrivate.setWorkspaceId(workspace.getId());
+        otherPrivate.setContent("Other private");
+        otherPrivate.setVisibility("private");
+        otherPrivate.setAuthor(other);
+        otherPrivate.setPerson(person);
+        noteMapper.insert(otherPrivate);
+
+        CompanyEngagementCountsDto counts = companyMapper.getCompanyEngagementCounts(
+            workspace.getId(), company.getId());
+        List<CompanyEngagementUserDto> users = companyMapper.getCompanyEngagementUsers(
+            workspace.getId(), company.getId(), 5);
+        List<CompanyEngagementWeekBucketDto> weeks = companyMapper.getCompanyEngagementWeeks(
+            workspace.getId(), company.getId(), "2026-06-01 00:00:00", "2026-08-31 23:59:59");
+        List<CompanyEngagementPersonDto> people = personMapper.getCompanyEngagementPeople(
+            workspace.getId(), company.getId(), 5);
+
+        assertEquals(1, counts.numNotes());
+        assertEquals(1, counts.numActivities());
+        assertEquals(1, counts.numTasks());
+        assertEquals(1, counts.openTasks());
+        assertTrue(users.stream().noneMatch(user -> user.userId() == other.getId()));
+        assertEquals(1, weeks.stream().mapToLong(CompanyEngagementWeekBucketDto::notes).sum());
+        assertEquals(List.of(person.getId()), people.stream().map(CompanyEngagementPersonDto::id).toList());
+        assertEquals(person.getName(), people.getFirst().name());
+    }
+
+    @Test
+    void relationshipScoreAggregatesAreCompactDeduplicatedAndExcludePrivateNotes() {
+        Company company = newCompany();
+        Person person = newPerson(company);
+        Pipeline pipeline = newPipeline();
+        Stage stage = newStage(pipeline, 0);
+        Deal deal = newDeal(pipeline, stage, company);
+        User user = newUser();
+        Activity activity = new Activity();
+        activity.setWorkspaceId(workspace.getId());
+        activity.setType("meeting");
+        activity.setSubject("Scoring meeting");
+        activity.setPerson(person);
+        activity.setDeal(deal);
+        activity.setCreatedBy(user);
+        activity.setTimestamp("2026-07-10 00:00:00");
+        activityMapper.insert(activity);
+        Activity boundary = new Activity();
+        boundary.setWorkspaceId(workspace.getId());
+        boundary.setType("meeting");
+        boundary.setSubject("Boundary scoring meeting");
+        boundary.setPerson(person);
+        boundary.setDeal(deal);
+        boundary.setCreatedBy(user);
+        boundary.setTimestamp("2026-07-11 00:00:00");
+        activityMapper.insert(boundary);
+        Activity future = new Activity();
+        future.setWorkspaceId(workspace.getId());
+        future.setType("meeting");
+        future.setSubject("Future scoring meeting");
+        future.setPerson(person);
+        future.setDeal(deal);
+        future.setCreatedBy(user);
+        future.setTimestamp("2026-07-11 00:00:01");
+        activityMapper.insert(future);
+        Task task = new Task();
+        task.setWorkspaceId(workspace.getId());
+        task.setDescription("Scoring task");
+        task.setStatus("todo");
+        task.setAssignedTo(user);
+        task.setPerson(person);
+        task.setDeal(deal);
+        taskMapper.insert(task);
+        Note visible = new Note();
+        visible.setWorkspaceId(workspace.getId());
+        visible.setContent("Visible scoring note");
+        visible.setAuthor(user);
+        visible.setPerson(person);
+        visible.setDeal(deal);
+        noteMapper.insert(visible);
+        Note privateNote = new Note();
+        privateNote.setWorkspaceId(workspace.getId());
+        privateNote.setContent("Private scoring note");
+        privateNote.setVisibility("private");
+        privateNote.setAuthor(user);
+        privateNote.setPerson(person);
+        privateNote.setDeal(deal);
+        noteMapper.insert(privateNote);
+        JdbcTemplate jdbc = new JdbcTemplate(dataSource);
+        jdbc.update("UPDATE task SET created_at = ? WHERE id = ?",
+            Timestamp.valueOf("2026-07-10 00:00:00"), task.getId());
+        jdbc.update("UPDATE note SET created_at = ? WHERE id IN (?, ?)",
+            Timestamp.valueOf("2026-07-10 00:00:00"), visible.getId(), privateNote.getId());
+        LocalDateTime reference = LocalDateTime.parse("2026-07-11T00:00:00");
+
+        RelationshipScoreAggregateDto personScore = personMapper
+            .getRelationshipScoreAggregates(workspace.getId(), reference).stream()
+            .filter(score -> score.id() == person.getId())
+            .findFirst().orElseThrow();
+        RelationshipScoreAggregateDto companyScore = companyMapper
+            .getRelationshipScoreAggregates(workspace.getId(), reference).stream()
+            .filter(score -> score.id() == company.getId())
+            .findFirst().orElseThrow();
+
+        assertEquals(4, personScore.recentTouchCount());
+        assertEquals(4, companyScore.recentTouchCount());
+        assertEquals(2.7, personScore.recentWeight(), 0.000001);
+        assertEquals(2.7, companyScore.recentWeight(), 0.000001);
+        assertEquals("2026-07-11 00:00:00", personScore.lastTouchAt());
+        assertEquals("2026-07-11 00:00:00", companyScore.lastTouchAt());
+        assertTrue(personScore.rawWeight() > 0);
+        assertTrue(companyScore.rawWeight() > 0);
+    }
+
+    @Test
+    void companyRevenueUsesWonActualsAndOpenForecastOnly() {
+        Company company = newCompany();
+        Pipeline pipeline = newPipeline();
+        Stage stage = newStage(pipeline, 0);
+        Deal won = newDeal(pipeline, stage, company);
+        won.setValue(1_000);
+        won.setActualValue(750);
+        won.setWon(true);
+        won.setClosedAt("2026-07-01 00:00:00");
+        dealMapper.update(won);
+        Deal lost = newDeal(pipeline, stage, company);
+        lost.setValue(500);
+        lost.setActualValue(999);
+        lost.setWon(false);
+        lost.setClosedAt("2026-07-02 00:00:00");
+        dealMapper.update(lost);
+        Deal open = newDeal(pipeline, stage, company);
+        open.setValue(400);
+        open.setActualValue(100);
+        dealMapper.update(open);
+
+        List<CompanyRevenueCurrencyDto> revenue = companyMapper.getCompanyRevenueByCurrency(
+            workspace.getId(), company.getId());
+
+        assertEquals(1, revenue.size());
+        assertEquals(3, revenue.getFirst().dealCount());
+        assertEquals(750, revenue.getFirst().pastRevenue());
+        assertEquals(400, revenue.getFirst().projectedRevenue());
     }
 
     private Workspace newWorkspace() {

@@ -143,6 +143,7 @@
     "viewAllSr": "{label} をすべて表示"
   },
   "ContactsChangeCompanyDialog": {
+    "companySearchFailed": "会社を検索できませんでした。もう一度お試しください。",
     "titleSingle": "会社を変更",
     "titleMultiple": "{count} 件のコンタクトの会社を変更",
     "descriptionSingle": "{name} を会社に関連付けます。",
@@ -204,6 +205,7 @@
     "toastFailedLoadDeals": "案件を読み込めませんでした"
   },
   "ContactsNewContactDialog": {
+    "companySearchFailed": "会社を検索できませんでした。もう一度お試しください。",
     "dialogTitle": "新規コンタクト",
     "description": "コンタクトに人物を追加します。追加したコンタクトは組織内の全ユーザーで共有されます。",
     "name": "名前",

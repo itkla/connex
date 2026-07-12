@@ -182,7 +182,7 @@ class DealMentionTest extends AbstractServiceTest {
             findDeal(dealService.getAllDeals(), deal.getId()),
             findDeal(dealService.getDealsPage(
                 "%" + deal.getName() + "%", null, null, null, null, null, null, null, 25, 0), deal.getId()),
-            findDeal(companyService.getDealsByCompanyId(company.getId()), deal.getId()),
+            findDeal(companyService.getDealsByCompanyId(company.getId(), 100), deal.getId()),
             findDeal(personService.getDealsByPersonId(person.getId()), deal.getId()),
             findDeal(pipelineService.getDealsByPipelineId(pipeline.getId()), deal.getId()),
             findDeal(pipelineService.getDealsByStageId(stage.getId()), deal.getId()),
@@ -229,9 +229,8 @@ class DealMentionTest extends AbstractServiceTest {
         List<Deal> fetched = List.of(
             dealService.getDealById(deal.getId()),
             findDeal(dealService.getAllDeals(), deal.getId()),
-            findDeal(companyService.getDealsByCompanyId(company.getId()), deal.getId()),
+            findDeal(companyService.getDealsByCompanyId(company.getId(), 100), deal.getId()),
             findDeal(personService.getDealsByPersonId(person.getId()), deal.getId()),
-            findDeal(Arrays.asList(companyService.getCompanyById(company.getId()).getDeals()), deal.getId()),
             findDeal(Arrays.asList(personService.getPersonById(person.getId()).getDeals()), deal.getId()));
 
         for (Deal candidate : fetched) {

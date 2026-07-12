@@ -44,7 +44,9 @@
     "empty": "No deals closing this week."
   },
   "AtRiskDeals": {
-    "empty": "No deals need attention right now."
+    "empty": "No deals need attention right now.",
+    "truncated": "Partial results: risk was assessed for the 1,000 highest-priority open deals.",
+    "truncatedEmpty": "No risks found in the 1,000 deals assessed. Additional deals were not assessed."
   },
   "CoolingRelationships": {
     "empty": "Every relationship is warm — nothing cooling off.",

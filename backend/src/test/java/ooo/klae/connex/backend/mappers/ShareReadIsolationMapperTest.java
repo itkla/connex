@@ -69,6 +69,17 @@ class ShareReadIsolationMapperTest extends AbstractMapperTest {
 
         assertNull(personMapper.getPersonById(workspace.getId(), person.getId()));
         assertFalse(personMapper.exists(workspace.getId(), person.getId()));
+        assertTrue(personMapper.getExistingPersonIds(workspace.getId(), java.util.List.of(person.getId())).isEmpty());
+    }
+
+    @Test
+    void sameOrgPersonShareIsIncludedInBatchVisibility() {
+        Workspace sibling = newWorkspaceInOrg(orgIdOf(workspace));
+        Person person = newPersonIn(sibling);
+        insertShare("person_share", "person_id", person.getId(), workspace.getId());
+
+        assertTrue(personMapper.getExistingPersonIds(
+            workspace.getId(), java.util.List.of(person.getId())).contains(person.getId()));
     }
 
     @Test

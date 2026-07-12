@@ -126,6 +126,22 @@ class ActivityMapperTest extends AbstractMapperTest {
     }
 
     @Test
+    void getActivitiesByPersonIdsBatchesOnlyRequestedWorkspaceContacts() {
+        User user = newUser();
+        Person included = newPerson(newCompany());
+        Person excluded = newPerson(newCompany());
+        Activity includedActivity = build("meeting", "included", included, null, user);
+        Activity excludedActivity = build("call", "excluded", excluded, null, user);
+        activityMapper.insert(includedActivity);
+        activityMapper.insert(excludedActivity);
+
+        List<Activity> activities = activityMapper.getActivitiesByPersonIds(
+            workspace.getId(), List.of(included.getId()));
+
+        assertEquals(List.of(includedActivity.getId()), activities.stream().map(Activity::getId).toList());
+    }
+
+    @Test
     void getActivitiesPageLimitsAndCountsWorkspaceRows() {
         Workspace pageWorkspace = newWorkspace();
         User user = newUser();

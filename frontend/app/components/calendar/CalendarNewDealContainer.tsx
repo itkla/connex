@@ -5,9 +5,9 @@ import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 
 import NewDealDialog from '@/app/components/records/deals/NewDealDialog';
-import { createDeal, getCompanies, getPipelines, getStagesByPipelineId } from '@/app/lib/api';
+import { createDeal, getPipelines, getStagesByPipelineId } from '@/app/lib/api';
 import { toastError, toastSuccess } from '@/app/lib/toast';
-import type { Company, CreateDealPayload, Pipeline, Stage } from '@/app/lib/types';
+import type { CreateDealPayload, Pipeline, Stage } from '@/app/lib/types';
 
 const EMPTY_DRAFT: CreateDealPayload = {
     name: '',
@@ -22,8 +22,8 @@ const EMPTY_DRAFT: CreateDealPayload = {
 
 /**
  * Deal quick-create for the calendar. Reuses {@link NewDealDialog} and mirrors the
- * DealsBrowser create flow, but is self-contained: it lazily loads companies,
- * pipelines and per-pipeline stages the first time it opens (so the calendar page's
+ * DealsBrowser create flow, but is self-contained: it lazily loads pipelines and
+ * per-pipeline stages the first time it opens (so the calendar page's
  * server loader stays lean) and seeds the expected close date to the selected day.
  */
 export default function CalendarNewDealContainer({
@@ -39,7 +39,6 @@ export default function CalendarNewDealContainer({
     const t = useTranslations('Calendar');
 
     const [loaded, setLoaded] = useState(false);
-    const [companies, setCompanies] = useState<Company[]>([]);
     const [pipelines, setPipelines] = useState<Pipeline[]>([]);
     const [stagesByPipeline, setStagesByPipeline] = useState<Record<number, Stage[]>>({});
 
@@ -51,12 +50,8 @@ export default function CalendarNewDealContainer({
         if (!open || loaded) return;
         let cancelled = false;
         void (async () => {
-            const [nextCompanies, nextPipelines] = await Promise.all([
-                getCompanies().catch(() => [] as Company[]),
-                getPipelines().catch(() => [] as Pipeline[]),
-            ]);
+            const nextPipelines = await getPipelines().catch(() => [] as Pipeline[]);
             if (cancelled) return;
-            setCompanies(nextCompanies);
             setPipelines(nextPipelines);
             const entries = await Promise.all(
                 nextPipelines.map(
@@ -119,7 +114,6 @@ export default function CalendarNewDealContainer({
             onOpenChange={handleOpenChange}
             payload={payload}
             setPayload={setPayload}
-            companies={companies}
             pipelines={pipelines}
             stagesByPipeline={stagesByPipeline}
             isCreating={creating}

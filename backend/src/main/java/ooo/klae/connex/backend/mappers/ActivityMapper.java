@@ -40,8 +40,14 @@ public interface ActivityMapper {
     );
     long upcomingCount(@Param("workspaceId") int workspaceId, @Param("days") int days);
     List<Activity> getActivitiesByPersonId(@Param("workspaceId") int workspaceId, @Param("personId") int personId);
+    List<Activity> getActivitiesByPersonIds(@Param("workspaceId") int workspaceId,
+            @Param("personIds") List<Integer> personIds);
     List<Activity> getActivitiesByDealId(@Param("workspaceId") int workspaceId, @Param("dealId") int dealId);
     List<Activity> getActivitiesByCreatedById(@Param("workspaceId") int workspaceId, @Param("createdById") int createdById);
+    List<Activity> getCompanyActivities(@Param("workspaceId") int workspaceId,
+            @Param("companyId") int companyId, @Param("limit") int limit);
+    List<Activity> getActivitiesByCompanyIds(@Param("workspaceId") int workspaceId,
+            @Param("companyIds") List<Integer> companyIds);
     Activity getActivityById(@Param("workspaceId") int workspaceId, @Param("id") int id);
     boolean exists(@Param("workspaceId") int workspaceId, @Param("id") int id);
     List<Activity> search(@Param("workspaceId") int workspaceId, @Param("query") String query);

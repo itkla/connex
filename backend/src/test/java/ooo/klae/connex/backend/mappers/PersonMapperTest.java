@@ -9,16 +9,21 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
 
 import ooo.klae.connex.backend.beans.Company;
 import ooo.klae.connex.backend.beans.Deal;
+import ooo.klae.connex.backend.beans.Note;
 import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.beans.Pipeline;
 import ooo.klae.connex.backend.beans.Stage;
 import ooo.klae.connex.backend.beans.Tag;
+import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.beans.Workspace;
 
 class PersonMapperTest extends AbstractMapperTest {
+
+    @Autowired private NoteMapper noteMapper;
 
     /**
      * Inserts a new person and checks if the generated ID is not zero.
@@ -47,6 +52,16 @@ class PersonMapperTest extends AbstractMapperTest {
         assertEquals("Engineer", found.getTitle());
         assertNotNull(found.getCompany());
         assertEquals(company.getId(), found.getCompany().getId());
+    }
+
+    @Test
+    void getPersonByIdDoesNotEmbedPrivateNoteIdentifiers() {
+        Person person = newPerson(newCompany());
+        addNote(person, newUser(), "private");
+
+        Person found = personMapper.getPersonById(workspace.getId(), person.getId());
+
+        assertNull(found.getNotes());
     }
 
     /**
@@ -95,6 +110,18 @@ class PersonMapperTest extends AbstractMapperTest {
         List<Person> all = personMapper.getAllPersons(workspace.getId());
 
         assertTrue(all.stream().anyMatch(x -> x.getId() == person.getId()));
+    }
+
+    @Test
+    void getExistingPersonIdsIsWorkspaceScopedAndIgnoresMissingIds() {
+        Person included = newPerson(newCompany());
+        Workspace other = newWorkspace();
+        Person foreign = newPersonIn(other);
+
+        List<Integer> ids = personMapper.getExistingPersonIds(
+            workspace.getId(), List.of(included.getId(), foreign.getId(), Integer.MAX_VALUE));
+
+        assertEquals(List.of(included.getId()), ids);
     }
 
     @Test
@@ -169,11 +196,27 @@ class PersonMapperTest extends AbstractMapperTest {
         Company company2 = newCompany();
         Person person1 = newPerson(company1);
         Person person2 = newPerson(company2);
+        addNote(person1, newUser(), "private");
 
-        List<Person> in1 = personMapper.getPersonsByCompanyId(workspace.getId(), company1.getId());
+        List<Person> in1 = personMapper.getPersonsByCompanyId(workspace.getId(), company1.getId(), null);
 
         assertTrue(in1.stream().anyMatch(x -> x.getId() == person1.getId()));
         assertTrue(in1.stream().noneMatch(x -> x.getId() == person2.getId()));
+        assertNull(in1.stream().filter(x -> x.getId() == person1.getId()).findFirst().orElseThrow().getNotes());
+    }
+
+    @Test
+    void getEngagedPersonIdsExcludesPrivateNoteOnlyContacts() {
+        Person privateOnly = newPerson(newCompany());
+        Person workspaceVisible = newPerson(newCompany());
+        User author = newUser();
+        addNote(privateOnly, author, "private");
+        addNote(workspaceVisible, author, "workspace");
+
+        List<Integer> engaged = personMapper.getEngagedPersonIds(workspace.getId());
+
+        assertFalse(engaged.contains(privateOnly.getId()));
+        assertTrue(engaged.contains(workspaceVisible.getId()));
     }
 
     /**
@@ -188,6 +231,16 @@ class PersonMapperTest extends AbstractMapperTest {
 
         List<Person> matched = personMapper.getPersonsByTagId(workspace.getId(), tag.getId());
         assertTrue(matched.stream().anyMatch(x -> x.getId() == person.getId()));
+    }
+
+    private void addNote(Person person, User author, String visibility) {
+        Note note = new Note();
+        note.setWorkspaceId(workspace.getId());
+        note.setContent("Note " + unique());
+        note.setVisibility(visibility);
+        note.setAuthor(author);
+        note.setPerson(person);
+        noteMapper.insert(note);
     }
 
     /**

@@ -39,7 +39,7 @@ class OrgShareCeilingArchTest {
      */
     private static final java.util.Map<String, Pattern> SHARE_READERS = java.util.Map.of(
         "mappers/CompanyMapper.xml", Pattern.compile("FROM company_share"),
-        "mappers/DealMapper.xml", Pattern.compile("FROM (?:company|pipeline)_share"),
+        "mappers/DealMapper.xml", Pattern.compile("FROM (?:company|person|pipeline)_share"),
         "mappers/PersonMapper.xml", Pattern.compile("FROM (?:person|company)_share"),
         "mappers/PipelineMapper.xml", Pattern.compile("FROM pipeline_share")
     );

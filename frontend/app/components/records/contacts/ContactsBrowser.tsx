@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { Button } from '@/components/ui/button';
@@ -36,9 +36,9 @@ import ContactAvatar from '@/app/components/records/contacts/ContactAvatar';
 import NewContactDialog from '@/app/components/records/contacts/NewContactDialog';
 import ChangeCompanyDialog from '@/app/components/records/contacts/ChangeCompanyDialog';
 import QuickEditSheet, { type ContactDraft } from '@/app/components/records/contacts/QuickEditSheet';
-import { updateContact, createContact, getCompanies, getContactsPage, getContactTemperatures, getPersonFacets, getTags, bulkAddTagToContacts, bulkRemoveTagFromContacts, bulkDeleteContacts, getContactIds, isFieldError } from '@/app/lib/api';
+import { updateContact, createContact, getContactsPage, getContactTemperatures, getPersonFacets, getTags, bulkAddTagToContacts, bulkRemoveTagFromContacts, bulkDeleteContacts, getContactIds, isFieldError } from '@/app/lib/api';
 import { uploadContactPicture } from '@/app/lib/utils';
-import { type Contact, type UpdateContactPayload, type Company, type CreateContactPayload, type ContactsPageParams, type PersonFacets, type RelationshipTemperature, type Tag } from '@/app/lib/types';
+import { type Contact, type UpdateContactPayload, type CreateContactPayload, type ContactsPageParams, type PersonFacets, type RelationshipTemperature, type Tag } from '@/app/lib/types';
 import TemperaturePill from '@/app/components/records/TemperaturePill';
 
 const NO_ITEMS: Contact[] = [];
@@ -103,21 +103,49 @@ export default function ContactsBrowser({ savedViews }: { savedViews: SavedView[
         applyQuery,
         sortKey,
         sortDirection,
-        onSortChange,
-        applySort,
+        onSortChange: changeServerSort,
+        applySort: applyServerSort,
+        revision,
         reload,
     } = useServerRecords<Contact, ContactsPageParams>(getContactsPage, filterParams);
 
     const selectedContacts = useMemo(() => contacts.filter((c) => selectedIds.has(c.id)), [contacts, selectedIds]);
 
     const filterSignature = useMemo(() => JSON.stringify([filterParams, query]), [filterParams, query]);
+    const filterSignatureRef = useRef(filterSignature);
+    useEffect(() => {
+        filterSignatureRef.current = filterSignature;
+    }, [filterSignature]);
     const [matchedSignature, setMatchedSignature] = useState<string | null>(null);
-    const allMatchingActive = matchedSignature === filterSignature;
-    const handleSelectedIdsChange = useCallback((ids: Set<SelectionId>) => {
-        if (ids.size === 0) setMatchedSignature(null);
-        setSelectedIds(ids);
+    const allMatchingActive = selectedIds.size > 0 && matchedSignature === filterSignature;
+    const selectAllRequestRef = useRef(0);
+    const [selectingAll, setSelectingAll] = useState(false);
+    const clearSelection = useCallback(() => {
+        selectAllRequestRef.current += 1;
+        setSelectingAll(false);
+        setMatchedSignature(null);
+        setSelectedIds(new Set());
     }, [setSelectedIds]);
-    useEffect(() => { if (!allMatchingActive) setSelectedIds(new Set()); }, [contacts, allMatchingActive, setSelectedIds]);
+    const onSortChange = useCallback((key: string) => {
+        clearSelection();
+        changeServerSort(key);
+    }, [clearSelection, changeServerSort]);
+    const applySort = useCallback((key: string | null, direction: 'asc' | 'desc') => {
+        clearSelection();
+        applyServerSort(key, direction);
+    }, [clearSelection, applyServerSort]);
+    const handleSelectedIdsChange = useCallback((ids: Set<SelectionId>) => {
+        selectAllRequestRef.current += 1;
+        setMatchedSignature(null);
+        setSelectedIds(allMatchingActive ? new Set() : ids);
+    }, [allMatchingActive, setSelectedIds]);
+    const selectionScope = `${page}:${size}:${sortKey ?? ''}:${sortDirection}:${revision}:${filterSignature}`;
+    const previousSelectionScopeRef = useRef(selectionScope);
+    useEffect(() => {
+        const scopeChanged = previousSelectionScopeRef.current !== selectionScope;
+        previousSelectionScopeRef.current = selectionScope;
+        if (scopeChanged && !allMatchingActive) clearSelection();
+    }, [selectionScope, allMatchingActive, clearSelection]);
 
     const [personFacets, setPersonFacets] = useState<PersonFacets | null>(null);
     const loadFacets = useCallback(() => {
@@ -125,7 +153,11 @@ export default function ContactsBrowser({ savedViews }: { savedViews: SavedView[
     }, []);
     useEffect(() => { loadFacets(); }, [loadFacets]);
 
-    const refresh = useCallback(() => { reload(); loadFacets(); }, [reload, loadFacets]);
+    const refresh = useCallback(() => {
+        clearSelection();
+        reload();
+        loadFacets();
+    }, [clearSelection, reload, loadFacets]);
 
     const facets = useMemo<ColumnFilterFacet[]>(() => {
         if (!personFacets) return [];
@@ -152,36 +184,44 @@ export default function ContactsBrowser({ savedViews }: { savedViews: SavedView[
     const [changeCompanyOpen, setChangeCompanyOpen] = useState(false);
     const [isClearingCompany, setIsClearingCompany] = useState(false);
 
-    const [companies, setCompanies] = useState<Company[]>([]);
-    useEffect(() => {
-        getCompanies({}).then(setCompanies).catch(() => setCompanies([]));
-    }, []);
-
     const [tags, setTags] = useState<Tag[]>([]);
     useEffect(() => { getTags().then(setTags).catch(() => setTags([])); }, []);
 
     const [bulkTag, setBulkTag] = useState<{ open: boolean; mode: 'add' | 'remove' }>({ open: false, mode: 'add' });
-    const [selectingAll, setSelectingAll] = useState(false);
     const selectedContactIds = useMemo(() => Array.from(selectedIds).map(Number), [selectedIds]);
 
     const selectAllMatching = useCallback(async () => {
+        const requestId = selectAllRequestRef.current + 1;
+        selectAllRequestRef.current = requestId;
+        const requestSignature = filterSignature;
         setSelectingAll(true);
         try {
             const ids = await getContactIds({ ...filterParams, q: query || undefined });
+            if (requestId !== selectAllRequestRef.current || requestSignature !== filterSignatureRef.current) return;
             setSelectedIds(new Set(ids));
-            setMatchedSignature(filterSignature);
+            setMatchedSignature(requestSignature);
         } catch (err) {
-            toastError(err instanceof Error ? err.message : t('toastSelectAllFailed'));
+            if (requestId === selectAllRequestRef.current) {
+                toastError(err instanceof Error ? err.message : t('toastSelectAllFailed'));
+            }
         } finally {
-            setSelectingAll(false);
+            if (requestId === selectAllRequestRef.current) setSelectingAll(false);
         }
     }, [filterParams, query, filterSignature, setSelectedIds, t]);
 
     const [tempByContactId, setTempByContactId] = useState<Map<number, RelationshipTemperature>>(new Map());
     useEffect(() => {
+        let cancelled = false;
         getContactTemperatures(contacts.map((contact) => contact.id))
-            .then((temps) => setTempByContactId(new Map(temps.map((temp) => [temp.id, temp]))))
-            .catch(() => setTempByContactId(new Map()));
+            .then((temps) => {
+                if (!cancelled) setTempByContactId(new Map(temps.map((temp) => [temp.id, temp])));
+            })
+            .catch(() => {
+                if (!cancelled) setTempByContactId(new Map());
+            });
+        return () => {
+            cancelled = true;
+        };
     }, [contacts]);
 
     const emptyContactDraft: CreateContactPayload = { name: '', email: '', phone: '', title: '' };
@@ -190,11 +230,6 @@ export default function ContactsBrowser({ savedViews }: { savedViews: SavedView[
     const [creationSucceeded, setCreationSucceeded] = useState(false);
     const [newContactPayload, setNewContactPayload] = useState<CreateContactPayload>(emptyContactDraft);
     const [imageFile, setImageFile] = useState<File | null>(null);
-    const selectedCompany = useMemo(
-        () => companies.find((c) => c.id === newContactPayload.companyId) ?? null,
-        [companies, newContactPayload.companyId],
-    );
-
     const closeNewContactDialog = (open: boolean) => {
         setNewContactDialogOpen(open);
         if (!open) {
@@ -317,12 +352,14 @@ export default function ContactsBrowser({ savedViews }: { savedViews: SavedView[
     };
 
     const quickEditOne = useCallback((contact: Contact) => {
+        setMatchedSignature(null);
         setSelectedIds(new Set([contact.id]));
         setDrafts({ [contact.id]: toDraft(contact) });
         setEditSheetOpen(true);
     }, [setSelectedIds]);
 
     const deleteOne = useCallback((contact: Contact) => {
+        setMatchedSignature(null);
         setSelectedIds(new Set([contact.id]));
         setDeleteDialogOpen(true);
     }, [setSelectedIds, setDeleteDialogOpen]);
@@ -416,14 +453,18 @@ export default function ContactsBrowser({ savedViews }: { savedViews: SavedView[
 
     const selectionActions = (
         <ButtonGroup className="rounded-full bg-muted">
-            <Button variant="outline" size="sm" onClick={viewSelected}>
-                <EyeIcon className="size-4" />
-                {t('view')}
-            </Button>
-            <Button variant="outline" size="sm" onClick={openEditSheet}>
-                <PencilIcon className="size-4" />
-                {t('quickEdit')}
-            </Button>
+            {!allMatchingActive && (
+                <>
+                    <Button variant="outline" size="sm" onClick={viewSelected}>
+                        <EyeIcon className="size-4" />
+                        {t('view')}
+                    </Button>
+                    <Button variant="outline" size="sm" onClick={openEditSheet}>
+                        <PencilIcon className="size-4" />
+                        {t('quickEdit')}
+                    </Button>
+                </>
+            )}
             <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                     <Button variant="outline" size="sm">
@@ -439,18 +480,22 @@ export default function ContactsBrowser({ savedViews }: { savedViews: SavedView[
                         <TagIcon />
                         {t('removeTag')}
                     </DropdownMenuItem>
-                    <DropdownMenuSeparator />
-                    <DropdownMenuItem onSelect={(e) => { e.preventDefault(); setChangeCompanyOpen(true); }}>
-                        <BuildingOffice2Icon />
-                        {t('changeCompany')}
-                    </DropdownMenuItem>
-                    <DropdownMenuItem
-                        disabled={isClearingCompany}
-                        onSelect={(e) => { e.preventDefault(); bulkRemoveFromCompany(); }}
-                    >
-                        <NoSymbolIcon />
-                        {t('removeFromCompany')}
-                    </DropdownMenuItem>
+                    {!allMatchingActive && (
+                        <>
+                            <DropdownMenuSeparator />
+                            <DropdownMenuItem onSelect={(e) => { e.preventDefault(); setChangeCompanyOpen(true); }}>
+                                <BuildingOffice2Icon />
+                                {t('changeCompany')}
+                            </DropdownMenuItem>
+                            <DropdownMenuItem
+                                disabled={isClearingCompany}
+                                onSelect={(e) => { e.preventDefault(); bulkRemoveFromCompany(); }}
+                            >
+                                <NoSymbolIcon />
+                                {t('removeFromCompany')}
+                            </DropdownMenuItem>
+                        </>
+                    )}
                     <DropdownMenuSeparator />
                     <DropdownMenuItem variant="destructive" onSelect={(e) => { e.preventDefault(); setDeleteDialogOpen(true); }}>
                         <TrashIcon />
@@ -550,9 +595,9 @@ export default function ContactsBrowser({ savedViews }: { savedViews: SavedView[
                 </Rise>
 
                 {(() => {
-                    const pageFullySelected = contacts.length > 0 && selectedContactIds.length >= contacts.length;
-                    const allMatchingSelected = total > contacts.length && selectedContactIds.length >= total;
-                    const canSelectAllMatching = hasActiveFilters && pageFullySelected && total > contacts.length && selectedContactIds.length < total;
+                    const pageFullySelected = contacts.length > 0 && contacts.every((contact) => selectedIds.has(contact.id));
+                    const allMatchingSelected = allMatchingActive && total > contacts.length && selectedIds.size >= total;
+                    const canSelectAllMatching = hasActiveFilters && pageFullySelected && total > contacts.length && selectedIds.size < total;
                     if (!canSelectAllMatching && !allMatchingSelected) return null;
                     return (
                         <div className="flex flex-wrap items-center justify-center gap-x-2 gap-y-1 rounded-lg bg-muted px-4 py-2 text-sm text-muted-foreground ring-1 ring-border">
@@ -631,8 +676,6 @@ export default function ContactsBrowser({ savedViews }: { savedViews: SavedView[
                     setNewContactPayload={setNewContactPayload}
                     imageFile={imageFile}
                     setImageFile={setImageFile}
-                    companies={companies}
-                    selectedCompany={selectedCompany}
                     isCreating={isCreating}
                     isSuccess={creationSucceeded}
                     createNewContact={createNewContact}
@@ -653,7 +696,6 @@ export default function ContactsBrowser({ savedViews }: { savedViews: SavedView[
                     open={changeCompanyOpen}
                     onOpenChange={setChangeCompanyOpen}
                     contacts={selectedContacts}
-                    companies={companies}
                 />
 
                 <BulkTagDialog

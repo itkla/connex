@@ -1,9 +1,13 @@
 package ooo.klae.connex.backend.mappers;
 
+import java.time.LocalDateTime;
+import java.util.List;
+
 import org.apache.ibatis.annotations.Param;
 
 import ooo.klae.connex.backend.beans.Person;
-import java.util.List;
+import ooo.klae.connex.backend.dto.CompanyEngagementPersonDto;
+import ooo.klae.connex.backend.dto.RelationshipScoreAggregateDto;
 
 /**
  * Mapper interface for {@code Person} persistence.
@@ -13,10 +17,21 @@ import java.util.List;
 
 public interface PersonMapper {
     List<Person> getAllPersons(int workspaceId);
-    List<Person> getPersonsByCompanyId(@Param("workspaceId") int workspaceId, @Param("companyId") int companyId);
+    List<RelationshipScoreAggregateDto> getRelationshipScoreAggregates(
+            @Param("workspaceId") int workspaceId,
+            @Param("reference") LocalDateTime reference);
+    List<Person> getPersonsByCompanyId(@Param("workspaceId") int workspaceId,
+            @Param("companyId") int companyId, @Param("limit") Integer limit);
+    List<CompanyEngagementPersonDto> getCompanyEngagementPeople(@Param("workspaceId") int workspaceId,
+            @Param("companyId") int companyId, @Param("limit") int limit);
     List<Person> getPersonsByTagId(@Param("workspaceId") int workspaceId, @Param("tagId") int tagId);
     List<Person> getPersonsByDealId(@Param("workspaceId") int workspaceId, @Param("dealId") int dealId);
     Person getPersonById(@Param("workspaceId") int workspaceId, @Param("id") int id);
+    List<Integer> getExistingPersonIds(@Param("workspaceId") int workspaceId,
+            @Param("ids") List<Integer> ids);
+    List<Person> getByIds(@Param("workspaceId") int workspaceId, @Param("ids") List<Integer> ids);
+    List<Person> getPersonsByCompanyIds(@Param("workspaceId") int workspaceId,
+            @Param("companyIds") List<Integer> companyIds);
     boolean exists(@Param("workspaceId") int workspaceId, @Param("id") int id);
     /** True only when the workspace OWNS the contact (excludes records merely shared in); for write scoping. */
     boolean existsOwned(@Param("workspaceId") int workspaceId, @Param("id") int id);

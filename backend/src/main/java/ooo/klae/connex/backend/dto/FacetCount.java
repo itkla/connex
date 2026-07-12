@@ -14,4 +14,5 @@ import lombok.NoArgsConstructor;
 public class FacetCount {
     private String key;
     private long count;
+    private String label;
 }

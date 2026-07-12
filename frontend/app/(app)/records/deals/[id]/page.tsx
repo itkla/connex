@@ -10,7 +10,6 @@ import { getLocale, getTranslations } from 'next-intl/server';
 import {
     getActivitiesForDeal,
     getAttachmentsFromCookie,
-    getCompanies,
     getCompanyById,
     getContactById,
     getContacts,
@@ -32,7 +31,6 @@ import {
 } from '@/app/lib/api';
 import {
     type Activity,
-    type Company,
     type Contact,
     type Deal,
     type DealStageHistory,
@@ -85,7 +83,7 @@ export default async function DealPage({ params }: { params: { id: number } }) {
     const t = await getTranslations('DealsPage');
     const locale = await getLocale();
 
-    const [deal, currentUser, activities, notes, tasks, tags, peopleRaw, allPipelines, allCompanies, allPersons, allDeals, allUsers, attachments, notificationPage, collaborators, customFields, risk, stageHistory] =
+    const [deal, currentUser, activities, notes, tasks, tags, peopleRaw, allPipelines, allPersons, allDeals, allUsers, attachments, notificationPage, collaborators, customFields, risk, stageHistory] =
         await Promise.all([
             getDealById(id, init).catch(() => null),
             getCurrentUserFromCookie(cookie),
@@ -95,7 +93,6 @@ export default async function DealPage({ params }: { params: { id: number } }) {
             getTagsForDeal(id, init).catch(() => [] as Tag[]),
             getDealPeople(id, init).catch(() => []) as Promise<unknown>,
             getPipelines(init).catch(() => [] as Pipeline[]),
-            getCompanies(init).catch(() => [] as Company[]),
             getContacts({}, init).catch(() => [] as Contact[]),
             getDeals(init).catch(() => [] as Deal[]),
             getUsers(init).catch(() => [] as User[]),
@@ -232,7 +229,6 @@ export default async function DealPage({ params }: { params: { id: number } }) {
                     <div className="mt-4 flex justify-end">
                         <DealActionsMenu
                             deal={deal}
-                            companies={allCompanies}
                             pipelines={allPipelines}
                             stagesByPipeline={stagesByPipeline}
                             currentUserId={currentUser.id}

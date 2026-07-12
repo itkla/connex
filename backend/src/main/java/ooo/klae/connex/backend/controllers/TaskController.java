@@ -81,6 +81,15 @@ public class TaskController {
         return taskService.getTaskSummary();
     }
 
+    /** Returns a bounded due-date-ordered preview of open tasks for the dashboard. */
+    @GetMapping("/upcoming")
+    public List<TaskDto> getUpcomingTasks(@RequestParam(defaultValue = "4") int limit) {
+        if (limit < 1 || limit > 20) {
+            throw new BadRequestException("limit must be between 1 and 20");
+        }
+        return taskService.getUpcomingOpenTasks(limit).stream().map(TaskDto::from).toList();
+    }
+
     /**
      * GET endpoint to retrieve a single task by ID.
      * @param id

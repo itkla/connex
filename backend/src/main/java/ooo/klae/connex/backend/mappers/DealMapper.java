@@ -13,9 +13,11 @@ import ooo.klae.connex.backend.dto.DealKpiClosedBucketDto;
 import ooo.klae.connex.backend.dto.DealKpiPeriodDto;
 import ooo.klae.connex.backend.dto.DealMonthDecimalTotalDto;
 import ooo.klae.connex.backend.dto.DealPipelineValueDto;
+import ooo.klae.connex.backend.dto.DealPrimaryContactDto;
 import ooo.klae.connex.backend.dto.DealRevenueMonthBoundary;
 import ooo.klae.connex.backend.dto.DealRevenueRangeDto;
 import ooo.klae.connex.backend.dto.DealStageDistributionDto;
+import ooo.klae.connex.backend.dto.DealTouchDto;
 import ooo.klae.connex.backend.dto.FacetCount;
 import java.time.LocalDate;
 import java.util.List;
@@ -58,6 +60,55 @@ public interface DealMapper {
         @Param("stageId") Integer stageId,
         @Param("companyId") Integer companyId,
         @Param("status") String status
+    );
+    List<Deal> getDealsPageFiltered(
+        @Param("workspaceId") int workspaceId,
+        @Param("query") String query,
+        @Param("sort") String sort,
+        @Param("dir") String dir,
+        @Param("currency") String currency,
+        @Param("pipelineIds") List<Integer> pipelineIds,
+        @Param("stageIds") List<Integer> stageIds,
+        @Param("companyIds") List<Integer> companyIds,
+        @Param("noCompany") boolean noCompany,
+        @Param("statuses") List<String> statuses,
+        @Param("riskIds") List<Integer> riskIds,
+        @Param("limit") int limit,
+        @Param("offset") int offset
+    );
+    long countDealsFiltered(
+        @Param("workspaceId") int workspaceId,
+        @Param("query") String query,
+        @Param("currency") String currency,
+        @Param("pipelineIds") List<Integer> pipelineIds,
+        @Param("stageIds") List<Integer> stageIds,
+        @Param("companyIds") List<Integer> companyIds,
+        @Param("noCompany") boolean noCompany,
+        @Param("statuses") List<String> statuses,
+        @Param("riskIds") List<Integer> riskIds
+    );
+    List<DealCurrencyMetricsDto> dealMetricsFiltered(
+        @Param("workspaceId") int workspaceId,
+        @Param("query") String query,
+        @Param("currency") String currency,
+        @Param("pipelineIds") List<Integer> pipelineIds,
+        @Param("stageIds") List<Integer> stageIds,
+        @Param("companyIds") List<Integer> companyIds,
+        @Param("noCompany") boolean noCompany,
+        @Param("statuses") List<String> statuses,
+        @Param("riskIds") List<Integer> riskIds
+    );
+    List<Integer> getFilteredDealIds(
+        @Param("workspaceId") int workspaceId,
+        @Param("query") String query,
+        @Param("currency") String currency,
+        @Param("pipelineIds") List<Integer> pipelineIds,
+        @Param("stageIds") List<Integer> stageIds,
+        @Param("companyIds") List<Integer> companyIds,
+        @Param("noCompany") boolean noCompany,
+        @Param("statuses") List<String> statuses,
+        @Param("riskIds") List<Integer> riskIds,
+        @Param("limit") int limit
     );
     DealRevenueRangeDto revenueClosedEventRange(
         @Param("workspaceId") int workspaceId,
@@ -137,8 +188,14 @@ public interface DealMapper {
     List<FacetCount> countsByCompany(int workspaceId);
     List<FacetCount> countsByCurrency(int workspaceId);
     List<Deal> getDealsByPipelineId(@Param("workspaceId") int workspaceId, @Param("pipelineId") int pipelineId);
+    long countDealsByPipelineId(@Param("workspaceId") int workspaceId, @Param("pipelineId") int pipelineId);
     List<Deal> getDealsByStageId(@Param("workspaceId") int workspaceId, @Param("stageId") int stageId);
     List<Deal> getDealsByCompanyId(@Param("workspaceId") int workspaceId, @Param("companyId") int companyId);
+    List<Deal> getDealsByCompanyIdPage(@Param("workspaceId") int workspaceId,
+            @Param("companyId") int companyId, @Param("limit") int limit);
+    List<Deal> getAccountHistoryDeals(@Param("workspaceId") int workspaceId,
+            @Param("companyId") int companyId, @Param("excludeDealId") int excludeDealId,
+            @Param("limit") int limit);
     List<Deal> getDealsByPersonId(@Param("workspaceId") int workspaceId, @Param("personId") int personId);
     List<Deal> getDealsByTagId(@Param("workspaceId") int workspaceId, @Param("tagId") int tagId);
     Deal getDealById(@Param("workspaceId") int workspaceId, @Param("id") int id);
@@ -150,6 +207,10 @@ public interface DealMapper {
     List<Deal> getDealsForDedup(int workspaceId);
     /** Deals in the workspace with the given ids (workspace-scoped); for export of a selected view. */
     List<Deal> getByIds(@Param("workspaceId") int workspaceId, @Param("ids") List<Integer> ids);
+    List<Deal> getDealsByCompanyIds(@Param("workspaceId") int workspaceId,
+            @Param("companyIds") List<Integer> companyIds);
+    List<Integer> getRiskCandidateIds(@Param("workspaceId") int workspaceId,
+            @Param("limit") int limit);
     int insert(Deal deal);
     /** Bulk-insert deals in one statement (CSV import); generated ids are written back to each bean. */
     int insertBatch(List<Deal> deals);
@@ -187,8 +248,21 @@ public interface DealMapper {
         @Param("workspaceId") int workspaceId,
         @Param("dealId") int dealId
     );
+    List<DealPrimaryContactDto> getPrimaryContactsByDealIds(
+        @Param("workspaceId") int workspaceId,
+        @Param("dealIds") List<Integer> dealIds
+    );
     /** Every deal stakeholder in the workspace as {@code (dealId, personId, name, role)} rows; for deal-risk scoring. */
     List<DealStakeholder> getAllDealStakeholders(int workspaceId);
+    List<DealStakeholder> getDealStakeholdersByDealIds(
+        @Param("workspaceId") int workspaceId,
+        @Param("dealIds") List<Integer> dealIds
+    );
+    List<DealTouchDto> getLatestDealTouches(
+        @Param("workspaceId") int workspaceId,
+        @Param("dealIds") List<Integer> dealIds,
+        @Param("now") String now
+    );
     /** Stakeholders for a single deal; the single-deal risk path scopes to this rather than the whole workspace. */
     List<DealStakeholder> getDealStakeholdersByDealId(
         @Param("workspaceId") int workspaceId,

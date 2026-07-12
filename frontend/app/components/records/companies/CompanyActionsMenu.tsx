@@ -306,7 +306,6 @@ export default function CompanyActionsMenu({
                 setNewContactPayload={setNewContactPayload}
                 imageFile={imageFile}
                 setImageFile={setImageFile}
-                companies={[company]}
                 selectedCompany={company}
                 isCreating={isCreatingContact}
                 isSuccess={contactCreationSucceeded}
@@ -318,7 +317,6 @@ export default function CompanyActionsMenu({
                 onOpenChange={closeNewDealDialog}
                 payload={newDealPayload}
                 setPayload={setNewDealPayload}
-                companies={[company]}
                 pipelines={pipelines}
                 stagesByPipeline={stagesByPipeline}
                 isCreating={isCreatingDeal}

@@ -55,8 +55,8 @@ class AiRelationshipContextTest {
 
     @Test
     void appendAccountHistory_masksReasonsExcludesCurrentDealAndTagsOutcomes() {
-        when(dealService.getDealsByCompanyId(COMPANY_ID)).thenReturn(List.of(
-                deal(CURRENT_DEAL_ID, null, 999000, 0, null, null, null),
+        when(dealService.getAccountHistoryDeals(
+            COMPANY_ID, CURRENT_DEAL_ID, AiRelationshipContext.MAX_ACCOUNT_DEALS)).thenReturn(List.of(
                 deal(11, Boolean.TRUE, 0, 200000, "USD", "Strong executive sponsor", "2025-01-15"),
                 deal(12, Boolean.FALSE, 150000, 0, "USD", "Lost on price to a competitor", "2024-06-01")));
 
@@ -70,12 +70,12 @@ class AiRelationshipContextTest {
         assertTrue(out.contains("200000 USD"));
         assertTrue(out.contains("150000 USD"));
         assertTrue(out.contains("Lost on price to a competitor"));
-        assertFalse(out.contains("999000"));
     }
 
     @Test
     void appendAccountHistory_omitsSpecialCareReason() {
-        when(dealService.getDealsByCompanyId(COMPANY_ID)).thenReturn(List.of(
+        when(dealService.getAccountHistoryDeals(
+            COMPANY_ID, CURRENT_DEAL_ID, AiRelationshipContext.MAX_ACCOUNT_DEALS)).thenReturn(List.of(
                 deal(11, Boolean.FALSE, 100000, 0, "USD", "Buyer disclosed a medical diagnosis", "2024-06-01")));
 
         StringBuilder prompt = new StringBuilder();
@@ -92,7 +92,8 @@ class AiRelationshipContextTest {
         for (int i = 20; i < 40; i++) {
             many.add(deal(i, Boolean.TRUE, 0, 1000 + i, "USD", "Won deal " + i, "2025-01-0" + (i % 9 + 1)));
         }
-        when(dealService.getDealsByCompanyId(COMPANY_ID)).thenReturn(many);
+        when(dealService.getAccountHistoryDeals(
+            COMPANY_ID, CURRENT_DEAL_ID, AiRelationshipContext.MAX_ACCOUNT_DEALS)).thenReturn(many);
 
         StringBuilder prompt = new StringBuilder();
         context.appendAccountHistory(prompt, COMPANY_ID, CURRENT_DEAL_ID, new MaskingContext());
@@ -103,7 +104,8 @@ class AiRelationshipContextTest {
 
     @Test
     void appendAccountHistory_failsClosedToNoneWhenFetchThrows() {
-        when(dealService.getDealsByCompanyId(anyInt())).thenThrow(new RuntimeException("boom"));
+        when(dealService.getAccountHistoryDeals(anyInt(), anyInt(), anyInt()))
+            .thenThrow(new RuntimeException("boom"));
 
         StringBuilder prompt = new StringBuilder();
         context.appendAccountHistory(prompt, COMPANY_ID, CURRENT_DEAL_ID, new MaskingContext());

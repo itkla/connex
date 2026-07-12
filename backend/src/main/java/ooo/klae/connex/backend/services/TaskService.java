@@ -87,6 +87,12 @@ public class TaskService {
         return taskMapper.taskSummary(workspaceService.getCurrentWorkspaceId(), userCalendarService.today());
     }
 
+    public List<Task> getUpcomingOpenTasks(int limit) {
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        return referenceService.hydrateTasks(
+            workspaceId, taskMapper.getUpcomingOpenTasks(workspaceId, limit));
+    }
+
     public List<Task> getTasksByAssignedToId(int assignedToId) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         return referenceService.hydrateTasks(workspaceId, taskMapper.getTasksByAssignedToId(workspaceId, assignedToId));

@@ -6,7 +6,7 @@ import {
     getAllStagesFromCookie,
     getCurrentUserFromCookie,
     getDealMetricsFromCookie,
-    getDealRisksFromCookie,
+    getDealRiskAnalyticsFromCookie,
     getIntroSuggestionsFromCookie,
     getIntroductions,
     getPipelinesFromCookie,
@@ -17,7 +17,7 @@ import {
 } from '@/app/lib/api';
 import type {
     DealMetrics,
-    DealRisk,
+    DealRiskAnalytics,
     IntroSuggestion,
     IntroductionRecord,
     JobMove,
@@ -29,6 +29,7 @@ import type {
 import AnalyticsBoard from '@/app/components/overview/analytics/AnalyticsBoard';
 
 const EMPTY_DEAL_METRICS: DealMetrics = { byCurrency: [], totalCount: 0 };
+const EMPTY_DEAL_RISK_ANALYTICS: DealRiskAnalytics = { currencies: [], truncated: false };
 const EMPTY_TASK_SUMMARY: TaskSummary = { todo: 0, inProgress: 0, done: 0, overdue: 0, dueSoon: 0 };
 const EMPTY_WARMTH_SUMMARY: WarmthSummary = {
     contacts: { hot: 0, warm: 0, cool: 0, cold: 0 },
@@ -56,7 +57,7 @@ export default async function AnalyticsPage() {
         pipelines,
         stages,
         users,
-        dealRisks,
+        dealRiskAnalytics,
         introSuggestions,
         recentMoves,
         introLineage,
@@ -67,7 +68,7 @@ export default async function AnalyticsPage() {
         getPipelinesFromCookie(cookie).catch(() => [] as Pipeline[]),
         getAllStagesFromCookie(cookie),
         getUsers(init).catch(() => [] as User[]),
-        getDealRisksFromCookie(cookie).catch(() => [] as DealRisk[]),
+        getDealRiskAnalyticsFromCookie(cookie).catch(() => EMPTY_DEAL_RISK_ANALYTICS),
         getIntroSuggestionsFromCookie(cookie).catch(() => [] as IntroSuggestion[]),
         getRecentMovesFromCookie(cookie).catch(() => [] as JobMove[]),
         getIntroductions({ size: 500 }, init)
@@ -84,7 +85,7 @@ export default async function AnalyticsPage() {
             pipelines={pipelines}
             stages={stages}
             users={users}
-            dealRisks={dealRisks}
+            dealRiskAnalytics={dealRiskAnalytics}
             introSuggestions={introSuggestions}
             introLineage={introLineage}
             recentMoves={recentMoves}

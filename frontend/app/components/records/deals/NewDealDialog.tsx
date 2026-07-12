@@ -19,6 +19,8 @@ import {
 import { cn } from '@/lib/utils';
 import { isFieldError } from '@/app/lib/api';
 import { type Company, type CreateDealPayload, type Pipeline, type Stage } from '@/app/lib/types';
+import { useCompanySearch } from '@/app/hooks/useCompanySearch';
+import { toastError } from '@/app/lib/toast';
 import {
     TagIcon,
     BanknotesIcon,
@@ -38,7 +40,6 @@ type Props = {
     onOpenChange: (open: boolean) => void;
     payload: CreateDealPayload;
     setPayload: Dispatch<SetStateAction<CreateDealPayload>>;
-    companies: Company[];
     pipelines: Pipeline[];
     stagesByPipeline: Record<number, Stage[]>;
     isCreating: boolean;
@@ -51,7 +52,6 @@ export default function NewDealDialog({
     onOpenChange,
     payload,
     setPayload,
-    companies,
     pipelines,
     stagesByPipeline,
     isCreating,
@@ -60,10 +60,15 @@ export default function NewDealDialog({
 }: Props) {
     const t = useTranslations('DealsNewDialog');
     const { fieldErrors, reset: resetFieldErrors, clearError, captureFieldErrors } = useFieldErrors();
+    const companySearch = useCompanySearch(open, [payload.company]);
 
     useEffect(() => {
         if (!open) resetFieldErrors();
     }, [open, resetFieldErrors]);
+
+    useEffect(() => {
+        if (companySearch.error) toastError(t('companySearchFailed'));
+    }, [companySearch.error, t]);
 
     const handleCreate = async () => {
         resetFieldErrors();
@@ -98,11 +103,9 @@ export default function NewDealDialog({
     };
 
     const selectedPipeline = pipelines.find((p) => p.id === payload.pipeline) ?? null;
-    const selectedCompany = companies.find((c) => c.id === payload.company) ?? null;
+    const selectedCompany = companySearch.companies.find((c) => c.id === payload.company) ?? null;
     const stages = payload.pipeline ? stagesByPipeline[payload.pipeline] ?? [] : [];
     const selectedStage = stages.find((s) => s.id === payload.stage) ?? null;
-    const actualValue = Number.isFinite(payload.actualValue) ? payload.actualValue : 0;
-
     const hasErrors = Object.keys(fieldErrors).length > 0;
     const status = resolveDialogStatus({ isLoading: isCreating, hasErrors, isSuccess });
 
@@ -267,9 +270,11 @@ export default function NewDealDialog({
                         <div className="ncd-rise grid gap-1.5" style={{ animationDelay: '240ms' }}>
                             <Label htmlFor="deal-company">{t('company')}</Label>
                             <Combobox
-                                items={companies}
+                                items={companySearch.companies}
+                                filter={null}
                                 itemToStringLabel={(c: Company) => c.name}
                                 value={selectedCompany}
+                                onInputValueChange={companySearch.onInputValueChange}
                                 onValueChange={(c) =>
                                     setPayload((prev) => ({ ...prev, company: (c as Company | null)?.id ?? null }))
                                 }
@@ -287,7 +292,7 @@ export default function NewDealDialog({
                                 <ComboboxContent className="pointer-events-auto">
                                     <ComboboxList onWheel={handleListWheel}>
                                         <ComboboxEmpty>{t('noCompaniesFound')}</ComboboxEmpty>
-                                        {companies.map((c) => (
+                                        {companySearch.companies.map((c) => (
                                             <ComboboxItem key={c.id} value={c}>
                                                 {c.name}
                                             </ComboboxItem>

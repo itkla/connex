@@ -150,6 +150,10 @@
     "emptyColumn": "Drop deals here",
     "count": "{count, plural, one {# deal} other {# deals}}",
     "moveFailed": "Couldn't move the deal",
+    "loading": "Loading the complete pipeline…",
+    "loadFailed": "Couldn't load the complete pipeline board",
+    "riskLoadFailed": "Couldn't load deal risk. Risk filters are unavailable until you retry.",
+    "companyLoadFailed": "Couldn't load company labels for this pipeline.",
     "a11yInstructions": "To pick up a deal, press space or enter. Use the arrow keys to move it between stages and positions, then press space or enter again to drop it. Press escape to cancel.",
     "a11yLifted": "Picked up deal {name}.",
     "a11yOver": "Deal {name} is over the {column} column.",
@@ -181,7 +185,10 @@
     "quickEdit": "Quick edit",
     "delete": "Delete",
     "searchPlaceholder": "Search deals",
+    "loadFailed": "Couldn't load the current deal view. Try again.",
+    "riskFilterTooBroad": "This risk filter is too broad. Add another filter to narrow the set below 1,000 deals.",
     "freelancer": "Freelancer",
+    "riskNone": "No current risk",
     "currency": "Currency",
     "currencyCount": "{count, plural, one {# deal} other {# deals}}",
     "columnName": "Name",
@@ -274,6 +281,7 @@
     "log": "Log"
   },
   "DealsNewDialog": {
+    "companySearchFailed": "Couldn't search companies. Try again.",
     "title": "New deal",
     "description": "Add a deal to your pipeline. Deals are shared with all users of this organization.",
     "name": "Name",
@@ -312,6 +320,7 @@
     "create": "Create"
   },
   "DealsQuickEditSheet": {
+    "companySearchFailed": "Couldn't search companies. Try again.",
     "titleSingle": "Quick edit deal",
     "titleMulti": "Quick edit {count} deals",
     "subtitle": "Update fields below. Only changed deals will be saved.",

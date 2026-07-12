@@ -36,9 +36,11 @@ import ooo.klae.connex.backend.dto.DealMetricsDto;
 import ooo.klae.connex.backend.dto.DealMoveRequest;
 import ooo.klae.connex.backend.dto.DealOwnerDto;
 import ooo.klae.connex.backend.dto.DealPipelineValueDto;
+import ooo.klae.connex.backend.dto.DealPrimaryContactDto;
 import ooo.klae.connex.backend.dto.DealRationaleDto;
 import ooo.klae.connex.backend.dto.DealRevenueSeriesDto;
 import ooo.klae.connex.backend.dto.DealRescheduleRequest;
+import ooo.klae.connex.backend.dto.DealRiskAnalyticsDto;
 import ooo.klae.connex.backend.dto.DealRiskDto;
 import ooo.klae.connex.backend.dto.DealStageDistributionDto;
 import ooo.klae.connex.backend.dto.DealStageHistoryDto;
@@ -60,6 +62,7 @@ import ooo.klae.connex.backend.util.PageBounds;
 import java.time.DateTimeException;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -77,7 +80,9 @@ import lombok.RequiredArgsConstructor;
 @RequiredArgsConstructor
 public class DealController {
     private static final Set<String> DEAL_STATUSES = Set.of("open", "closed", "won", "lost");
+    private static final Set<String> DEAL_RISKS = Set.of("high", "medium", "low", "none");
     private static final Set<String> SORT_DIRECTIONS = Set.of("asc", "desc");
+    private static final int MAX_FILTER_VALUES = 100;
     private static final Set<String> ANALYTICS_RANGES = Set.of("30d", "90d", "12m");
 
     private final DealService dealService;
@@ -125,20 +130,24 @@ public class DealController {
         @RequestParam(required = false) String sort,
         @RequestParam(required = false) String dir,
         @RequestParam(required = false) String currency,
-        @RequestParam(required = false) Integer pipelineId,
-        @RequestParam(required = false) Integer stageId,
-        @RequestParam(required = false) Integer companyId,
-        @RequestParam(required = false) String status
+        @RequestParam(required = false) List<Integer> pipelineId,
+        @RequestParam(required = false) List<Integer> stageId,
+        @RequestParam(required = false) List<Integer> companyId,
+        @RequestParam(defaultValue = "false") boolean noCompany,
+        @RequestParam(required = false) List<String> status,
+        @RequestParam(required = false) List<String> risk
     ) {
         PageBounds bounds = PageBounds.of(page, size);
         String query = (q == null || q.isBlank()) ? null : LikePattern.containing(q);
         String direction = validateOptionalValue(dir, SORT_DIRECTIONS, "dir");
-        String dealStatus = validateOptionalValue(status, DEAL_STATUSES, "status");
-        List<DealDto> items = dealService.getDealsPage(query, sort, direction, currency,
-            pipelineId, stageId, companyId, dealStatus, bounds.size(), bounds.offset())
-            .stream().map(DealDto::from).toList();
-        return new PageResponse<>(items, dealService.countDeals(
-            query, currency, pipelineId, stageId, companyId, dealStatus));
+        PageResponse<Deal> result = dealService.queryDealsPage(
+            query, sort, direction, currency,
+            normalizeIds(pipelineId, "pipelineId"),
+            normalizeIds(stageId, "stageId"),
+            normalizeIds(companyId, "companyId"),
+            noCompany, normalizeStatuses(status), normalizeValues(risk, DEAL_RISKS, "risk"),
+            bounds.size(), bounds.offset());
+        return new PageResponse<>(result.items().stream().map(DealDto::from).toList(), result.total());
     }
 
     /**
@@ -147,15 +156,30 @@ public class DealController {
     @GetMapping("/metrics")
     public DealMetricsDto getDealMetrics(
         @RequestParam(required = false) String currency,
-        @RequestParam(required = false) Integer pipelineId,
-        @RequestParam(required = false) Integer stageId,
-        @RequestParam(required = false) Integer companyId,
-        @RequestParam(required = false) String status,
+        @RequestParam(required = false) List<Integer> pipelineId,
+        @RequestParam(required = false) List<Integer> stageId,
+        @RequestParam(required = false) List<Integer> companyId,
+        @RequestParam(defaultValue = "false") boolean noCompany,
+        @RequestParam(required = false) List<String> status,
+        @RequestParam(required = false) List<String> risk,
         @RequestParam(required = false) String q
     ) {
         String query = (q == null || q.isBlank()) ? null : LikePattern.containing(q);
-        String dealStatus = validateOptionalValue(status, DEAL_STATUSES, "status");
-        return dealService.getDealMetrics(query, currency, pipelineId, stageId, companyId, dealStatus);
+        return dealService.queryDealMetrics(
+            query, currency,
+            normalizeIds(pipelineId, "pipelineId"),
+            normalizeIds(stageId, "stageId"),
+            normalizeIds(companyId, "companyId"),
+            noCompany, normalizeStatuses(status), normalizeValues(risk, DEAL_RISKS, "risk"));
+    }
+
+    /** Returns every deal in one bounded pipeline board so drag positions remain absolute. */
+    @GetMapping("/board")
+    public List<DealDto> getDealBoard(@RequestParam int pipelineId) {
+        if (pipelineId < 1) {
+            throw new BadRequestException("pipelineId must be a positive integer");
+        }
+        return dealService.getDealBoard(pipelineId).stream().map(DealDto::from).toList();
     }
 
     /**
@@ -164,6 +188,14 @@ public class DealController {
     @GetMapping("/facets")
     public DealFacets getDealFacets() {
         return dealService.getDealFacets();
+    }
+
+    /** Returns the first visible contact for each requested deal without per-deal fan-out. */
+    @GetMapping("/people/primary")
+    public List<DealPrimaryContactDto> getPrimaryContacts(
+            @RequestParam(required = false) List<Integer> ids) {
+        List<Integer> normalizedIds = normalizeIds(ids, "ids");
+        return normalizedIds == null ? List.of() : dealService.getPrimaryContacts(normalizedIds);
     }
 
     /**
@@ -276,6 +308,57 @@ public class DealController {
         return value;
     }
 
+    private static List<Integer> normalizeIds(List<Integer> values, String parameter) {
+        if (values == null || values.isEmpty()) {
+            return null;
+        }
+        if (values.size() > MAX_FILTER_VALUES) {
+            throw new BadRequestException(parameter + " accepts at most " + MAX_FILTER_VALUES + " values");
+        }
+        LinkedHashSet<Integer> normalized = new LinkedHashSet<>();
+        for (Integer value : values) {
+            if (value == null || value < 1) {
+                throw new BadRequestException(parameter + " values must be positive integers");
+            }
+            normalized.add(value);
+        }
+        return List.copyOf(normalized);
+    }
+
+    private static List<String> normalizeStatuses(List<String> values) {
+        List<String> normalized = normalizeValues(values, DEAL_STATUSES, "status");
+        if (normalized == null) {
+            return null;
+        }
+        LinkedHashSet<String> expanded = new LinkedHashSet<>();
+        for (String value : normalized) {
+            if ("closed".equals(value)) {
+                expanded.add("won");
+                expanded.add("lost");
+            } else {
+                expanded.add(value);
+            }
+        }
+        return List.copyOf(expanded);
+    }
+
+    private static List<String> normalizeValues(List<String> values, Set<String> allowed, String parameter) {
+        if (values == null || values.isEmpty()) {
+            return null;
+        }
+        if (values.size() > MAX_FILTER_VALUES) {
+            throw new BadRequestException(parameter + " accepts at most " + MAX_FILTER_VALUES + " values");
+        }
+        LinkedHashSet<String> normalized = new LinkedHashSet<>();
+        for (String value : values) {
+            if (value == null || value.isBlank()) {
+                throw new BadRequestException(parameter + " values must not be blank");
+            }
+            normalized.add(validateOptionalValue(value, allowed, parameter));
+        }
+        return List.copyOf(normalized);
+    }
+
     private static int validatePositiveDays(int days) {
         if (days < 1) {
             throw new BadRequestException("days must be a positive integer");
@@ -315,10 +398,22 @@ public class DealController {
         return DealDto.from(dealService.getDealById(id));
     }
 
-    /** Risk assessment for every at-risk open deal in the active workspace, highest risk first. */
+    /** Risk assessment for a bounded requested deal set, highest risk first. */
     @GetMapping("/risk")
-    public List<DealRiskDto> getDealRisks() {
-        return dealRiskService.assessWorkspace(workspaceService.getCurrentWorkspaceId());
+    public List<DealRiskDto> getDealRisks(
+            @RequestParam(required = false) List<Integer> ids) {
+        List<Integer> normalizedIds = normalizeIds(ids, "ids");
+        if (normalizedIds == null) {
+            throw new BadRequestException("ids are required for interactive deal-risk assessment");
+        }
+        return dealRiskService.assessDeals(
+            workspaceService.getCurrentWorkspaceId(), normalizedIds);
+    }
+
+    /** Compact bounded risk totals for analytics. */
+    @GetMapping("/risk/analytics")
+    public DealRiskAnalyticsDto getDealRiskAnalytics() {
+        return dealRiskService.analytics(workspaceService.getCurrentWorkspaceId());
     }
 
     /** Risk assessment for a single deal; {@code level} is {@code "none"} when it is not at risk. */
