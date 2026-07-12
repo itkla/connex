@@ -19,7 +19,7 @@
 ## 3. Entrustee obligations (APPI Art. 25 supervision-ready)
 - Handle personal data only on documented instructions; do not use it for Connex's own purposes.
 - Implement the security control measures described in [SECURITY.md](SECURITY.md) (organizational, human, physical, technical, external-environment — APPI Art. 23).
-- Make encryption, key-custody, revocation, backup/export, and plaintext-access commitments only as described in [ENCRYPTION_GUARANTEE_MATRIX.md](ENCRYPTION_GUARANTEE_MATRIX.md). Hosted SaaS storage-encryption launch and evidence requirements are in [SAAS_STORAGE_ENCRYPTION_RUNBOOK.md](SAAS_STORAGE_ENCRYPTION_RUNBOOK.md). Hosted SaaS storage encryption is not end-to-end encryption; Connex backend services process plaintext customer CRM content to provide the service.
+- Make encryption, key-custody, revocation, backup/export, and plaintext-access commitments only as described in [ENCRYPTION_GUARANTEE_MATRIX.md](ENCRYPTION_GUARANTEE_MATRIX.md). Hosted SaaS storage encryption must not be represented as shipped for a production environment unless that environment has passed the evidence and launch requirements in [SAAS_STORAGE_ENCRYPTION_RUNBOOK.md](SAAS_STORAGE_ENCRYPTION_RUNBOOK.md). Regardless of storage-encryption posture, Connex backend services process plaintext customer CRM content to provide the service; the service is not end-to-end encrypted or zero-knowledge.
 - Impose confidentiality on personnel; supervise them (Art. 24).
 - Assist the Entruster with data-subject requests (開示等) it receives, per [APPI_DATA_SUBJECT_REQUEST_PROCEDURE.md](APPI_DATA_SUBJECT_REQUEST_PROCEDURE.md).
 - Maintain records sufficient for the Entruster's audits; permit reasonable audit/inspection.
