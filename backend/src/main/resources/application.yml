@@ -165,18 +165,19 @@ connex:
             client-id: ${CONNEX_SOCIAL_LOGIN_MICROSOFT_CLIENT_ID:}
             client-secret: ${CONNEX_SOCIAL_LOGIN_MICROSOFT_CLIENT_SECRET:}
     ai:
-        # Instance-level switch for AI features (#94/#386). Defaults true now that the
-        # encryption-at-rest hard gate (#92) is satisfied, so the deployment OFFERS AI —
-        # but the feature gate still fails closed per organization: no tenant gets AI until
-        # it configures and enables a BYOP provider (allowlisted region + no-training/
-        # no-retention attestation) and a member holds the AI_USE permission. Set
-        # CONNEX_AI_ENABLED=false to disable AI for the whole instance.
-        enabled: ${CONNEX_AI_ENABLED:true}
+        # Instance-level switch for AI features (#94/#386). Defaults false pending live public/APPI
+        # disclosures and counsel approval. An operator must explicitly set CONNEX_AI_ENABLED=true,
+        # and the feature gate still requires an enabled, attested BYOP provider plus AI_USE.
+        enabled: ${CONNEX_AI_ENABLED:false}
         # Instance gate for org-configured private/internal OpenAI-compatible endpoints. Defaults
         # false: on a shared multi-tenant deployment an org-supplied internal endpoint is an SSRF
         # vector, so the org-level allowInternalEndpoint flag is honored only when the operator of
         # a self-hosted instance opts in.
         allow-internal-endpoints: ${CONNEX_AI_ALLOW_INTERNAL_ENDPOINTS:false}
+        # Comma-separated RFC 6052 network-specific prefixes used by this deployment's translators.
+        # Invalid or overlapping prefixes fail startup; unclassified org-controlled IPv6 fails closed
+        # whenever any valid RFC 6052 interpretation could reach a blocked IPv4 destination.
+        nat64-prefixes: ${CONNEX_AI_NAT64_PREFIXES:}
         connect-timeout-ms: ${CONNEX_AI_CONNECT_TIMEOUT_MS:3000}
         request-timeout-ms: ${CONNEX_AI_REQUEST_TIMEOUT_MS:60000}
         max-response-bytes: ${CONNEX_AI_MAX_RESPONSE_BYTES:2097152}

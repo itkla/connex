@@ -145,7 +145,7 @@ public class AiInvocationService {
         }
 
         try {
-            OutboundLeakScan.assertNoLeak(serializedPrompt, invocation.context());
+            OutboundLeakScan.assertNoLeak(serializedPrompt, invocation.context(), objectMapper);
         } catch (MaskingLeakException exception) {
             emitAudit(workspaceId, orgId, resolved, invocation, correlationId, "blocked",
                     null, null, null, null, "leak", structured, null);

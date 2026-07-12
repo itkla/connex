@@ -148,6 +148,27 @@ class DealBriefServiceTest {
     }
 
     @Test
+    void generate_japaneseLocaleReadsSeparateCacheEntry() {
+        LocaleContextHolder.setLocale(Locale.JAPANESE);
+        BriefAssembly assembly = assembly();
+        when(aiFeatureGate.isAiUsable()).thenReturn(true);
+        when(dealBriefAssembler.assemble(WORKSPACE_ID, DEAL_ID)).thenReturn(assembly);
+        when(aiOutputCacheStore.contentHash(assembly.prompt(), assembly.context())).thenReturn(HASH);
+        when(aiOutputCacheStore.find(
+                WORKSPACE_ID, "deal.brief:ja", DEAL_ID, AiOutputCacheStore.NO_SUBJECT))
+                .thenReturn(Optional.of(row(HASH, 0, "2026-07-01T09:00:00Z")));
+        when(aiOutputCacheStore.read("payload", DealBriefContent.class))
+                .thenReturn(Optional.of(new DealBriefContent(List.of(
+                        new DealBriefContent.Section("概要", "保存済みの概要。")))));
+
+        DealBriefDto result = service.generate(DEAL_ID);
+
+        assertTrue(result.isAvailable());
+        assertEquals("保存済みの概要。", result.getSections().getFirst().body());
+        verify(aiInvocationService, never()).completeStructured(any(), any());
+    }
+
+    @Test
     void generate_contentHashMismatch_regenerates() {
         BriefAssembly assembly = assembly();
         when(aiFeatureGate.isAiUsable()).thenReturn(true);

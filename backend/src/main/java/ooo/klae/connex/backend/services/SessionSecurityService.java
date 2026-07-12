@@ -2,6 +2,7 @@ package ooo.klae.connex.backend.services;
 
 import java.time.Clock;
 import java.time.Duration;
+import java.util.UUID;
 
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -28,6 +29,9 @@ public class SessionSecurityService {
     public static final String AUTHENTICATED_USER_ATTR = "connex.authenticatedUserId";
     public static final String WEBAUTHN_STEP_UP_AT_ATTR = "connex.webauthnStepUpAt";
     public static final String WEBAUTHN_STEP_UP_USER_ATTR = "connex.webauthnStepUpUserId";
+    static final String REQUEST_IDENTITY_ATTR = "connex.requestIdentity";
+    static final String REQUEST_IDENTITY_SESSION_ATTR = "connex.requestIdentitySessionId";
+    static final String REQUEST_IDENTITY_USER_ATTR = "connex.requestIdentityUserId";
     public static final String FIRST_PASSKEY_BOOTSTRAP_AT_ATTR = "connex.firstPasskeyBootstrapAt";
     public static final String FIRST_PASSKEY_BOOTSTRAP_USER_ATTR = "connex.firstPasskeyBootstrapUserId";
 
@@ -40,6 +44,36 @@ public class SessionSecurityService {
         session.setAttribute(AUTHENTICATED_USER_ATTR, userId);
         session.removeAttribute(WEBAUTHN_STEP_UP_AT_ATTR);
         session.removeAttribute(WEBAUTHN_STEP_UP_USER_ATTR);
+        replaceRequestIdentity(session, userId);
+    }
+
+    /**
+     * Returns an opaque identity for the current authenticated principal and session generation.
+     * The value is replaced on every authentication ceremony and never contains a user or session
+     * identifier.
+     * @param request current servlet request
+     * @return stable opaque identity for this authenticated session generation, or null
+     */
+    public String requestIdentity(HttpServletRequest request) {
+        Integer userId = currentUserId();
+        HttpSession session = request == null ? null : request.getSession(false);
+        if (userId == null || session == null) {
+            return null;
+        }
+        try {
+            synchronized (session) {
+                String identity = stringAttribute(session, REQUEST_IDENTITY_ATTR);
+                String identitySessionId = stringAttribute(session, REQUEST_IDENTITY_SESSION_ATTR);
+                Integer identityUserId = integerAttribute(session, REQUEST_IDENTITY_USER_ATTR);
+                if (identity == null || !session.getId().equals(identitySessionId)
+                        || !userId.equals(identityUserId)) {
+                    identity = replaceRequestIdentity(session, userId);
+                }
+                return identity;
+            }
+        } catch (IllegalStateException exception) {
+            return null;
+        }
     }
 
     public void markStepUp(HttpServletRequest request, int userId) {
@@ -155,6 +189,14 @@ public class SessionSecurityService {
         session.setAttribute(WEBAUTHN_STEP_UP_USER_ATTR, userId);
     }
 
+    private static String replaceRequestIdentity(HttpSession session, int userId) {
+        String identity = UUID.randomUUID().toString();
+        session.setAttribute(REQUEST_IDENTITY_ATTR, identity);
+        session.setAttribute(REQUEST_IDENTITY_SESSION_ATTR, session.getId());
+        session.setAttribute(REQUEST_IDENTITY_USER_ATTR, userId);
+        return identity;
+    }
+
     private Long authenticatedAt(HttpSession session) {
         Long authenticatedAt = longAttribute(session, AUTHENTICATED_AT_ATTR);
         if (authenticatedAt != null) {
@@ -180,6 +222,11 @@ public class SessionSecurityService {
     private static Integer integerAttribute(HttpSession session, String name) {
         Object value = session.getAttribute(name);
         return value instanceof Integer typed ? typed : null;
+    }
+
+    private static String stringAttribute(HttpSession session, String name) {
+        Object value = session.getAttribute(name);
+        return value instanceof String typed && !typed.isBlank() ? typed : null;
     }
 
     private static HttpServletRequest currentRequest() {

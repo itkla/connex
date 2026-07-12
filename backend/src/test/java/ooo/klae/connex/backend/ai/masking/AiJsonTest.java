@@ -56,6 +56,27 @@ class AiJsonTest {
     }
 
     @Test
+    void returnsNullRatherThanAcceptingNestedObjectFromMalformedOuterObject() {
+        String text = "{\"outer\":{\"rationale\":\"Ping {{P1}}\"}";
+
+        assertNull(AiJson.extractObject(text, mapper));
+    }
+
+    @Test
+    void returnsNullRatherThanSkippingMalformedUnquotedOuterObject() {
+        String text = "{not-json {\"rationale\":\"accepted inner\"}";
+
+        assertNull(AiJson.extractObject(text, mapper));
+    }
+
+    @Test
+    void returnsNullRatherThanTreatingMalformedDoubleBraceObjectAsPlaceholder() {
+        String text = "{{\"rationale\":\"accepted inner\"}}";
+
+        assertNull(AiJson.extractObject(text, mapper));
+    }
+
+    @Test
     void returnsNullWhenNoObjectPresent() {
         assertNull(AiJson.extractObject("Sorry, I cannot produce a structured answer.", mapper));
         assertNull(AiJson.extractObject("   ", mapper));

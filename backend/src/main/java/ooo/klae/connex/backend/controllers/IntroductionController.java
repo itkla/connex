@@ -42,7 +42,7 @@ public class IntroductionController {
     }
 
     /** Returns an AI-generated introduction rationale, or a graceful unavailability response. */
-    @GetMapping("/suggestions/rationale")
+    @PostMapping("/suggestions/rationale")
     public IntroRationaleDto rationale(@RequestParam int personA, @RequestParam int personB) {
         return introRationaleService.generate(personA, personB);
     }

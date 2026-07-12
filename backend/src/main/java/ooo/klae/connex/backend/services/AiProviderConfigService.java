@@ -19,6 +19,7 @@ import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.ai.AiProperties;
 import ooo.klae.connex.backend.ai.AiProviderReadiness;
 import ooo.klae.connex.backend.ai.AiProviderSecretCipher;
+import ooo.klae.connex.backend.ai.egress.AiEndpointAddressValidator;
 import ooo.klae.connex.backend.ai.provider.AiCredentials;
 import ooo.klae.connex.backend.ai.provider.AiProviderException;
 import ooo.klae.connex.backend.ai.provider.ResolvedAiProvider;
@@ -69,7 +70,7 @@ public class AiProviderConfigService implements AiProviderReadiness {
     private static final Pattern AZURE_API_KEY = Pattern.compile("^[A-Za-z0-9_\\-]{8,256}$");
     private static final Pattern VERTEX_PROJECT_ID = Pattern.compile("^[a-z][a-z0-9-]{4,28}[a-z0-9]$");
     private static final Pattern VERTEX_REGION = Pattern.compile("^[a-z]+-[a-z]+[0-9]{1,2}$");
-    private static final Pattern VERTEX_MODEL_ID = Pattern.compile("^[A-Za-z0-9._@\\-]{1,128}$");
+    private static final Pattern VERTEX_MODEL_ID = Pattern.compile("^[a-z0-9._@\\-]{1,128}$");
     private static final Pattern GENERIC_API_KEY = Pattern.compile("^[\\x21-\\x7e]{1,512}$");
     private static final Set<String> BEDROCK_REGIONS = Set.of(
             "us-east-1",
@@ -88,6 +89,7 @@ public class AiProviderConfigService implements AiProviderReadiness {
     private final WorkspaceMapper workspaceMapper;
     private final OrgMemberService orgMemberService;
     private final AiProviderSecretCipher aiProviderSecretCipher;
+    private final AiEndpointAddressValidator aiEndpointAddressValidator;
     private final AuditService auditService;
     private final SessionSecurityService sessionSecurityService;
     private final ObjectMapper objectMapper;
@@ -438,8 +440,7 @@ public class AiProviderConfigService implements AiProviderReadiness {
     }
 
     private static boolean isVertexModelFamily(String modelId) {
-        String lower = modelId.toLowerCase(Locale.ROOT);
-        return lower.startsWith("gemini") || lower.startsWith("claude");
+        return modelId.startsWith("gemini") || modelId.startsWith("claude");
     }
 
     private static void requireParsableRsaPrivateKey(String privateKeyPem) {
@@ -477,7 +478,7 @@ public class AiProviderConfigService implements AiProviderReadiness {
         return endpoint;
     }
 
-    private static String resolveGenericEndpoint(String requested, boolean allowInternal) {
+    private String resolveGenericEndpoint(String requested, boolean allowInternal) {
         String endpoint = resolveRequiredText(requested, 512, "An OpenAI-compatible endpoint is required");
         if (!isValidGenericEndpoint(endpoint, allowInternal)) {
             throw new BadRequestException("Invalid OpenAI-compatible endpoint");
@@ -492,15 +493,14 @@ public class AiProviderConfigService implements AiProviderReadiness {
                 && uri.getHost().toLowerCase(Locale.ROOT).endsWith(".openai.azure.com");
     }
 
-    private static boolean isValidGenericEndpoint(String endpoint, boolean allowInternal) {
+    private boolean isValidGenericEndpoint(String endpoint, boolean allowInternal) {
         URI uri = parseAbsoluteEndpoint(endpoint);
         if (uri == null) {
             return false;
         }
-        if ("https".equalsIgnoreCase(uri.getScheme())) {
-            return true;
-        }
-        return allowInternal && "http".equalsIgnoreCase(uri.getScheme());
+        boolean validScheme = "https".equalsIgnoreCase(uri.getScheme())
+                || allowInternal && "http".equalsIgnoreCase(uri.getScheme());
+        return validScheme && aiEndpointAddressValidator.isFetchable(uri.getHost(), allowInternal);
     }
 
     private static URI parseAbsoluteEndpoint(String endpoint) {
