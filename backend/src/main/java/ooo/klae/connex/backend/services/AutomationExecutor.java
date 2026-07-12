@@ -27,7 +27,6 @@ import ooo.klae.connex.backend.tenant.TenantWorkScope;
 public class AutomationExecutor {
 
     private final TenantContext tenantContext;
-    private final WorkspaceService workspaceService;
     private final AutomationScope automationScope;
     private final TenantWorkScope tenantWorkScope;
 
@@ -37,9 +36,13 @@ public class AutomationExecutor {
      * re-trigger rules), restoring all three afterward.
      */
     public <T> T runAs(int workspaceId, User principal, String role, Supplier<T> work) {
-        int orgId = tenantWorkScope.unrouted(() -> workspaceService.getOrgId(workspaceId));
-        String catalog = tenantWorkScope.resolveCatalogUnrouted(orgId);
+        return tenantWorkScope.withWorkspacePlacement(workspaceId,
+            (orgId, catalog) -> runWithPinnedPlacement(
+                workspaceId, orgId, catalog, principal, role, work));
+    }
 
+    private <T> T runWithPinnedPlacement(int workspaceId, int orgId, String catalog,
+            User principal, String role, Supplier<T> work) {
         SecurityContext previousSecurity = SecurityContextHolder.getContext();
         boolean hadTenant = tenantContext.isResolved();
         Integer previousWorkspace = hadTenant ? tenantContext.getWorkspaceId() : null;
@@ -54,7 +57,7 @@ public class AutomationExecutor {
         tenantContext.set(workspaceId, orgId, principal.getId(), role, catalog);
         boolean previousScope = automationScope.enter();
         try {
-            return tenantWorkScope.withCatalog(catalog, work);
+            return work.get();
         } finally {
             automationScope.restore(previousScope);
             if (hadTenant) {

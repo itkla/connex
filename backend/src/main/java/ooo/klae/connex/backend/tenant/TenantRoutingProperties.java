@@ -1,13 +1,8 @@
 package ooo.klae.connex.backend.tenant;
 
-import java.time.Duration;
-
 import jakarta.validation.constraints.NotBlank;
-import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Pattern;
 
-import org.hibernate.validator.constraints.time.DurationMax;
-import org.hibernate.validator.constraints.time.DurationMin;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.stereotype.Component;
 import org.springframework.validation.annotation.Validated;
@@ -39,11 +34,6 @@ public class TenantRoutingProperties {
     private String mode = MODE_SINGLE_DATABASE;
 
     private String defaultCatalog = "";
-
-    @NotNull(message = "must not be null")
-    @DurationMin(nanos = 0, message = "must not be negative")
-    @DurationMax(days = 365, message = "must be at most 365 days")
-    private Duration placementCacheTtl = Duration.ofSeconds(30);
 
     public boolean isCatalogPerPlacement() {
         return MODE_CATALOG_PER_PLACEMENT.equals(mode);
