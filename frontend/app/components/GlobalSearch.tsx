@@ -1,9 +1,8 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useTranslations } from 'next-intl';
-import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
 import { Command as CommandPrimitive } from 'cmdk';
 import { MagnifyingGlassIcon } from '@heroicons/react/24/outline';
 import { Loader2Icon } from 'lucide-react';
@@ -14,20 +13,18 @@ import { ACTION_GROUPS, type ActionGroup, type AppAction } from '@/app/lib/actio
 import { search as searchApi } from '@/app/lib/api';
 import type { SearchResults } from '@/app/lib/types';
 import { buildSearchGroups, openResult, type ResultGroup } from '@/app/lib/search/resultGroups';
-import { easeOut, springJiggle, springSmooth, springSnappy } from '@/app/lib/motion';
 import { cn } from '@/lib/utils';
 
 const MIN_QUERY_LENGTH = 2;
 const DEBOUNCE_MS = 250;
 
-/** The registry groups shown, in order, when the palette opens with an empty query. */
 const EMPTY_GROUP_ORDER: readonly ActionGroup[] = ['record', 'create', 'navigate', 'workspace'];
 
 const SHORTCUT_GLYPHS: Record<string, string> = { mod: '⌘', ctrl: '⌃', alt: '⌥', shift: '⇧' };
 
-/** Panel heights (px): a small window by default, a larger scrollable one on hover. */
 const PANEL_COLLAPSED = 168;
 const PANEL_EXPANDED = 452;
+const PANEL_VIEWPORT_CLEARANCE = 44;
 
 const PILL_SHELL =
     'relative flex w-full items-center rounded-full bg-muted ring-1 ring-border focus-within:ring-2 focus-within:ring-brand';
@@ -37,7 +34,6 @@ const PILL_INPUT =
 type Mode = 'inline' | 'palette';
 type ScopedResults = { query: string; data: SearchResults };
 
-/** Renders a normalized chord as compact glyphs for display alongside a command. */
 function formatShortcut(chord: string): string {
     return chord
         .split('+')
@@ -45,7 +41,6 @@ function formatShortcut(chord: string): string {
         .join('');
 }
 
-/** The lowercased haystack a command is matched against: its label plus locale-neutral and localized aliases. */
 function actionSearchText(action: AppAction, t: (key: string) => string): string {
     const parts = [t(action.labelKey)];
     if (action.keywords) parts.push(...action.keywords);
@@ -53,9 +48,24 @@ function actionSearchText(action: AppAction, t: (key: string) => string): string
     return parts.join(' ').toLowerCase();
 }
 
-/** Ranks a command so label prefix matches sort above mere substring/alias matches. */
 function rankAction(action: AppAction, lowerQuery: string, t: (key: string) => string): number {
     return t(action.labelKey).toLowerCase().startsWith(lowerQuery) ? 0 : 1;
+}
+
+function subscribeToViewport(onChange: () => void): () => void {
+    window.addEventListener('resize', onChange);
+    window.visualViewport?.addEventListener('resize', onChange);
+    window.visualViewport?.addEventListener('scroll', onChange);
+    return () => {
+        window.removeEventListener('resize', onChange);
+        window.visualViewport?.removeEventListener('resize', onChange);
+        window.visualViewport?.removeEventListener('scroll', onChange);
+    };
+}
+
+function viewportSnapshot(): string {
+    const viewport = window.visualViewport;
+    return `${viewport?.offsetLeft ?? 0}:${viewport?.offsetTop ?? 0}:${viewport?.width ?? window.innerWidth}:${viewport?.height ?? window.innerHeight}`;
 }
 
 const EMPTY_RESULTS: SearchResults = {
@@ -73,12 +83,10 @@ const EMPTY_RESULTS: SearchResults = {
 
 /**
  * The unified global search surface. As an inline field in the app header it runs the debounced
- * record-search dropdown; pressing `Cmd/Ctrl+K` from anywhere slides the same pill to the centre of the
- * viewport (keeping its shape) and slides a command panel down from beneath it — permission-aware
- * registry commands plus record search, carrying the query across. The panel shows a small window that
- * springs open to a larger scrollable one on hover. The centred field stays anchored and focused so it
- * never moves as the panel resizes. Escape, outside-click, or selecting a result returns to the inline
- * field; reduced-motion drops the spring/slide.
+ * record-search dropdown; pressing `Cmd/Ctrl+K` opens a centred command palette with permission-aware
+ * registry commands and record search while carrying the query across. The panel expands to a larger
+ * scrollable window on hover while the centred field stays anchored and focused. Escape, outside-click,
+ * or selecting a result returns focus to the element that opened the palette.
  */
 export default function GlobalSearch() {
     const tSearch = useTranslations('CommonSearchBar');
@@ -86,7 +94,8 @@ export default function GlobalSearch() {
     const router = useRouter();
     const searchParams = useSearchParams();
     const urlQuery = searchParams.get('query') ?? '';
-    const reduceMotion = useReducedMotion() ?? false;
+    const currentViewport = useSyncExternalStore(subscribeToViewport, viewportSnapshot, () => '0:0:0:0');
+    const [viewportOffsetLeft, viewportOffsetTop, currentViewportWidth, currentViewportHeight] = currentViewport.split(':').map(Number);
 
     const { run, pendingIds } = useActions();
     const available = useAvailableActions();
@@ -104,6 +113,7 @@ export default function GlobalSearch() {
     const paletteRef = useRef<HTMLDivElement>(null);
     const listRef = useRef<HTMLDivElement>(null);
     const lastFocusedRef = useRef<HTMLElement | null>(null);
+    const lastFocusedWasInlineRef = useRef(false);
     const modeRef = useRef<Mode>(mode);
     useEffect(() => {
         modeRef.current = mode;
@@ -165,9 +175,12 @@ export default function GlobalSearch() {
         setMode('inline');
         setExpanded(false);
         const opener = lastFocusedRef.current;
+        const restoreInlineFocus = lastFocusedWasInlineRef.current;
         lastFocusedRef.current = null;
+        lastFocusedWasInlineRef.current = false;
         requestAnimationFrame(() => {
-            if (opener && opener.isConnected) opener.focus();
+            if (restoreInlineFocus) inlineInputRef.current?.focus();
+            else if (opener && opener.isConnected) opener.focus();
         });
     }, []);
 
@@ -181,6 +194,8 @@ export default function GlobalSearch() {
                 } else {
                     const active = document.activeElement;
                     lastFocusedRef.current = active instanceof HTMLElement ? active : null;
+                    lastFocusedWasInlineRef.current =
+                        active instanceof HTMLElement && containerRef.current?.contains(active) === true;
                     setMode('palette');
                 }
                 return;
@@ -287,6 +302,9 @@ export default function GlobalSearch() {
     const paletteRecordCount = paletteRecordGroups.reduce((sum, group) => sum + group.rows.length, 0);
     const commandCount = commandGroups.reduce((sum, entry) => sum + entry.actions.length, 0);
     const showNoResults = trimmed.length > 0 && !searching && commandCount + paletteRecordCount === 0;
+    const availablePanelHeight = Math.max(0, Math.floor(currentViewportHeight / 2 - PANEL_VIEWPORT_CLEARANCE));
+    const collapsedPanelHeight = Math.min(PANEL_COLLAPSED, availablePanelHeight);
+    const expandedPanelHeight = Math.min(PANEL_EXPANDED, availablePanelHeight);
 
     return (
         <div ref={containerRef} className="relative w-full">
@@ -294,8 +312,7 @@ export default function GlobalSearch() {
                 <div aria-hidden className="h-11 w-full" />
             ) : (
                 <>
-                    <motion.form
-                        layoutId="global-search-pill"
+                    <form
                         role="search"
                         onSubmit={(event) => {
                             event.preventDefault();
@@ -326,7 +343,7 @@ export default function GlobalSearch() {
                         <kbd className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 select-none rounded border border-border bg-background px-1.5 py-0.5 font-mono text-[10px] font-medium text-muted-foreground">
                             ⌘K
                         </kbd>
-                    </motion.form>
+                    </form>
 
                     {showInlineDropdown ? (
                         <div
@@ -387,40 +404,32 @@ export default function GlobalSearch() {
                 </>
             )}
 
-            <AnimatePresence>
-                {isPalette ? (
-                    <motion.button
-                        key="global-search-scrim"
+            {isPalette ? (
+                    <button
                         type="button"
                         aria-hidden
                         tabIndex={-1}
                         onClick={closePalette}
-                        initial={{ opacity: 0 }}
-                        animate={{ opacity: 1 }}
-                        exit={{ opacity: 0 }}
-                        transition={{ duration: 0.16, ease: easeOut }}
                         className="fixed inset-0 z-40 cursor-default bg-black/50 backdrop-blur-[1px]"
                     />
                 ) : null}
-            </AnimatePresence>
 
-            <AnimatePresence>
-                {isPalette ? (
-                    <motion.div
-                        key="global-search-overlay"
+            {isPalette ? (
+                    <div
                         ref={paletteRef}
                         role="dialog"
                         aria-modal
                         aria-label={tActions('palette.trigger')}
                         onKeyDown={onPaletteKeyDown}
-                        initial={{ opacity: 0 }}
-                        animate={{ opacity: 1 }}
-                        exit={{ opacity: 0 }}
-                        transition={{ duration: 0.14 }}
-                        className="fixed inset-x-0 top-[calc(50vh-1.5rem)] z-50 mx-auto flex w-[min(36rem,92vw)] flex-col gap-2"
+                        className="fixed z-50 flex -translate-x-1/2 flex-col gap-2"
+                        style={{
+                            left: viewportOffsetLeft + currentViewportWidth / 2,
+                            top: viewportOffsetTop + currentViewportHeight / 2 - 24,
+                            width: `min(36rem, ${currentViewportWidth * 0.92}px)`,
+                        }}
                     >
                         <CommandPrimitive shouldFilter={false} loop className="contents">
-                            <motion.div layoutId="global-search-pill" transition={reduceMotion ? { duration: 0 } : springSnappy} className={cn(PILL_SHELL, 'z-10 shadow-lg')}>
+                            <div className={cn(PILL_SHELL, 'z-10 shadow-lg')}>
                                 <MagnifyingGlassIcon className="pointer-events-none absolute left-3.5 top-1/2 size-5 -translate-y-1/2 text-muted-foreground" />
                                 <CommandPrimitive.Input
                                     ref={paletteInputRef}
@@ -433,23 +442,18 @@ export default function GlobalSearch() {
                                 <kbd className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 select-none rounded border border-border bg-background px-1.5 py-0.5 font-mono text-[10px] font-medium text-muted-foreground">
                                     esc
                                 </kbd>
-                            </motion.div>
+                            </div>
 
-                            <motion.div
-                                initial={reduceMotion ? { opacity: 0 } : { opacity: 0, y: -24 }}
-                                animate={{ opacity: 1, y: 0 }}
-                                exit={reduceMotion ? { opacity: 0 } : { opacity: 0, y: -18 }}
-                                transition={reduceMotion ? { duration: 0.12 } : springSmooth}
-                                onHoverStart={() => setExpanded(true)}
-                                onHoverEnd={() => setExpanded(false)}
+                            <div
+                                onMouseEnter={() => setExpanded(true)}
+                                onMouseLeave={() => setExpanded(false)}
                                 onMouseDown={(event) => event.preventDefault()}
                                 className="relative z-0 overflow-hidden rounded-2xl bg-popover text-popover-foreground shadow-2xl ring-1 ring-border"
+                                style={{ maxHeight: availablePanelHeight }}
                             >
-                                <motion.div
-                                    animate={{ maxHeight: expanded ? PANEL_EXPANDED : PANEL_COLLAPSED }}
-                                    transition={reduceMotion ? { duration: 0 } : springJiggle}
+                                <div
                                     className="no-scrollbar overflow-y-auto"
-                                    style={{ maxHeight: PANEL_COLLAPSED }}
+                                    style={{ maxHeight: expanded ? expandedPanelHeight : collapsedPanelHeight }}
                                 >
                                     <CommandList className="max-h-none overflow-visible p-1">
                                         {commandGroups.map((entry) => (
@@ -512,12 +516,11 @@ export default function GlobalSearch() {
                                             <div className="py-8 text-center text-sm text-muted-foreground">{tActions('palette.noResults', { query: trimmed })}</div>
                                         ) : null}
                                     </CommandList>
-                                </motion.div>
-                            </motion.div>
+                                </div>
+                            </div>
                         </CommandPrimitive>
-                    </motion.div>
+                    </div>
                 ) : null}
-            </AnimatePresence>
         </div>
     );
 }
