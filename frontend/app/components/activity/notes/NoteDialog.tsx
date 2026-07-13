@@ -10,11 +10,8 @@ import { UserIcon, BriefcaseIcon } from '@heroicons/react/24/outline';
 import {
     ResponsiveDialog,
     ResponsiveDialogContent,
-    ResponsiveDialogHeader,
     ResponsiveDialogTitle,
     ResponsiveDialogDescription,
-    ResponsiveDialogFooter,
-    ResponsiveDialogClose,
 } from '@/components/ui/responsive-dialog';
 import {
     Combobox,
@@ -59,6 +56,7 @@ export default function NoteDialog({
     defaultDeal = null,
     defaultContent = '',
 }: Props) {
+    const t = useTranslations('ActivityNotesDialog');
     const submittingRef = useRef(false);
 
     const handleOpenChange = (next: boolean) => {
@@ -76,6 +74,8 @@ export default function NoteDialog({
     return (
         <ResponsiveDialog open={open} onOpenChange={handleOpenChange}>
             <ResponsiveDialogContent className="gap-0 overflow-hidden p-0 sm:max-w-lg">
+                <ResponsiveDialogTitle className="sr-only">{note ? t('titleEdit') : t('titleCreate')}</ResponsiveDialogTitle>
+                <ResponsiveDialogDescription className="sr-only">{t('description')}</ResponsiveDialogDescription>
                 <NoteDialogForm
                     key={openCount}
                     note={note}
@@ -88,6 +88,7 @@ export default function NoteDialog({
                     onSubmittingChange={(value) => {
                         submittingRef.current = value;
                     }}
+                    onCancel={() => onOpenChange(false)}
                     onClose={() => onOpenChange(false)}
                 />
             </ResponsiveDialogContent>
@@ -104,14 +105,18 @@ type FormProps = {
     defaultDeal: Deal | null;
     defaultContent: string;
     onSubmittingChange: (value: boolean) => void;
+    /** Invoked by the Cancel button — closes the dialog, or steps back to the selector in the morphing launcher. */
+    onCancel: () => void;
+    /** Invoked once the save succeeds (after the success beat), to dismiss the surface. */
     onClose: () => void;
 };
 
 /**
- * The note form. It lives inside {@code DialogContent} — which unmounts on close —
- * so its state initializes fresh from props on each open, with no reset effect.
+ * The note form body — free of any dialog/drawer shell so it can render inside the standalone
+ * {@link NoteDialog} (desktop dialog / mobile drawer) or embedded in the morphing Quick Create drawer.
+ * It initializes state fresh from props on mount (callers remount it per open), with no reset effect.
  */
-function NoteDialogForm({
+export function NoteDialogForm({
     note,
     persons,
     deals,
@@ -120,6 +125,7 @@ function NoteDialogForm({
     defaultDeal,
     defaultContent,
     onSubmittingChange,
+    onCancel,
     onClose,
 }: FormProps) {
     const router = useRouter();
@@ -200,10 +206,10 @@ function NoteDialogForm({
             <DialogStatusCover status={status} />
 
             <div className="px-6 pb-6">
-                <ResponsiveDialogHeader className="ncd-rise -mt-12" style={{ animationDelay: '40ms' }}>
-                    <ResponsiveDialogTitle className="text-xl font-semibold tracking-tight">{isEdit ? t('titleEdit') : t('titleCreate')}</ResponsiveDialogTitle>
-                    <ResponsiveDialogDescription>{t('description')}</ResponsiveDialogDescription>
-                </ResponsiveDialogHeader>
+                <div className="ncd-rise -mt-12 flex flex-col gap-2" style={{ animationDelay: '40ms' }}>
+                    <h2 className="font-heading text-xl font-semibold leading-none tracking-tight">{isEdit ? t('titleEdit') : t('titleCreate')}</h2>
+                    <p className="text-sm text-muted-foreground">{t('description')}</p>
+                </div>
 
                 <form onSubmit={handleSubmit} className="grid gap-5">
                     <div className="ncd-rise grid gap-1.5" style={{ animationDelay: '90ms' }}>
@@ -296,12 +302,10 @@ function NoteDialogForm({
                         </div>
                     </div>
 
-                    <ResponsiveDialogFooter className="ncd-rise" style={{ animationDelay: '190ms' }}>
-                        <ResponsiveDialogClose asChild>
-                            <Button type="button" variant="outline" disabled={submitting}>
-                                {t('cancel')}
-                            </Button>
-                        </ResponsiveDialogClose>
+                    <div className="ncd-rise flex flex-col-reverse gap-2 sm:flex-row sm:justify-end" style={{ animationDelay: '190ms' }}>
+                        <Button type="button" variant="outline" disabled={submitting} onClick={onCancel}>
+                            {t('cancel')}
+                        </Button>
                         <Button
                             type="submit"
                             variant="brand"
@@ -316,7 +320,7 @@ function NoteDialogForm({
                                 t('create')
                             )}
                         </Button>
-                    </ResponsiveDialogFooter>
+                    </div>
                 </form>
             </div>
         </>
