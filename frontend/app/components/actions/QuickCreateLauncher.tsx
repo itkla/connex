@@ -35,6 +35,7 @@ const ActivityDialogForm = dynamic(() =>
 );
 const DealCreateContainer = dynamic(() => import('@/app/components/actions/create/DealCreateContainer'));
 const ContactCreateContainer = dynamic(() => import('@/app/components/actions/create/ContactCreateContainer'));
+const CompanyCreateContainer = dynamic(() => import('@/app/components/actions/create/CompanyCreateContainer'));
 
 const PANEL_WIDTH = 380;
 const PANEL_GAP = 12;
@@ -48,10 +49,11 @@ const EMBEDDED_BY_ACTION: Record<string, EmbeddedKind> = {
     'create.activity': 'activity',
     'create.deal': 'deal',
     'create.person': 'person',
+    'create.company': 'company',
 };
 
 /** Embedded kinds backed by a self-loading create container (vs. a shell-less form body fed the shared rosters). */
-const CONTAINER_KINDS = new Set<EmbeddedKind>(['deal', 'person']);
+const CONTAINER_KINDS = new Set<EmbeddedKind>(['deal', 'person', 'company']);
 
 type Anchor = { top: number; left: number; maxHeight: number };
 
@@ -386,7 +388,7 @@ function TypeSelector({
 }
 
 type EmbeddedFormKind = 'task' | 'note' | 'activity';
-type EmbeddedContainerKind = 'deal' | 'person';
+type EmbeddedContainerKind = 'deal' | 'person' | 'company';
 type EmbeddedKind = EmbeddedFormKind | EmbeddedContainerKind;
 type FlowView = 'selector' | EmbeddedKind;
 type FlowRefs = { persons: Contact[]; deals: Deal[]; users: User[] };
@@ -504,6 +506,8 @@ function MobileCreateFlow({ actions, context, currentUserId, onFallback, onClose
                         <div className="px-4 pb-6 pt-4">
                             <TypeSelector actions={actions} onSelect={select} />
                         </div>
+                    ) : view === 'company' ? (
+                        <CompanyCreateContainer embedded open onOpenChange={closeFromContainer} onCancel={back} />
                     ) : view === 'deal' ? (
                         <DealCreateContainer embedded open onOpenChange={closeFromContainer} onCancel={back} defaults={defaults} />
                     ) : view === 'person' ? (

@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 
-import NewCompanyDialog from '@/app/components/records/companies/NewCompanyDialog';
+import NewCompanyDialog, { NewCompanyForm } from '@/app/components/records/companies/NewCompanyDialog';
 import type { PendingContact, PendingContactDraft } from '@/app/components/records/companies/CompanyContactsField';
 import {
     createCompany,
@@ -39,9 +39,15 @@ function cleanCompanyPayload(payload: CreateCompanyPayload): CreateCompanyPayloa
 export default function CompanyCreateContainer({
     open,
     onOpenChange,
+    embedded = false,
+    onCancel,
 }: {
     open: boolean;
     onOpenChange: (open: boolean) => void;
+    /** Renders the shell-less {@link NewCompanyForm} directly, for embedding in the morphing launcher. */
+    embedded?: boolean;
+    /** Cancel handler for embedded mode — steps back to the launcher selector. */
+    onCancel?: () => void;
 }) {
     const router = useRouter();
     const t = useTranslations('Actions');
@@ -149,6 +155,22 @@ export default function CompanyCreateContainer({
             toastError(err instanceof Error ? err.message : t('feedback.createFailed'));
         }
     };
+
+    if (embedded) {
+        return (
+            <NewCompanyForm
+                onCancel={onCancel ?? (() => onOpenChange(false))}
+                payload={payload}
+                setPayload={setPayload}
+                logoFile={logoFile}
+                setLogoFile={setLogoFile}
+                isCreating={creating}
+                isSuccess={succeeded}
+                existingCompanies={existingCompanies}
+                createNewCompany={createNewCompany}
+            />
+        );
+    }
 
     return (
         <NewCompanyDialog
