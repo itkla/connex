@@ -319,6 +319,8 @@ function ReportPaper({
         widget.id,
         widget.title?.trim() || t(`measure.${widget.measure}`),
     ]));
+    const hasComparison = document.widgets.some((widget) =>
+        widget.priorTotal != null || widget.points.some((point) => point.priorValue != null));
     const localizedSourceLabel = (label: string, widgetId: string) => {
         const display = sourceDisplayLabel(label, measureLabelByWidgetId.get(widgetId));
         const separator = display.lastIndexOf(' · ');
@@ -381,10 +383,12 @@ function ReportPaper({
                             <dt className="text-xs uppercase tracking-[0.12em] text-muted-foreground">{t('document.period')}</dt>
                             <dd className="mt-1 font-medium text-foreground">{formatRange(document.periodStart, document.periodEnd, locale)}</dd>
                         </div>
-                        <div>
-                            <dt className="text-xs uppercase tracking-[0.12em] text-muted-foreground">{t('document.comparison')}</dt>
-                            <dd className="mt-1 text-foreground">{formatRange(document.priorPeriodStart, document.priorPeriodEnd, locale)}</dd>
-                        </div>
+                        {hasComparison ? (
+                            <div>
+                                <dt className="text-xs uppercase tracking-[0.12em] text-muted-foreground">{t('document.comparison')}</dt>
+                                <dd className="mt-1 text-foreground">{formatRange(document.priorPeriodStart, document.priorPeriodEnd, locale)}</dd>
+                            </div>
+                        ) : null}
                         {snapshot ? (
                             <div>
                                 <dt className="text-xs uppercase tracking-[0.12em] text-muted-foreground">{t('document.snapshot')}</dt>
@@ -450,18 +454,20 @@ function ReportPaper({
                                         })}
                                     </p>
                                 </div>
-                                <div className="text-right">
-                                    <p className="text-lg font-semibold tabular-nums text-foreground">
-                                        {formatReportValue(widget.total, widget.unit, locale)}
-                                    </p>
-                                    {widget.changePercent != null ? (
-                                        <p className="text-xs tabular-nums text-muted-foreground">
-                                            {t('document.changeValue', {
-                                                value: new Intl.NumberFormat(locale, { maximumFractionDigits: 1, signDisplay: 'always' }).format(widget.changePercent),
-                                            })}
+                                {widget.total != null ? (
+                                    <div className="text-right">
+                                        <p className="text-lg font-semibold tabular-nums text-foreground">
+                                            {formatReportValue(widget.total, widget.unit, locale)}
                                         </p>
-                                    ) : null}
-                                </div>
+                                        {widget.changePercent != null ? (
+                                            <p className="text-xs tabular-nums text-muted-foreground">
+                                                {t('document.changeValue', {
+                                                    value: new Intl.NumberFormat(locale, { maximumFractionDigits: 1, signDisplay: 'always' }).format(widget.changePercent),
+                                                })}
+                                            </p>
+                                        ) : null}
+                                    </div>
+                                ) : null}
                             </div>
                             <ReportWidgetRenderer widget={widget} />
                         </section>

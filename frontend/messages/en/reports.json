@@ -48,6 +48,10 @@
         "name": "Pipeline Health",
         "description": "Open pipeline, stage coverage, and relationship risk."
       },
+      "forecasting": {
+        "name": "Forecasting",
+        "description": "Next-three-month best, likely, and commit forecasts weighted by historical stage win rates."
+      },
       "relationship-coverage": {
         "name": "Relationship Coverage",
         "description": "Warmth distribution and account coverage."
@@ -181,7 +185,10 @@
       "coverage_gap_count": "Coverage gap count",
       "coverage_gap_open_pipeline_value": "Coverage-gap open pipeline value",
       "single_threaded_deal_count": "Single-threaded deal count",
-      "single_threaded_deal_value": "Single-threaded deal value"
+      "single_threaded_deal_value": "Single-threaded deal value",
+      "forecast_best": "Best-case forecast",
+      "forecast_weighted": "Likely forecast (weighted)",
+      "forecast_worst": "Commit forecast"
     },
     "group": {
       "none": "No grouping",

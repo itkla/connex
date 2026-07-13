@@ -28,6 +28,9 @@ export const REPORT_MEASURES: Record<ReportDataSource, ReportMeasure[]> = {
         'avg_cycle_days',
         'open_pipeline_value',
         'open_deal_count',
+        'forecast_best',
+        'forecast_weighted',
+        'forecast_worst',
         'at_risk_revenue',
         'single_threaded_deal_count',
         'single_threaded_deal_value',
@@ -58,6 +61,9 @@ export function reportGroupsForMeasure(
     }
     if (measure === 'coverage_gap_count' || measure === 'coverage_gap_open_pipeline_value') {
         return ['none', 'company'];
+    }
+    if (measure === 'forecast_best' || measure === 'forecast_weighted' || measure === 'forecast_worst') {
+        return ['none', 'date', 'pipeline', 'stage'];
     }
     if (dataSource === 'companies') return ['none', 'industry'];
     if (dataSource === 'deals') return REPORT_GROUPS.deals.filter((group) => group !== 'deal');

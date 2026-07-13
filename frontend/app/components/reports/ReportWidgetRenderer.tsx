@@ -53,6 +53,14 @@ export function formatReportValue(value: number | null, unit: string | null, loc
     }).format(value);
 }
 
+function pointUnit(key: string, widgetUnit: string | null): string | null {
+    if (widgetUnit !== 'mixed') return widgetUnit;
+    const separator = key.indexOf(':');
+    if (separator < 1) return null;
+    const currency = key.slice(0, separator).trim().toUpperCase();
+    return /^[A-Z]{3}$/.test(currency) ? currency : null;
+}
+
 export default function ReportWidgetRenderer({ widget }: { widget: ReportWidgetData }) {
     const t = useTranslations('Reports');
     const locale = useLocale();
@@ -109,6 +117,21 @@ export default function ReportWidgetRenderer({ widget }: { widget: ReportWidgetD
         prior: { label: t('document.priorPeriod'), color: 'var(--chart-2)' },
     } satisfies ChartConfig;
 
+    if (widget.chartType === 'kpi' && widget.unit === 'mixed' && data.length > 0) {
+        return (
+            <ul className="flex min-h-48 flex-col justify-center divide-y divide-border">
+                {data.map((point) => (
+                    <li key={point.key} className="flex items-baseline justify-between gap-4 py-3">
+                        <span className="text-sm text-muted-foreground">{point.label}</span>
+                        <span className="text-xl font-semibold tabular-nums text-foreground">
+                            {formatReportValue(point.current, pointUnit(point.key, widget.unit), locale)}
+                        </span>
+                    </li>
+                ))}
+            </ul>
+        );
+    }
+
     if (widget.chartType === 'kpi') {
         return (
             <div className="flex min-h-48 flex-col justify-center">
@@ -135,7 +158,7 @@ export default function ReportWidgetRenderer({ widget }: { widget: ReportWidgetD
         return <div className="flex min-h-48 items-center justify-center text-sm text-muted-foreground">{t('document.noData')}</div>;
     }
 
-    if (widget.chartType === 'table') {
+    if (widget.chartType === 'table' || widget.unit === 'mixed') {
         const showPrior = data.some((point) => point.prior != null);
         return (
             <div className="overflow-x-auto">
@@ -154,11 +177,11 @@ export default function ReportWidgetRenderer({ widget }: { widget: ReportWidgetD
                             <tr key={point.key}>
                                 <td className="px-3 py-2.5 text-foreground">{point.label}</td>
                                 <td className="px-3 py-2.5 text-right tabular-nums text-foreground">
-                                    {formatReportValue(point.current, widget.unit, locale)}
+                                    {formatReportValue(point.current, pointUnit(point.key, widget.unit), locale)}
                                 </td>
                                 {showPrior ? (
                                     <td className="px-3 py-2.5 text-right tabular-nums text-muted-foreground">
-                                        {formatReportValue(point.prior, widget.unit, locale)}
+                                        {formatReportValue(point.prior, pointUnit(point.key, widget.unit), locale)}
                                     </td>
                                 ) : null}
                             </tr>
