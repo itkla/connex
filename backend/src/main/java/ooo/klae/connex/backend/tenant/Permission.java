@@ -6,9 +6,9 @@ import java.util.List;
 
 /**
  * The fixed catalog of workspace permissions. Built-in roles map to preset
- * bundles of these; owner-defined custom roles select any subset. Reads are
- * governed by workspace membership, so only state-changing and management
- * actions appear here.
+ * bundles of these; owner-defined custom roles select any subset. Most reads
+ * are governed by workspace membership; explicitly permissioned shared
+ * surfaces such as reports and audit history also appear here.
  */
 public enum Permission {
     COMPANY_CREATE,
@@ -31,6 +31,10 @@ public enum Permission {
     TASK_DELETE,
     ATTACHMENT_CREATE,
     ATTACHMENT_DELETE,
+    REPORT_READ,
+    REPORT_CREATE,
+    REPORT_UPDATE,
+    REPORT_DELETE,
     PIPELINE_MANAGE,
     TAG_MANAGE,
     CUSTOM_FIELD_MANAGE,

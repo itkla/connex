@@ -47,6 +47,7 @@ class TenantScopeInterceptorTest {
     void scopedStatementsRequireResolvedContext() {
         assertTrue(interceptor.requiresResolvedContext(NS + "CompanyMapper.getAllCompanies"));
         assertTrue(interceptor.requiresResolvedContext(NS + "DealMapper.search"));
+        assertTrue(interceptor.requiresResolvedContext(NS + "ReportMapper.getDefinitions"));
         assertTrue(interceptor.requiresResolvedContext(NS + "NotificationMapper.findPage"));
         assertTrue(interceptor.requiresResolvedContext(NS + "AuditLogMapper.findRecent"));
     }
@@ -61,6 +62,8 @@ class TenantScopeInterceptorTest {
         assertFalse(interceptor.requiresResolvedContext(NS + "NotificationMapper.lockRecipientMemberships"));
         assertFalse(interceptor.requiresResolvedContext(NS + "NotificationMapper.findRecipientIdsByActor"));
         assertFalse(interceptor.requiresResolvedContext(NS + "NotificationMapper.lockRecipientIdsByActor"));
+        assertFalse(interceptor.requiresResolvedContext(NS + "ReportMapper.clearDefinitionCreatorsAnywhere"));
+        assertFalse(interceptor.requiresResolvedContext(NS + "ReportMapper.clearSnapshotGeneratorsAnywhere"));
     }
 
     @Test

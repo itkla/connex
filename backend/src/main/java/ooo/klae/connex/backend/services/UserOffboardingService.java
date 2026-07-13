@@ -14,6 +14,7 @@ import ooo.klae.connex.backend.mappers.DealMapper;
 import ooo.klae.connex.backend.mappers.IntroductionMapper;
 import ooo.klae.connex.backend.mappers.NoteMapper;
 import ooo.klae.connex.backend.mappers.NotificationMapper;
+import ooo.klae.connex.backend.mappers.ReportMapper;
 import ooo.klae.connex.backend.mappers.RuleMapper;
 import ooo.klae.connex.backend.mappers.SavedViewMapper;
 import ooo.klae.connex.backend.mappers.ShareMapper;
@@ -53,6 +54,7 @@ public class UserOffboardingService {
     private final DealMapper dealMapper;
     private final TaskMapper taskMapper;
     private final AttachmentMapper attachmentMapper;
+    private final ReportMapper reportMapper;
     private final RuleMapper ruleMapper;
     private final ShareMapper shareMapper;
     private final SavedViewMapper savedViewMapper;
@@ -141,9 +143,9 @@ public class UserOffboardingService {
      * shape the dropped constraints had: personal artifacts are deleted
      * (CASCADE — saved views, dashboards, notifications, collaborator seats)
      * and shared-history references are nulled (SET NULL — deal ownership,
-     * task assignment, uploader, notification actor, rule principals, share
-     * grantors). Statements are grouped deletes-then-nulls for readability;
-     * no data dependency exists between them, so the order is otherwise
+     * task assignment, uploader, notification actor, report actors, rule
+     * principals, share grantors). Statements are grouped deletes-then-nulls
+     * for readability; no data dependency exists between them, so the order is otherwise
      * immaterial. Must run inside the caller's deletion transaction.
      * Recipient memberships are locked in user-id order before notification
      * rows so concurrent inbox mutations use the same membership-to-notification
@@ -185,6 +187,8 @@ public class UserOffboardingService {
         dealMapper.clearOwnershipAnywhere(userId);
         taskMapper.unassignAnywhere(userId);
         attachmentMapper.clearUploaderAnywhere(userId);
+        reportMapper.clearDefinitionCreatorsAnywhere(userId);
+        reportMapper.clearSnapshotGeneratorsAnywhere(userId);
         ruleMapper.clearRunAsAnywhere(userId);
         ruleMapper.clearCreatedByAnywhere(userId);
         shareMapper.clearCompanyShareGrantedByAnywhere(userId);

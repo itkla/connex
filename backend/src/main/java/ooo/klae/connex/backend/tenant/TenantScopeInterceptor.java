@@ -74,7 +74,8 @@ public class TenantScopeInterceptor implements Interceptor {
         MAPPERS + "PersonEdgeMapper",
         MAPPERS + "RoleMapper",
         MAPPERS + "ShareMapper",
-        MAPPERS + "AiOutputCacheMapper"
+        MAPPERS + "AiOutputCacheMapper",
+        MAPPERS + "ReportMapper"
     );
 
     /**
@@ -166,6 +167,8 @@ public class TenantScopeInterceptor implements Interceptor {
         MAPPERS + "ShareMapper.clearPipelineShareGrantedByAnywhere",
         MAPPERS + "SavedViewMapper.deleteForUserAnywhere",
         MAPPERS + "UserDashboardMapper.deleteForUserAnywhere",
+        MAPPERS + "ReportMapper.clearDefinitionCreatorsAnywhere",
+        MAPPERS + "ReportMapper.clearSnapshotGeneratorsAnywhere",
         MAPPERS + "NotificationMapper.bumpStateVersions"
     );
 

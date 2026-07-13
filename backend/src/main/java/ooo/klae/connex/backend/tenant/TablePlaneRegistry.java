@@ -95,6 +95,8 @@ public final class TablePlaneRegistry {
         "person_tag",
         "pipeline",
         "pipeline_share",
+        "report_definition",
+        "report_snapshot",
         "rule",
         "rule_execution",
         "saved_view",
