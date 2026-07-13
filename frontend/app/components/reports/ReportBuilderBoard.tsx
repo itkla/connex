@@ -21,6 +21,7 @@ import {
     blankReportConfig,
     cloneReportConfig,
     newReportWidget,
+    reportGroupsForMeasure,
     reflowReportLayout,
 } from '@/app/components/reports/reportConfig';
 import { createReport, updateReport } from '@/app/lib/api';
@@ -445,24 +446,24 @@ function WidgetEditor({
                 <FieldSelect
                     label={t('builder.measure')}
                     value={widget.measure}
-                    onChange={(value) => onChange({
-                        measure: value,
-                        ...(value === 'at_risk_revenue' && widget.groupBy !== 'none' && widget.groupBy !== 'risk'
-                            ? { groupBy: 'risk' }
-                            : value !== 'at_risk_revenue' && widget.groupBy === 'risk'
-                                ? { groupBy: 'none' }
-                            : {}),
-                    })}
+                    onChange={(value) => {
+                        const groups = reportGroupsForMeasure(widget.dataSource, value);
+                        const currentGroup = widget.groupBy ?? 'none';
+                        onChange({
+                            measure: value,
+                            groupBy: groups.includes(currentGroup)
+                                ? currentGroup
+                                : value === 'at_risk_revenue' ? 'risk' : groups[0],
+                        });
+                    }}
                     options={REPORT_MEASURES[widget.dataSource].map((value) => ({ value, label: t(`measure.${value}`) }))}
                 />
                 <FieldSelect
                     label={t('builder.groupBy')}
                     value={widget.groupBy ?? 'none'}
                     onChange={(value) => onChange({ groupBy: value })}
-                    options={(widget.measure === 'at_risk_revenue'
-                        ? (['none', 'risk'] as const)
-                        : REPORT_GROUPS[widget.dataSource]
-                    ).map((value) => ({ value, label: t(`group.${value}`) }))}
+                    options={reportGroupsForMeasure(widget.dataSource, widget.measure)
+                        .map((value) => ({ value, label: t(`group.${value}`) }))}
                 />
                 <FieldSelect
                     label={t('builder.chartType')}

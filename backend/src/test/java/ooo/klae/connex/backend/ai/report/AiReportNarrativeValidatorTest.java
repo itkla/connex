@@ -46,6 +46,41 @@ class AiReportNarrativeValidatorTest {
     }
 
     @Test
+    void relationshipHealthFacts_areLocalizedAndAccepted() {
+        ReportAppendixRowDto source = new ReportAppendixRowDto(
+                "health.coverage", "coverage", "coverage_gap_count · Cooling",
+                new BigDecimal("3"), new BigDecimal("2"), "count");
+        String claim = AiReportFacts.claim(source);
+        String recommendation = AiReportFacts.claims(source).get(1);
+        AiReportContext context = new AiReportContext(
+                "Relationship health", LocalDate.of(2026, 1, 1), LocalDate.of(2026, 1, 31),
+                List.of(source));
+        AiReportNarrativeContent content = new AiReportNarrativeContent(
+                List.of(new AiReportNarrativeContent.Section(
+                        "Executive summary",
+                        List.of(new AiReportNarrativeContent.Claim(
+                                claim, List.of(source.sourceId()))))),
+                List.of(new AiReportNarrativeContent.Claim(
+                        recommendation, List.of(source.sourceId()))));
+
+        assertTrue(claim.startsWith("Coverage gap count · Cooling"));
+        assertTrue(AiReportNarrativeValidator.validate(content, context).isPresent());
+
+        LocaleContextHolder.setLocale(Locale.JAPANESE);
+        String japaneseClaim = AiReportFacts.claim(source);
+        AiReportNarrativeContent japaneseContent = new AiReportNarrativeContent(
+                List.of(new AiReportNarrativeContent.Section(
+                        "エグゼクティブサマリー",
+                        List.of(new AiReportNarrativeContent.Claim(
+                                japaneseClaim, List.of(source.sourceId()))))),
+                List.of(new AiReportNarrativeContent.Claim(
+                        AiReportFacts.claims(source).get(1), List.of(source.sourceId()))));
+
+        assertTrue(japaneseClaim.startsWith("カバレッジ不足の会社数 · 低下"));
+        assertTrue(AiReportNarrativeValidator.validate(japaneseContent, context).isPresent());
+    }
+
+    @Test
     void validate_unknownCitation_failsClosed() {
         AiReportNarrativeContent content = content(
                 new AiReportNarrativeContent.Claim("Unsupported claim.", List.of("unknown.source")));

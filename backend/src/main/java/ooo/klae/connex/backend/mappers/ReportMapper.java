@@ -66,7 +66,15 @@ public interface ReportMapper {
 
     List<ReportAggregateRow> aggregateCompanies(@Param("query") ReportAggregateQuery query);
 
+    List<ReportAggregateRow> aggregateCoverageGaps(@Param("query") ReportAggregateQuery query);
+
+    List<ReportAggregateRow> aggregateSingleThreadedDeals(@Param("query") ReportAggregateQuery query);
+
     List<Integer> getVisiblePersonIdsAt(
+        @Param("workspaceId") int workspaceId,
+        @Param("asOf") java.time.LocalDateTime asOf);
+
+    List<Integer> getVisibleCompanyIdsAt(
         @Param("workspaceId") int workspaceId,
         @Param("asOf") java.time.LocalDateTime asOf);
 

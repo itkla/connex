@@ -52,6 +52,10 @@
         "name": "Relationship Coverage",
         "description": "Warmth distribution and account coverage."
       },
+      "relationship-health": {
+        "name": "Relationship Health",
+        "description": "Cooling accounts, coverage gaps, and single-threaded deal risk."
+      },
       "activity-team": {
         "name": "Activity & Team",
         "description": "Team activity and task execution."
@@ -172,7 +176,12 @@
       "avg_cycle_days": "Average cycle days",
       "open_pipeline_value": "Open pipeline value",
       "open_deal_count": "Open deal count",
-      "at_risk_revenue": "At-risk revenue"
+      "at_risk_revenue": "At-risk revenue",
+      "company_count": "Company count",
+      "coverage_gap_count": "Coverage gap count",
+      "coverage_gap_open_pipeline_value": "Coverage-gap open pipeline value",
+      "single_threaded_deal_count": "Single-threaded deal count",
+      "single_threaded_deal_value": "Single-threaded deal value"
     },
     "group": {
       "none": "No grouping",
@@ -182,6 +191,7 @@
       "owner": "Owner",
       "status": "Status",
       "company": "Company",
+      "deal": "Deal",
       "risk": "Risk level",
       "activity_type": "Activity type",
       "industry": "Industry",

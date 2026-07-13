@@ -1036,7 +1036,12 @@ export type ReportMeasure =
     | "avg_cycle_days"
     | "open_pipeline_value"
     | "open_deal_count"
-    | "at_risk_revenue";
+    | "at_risk_revenue"
+    | "company_count"
+    | "coverage_gap_count"
+    | "coverage_gap_open_pipeline_value"
+    | "single_threaded_deal_count"
+    | "single_threaded_deal_value";
 
 export type ReportGroupBy =
     | "none"
@@ -1046,6 +1051,7 @@ export type ReportGroupBy =
     | "owner"
     | "status"
     | "company"
+    | "deal"
     | "risk"
     | "activity_type"
     | "industry"

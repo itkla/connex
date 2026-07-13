@@ -86,20 +86,25 @@ public class ReportService {
             "deals", "people", "companies", "activities", "tasks", "relationships");
     private static final Set<String> DEAL_MEASURES = Set.of(
             "count", "new_pipeline_value", "won_revenue", "win_rate", "avg_cycle_days",
-            "open_pipeline_value", "open_deal_count", "at_risk_revenue");
+            "open_pipeline_value", "open_deal_count", "at_risk_revenue",
+            "single_threaded_deal_count", "single_threaded_deal_value");
+    private static final Set<String> COMPANY_MEASURES = Set.of(
+            "count", "coverage_gap_count", "coverage_gap_open_pipeline_value");
+    private static final Set<String> RELATIONSHIP_MEASURES = Set.of("count", "company_count");
     private static final Set<String> COUNT_MEASURES = Set.of("count");
     private static final Set<String> DEAL_GROUPS = Set.of(
-            "none", "date", "pipeline", "stage", "owner", "status", "company", "risk");
+            "none", "date", "pipeline", "stage", "owner", "status", "company", "deal", "risk");
     private static final Set<String> ACTIVITY_GROUPS = Set.of("none", "date", "activity_type", "owner");
     private static final Set<String> TASK_GROUPS = Set.of("none", "date", "status", "owner");
     private static final Set<String> PEOPLE_GROUPS = Set.of("none", "company");
-    private static final Set<String> COMPANY_GROUPS = Set.of("none", "industry");
+    private static final Set<String> COMPANY_GROUPS = Set.of("none", "industry", "company");
     private static final Set<String> RELATIONSHIP_GROUPS = Set.of("none", "warmth_band", "trend");
     private static final Set<String> DEAL_STATUSES = Set.of("open", "won", "lost");
     private static final Set<String> TASK_STATUSES = Set.of("todo", "in_progress", "done");
     private static final Set<String> WARMTH_BANDS = Set.of("hot", "warm", "cool", "cold");
     private static final Set<String> TEMPLATE_KEYS = Set.of(
-            "sales-performance", "pipeline-health", "relationship-coverage", "activity-team");
+            "sales-performance", "pipeline-health", "relationship-coverage", "relationship-health",
+            "activity-team");
 
     private final ReportMapper reportMapper;
     private final WorkspaceService workspaceService;
@@ -126,7 +131,7 @@ public class ReportService {
         return toDefinitionDto(requireDefinition(id));
     }
 
-    /** Returns the four built-in report starting points. */
+    /** Returns the five built-in report starting points. */
     @RequirePermission(Permission.REPORT_READ)
     public List<ReportTemplateDto> templates() {
         return List.of(
@@ -145,6 +150,20 @@ public class ReportService {
                                 widget("warmth", "Relationship warmth", "relationships", "count", "warmth_band", "donut"),
                                 widget("companies", "New companies", "companies", "count", "industry", "bar"),
                                 widget("people", "New contacts", "people", "count", "company", "table"))),
+                template("relationship-health", "Relationship Health",
+                        "Cooling accounts, coverage gaps, and single-threaded deal risk.",
+                        "monthly", List.of(
+                                widget("warmth", "Relationship warmth", "relationships", "count", "warmth_band", "donut"),
+                                widget("cooling-accounts", "Company relationship trends", "relationships",
+                                        "company_count", "trend", "bar"),
+                                widget("coverage-gap-count", "Coverage gaps", "companies",
+                                        "coverage_gap_count", "none", "kpi"),
+                                widget("coverage-gap-pipeline", "Coverage gaps by open pipeline", "companies",
+                                        "coverage_gap_open_pipeline_value", "company", "table"),
+                                widget("single-thread-count", "Single-threaded deals", "deals",
+                                        "single_threaded_deal_count", "none", "kpi"),
+                                widget("single-thread-value", "Single-threaded deal value", "deals",
+                                        "single_threaded_deal_value", "deal", "table"))),
                 template("activity-team", "Activity & Team", "Team activity and task execution.",
                         "weekly", List.of(
                                 widget("activity", "Activity volume", "activities", "count", "date", "line-area"),
@@ -336,7 +355,9 @@ public class ReportService {
             inputs.currentRows().put(aggregationKey, current);
             inputs.priorRows().put(aggregationKey, prior);
         }
-        return widgetResult(widget, widgetIndex, current, prior, bucket, period);
+        return widgetResult(
+                widget, widgetIndex, current, prior, bucket, period,
+                priorComparable(widget, filters));
     }
 
     private RowPair aggregateWidget(
@@ -347,13 +368,35 @@ public class ReportService {
             PeriodWindow period,
             GenerationInputs inputs) {
         if ("relationships".equals(widget.dataSource())) {
+            boolean companies = "company_count".equals(widget.measure());
             return new RowPair(
-                    relationshipRows(widget, filters, inputs.currentRelationships()),
-                    relationshipRows(widget, filters, inputs.priorRelationships()));
+                    relationshipRows(widget, filters,
+                            companies ? inputs.currentCompanyRelationships() : inputs.currentRelationships()),
+                    relationshipRows(widget, filters,
+                            companies ? inputs.priorCompanyRelationships() : inputs.priorRelationships()));
         } else if ("at_risk_revenue".equals(widget.measure())) {
             return new RowPair(
                     riskRows(workspaceId, widget, filters, period.start(), period.end(), period.zone(), inputs),
                     List.of());
+        } else if (Set.of("coverage_gap_count", "coverage_gap_open_pipeline_value")
+                .contains(widget.measure())) {
+            List<ReportAggregateRow> current = reportMapper.aggregateCoverageGaps(query(
+                    workspaceId, widget, filters, bucket, period.currentStartUtc(),
+                    period.currentEndUtc(), period.zone()));
+            List<ReportAggregateRow> prior = priorComparable(widget, filters)
+                    ? reportMapper.aggregateCoverageGaps(query(
+                            workspaceId, widget, filters, bucket, period.priorStartUtc(),
+                            period.priorEndUtc(), period.zone()))
+                    : List.of();
+            return new RowPair(
+                    countTotalRow(widget, current),
+                    countTotalRow(widget, prior));
+        } else if (Set.of("single_threaded_deal_count", "single_threaded_deal_value")
+                .contains(widget.measure())) {
+            List<ReportAggregateRow> current = reportMapper.aggregateSingleThreadedDeals(query(
+                    workspaceId, widget, filters, bucket, period.currentStartUtc(),
+                    period.currentEndUtc(), period.zone()));
+            return new RowPair(countTotalRow(widget, current), List.of());
         }
         List<ReportAggregateRow> current = aggregate(widget.dataSource(), query(
                         workspaceId,
@@ -382,7 +425,8 @@ public class ReportService {
             List<ReportAggregateRow> current,
             List<ReportAggregateRow> prior,
             String bucket,
-            PeriodWindow period) {
+            PeriodWindow period,
+            boolean priorComparable) {
         Map<String, ReportAggregateRow> priorByKey = new HashMap<>();
         for (ReportAggregateRow row : prior) {
             priorByKey.put(comparisonKey(row, widget, bucket, period.priorStart()), row);
@@ -392,7 +436,6 @@ public class ReportService {
         Set<String> units = new LinkedHashSet<>();
         BigDecimal total = BigDecimal.ZERO;
         BigDecimal priorTotal = BigDecimal.ZERO;
-        boolean priorComparable = !"at_risk_revenue".equals(widget.measure());
         int pointIndex = 0;
         for (ReportAggregateRow row : current) {
             ReportAggregateRow priorRow = priorByKey.remove(
@@ -451,6 +494,32 @@ public class ReportService {
             case "companies" -> reportMapper.aggregateCompanies(query);
             default -> throw new BadRequestException("Unsupported report data source: " + dataSource);
         };
+    }
+
+    private static List<ReportAggregateRow> countTotalRow(
+            ReportWidgetConfig widget, List<ReportAggregateRow> rows) {
+        if (!rows.isEmpty() || !Set.of("coverage_gap_count", "single_threaded_deal_count")
+                .contains(widget.measure()) || !"none".equals(normalizeGroup(widget.groupBy()))) {
+            return rows;
+        }
+        return List.of(new ReportAggregateRow("total", "Total", "count", BigDecimal.ZERO));
+    }
+
+    private static boolean priorComparable(ReportWidgetConfig widget, ReportFilters filters) {
+        if (Set.of(
+                "at_risk_revenue", "coverage_gap_open_pipeline_value",
+                "single_threaded_deal_count", "single_threaded_deal_value")
+                .contains(widget.measure())) {
+            return false;
+        }
+        if (!"coverage_gap_count".equals(widget.measure())) {
+            return true;
+        }
+        boolean dealFilters = filters != null && (
+                filters.pipelineIds() != null && !filters.pipelineIds().isEmpty()
+                || filters.ownerIds() != null && !filters.ownerIds().isEmpty()
+                || filters.statuses() != null && !filters.statuses().isEmpty());
+        return "none".equals(normalizeGroup(widget.groupBy())) && !dealFilters;
     }
 
     private static List<ReportAggregateRow> hydrateOwnerLabels(
@@ -547,31 +616,55 @@ public class ReportService {
     }
 
     private GenerationInputs generationInputs(int workspaceId, ReportConfig config, PeriodWindow period) {
-        boolean relationships = config.widgets().stream()
-                .anyMatch(widget -> "relationships".equals(widget.dataSource()));
+        boolean contactRelationships = config.widgets().stream()
+                .anyMatch(widget -> "relationships".equals(widget.dataSource())
+                        && "count".equals(widget.measure()));
+        boolean companyRelationships = config.widgets().stream()
+                .anyMatch(widget -> "relationships".equals(widget.dataSource())
+                        && "company_count".equals(widget.measure()));
         boolean risk = config.widgets().stream()
                 .anyMatch(widget -> "at_risk_revenue".equals(widget.measure()));
         boolean owners = config.widgets().stream()
                 .anyMatch(widget -> "owner".equals(normalizeGroup(widget.groupBy())));
-        Set<Integer> currentPeople = relationships
+        Set<Integer> currentPeople = contactRelationships
                 ? new HashSet<>(reportMapper.getVisiblePersonIdsAt(
                         workspaceId,
                         LocalDateTime.ofInstant(period.currentEndInstant(), ZoneOffset.UTC)))
                 : Set.of();
-        Set<Integer> priorPeople = relationships
+        Set<Integer> priorPeople = contactRelationships
                 ? new HashSet<>(reportMapper.getVisiblePersonIdsAt(
                         workspaceId,
                         LocalDateTime.ofInstant(period.priorEndInstant(), ZoneOffset.UTC)))
                 : Set.of();
-        List<RelationshipTemperatureDto> currentRelationships = relationships
+        List<RelationshipTemperatureDto> currentRelationships = contactRelationships
                 ? visibleRelationshipScores(
                         scoringService.scoreContacts(workspaceId, period.currentEndInstant()),
                         currentPeople)
                 : List.of();
-        List<RelationshipTemperatureDto> priorRelationships = relationships
+        List<RelationshipTemperatureDto> priorRelationships = contactRelationships
                 ? visibleRelationshipScores(
                         scoringService.scoreContacts(workspaceId, period.priorEndInstant()),
                         priorPeople)
+                : List.of();
+        Set<Integer> currentCompanies = companyRelationships
+                ? new HashSet<>(reportMapper.getVisibleCompanyIdsAt(
+                        workspaceId,
+                        LocalDateTime.ofInstant(period.currentEndInstant(), ZoneOffset.UTC)))
+                : Set.of();
+        Set<Integer> priorCompanies = companyRelationships
+                ? new HashSet<>(reportMapper.getVisibleCompanyIdsAt(
+                        workspaceId,
+                        LocalDateTime.ofInstant(period.priorEndInstant(), ZoneOffset.UTC)))
+                : Set.of();
+        List<RelationshipTemperatureDto> currentCompanyRelationships = companyRelationships
+                ? visibleRelationshipScores(
+                        scoringService.scoreCompanies(workspaceId, period.currentEndInstant()),
+                        currentCompanies)
+                : List.of();
+        List<RelationshipTemperatureDto> priorCompanyRelationships = companyRelationships
+                ? visibleRelationshipScores(
+                        scoringService.scoreCompanies(workspaceId, period.priorEndInstant()),
+                        priorCompanies)
                 : List.of();
         Map<String, String> ownerLabels = new HashMap<>();
         if (owners) {
@@ -582,6 +675,8 @@ public class ReportService {
         return new GenerationInputs(
                 currentRelationships,
                 priorRelationships,
+                currentCompanyRelationships,
+                priorCompanyRelationships,
                 risk ? dealRiskService.assessWorkspace(workspaceId) : List.of(),
                 Map.copyOf(ownerLabels),
                 new HashMap<>(),
@@ -699,7 +794,12 @@ public class ReportService {
         if (!DATA_SOURCES.contains(source) || !CHART_TYPES.contains(chart)) {
             throw new BadRequestException("Invalid report widget configuration");
         }
-        Set<String> measures = "deals".equals(source) ? DEAL_MEASURES : COUNT_MEASURES;
+        Set<String> measures = switch (source) {
+            case "deals" -> DEAL_MEASURES;
+            case "companies" -> COMPANY_MEASURES;
+            case "relationships" -> RELATIONSHIP_MEASURES;
+            default -> COUNT_MEASURES;
+        };
         Set<String> groups = switch (source) {
             case "deals" -> DEAL_GROUPS;
             case "activities" -> ACTIVITY_GROUPS;
@@ -711,7 +811,15 @@ public class ReportService {
         };
         if (!measures.contains(measure) || !groups.contains(group)
                 || "risk".equals(group) && !"at_risk_revenue".equals(measure)
-                || "at_risk_revenue".equals(measure) && !Set.of("none", "risk").contains(group)) {
+                || "at_risk_revenue".equals(measure) && !Set.of("none", "risk").contains(group)
+                || "deal".equals(group) && !Set.of(
+                        "single_threaded_deal_count", "single_threaded_deal_value").contains(measure)
+                || Set.of("single_threaded_deal_count", "single_threaded_deal_value").contains(measure)
+                        && !Set.of("none", "company", "deal").contains(group)
+                || "company".equals(group) && "companies".equals(source)
+                        && !Set.of("coverage_gap_count", "coverage_gap_open_pipeline_value").contains(measure)
+                || Set.of("coverage_gap_count", "coverage_gap_open_pipeline_value").contains(measure)
+                        && !Set.of("none", "company").contains(group)) {
             throw new BadRequestException("Unsupported report measure or grouping");
         }
     }
@@ -1074,6 +1182,8 @@ public class ReportService {
     private record GenerationInputs(
             List<RelationshipTemperatureDto> currentRelationships,
             List<RelationshipTemperatureDto> priorRelationships,
+            List<RelationshipTemperatureDto> currentCompanyRelationships,
+            List<RelationshipTemperatureDto> priorCompanyRelationships,
             List<DealRiskDto> risks,
             Map<String, String> ownerLabels,
             Map<String, List<ReportAggregateRow>> currentRows,

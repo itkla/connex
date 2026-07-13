@@ -28,9 +28,30 @@ final class AiReportFacts {
             Map.entry("open_pipeline_value", "Open pipeline value"),
             Map.entry("open_deal_count", "Open deal count"),
             Map.entry("at_risk_revenue", "At-risk revenue"),
+            Map.entry("company_count", "Company count"),
+            Map.entry("coverage_gap_count", "Coverage gap count"),
+            Map.entry("coverage_gap_open_pipeline_value", "Coverage-gap open pipeline value"),
+            Map.entry("single_threaded_deal_count", "Single-threaded deal count"),
+            Map.entry("single_threaded_deal_value", "Single-threaded deal value"),
             Map.entry("total", "Total"),
             Map.entry("unassigned", "Unassigned"),
-            Map.entry("unspecified", "Unspecified"));
+            Map.entry("unspecified", "Unspecified"),
+            Map.entry("open", "Open"),
+            Map.entry("won", "Won"),
+            Map.entry("lost", "Lost"),
+            Map.entry("todo", "To do"),
+            Map.entry("in progress", "In progress"),
+            Map.entry("done", "Done"),
+            Map.entry("hot", "Hot"),
+            Map.entry("warm", "Warm"),
+            Map.entry("cool", "Cool"),
+            Map.entry("cold", "Cold"),
+            Map.entry("high", "High"),
+            Map.entry("medium", "Medium"),
+            Map.entry("low", "Low"),
+            Map.entry("rising", "Rising"),
+            Map.entry("steady", "Steady"),
+            Map.entry("cooling", "Cooling"));
     private static final Map<String, String> JAPANESE_LABELS = Map.ofEntries(
             Map.entry("count", "件数"),
             Map.entry("new_pipeline_value", "新規パイプライン金額"),
@@ -40,6 +61,11 @@ final class AiReportFacts {
             Map.entry("open_pipeline_value", "進行中パイプライン金額"),
             Map.entry("open_deal_count", "進行中商談数"),
             Map.entry("at_risk_revenue", "リスク売上"),
+            Map.entry("company_count", "会社数"),
+            Map.entry("coverage_gap_count", "カバレッジ不足の会社数"),
+            Map.entry("coverage_gap_open_pipeline_value", "カバレッジ不足の進行中パイプライン金額"),
+            Map.entry("single_threaded_deal_count", "単一接点案件数"),
+            Map.entry("single_threaded_deal_value", "単一接点案件金額"),
             Map.entry("total", "合計"),
             Map.entry("unassigned", "未割り当て"),
             Map.entry("unspecified", "未指定"),
@@ -101,9 +127,21 @@ final class AiReportFacts {
 
     static List<String> claims(ReportAppendixRowDto source) {
         String label = label(source);
-        String recommendation = japanese()
-                ? label + "を担当チームで確認し、次の対応を記録してください。"
-                : "Review " + label + " with the responsible team and record the next action.";
+        String measure = source.label().split(" · ", 2)[0].toLowerCase(Locale.ROOT);
+        String recommendation;
+        if (Set.of("coverage_gap_count", "coverage_gap_open_pipeline_value").contains(measure)) {
+            recommendation = japanese()
+                    ? label + "を確認し、追加の関係構築担当者を割り当ててください。"
+                    : "Review " + label + " and assign an additional relationship owner.";
+        } else if (Set.of("single_threaded_deal_count", "single_threaded_deal_value").contains(measure)) {
+            recommendation = japanese()
+                    ? label + "を確認し、案件に追加のステークホルダーを登録してください。"
+                    : "Review " + label + " and add another stakeholder to the deal.";
+        } else {
+            recommendation = japanese()
+                    ? label + "を担当チームで確認し、次の対応を記録してください。"
+                    : "Review " + label + " with the responsible team and record the next action.";
+        }
         return List.of(claim(source), recommendation);
     }
 
