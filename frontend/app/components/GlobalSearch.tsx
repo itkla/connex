@@ -3,11 +3,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useTranslations } from 'next-intl';
+import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
 import { Command as CommandPrimitive } from 'cmdk';
 import { MagnifyingGlassIcon } from '@heroicons/react/24/outline';
 import { Loader2Icon } from 'lucide-react';
 
 import { CommandGroup, CommandItem, CommandList, CommandSeparator, CommandShortcut } from '@/components/ui/command';
+import { easeOut, instant, springJiggle, springSmooth, springSnappy } from '@/app/lib/motion';
 import { useActions, useAvailableActions } from '@/app/hooks/useActions';
 import { ACTION_GROUPS, type ActionGroup, type AppAction } from '@/app/lib/actions/types';
 import { search as searchApi } from '@/app/lib/api';
@@ -96,6 +98,7 @@ export default function GlobalSearch() {
     const urlQuery = searchParams.get('query') ?? '';
     const currentViewport = useSyncExternalStore(subscribeToViewport, viewportSnapshot, () => '0:0:0:0');
     const [viewportOffsetLeft, viewportOffsetTop, currentViewportWidth, currentViewportHeight] = currentViewport.split(':').map(Number);
+    const reduceMotion = useReducedMotion() ?? false;
 
     const { run, pendingIds } = useActions();
     const available = useAvailableActions();
@@ -312,7 +315,8 @@ export default function GlobalSearch() {
                 <div aria-hidden className="h-11 w-full" />
             ) : (
                 <>
-                    <form
+                    <motion.form
+                        layoutId="global-search-pill"
                         role="search"
                         onSubmit={(event) => {
                             event.preventDefault();
@@ -343,7 +347,7 @@ export default function GlobalSearch() {
                         <kbd className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 select-none rounded border border-border bg-background px-1.5 py-0.5 font-mono text-[10px] font-medium text-muted-foreground">
                             ⌘K
                         </kbd>
-                    </form>
+                    </motion.form>
 
                     {showInlineDropdown ? (
                         <div
@@ -404,23 +408,36 @@ export default function GlobalSearch() {
                 </>
             )}
 
-            {isPalette ? (
-                    <button
+            <AnimatePresence>
+                {isPalette ? (
+                    <motion.button
+                        key="global-search-scrim"
                         type="button"
                         aria-hidden
                         tabIndex={-1}
                         onClick={closePalette}
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        exit={{ opacity: 0 }}
+                        transition={{ duration: 0.16, ease: easeOut }}
                         className="fixed inset-0 z-40 cursor-default bg-black/50 backdrop-blur-[1px]"
                     />
                 ) : null}
+            </AnimatePresence>
 
-            {isPalette ? (
-                    <div
+            <AnimatePresence>
+                {isPalette ? (
+                    <motion.div
+                        key="global-search-overlay"
                         ref={paletteRef}
                         role="dialog"
                         aria-modal
                         aria-label={tActions('palette.trigger')}
                         onKeyDown={onPaletteKeyDown}
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        exit={{ opacity: 0 }}
+                        transition={{ duration: 0.14 }}
                         className="fixed z-50 flex -translate-x-1/2 flex-col gap-2"
                         style={{
                             left: viewportOffsetLeft + currentViewportWidth / 2,
@@ -429,7 +446,11 @@ export default function GlobalSearch() {
                         }}
                     >
                         <CommandPrimitive shouldFilter={false} loop className="contents">
-                            <div className={cn(PILL_SHELL, 'z-10 shadow-lg')}>
+                            <motion.div
+                                layoutId="global-search-pill"
+                                transition={reduceMotion ? instant : springSnappy}
+                                className={cn(PILL_SHELL, 'z-10 shadow-lg')}
+                            >
                                 <MagnifyingGlassIcon className="pointer-events-none absolute left-3.5 top-1/2 size-5 -translate-y-1/2 text-muted-foreground" />
                                 <CommandPrimitive.Input
                                     ref={paletteInputRef}
@@ -442,18 +463,24 @@ export default function GlobalSearch() {
                                 <kbd className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 select-none rounded border border-border bg-background px-1.5 py-0.5 font-mono text-[10px] font-medium text-muted-foreground">
                                     esc
                                 </kbd>
-                            </div>
+                            </motion.div>
 
-                            <div
-                                onMouseEnter={() => setExpanded(true)}
-                                onMouseLeave={() => setExpanded(false)}
+                            <motion.div
+                                initial={reduceMotion ? { opacity: 0 } : { opacity: 0, y: -24 }}
+                                animate={{ opacity: 1, y: 0 }}
+                                exit={reduceMotion ? { opacity: 0 } : { opacity: 0, y: -18 }}
+                                transition={reduceMotion ? { duration: 0.12 } : springSmooth}
+                                onHoverStart={() => setExpanded(true)}
+                                onHoverEnd={() => setExpanded(false)}
                                 onMouseDown={(event) => event.preventDefault()}
                                 className="relative z-0 overflow-hidden rounded-2xl bg-popover text-popover-foreground shadow-2xl ring-1 ring-border"
                                 style={{ maxHeight: availablePanelHeight }}
                             >
-                                <div
+                                <motion.div
+                                    animate={{ maxHeight: expanded ? expandedPanelHeight : collapsedPanelHeight }}
+                                    transition={reduceMotion ? instant : springJiggle}
                                     className="no-scrollbar overflow-y-auto"
-                                    style={{ maxHeight: expanded ? expandedPanelHeight : collapsedPanelHeight }}
+                                    style={{ maxHeight: collapsedPanelHeight }}
                                 >
                                     <CommandList className="max-h-none overflow-visible p-1">
                                         {commandGroups.map((entry) => (
@@ -516,11 +543,12 @@ export default function GlobalSearch() {
                                             <div className="py-8 text-center text-sm text-muted-foreground">{tActions('palette.noResults', { query: trimmed })}</div>
                                         ) : null}
                                     </CommandList>
-                                </div>
-                            </div>
+                                </motion.div>
+                            </motion.div>
                         </CommandPrimitive>
-                    </div>
+                    </motion.div>
                 ) : null}
+            </AnimatePresence>
         </div>
     );
 }
