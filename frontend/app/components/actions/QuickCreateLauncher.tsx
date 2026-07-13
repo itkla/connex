@@ -22,6 +22,7 @@ import type { AppAction } from '@/app/lib/actions/types';
 const PANEL_WIDTH = 380;
 const PANEL_GAP = 12;
 const VIEWPORT_MARGIN = 16;
+const MOBILE_HANDOFF_DELAY_MS = 300;
 
 type Anchor = { top: number; left: number; maxHeight: number };
 
@@ -39,6 +40,9 @@ function useIsClient(): boolean {
  * selector; choosing a record type hands off to that type's full creation dialog (shell-owned overlay).
  * On desktop it renders as a portal'd panel anchored beside the sidebar (no navigation reflow); on
  * mobile it uses a bottom sheet. Focus is trapped while open and restored to the trigger on close.
+ * On mobile the selector and every create dialog are Base UI drawers, so the hand-off waits for this
+ * drawer to finish closing before opening the target one — two drawers transitioning at once desyncs
+ * the shared backdrop/dismiss handling and flicks the just-opened dialog straight back down.
  */
 export default function QuickCreateLauncher() {
     const t = useTranslations('Actions');
@@ -101,9 +105,15 @@ export default function QuickCreateLauncher() {
     const selectAction = useCallback(
         (action: AppAction) => {
             closeLauncher();
+            if (isMobile) {
+                window.setTimeout(() => {
+                    void run(action.id, { source: 'menu' });
+                }, MOBILE_HANDOFF_DELAY_MS);
+                return;
+            }
             void run(action.id, { source: 'menu' });
         },
-        [closeLauncher, run],
+        [closeLauncher, run, isMobile],
     );
 
     const handlePanelKeyDown = useCallback(
