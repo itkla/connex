@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, type WheelEvent } from 'react';
+import { useRef, useState, type WheelEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { toastError, toastSuccess } from '@/app/lib/toast';
@@ -10,11 +10,8 @@ import { ChatBubbleLeftRightIcon, PencilSquareIcon, CalendarIcon, Bars3BottomLef
 import {
     ResponsiveDialog,
     ResponsiveDialogContent,
-    ResponsiveDialogHeader,
     ResponsiveDialogTitle,
     ResponsiveDialogDescription,
-    ResponsiveDialogFooter,
-    ResponsiveDialogClose,
 } from '@/components/ui/responsive-dialog';
 import {
     Combobox,
@@ -24,7 +21,6 @@ import {
     ComboboxItem,
     ComboboxList,
 } from '@/components/ui/combobox';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import MentionEditor from '@/app/components/activity/notes/MentionEditor';
@@ -85,30 +81,96 @@ export default function ActivityDialog({
     defaultSubject = '',
     defaultNotes = '',
 }: Props) {
+    const t = useTranslations('ActivityCreateDialog');
+    const submittingRef = useRef(false);
+
+    const handleOpenChange = (next: boolean) => {
+        if (!next && submittingRef.current) return;
+        onOpenChange(next);
+    };
+
+    const [prevOpen, setPrevOpen] = useState(open);
+    const [openCount, setOpenCount] = useState(0);
+    if (open !== prevOpen) {
+        setPrevOpen(open);
+        if (open) setOpenCount((count) => count + 1);
+    }
+
+    return (
+        <ResponsiveDialog open={open} onOpenChange={handleOpenChange}>
+            <ResponsiveDialogContent className="gap-0 overflow-hidden p-0 sm:max-w-lg">
+                <ResponsiveDialogTitle className="sr-only">{t('titleCreate')}</ResponsiveDialogTitle>
+                <ResponsiveDialogDescription className="sr-only">{t('description')}</ResponsiveDialogDescription>
+                <ActivityDialogForm
+                    key={openCount}
+                    persons={persons}
+                    deals={deals}
+                    currentUserId={currentUserId}
+                    defaultPerson={defaultPerson}
+                    defaultDeal={defaultDeal}
+                    defaultTimestamp={defaultTimestamp}
+                    defaultType={defaultType}
+                    defaultSubject={defaultSubject}
+                    defaultNotes={defaultNotes}
+                    onSubmittingChange={(value) => {
+                        submittingRef.current = value;
+                    }}
+                    onCancel={() => onOpenChange(false)}
+                    onClose={() => onOpenChange(false)}
+                />
+            </ResponsiveDialogContent>
+        </ResponsiveDialog>
+    );
+}
+
+type ActivityDialogFormProps = {
+    persons: Contact[];
+    deals: Deal[];
+    currentUserId: number;
+    defaultPerson?: Contact | null;
+    defaultDeal?: Deal | null;
+    defaultTimestamp?: string;
+    defaultType?: ActivityType;
+    defaultSubject?: string;
+    defaultNotes?: string;
+    onSubmittingChange: (submitting: boolean) => void;
+    /** Invoked by the Cancel button — closes the dialog, or steps back to the selector in the morphing launcher. */
+    onCancel: () => void;
+    /** Invoked once the create succeeds (after the success beat), to dismiss the surface. */
+    onClose: () => void;
+};
+
+/**
+ * The activity-log form body — free of any dialog/drawer shell so it can render inside the standalone
+ * {@link ActivityDialog} (desktop dialog / mobile drawer) or embedded in the morphing Quick Create drawer.
+ * It initializes state fresh from props on mount (callers remount it per open), with no reset effect.
+ */
+export function ActivityDialogForm({
+    persons,
+    deals,
+    currentUserId,
+    defaultPerson = null,
+    defaultDeal = null,
+    defaultTimestamp,
+    defaultType,
+    defaultSubject = '',
+    defaultNotes = '',
+    onSubmittingChange,
+    onCancel,
+    onClose,
+}: ActivityDialogFormProps) {
     const router = useRouter();
     const t = useTranslations('ActivityCreateDialog');
 
-    const [type, setType] = useState<ActivityType>(ACTIVITY_TYPES[0]);
-    const [subject, setSubject] = useState('');
-    const [notes, setNotes] = useState('');
-    const [when, setWhen] = useState('');
-    const [selectedPerson, setSelectedPerson] = useState<Contact | null>(null);
-    const [selectedDeal, setSelectedDeal] = useState<Deal | null>(null);
+    const [type, setType] = useState<ActivityType>(() => defaultType ?? ACTIVITY_TYPES[0]);
+    const [subject, setSubject] = useState(() => defaultSubject);
+    const [notes, setNotes] = useState(() => defaultNotes);
+    const [when, setWhen] = useState(() => defaultTimestamp ?? nowLocalValue());
+    const [selectedPerson, setSelectedPerson] = useState<Contact | null>(() => defaultPerson);
+    const [selectedDeal, setSelectedDeal] = useState<Deal | null>(() => defaultDeal);
     const [submitting, setSubmitting] = useState(false);
     const [succeeded, setSucceeded] = useState(false);
     const { fieldErrors, reset: resetFieldErrors, clearError, captureFieldErrors } = useFieldErrors();
-
-    useEffect(() => {
-        if (!open) return;
-        // eslint-disable-next-line react-hooks/set-state-in-effect
-        setType(defaultType ?? ACTIVITY_TYPES[0]);
-        setSubject(defaultSubject);
-        setNotes(defaultNotes);
-        setWhen(defaultTimestamp ?? nowLocalValue());
-        setSelectedPerson(defaultPerson ?? null);
-        setSelectedDeal(defaultDeal ?? null);
-        resetFieldErrors();
-    }, [open, defaultPerson, defaultDeal, defaultTimestamp, defaultType, defaultSubject, defaultNotes, resetFieldErrors]);
 
     const handleListWheel = (e: WheelEvent<HTMLDivElement>) => {
         const lineHeightPx = 16;
@@ -120,6 +182,7 @@ export default function ActivityDialog({
         e.preventDefault();
         resetFieldErrors();
         setSubmitting(true);
+        onSubmittingChange(true);
         try {
             await createActivity({
                 type,
@@ -133,7 +196,7 @@ export default function ActivityDialog({
             toastSuccess(t('toastCreated'));
             setSucceeded(true);
             router.refresh();
-            setTimeout(() => onOpenChange(false), 900);
+            setTimeout(() => onClose(), 900);
         } catch (err) {
             if (captureFieldErrors(err)) {
                 if (isFieldError(err)) {
@@ -149,177 +212,168 @@ export default function ActivityDialog({
             toastError(message);
         } finally {
             setSubmitting(false);
+            onSubmittingChange(false);
         }
     };
 
     const hasErrors = Object.keys(fieldErrors).length > 0;
     const status = resolveDialogStatus({ isLoading: submitting, hasErrors, isSuccess: succeeded });
 
-    const handleOpenChange = (next: boolean) => {
-        if (!next && submitting) return;
-        if (!next) setSucceeded(false);
-        onOpenChange(next);
-    };
-
     return (
-        <ResponsiveDialog open={open} onOpenChange={handleOpenChange}>
-            <ResponsiveDialogContent className="gap-0 overflow-hidden p-0 sm:max-w-lg">
-                <DialogStatusCover status={status} />
+        <>
+            <DialogStatusCover status={status} />
 
-                <div className="px-6 pb-6">
-                    <ResponsiveDialogHeader className="ncd-rise -mt-12" style={{ animationDelay: '40ms' }}>
-                        <div className="flex items-start gap-3">
-                            <span className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-brand-light text-brand-dark">
-                                <ChatBubbleLeftRightIcon className="size-5" />
-                            </span>
-                            <div className="space-y-1">
-                                <ResponsiveDialogTitle className="text-xl font-semibold tracking-tight">{t('titleCreate')}</ResponsiveDialogTitle>
-                                <ResponsiveDialogDescription>{t('description')}</ResponsiveDialogDescription>
-                            </div>
+            <div className="px-6 pb-6">
+                <div className="ncd-rise -mt-12 flex flex-col gap-2" style={{ animationDelay: '40ms' }}>
+                    <div className="flex items-start gap-3">
+                        <span className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-brand-light text-brand-dark">
+                            <ChatBubbleLeftRightIcon className="size-5" />
+                        </span>
+                        <div className="space-y-1">
+                            <h2 className="font-heading text-xl font-semibold leading-none tracking-tight">{t('titleCreate')}</h2>
+                            <p className="text-sm text-muted-foreground">{t('description')}</p>
                         </div>
-                    </ResponsiveDialogHeader>
+                    </div>
+                </div>
 
-                    <form onSubmit={handleSubmit} className="grid gap-5">
-                        <div className="ncd-rise grid gap-1.5" style={{ animationDelay: '90ms' }}>
-                            <Label>{t('typeLabel')}</Label>
-                            <ActivityTypePicker
-                                value={type}
-                                onChange={setType}
-                                getLabel={(ty) => t(`type${ty}` as 'typeCall')}
+                <form onSubmit={handleSubmit} className="grid gap-5">
+                    <div className="ncd-rise grid gap-1.5" style={{ animationDelay: '90ms' }}>
+                        <Label>{t('typeLabel')}</Label>
+                        <ActivityTypePicker
+                            value={type}
+                            onChange={setType}
+                            getLabel={(ty) => t(`type${ty}` as 'typeCall')}
+                        />
+                    </div>
+
+                    <div className="ncd-rise grid gap-1.5" style={{ animationDelay: '140ms' }}>
+                        <Label htmlFor="activity-subject">{t('subjectLabel')}</Label>
+                        <div className="group relative">
+                            <PencilSquareIcon className={fieldLeadIconClass} />
+                            <input
+                                id="activity-subject"
+                                type="text"
+                                value={subject}
+                                onChange={(e) => {
+                                    setSubject(e.target.value);
+                                    clearError('subject');
+                                }}
+                                placeholder={t('subjectPlaceholder')}
+                                className={cn(fieldInputClass, 'pl-9 pr-3', fieldErrors.subject && fieldErrorClass)}
+                                aria-invalid={Boolean(fieldErrors.subject)}
+                                aria-describedby={fieldErrors.subject ? 'activity-subject-error' : undefined}
+                                autoFocus
+                                required
                             />
                         </div>
+                        {fieldErrors.subject && <p id="activity-subject-error" className="text-sm text-destructive">{fieldErrors.subject}</p>}
+                    </div>
 
-                        <div className="ncd-rise grid gap-1.5" style={{ animationDelay: '140ms' }}>
-                            <Label htmlFor="activity-subject">{t('subjectLabel')}</Label>
-                            <div className="group relative">
-                                <PencilSquareIcon className={fieldLeadIconClass} />
-                                <input
-                                    id="activity-subject"
-                                    type="text"
-                                    value={subject}
-                                    onChange={(e) => {
-                                        setSubject(e.target.value);
-                                        clearError('subject');
-                                    }}
-                                    placeholder={t('subjectPlaceholder')}
-                                    className={cn(fieldInputClass, 'pl-9 pr-3', fieldErrors.subject && fieldErrorClass)}
-                                    aria-invalid={Boolean(fieldErrors.subject)}
-                                    aria-describedby={fieldErrors.subject ? 'activity-subject-error' : undefined}
-                                    autoFocus
-                                    required
-                                />
-                            </div>
-                            {fieldErrors.subject && <p id="activity-subject-error" className="text-sm text-destructive">{fieldErrors.subject}</p>}
+                    <div className="ncd-rise grid gap-1.5" style={{ animationDelay: '190ms' }}>
+                        <Label htmlFor="activity-when">{t('timestampLabel')}</Label>
+                        <div className="group relative">
+                            <CalendarIcon className={fieldLeadIconClass} />
+                            <input
+                                id="activity-when"
+                                type="datetime-local"
+                                value={when}
+                                onChange={(e) => setWhen(e.target.value)}
+                                className={cn(fieldInputClass, 'pl-9 pr-3')}
+                            />
                         </div>
+                    </div>
 
-                        <div className="ncd-rise grid gap-1.5" style={{ animationDelay: '190ms' }}>
-                            <Label htmlFor="activity-when">{t('timestampLabel')}</Label>
-                            <div className="group relative">
-                                <CalendarIcon className={fieldLeadIconClass} />
-                                <input
-                                    id="activity-when"
-                                    type="datetime-local"
-                                    value={when}
-                                    onChange={(e) => setWhen(e.target.value)}
-                                    className={cn(fieldInputClass, 'pl-9 pr-3')}
-                                />
-                            </div>
+                    <div className="ncd-rise grid gap-1.5" style={{ animationDelay: '240ms' }}>
+                        <Label htmlFor="activity-notes">{t('notesLabel')}</Label>
+                        <div className="group relative">
+                            <Bars3BottomLeftIcon className="pointer-events-none absolute left-3 top-3 size-4 text-muted-foreground transition-colors group-focus-within:text-brand" />
+                            <MentionEditor
+                                id="activity-notes"
+                                value={notes}
+                                onChange={setNotes}
+                                placeholder={t('notesPlaceholder')}
+                                className={cn(fieldInputClass, 'min-h-24 pl-9 pr-3 py-2')}
+                            />
                         </div>
+                    </div>
 
-                        <div className="ncd-rise grid gap-1.5" style={{ animationDelay: '240ms' }}>
-                            <Label htmlFor="activity-notes">{t('notesLabel')}</Label>
-                            <div className="group relative">
-                                <Bars3BottomLeftIcon className="pointer-events-none absolute left-3 top-3 size-4 text-muted-foreground transition-colors group-focus-within:text-brand" />
-                                <MentionEditor
-                                    id="activity-notes"
-                                    value={notes}
-                                    onChange={setNotes}
-                                    placeholder={t('notesPlaceholder')}
-                                    className={cn(fieldInputClass, 'min-h-24 pl-9 pr-3 py-2')}
-                                />
-                            </div>
-                        </div>
-
-                        <div className="ncd-rise grid grid-cols-1 gap-3 md:grid-cols-2" style={{ animationDelay: '290ms' }}>
-                            <div className="grid gap-1.5">
-                                <Label htmlFor="activity-person">{t('personLabel')}</Label>
-                                <Combobox
-                                    items={persons}
-                                    itemToStringLabel={(p: Contact) => p.name}
-                                    value={selectedPerson}
-                                    onValueChange={(p) => setSelectedPerson(p as Contact | null)}
-                                >
-                                    <ComboboxInput
-                                        id="activity-person"
-                                        placeholder={t('personPlaceholder')}
-                                        className="rounded-lg border-0 bg-muted shadow-none ring-1 ring-border dark:bg-muted has-[[data-slot=input-group-control]:focus-visible]:ring-2 has-[[data-slot=input-group-control]:focus-visible]:ring-brand"
-                                    >
-                                        <InputGroupAddon align="inline-start">
-                                            <UserIcon className="size-4 text-muted-foreground transition-colors group-focus-within/input-group:text-brand" />
-                                        </InputGroupAddon>
-                                    </ComboboxInput>
-                                    <ComboboxContent className="pointer-events-auto">
-                                        <ComboboxList onWheel={handleListWheel}>
-                                            <ComboboxEmpty>{t('noPersonFound')}</ComboboxEmpty>
-                                            {persons.map((p) => (
-                                                <ComboboxItem key={p.id} value={p}>
-                                                    {p.name}
-                                                </ComboboxItem>
-                                            ))}
-                                        </ComboboxList>
-                                    </ComboboxContent>
-                                </Combobox>
-                            </div>
-
-                            <div className="grid gap-1.5">
-                                <Label htmlFor="activity-deal">{t('dealLabel')}</Label>
-                                <Combobox
-                                    items={deals}
-                                    itemToStringLabel={(d: Deal) => d.name}
-                                    value={selectedDeal}
-                                    onValueChange={(d) => setSelectedDeal(d as Deal | null)}
-                                >
-                                    <ComboboxInput
-                                        id="activity-deal"
-                                        placeholder={t('dealPlaceholder')}
-                                        className="rounded-lg border-0 bg-muted shadow-none ring-1 ring-border dark:bg-muted has-[[data-slot=input-group-control]:focus-visible]:ring-2 has-[[data-slot=input-group-control]:focus-visible]:ring-brand"
-                                    >
-                                        <InputGroupAddon align="inline-start">
-                                            <BriefcaseIcon className="size-4 text-muted-foreground transition-colors group-focus-within/input-group:text-brand" />
-                                        </InputGroupAddon>
-                                    </ComboboxInput>
-                                    <ComboboxContent className="pointer-events-auto">
-                                        <ComboboxList onWheel={handleListWheel}>
-                                            <ComboboxEmpty>{t('noDealFound')}</ComboboxEmpty>
-                                            {deals.map((d) => (
-                                                <ComboboxItem key={d.id} value={d}>
-                                                    {d.name}
-                                                </ComboboxItem>
-                                            ))}
-                                        </ComboboxList>
-                                    </ComboboxContent>
-                                </Combobox>
-                            </div>
-                        </div>
-
-                        <ResponsiveDialogFooter className="ncd-rise" style={{ animationDelay: '340ms' }}>
-                            <ResponsiveDialogClose asChild>
-                                <Button type="button" variant="outline" disabled={submitting}>
-                                    {t('cancel')}
-                                </Button>
-                            </ResponsiveDialogClose>
-                            <Button
-                                type="submit"
-                                variant="brand"
-                                disabled={submitting || succeeded}
-                                className="min-w-24 shadow-sm transition hover:shadow-md"
+                    <div className="ncd-rise grid grid-cols-1 gap-3 md:grid-cols-2" style={{ animationDelay: '290ms' }}>
+                        <div className="grid gap-1.5">
+                            <Label htmlFor="activity-person">{t('personLabel')}</Label>
+                            <Combobox
+                                items={persons}
+                                itemToStringLabel={(p: Contact) => p.name}
+                                value={selectedPerson}
+                                onValueChange={(p) => setSelectedPerson(p as Contact | null)}
                             >
-                                {submitting ? <Loader2Icon className="size-4 animate-spin" /> : t('create')}
-                            </Button>
-                        </ResponsiveDialogFooter>
-                    </form>
-                </div>
-            </ResponsiveDialogContent>
-        </ResponsiveDialog>
+                                <ComboboxInput
+                                    id="activity-person"
+                                    placeholder={t('personPlaceholder')}
+                                    className="rounded-lg border-0 bg-muted shadow-none ring-1 ring-border dark:bg-muted has-[[data-slot=input-group-control]:focus-visible]:ring-2 has-[[data-slot=input-group-control]:focus-visible]:ring-brand"
+                                >
+                                    <InputGroupAddon align="inline-start">
+                                        <UserIcon className="size-4 text-muted-foreground transition-colors group-focus-within/input-group:text-brand" />
+                                    </InputGroupAddon>
+                                </ComboboxInput>
+                                <ComboboxContent className="pointer-events-auto">
+                                    <ComboboxList onWheel={handleListWheel}>
+                                        <ComboboxEmpty>{t('noPersonFound')}</ComboboxEmpty>
+                                        {persons.map((p) => (
+                                            <ComboboxItem key={p.id} value={p}>
+                                                {p.name}
+                                            </ComboboxItem>
+                                        ))}
+                                    </ComboboxList>
+                                </ComboboxContent>
+                            </Combobox>
+                        </div>
+
+                        <div className="grid gap-1.5">
+                            <Label htmlFor="activity-deal">{t('dealLabel')}</Label>
+                            <Combobox
+                                items={deals}
+                                itemToStringLabel={(d: Deal) => d.name}
+                                value={selectedDeal}
+                                onValueChange={(d) => setSelectedDeal(d as Deal | null)}
+                            >
+                                <ComboboxInput
+                                    id="activity-deal"
+                                    placeholder={t('dealPlaceholder')}
+                                    className="rounded-lg border-0 bg-muted shadow-none ring-1 ring-border dark:bg-muted has-[[data-slot=input-group-control]:focus-visible]:ring-2 has-[[data-slot=input-group-control]:focus-visible]:ring-brand"
+                                >
+                                    <InputGroupAddon align="inline-start">
+                                        <BriefcaseIcon className="size-4 text-muted-foreground transition-colors group-focus-within/input-group:text-brand" />
+                                    </InputGroupAddon>
+                                </ComboboxInput>
+                                <ComboboxContent className="pointer-events-auto">
+                                    <ComboboxList onWheel={handleListWheel}>
+                                        <ComboboxEmpty>{t('noDealFound')}</ComboboxEmpty>
+                                        {deals.map((d) => (
+                                            <ComboboxItem key={d.id} value={d}>
+                                                {d.name}
+                                            </ComboboxItem>
+                                        ))}
+                                    </ComboboxList>
+                                </ComboboxContent>
+                            </Combobox>
+                        </div>
+                    </div>
+
+                    <div className="ncd-rise flex flex-col-reverse gap-2 sm:flex-row sm:justify-end" style={{ animationDelay: '340ms' }}>
+                        <Button type="button" variant="outline" disabled={submitting} onClick={onCancel}>
+                            {t('cancel')}
+                        </Button>
+                        <Button
+                            type="submit"
+                            variant="brand"
+                            disabled={submitting || succeeded}
+                            className="min-w-24 shadow-sm transition hover:shadow-md"
+                        >
+                            {submitting ? <Loader2Icon className="size-4 animate-spin" /> : t('create')}
+                        </Button>
+                    </div>
+                </form>
+            </div>
+        </>
     );
 }

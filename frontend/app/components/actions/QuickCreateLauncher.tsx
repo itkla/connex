@@ -30,6 +30,9 @@ const TaskDialogForm = dynamic(() =>
 const NoteDialogForm = dynamic(() =>
     import('@/app/components/activity/notes/NoteDialog').then((m) => ({ default: m.NoteDialogForm })),
 );
+const ActivityDialogForm = dynamic(() =>
+    import('@/app/components/activity/activities/ActivityDialog').then((m) => ({ default: m.ActivityDialogForm })),
+);
 
 const PANEL_WIDTH = 380;
 const PANEL_GAP = 12;
@@ -37,9 +40,10 @@ const VIEWPORT_MARGIN = 16;
 const MOBILE_HANDOFF_DELAY_MS = 300;
 
 /** Create actions that morph into an embedded form inside the mobile launcher drawer (vs. handing off to a separate dialog). */
-const EMBEDDED_FORM_BY_ACTION: Record<string, 'task' | 'note'> = {
+const EMBEDDED_FORM_BY_ACTION: Record<string, EmbeddedFormKind> = {
     'create.task': 'task',
     'create.note': 'note',
+    'create.activity': 'activity',
 };
 
 type Anchor = { top: number; left: number; maxHeight: number };
@@ -374,7 +378,8 @@ function TypeSelector({
     );
 }
 
-type FlowView = 'selector' | 'task' | 'note';
+type EmbeddedFormKind = 'task' | 'note' | 'activity';
+type FlowView = 'selector' | EmbeddedFormKind;
 type FlowRefs = { persons: Contact[]; deals: Deal[]; users: User[] };
 
 type MobileCreateFlowProps = {
@@ -501,7 +506,7 @@ function MobileCreateFlow({ actions, context, currentUserId, onFallback, onClose
                             onCancel={back}
                             onClose={onClose}
                         />
-                    ) : (
+                    ) : view === 'note' ? (
                         <NoteDialogForm
                             note={null}
                             persons={refs.persons}
@@ -510,6 +515,17 @@ function MobileCreateFlow({ actions, context, currentUserId, onFallback, onClose
                             defaultPerson={defaultPerson}
                             defaultDeal={defaultDeal}
                             defaultContent=""
+                            onSubmittingChange={setSubmitting}
+                            onCancel={back}
+                            onClose={onClose}
+                        />
+                    ) : (
+                        <ActivityDialogForm
+                            persons={refs.persons}
+                            deals={refs.deals}
+                            currentUserId={currentUserId}
+                            defaultPerson={defaultPerson}
+                            defaultDeal={defaultDeal}
                             onSubmittingChange={setSubmitting}
                             onCancel={back}
                             onClose={onClose}
