@@ -4,7 +4,8 @@
       "trigger": "新規作成",
       "title": "作成",
       "description": "レコードを作成",
-      "close": "閉じる"
+      "close": "閉じる",
+      "back": "種類に戻る"
     },
     "palette": {
       "trigger": "検索とコマンド",

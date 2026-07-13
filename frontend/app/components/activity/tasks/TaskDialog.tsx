@@ -10,11 +10,8 @@ import { ClipboardDocumentCheckIcon, Bars3BottomLeftIcon, CalendarIcon, UserCirc
 import {
     ResponsiveDialog,
     ResponsiveDialogContent,
-    ResponsiveDialogHeader,
     ResponsiveDialogTitle,
     ResponsiveDialogDescription,
-    ResponsiveDialogFooter,
-    ResponsiveDialogClose,
 } from '@/components/ui/responsive-dialog';
 import {
     Combobox,
@@ -62,6 +59,7 @@ export default function TaskDialog({
     defaultDueDate = '',
     defaultDescription = '',
 }: Props) {
+    const t = useTranslations('ActivityTasksDialog');
     const submittingRef = useRef(false);
 
     const handleOpenChange = (next: boolean) => {
@@ -79,6 +77,8 @@ export default function TaskDialog({
     return (
         <ResponsiveDialog open={open} onOpenChange={handleOpenChange}>
             <ResponsiveDialogContent className="gap-0 overflow-hidden p-0 sm:max-w-lg">
+                <ResponsiveDialogTitle className="sr-only">{t('titleCreate')}</ResponsiveDialogTitle>
+                <ResponsiveDialogDescription className="sr-only">{t('description')}</ResponsiveDialogDescription>
                 <TaskDialogForm
                     key={openCount}
                     persons={persons}
@@ -92,6 +92,7 @@ export default function TaskDialog({
                     onSubmittingChange={(value) => {
                         submittingRef.current = value;
                     }}
+                    onCancel={() => onOpenChange(false)}
                     onClose={() => onOpenChange(false)}
                 />
             </ResponsiveDialogContent>
@@ -109,14 +110,18 @@ type TaskDialogFormProps = {
     defaultDueDate: string;
     defaultDescription: string;
     onSubmittingChange: (submitting: boolean) => void;
+    /** Invoked by the Cancel button — closes the dialog, or steps back to the selector in the morphing launcher. */
+    onCancel: () => void;
+    /** Invoked once the create succeeds (after the success beat), to dismiss the surface. */
     onClose: () => void;
 };
 
 /**
- * The task-create form. It lives inside {@code ResponsiveDialogContent} — which unmounts on
- * close — so its state initializes fresh from props on each open, with no reset effect.
+ * The task-create form body — free of any dialog/drawer shell so it can render inside the standalone
+ * {@link TaskDialog} (desktop dialog / mobile drawer) or embedded in the morphing Quick Create drawer.
+ * It initializes state fresh from props on mount (callers remount it per open), with no reset effect.
  */
-function TaskDialogForm({
+export function TaskDialogForm({
     persons,
     deals,
     users,
@@ -126,6 +131,7 @@ function TaskDialogForm({
     defaultDueDate,
     defaultDescription,
     onSubmittingChange,
+    onCancel,
     onClose,
 }: TaskDialogFormProps) {
     const router = useRouter();
@@ -195,17 +201,17 @@ function TaskDialogForm({
             <DialogStatusCover status={status} />
 
             <div className="px-6 pb-6">
-                <ResponsiveDialogHeader className="ncd-rise -mt-12" style={{ animationDelay: '40ms' }}>
+                <div className="ncd-rise -mt-12 flex flex-col gap-2" style={{ animationDelay: '40ms' }}>
                     <div className="flex items-start gap-3">
                         <span className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-brand-light text-brand-dark">
                             <ClipboardDocumentCheckIcon className="size-5" />
                         </span>
                         <div className="space-y-1">
-                            <ResponsiveDialogTitle className="text-xl font-semibold tracking-tight">{t('titleCreate')}</ResponsiveDialogTitle>
-                            <ResponsiveDialogDescription>{t('description')}</ResponsiveDialogDescription>
+                            <h2 className="font-heading text-xl font-semibold leading-none tracking-tight">{t('titleCreate')}</h2>
+                            <p className="text-sm text-muted-foreground">{t('description')}</p>
                         </div>
                     </div>
-                </ResponsiveDialogHeader>
+                </div>
 
                 <form onSubmit={handleSubmit} className="grid gap-5">
                     <div className="ncd-rise grid gap-1.5" style={{ animationDelay: '90ms' }}>
@@ -337,12 +343,10 @@ function TaskDialogForm({
                         </div>
                     </div>
 
-                    <ResponsiveDialogFooter className="ncd-rise" style={{ animationDelay: '240ms' }}>
-                        <ResponsiveDialogClose asChild>
-                            <Button type="button" variant="outline" disabled={submitting}>
-                                {t('cancel')}
-                            </Button>
-                        </ResponsiveDialogClose>
+                    <div className="ncd-rise flex flex-col-reverse gap-2 sm:flex-row sm:justify-end" style={{ animationDelay: '240ms' }}>
+                        <Button type="button" variant="outline" disabled={submitting} onClick={onCancel}>
+                            {t('cancel')}
+                        </Button>
                         <Button
                             type="submit"
                             variant="brand"
@@ -355,7 +359,7 @@ function TaskDialogForm({
                                 t('create')
                             )}
                         </Button>
-                    </ResponsiveDialogFooter>
+                    </div>
                 </form>
             </div>
         </>

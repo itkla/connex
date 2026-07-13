@@ -4,7 +4,8 @@
       "trigger": "New",
       "title": "Create",
       "description": "Create a record",
-      "close": "Close"
+      "close": "Close",
+      "back": "Back to types"
     },
     "palette": {
       "trigger": "Search & commands",
