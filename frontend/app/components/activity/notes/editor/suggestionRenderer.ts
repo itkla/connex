@@ -48,6 +48,7 @@ export function createSuggestionRenderer<Item>(
                 popup = document.createElement("div");
                 popup.style.position = "fixed";
                 popup.style.zIndex = "60";
+                popup.style.pointerEvents = "auto";
                 popup.appendChild(renderer.element);
                 document.body.appendChild(popup);
                 place(props.clientRect?.());

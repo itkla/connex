@@ -32,9 +32,9 @@ export type ToolbarLabels = {
     codeBlock: string;
 };
 
-type Props = { editor: Editor | null; labels: ToolbarLabels };
+type Props = { editor: Editor | null; labels: ToolbarLabels; compact?: boolean };
 
-export function EditorToolbar({ editor, labels }: Props) {
+export function EditorToolbar({ editor, labels, compact = false }: Props) {
     const [, setTick] = useState(0);
 
     useEffect(() => {
@@ -80,7 +80,13 @@ export function EditorToolbar({ editor, labels }: Props) {
     );
 
     return (
-        <div className="sticky top-0 z-10 mb-2 flex flex-wrap items-center gap-0.5 rounded-xl border border-border bg-card/85 p-1 backdrop-blur">
+        <div
+            className={
+                compact
+                    ? "flex flex-wrap items-center gap-0.5 border-b border-border bg-muted/40 px-1.5 py-1"
+                    : "sticky top-0 z-10 mb-2 flex flex-wrap items-center gap-0.5 rounded-xl border border-border bg-card/85 p-1 backdrop-blur"
+            }
+        >
             {button("h1", labels.h1, editor.isActive("heading", { level: 1 }), () => editor.chain().focus().toggleHeading({ level: 1 }).run(), Heading1)}
             {button("h2", labels.h2, editor.isActive("heading", { level: 2 }), () => editor.chain().focus().toggleHeading({ level: 2 }).run(), Heading2)}
             {button("h3", labels.h3, editor.isActive("heading", { level: 3 }), () => editor.chain().focus().toggleHeading({ level: 3 }).run(), Heading3)}
