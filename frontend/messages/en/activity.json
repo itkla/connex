@@ -134,7 +134,6 @@
     "titleEdit": "Edit note",
     "description": "Capture a thought, follow-up, or context. Link it to a person or deal so everyone can see it.",
     "contentLabel": "Content",
-    "contentPlaceholder": "What's on your mind?",
     "personLabel": "Contact",
     "personPlaceholder": "Link a contact",
     "noPersonFound": "No contact found.",

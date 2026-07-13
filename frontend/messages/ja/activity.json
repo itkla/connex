@@ -134,7 +134,6 @@
     "titleEdit": "メモを編集",
     "description": "考えやフォローアップ、コンテキストを記録します。人物や案件と関連付けるとチーム全員に共有されます。",
     "contentLabel": "内容",
-    "contentPlaceholder": "何を考えていますか？",
     "personLabel": "人物",
     "personPlaceholder": "人物を関連付け",
     "noPersonFound": "該当する人物がいません。",
