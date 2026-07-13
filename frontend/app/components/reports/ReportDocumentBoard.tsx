@@ -16,6 +16,7 @@ import {
 } from '@heroicons/react/24/outline';
 
 import ReportWidgetRenderer, { formatReportValue } from '@/app/components/reports/ReportWidgetRenderer';
+import ScheduleManager from '@/app/components/reports/ScheduleManager';
 import {
     createReportSnapshot,
     deleteReportSnapshot,
@@ -58,9 +59,13 @@ function isValidAttainmentRange(start: string, end: string, cadence: ReportDefin
 export default function ReportDocumentBoard({
     definition,
     initialSnapshots,
+    canUpdateReports,
+    defaultTimezone,
 }: {
     definition: ReportDefinition;
     initialSnapshots: ReportSnapshotSummary[];
+    canUpdateReports: boolean;
+    defaultTimezone: string;
 }) {
     const t = useTranslations('Reports');
     const locale = useLocale();
@@ -228,6 +233,12 @@ export default function ReportDocumentBoard({
                         </Button>
                     </div>
                     <div className="flex flex-wrap items-center gap-2">
+                        <ScheduleManager
+                            reportId={definition.id}
+                            reportName={definition.name}
+                            canManage={canUpdateReports}
+                            defaultTimezone={defaultTimezone}
+                        />
                         <Button variant="outline" onClick={createSnapshot} disabled={!document || snapshotting}>
                             <ArchiveBoxArrowDownIcon />
                             {snapshotting ? t('document.snapshotting') : t('document.snapshot')}
@@ -244,12 +255,14 @@ export default function ReportDocumentBoard({
                             <PrinterIcon />
                             {t('document.pdf')}
                         </Button>
-                        <Button asChild variant="brand">
-                            <Link href={`/overview/reports/${definition.id}/edit`}>
-                                <PencilSquareIcon />
-                                {t('common.edit')}
-                            </Link>
-                        </Button>
+                        {canUpdateReports ? (
+                            <Button asChild variant="brand">
+                                <Link href={`/overview/reports/${definition.id}/edit`}>
+                                    <PencilSquareIcon />
+                                    {t('common.edit')}
+                                </Link>
+                            </Button>
+                        ) : null}
                     </div>
                 </div>
 

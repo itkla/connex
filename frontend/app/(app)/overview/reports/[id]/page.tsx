@@ -35,5 +35,12 @@ export default async function ReportPage({ params }: { params: Promise<{ id: str
         redirect('/overview/reports');
     }
 
-    return <ReportDocumentBoard definition={report} initialSnapshots={snapshots} />;
+    return (
+        <ReportDocumentBoard
+            definition={report}
+            initialSnapshots={snapshots}
+            canUpdateReports={effectivePermissions.includes('REPORT_UPDATE')}
+            defaultTimezone={user.timezone}
+        />
+    );
 }

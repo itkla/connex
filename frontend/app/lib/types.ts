@@ -1022,6 +1022,10 @@ export type DashboardLayoutResponse = {
 
 export type ReportCadence = "weekly" | "monthly" | "quarterly" | "custom";
 
+export type ReportScheduleCadence = Exclude<ReportCadence, "custom">;
+
+export type ReportScheduleTimezone = string;
+
 export type ReportBucket = "day" | "week" | "month";
 
 export type ReportChartType = "bar" | "line-area" | "donut" | "funnel" | "table" | "kpi";
@@ -1211,6 +1215,33 @@ export type ReportSnapshotSummary = {
 
 export type ReportSnapshot = ReportSnapshotSummary & {
     computedResult: ReportDocument;
+};
+
+export type ReportScheduleRecipient = {
+    userId: number;
+    displayName: string;
+    email: string;
+};
+
+export type ReportScheduleRequest = {
+    cadence: ReportScheduleCadence;
+    recipientUserIds: number[];
+    timezone: ReportScheduleTimezone;
+    hourOfDay: number;
+    enabled: boolean;
+};
+
+export type ReportSchedule = ReportScheduleRequest & {
+    id: number;
+    reportDefinitionId: number;
+    recipients: ReportScheduleRecipient[];
+    runAsUserId: number;
+    runAsLabel: string | null;
+    nextRunAt: string;
+    lastRunAt: string | null;
+    createdBy: number;
+    createdAt: string;
+    updatedAt: string;
 };
 
 export type ReportGoalPeriodType = 'month' | 'quarter';

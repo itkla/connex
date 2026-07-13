@@ -9,6 +9,7 @@ import PasswordReset from "./templates/PasswordReset.js";
 import EmailChange from "./templates/EmailChange.js";
 import Test from "./templates/Test.js";
 import NotificationEmail from "./templates/NotificationEmail.js";
+import ReportDelivery from "./templates/ReportDelivery.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const outDir = join(here, "..", "..", "backend", "src", "main", "resources", "templates", "emails");
@@ -19,6 +20,8 @@ const templates: Array<{ name: string; element: React.ReactElement }> = [
     { name: "email-change.en.html", element: <EmailChange /> },
     { name: "test.en.html", element: <Test /> },
     { name: "notification.en.html", element: <NotificationEmail /> },
+    { name: "report-delivery.en.html", element: <ReportDelivery locale="en" /> },
+    { name: "report-delivery.ja.html", element: <ReportDelivery locale="ja" /> },
 ];
 
 mkdirSync(outDir, { recursive: true });

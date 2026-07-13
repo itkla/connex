@@ -2555,6 +2555,55 @@ export function deleteReport(id: number) {
     return deleteJson<void>(`/api/reports/${id}`);
 }
 
+async function requestReportSchedule(
+    reportId: number,
+    init: RequestInit = {},
+): Promise<Types.ReportSchedule | null> {
+    try {
+        return await getJson<Types.ReportSchedule>(`/api/reports/${reportId}/schedule`, {
+            cache: "no-store",
+            ...init,
+        });
+    } catch (error) {
+        if (error instanceof ApiError && error.status === 404) {
+            await getReport(reportId, init);
+            return null;
+        }
+        throw error;
+    }
+}
+
+export function getReportSchedule(
+    reportId: number,
+    init: RequestInit = {},
+): Promise<Types.ReportSchedule | null> {
+    if (Object.keys(init).length > 0) return requestReportSchedule(reportId, init);
+    return withReportRequestIdentity((signal) => requestReportSchedule(reportId, { signal }));
+}
+
+export function getReportScheduleFromCookie(reportId: number, cookie: string | null) {
+    if (!cookie) return Promise.resolve(null);
+    return getReportSchedule(reportId, { headers: { cookie }, cache: "no-store" });
+}
+
+export function saveReportSchedule(
+    reportId: number,
+    body: Types.ReportScheduleRequest,
+    scheduleExists: boolean,
+) {
+    return withReportRequestIdentity((signal) => {
+        const path = `/api/reports/${reportId}/schedule`;
+        return scheduleExists
+            ? putJson<Types.ReportSchedule>(path, body, { signal })
+            : postJson<Types.ReportSchedule>(path, body, { signal });
+    });
+}
+
+export function deleteReportSchedule(reportId: number) {
+    return withReportRequestIdentity((signal) =>
+        deleteJson<void>(`/api/reports/${reportId}/schedule`, { signal }));
+}
+
 export function getGoals(init: RequestInit = {}) {
     return getJson<Types.ReportGoal[]>(`/api/goals`, { cache: "no-store", ...init });
 }
