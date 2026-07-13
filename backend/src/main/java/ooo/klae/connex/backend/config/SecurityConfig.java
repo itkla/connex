@@ -167,7 +167,8 @@ public class SecurityConfig {
         }
         http
             .authorizeHttpRequests(auth -> {
-                auth.requestMatchers(HttpMethod.GET, "/api/mail/managed").permitAll()
+                auth.requestMatchers(HttpMethod.GET, "/api/version").permitAll()
+                    .requestMatchers(HttpMethod.GET, "/api/mail/managed").permitAll()
                     .requestMatchers("/api/auth/webauthn/authenticate/**").permitAll()
                     .requestMatchers("/api/auth/webauthn/**").authenticated()
                     .requestMatchers("/api/auth/**").permitAll();
