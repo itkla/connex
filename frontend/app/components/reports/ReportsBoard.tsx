@@ -8,6 +8,7 @@ import {
     ArrowRightIcon,
     ArrowTrendingUpIcon,
     ChartBarIcon,
+    FlagIcon,
     EllipsisHorizontalIcon,
     HeartIcon,
     PresentationChartLineIcon,
@@ -42,6 +43,7 @@ const TEMPLATE_ICONS: Record<string, ComponentType<{ className?: string }>> = {
     'sales-performance': ChartBarIcon,
     'pipeline-health': PresentationChartLineIcon,
     'forecasting': ArrowTrendingUpIcon,
+    'quota-attainment': FlagIcon,
     'relationship-coverage': HeartIcon,
     'relationship-health': ShieldExclamationIcon,
     'activity-team': UserGroupIcon,
@@ -50,9 +52,11 @@ const TEMPLATE_ICONS: Record<string, ComponentType<{ className?: string }>> = {
 export default function ReportsBoard({
     templates,
     initialReports,
+    effectivePermissions,
 }: {
     templates: ReportTemplate[];
     initialReports: ReportDefinition[];
+    effectivePermissions: string[];
 }) {
     const t = useTranslations('Reports');
     const locale = useLocale();
@@ -60,6 +64,13 @@ export default function ReportsBoard({
     const [reports, setReports] = useState(initialReports);
     const [deleting, setDeleting] = useState<ReportDefinition | null>(null);
     const [busy, setBusy] = useState(false);
+    const canReadGoals = effectivePermissions.includes('GOAL_READ');
+    const visibleTemplates = canReadGoals
+        ? templates
+        : templates.filter((template) => template.key !== 'quota-attainment');
+    const visibleReports = canReadGoals
+        ? reports
+        : reports.filter((report) => report.config.widgets.every((widget) => widget.measure !== 'attainment'));
 
     const confirmDelete = async () => {
         if (!deleting) return;
@@ -90,12 +101,22 @@ export default function ReportsBoard({
                             {t('landing.subtitle')}
                         </p>
                     </div>
-                    <Button asChild variant="brand">
-                        <Link href="/overview/reports/new">
-                            <SparklesIcon />
-                            {t('landing.newReport')}
-                        </Link>
-                    </Button>
+                    <div className="flex flex-wrap items-center gap-2">
+                        {canReadGoals ? (
+                            <Button asChild variant="outline">
+                                <Link href="/overview/reports/goals">
+                                    <FlagIcon />
+                                    {t('landing.manageGoals')}
+                                </Link>
+                            </Button>
+                        ) : null}
+                        <Button asChild variant="brand">
+                            <Link href="/overview/reports/new">
+                                <SparklesIcon />
+                                {t('landing.newReport')}
+                            </Link>
+                        </Button>
+                    </div>
                 </header>
 
                 <section aria-labelledby="report-templates-title">
@@ -111,7 +132,7 @@ export default function ReportsBoard({
                         </Button>
                     </div>
                     <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6">
-                        {templates.map((template) => {
+                        {visibleTemplates.map((template) => {
                             const Icon = TEMPLATE_ICONS[template.key] ?? PresentationChartLineIcon;
                             return (
                                 <Link
@@ -145,7 +166,7 @@ export default function ReportsBoard({
                         </h2>
                         <p className="mt-1 text-sm text-muted-foreground">{t('landing.savedSubtitle')}</p>
                     </div>
-                    {reports.length === 0 ? (
+                    {visibleReports.length === 0 ? (
                         <div className="rounded-2xl border border-dashed border-border bg-card/40 px-6 py-16 text-center">
                             <PresentationChartLineIcon className="mx-auto size-7 text-muted-foreground" />
                             <h3 className="mt-4 text-base font-semibold text-foreground">{t('landing.emptyTitle')}</h3>
@@ -154,7 +175,7 @@ export default function ReportsBoard({
                     ) : (
                         <div className="overflow-hidden rounded-2xl border border-border bg-card">
                             <ul className="divide-y divide-border">
-                                {reports.map((report) => (
+                                {visibleReports.map((report) => (
                                     <li key={report.id} className="group flex items-center gap-4 px-5 py-4 hover:bg-muted/50">
                                         <div className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-muted text-muted-foreground">
                                             <PresentationChartLineIcon className="size-5" />

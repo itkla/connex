@@ -1044,7 +1044,8 @@ export type ReportMeasure =
     | "single_threaded_deal_value"
     | "forecast_best"
     | "forecast_weighted"
-    | "forecast_worst";
+    | "forecast_worst"
+    | "attainment";
 
 export type ReportGroupBy =
     | "none"
@@ -1210,6 +1211,25 @@ export type ReportSnapshotSummary = {
 
 export type ReportSnapshot = ReportSnapshotSummary & {
     computedResult: ReportDocument;
+};
+
+export type ReportGoalPeriodType = 'month' | 'quarter';
+
+export type ReportGoalInput = {
+    ownerId: number | null;
+    metric: 'won_revenue';
+    periodType: ReportGoalPeriodType;
+    periodStart: string;
+    targetValue: number;
+    currency: string;
+};
+
+export type ReportGoal = ReportGoalInput & {
+    id: number;
+    ownerLabel: string | null;
+    createdBy: number | null;
+    createdAt: string;
+    updatedAt: string;
 };
 
 export type UpdateContactPayload = {

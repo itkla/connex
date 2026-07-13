@@ -44,6 +44,17 @@ type DocumentState =
     | { status: 'error' }
     | { status: 'ready'; document: ReportDocument };
 
+function isValidAttainmentRange(start: string, end: string, cadence: ReportDefinition['cadence']): boolean {
+    const match = /^(\d{4})-(\d{2})-01$/.exec(start);
+    if (!match || end < start) return false;
+    const year = Number(match[1]);
+    const month = Number(match[2]);
+    if (cadence === 'quarterly' && ![1, 4, 7, 10].includes(month)) return false;
+    const months = cadence === 'quarterly' ? 3 : 1;
+    const nextPeriod = new Date(Date.UTC(year, month - 1 + months, 1)).toISOString().slice(0, 10);
+    return end < nextPeriod;
+}
+
 export default function ReportDocumentBoard({
     definition,
     initialSnapshots,
@@ -67,6 +78,7 @@ export default function ReportDocumentBoard({
     const generationInputRef = useRef<ReportGenerateInput>({});
     const snapshotRequestRef = useRef(0);
     const paperRef = useRef<HTMLElement>(null);
+    const hasAttainment = definition.config.widgets.some((widget) => widget.measure === 'attainment');
 
     const document = activeSnapshotId != null
         ? activeSnapshot?.computedResult ?? null
@@ -89,14 +101,22 @@ export default function ReportDocumentBoard({
         };
     }, [definition.id, refreshKey]);
 
-    const generate = () => {
+    const generationInput = (): ReportGenerateInput | null => {
         if ((start && !end) || (!start && end)) {
             toastError(t('document.rangePairRequired'));
-            return;
+            return null;
         }
-        generationInputRef.current = {
-            ...(start && end ? { start, end } : {}),
-        };
+        if (hasAttainment && start && end && !isValidAttainmentRange(start, end, definition.cadence)) {
+            toastError(t('document.attainmentRangeRequired'));
+            return null;
+        }
+        return start && end ? { start, end } : {};
+    };
+
+    const generate = () => {
+        const input = generationInput();
+        if (!input) return;
+        generationInputRef.current = input;
         snapshotRequestRef.current += 1;
         setActiveSnapshotId(null);
         setActiveSnapshot(null);
@@ -105,9 +125,11 @@ export default function ReportDocumentBoard({
     };
 
     const createSnapshot = async () => {
+        const input = generationInput();
+        if (!input) return;
         setSnapshotting(true);
         try {
-            const snapshot = await createReportSnapshot(definition.id, start && end ? { start, end } : {});
+            const snapshot = await createReportSnapshot(definition.id, input);
             setSnapshots((current) => [snapshot, ...current]);
             setActiveSnapshotId(snapshot.id);
             setActiveSnapshot(snapshot);
@@ -159,12 +181,14 @@ export default function ReportDocumentBoard({
     };
 
     const exportCsv = async () => {
+        const input = activeSnapshot ? null : generationInput();
+        if (!activeSnapshot && !input) return;
         setExporting(true);
         try {
             if (activeSnapshot) {
                 await exportReportSnapshotCsv(definition.id, activeSnapshot.id);
             } else {
-                await exportReportCsv(definition.id, start && end ? { start, end } : {}, `${definition.name}.csv`);
+                await exportReportCsv(definition.id, input ?? {}, `${definition.name}.csv`);
             }
         } catch (error) {
             toastError(error instanceof Error ? error.message : t('common.requestFailed'));
@@ -319,8 +343,14 @@ function ReportPaper({
         widget.id,
         widget.title?.trim() || t(`measure.${widget.measure}`),
     ]));
-    const hasComparison = document.widgets.some((widget) =>
-        widget.priorTotal != null || widget.points.some((point) => point.priorValue != null));
+    const measureByWidgetId = new Map(document.widgets.map((widget) => [widget.widgetId, widget.measure]));
+    const hasComparison = document.widgets.some((widget) => widget.measure !== 'attainment' && (
+        widget.priorTotal != null || widget.points.some((point) => point.priorValue != null)));
+    const hasAttainmentRows = document.appendix.some((row) => measureByWidgetId.get(row.widgetId) === 'attainment');
+    const hasNonAttainmentRows = document.appendix.some((row) => measureByWidgetId.get(row.widgetId) !== 'attainment');
+    const hasMixedSemantics = hasAttainmentRows && hasNonAttainmentRows;
+    const hasPriorRows = document.appendix.some((row) =>
+        measureByWidgetId.get(row.widgetId) !== 'attainment' && row.priorValue != null);
     const localizedSourceLabel = (label: string, widgetId: string) => {
         const display = sourceDisplayLabel(label, measureLabelByWidgetId.get(widgetId));
         const separator = display.lastIndexOf(' · ');
@@ -358,6 +388,7 @@ function ReportPaper({
                 case 'unassigned': return t('label.unassigned');
                 case 'unspecified': return t('label.unspecified');
                 case 'other': return t('label.other');
+                case 'workspace-wide': return t('label.workspaceWide');
                 default: return value;
             }
         })();
@@ -461,9 +492,13 @@ function ReportPaper({
                                         </p>
                                         {widget.changePercent != null ? (
                                             <p className="text-xs tabular-nums text-muted-foreground">
-                                                {t('document.changeValue', {
-                                                    value: new Intl.NumberFormat(locale, { maximumFractionDigits: 1, signDisplay: 'always' }).format(widget.changePercent),
-                                                })}
+                                                {widget.measure === 'attainment'
+                                                    ? t('document.attainmentValue', {
+                                                        value: new Intl.NumberFormat(locale, { maximumFractionDigits: 1 }).format(widget.changePercent),
+                                                    })
+                                                    : t('document.changeValue', {
+                                                        value: new Intl.NumberFormat(locale, { maximumFractionDigits: 1, signDisplay: 'always' }).format(widget.changePercent),
+                                                    })}
                                             </p>
                                         ) : null}
                                     </div>
@@ -483,8 +518,20 @@ function ReportPaper({
                             <tr>
                                 <th className="px-4 py-3 font-medium">{t('document.source')}</th>
                                 <th className="px-4 py-3 font-medium">{t('document.metric')}</th>
-                                <th className="px-4 py-3 text-right font-medium">{t('document.currentPeriod')}</th>
-                                <th className="px-4 py-3 text-right font-medium">{t('document.priorPeriod')}</th>
+                                <th className="px-4 py-3 text-right font-medium">
+                                    {hasMixedSemantics
+                                        ? t('document.value')
+                                        : hasAttainmentRows && !hasPriorRows
+                                            ? t('document.actual')
+                                            : t('document.currentPeriod')}
+                                </th>
+                                <th className="px-4 py-3 text-right font-medium">
+                                    {hasMixedSemantics
+                                        ? t('document.comparisonValue')
+                                        : hasAttainmentRows
+                                        ? hasPriorRows ? t('document.priorOrTarget') : t('document.target')
+                                        : t('document.priorPeriod')}
+                                </th>
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-border">
@@ -522,7 +569,9 @@ function ReportPaper({
                                 label={localizedSourceLabel(citation.label, citation.widgetId)}
                                 index={index + 1}
                                 locale={locale}
-                                priorLabel={t('document.priorCitation')}
+                                comparisonLabel={measureByWidgetId.get(citation.widgetId) === 'attainment'
+                                    ? t('document.targetCitation')
+                                    : t('document.priorCitation')}
                             />
                         ))}
                     </ol>
@@ -570,13 +619,13 @@ function Citation({
     label,
     index,
     locale,
-    priorLabel,
+    comparisonLabel,
 }: {
     citation: ReportCitation;
     label: string;
     index: number;
     locale: string;
-    priorLabel: string;
+    comparisonLabel: string;
 }) {
     return (
         <li className="flex gap-2">
@@ -584,7 +633,7 @@ function Citation({
             <span>
                 {label} · {formatReportValue(citation.value, citation.unit, locale)}
                 {citation.priorValue != null
-                    ? ` · ${formatReportValue(citation.priorValue, citation.unit, locale)} ${priorLabel}`
+                    ? ` · ${formatReportValue(citation.priorValue, citation.unit, locale)} ${comparisonLabel}`
                     : ''}
             </span>
         </li>

@@ -3,7 +3,12 @@ import { notFound, redirect } from 'next/navigation';
 import { getTranslations } from 'next-intl/server';
 
 import ReportDocumentBoard from '@/app/components/reports/ReportDocumentBoard';
-import { getCurrentUserFromCookie, getReport, getReportSnapshots } from '@/app/lib/api';
+import {
+    getCurrentUserFromCookie,
+    getEffectivePermissionsFromCookie,
+    getReport,
+    getReportSnapshots,
+} from '@/app/lib/api';
 import type { ReportSnapshotSummary } from '@/app/lib/types';
 
 export async function generateMetadata() {
@@ -19,11 +24,16 @@ export default async function ReportPage({ params }: { params: Promise<{ id: str
     const user = await getCurrentUserFromCookie(cookie);
     if (!user) redirect('/auth/login');
     const init = { headers: { cookie: cookie ?? '' } } as const;
-    const [report, snapshots] = await Promise.all([
+    const [report, snapshots, effectivePermissions] = await Promise.all([
         getReport(id, init).catch(() => null),
         getReportSnapshots(id, init).catch((): ReportSnapshotSummary[] => []),
+        getEffectivePermissionsFromCookie(cookie),
     ]);
     if (!report) notFound();
+    if (report.config.widgets.some((widget) => widget.measure === 'attainment')
+            && !effectivePermissions.includes('GOAL_READ')) {
+        redirect('/overview/reports');
+    }
 
     return <ReportDocumentBoard definition={report} initialSnapshots={snapshots} />;
 }

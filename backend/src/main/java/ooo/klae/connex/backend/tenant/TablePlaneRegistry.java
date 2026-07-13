@@ -96,6 +96,7 @@ public final class TablePlaneRegistry {
         "pipeline",
         "pipeline_share",
         "report_definition",
+        "report_goal",
         "report_snapshot",
         "rule",
         "rule_execution",

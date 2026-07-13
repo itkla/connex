@@ -911,6 +911,14 @@ export function getUsers(init: RequestInit = {}) {
     return getJson<Types.User[]>(`/api/users`, init);
 }
 
+export function getUsersFromCookie(cookie: string | null) {
+    return safeWithCookie<Types.User>((init) => getUsers(init), cookie);
+}
+
+export function getUsersResultFromCookie(cookie: string | null) {
+    return resultWithCookie<Types.User[]>((init) => getUsers(init), cookie);
+}
+
 /*
 * == User-associated records
 */
@@ -2346,6 +2354,14 @@ export function getPermissionCatalog(init: RequestInit = {}) {
     return getJson<string[]>(`/api/permissions`, { cache: "no-store", ...init });
 }
 
+export function getEffectivePermissions(init: RequestInit = {}) {
+    return getJson<string[]>(`/api/permissions/effective`, { cache: "no-store", ...init });
+}
+
+export function getEffectivePermissionsFromCookie(cookie: string | null) {
+    return safeWithCookie<string>((init) => getEffectivePermissions(init), cookie);
+}
+
 /*
 * == Custom field management
 */
@@ -2537,6 +2553,30 @@ export function updateReport(id: number, payload: Types.ReportDefinitionInput) {
 
 export function deleteReport(id: number) {
     return deleteJson<void>(`/api/reports/${id}`);
+}
+
+export function getGoals(init: RequestInit = {}) {
+    return getJson<Types.ReportGoal[]>(`/api/goals`, { cache: "no-store", ...init });
+}
+
+export function getGoalsFromCookie(cookie: string | null) {
+    return safeWithCookie<Types.ReportGoal>((init) => getGoals(init), cookie);
+}
+
+export function getGoalsResultFromCookie(cookie: string | null) {
+    return resultWithCookie<Types.ReportGoal[]>((init) => getGoals(init), cookie);
+}
+
+export function createGoal(payload: Types.ReportGoalInput) {
+    return postJson<Types.ReportGoal>(`/api/goals`, payload);
+}
+
+export function updateGoal(id: number, payload: Types.ReportGoalInput) {
+    return putJson<Types.ReportGoal>(`/api/goals/${id}`, payload);
+}
+
+export function deleteGoal(id: number) {
+    return deleteJson<void>(`/api/goals/${id}`);
 }
 
 export async function generateReport(id: number, payload: Types.ReportGenerateInput = {}) {

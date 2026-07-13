@@ -35,6 +35,8 @@ public enum Permission {
     REPORT_CREATE,
     REPORT_UPDATE,
     REPORT_DELETE,
+    GOAL_READ,
+    GOAL_MANAGE,
     PIPELINE_MANAGE,
     TAG_MANAGE,
     CUSTOM_FIELD_MANAGE,
