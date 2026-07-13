@@ -24,6 +24,7 @@ export const REPORT_MEASURES: Record<ReportDataSource, ReportMeasure[]> = {
         'count',
         'new_pipeline_value',
         'won_revenue',
+        'attainment',
         'win_rate',
         'avg_cycle_days',
         'open_pipeline_value',
@@ -65,6 +66,7 @@ export function reportGroupsForMeasure(
     if (measure === 'forecast_best' || measure === 'forecast_weighted' || measure === 'forecast_worst') {
         return ['none', 'date', 'pipeline', 'stage'];
     }
+    if (measure === 'attainment') return ['none', 'owner'];
     if (dataSource === 'companies') return ['none', 'industry'];
     if (dataSource === 'deals') return REPORT_GROUPS.deals.filter((group) => group !== 'deal');
     return REPORT_GROUPS[dataSource];

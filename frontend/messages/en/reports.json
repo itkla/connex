@@ -8,7 +8,9 @@
       "editTitle": "Edit report",
       "editDescription": "Update a report definition",
       "documentTitle": "Report",
-      "documentDescription": "Generated narrative business report"
+      "documentDescription": "Generated narrative business report",
+      "goalsTitle": "Goals",
+      "goalsDescription": "Revenue targets for report attainment"
     },
     "common": {
       "cancel": "Cancel",
@@ -24,6 +26,7 @@
       "title": "Reports",
       "subtitle": "Turn deterministic CRM figures into a review-ready narrative with charts, recommendations, an appendix, and traceable sources.",
       "newReport": "New report",
+      "manageGoals": "Manage goals",
       "templatesTitle": "Start with a proven brief",
       "templatesSubtitle": "Every template includes a grounded narrative and can be tailored before it is shared.",
       "startBlank": "Start blank",
@@ -51,6 +54,10 @@
       "forecasting": {
         "name": "Forecasting",
         "description": "Next-three-month best, likely, and commit forecasts weighted by historical stage win rates."
+      },
+      "quota-attainment": {
+        "name": "Quota Attainment",
+        "description": "Owner and workspace revenue targets compared with won revenue."
       },
       "relationship-coverage": {
         "name": "Relationship Coverage",
@@ -83,6 +90,7 @@
       "endDate": "End date",
       "filtersTitle": "Shared filters",
       "filtersSubtitle": "These filters apply to every evidence block in the report.",
+      "attainmentFilters": "Attainment uses the full quota scope. Pipeline, status, and tag filters are unavailable; owner filters are available only without a workspace-wide attainment block.",
       "pipelines": "Pipelines",
       "owners": "Owners",
       "statuses": "Statuses",
@@ -129,6 +137,7 @@
       "pngFailed": "The PNG could not be rendered in this browser.",
       "pdf": "Print / PDF",
       "rangePairRequired": "Choose both a start and end date.",
+      "attainmentRangeRequired": "Quota attainment must start on the first day of one calendar month or quarter and end within that period.",
       "errorTitle": "This report could not be generated",
       "errorBody": "Check your access and try again. Saved snapshots remain available above.",
       "reportLabel": "Business review",
@@ -145,9 +154,17 @@
       "widgetScope": "{source} · grouped by {group}",
       "currentPeriod": "Current",
       "priorPeriod": "Prior",
+      "actual": "Actual",
+      "target": "Target",
+      "value": "Value",
+      "comparisonValue": "Comparison",
+      "priorOrTarget": "Prior / target",
       "priorCitation": "prior",
+      "targetCitation": "target",
       "priorValue": "Prior {value}",
+      "targetValue": "Target {value}",
       "changeValue": "{value}% vs prior",
+      "attainmentValue": "{value}% attainment",
       "dimension": "Dimension",
       "noData": "No data for this period",
       "source": "Source",
@@ -188,7 +205,8 @@
       "single_threaded_deal_value": "Single-threaded deal value",
       "forecast_best": "Best-case forecast",
       "forecast_weighted": "Likely forecast (weighted)",
-      "forecast_worst": "Commit forecast"
+      "forecast_worst": "Commit forecast",
+      "attainment": "Quota attainment"
     },
     "group": {
       "none": "No grouping",
@@ -241,7 +259,56 @@
       "total": "Total",
       "unassigned": "Unassigned",
       "unspecified": "Unspecified",
-      "other": "Other"
+      "other": "Other",
+      "workspaceWide": "Workspace-wide"
+    },
+    "goals": {
+      "backToReports": "Back to reports",
+      "eyebrow": "Revenue planning",
+      "title": "Goals",
+      "subtitle": "Set monthly or quarterly won-revenue targets for individual owners or the entire workspace.",
+      "readOnly": "You can review goals in this workspace, but only goal managers can create or change them.",
+      "createGoal": "Create goal",
+      "createTitle": "Create revenue goal",
+      "editTitle": "Edit revenue goal",
+      "formDescription": "Actuals are computed from won revenue in the same period and currency.",
+      "owner": "Owner",
+      "scope": "Owner / scope",
+      "workspaceWide": "Workspace-wide",
+      "workspaceScope": "Workspace goal",
+      "ownerScope": "Owner goal",
+      "periodType": "Period type",
+      "month": "Month",
+      "quarter": "Quarter",
+      "period": "Period",
+      "metric": "Metric",
+      "target": "Target",
+      "currency": "Currency",
+      "targetPlaceholder": "100000.00",
+      "saveChanges": "Save changes",
+      "created": "Goal created",
+      "updated": "Goal updated",
+      "deleted": "Goal deleted",
+      "deleteTitle": "Delete goal?",
+      "deleteBody": "The revenue target for {scope} will be permanently deleted.",
+      "emptyTitle": "No revenue goals yet",
+      "emptyBody": "Create a target to add deterministic attainment figures to monthly or quarterly reports.",
+      "loadErrorTitle": "Goals could not be loaded",
+      "loadErrorBody": "The workspace goals are unavailable right now. Retry before creating or changing a target.",
+      "ownersLoadError": "Workspace members could not be loaded, so goal management is temporarily unavailable.",
+      "tableTitle": "Revenue targets",
+      "count": "{count, plural, one {# goal} other {# goals}}",
+      "actions": "Actions",
+      "editNamed": "Edit goal for {scope}",
+      "deleteNamed": "Delete goal for {scope}",
+      "quarterLabel": "Q{quarter} {year}",
+      "validation": {
+        "owner": "Choose an active workspace member.",
+        "period": "Choose a reporting period.",
+        "quarter": "Quarterly goals must start in January, April, July, or October.",
+        "target": "Enter a non-negative target with no more than 13 whole digits and 2 decimal places.",
+        "currency": "Currency must contain 3 to 8 letters."
+      }
     }
   }
 }

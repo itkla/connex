@@ -5,6 +5,7 @@ import { getTranslations } from 'next-intl/server';
 import ReportBuilderBoard from '@/app/components/reports/ReportBuilderBoard';
 import {
     getCurrentUserFromCookie,
+    getEffectivePermissionsFromCookie,
     getPipelinesFromCookie,
     getReportTemplatesFromCookie,
     getTagsFromCookie,
@@ -27,13 +28,25 @@ export default async function NewReportPage({
     if (!user) redirect('/auth/login');
     const { template: templateKey } = await searchParams;
     const init = { headers: { cookie: cookie ?? '' } } as const;
-    const [templates, pipelines, users, tags] = await Promise.all([
+    const [templates, pipelines, users, tags, effectivePermissions] = await Promise.all([
         getReportTemplatesFromCookie(cookie),
         getPipelinesFromCookie(cookie),
         getUsers(init).catch((): User[] => []),
         getTagsFromCookie(cookie).catch((): Tag[] => []),
+        getEffectivePermissionsFromCookie(cookie),
     ]);
-    const template = templateKey ? templates.find((item) => item.key === templateKey) : undefined;
+    const canReadGoals = effectivePermissions.includes('GOAL_READ');
+    const template = templateKey
+        ? templates.find((item) => item.key === templateKey && (canReadGoals || item.key !== 'quota-attainment'))
+        : undefined;
 
-    return <ReportBuilderBoard initialTemplate={template} pipelines={pipelines} users={users} tags={tags} />;
+    return (
+        <ReportBuilderBoard
+            initialTemplate={template}
+            pipelines={pipelines}
+            users={users}
+            tags={tags}
+            canReadGoals={canReadGoals}
+        />
+    );
 }

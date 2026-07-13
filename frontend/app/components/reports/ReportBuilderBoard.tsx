@@ -29,11 +29,13 @@ import { toastError, toastSuccess } from '@/app/lib/toast';
 import type {
     Pipeline,
     ReportCadence,
+    ReportChartType,
     ReportConfig,
     ReportDataSource,
     ReportDefinition,
     ReportDefinitionInput,
     ReportFilters,
+    ReportMeasure,
     ReportTemplate,
     ReportWidgetConfig,
     Tag,
@@ -54,6 +56,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { cn } from '@/lib/utils';
 
 const CADENCES: ReportCadence[] = ['weekly', 'monthly', 'quarterly', 'custom'];
+const ATTAINMENT_CHARTS: ReadonlySet<ReportChartType> = new Set(['bar', 'kpi']);
 const STATUSES = ['open', 'won', 'lost', 'todo', 'in_progress', 'done'] as const;
 const WARMTH_BANDS = ['hot', 'warm', 'cool', 'cold'] as const;
 
@@ -79,12 +82,14 @@ export default function ReportBuilderBoard({
     pipelines,
     users,
     tags,
+    canReadGoals,
 }: {
     initialReport?: ReportDefinition;
     initialTemplate?: ReportTemplate;
     pipelines: Pipeline[];
     users: User[];
     tags: Tag[];
+    canReadGoals: boolean;
 }) {
     const t = useTranslations('Reports');
     const router = useRouter();
@@ -120,6 +125,12 @@ export default function ReportBuilderBoard({
         [config.layout],
     );
     const filters = selectedFilters(config.filters);
+    const hasAttainment = config.widgets.some((widget) => widget.measure === 'attainment');
+    const hasWorkspaceAttainment = config.widgets.some((widget) =>
+        widget.measure === 'attainment' && (widget.groupBy ?? 'none') === 'none');
+    const cadenceOptions = hasAttainment
+        ? CADENCES.filter((value) => value === 'monthly' || value === 'quarterly')
+        : CADENCES;
     const messages: SortableGridMessages = {
         instructions: t('builder.dragInstructions'),
         handleLabel: (widgetName) => t('builder.dragHandle', { name: widgetName }),
@@ -137,7 +148,14 @@ export default function ReportBuilderBoard({
         }));
     };
     const updateWidget = (id: string, patch: Partial<ReportWidgetConfig>) => {
-        setWidgets(config.widgets.map((widget) => widget.id === id ? { ...widget, ...patch } : widget));
+        setConfig((current) => {
+            const widgets = current.widgets.map((widget) => widget.id === id ? { ...widget, ...patch } : widget);
+            return {
+                ...current,
+                widgets,
+                layout: reflowReportLayout(widgets, current.layout),
+            };
+        });
     };
     const updateDataSource = (widget: ReportWidgetConfig, dataSource: ReportDataSource) => {
         updateWidget(widget.id, {
@@ -145,6 +163,41 @@ export default function ReportBuilderBoard({
             measure: REPORT_MEASURES[dataSource][0],
             groupBy: REPORT_GROUPS[dataSource][0],
         });
+    };
+    const updateMeasure = (widget: ReportWidgetConfig, measure: ReportMeasure) => {
+        const groups = reportGroupsForMeasure(widget.dataSource, measure);
+        const currentGroup = widget.groupBy ?? 'none';
+        const groupBy = groups.includes(currentGroup)
+            ? currentGroup
+            : measure === 'at_risk_revenue' ? 'risk' : groups[0];
+        const chartType = measure === 'attainment' && !ATTAINMENT_CHARTS.has(widget.chartType)
+            ? 'bar'
+            : widget.chartType;
+        if (measure === 'attainment' && cadence !== 'monthly' && cadence !== 'quarterly') {
+            setCadence('monthly');
+        }
+        updateWidget(widget.id, { measure, groupBy, chartType });
+        if (measure === 'attainment') {
+            setConfig((current) => ({
+                ...current,
+                filters: {
+                    ...selectedFilters(current.filters),
+                    pipelineIds: null,
+                    statuses: null,
+                    tagIds: null,
+                    ...(groupBy === 'none' ? { ownerIds: null } : {}),
+                },
+            }));
+        }
+    };
+    const updateGroup = (widget: ReportWidgetConfig, groupBy: ReportWidgetConfig['groupBy']) => {
+        updateWidget(widget.id, { groupBy });
+        if (widget.measure === 'attainment' && groupBy === 'none') {
+            setConfig((current) => ({
+                ...current,
+                filters: { ...selectedFilters(current.filters), ownerIds: null },
+            }));
+        }
     };
     const addWidget = () => {
         if (config.widgets.length >= 16) return;
@@ -256,7 +309,7 @@ export default function ReportBuilderBoard({
                                     label={t('builder.cadence')}
                                     value={cadence}
                                     onChange={setCadence}
-                                    options={CADENCES.map((value) => ({ value, label: t(`cadence.${value}`) }))}
+                                    options={cadenceOptions.map((value) => ({ value, label: t(`cadence.${value}`) }))}
                                 />
                                 <FieldSelect
                                     label={t('builder.bucket')}
@@ -298,30 +351,39 @@ export default function ReportBuilderBoard({
                         <section className="rounded-2xl border border-border bg-card p-5">
                             <h2 className="text-sm font-semibold text-foreground">{t('builder.filtersTitle')}</h2>
                             <p className="mt-1 text-xs leading-relaxed text-muted-foreground">{t('builder.filtersSubtitle')}</p>
+                            {hasAttainment ? (
+                                <p className="mt-3 text-xs leading-relaxed text-muted-foreground">
+                                    {t('builder.attainmentFilters')}
+                                </p>
+                            ) : null}
                             <div className="mt-5 space-y-5">
                                 <FilterChecklist
                                     label={t('builder.pipelines')}
                                     options={pipelines.map((pipeline) => ({ value: pipeline.id, label: pipeline.name }))}
                                     values={filters.pipelineIds}
                                     onChange={(value) => updateFilters({ pipelineIds: toggleValue(filters.pipelineIds, value) })}
+                                    disabled={hasAttainment}
                                 />
                                 <FilterChecklist
                                     label={t('builder.owners')}
                                     options={users.map((user) => ({ value: user.id, label: user.displayName }))}
                                     values={filters.ownerIds}
                                     onChange={(value) => updateFilters({ ownerIds: toggleValue(filters.ownerIds, value) })}
+                                    disabled={hasWorkspaceAttainment}
                                 />
                                 <FilterChecklist
                                     label={t('builder.statuses')}
                                     options={STATUSES.map((value) => ({ value, label: t(`status.${value}`) }))}
                                     values={filters.statuses}
                                     onChange={(value) => updateFilters({ statuses: toggleValue(filters.statuses, value) })}
+                                    disabled={hasAttainment}
                                 />
                                 <FilterChecklist
                                     label={t('builder.tags')}
                                     options={tags.map((tag) => ({ value: tag.id, label: tag.name }))}
                                     values={filters.tagIds}
                                     onChange={(value) => updateFilters({ tagIds: toggleValue(filters.tagIds, value) })}
+                                    disabled={hasAttainment}
                                 />
                                 <FilterChecklist
                                     label={t('builder.warmth')}
@@ -359,7 +421,10 @@ export default function ReportBuilderBoard({
                                     isDragging={isDragging}
                                     fullWidth={(layoutById.get(widget.id)?.width ?? 6) >= 12}
                                     canRemove={config.widgets.length > 1}
+                                    canReadGoals={canReadGoals}
                                     onDataSourceChange={(value) => updateDataSource(widget, value)}
+                                    onMeasureChange={(value) => updateMeasure(widget, value)}
+                                    onGroupChange={(value) => updateGroup(widget, value)}
                                     onChange={(patch) => updateWidget(widget.id, patch)}
                                     onToggleWidth={() => toggleWidth(widget.id)}
                                     onRemove={() => removeWidget(widget.id)}
@@ -386,7 +451,10 @@ function WidgetEditor({
     isDragging,
     fullWidth,
     canRemove,
+    canReadGoals,
     onDataSourceChange,
+    onMeasureChange,
+    onGroupChange,
     onChange,
     onToggleWidth,
     onRemove,
@@ -396,7 +464,10 @@ function WidgetEditor({
     isDragging: boolean;
     fullWidth: boolean;
     canRemove: boolean;
+    canReadGoals: boolean;
     onDataSourceChange: (source: ReportDataSource) => void;
+    onMeasureChange: (measure: ReportMeasure) => void;
+    onGroupChange: (group: ReportWidgetConfig['groupBy']) => void;
     onChange: (patch: Partial<ReportWidgetConfig>) => void;
     onToggleWidth: () => void;
     onRemove: () => void;
@@ -446,22 +517,15 @@ function WidgetEditor({
                 <FieldSelect
                     label={t('builder.measure')}
                     value={widget.measure}
-                    onChange={(value) => {
-                        const groups = reportGroupsForMeasure(widget.dataSource, value);
-                        const currentGroup = widget.groupBy ?? 'none';
-                        onChange({
-                            measure: value,
-                            groupBy: groups.includes(currentGroup)
-                                ? currentGroup
-                                : value === 'at_risk_revenue' ? 'risk' : groups[0],
-                        });
-                    }}
-                    options={REPORT_MEASURES[widget.dataSource].map((value) => ({ value, label: t(`measure.${value}`) }))}
+                    onChange={onMeasureChange}
+                    options={REPORT_MEASURES[widget.dataSource]
+                        .filter((value) => canReadGoals || value !== 'attainment')
+                        .map((value) => ({ value, label: t(`measure.${value}`) }))}
                 />
                 <FieldSelect
                     label={t('builder.groupBy')}
                     value={widget.groupBy ?? 'none'}
-                    onChange={(value) => onChange({ groupBy: value })}
+                    onChange={onGroupChange}
                     options={reportGroupsForMeasure(widget.dataSource, widget.measure)
                         .map((value) => ({ value, label: t(`group.${value}`) }))}
                 />
@@ -469,7 +533,10 @@ function WidgetEditor({
                     label={t('builder.chartType')}
                     value={widget.chartType}
                     onChange={(value) => onChange({ chartType: value })}
-                    options={REPORT_CHART_TYPES.map((value) => ({ value, label: t(`chart.${value}`) }))}
+                    options={(widget.measure === 'attainment'
+                        ? REPORT_CHART_TYPES.filter((value) => ATTAINMENT_CHARTS.has(value))
+                        : REPORT_CHART_TYPES)
+                        .map((value) => ({ value, label: t(`chart.${value}`) }))}
                 />
             </div>
             <div className="mt-5 flex min-h-40 items-center justify-center rounded-xl border border-dashed border-border bg-muted/30 px-5 text-center">
@@ -528,11 +595,13 @@ function FilterChecklist<T extends string | number>({
     options,
     values,
     onChange,
+    disabled = false,
 }: {
     label: string;
     options: { value: T; label: string }[];
     values: T[] | null;
     onChange: (value: T) => void;
+    disabled?: boolean;
 }) {
     if (options.length === 0) return null;
     return (
@@ -540,10 +609,17 @@ function FilterChecklist<T extends string | number>({
             <legend className="text-xs font-medium uppercase tracking-[0.12em] text-muted-foreground">{label}</legend>
             <div className="mt-2 max-h-32 space-y-1 overflow-y-auto rounded-xl border border-border p-2">
                 {options.map((option) => (
-                    <label key={String(option.value)} className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-sm hover:bg-muted">
+                    <label
+                        key={String(option.value)}
+                        className={cn(
+                            'flex items-center gap-2 rounded-lg px-2 py-1.5 text-sm',
+                            disabled ? 'cursor-not-allowed opacity-50' : 'cursor-pointer hover:bg-muted',
+                        )}
+                    >
                         <Checkbox
                             checked={values?.includes(option.value) ?? false}
                             onCheckedChange={() => onChange(option.value)}
+                            disabled={disabled}
                         />
                         <span className="truncate">{option.label}</span>
                     </label>

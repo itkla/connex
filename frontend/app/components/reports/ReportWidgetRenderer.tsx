@@ -21,6 +21,8 @@ import {
 import type { ReportWidgetData } from '@/app/lib/types';
 import {
     ChartContainer,
+    ChartLegend,
+    ChartLegendContent,
     ChartTooltip,
     ChartTooltipContent,
     type ChartConfig,
@@ -44,6 +46,13 @@ export function formatReportValue(value: number | null, unit: string | null, loc
             notation: Math.abs(value) >= 10000 ? 'compact' : 'standard',
         }).format(value);
     }
+    if (unit && /^[A-Z]{4,8}$/.test(unit)) {
+        const formatted = new Intl.NumberFormat(locale, {
+            maximumFractionDigits: 1,
+            notation: Math.abs(value) >= 10000 ? 'compact' : 'standard',
+        }).format(value);
+        return `${formatted} ${unit}`;
+    }
     if (unit === 'percent' || unit === '%') {
         return new Intl.NumberFormat(locale, { maximumFractionDigits: 1 }).format(value) + '%';
     }
@@ -58,7 +67,7 @@ function pointUnit(key: string, widgetUnit: string | null): string | null {
     const separator = key.indexOf(':');
     if (separator < 1) return null;
     const currency = key.slice(0, separator).trim().toUpperCase();
-    return /^[A-Z]{3}$/.test(currency) ? currency : null;
+    return /^[A-Z]{3,8}$/.test(currency) ? currency : null;
 }
 
 export default function ReportWidgetRenderer({ widget }: { widget: ReportWidgetData }) {
@@ -99,6 +108,7 @@ export default function ReportWidgetRenderer({ widget }: { widget: ReportWidgetD
             case 'unassigned': translated = t('label.unassigned'); break;
             case 'unspecified': translated = t('label.unspecified'); break;
             case 'other': translated = t('label.other'); break;
+            case 'workspace-wide': translated = t('label.workspaceWide'); break;
             default: translated = value;
         }
         return prefix + translated;
@@ -112,10 +122,15 @@ export default function ReportWidgetRenderer({ widget }: { widget: ReportWidgetD
         })),
         [widget.points, localizeLabel],
     );
+    const isAttainment = widget.measure === 'attainment';
     const config = {
-        current: { label: t('document.currentPeriod'), color: 'var(--chart-1)' },
-        prior: { label: t('document.priorPeriod'), color: 'var(--chart-2)' },
+        current: { label: isAttainment ? t('document.actual') : t('document.currentPeriod'), color: 'var(--chart-1)' },
+        prior: { label: isAttainment ? t('document.target') : t('document.priorPeriod'), color: 'var(--chart-2)' },
     } satisfies ChartConfig;
+
+    if (isAttainment && data.length === 0) {
+        return <div className="flex min-h-48 items-center justify-center text-sm text-muted-foreground">{t('document.noData')}</div>;
+    }
 
     if (widget.chartType === 'kpi' && widget.unit === 'mixed' && data.length > 0) {
         return (
@@ -123,8 +138,17 @@ export default function ReportWidgetRenderer({ widget }: { widget: ReportWidgetD
                 {data.map((point) => (
                     <li key={point.key} className="flex items-baseline justify-between gap-4 py-3">
                         <span className="text-sm text-muted-foreground">{point.label}</span>
-                        <span className="text-xl font-semibold tabular-nums text-foreground">
-                            {formatReportValue(point.current, pointUnit(point.key, widget.unit), locale)}
+                        <span className="text-right">
+                            <span className="block text-xl font-semibold tabular-nums text-foreground">
+                                {formatReportValue(point.current, pointUnit(point.key, widget.unit), locale)}
+                            </span>
+                            {isAttainment && point.prior != null ? (
+                                <span className="mt-1 block text-xs tabular-nums text-muted-foreground">
+                                    {t('document.targetValue', {
+                                        value: formatReportValue(point.prior, pointUnit(point.key, widget.unit), locale),
+                                    })}
+                                </span>
+                            ) : null}
                         </span>
                     </li>
                 ))}
@@ -140,12 +164,20 @@ export default function ReportWidgetRenderer({ widget }: { widget: ReportWidgetD
                 </p>
                 {widget.priorTotal != null ? (
                     <div className="mt-3 flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
-                        <span>{t('document.priorValue', { value: formatReportValue(widget.priorTotal, widget.unit, locale) })}</span>
+                        <span>
+                            {isAttainment
+                                ? t('document.targetValue', { value: formatReportValue(widget.priorTotal, widget.unit, locale) })
+                                : t('document.priorValue', { value: formatReportValue(widget.priorTotal, widget.unit, locale) })}
+                        </span>
                         {widget.changePercent != null ? (
-                            <span className={widget.changePercent >= 0 ? 'text-brand-dark' : 'text-destructive'}>
-                                {t('document.changeValue', {
-                                    value: new Intl.NumberFormat(locale, { maximumFractionDigits: 1, signDisplay: 'always' }).format(widget.changePercent),
-                                })}
+                            <span className={isAttainment || widget.changePercent >= 0 ? 'text-brand-dark' : 'text-destructive'}>
+                                {isAttainment
+                                    ? t('document.attainmentValue', {
+                                        value: new Intl.NumberFormat(locale, { maximumFractionDigits: 1 }).format(widget.changePercent),
+                                    })
+                                    : t('document.changeValue', {
+                                        value: new Intl.NumberFormat(locale, { maximumFractionDigits: 1, signDisplay: 'always' }).format(widget.changePercent),
+                                    })}
                             </span>
                         ) : null}
                     </div>
@@ -166,9 +198,13 @@ export default function ReportWidgetRenderer({ widget }: { widget: ReportWidgetD
                     <thead className="border-b border-border text-xs uppercase tracking-[0.12em] text-muted-foreground">
                         <tr>
                             <th className="px-3 py-2 font-medium">{t('document.dimension')}</th>
-                            <th className="px-3 py-2 text-right font-medium">{t('document.currentPeriod')}</th>
+                            <th className="px-3 py-2 text-right font-medium">
+                                {isAttainment ? t('document.actual') : t('document.currentPeriod')}
+                            </th>
                             {showPrior ? (
-                                <th className="px-3 py-2 text-right font-medium">{t('document.priorPeriod')}</th>
+                                <th className="px-3 py-2 text-right font-medium">
+                                    {isAttainment ? t('document.target') : t('document.priorPeriod')}
+                                </th>
                             ) : null}
                         </tr>
                     </thead>
@@ -262,6 +298,8 @@ export default function ReportWidgetRenderer({ widget }: { widget: ReportWidgetD
                 <XAxis dataKey="label" tickLine={false} axisLine={false} tickMargin={10} />
                 <YAxis tickLine={false} axisLine={false} tickFormatter={(value: number) => formatReportValue(value, widget.unit, locale)} />
                 <ChartTooltip content={<ChartTooltipContent />} />
+                {isAttainment ? <ChartLegend content={<ChartLegendContent />} /> : null}
+                {isAttainment ? <Bar dataKey="prior" fill="var(--chart-2)" radius={[6, 6, 0, 0]} /> : null}
                 <Bar dataKey="current" fill="var(--chart-1)" radius={[6, 6, 0, 0]} />
             </BarChart>
         </ChartContainer>

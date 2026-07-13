@@ -8,7 +8,9 @@
       "editTitle": "レポートを編集",
       "editDescription": "レポート定義を更新",
       "documentTitle": "レポート",
-      "documentDescription": "生成されたビジネスレポート"
+      "documentDescription": "生成されたビジネスレポート",
+      "goalsTitle": "目標",
+      "goalsDescription": "レポート達成率の売上目標"
     },
     "common": {
       "cancel": "キャンセル",
@@ -24,6 +26,7 @@
       "title": "レポート",
       "subtitle": "確定的なCRM数値を、グラフ、推奨事項、データ付録、追跡可能な出典を備えたレビュー用の文章に変換します。",
       "newReport": "新規レポート",
+      "manageGoals": "目標を管理",
       "templatesTitle": "実績ある構成から開始",
       "templatesSubtitle": "すべてのテンプレートに根拠付きの文章が含まれ、共有前に調整できます。",
       "startBlank": "空白から開始",
@@ -51,6 +54,10 @@
       "forecasting": {
         "name": "売上予測",
         "description": "今後3か月を対象に、ステージごとの過去の勝率で加重した最良・見込み・コミット予測。"
+      },
+      "quota-attainment": {
+        "name": "目標達成率",
+        "description": "担当者およびワークスペースの売上目標と受注売上を比較します。"
       },
       "relationship-coverage": {
         "name": "関係性カバレッジ",
@@ -83,6 +90,7 @@
       "endDate": "終了日",
       "filtersTitle": "共通フィルター",
       "filtersSubtitle": "これらのフィルターはレポート内のすべての根拠ブロックに適用されます。",
+      "attainmentFilters": "達成率は目標の範囲全体を使用します。パイプライン、ステータス、タグのフィルターは使用できず、担当者フィルターはワークスペース全体の達成率ブロックがない場合のみ使用できます。",
       "pipelines": "パイプライン",
       "owners": "所有者",
       "statuses": "ステータス",
@@ -129,6 +137,7 @@
       "pngFailed": "このブラウザではPNGを生成できませんでした。",
       "pdf": "印刷 / PDF",
       "rangePairRequired": "開始日と終了日の両方を選択してください。",
+      "attainmentRangeRequired": "目標達成率の期間は暦月または暦四半期の初日から開始し、その期間内に終了する必要があります。",
       "errorTitle": "レポートを生成できませんでした",
       "errorBody": "アクセス権を確認して再試行してください。保存済みスナップショットは上から利用できます。",
       "reportLabel": "ビジネスレビュー",
@@ -145,9 +154,17 @@
       "widgetScope": "{source}・{group}別",
       "currentPeriod": "当期",
       "priorPeriod": "前期",
+      "actual": "実績",
+      "target": "目標",
+      "value": "値",
+      "comparisonValue": "比較",
+      "priorOrTarget": "前期 / 目標",
       "priorCitation": "前期",
+      "targetCitation": "目標",
       "priorValue": "前期 {value}",
+      "targetValue": "目標 {value}",
       "changeValue": "前期比 {value}%",
+      "attainmentValue": "達成率 {value}%",
       "dimension": "区分",
       "noData": "この期間のデータはありません",
       "source": "出典",
@@ -188,7 +205,8 @@
       "single_threaded_deal_value": "単一接点案件金額",
       "forecast_best": "最良ケース予測",
       "forecast_weighted": "見込み予測（加重）",
-      "forecast_worst": "コミット予測"
+      "forecast_worst": "コミット予測",
+      "attainment": "目標達成率"
     },
     "group": {
       "none": "グループ化なし",
@@ -241,7 +259,56 @@
       "total": "合計",
       "unassigned": "未割り当て",
       "unspecified": "未指定",
-      "other": "その他"
+      "other": "その他",
+      "workspaceWide": "ワークスペース全体"
+    },
+    "goals": {
+      "backToReports": "レポートに戻る",
+      "eyebrow": "売上計画",
+      "title": "目標",
+      "subtitle": "担当者別またはワークスペース全体の月次・四半期受注売上目標を設定します。",
+      "readOnly": "このワークスペースの目標を確認できますが、作成や変更は目標管理権限を持つユーザーのみ可能です。",
+      "createGoal": "目標を作成",
+      "createTitle": "売上目標を作成",
+      "editTitle": "売上目標を編集",
+      "formDescription": "実績は同じ期間・通貨の受注売上から算出されます。",
+      "owner": "担当者",
+      "scope": "担当者 / 範囲",
+      "workspaceWide": "ワークスペース全体",
+      "workspaceScope": "ワークスペース目標",
+      "ownerScope": "担当者目標",
+      "periodType": "期間タイプ",
+      "month": "月",
+      "quarter": "四半期",
+      "period": "期間",
+      "metric": "指標",
+      "target": "目標",
+      "currency": "通貨",
+      "targetPlaceholder": "100000.00",
+      "saveChanges": "変更を保存",
+      "created": "目標を作成しました",
+      "updated": "目標を更新しました",
+      "deleted": "目標を削除しました",
+      "deleteTitle": "目標を削除しますか？",
+      "deleteBody": "{scope} の売上目標が完全に削除されます。",
+      "emptyTitle": "売上目標はまだありません",
+      "emptyBody": "月次または四半期レポートに確定的な達成率を追加する目標を作成してください。",
+      "loadErrorTitle": "目標を読み込めませんでした",
+      "loadErrorBody": "ワークスペースの目標を現在利用できません。目標を作成または変更する前に再試行してください。",
+      "ownersLoadError": "ワークスペースメンバーを読み込めなかったため、目標管理を一時的に利用できません。",
+      "tableTitle": "売上目標",
+      "count": "{count}件の目標",
+      "actions": "操作",
+      "editNamed": "{scope} の目標を編集",
+      "deleteNamed": "{scope} の目標を削除",
+      "quarterLabel": "{year}年 第{quarter}四半期",
+      "validation": {
+        "owner": "有効なワークスペースメンバーを選択してください。",
+        "period": "レポート期間を選択してください。",
+        "quarter": "四半期目標は1月、4月、7月、10月に開始する必要があります。",
+        "target": "整数部13桁、小数部2桁以内の0以上の目標を入力してください。",
+        "currency": "通貨は3〜8文字の英字で入力してください。"
+      }
     }
   }
 }

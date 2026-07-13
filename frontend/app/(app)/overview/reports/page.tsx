@@ -5,6 +5,7 @@ import { getTranslations } from 'next-intl/server';
 import ReportsBoard from '@/app/components/reports/ReportsBoard';
 import {
     getCurrentUserFromCookie,
+    getEffectivePermissionsFromCookie,
     getReportsFromCookie,
     getReportTemplatesFromCookie,
 } from '@/app/lib/api';
@@ -19,10 +20,17 @@ export default async function ReportsPage() {
     const user = await getCurrentUserFromCookie(cookie);
     if (!user) redirect('/auth/login');
 
-    const [templates, reports] = await Promise.all([
+    const [templates, reports, effectivePermissions] = await Promise.all([
         getReportTemplatesFromCookie(cookie),
         getReportsFromCookie(cookie),
+        getEffectivePermissionsFromCookie(cookie),
     ]);
 
-    return <ReportsBoard templates={templates} initialReports={reports} />;
+    return (
+        <ReportsBoard
+            templates={templates}
+            initialReports={reports}
+            effectivePermissions={effectivePermissions}
+        />
+    );
 }
