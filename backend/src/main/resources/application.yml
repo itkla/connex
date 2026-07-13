@@ -199,6 +199,10 @@ connex:
         scheduling-enabled: ${CONNEX_RULES_SCHEDULING_ENABLED:true}
         evaluation-delay-ms: ${CONNEX_RULES_EVALUATION_DELAY_MS:900000}
         initial-delay-ms: ${CONNEX_RULES_INITIAL_DELAY_MS:900000}
+    reports:
+        scheduling-enabled: ${CONNEX_REPORTS_SCHEDULING_ENABLED:true}
+        delivery-delay-ms: ${CONNEX_REPORTS_DELIVERY_DELAY_MS:300000}
+        initial-delay-ms: ${CONNEX_REPORTS_INITIAL_DELAY_MS:300000}
     mail:
         # Instance-wide SMTP transport. enabled=true wires the default sender and lets
         # workspace invites be emailed; it is also the transport that the account-level

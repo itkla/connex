@@ -2,7 +2,7 @@
 
 Authoring workspace for Connex's transactional emails. Components here are the
 **source of truth**; they render to inline-styled, email-client-safe HTML under
-`backend/src/main/resources/templates/emails/*.en.html`, which the backend's
+`backend/src/main/resources/templates/emails/*.html`, which the backend's
 `EmailTemplateRenderer` fills in at send time.
 
 This is a standalone package (not part of the Next.js app) so React Email's
@@ -18,6 +18,7 @@ ships to any runtime.
 | `EmailChange.tsx` | `email-change.en.html` | `SmtpEmailChangeEmailService` |
 | `Test.tsx` | `test.en.html` | `WorkspaceMailConfigService#sendTest` |
 | `NotificationEmail.tsx` | `notification.en.html` | `EmailNotificationDispatcher` |
+| `ReportDelivery.tsx` | `report-delivery.en.html`, `report-delivery.ja.html` | `ReportDeliveryScheduler` |
 
 ## Placeholders
 
@@ -48,5 +49,6 @@ re-render and confirm the `{{token}}` markers survived (`grep '{{' ...`).
   deprecation notice; `pnpm audit` reports no vulnerabilities. It remains the
   standard React Email import and is build-only. Revisit if React Email
   consolidates the package.
-- Japanese (`*.ja.html`) variants and per-recipient locale selection are tracked
-  separately — the renderer is already locale-capable but only `en` exists today.
+- Per-recipient locale selection remains future work because user profiles do not
+  currently persist a locale. Scheduled reports include English and Japanese
+  templates, while delivery follows the existing English default.
