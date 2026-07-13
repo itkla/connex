@@ -10,6 +10,7 @@ import {
     EllipsisHorizontalIcon,
     HeartIcon,
     PresentationChartLineIcon,
+    ShieldExclamationIcon,
     SparklesIcon,
     TrashIcon,
     UserGroupIcon,
@@ -40,6 +41,7 @@ const TEMPLATE_ICONS: Record<string, ComponentType<{ className?: string }>> = {
     'sales-performance': ChartBarIcon,
     'pipeline-health': PresentationChartLineIcon,
     'relationship-coverage': HeartIcon,
+    'relationship-health': ShieldExclamationIcon,
     'activity-team': UserGroupIcon,
 };
 
@@ -106,7 +108,7 @@ export default function ReportsBoard({
                             <Link href="/overview/reports/new">{t('landing.startBlank')}</Link>
                         </Button>
                     </div>
-                    <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+                    <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-5">
                         {templates.map((template) => {
                             const Icon = TEMPLATE_ICONS[template.key] ?? PresentationChartLineIcon;
                             return (

@@ -52,6 +52,10 @@
         "name": "関係性カバレッジ",
         "description": "温度分布とアカウントのカバレッジ。"
       },
+      "relationship-health": {
+        "name": "関係性の健全性",
+        "description": "関係性が低下しているアカウント、カバレッジ不足、単一接点に依存する案件リスク。"
+      },
       "activity-team": {
         "name": "活動とチーム",
         "description": "チーム活動とタスク実行状況。"
@@ -172,7 +176,12 @@
       "avg_cycle_days": "平均サイクル日数",
       "open_pipeline_value": "オープンパイプライン金額",
       "open_deal_count": "オープン案件数",
-      "at_risk_revenue": "リスク売上"
+      "at_risk_revenue": "リスク売上",
+      "company_count": "会社数",
+      "coverage_gap_count": "カバレッジ不足の会社数",
+      "coverage_gap_open_pipeline_value": "カバレッジ不足のオープンパイプライン金額",
+      "single_threaded_deal_count": "単一接点案件数",
+      "single_threaded_deal_value": "単一接点案件金額"
     },
     "group": {
       "none": "グループ化なし",
@@ -182,6 +191,7 @@
       "owner": "所有者",
       "status": "ステータス",
       "company": "会社",
+      "deal": "案件",
       "risk": "リスクレベル",
       "activity_type": "活動タイプ",
       "industry": "業界",

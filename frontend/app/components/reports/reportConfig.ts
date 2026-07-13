@@ -29,22 +29,40 @@ export const REPORT_MEASURES: Record<ReportDataSource, ReportMeasure[]> = {
         'open_pipeline_value',
         'open_deal_count',
         'at_risk_revenue',
+        'single_threaded_deal_count',
+        'single_threaded_deal_value',
     ],
     people: ['count'],
-    companies: ['count'],
+    companies: ['count', 'coverage_gap_count', 'coverage_gap_open_pipeline_value'],
     activities: ['count'],
     tasks: ['count'],
-    relationships: ['count'],
+    relationships: ['count', 'company_count'],
 };
 
 export const REPORT_GROUPS: Record<ReportDataSource, ReportGroupBy[]> = {
-    deals: ['none', 'date', 'pipeline', 'stage', 'owner', 'status', 'company'],
+    deals: ['none', 'date', 'pipeline', 'stage', 'owner', 'status', 'company', 'deal'],
     people: ['none', 'company'],
-    companies: ['none', 'industry'],
+    companies: ['none', 'industry', 'company'],
     activities: ['none', 'date', 'activity_type', 'owner'],
     tasks: ['none', 'date', 'status', 'owner'],
     relationships: ['none', 'warmth_band', 'trend'],
 };
+
+export function reportGroupsForMeasure(
+    dataSource: ReportDataSource,
+    measure: ReportMeasure,
+): ReportGroupBy[] {
+    if (measure === 'at_risk_revenue') return ['none', 'risk'];
+    if (measure === 'single_threaded_deal_count' || measure === 'single_threaded_deal_value') {
+        return ['none', 'company', 'deal'];
+    }
+    if (measure === 'coverage_gap_count' || measure === 'coverage_gap_open_pipeline_value') {
+        return ['none', 'company'];
+    }
+    if (dataSource === 'companies') return ['none', 'industry'];
+    if (dataSource === 'deals') return REPORT_GROUPS.deals.filter((group) => group !== 'deal');
+    return REPORT_GROUPS[dataSource];
+}
 
 export function newReportWidget(index: number): ReportWidgetConfig {
     const suffix = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'

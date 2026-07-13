@@ -115,16 +115,18 @@ export default function ReportWidgetRenderer({ widget }: { widget: ReportWidgetD
                 <p className="text-4xl font-semibold tracking-tight text-foreground tabular-nums">
                     {formatReportValue(widget.total, widget.unit, locale)}
                 </p>
-                <div className="mt-3 flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
-                    <span>{t('document.priorValue', { value: formatReportValue(widget.priorTotal, widget.unit, locale) })}</span>
-                    {widget.changePercent != null ? (
-                        <span className={widget.changePercent >= 0 ? 'text-brand-dark' : 'text-destructive'}>
-                            {t('document.changeValue', {
-                                value: new Intl.NumberFormat(locale, { maximumFractionDigits: 1, signDisplay: 'always' }).format(widget.changePercent),
-                            })}
-                        </span>
-                    ) : null}
-                </div>
+                {widget.priorTotal != null ? (
+                    <div className="mt-3 flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
+                        <span>{t('document.priorValue', { value: formatReportValue(widget.priorTotal, widget.unit, locale) })}</span>
+                        {widget.changePercent != null ? (
+                            <span className={widget.changePercent >= 0 ? 'text-brand-dark' : 'text-destructive'}>
+                                {t('document.changeValue', {
+                                    value: new Intl.NumberFormat(locale, { maximumFractionDigits: 1, signDisplay: 'always' }).format(widget.changePercent),
+                                })}
+                            </span>
+                        ) : null}
+                    </div>
+                ) : null}
             </div>
         );
     }
@@ -134,6 +136,7 @@ export default function ReportWidgetRenderer({ widget }: { widget: ReportWidgetD
     }
 
     if (widget.chartType === 'table') {
+        const showPrior = data.some((point) => point.prior != null);
         return (
             <div className="overflow-x-auto">
                 <table className="w-full text-left text-sm">
@@ -141,7 +144,9 @@ export default function ReportWidgetRenderer({ widget }: { widget: ReportWidgetD
                         <tr>
                             <th className="px-3 py-2 font-medium">{t('document.dimension')}</th>
                             <th className="px-3 py-2 text-right font-medium">{t('document.currentPeriod')}</th>
-                            <th className="px-3 py-2 text-right font-medium">{t('document.priorPeriod')}</th>
+                            {showPrior ? (
+                                <th className="px-3 py-2 text-right font-medium">{t('document.priorPeriod')}</th>
+                            ) : null}
                         </tr>
                     </thead>
                     <tbody className="divide-y divide-border">
@@ -151,9 +156,11 @@ export default function ReportWidgetRenderer({ widget }: { widget: ReportWidgetD
                                 <td className="px-3 py-2.5 text-right tabular-nums text-foreground">
                                     {formatReportValue(point.current, widget.unit, locale)}
                                 </td>
-                                <td className="px-3 py-2.5 text-right tabular-nums text-muted-foreground">
-                                    {formatReportValue(point.prior, widget.unit, locale)}
-                                </td>
+                                {showPrior ? (
+                                    <td className="px-3 py-2.5 text-right tabular-nums text-muted-foreground">
+                                        {formatReportValue(point.prior, widget.unit, locale)}
+                                    </td>
+                                ) : null}
                             </tr>
                         ))}
                     </tbody>
