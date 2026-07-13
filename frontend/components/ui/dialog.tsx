@@ -84,7 +84,7 @@ function DialogContent({
             origin.clientY <= rect.bottom
           const withinPortaledPopup = Boolean(
             target?.closest(
-              "[data-slot='combobox-content'],[data-slot='autocomplete-content']"
+              "[data-slot='combobox-content'],[data-slot='autocomplete-content'],[data-slot='editor-suggestion']"
             )
           )
           if (withinContentBounds || withinPortaledPopup) {

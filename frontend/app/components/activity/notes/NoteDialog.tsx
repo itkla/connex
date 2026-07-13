@@ -210,7 +210,9 @@ function NoteDialogForm({
                         <Label htmlFor="note-content">{t('contentLabel')}</Label>
                         <div
                             id="note-content"
+                            tabIndex={-1}
                             aria-invalid={fieldErrors.content ? true : undefined}
+                            aria-describedby={fieldErrors.content ? 'note-content-error' : undefined}
                             className={cn(
                                 'overflow-hidden rounded-xl border bg-background transition-[box-shadow,border-color] focus-within:ring-2 focus-within:ring-brand/60',
                                 fieldErrors.content
