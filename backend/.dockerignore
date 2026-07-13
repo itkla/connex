@@ -1,0 +1,13 @@
+.git
+.gradle
+build
+bin
+out
+*.log
+.env
+.env.*
+docker-compose.yml
+Dockerfile
+.dockerignore
+AGENTS.md
+CLAUDE.md

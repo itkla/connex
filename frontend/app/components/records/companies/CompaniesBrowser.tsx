@@ -349,14 +349,16 @@ export default function CompaniesBrowser({ savedViews }: { savedViews: SavedView
             });
     }, [metricsStatusByCompanyId, t]);
 
+    const openNewDialog = () => {
+        setNewPayload(emptyDraft);
+        setLogoFile(null);
+        setPendingContacts([]);
+        setCreationSucceeded(false);
+        setNewDialogOpen(true);
+    };
+
     const closeNewDialog = (open: boolean) => {
         setNewDialogOpen(open);
-        if (!open) {
-            setNewPayload(emptyDraft);
-            setLogoFile(null);
-            setPendingContacts([]);
-            setCreationSucceeded(false);
-        }
     };
 
     const createNewCompany = async () => {
@@ -640,7 +642,7 @@ export default function CompaniesBrowser({ savedViews }: { savedViews: SavedView
                         <div className="flex items-center gap-2">
                             <RecordsActions
                                 entity="companies"
-                                onNew={() => setNewDialogOpen(true)}
+                                onNew={openNewDialog}
                                 newLabel={t('new')}
                                 newAriaLabel={t('addCompanyAriaLabel')}
                                 onImported={refresh}

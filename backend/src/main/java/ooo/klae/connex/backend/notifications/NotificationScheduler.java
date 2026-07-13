@@ -8,10 +8,14 @@ import org.springframework.stereotype.Component;
 
 import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.mappers.NotificationMapper;
+import ooo.klae.connex.backend.tenant.TenantWorkScope;
 import ooo.klae.connex.backend.services.NotificationReconciliationService;
 
 /**
  * Runs reconciliation per explicit workspace without an authentication context.
+ * Workspace enumeration reads the control-plane {@code workspace} table (which
+ * only exists on the default catalog), so it runs unrouted — no catalog
+ * fan-out; {@code inWorkspace} then pins each workspace's own catalog.
  */
 @Component
 @RequiredArgsConstructor
@@ -25,6 +29,7 @@ public class NotificationScheduler {
     private static final Logger log = LoggerFactory.getLogger(NotificationScheduler.class);
 
     private final NotificationMapper notificationMapper;
+    private final TenantWorkScope tenantWorkScope;
     private final NotificationReconciliationService reconciliationService;
 
     @Scheduled(
@@ -32,10 +37,12 @@ public class NotificationScheduler {
         initialDelayString = "${connex.notifications.initial-delay-ms:300000}"
     )
     public void reconcileAndPurge() {
-        for (Integer workspaceId : notificationMapper.findWorkspaceIds()) {
+        for (Integer workspaceId : tenantWorkScope.unrouted(notificationMapper::findWorkspaceIds)) {
             try {
-                reconciliationService.reconcileWorkspace(workspaceId, true);
-                reconciliationService.purgeWorkspace(workspaceId);
+                tenantWorkScope.inWorkspace(workspaceId, () -> {
+                    reconciliationService.reconcileWorkspace(workspaceId, true);
+                    reconciliationService.purgeWorkspace(workspaceId);
+                });
             } catch (Exception exception) {
                 log.error("Scheduled notification reconciliation failed for workspace={}", workspaceId, exception);
             }

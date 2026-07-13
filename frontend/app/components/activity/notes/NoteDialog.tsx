@@ -8,14 +8,14 @@ import { Loader2Icon } from 'lucide-react';
 import { Bars3BottomLeftIcon, UserIcon, BriefcaseIcon } from '@heroicons/react/24/outline';
 
 import {
-    Dialog,
-    DialogContent,
-    DialogHeader,
-    DialogTitle,
-    DialogDescription,
-    DialogFooter,
-    DialogClose,
-} from '@/components/ui/dialog';
+    ResponsiveDialog,
+    ResponsiveDialogContent,
+    ResponsiveDialogHeader,
+    ResponsiveDialogTitle,
+    ResponsiveDialogDescription,
+    ResponsiveDialogFooter,
+    ResponsiveDialogClose,
+} from '@/components/ui/responsive-dialog';
 import {
     Combobox,
     ComboboxContent,
@@ -66,10 +66,18 @@ export default function NoteDialog({
         onOpenChange(next);
     };
 
+    const [prevOpen, setPrevOpen] = useState(open);
+    const [openCount, setOpenCount] = useState(0);
+    if (open !== prevOpen) {
+        setPrevOpen(open);
+        if (open) setOpenCount((count) => count + 1);
+    }
+
     return (
-        <Dialog open={open} onOpenChange={handleOpenChange}>
-            <DialogContent className="gap-0 overflow-hidden p-0 sm:max-w-lg">
+        <ResponsiveDialog open={open} onOpenChange={handleOpenChange}>
+            <ResponsiveDialogContent className="gap-0 overflow-hidden p-0 sm:max-w-lg">
                 <NoteDialogForm
+                    key={openCount}
                     note={note}
                     persons={persons}
                     deals={deals}
@@ -82,8 +90,8 @@ export default function NoteDialog({
                     }}
                     onClose={() => onOpenChange(false)}
                 />
-            </DialogContent>
-        </Dialog>
+            </ResponsiveDialogContent>
+        </ResponsiveDialog>
     );
 }
 
@@ -192,10 +200,10 @@ function NoteDialogForm({
             <DialogStatusCover status={status} />
 
             <div className="px-6 pb-6">
-                <DialogHeader className="ncd-rise -mt-12" style={{ animationDelay: '40ms' }}>
-                    <DialogTitle className="text-xl font-semibold tracking-tight">{isEdit ? t('titleEdit') : t('titleCreate')}</DialogTitle>
-                    <DialogDescription>{t('description')}</DialogDescription>
-                </DialogHeader>
+                <ResponsiveDialogHeader className="ncd-rise -mt-12" style={{ animationDelay: '40ms' }}>
+                    <ResponsiveDialogTitle className="text-xl font-semibold tracking-tight">{isEdit ? t('titleEdit') : t('titleCreate')}</ResponsiveDialogTitle>
+                    <ResponsiveDialogDescription>{t('description')}</ResponsiveDialogDescription>
+                </ResponsiveDialogHeader>
 
                 <form onSubmit={handleSubmit} className="grid gap-5">
                     <div className="ncd-rise grid gap-1.5" style={{ animationDelay: '90ms' }}>
@@ -281,12 +289,12 @@ function NoteDialogForm({
                         </div>
                     </div>
 
-                    <DialogFooter className="ncd-rise" style={{ animationDelay: '190ms' }}>
-                        <DialogClose asChild>
+                    <ResponsiveDialogFooter className="ncd-rise" style={{ animationDelay: '190ms' }}>
+                        <ResponsiveDialogClose asChild>
                             <Button type="button" variant="outline" disabled={submitting}>
                                 {t('cancel')}
                             </Button>
-                        </DialogClose>
+                        </ResponsiveDialogClose>
                         <Button
                             type="submit"
                             variant="brand"
@@ -301,7 +309,7 @@ function NoteDialogForm({
                                 t('create')
                             )}
                         </Button>
-                    </DialogFooter>
+                    </ResponsiveDialogFooter>
                 </form>
             </div>
         </>

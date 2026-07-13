@@ -8,6 +8,7 @@ import org.springframework.transaction.event.TransactionPhase;
 import org.springframework.transaction.event.TransactionalEventListener;
 
 import lombok.RequiredArgsConstructor;
+import ooo.klae.connex.backend.tenant.TenantWorkScope;
 
 /**
  * Runs entity-change rules after the triggering mutation commits, off the request thread. Mirrors the
@@ -19,13 +20,15 @@ import lombok.RequiredArgsConstructor;
 public class RuleTriggerListener {
 
     private final RuleEngineService ruleEngineService;
+    private final TenantWorkScope tenantWorkScope;
     private static final Logger log = LoggerFactory.getLogger(RuleTriggerListener.class);
 
     @Async
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT, fallbackExecution = true)
     public void onTrigger(RuleTriggerEvent event) {
         try {
-            ruleEngineService.onEntityChange(event.workspaceId(), event.recordType(), event.entityId(), event.event());
+            tenantWorkScope.inWorkspace(event.workspaceId(), () ->
+                ruleEngineService.onEntityChange(event.workspaceId(), event.recordType(), event.entityId(), event.event()));
         } catch (Exception e) {
             log.warn("Rule engine failed for {} {} {}: {}", event.recordType(), event.entityId(), event.event(), e.getMessage());
         }

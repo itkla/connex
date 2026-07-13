@@ -21,6 +21,7 @@ import ooo.klae.connex.backend.mappers.DealMapper;
 import ooo.klae.connex.backend.mappers.IntroductionMapper;
 import ooo.klae.connex.backend.mappers.NoteMapper;
 import ooo.klae.connex.backend.mappers.NotificationMapper;
+import ooo.klae.connex.backend.mappers.ReportMapper;
 import ooo.klae.connex.backend.mappers.RuleMapper;
 import ooo.klae.connex.backend.mappers.SavedViewMapper;
 import ooo.klae.connex.backend.mappers.ShareMapper;
@@ -37,6 +38,7 @@ class UserOffboardingOrderTest {
     @Mock private IntroductionMapper introductionMapper;
     @Mock private NotificationMapper notificationMapper;
     @Mock private DealMapper dealMapper;
+    @Mock private ReportMapper reportMapper;
     @Mock private TaskMapper taskMapper;
     @Mock private AttachmentMapper attachmentMapper;
     @Mock private RuleMapper ruleMapper;

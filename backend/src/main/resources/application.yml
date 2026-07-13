@@ -87,16 +87,14 @@ connex:
             # an org whose placement row demands routing is refused with 503 rather than
             # silently served from shared storage. 'catalog-per-placement' switches the
             # pooled connection to the org's database_handle at checkout and resets it on
-            # return. DO NOT enable catalog-per-placement in production until the
-            # control-plane split increment (#440) lands AND off-request-thread work
-            # (@Async rule triggers, @Scheduled rule/notification jobs) resolves the org
-            # catalog — those paths currently run on the shared catalog.
+            # return. Off-request-thread work (@Async rule triggers, @Scheduled
+            # rule/notification jobs) resolves the org catalog via TenantWorkScope and
+            # the schedulers fan out over every active catalog. DO NOT enable
+            # catalog-per-placement in production until the remaining flag-enable gate
+            # (#485) clears.
             mode: ${CONNEX_TENANCY_ROUTING_MODE:single-database}
             # Control-plane/default catalog; required when mode=catalog-per-placement.
             default-catalog: ${CONNEX_TENANCY_ROUTING_DEFAULT_CATALOG:}
-            # How long a per-org placement lookup is cached on the request path.
-            # Placement writes must invalidate (PlacementRegistry.invalidate).
-            placement-cache-ttl: ${CONNEX_TENANCY_ROUTING_PLACEMENT_CACHE_TTL:30s}
     security:
         # CSRF protection for state-changing requests. The SPA fetches the token from
         # GET /api/auth/csrf and echoes it in the X-XSRF-TOKEN header. Kill-switch for cutover.
@@ -206,6 +204,10 @@ connex:
         # Settings → Email; its SMTP password is stored in the central secret store.
         # app-base-url is the frontend origin used to build invite links (never a request header).
         enabled: ${CONNEX_MAIL_ENABLED:false}
+        # When true, per-workspace SMTP overrides are disabled and the instance transport
+        # (enabled + host/from below) is authoritative for all workspace mail; if the instance
+        # transport is left unconfigured, workspace mail is disabled entirely.
+        managed: ${CONNEX_MAIL_MANAGED:false}
         host: ${CONNEX_MAIL_HOST:}
         port: ${CONNEX_MAIL_PORT:587}
         username: ${CONNEX_MAIL_USERNAME:}

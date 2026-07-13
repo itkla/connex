@@ -18,7 +18,7 @@ class TenantScopeInterceptorTest {
     private static final String NS = "ooo.klae.connex.backend.mappers.";
 
     private final TenantContext tenantContext = new TenantContext();
-    private final TenantScopeInterceptor interceptor = new TenantScopeInterceptor(tenantContext, true);
+    private final TenantScopeInterceptor interceptor = new TenantScopeInterceptor(tenantContext, true, false);
 
     @AfterEach
     void tearDown() {
@@ -27,9 +27,27 @@ class TenantScopeInterceptorTest {
     }
 
     @Test
+    void routedModeRequiresACatalogScopeOffTheRequestThread() {
+        TenantScopeInterceptor routed = new TenantScopeInterceptor(tenantContext, true, true);
+
+        assertThrows(IllegalStateException.class,
+            () -> routed.enforce(NS + "CompanyMapper.getAllCompanies"),
+            "an off-thread scoped statement with no catalog scope must fail loudly when routing is enabled");
+
+        tenantContext.swapCatalogOverride(java.util.Optional.of("cnx_a"));
+        try {
+            routed.enforce(NS + "CompanyMapper.getAllCompanies");
+        } finally {
+            tenantContext.swapCatalogOverride(null);
+        }
+        routed.enforce(NS + "WorkspaceMapper.getRole");
+    }
+
+    @Test
     void scopedStatementsRequireResolvedContext() {
         assertTrue(interceptor.requiresResolvedContext(NS + "CompanyMapper.getAllCompanies"));
         assertTrue(interceptor.requiresResolvedContext(NS + "DealMapper.search"));
+        assertTrue(interceptor.requiresResolvedContext(NS + "ReportMapper.getDefinitions"));
         assertTrue(interceptor.requiresResolvedContext(NS + "NotificationMapper.findPage"));
         assertTrue(interceptor.requiresResolvedContext(NS + "AuditLogMapper.findRecent"));
     }
@@ -44,6 +62,8 @@ class TenantScopeInterceptorTest {
         assertFalse(interceptor.requiresResolvedContext(NS + "NotificationMapper.lockRecipientMemberships"));
         assertFalse(interceptor.requiresResolvedContext(NS + "NotificationMapper.findRecipientIdsByActor"));
         assertFalse(interceptor.requiresResolvedContext(NS + "NotificationMapper.lockRecipientIdsByActor"));
+        assertFalse(interceptor.requiresResolvedContext(NS + "ReportMapper.clearDefinitionCreatorsAnywhere"));
+        assertFalse(interceptor.requiresResolvedContext(NS + "ReportMapper.clearSnapshotGeneratorsAnywhere"));
     }
 
     @Test

@@ -81,7 +81,7 @@ function useSections(): NavSection[] {
                 { label: t("navIntroductions"), href: "/overview/introductions", icon: ArrowsRightLeftIcon, disabled: false },
                 { label: t("navAnalytics"), href: "/overview/analytics", icon: ChartBarIcon, disabled: false },
                 // { label: t("navInsights"), href: "/overview/insights", icon: ChartPieIcon, disabled: true },
-                { label: t("navReports"), href: "/overview/reports", icon: PresentationChartLineIcon, disabled: true }
+                { label: t("navReports"), href: "/overview/reports", icon: PresentationChartLineIcon }
             ]
         },
         {

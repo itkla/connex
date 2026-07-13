@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.time.LocalDate;
 import java.util.List;
 
 import org.junit.jupiter.api.Test;
@@ -13,6 +14,8 @@ import org.springframework.beans.factory.annotation.Autowired;
 import ooo.klae.connex.backend.beans.Company;
 import ooo.klae.connex.backend.beans.Deal;
 import ooo.klae.connex.backend.beans.Pipeline;
+import ooo.klae.connex.backend.beans.ReportDefinition;
+import ooo.klae.connex.backend.beans.ReportSnapshot;
 import ooo.klae.connex.backend.beans.Rule;
 import ooo.klae.connex.backend.beans.SavedView;
 import ooo.klae.connex.backend.beans.Stage;
@@ -21,6 +24,7 @@ import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.beans.UserDashboard;
 import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.mappers.NotificationMapper;
+import ooo.klae.connex.backend.mappers.ReportMapper;
 import ooo.klae.connex.backend.mappers.RuleMapper;
 import ooo.klae.connex.backend.mappers.SavedViewMapper;
 import ooo.klae.connex.backend.mappers.UserDashboardMapper;
@@ -38,6 +42,7 @@ class UserOffboardingServiceTest extends AbstractServiceTest {
     @Autowired private NotificationMapper notificationMapper;
     @Autowired private SavedViewMapper savedViewMapper;
     @Autowired private UserDashboardMapper userDashboardMapper;
+    @Autowired private ReportMapper reportMapper;
     @Autowired private RuleMapper ruleMapper;
 
     @Test
@@ -75,6 +80,8 @@ class UserOffboardingServiceTest extends AbstractServiceTest {
         userDashboardMapper.upsert(dashboard(target));
         newNotification(workspace.getId(), target.getId());
         Rule rule = ruleFor(target);
+        ReportDefinition reportDefinition = reportDefinitionFor(target);
+        ReportSnapshot reportSnapshot = reportSnapshotFor(reportDefinition, target);
 
         offboardingService.eraseOrgDataReferences(target.getId());
 
@@ -87,6 +94,9 @@ class UserOffboardingServiceTest extends AbstractServiceTest {
         Rule after = ruleMapper.getById(workspace.getId(), rule.getId());
         assertNull(after.getRunAsUserId());
         assertNull(after.getCreatedById());
+        assertNull(reportMapper.getDefinition(workspace.getId(), reportDefinition.getId()).getCreatedBy());
+        assertNull(reportMapper.getSnapshot(
+            workspace.getId(), reportDefinition.getId(), reportSnapshot.getId()).getGeneratedBy());
         assertEquals(target.getDisplayName(), userMapper.getUserById(target.getId()).getDisplayName());
     }
 
@@ -141,5 +151,28 @@ class UserOffboardingServiceTest extends AbstractServiceTest {
         rule.setCreatedById(user.getId());
         ruleMapper.insert(rule);
         return rule;
+    }
+
+    private ReportDefinition reportDefinitionFor(User user) {
+        ReportDefinition definition = new ReportDefinition();
+        definition.setWorkspaceId(workspace.getId());
+        definition.setName("Report " + unique());
+        definition.setCadence("monthly");
+        definition.setConfigJson("{\"widgets\":[]}");
+        definition.setCreatedBy(user.getId());
+        reportMapper.insertDefinition(definition);
+        return definition;
+    }
+
+    private ReportSnapshot reportSnapshotFor(ReportDefinition definition, User user) {
+        ReportSnapshot snapshot = new ReportSnapshot();
+        snapshot.setWorkspaceId(workspace.getId());
+        snapshot.setReportDefinitionId(definition.getId());
+        snapshot.setPeriodStart(LocalDate.of(2026, 6, 1));
+        snapshot.setPeriodEnd(LocalDate.of(2026, 6, 30));
+        snapshot.setComputedResult("{}");
+        snapshot.setGeneratedBy(user.getId());
+        reportMapper.insertSnapshot(snapshot);
+        return snapshot;
     }
 }

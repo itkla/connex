@@ -66,6 +66,54 @@
   --radius-4xl: calc(var(--radius) * 2.6);
 }
 
+@media print {
+  body {
+    background: white;
+  }
+
+  .report-controls,
+  #app-sidebar,
+  [data-app-toolbar] {
+    display: none;
+  }
+
+  [data-app-shell],
+  [data-app-main] {
+    display: block;
+    height: auto;
+    overflow: visible;
+    padding: 0;
+  }
+
+  .report-page {
+    background: white;
+    padding: 0;
+  }
+
+  .report-paper {
+    --background: oklch(1 0 0);
+    --foreground: oklch(0.145 0 0);
+    --card: oklch(1 0 0);
+    --card-foreground: oklch(0.145 0 0);
+    --muted: oklch(0.97 0 0);
+    --muted-foreground: oklch(0.556 0 0);
+    --border: oklch(0.922 0 0);
+    --chart-grid: var(--border);
+    color-scheme: light;
+    max-width: none;
+    background: var(--card);
+    color: var(--foreground);
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+    padding: 0;
+  }
+
+  .report-paper section {
+    break-inside: avoid;
+  }
+}
+
 @theme {
   --color-brand: #73d200;
   --color-brand-foreground: oklch(0.205 0 0);

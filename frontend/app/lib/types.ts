@@ -1020,6 +1020,189 @@ export type DashboardLayoutResponse = {
     updatedAt?: string | null;
 };
 
+export type ReportCadence = "weekly" | "monthly" | "quarterly" | "custom";
+
+export type ReportBucket = "day" | "week" | "month";
+
+export type ReportChartType = "bar" | "line-area" | "donut" | "funnel" | "table" | "kpi";
+
+export type ReportDataSource = "deals" | "people" | "companies" | "activities" | "tasks" | "relationships";
+
+export type ReportMeasure =
+    | "count"
+    | "new_pipeline_value"
+    | "won_revenue"
+    | "win_rate"
+    | "avg_cycle_days"
+    | "open_pipeline_value"
+    | "open_deal_count"
+    | "at_risk_revenue";
+
+export type ReportGroupBy =
+    | "none"
+    | "date"
+    | "pipeline"
+    | "stage"
+    | "owner"
+    | "status"
+    | "company"
+    | "risk"
+    | "activity_type"
+    | "industry"
+    | "warmth_band"
+    | "trend";
+
+export type ReportRange = {
+    start: string;
+    end: string;
+};
+
+export type ReportFilters = {
+    pipelineIds: number[] | null;
+    ownerIds: number[] | null;
+    statuses: string[] | null;
+    tagIds: number[] | null;
+    warmthBands: string[] | null;
+};
+
+export type ReportWidgetConfig = {
+    id: string;
+    title: string | null;
+    dataSource: ReportDataSource;
+    measure: ReportMeasure;
+    groupBy: ReportGroupBy | null;
+    chartType: ReportChartType;
+};
+
+export type ReportLayoutItem = {
+    widgetId: string;
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+};
+
+export type ReportConfig = {
+    widgets: ReportWidgetConfig[];
+    filters: ReportFilters | null;
+    range: ReportRange | null;
+    bucket: ReportBucket;
+    layout: ReportLayoutItem[];
+};
+
+export type ReportDefinitionInput = {
+    name: string;
+    description: string | null;
+    cadence: ReportCadence;
+    templateKey: string | null;
+    config: ReportConfig;
+};
+
+export type ReportDefinition = ReportDefinitionInput & {
+    id: number;
+    createdBy: number | null;
+    createdAt: string;
+    updatedAt: string;
+};
+
+export type ReportTemplate = {
+    key: string;
+    name: string;
+    description: string;
+    cadence: ReportCadence;
+    config: ReportConfig;
+};
+
+export type ReportGenerateInput = {
+    start?: string | null;
+    end?: string | null;
+};
+
+export type ReportDataPoint = {
+    key: string;
+    label: string;
+    value: number;
+    priorValue: number | null;
+    sourceId: string;
+};
+
+export type ReportWidgetData = {
+    widgetId: string;
+    title: string;
+    chartType: ReportChartType;
+    dataSource: ReportDataSource;
+    measure: ReportMeasure;
+    groupBy: ReportGroupBy | null;
+    unit: string | null;
+    total: number | null;
+    priorTotal: number | null;
+    changePercent: number | null;
+    points: ReportDataPoint[];
+};
+
+export type ReportAppendixRow = {
+    sourceId: string;
+    widgetId: string;
+    label: string;
+    value: number;
+    priorValue: number | null;
+    unit: string | null;
+};
+
+export type ReportCitation = {
+    sourceId: string;
+    widgetId: string;
+    label: string;
+    value: number;
+    priorValue: number | null;
+    unit: string | null;
+};
+
+export type ReportNarrativeClaim = {
+    text: string;
+    sourceIds: string[];
+};
+
+export type ReportNarrativeSection = {
+    title: string;
+    claims: ReportNarrativeClaim[];
+};
+
+export type ReportNarrative = {
+    available: boolean;
+    sections: ReportNarrativeSection[];
+    findings: ReportNarrativeClaim[];
+    reason: string | null;
+    generatedAt: string | null;
+    warnings: number;
+};
+
+export type ReportDocument = {
+    definition: ReportDefinition;
+    periodStart: string;
+    periodEnd: string;
+    priorPeriodStart: string;
+    priorPeriodEnd: string;
+    narrative: ReportNarrative;
+    widgets: ReportWidgetData[];
+    appendix: ReportAppendixRow[];
+    citations: ReportCitation[];
+    generatedAt: string;
+};
+
+export type ReportSnapshotSummary = {
+    id: number;
+    reportDefinitionId: number;
+    periodStart: string;
+    periodEnd: string;
+    generatedBy: number | null;
+    generatedAt: string;
+};
+
+export type ReportSnapshot = ReportSnapshotSummary & {
+    computedResult: ReportDocument;
+};
+
 export type UpdateContactPayload = {
     name?: string;
     email?: string;

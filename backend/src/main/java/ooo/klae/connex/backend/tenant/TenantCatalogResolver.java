@@ -1,9 +1,5 @@
 package ooo.klae.connex.backend.tenant;
 
-import java.util.Locale;
-import java.util.Set;
-import java.util.regex.Pattern;
-
 import org.springframework.stereotype.Component;
 
 import lombok.RequiredArgsConstructor;
@@ -24,10 +20,6 @@ import ooo.klae.connex.backend.services.PlacementRegistry;
 @Component
 @RequiredArgsConstructor
 public class TenantCatalogResolver {
-
-    private static final Pattern DATABASE_HANDLE = Pattern.compile("^[A-Za-z0-9_]{1,64}$");
-    private static final Set<String> RESERVED_CATALOGS = Set.of(
-        "information_schema", "mysql", "performance_schema", "sys");
 
     private final PlacementRegistry placementRegistry;
     private final TenantRoutingProperties properties;
@@ -61,18 +53,10 @@ public class TenantCatalogResolver {
                 "Organization " + orgId + " requires placement routing this deployment does not provide");
         }
         String handle = placement.getDatabaseHandle();
-        if (handle == null || !DATABASE_HANDLE.matcher(handle).matches() || isReserved(handle)) {
+        if (!DatabaseHandles.servable(handle, properties.getDefaultCatalog())) {
             throw new ServiceUnavailableException(
                 "Organization " + orgId + " has an invalid placement database handle");
         }
         return handle;
-    }
-
-    private boolean isReserved(String handle) {
-        if (RESERVED_CATALOGS.contains(handle.toLowerCase(Locale.ROOT))) {
-            return true;
-        }
-        String defaultCatalog = properties.getDefaultCatalog();
-        return defaultCatalog != null && handle.equalsIgnoreCase(defaultCatalog);
     }
 }

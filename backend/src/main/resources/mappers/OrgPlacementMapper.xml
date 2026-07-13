@@ -56,4 +56,11 @@
        #{kmsProvider}, #{kmsKeyRef}, #{kmsKeyRegion}, #{revocationSupported}, #{revocationEffect},
        #{backupEncryptionMode}, #{snapshotCopyPolicy}, #{restoreValidationState}, #{evidenceCheckedAt})
   </insert>
+  <select id="distinctDedicatedHandles" resultType="string">
+    SELECT DISTINCT database_handle
+    FROM org_placement
+    WHERE placement_mode = 'dedicated_database' AND database_handle IS NOT NULL
+    ORDER BY database_handle
+  </select>
+
 </mapper>

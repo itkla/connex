@@ -1,0 +1,230 @@
+{
+  "Reports": {
+    "metadata": {
+      "title": "レポート",
+      "description": "ワークスペースのデータに基づくビジネスレポート",
+      "newTitle": "新規レポート",
+      "newDescription": "カスタムビジネスレポートを作成",
+      "editTitle": "レポートを編集",
+      "editDescription": "レポート定義を更新",
+      "documentTitle": "レポート",
+      "documentDescription": "生成されたビジネスレポート"
+    },
+    "common": {
+      "cancel": "キャンセル",
+      "delete": "削除",
+      "deleting": "削除中…",
+      "edit": "編集",
+      "retry": "再試行",
+      "saving": "保存中…",
+      "requestFailed": "リクエストを完了できませんでした。"
+    },
+    "landing": {
+      "eyebrow": "ワークスペースインテリジェンス",
+      "title": "レポート",
+      "subtitle": "確定的なCRM数値を、グラフ、推奨事項、データ付録、追跡可能な出典を備えたレビュー用の文章に変換します。",
+      "newReport": "新規レポート",
+      "templatesTitle": "実績ある構成から開始",
+      "templatesSubtitle": "すべてのテンプレートに根拠付きの文章が含まれ、共有前に調整できます。",
+      "startBlank": "空白から開始",
+      "useTemplate": "テンプレートを使用",
+      "savedTitle": "保存済みレポート",
+      "savedSubtitle": "このワークスペースで共有されているレポート定義です。",
+      "emptyTitle": "保存済みレポートはありません",
+      "emptyBody": "上のテンプレートを選ぶか、空白のレポートから最初のレポートを作成してください。",
+      "noDescription": "説明なし",
+      "updated": "{date} に更新",
+      "actions": "{name} の操作",
+      "deleteTitle": "レポートを削除しますか？",
+      "deleteBody": "{name} とすべての凍結スナップショットが完全に削除されます。",
+      "deleted": "{name} を削除しました"
+    },
+    "templates": {
+      "sales-performance": {
+        "name": "営業パフォーマンス",
+        "description": "売上、勝率、新規パイプラインの推移。"
+      },
+      "pipeline-health": {
+        "name": "パイプライン健全性",
+        "description": "オープンパイプライン、ステージ網羅率、関係性リスク。"
+      },
+      "relationship-coverage": {
+        "name": "関係性カバレッジ",
+        "description": "温度分布とアカウントのカバレッジ。"
+      },
+      "activity-team": {
+        "name": "活動とチーム",
+        "description": "チーム活動とタスク実行状況。"
+      }
+    },
+    "builder": {
+      "newEyebrow": "レポートビルダー",
+      "editEyebrow": "レポート設定",
+      "newTitle": "レポートを作成",
+      "editTitle": "レポートを編集",
+      "subtitle": "根拠を選び、キャンバスを整え、得られた数値だけに基づく文章を作成します。",
+      "save": "レポートを保存",
+      "detailsTitle": "レポート詳細",
+      "name": "名前",
+      "namePlaceholder": "月次ビジネスレビュー",
+      "description": "説明",
+      "descriptionPlaceholder": "このレポートでチームが判断すべきことは何ですか？",
+      "cadence": "周期",
+      "bucket": "時間単位",
+      "startDate": "開始日",
+      "endDate": "終了日",
+      "filtersTitle": "共通フィルター",
+      "filtersSubtitle": "これらのフィルターはレポート内のすべての根拠ブロックに適用されます。",
+      "pipelines": "パイプライン",
+      "owners": "所有者",
+      "statuses": "ステータス",
+      "tags": "タグ",
+      "warmth": "温度帯",
+      "canvasTitle": "根拠キャンバス",
+      "canvasSubtitle": "ドラッグして並べ替えます。幅は最終文書内の配置を決めます。",
+      "addWidget": "根拠ブロックを追加",
+      "widgetTitle": "根拠ブロックのタイトル",
+      "dataSource": "データソース",
+      "measure": "指標",
+      "groupBy": "グループ化",
+      "chartType": "表示形式",
+      "previewDescription": "{measure}（{group}別）",
+      "halfWidth": "半幅にする",
+      "fullWidth": "全幅にする",
+      "removeWidget": "根拠ブロックを削除",
+      "nameRequired": "保存する前にレポート名を入力してください。",
+      "rangeRequired": "カスタムレポートには開始日と終了日の両方が必要です。",
+      "created": "レポートを作成しました",
+      "updated": "レポートを更新しました",
+      "dragInstructions": "スペースキーで根拠ブロックを持ち上げ、矢印キーで移動し、スペースキーで配置します。",
+      "dragHandle": "{name} をドラッグして並べ替え",
+      "dragLifted": "{name} を持ち上げました",
+      "dragOver": "{name} は {target} の上にあります",
+      "dragDropped": "{name} を {target} の前に配置しました",
+      "dragCancelled": "{name} の移動をキャンセルしました"
+    },
+    "document": {
+      "run": "レポートを実行",
+      "regenerateNarrative": "文章を更新",
+      "snapshot": "スナップショット",
+      "snapshotting": "スナップショットを保存中…",
+      "snapshotCreated": "スナップショットを作成しました",
+      "snapshotDeleted": "スナップショットを削除しました",
+      "snapshots": "凍結スナップショット",
+      "live": "ライブレポート",
+      "deleteSnapshot": "スナップショットを削除",
+      "deleteSnapshotNamed": "{date}のスナップショットを削除",
+      "deleteSnapshotConfirm": "この確定スナップショットを削除しますか？この操作は元に戻せません。",
+      "csv": "CSV",
+      "png": "PNG",
+      "exportingPng": "PNGを生成中…",
+      "pngFailed": "このブラウザではPNGを生成できませんでした。",
+      "pdf": "印刷 / PDF",
+      "rangePairRequired": "開始日と終了日の両方を選択してください。",
+      "errorTitle": "レポートを生成できませんでした",
+      "errorBody": "アクセス権を確認して再試行してください。保存済みスナップショットは上から利用できます。",
+      "reportLabel": "ビジネスレビュー",
+      "period": "レポート期間",
+      "comparison": "比較対象",
+      "executiveSummary": "エグゼクティブサマリー",
+      "findings": "所見と推奨事項",
+      "narrativeUnavailable": "文章を利用できません",
+      "narrativeUnavailableBody": "確定的な数値と出典付録は完全な状態で確認できます。",
+      "figures": "根拠と数値",
+      "appendix": "データ付録",
+      "citations": "出典",
+      "generatedBy": "Connexがワークスペースの確定的な数値から生成",
+      "widgetScope": "{source}・{group}別",
+      "currentPeriod": "当期",
+      "priorPeriod": "前期",
+      "priorCitation": "前期",
+      "priorValue": "前期 {value}",
+      "changeValue": "前期比 {value}%",
+      "dimension": "区分",
+      "noData": "この期間のデータはありません",
+      "source": "出典",
+      "metric": "指標"
+    },
+    "cadence": {
+      "weekly": "週次",
+      "monthly": "月次",
+      "quarterly": "四半期",
+      "custom": "カスタム期間"
+    },
+    "bucket": {
+      "day": "日",
+      "week": "週",
+      "month": "月"
+    },
+    "source": {
+      "deals": "案件",
+      "people": "人物",
+      "companies": "会社",
+      "activities": "活動",
+      "tasks": "タスク",
+      "relationships": "関係性"
+    },
+    "measure": {
+      "count": "件数",
+      "new_pipeline_value": "新規パイプライン金額",
+      "won_revenue": "受注売上",
+      "win_rate": "勝率",
+      "avg_cycle_days": "平均サイクル日数",
+      "open_pipeline_value": "オープンパイプライン金額",
+      "open_deal_count": "オープン案件数",
+      "at_risk_revenue": "リスク売上"
+    },
+    "group": {
+      "none": "グループ化なし",
+      "date": "日付",
+      "pipeline": "パイプライン",
+      "stage": "ステージ",
+      "owner": "所有者",
+      "status": "ステータス",
+      "company": "会社",
+      "risk": "リスクレベル",
+      "activity_type": "活動タイプ",
+      "industry": "業界",
+      "warmth_band": "温度帯",
+      "trend": "傾向"
+    },
+    "chart": {
+      "bar": "棒グラフ",
+      "line-area": "折れ線・面グラフ",
+      "donut": "ドーナツグラフ",
+      "funnel": "ファネル",
+      "table": "表",
+      "kpi": "KPI"
+    },
+    "status": {
+      "open": "オープン案件",
+      "won": "受注案件",
+      "lost": "失注案件",
+      "todo": "未着手",
+      "in_progress": "進行中",
+      "done": "完了"
+    },
+    "warmth": {
+      "hot": "ホット",
+      "warm": "ウォーム",
+      "cool": "クール",
+      "cold": "コールド"
+    },
+    "risk": {
+      "high": "高",
+      "medium": "中",
+      "low": "低"
+    },
+    "trend": {
+      "rising": "上昇",
+      "steady": "安定",
+      "cooling": "低下"
+    },
+    "label": {
+      "total": "合計",
+      "unassigned": "未割り当て",
+      "unspecified": "未指定",
+      "other": "その他"
+    }
+  }
+}

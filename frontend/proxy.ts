@@ -20,6 +20,13 @@ const PROTECTED_PREFIXES = [
 const SESSION_COOKIE = 'JSESSIONID';
 const WORKSPACE_COOKIE = 'connex_workspace';
 
+const ALWAYS_ACCESSIBLE_AUTH_PATHS = new Set([
+    '/auth/register',
+    '/auth/forgot-password',
+    '/auth/reset-password',
+    '/auth/confirm-email',
+]);
+
 function isProtectedPath(pathname: string) {
     return PROTECTED_PREFIXES.some(
         (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`),
@@ -58,14 +65,14 @@ export function proxy(request: NextRequest) {
         return NextResponse.next();
     }
 
-    // A logged-in user may legitimately follow a reset or email-verification link (e.g. right
-    // after registering, or from another device), so let those through instead of bouncing them
-    // to the dashboard.
+    // The session cookie's presence doesn't prove the session is still valid — a stale JSESSIONID
+    // can linger after it expires server-side. Registration and account-recovery pages are how a
+    // user re-authenticates or starts fresh, so they stay reachable regardless of a lingering
+    // cookie; bouncing them to the dashboard would trap anyone holding a dead session.
     if (
         hasSession &&
         pathname.startsWith('/auth/') &&
-        pathname !== '/auth/reset-password' &&
-        pathname !== '/auth/confirm-email' &&
+        !ALWAYS_ACCESSIBLE_AUTH_PATHS.has(pathname) &&
         !searchParams.has('redirect')
     ) {
         return NextResponse.redirect(new URL('/dashboard', request.url));

@@ -15,11 +15,11 @@ const TABS = [
     { key: "tabEmail", href: "/settings/email" },
 ] as const;
 
-export default function SettingsTabs() {
+export default function SettingsTabs({ mailManaged = false }: { mailManaged?: boolean }) {
     const pathname = usePathname() ?? "";
     const t = useTranslations("WorkspaceSettings");
     const reduce = useReducedMotion() ?? false;
-    const tabs = TABS;
+    const tabs = TABS.filter((tab) => tab.key !== "tabEmail" || !mailManaged);
 
     return (
         <nav className="flex gap-1 border-b border-border" aria-label={t("title")}>

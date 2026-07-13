@@ -5,6 +5,7 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 import ooo.klae.connex.backend.tenant.TenantContext;
+import ooo.klae.connex.backend.tenant.TenantRoutingProperties;
 import ooo.klae.connex.backend.tenant.TenantScopeInterceptor;
 
 /**
@@ -19,7 +20,9 @@ public class MyBatisConfig {
     /** The tenant-scope backstop; disable with {@code connex.tenancy.enforce-scope=false}. */
     @Bean
     TenantScopeInterceptor tenantScopeInterceptor(TenantContext tenantContext,
-            @Value("${connex.tenancy.enforce-scope:true}") boolean enforce) {
-        return new TenantScopeInterceptor(tenantContext, enforce);
+            @Value("${connex.tenancy.enforce-scope:true}") boolean enforce,
+            @Value("${connex.tenancy.routing.mode:single-database}") String routingMode) {
+        return new TenantScopeInterceptor(tenantContext, enforce,
+            TenantRoutingProperties.MODE_CATALOG_PER_PLACEMENT.equals(routingMode));
     }
 }

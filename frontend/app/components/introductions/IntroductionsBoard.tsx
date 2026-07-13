@@ -215,7 +215,7 @@ export default function IntroductionsBoard({
               };
 
     return (
-        <div className="mx-auto w-full max-w-7xl space-y-6 px-2 pb-12">
+        <div className="mx-auto w-full max-w-[100rem] space-y-6 px-2 pb-12">
             <Rise>
                 <header className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
                     <div>

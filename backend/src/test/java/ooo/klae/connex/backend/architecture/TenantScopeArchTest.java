@@ -112,6 +112,8 @@ class TenantScopeArchTest {
         "ooo.klae.connex.backend.mappers.ShareMapper.clearPipelineShareGrantedByAnywhere",
         "ooo.klae.connex.backend.mappers.SavedViewMapper.deleteForUserAnywhere",
         "ooo.klae.connex.backend.mappers.UserDashboardMapper.deleteForUserAnywhere",
+        "ooo.klae.connex.backend.mappers.ReportMapper.clearDefinitionCreatorsAnywhere",
+        "ooo.klae.connex.backend.mappers.ReportMapper.clearSnapshotGeneratorsAnywhere",
         "ooo.klae.connex.backend.mappers.NotificationMapper.bumpStateVersions"
     );
 

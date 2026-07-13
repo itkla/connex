@@ -117,7 +117,7 @@ export default function NewCompanyDialog({
     const [wasOpen, setWasOpen] = useState(open);
     if (open !== wasOpen) {
         setWasOpen(open);
-        if (!open) {
+        if (open) {
             resetFieldErrors();
             setIsDragging(false);
             setWebsiteFormatError(null);

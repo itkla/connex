@@ -8,14 +8,14 @@ import { Loader2Icon } from 'lucide-react';
 import { ChatBubbleLeftRightIcon, PencilSquareIcon, CalendarIcon, Bars3BottomLeftIcon, UserIcon, BriefcaseIcon } from '@heroicons/react/24/outline';
 
 import {
-    Dialog,
-    DialogContent,
-    DialogHeader,
-    DialogTitle,
-    DialogDescription,
-    DialogFooter,
-    DialogClose,
-} from '@/components/ui/dialog';
+    ResponsiveDialog,
+    ResponsiveDialogContent,
+    ResponsiveDialogHeader,
+    ResponsiveDialogTitle,
+    ResponsiveDialogDescription,
+    ResponsiveDialogFooter,
+    ResponsiveDialogClose,
+} from '@/components/ui/responsive-dialog';
 import {
     Combobox,
     ComboboxContent,
@@ -162,22 +162,22 @@ export default function ActivityDialog({
     };
 
     return (
-        <Dialog open={open} onOpenChange={handleOpenChange}>
-            <DialogContent className="gap-0 overflow-hidden p-0 sm:max-w-lg">
+        <ResponsiveDialog open={open} onOpenChange={handleOpenChange}>
+            <ResponsiveDialogContent className="gap-0 overflow-hidden p-0 sm:max-w-lg">
                 <DialogStatusCover status={status} />
 
                 <div className="px-6 pb-6">
-                    <DialogHeader className="ncd-rise -mt-12" style={{ animationDelay: '40ms' }}>
+                    <ResponsiveDialogHeader className="ncd-rise -mt-12" style={{ animationDelay: '40ms' }}>
                         <div className="flex items-start gap-3">
                             <span className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-brand-light text-brand-dark">
                                 <ChatBubbleLeftRightIcon className="size-5" />
                             </span>
                             <div className="space-y-1">
-                                <DialogTitle className="text-xl font-semibold tracking-tight">{t('titleCreate')}</DialogTitle>
-                                <DialogDescription>{t('description')}</DialogDescription>
+                                <ResponsiveDialogTitle className="text-xl font-semibold tracking-tight">{t('titleCreate')}</ResponsiveDialogTitle>
+                                <ResponsiveDialogDescription>{t('description')}</ResponsiveDialogDescription>
                             </div>
                         </div>
-                    </DialogHeader>
+                    </ResponsiveDialogHeader>
 
                     <form onSubmit={handleSubmit} className="grid gap-5">
                         <div className="ncd-rise grid gap-1.5" style={{ animationDelay: '90ms' }}>
@@ -302,12 +302,12 @@ export default function ActivityDialog({
                             </div>
                         </div>
 
-                        <DialogFooter className="ncd-rise" style={{ animationDelay: '340ms' }}>
-                            <DialogClose asChild>
+                        <ResponsiveDialogFooter className="ncd-rise" style={{ animationDelay: '340ms' }}>
+                            <ResponsiveDialogClose asChild>
                                 <Button type="button" variant="outline" disabled={submitting}>
                                     {t('cancel')}
                                 </Button>
-                            </DialogClose>
+                            </ResponsiveDialogClose>
                             <Button
                                 type="submit"
                                 variant="brand"
@@ -316,10 +316,10 @@ export default function ActivityDialog({
                             >
                                 {submitting ? <Loader2Icon className="size-4 animate-spin" /> : t('create')}
                             </Button>
-                        </DialogFooter>
+                        </ResponsiveDialogFooter>
                     </form>
                 </div>
-            </DialogContent>
-        </Dialog>
+            </ResponsiveDialogContent>
+        </ResponsiveDialog>
     );
 }
