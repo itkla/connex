@@ -86,6 +86,74 @@ class ReportIntegrationTest {
           }
         }
         """;
+    private static final String RELATIONSHIP_HEALTH_BODY = """
+        {
+          "name": "January Relationship Health",
+          "description": "Relationship risk review",
+          "cadence": "custom",
+          "templateKey": "relationship-health",
+          "config": {
+            "widgets": [
+              {
+                "id": "cooling",
+                "title": "Company relationship trends",
+                "dataSource": "relationships",
+                "measure": "company_count",
+                "groupBy": "trend",
+                "chartType": "bar"
+              },
+              {
+                "id": "coverage-count",
+                "title": "Coverage gaps",
+                "dataSource": "companies",
+                "measure": "coverage_gap_count",
+                "groupBy": "none",
+                "chartType": "kpi"
+              },
+              {
+                "id": "coverage-value",
+                "title": "Coverage gaps by open pipeline",
+                "dataSource": "companies",
+                "measure": "coverage_gap_open_pipeline_value",
+                "groupBy": "company",
+                "chartType": "table"
+              },
+              {
+                "id": "single-count",
+                "title": "Single-threaded deals",
+                "dataSource": "deals",
+                "measure": "single_threaded_deal_count",
+                "groupBy": "none",
+                "chartType": "kpi"
+              },
+              {
+                "id": "single-value",
+                "title": "Single-threaded deal value",
+                "dataSource": "deals",
+                "measure": "single_threaded_deal_value",
+                "groupBy": "deal",
+                "chartType": "table"
+              }
+            ],
+            "filters": {
+              "pipelineIds": null,
+              "ownerIds": null,
+              "statuses": null,
+              "tagIds": null,
+              "warmthBands": null
+            },
+            "range": {"start": "2026-01-01", "end": "2026-01-31"},
+            "bucket": "day",
+            "layout": [
+              {"widgetId": "cooling", "x": 0, "y": 0, "width": 6, "height": 4},
+              {"widgetId": "coverage-count", "x": 6, "y": 0, "width": 6, "height": 4},
+              {"widgetId": "coverage-value", "x": 0, "y": 4, "width": 6, "height": 4},
+              {"widgetId": "single-count", "x": 6, "y": 4, "width": 6, "height": 4},
+              {"widgetId": "single-value", "x": 0, "y": 8, "width": 6, "height": 4}
+            ]
+          }
+        }
+        """;
 
     @Autowired private WebApplicationContext context;
     @Autowired @Qualifier("springSecurityFilterChain") private Filter springSecurityFilterChain;
@@ -207,6 +275,99 @@ class ReportIntegrationTest {
                 .session(session)
                 .with(csrf()))
             .andExpect(status().isNoContent());
+    }
+
+    @Test
+    void relationshipHealthTemplateIsAvailable() throws Exception {
+        RequestContextHolder.resetRequestAttributes();
+        Workspace workspace = newWorkspace();
+        User member = newMember(workspace, "member");
+        MockHttpSession session = login(member.getUsername());
+
+        mockMvc.perform(get("/api/reports/templates")
+                .header("X-Workspace-Id", workspace.getId())
+                .session(session))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$[?(@.key == 'relationship-health')]").isNotEmpty())
+            .andExpect(jsonPath("$[3].config.widgets.length()").value(6));
+    }
+
+    @Test
+    void relationshipHealthGenerationAggregatesRiskAndPreservesTenantIsolation() throws Exception {
+        RequestContextHolder.resetRequestAttributes();
+        Workspace workspace = newWorkspace();
+        User member = newMember(workspace, "member");
+        MockHttpSession session = login(member.getUsername());
+        Workspace otherWorkspace = newWorkspace();
+        User otherMember = newMember(otherWorkspace, "member");
+
+        int pipelineId = insertPipeline(workspace.getId(), "Health pipeline");
+        int stageId = insertStage(workspace.getId(), pipelineId, "Open");
+        int gapZero = insertCompany(workspace.getId(), "Gap Zero");
+        int gapOne = insertCompany(workspace.getId(), "Gap One");
+        int covered = insertCompany(workspace.getId(), "Covered");
+        int cooling = insertCompany(workspace.getId(), "Cooling");
+        int gapZeroPerson = insertPerson(workspace.getId(), gapZero, "Gap Zero Stakeholder");
+        int gapOneWarm = insertPerson(workspace.getId(), gapOne, "Gap One Warm");
+        int gapOneCold = insertPerson(workspace.getId(), gapOne, "Gap One Cold");
+        int coveredWarmOne = insertPerson(workspace.getId(), covered, "Covered Warm One");
+        int coveredWarmTwo = insertPerson(workspace.getId(), covered, "Covered Warm Two");
+        int coolingWarm = insertPerson(workspace.getId(), cooling, "Cooling Warm");
+        insertPersonActivity(workspace.getId(), member.getId(), gapOneWarm, "2026-01-20 09:00:00");
+        insertPersonActivity(workspace.getId(), member.getId(), coveredWarmOne, "2026-01-20 09:00:00");
+        insertPersonActivity(workspace.getId(), member.getId(), coveredWarmTwo, "2026-01-20 09:00:00");
+        insertPersonActivity(workspace.getId(), member.getId(), coolingWarm, "2025-12-31 09:00:00");
+
+        int singleDeal = insertDeal(workspace.getId(), pipelineId, stageId, gapZero,
+                "Single Thread", "100.00", false);
+        insertDealPerson(singleDeal, gapZeroPerson);
+        jdbcTemplate.update("UPDATE deal SET expected_close_date = NULL WHERE id = ?", singleDeal);
+        int twoThreadDeal = insertDeal(workspace.getId(), pipelineId, stageId, gapOne,
+                "Two Threads", "200.00", false);
+        insertDealPerson(twoThreadDeal, gapOneWarm);
+        insertDealPerson(twoThreadDeal, gapOneCold);
+        insertDeal(workspace.getId(), pipelineId, stageId, covered,
+                "No Threads", "300.00", false);
+        int excludedDeal = insertDeal(workspace.getId(), pipelineId, stageId, covered,
+                "Excluded Thread", "400.00", true);
+        insertDealPerson(excludedDeal, coveredWarmOne);
+
+        int otherPipelineId = insertPipeline(otherWorkspace.getId(), "Other pipeline");
+        int otherStageId = insertStage(otherWorkspace.getId(), otherPipelineId, "Other open");
+        int otherCompany = insertCompany(otherWorkspace.getId(), "Other Gap");
+        int otherPerson = insertPerson(otherWorkspace.getId(), otherCompany, "Other Stakeholder");
+        int otherDeal = insertDeal(otherWorkspace.getId(), otherPipelineId, otherStageId, otherCompany,
+                "Other Single Thread", "500.00", false);
+        insertDealPerson(otherDeal, otherPerson);
+        insertPersonActivity(otherWorkspace.getId(), otherMember.getId(), otherPerson, "2026-01-20 09:00:00");
+        int sharedCompany = insertCompany(otherWorkspace.getId(), "Shared Gap");
+        int sharedPerson = insertPerson(otherWorkspace.getId(), sharedCompany, "Shared Stakeholder");
+        insertCompanyShare(sharedCompany, workspace.getId(), member.getId());
+        insertPersonShare(sharedPerson, workspace.getId(), member.getId());
+
+        int reportId = createReport(session, workspace, RELATIONSHIP_HEALTH_BODY);
+
+        mockMvc.perform(post("/api/reports/{id}/generate", reportId)
+                .header("X-Workspace-Id", workspace.getId())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{}")
+                .session(session)
+                .with(csrf()))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.widgets[0].points[0].key").value("cooling"))
+            .andExpect(jsonPath("$.widgets[0].points[0].value").value(1))
+            .andExpect(jsonPath("$.widgets[0].total").value(5))
+            .andExpect(jsonPath("$.widgets[0].points[1].value").value(2))
+            .andExpect(jsonPath("$.widgets[0].points[2].value").value(2))
+            .andExpect(jsonPath("$.widgets[1].total").value(4))
+            .andExpect(jsonPath("$.widgets[2].points[0].label").value("USD · Gap One"))
+            .andExpect(jsonPath("$.widgets[2].points[0].value").value(200))
+            .andExpect(jsonPath("$.widgets[2].points[1].label").value("USD · Gap Zero"))
+            .andExpect(jsonPath("$.widgets[2].points[1].value").value(100))
+            .andExpect(jsonPath("$.widgets[3].total").value(1))
+            .andExpect(jsonPath("$.widgets[3].priorTotal").doesNotExist())
+            .andExpect(jsonPath("$.widgets[4].total").value(100))
+            .andExpect(jsonPath("$.widgets[4].points[0].label").value("USD · Single Thread"));
     }
 
     @Test
@@ -363,6 +524,79 @@ class ReportIntegrationTest {
         jdbcTemplate.update(
                 "INSERT INTO activity (workspace_id, type, subject, created_by_id, timestamp) VALUES (?, ?, ?, ?, ?)",
                 workspaceId, "call", "Report integration activity", userId, timestamp);
+    }
+
+    private int insertPipeline(int workspaceId, String name) {
+        jdbcTemplate.update(
+                "INSERT INTO pipeline (workspace_id, name, created_at) VALUES (?, ?, ?)",
+                workspaceId, name, "2026-01-01 00:00:00");
+        return jdbcTemplate.queryForObject(
+                "SELECT id FROM pipeline WHERE workspace_id = ? AND name = ?",
+                Integer.class, workspaceId, name);
+    }
+
+    private int insertStage(int workspaceId, int pipelineId, String name) {
+        jdbcTemplate.update(
+                "INSERT INTO stage (workspace_id, name, pipeline_id, position) VALUES (?, ?, ?, ?)",
+                workspaceId, name, pipelineId, 1);
+        return jdbcTemplate.queryForObject(
+                "SELECT id FROM stage WHERE workspace_id = ? AND pipeline_id = ? AND position = ?",
+                Integer.class, workspaceId, pipelineId, 1);
+    }
+
+    private int insertCompany(int workspaceId, String name) {
+        jdbcTemplate.update(
+                "INSERT INTO company (workspace_id, name, created_at) VALUES (?, ?, ?)",
+                workspaceId, name, "2026-01-01 00:00:00");
+        return jdbcTemplate.queryForObject(
+                "SELECT id FROM company WHERE workspace_id = ? AND name = ?",
+                Integer.class, workspaceId, name);
+    }
+
+    private int insertPerson(int workspaceId, int companyId, String name) {
+        jdbcTemplate.update(
+                "INSERT INTO person (workspace_id, company_id, name, created_at) VALUES (?, ?, ?, ?)",
+                workspaceId, companyId, name, "2026-01-01 00:00:00");
+        return jdbcTemplate.queryForObject(
+                "SELECT id FROM person WHERE workspace_id = ? AND name = ?",
+                Integer.class, workspaceId, name);
+    }
+
+    private void insertPersonActivity(int workspaceId, int userId, int personId, String timestamp) {
+        jdbcTemplate.update(
+                "INSERT INTO activity (workspace_id, type, subject, created_by_id, person_id, timestamp) "
+                        + "VALUES (?, ?, ?, ?, ?, ?)",
+                workspaceId, "meeting", "Relationship health activity", userId, personId, timestamp);
+    }
+
+    private int insertDeal(int workspaceId, int pipelineId, int stageId, int companyId,
+            String name, String value, boolean riskExcluded) {
+        jdbcTemplate.update(
+                "INSERT INTO deal (workspace_id, name, value, currency, pipeline_id, stage_id, company_id, "
+                        + "expected_close_date, risk_excluded, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                workspaceId, name, value, "USD", pipelineId, stageId, companyId,
+                "2026-01-25", riskExcluded, "2026-01-01 00:00:00");
+        return jdbcTemplate.queryForObject(
+                "SELECT id FROM deal WHERE workspace_id = ? AND name = ?",
+                Integer.class, workspaceId, name);
+    }
+
+    private void insertDealPerson(int dealId, int personId) {
+        jdbcTemplate.update(
+                "INSERT INTO deal_person (deal_id, person_id, role) VALUES (?, ?, ?)",
+                dealId, personId, "stakeholder");
+    }
+
+    private void insertCompanyShare(int companyId, int workspaceId, int grantedBy) {
+        jdbcTemplate.update(
+                "INSERT INTO company_share (company_id, workspace_id, granted_by, created_at) VALUES (?, ?, ?, ?)",
+                companyId, workspaceId, grantedBy, "2026-01-01 00:00:00");
+    }
+
+    private void insertPersonShare(int personId, int workspaceId, int grantedBy) {
+        jdbcTemplate.update(
+                "INSERT INTO person_share (person_id, workspace_id, granted_by, created_at) VALUES (?, ?, ?, ?)",
+                personId, workspaceId, grantedBy, "2026-01-01 00:00:00");
     }
 
     private Workspace newWorkspace() {

@@ -57,6 +57,7 @@ class MapperPlaneArchTest {
         Map.entry("PersonEdgeMapper", Set.of("workspace")),
         Map.entry("PersonMapper", Set.of("workspace")),
         Map.entry("PipelineMapper", Set.of("workspace")),
+        Map.entry("ReportMapper", Set.of("workspace")),
         Map.entry("RoleMapper", Set.of("workspace_role", "workspace_role_permission")),
         Map.entry("ShareMapper", Set.of("workspace")),
         Map.entry("TaskMapper", Set.of("workspace")));
