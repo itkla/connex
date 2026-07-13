@@ -76,7 +76,8 @@ public class TenantScopeInterceptor implements Interceptor {
         MAPPERS + "ShareMapper",
         MAPPERS + "AiOutputCacheMapper",
         MAPPERS + "ReportMapper",
-        MAPPERS + "GoalMapper"
+        MAPPERS + "GoalMapper",
+        MAPPERS + "ScheduleMapper"
     );
 
     /**
