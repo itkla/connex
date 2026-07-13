@@ -45,6 +45,7 @@ import ooo.klae.connex.backend.dto.ReportDefinitionDto;
 import ooo.klae.connex.backend.dto.ReportDefinitionRequest;
 import ooo.klae.connex.backend.dto.ReportDocumentDto;
 import ooo.klae.connex.backend.dto.ReportFilters;
+import ooo.klae.connex.backend.dto.ReportForecastAggregateRow;
 import ooo.klae.connex.backend.dto.ReportGenerateRequest;
 import ooo.klae.connex.backend.dto.ReportLayoutItem;
 import ooo.klae.connex.backend.dto.ReportNarrativeDto;
@@ -78,7 +79,9 @@ public class ReportService {
     private static final int MAX_SNAPSHOTS_PER_WORKSPACE = 1_000;
     private static final long MAX_SNAPSHOT_BYTES_PER_WORKSPACE = 268_435_456;
     private static final int RISK_ID_BATCH_SIZE = 1_000;
+    private static final int FORECAST_HORIZON_MONTHS = 3;
     private static final long MAX_RANGE_DAYS = 1_826;
+    private static final BigDecimal FORECAST_NEUTRAL_WIN_RATE = new BigDecimal("0.5");
     private static final Set<String> CADENCES = Set.of("weekly", "monthly", "quarterly", "custom");
     private static final Set<String> BUCKETS = Set.of("day", "week", "month");
     private static final Set<String> CHART_TYPES = Set.of("bar", "line-area", "donut", "funnel", "table", "kpi");
@@ -87,7 +90,10 @@ public class ReportService {
     private static final Set<String> DEAL_MEASURES = Set.of(
             "count", "new_pipeline_value", "won_revenue", "win_rate", "avg_cycle_days",
             "open_pipeline_value", "open_deal_count", "at_risk_revenue",
-            "single_threaded_deal_count", "single_threaded_deal_value");
+            "single_threaded_deal_count", "single_threaded_deal_value",
+            "forecast_best", "forecast_weighted", "forecast_worst");
+    private static final Set<String> FORECAST_MEASURES = Set.of(
+            "forecast_best", "forecast_weighted", "forecast_worst");
     private static final Set<String> COMPANY_MEASURES = Set.of(
             "count", "coverage_gap_count", "coverage_gap_open_pipeline_value");
     private static final Set<String> RELATIONSHIP_MEASURES = Set.of("count", "company_count");
@@ -104,7 +110,7 @@ public class ReportService {
     private static final Set<String> WARMTH_BANDS = Set.of("hot", "warm", "cool", "cold");
     private static final Set<String> TEMPLATE_KEYS = Set.of(
             "sales-performance", "pipeline-health", "relationship-coverage", "relationship-health",
-            "activity-team");
+            "forecasting", "activity-team");
 
     private final ReportMapper reportMapper;
     private final WorkspaceService workspaceService;
@@ -131,7 +137,7 @@ public class ReportService {
         return toDefinitionDto(requireDefinition(id));
     }
 
-    /** Returns the five built-in report starting points. */
+    /** Returns the six built-in report starting points. */
     @RequirePermission(Permission.REPORT_READ)
     public List<ReportTemplateDto> templates() {
         return List.of(
@@ -145,6 +151,19 @@ public class ReportService {
                                 widget("pipeline-value", "Open pipeline", "deals", "open_pipeline_value", "pipeline", "bar"),
                                 widget("stage-count", "Deals by stage", "deals", "open_deal_count", "stage", "funnel"),
                                 widget("risk-revenue", "At-risk revenue", "deals", "at_risk_revenue", "risk", "table"))),
+                template("forecasting", "Forecasting",
+                        "Next-three-month best, likely, and commit forecasts weighted by historical stage win rates.",
+                        "quarterly", "month", List.of(
+                                widget("weighted-by-month", "Likely forecast by month", "deals",
+                                        "forecast_weighted", "date", "line-area"),
+                                widget("best-summary", "Best-case forecast", "deals",
+                                        "forecast_best", "none", "kpi"),
+                                widget("weighted-summary", "Likely forecast", "deals",
+                                        "forecast_weighted", "none", "kpi"),
+                                widget("worst-summary", "Commit forecast", "deals",
+                                        "forecast_worst", "none", "kpi"),
+                                widget("pipeline-by-stage", "Forward pipeline by stage", "deals",
+                                        "forecast_best", "stage", "bar"))),
                 template("relationship-coverage", "Relationship Coverage", "Warmth distribution and account coverage.",
                         "monthly", List.of(
                                 widget("warmth", "Relationship warmth", "relationships", "count", "warmth_band", "donut"),
@@ -323,6 +342,19 @@ public class ReportService {
         validateConfig(definition.getCadence(), definition.getTemplateKey(), config);
         PeriodWindow period = resolvePeriod(definition.getCadence(), config.range(), request, config.bucket());
         int workspaceId = workspaceService.getCurrentWorkspaceId();
+        GeneratedFigures figures = generateFigures(workspaceId, config, period);
+        ReportNarrativeDto narrative = includeNarrative
+                ? aiReportNarrativeService.generate(
+                        id, definition.getName(), period.start(), period.end(), figures.appendix())
+                : ReportNarrativeDto.unavailable("not_requested");
+        List<ReportCitationDto> citations = citations(narrative, figures.appendix());
+        return new ReportDocumentDto(
+                toDefinitionDto(definition), period.start(), period.end(), period.priorStart(), period.priorEnd(),
+                narrative, figures.widgets(), figures.appendix(), citations, Instant.now(clock).toString());
+    }
+
+    /** Generates every widget's figures and appendix rows for the resolved reporting period. */
+    private GeneratedFigures generateFigures(int workspaceId, ReportConfig config, PeriodWindow period) {
         List<ReportWidgetDataDto> widgets = new ArrayList<>();
         List<ReportAppendixRowDto> appendix = new ArrayList<>();
         GenerationInputs inputs = generationInputs(workspaceId, config, period);
@@ -333,30 +365,25 @@ public class ReportService {
             widgets.add(result.widget());
             appendix.addAll(result.appendix());
         }
-        ReportNarrativeDto narrative = includeNarrative
-                ? aiReportNarrativeService.generate(id, definition.getName(), period.start(), period.end(), appendix)
-                : ReportNarrativeDto.unavailable("not_requested");
-        List<ReportCitationDto> citations = citations(narrative, appendix);
-        return new ReportDocumentDto(
-                toDefinitionDto(definition), period.start(), period.end(), period.priorStart(), period.priorEnd(),
-                narrative, List.copyOf(widgets), List.copyOf(appendix), citations, Instant.now(clock).toString());
+        return new GeneratedFigures(List.copyOf(widgets), List.copyOf(appendix));
     }
 
     private WidgetResult generateWidget(int workspaceId, ReportWidgetConfig widget, ReportFilters filters,
             String bucket, PeriodWindow period, int widgetIndex, GenerationInputs inputs) {
+        String effectiveBucket = FORECAST_MEASURES.contains(widget.measure()) ? "month" : bucket;
         String aggregationKey = widget.dataSource() + '\u0000' + widget.measure() + '\u0000'
-                + normalizeGroup(widget.groupBy()) + '\u0000' + bucket;
+                + normalizeGroup(widget.groupBy()) + '\u0000' + effectiveBucket;
         List<ReportAggregateRow> current = inputs.currentRows().get(aggregationKey);
         List<ReportAggregateRow> prior = inputs.priorRows().get(aggregationKey);
         if (current == null || prior == null) {
-            RowPair generated = aggregateWidget(workspaceId, widget, filters, bucket, period, inputs);
+            RowPair generated = aggregateWidget(workspaceId, widget, filters, effectiveBucket, period, inputs);
             current = generated.current();
             prior = generated.prior();
             inputs.currentRows().put(aggregationKey, current);
             inputs.priorRows().put(aggregationKey, prior);
         }
         return widgetResult(
-                widget, widgetIndex, current, prior, bucket, period,
+                widget, widgetIndex, current, prior, effectiveBucket, period,
                 priorComparable(widget, filters));
     }
 
@@ -378,6 +405,9 @@ public class ReportService {
             return new RowPair(
                     riskRows(workspaceId, widget, filters, period.start(), period.end(), period.zone(), inputs),
                     List.of());
+        } else if (FORECAST_MEASURES.contains(widget.measure())) {
+            return new RowPair(aggregateForecast(
+                    workspaceId, widget, filters, period.zone(), inputs), List.of());
         } else if (Set.of("coverage_gap_count", "coverage_gap_open_pipeline_value")
                 .contains(widget.measure())) {
             List<ReportAggregateRow> current = reportMapper.aggregateCoverageGaps(query(
@@ -509,7 +539,7 @@ public class ReportService {
         if (Set.of(
                 "at_risk_revenue", "coverage_gap_open_pipeline_value",
                 "single_threaded_deal_count", "single_threaded_deal_value")
-                .contains(widget.measure())) {
+                .contains(widget.measure()) || FORECAST_MEASURES.contains(widget.measure())) {
             return false;
         }
         if (!"coverage_gap_count".equals(widget.measure())) {
@@ -615,6 +645,48 @@ public class ReportService {
                 .toList();
     }
 
+    /**
+     * Aggregates the forward window {@code [today, today + 3 months)} into expected-close months.
+     * For each non-negative open-deal value {@code v}, the probability {@code p} is the deal stage's
+     * all-time {@code won / (won + lost)} rate. A stage with no closed history falls back to the
+     * workspace-wide closed-deal rate; a workspace with no closed deals uses the neutral rate
+     * {@code 0.5}. Best is {@code sum(v)}, likely is {@code sum(v * p)}, and commit/worst is
+     * {@code sum(v * p^2)}. Squaring is a conservative floor and, because {@code 0 <= p <= 1},
+     * guarantees {@code worst <= likely <= best}. One mapper statement computes all three bands
+     * from one database snapshot, and the result is reused by sibling widgets with the same
+     * grouping. All groupings in one generated report share the service's repeatable-read
+     * transaction. The mapper defensively treats negative stored values as zero to preserve the
+     * invariant for legacy data.
+     */
+    private List<ReportAggregateRow> aggregateForecast(
+            int workspaceId,
+            ReportWidgetConfig widget,
+            ReportFilters filters,
+            ZoneId zone,
+            GenerationInputs inputs) {
+        String cacheKey = normalizeGroup(widget.groupBy());
+        List<ReportForecastAggregateRow> bands = inputs.forecastRows().get(cacheKey);
+        if (bands == null) {
+            LocalDate start = inputs.forecastStart();
+            LocalDate endExclusive = start.plusMonths(FORECAST_HORIZON_MONTHS);
+            LocalDateTime startUtc = LocalDateTime.ofInstant(start.atStartOfDay(zone).toInstant(), ZoneOffset.UTC);
+            LocalDateTime endUtc = LocalDateTime.ofInstant(
+                    endExclusive.atStartOfDay(zone).toInstant(), ZoneOffset.UTC);
+            ReportAggregateQuery query = query(
+                    workspaceId, widget, filters, "month", startUtc, endUtc, zone, null,
+                    FORECAST_NEUTRAL_WIN_RATE);
+            bands = reportMapper.aggregateForecast(query);
+            inputs.forecastRows().put(cacheKey, bands);
+        }
+        return bands.stream().map(row -> new ReportAggregateRow(
+                row.groupKey(), row.groupLabel(), row.unit(), switch (widget.measure()) {
+                    case "forecast_best" -> safe(row.bestValue());
+                    case "forecast_weighted" -> safe(row.weightedValue());
+                    case "forecast_worst" -> safe(row.worstValue());
+                    default -> throw new BadRequestException("Unsupported forecast measure: " + widget.measure());
+                })).toList();
+    }
+
     private GenerationInputs generationInputs(int workspaceId, ReportConfig config, PeriodWindow period) {
         boolean contactRelationships = config.widgets().stream()
                 .anyMatch(widget -> "relationships".equals(widget.dataSource())
@@ -679,6 +751,8 @@ public class ReportService {
                 priorCompanyRelationships,
                 risk ? dealRiskService.assessWorkspace(workspaceId) : List.of(),
                 Map.copyOf(ownerLabels),
+                LocalDate.now(clock.withZone(period.zone())),
+                new HashMap<>(),
                 new HashMap<>(),
                 new HashMap<>());
     }
@@ -695,13 +769,20 @@ public class ReportService {
 
     private ReportAggregateQuery query(int workspaceId, ReportWidgetConfig widget, ReportFilters filters,
             String bucket, LocalDateTime startUtc, LocalDateTime endUtc, ZoneId zone, List<Integer> riskIds) {
+        return query(workspaceId, widget, filters, bucket, startUtc, endUtc, zone, riskIds, null);
+    }
+
+    private ReportAggregateQuery query(int workspaceId, ReportWidgetConfig widget, ReportFilters filters,
+            String bucket, LocalDateTime startUtc, LocalDateTime endUtc, ZoneId zone, List<Integer> riskIds,
+            BigDecimal fallbackWinRate) {
         ReportFilters safeFilters = filters == null ? new ReportFilters(null, null, null, null, null) : filters;
         return new ReportAggregateQuery(workspaceId, widget.measure(), normalizeGroup(widget.groupBy()), bucket,
                 startUtc, endUtc,
                 LocalDate.ofInstant(startUtc.toInstant(ZoneOffset.UTC), zone),
                 LocalDate.ofInstant(endUtc.toInstant(ZoneOffset.UTC), zone),
                 safeFilters.pipelineIds(), safeFilters.ownerIds(),
-                safeFilters.statuses(), safeFilters.tagIds(), riskIds, offsetSegments(startUtc, endUtc, zone));
+                safeFilters.statuses(), safeFilters.tagIds(), riskIds, fallbackWinRate,
+                offsetSegments(startUtc, endUtc, zone));
     }
 
     private static List<ReportOffsetSegment> offsetSegments(
@@ -819,7 +900,9 @@ public class ReportService {
                 || "company".equals(group) && "companies".equals(source)
                         && !Set.of("coverage_gap_count", "coverage_gap_open_pipeline_value").contains(measure)
                 || Set.of("coverage_gap_count", "coverage_gap_open_pipeline_value").contains(measure)
-                        && !Set.of("none", "company").contains(group)) {
+                        && !Set.of("none", "company").contains(group)
+                || FORECAST_MEASURES.contains(measure)
+                        && !Set.of("none", "date", "pipeline", "stage").contains(group)) {
             throw new BadRequestException("Unsupported report measure or grouping");
         }
     }
@@ -987,13 +1070,18 @@ public class ReportService {
 
     private static ReportTemplateDto template(String key, String name, String description,
             String cadence, List<ReportWidgetConfig> widgets) {
+        return template(key, name, description, cadence, "week", widgets);
+    }
+
+    private static ReportTemplateDto template(String key, String name, String description,
+            String cadence, String bucket, List<ReportWidgetConfig> widgets) {
         List<ReportLayoutItem> layout = new ArrayList<>();
         for (int index = 0; index < widgets.size(); index++) {
             layout.add(new ReportLayoutItem(widgets.get(index).id(), index % 2 * 6, index / 2 * 4, 6, 4));
         }
         return new ReportTemplateDto(key, name, description, cadence,
                 new ReportConfig(widgets, new ReportFilters(null, null, null, null, null), null,
-                        "week", List.copyOf(layout)));
+                        bucket, List.copyOf(layout)));
     }
 
     private static ReportWidgetConfig widget(String id, String title, String source,
@@ -1186,8 +1274,15 @@ public class ReportService {
             List<RelationshipTemperatureDto> priorCompanyRelationships,
             List<DealRiskDto> risks,
             Map<String, String> ownerLabels,
+            LocalDate forecastStart,
+            Map<String, List<ReportForecastAggregateRow>> forecastRows,
             Map<String, List<ReportAggregateRow>> currentRows,
             Map<String, List<ReportAggregateRow>> priorRows) {
+    }
+
+    private record GeneratedFigures(
+            List<ReportWidgetDataDto> widgets,
+            List<ReportAppendixRowDto> appendix) {
     }
 
     private record RowPair(List<ReportAggregateRow> current, List<ReportAggregateRow> prior) {

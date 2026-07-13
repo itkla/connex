@@ -8,6 +8,7 @@ import ooo.klae.connex.backend.beans.ReportDefinition;
 import ooo.klae.connex.backend.beans.ReportSnapshot;
 import ooo.klae.connex.backend.dto.ReportAggregateQuery;
 import ooo.klae.connex.backend.dto.ReportAggregateRow;
+import ooo.klae.connex.backend.dto.ReportForecastAggregateRow;
 import ooo.klae.connex.backend.dto.ReportSnapshotSummaryDto;
 
 /**
@@ -57,6 +58,8 @@ public interface ReportMapper {
         @Param("id") int id);
 
     List<ReportAggregateRow> aggregateDeals(@Param("query") ReportAggregateQuery query);
+
+    List<ReportForecastAggregateRow> aggregateForecast(@Param("query") ReportAggregateQuery query);
 
     List<ReportAggregateRow> aggregateActivities(@Param("query") ReportAggregateQuery query);
 
