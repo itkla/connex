@@ -33,18 +33,25 @@ const NoteDialogForm = dynamic(() =>
 const ActivityDialogForm = dynamic(() =>
     import('@/app/components/activity/activities/ActivityDialog').then((m) => ({ default: m.ActivityDialogForm })),
 );
+const DealCreateContainer = dynamic(() => import('@/app/components/actions/create/DealCreateContainer'));
+const ContactCreateContainer = dynamic(() => import('@/app/components/actions/create/ContactCreateContainer'));
 
 const PANEL_WIDTH = 380;
 const PANEL_GAP = 12;
 const VIEWPORT_MARGIN = 16;
 const MOBILE_HANDOFF_DELAY_MS = 300;
 
-/** Create actions that morph into an embedded form inside the mobile launcher drawer (vs. handing off to a separate dialog). */
-const EMBEDDED_FORM_BY_ACTION: Record<string, EmbeddedFormKind> = {
+/** Create actions that morph in place inside the mobile launcher drawer (vs. handing off to a separate dialog). */
+const EMBEDDED_BY_ACTION: Record<string, EmbeddedKind> = {
     'create.task': 'task',
     'create.note': 'note',
     'create.activity': 'activity',
+    'create.deal': 'deal',
+    'create.person': 'person',
 };
+
+/** Embedded kinds backed by a self-loading create container (vs. a shell-less form body fed the shared rosters). */
+const CONTAINER_KINDS = new Set<EmbeddedKind>(['deal', 'person']);
 
 type Anchor = { top: number; left: number; maxHeight: number };
 
@@ -379,7 +386,9 @@ function TypeSelector({
 }
 
 type EmbeddedFormKind = 'task' | 'note' | 'activity';
-type FlowView = 'selector' | EmbeddedFormKind;
+type EmbeddedContainerKind = 'deal' | 'person';
+type EmbeddedKind = EmbeddedFormKind | EmbeddedContainerKind;
+type FlowView = 'selector' | EmbeddedKind;
 type FlowRefs = { persons: Contact[]; deals: Deal[]; users: User[] };
 
 type MobileCreateFlowProps = {
@@ -411,7 +420,7 @@ function MobileCreateFlow({ actions, context, currentUserId, onFallback, onClose
     }, [submitting, onPendingChange]);
 
     useEffect(() => {
-        if (view === 'selector' || refs) return;
+        if (view === 'selector' || CONTAINER_KINDS.has(view) || refs) return;
         let cancelled = false;
         Promise.all([getContacts({}), getDeals(), getUsers()])
             .then(([persons, deals, users]) => {
@@ -427,8 +436,8 @@ function MobileCreateFlow({ actions, context, currentUserId, onFallback, onClose
 
     const select = useCallback(
         (action: AppAction) => {
-            const kind = EMBEDDED_FORM_BY_ACTION[action.id];
-            if (kind && currentUserId != null) {
+            const kind = EMBEDDED_BY_ACTION[action.id];
+            if (kind && (CONTAINER_KINDS.has(kind) || currentUserId != null)) {
                 setDirection(1);
                 setView(kind);
                 return;
@@ -436,6 +445,13 @@ function MobileCreateFlow({ actions, context, currentUserId, onFallback, onClose
             onFallback(action);
         },
         [currentUserId, onFallback],
+    );
+
+    const closeFromContainer = useCallback(
+        (next: boolean) => {
+            if (!next) onClose();
+        },
+        [onClose],
     );
 
     const back = useCallback(() => {
@@ -488,6 +504,10 @@ function MobileCreateFlow({ actions, context, currentUserId, onFallback, onClose
                         <div className="px-4 pb-6 pt-4">
                             <TypeSelector actions={actions} onSelect={select} />
                         </div>
+                    ) : view === 'deal' ? (
+                        <DealCreateContainer embedded open onOpenChange={closeFromContainer} onCancel={back} defaults={defaults} />
+                    ) : view === 'person' ? (
+                        <ContactCreateContainer embedded open onOpenChange={closeFromContainer} onCancel={back} defaults={defaults} />
                     ) : refs === null || currentUserId == null ? (
                         <div className="grid min-h-[28rem] place-items-center">
                             <Loader2Icon className="size-5 animate-spin text-muted-foreground" />
