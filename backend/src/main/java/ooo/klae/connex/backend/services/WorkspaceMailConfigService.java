@@ -14,11 +14,13 @@ import ooo.klae.connex.backend.dto.MailConfigDto;
 import ooo.klae.connex.backend.dto.MailConfigRequest;
 import ooo.klae.connex.backend.dto.MailTestResult;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
+import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.mail.EmailTemplateRenderer;
+import ooo.klae.connex.backend.mail.MailConfigResolver;
 import ooo.klae.connex.backend.mail.MailMessage;
+import ooo.klae.connex.backend.mail.MailProperties;
 import ooo.klae.connex.backend.mail.MailService;
 import ooo.klae.connex.backend.mail.ResolvedMailConfig;
-import ooo.klae.connex.backend.mail.MailConfigResolver;
 import ooo.klae.connex.backend.mail.SecretCipher;
 import ooo.klae.connex.backend.mail.SmtpDestinationGuard;
 import ooo.klae.connex.backend.mappers.MailConfigMapper;
@@ -29,7 +31,8 @@ import ooo.klae.connex.backend.tenant.Permission;
  * Owner/admin management of a workspace's own SMTP transport ({@code WORKSPACE_SETTINGS}).
  * The SMTP password is encrypted at rest and never returned; a blank password on
  * save keeps the stored one. Provides a synchronous "send test email" so an admin
- * can verify the transport before relying on it.
+ * can verify the transport before relying on it. Mutating operations are unavailable
+ * when instance-managed mail is enabled.
  */
 @Service
 @RequiredArgsConstructor
@@ -47,6 +50,7 @@ public class WorkspaceMailConfigService {
     private final UserMapper userMapper;
     private final SessionSecurityService sessionSecurityService;
     private final SmtpDestinationGuard smtpDestinationGuard;
+    private final MailProperties mailProperties;
 
     /**
      * Returns the workspace's SMTP config for the settings page (password omitted).
@@ -69,6 +73,7 @@ public class WorkspaceMailConfigService {
      */
     @Transactional
     public MailConfigDto saveConfig(int workspaceId, int actorId, MailConfigRequest request) {
+        requireWorkspaceOverridesAllowed();
         workspaceService.requirePermission(workspaceId, actorId, Permission.WORKSPACE_SETTINGS);
         sessionSecurityService.requireRecentAuthentication(actorId);
 
@@ -121,6 +126,7 @@ public class WorkspaceMailConfigService {
      */
     @Transactional
     public void deleteConfig(int workspaceId, int actorId) {
+        requireWorkspaceOverridesAllowed();
         workspaceService.requirePermission(workspaceId, actorId, Permission.WORKSPACE_SETTINGS);
         sessionSecurityService.requireRecentAuthentication(actorId);
         WorkspaceMailConfig existing = mailConfigMapper.findByWorkspace(workspaceId);
@@ -140,6 +146,7 @@ public class WorkspaceMailConfigService {
      * @return success, or failure carrying the error
      */
     public MailTestResult sendTest(int workspaceId, int actorId) {
+        requireWorkspaceOverridesAllowed();
         workspaceService.requirePermission(workspaceId, actorId, Permission.WORKSPACE_SETTINGS);
         sessionSecurityService.requireRecentAuthentication(actorId);
         User actor = userMapper.getUserById(actorId);
@@ -167,6 +174,12 @@ public class WorkspaceMailConfigService {
 
     private static boolean isBlank(String value) {
         return value == null || value.isBlank();
+    }
+
+    private void requireWorkspaceOverridesAllowed() {
+        if (mailProperties.isManaged()) {
+            throw new ForbiddenException("Workspace SMTP overrides are disabled on this instance");
+        }
     }
 
     private static String trimToNull(String value) {
