@@ -34,7 +34,7 @@ class CapabilityRegistryTest {
     @BeforeEach
     void setUp() {
         capabilityRegistry = new CapabilityRegistry(ssoConnectionService,
-                socialLoginClientRegistrations, mailProperties, deploymentProperties);
+                socialLoginClientRegistrations, mailProperties, deploymentProperties, capability -> true);
     }
 
     @Test
@@ -70,6 +70,7 @@ class CapabilityRegistryTest {
                 socialLoginClientRegistrations,
                 mailProperties,
                 deploymentProperties,
+                capability -> true,
                 Map.of(Capability.SSO, Set.of(DeploymentProperties.PROFILE_SAAS)));
         when(deploymentProperties.isConfigured()).thenReturn(true);
         when(deploymentProperties.getProfile()).thenReturn(DeploymentProperties.PROFILE_SAAS);
@@ -77,6 +78,28 @@ class CapabilityRegistryTest {
         assertFalse(restrictedRegistry.isAvailable(Capability.SSO));
 
         verifyNoInteractions(ssoConnectionService);
+    }
+
+    @Test
+    void entitlementDenialOverridesEnabledOperatorSetting() {
+        MailProperties managedMailProperties = new MailProperties();
+        managedMailProperties.setManaged(true);
+        CapabilityRegistry restrictedRegistry = new CapabilityRegistry(
+                ssoConnectionService,
+                socialLoginClientRegistrations,
+                managedMailProperties,
+                new DeploymentProperties(),
+                capability -> capability != Capability.MANAGED_MAIL);
+
+        assertFalse(restrictedRegistry.isAvailable(Capability.MANAGED_MAIL));
+    }
+
+    @Test
+    void entitlementAndOperatorSettingPermitAvailability() {
+        when(deploymentProperties.isConfigured()).thenReturn(false);
+        when(ssoConnectionService.isInstanceEnabled()).thenReturn(true);
+
+        assertTrue(capabilityRegistry.isAvailable(Capability.SSO));
     }
 
     @Test

@@ -30,6 +30,7 @@ public class CapabilityRegistry {
     private final SocialLoginClientRegistrations socialLoginClientRegistrations;
     private final MailProperties mailProperties;
     private final DeploymentProperties deploymentProperties;
+    private final CapabilityEntitlement capabilityEntitlement;
     private final Map<Capability, Set<String>> forbiddenProfiles;
 
     /**
@@ -39,26 +40,30 @@ public class CapabilityRegistry {
      * @param socialLoginClientRegistrations social-login capability source
      * @param mailProperties mail capability source
      * @param deploymentProperties active deployment profile
+     * @param capabilityEntitlement capability entitlement source
      */
     @Autowired
     public CapabilityRegistry(SsoConnectionService ssoConnectionService,
             SocialLoginClientRegistrations socialLoginClientRegistrations,
             MailProperties mailProperties,
-            DeploymentProperties deploymentProperties) {
+            DeploymentProperties deploymentProperties,
+            CapabilityEntitlement capabilityEntitlement) {
         this(ssoConnectionService, socialLoginClientRegistrations, mailProperties,
-                deploymentProperties, FORBIDDEN_PROFILES);
+                deploymentProperties, capabilityEntitlement, FORBIDDEN_PROFILES);
     }
 
     CapabilityRegistry(SsoConnectionService ssoConnectionService,
             SocialLoginClientRegistrations socialLoginClientRegistrations,
             MailProperties mailProperties,
             DeploymentProperties deploymentProperties,
+            CapabilityEntitlement capabilityEntitlement,
             Map<Capability, Set<String>> forbiddenProfiles) {
         this.ssoConnectionService = Objects.requireNonNull(ssoConnectionService, "ssoConnectionService");
         this.socialLoginClientRegistrations = Objects.requireNonNull(
                 socialLoginClientRegistrations, "socialLoginClientRegistrations");
         this.mailProperties = Objects.requireNonNull(mailProperties, "mailProperties");
         this.deploymentProperties = Objects.requireNonNull(deploymentProperties, "deploymentProperties");
+        this.capabilityEntitlement = Objects.requireNonNull(capabilityEntitlement, "capabilityEntitlement");
         this.forbiddenProfiles = immutableForbiddenProfiles(forbiddenProfiles);
     }
 
@@ -84,10 +89,10 @@ public class CapabilityRegistry {
     }
 
     /**
-     * Entitlement seam for the organization capability model tracked by issue #501.
+     * Delegates the licensed or paid-for availability factor to the installed entitlement seam.
      */
     private boolean entitlement(Capability capability) {
-        return true;
+        return capabilityEntitlement.isEntitled(capability);
     }
 
     /**

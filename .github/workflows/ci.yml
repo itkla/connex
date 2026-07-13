@@ -13,6 +13,28 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  migrations:
+    name: Migrations — forward-only guard
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Forbid modifying or deleting shipped migrations
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          CHANGED=$(git diff --diff-filter=MD --name-only "$BASE_SHA"...HEAD -- 'backend/src/main/resources/db/migration' || true)
+          if [ -n "$CHANGED" ]; then
+            echo "::error::Shipped Flyway migrations are immutable. Modified or deleted:"
+            echo "$CHANGED"
+            echo "Forward-only: add a NEW migration instead of editing an applied one (see docs/UPGRADING.md)."
+            exit 1
+          fi
+          echo "No shipped migrations modified or deleted."
+
   backend:
     name: Backend — build & test
     runs-on: ubuntu-latest
