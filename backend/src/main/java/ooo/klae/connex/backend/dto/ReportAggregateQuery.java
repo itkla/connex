@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.dto;
 
+import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
@@ -19,6 +20,7 @@ import java.util.List;
  * @param statuses status filters
  * @param tagIds tag filters
  * @param riskIds deterministic at-risk deal ids
+ * @param fallbackWinRate neutral forecast rate when no closed-deal history exists
  * @param offsets constant-offset intervals for local calendar bucketing
  */
 public record ReportAggregateQuery(
@@ -35,5 +37,6 @@ public record ReportAggregateQuery(
         List<String> statuses,
         List<Integer> tagIds,
         List<Integer> riskIds,
+        BigDecimal fallbackWinRate,
         List<ReportOffsetSegment> offsets) {
 }

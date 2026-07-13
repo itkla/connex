@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 import { useLocale, useTranslations } from 'next-intl';
 import {
     ArrowRightIcon,
+    ArrowTrendingUpIcon,
     ChartBarIcon,
     EllipsisHorizontalIcon,
     HeartIcon,
@@ -40,6 +41,7 @@ import {
 const TEMPLATE_ICONS: Record<string, ComponentType<{ className?: string }>> = {
     'sales-performance': ChartBarIcon,
     'pipeline-health': PresentationChartLineIcon,
+    'forecasting': ArrowTrendingUpIcon,
     'relationship-coverage': HeartIcon,
     'relationship-health': ShieldExclamationIcon,
     'activity-team': UserGroupIcon,
@@ -108,7 +110,7 @@ export default function ReportsBoard({
                             <Link href="/overview/reports/new">{t('landing.startBlank')}</Link>
                         </Button>
                     </div>
-                    <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-5">
+                    <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6">
                         {templates.map((template) => {
                             const Icon = TEMPLATE_ICONS[template.key] ?? PresentationChartLineIcon;
                             return (

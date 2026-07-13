@@ -1041,7 +1041,10 @@ export type ReportMeasure =
     | "coverage_gap_count"
     | "coverage_gap_open_pipeline_value"
     | "single_threaded_deal_count"
-    | "single_threaded_deal_value";
+    | "single_threaded_deal_value"
+    | "forecast_best"
+    | "forecast_weighted"
+    | "forecast_worst";
 
 export type ReportGroupBy =
     | "none"

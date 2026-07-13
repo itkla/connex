@@ -1,6 +1,8 @@
 package ooo.klae.connex.backend.integration;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyList;
@@ -14,8 +16,19 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import java.math.BigDecimal;
+import java.time.Clock;
+import java.time.Instant;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.YearMonth;
+import java.time.ZoneId;
+import java.time.ZoneOffset;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 import jakarta.servlet.Filter;
@@ -45,8 +58,10 @@ import ooo.klae.connex.backend.dto.ReportNarrativeClaimDto;
 import ooo.klae.connex.backend.dto.ReportNarrativeDto;
 import ooo.klae.connex.backend.dto.ReportNarrativeSectionDto;
 import ooo.klae.connex.backend.mappers.RoleMapper;
+import ooo.klae.connex.backend.mappers.ShareMapper;
 import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
+import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
 /**
@@ -58,6 +73,7 @@ import tools.jackson.databind.ObjectMapper;
 class ReportIntegrationTest {
 
     private static final String PASSWORD = "Report-Test-Pw1!";
+    private static final Instant FIXED_NOW = Instant.parse("2026-07-12T12:00:00Z");
     private static final String REPORT_BODY = """
         {
           "name": "January Activity",
@@ -154,22 +170,115 @@ class ReportIntegrationTest {
           }
         }
         """;
+    private static final String FORECAST_BODY = """
+        {
+          "name": "Forward Forecast",
+          "description": "Weighted pipeline forecast",
+          "cadence": "custom",
+          "templateKey": "forecasting",
+          "config": {
+            "widgets": [
+              {
+                "id": "forecast-best",
+                "title": "Best-case forecast",
+                "dataSource": "deals",
+                "measure": "forecast_best",
+                "groupBy": "date",
+                "chartType": "line-area"
+              },
+              {
+                "id": "forecast-weighted",
+                "title": "Likely forecast",
+                "dataSource": "deals",
+                "measure": "forecast_weighted",
+                "groupBy": "date",
+                "chartType": "line-area"
+              },
+              {
+                "id": "forecast-worst",
+                "title": "Commit forecast",
+                "dataSource": "deals",
+                "measure": "forecast_worst",
+                "groupBy": "date",
+                "chartType": "line-area"
+              },
+              {
+                "id": "forecast-best-summary",
+                "title": "Best-case summary",
+                "dataSource": "deals",
+                "measure": "forecast_best",
+                "groupBy": "none",
+                "chartType": "kpi"
+              },
+              {
+                "id": "forecast-weighted-summary",
+                "title": "Likely summary",
+                "dataSource": "deals",
+                "measure": "forecast_weighted",
+                "groupBy": "none",
+                "chartType": "kpi"
+              },
+              {
+                "id": "forecast-worst-summary",
+                "title": "Commit summary",
+                "dataSource": "deals",
+                "measure": "forecast_worst",
+                "groupBy": "none",
+                "chartType": "kpi"
+              },
+              {
+                "id": "forecast-best-stage",
+                "title": "Forward pipeline by stage",
+                "dataSource": "deals",
+                "measure": "forecast_best",
+                "groupBy": "stage",
+                "chartType": "bar"
+              }
+            ],
+            "filters": {
+              "pipelineIds": null,
+              "ownerIds": null,
+              "statuses": null,
+              "tagIds": null,
+              "warmthBands": null
+            },
+            "range": {"start": "2026-01-01", "end": "2026-01-31"},
+            "bucket": "day",
+            "layout": [
+              {"widgetId": "forecast-best", "x": 0, "y": 0, "width": 6, "height": 4},
+              {"widgetId": "forecast-weighted", "x": 6, "y": 0, "width": 6, "height": 4},
+              {"widgetId": "forecast-worst", "x": 0, "y": 4, "width": 6, "height": 4},
+              {"widgetId": "forecast-best-summary", "x": 6, "y": 4, "width": 6, "height": 4},
+              {"widgetId": "forecast-weighted-summary", "x": 0, "y": 8, "width": 6, "height": 4},
+              {"widgetId": "forecast-worst-summary", "x": 6, "y": 8, "width": 6, "height": 4},
+              {"widgetId": "forecast-best-stage", "x": 0, "y": 12, "width": 12, "height": 4}
+            ]
+          }
+        }
+        """;
 
     @Autowired private WebApplicationContext context;
     @Autowired @Qualifier("springSecurityFilterChain") private Filter springSecurityFilterChain;
     @Autowired private UserMapper userMapper;
     @Autowired private WorkspaceMapper workspaceMapper;
     @Autowired private RoleMapper roleMapper;
+    @Autowired private ShareMapper shareMapper;
     @Autowired private PasswordEncoder passwordEncoder;
     @Autowired private JdbcTemplate jdbcTemplate;
     @Autowired private ObjectMapper objectMapper;
 
     @MockitoBean private AiReportNarrativeService aiReportNarrativeService;
+    @MockitoBean private Clock clock;
 
     private MockMvc mockMvc;
 
     @BeforeEach
     void setUp() {
+        when(clock.instant()).thenReturn(FIXED_NOW);
+        when(clock.millis()).thenReturn(FIXED_NOW.toEpochMilli());
+        when(clock.getZone()).thenReturn(ZoneOffset.UTC);
+        when(clock.withZone(any(ZoneId.class))).thenAnswer(invocation ->
+                Clock.fixed(FIXED_NOW, invocation.getArgument(0, ZoneId.class)));
         mockMvc = MockMvcBuilders.webAppContextSetup(context)
                 .addFilters(springSecurityFilterChain)
                 .build();
@@ -288,8 +397,33 @@ class ReportIntegrationTest {
                 .header("X-Workspace-Id", workspace.getId())
                 .session(session))
             .andExpect(status().isOk())
-            .andExpect(jsonPath("$[?(@.key == 'relationship-health')]").isNotEmpty())
-            .andExpect(jsonPath("$[3].config.widgets.length()").value(6));
+            .andExpect(jsonPath("$[?(@.key == 'relationship-health')]").isNotEmpty());
+    }
+
+    @Test
+    void forecastingTemplateIsAvailable() throws Exception {
+        RequestContextHolder.resetRequestAttributes();
+        Workspace workspace = newWorkspace();
+        User member = newMember(workspace, "member");
+        MockHttpSession session = login(member.getUsername());
+
+        MvcResult result = mockMvc.perform(get("/api/reports/templates")
+                .header("X-Workspace-Id", workspace.getId())
+                .session(session))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$[?(@.key == 'forecasting')]").isNotEmpty())
+            .andReturn();
+
+        JsonNode forecasting = findTemplate(
+                objectMapper.readTree(result.getResponse().getContentAsString()), "forecasting");
+        assertNotNull(forecasting);
+        assertEquals("quarterly", forecasting.get("cadence").asText());
+        assertEquals("month", forecasting.get("config").get("bucket").asText());
+        List<String> measures = new ArrayList<>();
+        for (JsonNode widget : forecasting.get("config").get("widgets")) {
+            measures.add(widget.get("measure").asText());
+        }
+        assertTrue(measures.containsAll(List.of("forecast_best", "forecast_weighted", "forecast_worst")));
     }
 
     @Test
@@ -368,6 +502,149 @@ class ReportIntegrationTest {
             .andExpect(jsonPath("$.widgets[3].priorTotal").doesNotExist())
             .andExpect(jsonPath("$.widgets[4].total").value(100))
             .andExpect(jsonPath("$.widgets[4].points[0].label").value("USD · Single Thread"));
+    }
+
+    @Test
+    void forecastingGenerationUsesHistoricalRatesForwardWindowAndTenantIsolation() throws Exception {
+        RequestContextHolder.resetRequestAttributes();
+        Workspace workspace = newWorkspace();
+        User member = newMember(workspace, "member");
+        MockHttpSession session = login(member.getUsername());
+        LocalDate today = LocalDate.now(clock.withZone(ZoneOffset.UTC));
+        LocalDate inHorizon = today;
+
+        int pipelineId = insertPipeline(workspace.getId(), "Forecast pipeline");
+        int lowRateStageId = insertStage(workspace.getId(), pipelineId, "Low historical rate", 1);
+        int highRateStageId = insertStage(workspace.getId(), pipelineId, "High historical rate", 2);
+        int fallbackStageId = insertStage(workspace.getId(), pipelineId, "No history", 3);
+        insertClosedDeal(workspace.getId(), pipelineId, lowRateStageId,
+                "Future-date closed won", "1000.00", "USD", true, inHorizon);
+        for (int index = 0; index < 3; index++) {
+            insertClosedDeal(workspace.getId(), pipelineId, lowRateStageId,
+                    "Low-rate lost " + index, "10.00", "USD", false, today.minusMonths(2));
+        }
+        for (int index = 0; index < 4; index++) {
+            insertClosedDeal(workspace.getId(), pipelineId, highRateStageId,
+                    "High-rate won " + index, "10.00", "USD", true, today.minusMonths(2));
+        }
+        insertOpenDeal(workspace.getId(), pipelineId, lowRateStageId,
+                "Historical stage open", "100.00", "USD", inHorizon);
+        insertOpenDeal(workspace.getId(), pipelineId, fallbackStageId,
+                "Fallback stage open", "200.00", "USD", inHorizon);
+        insertOpenDeal(workspace.getId(), pipelineId, lowRateStageId,
+                "Euro open", "50.00", "EUR", inHorizon);
+        insertOpenDeal(workspace.getId(), pipelineId, lowRateStageId,
+                "Next month open", "40.00", "USD", inHorizon.plusMonths(1));
+        insertOpenDeal(workspace.getId(), pipelineId, lowRateStageId,
+                "Past open", "1000.00", "USD", today.minusDays(1));
+        insertOpenDeal(workspace.getId(), pipelineId, lowRateStageId,
+                "Boundary open", "1000.00", "USD", today.plusMonths(3));
+
+        Workspace otherWorkspace = newWorkspace();
+        int otherPipelineId = insertPipeline(otherWorkspace.getId(), "Other forecast pipeline");
+        int otherStageId = insertStage(otherWorkspace.getId(), otherPipelineId, "Other stage", 1);
+        for (int index = 0; index < 5; index++) {
+            insertClosedDeal(otherWorkspace.getId(), otherPipelineId, otherStageId,
+                    "Other won " + index, "10.00", "USD", true, today.minusMonths(1));
+        }
+        insertOpenDeal(otherWorkspace.getId(), otherPipelineId, otherStageId,
+                "Other open", "5000.00", "USD", inHorizon);
+
+        int reportId = createReport(session, workspace, FORECAST_BODY);
+        MvcResult result = mockMvc.perform(post("/api/reports/{id}/generate", reportId)
+                .header("X-Workspace-Id", workspace.getId())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{}")
+                .session(session)
+                .with(csrf()))
+            .andExpect(status().isOk())
+            .andReturn();
+
+        JsonNode document = objectMapper.readTree(result.getResponse().getContentAsString());
+        JsonNode widgets = document.get("widgets");
+        Map<String, BigDecimal> best = pointValues(widgets.get(0));
+        Map<String, BigDecimal> weighted = pointValues(widgets.get(1));
+        Map<String, BigDecimal> worst = pointValues(widgets.get(2));
+        String month = YearMonth.from(inHorizon).toString();
+        assertDecimal("300", best.get("USD:" + month));
+        assertDecimal("150", weighted.get("USD:" + month));
+        assertDecimal("84.375", worst.get("USD:" + month));
+        assertDecimal("50", best.get("EUR:" + month));
+        assertDecimal("12.5", weighted.get("EUR:" + month));
+        assertDecimal("3.125", worst.get("EUR:" + month));
+        String nextMonth = YearMonth.from(inHorizon.plusMonths(1)).toString();
+        assertDecimal("40", best.get("USD:" + nextMonth));
+        assertDecimal("10", weighted.get("USD:" + nextMonth));
+        assertDecimal("2.5", worst.get("USD:" + nextMonth));
+        assertEquals(Set.of("USD:" + month, "EUR:" + month, "USD:" + nextMonth), best.keySet());
+        assertEquals(best.keySet(), weighted.keySet());
+        assertEquals(best.keySet(), worst.keySet());
+        for (String key : best.keySet()) {
+            assertTrue(worst.get(key).compareTo(weighted.get(key)) <= 0);
+            assertTrue(weighted.get(key).compareTo(best.get(key)) <= 0);
+        }
+        Map<String, BigDecimal> bestSummary = pointValues(widgets.get(3));
+        Map<String, BigDecimal> weightedSummary = pointValues(widgets.get(4));
+        Map<String, BigDecimal> worstSummary = pointValues(widgets.get(5));
+        Map<String, BigDecimal> bestByStage = pointValues(widgets.get(6));
+        assertDecimal(sumCurrency(best, "USD"), bestSummary.get("USD:total"));
+        assertDecimal(sumCurrency(best, "EUR"), bestSummary.get("EUR:total"));
+        assertDecimal(sumCurrency(weighted, "USD"), weightedSummary.get("USD:total"));
+        assertDecimal(sumCurrency(weighted, "EUR"), weightedSummary.get("EUR:total"));
+        assertDecimal(sumCurrency(worst, "USD"), worstSummary.get("USD:total"));
+        assertDecimal(sumCurrency(worst, "EUR"), worstSummary.get("EUR:total"));
+        assertDecimal(bestSummary.get("USD:total"), sumCurrency(bestByStage, "USD"));
+        assertDecimal(bestSummary.get("EUR:total"), sumCurrency(bestByStage, "EUR"));
+        for (JsonNode widget : widgets) {
+            assertEquals("mixed", widget.get("unit").asText());
+            assertTrue(widget.get("total") == null || widget.get("total").isNull());
+            assertTrue(widget.get("priorTotal") == null || widget.get("priorTotal").isNull());
+            for (JsonNode point : widget.get("points")) {
+                assertTrue(point.get("priorValue") == null || point.get("priorValue").isNull());
+            }
+        }
+    }
+
+    @Test
+    void forecastingUsesNeutralDefaultWithoutClosedHistory() throws Exception {
+        RequestContextHolder.resetRequestAttributes();
+        Workspace workspace = newWorkspace();
+        User member = newMember(workspace, "member");
+        MockHttpSession session = login(member.getUsername());
+        LocalDate today = LocalDate.now(clock.withZone(ZoneOffset.UTC));
+        LocalDate inHorizon = today.plusDays(7);
+        Integer orgId = workspaceMapper.getOrgId(workspace.getId());
+        assertNotNull(orgId);
+        Workspace pipelineOwner = newWorkspaceInOrg(orgId);
+        User pipelineOwnerMember = newMember(pipelineOwner, "member");
+        int pipelineId = insertPipeline(pipelineOwner.getId(), "Neutral forecast pipeline");
+        int stageId = insertStage(pipelineOwner.getId(), pipelineId, "Neutral stage", 1);
+        assertEquals(1, shareMapper.sharePipeline(
+                pipelineId, pipelineOwner.getId(), workspace.getId(), pipelineOwnerMember.getId(), false));
+        insertOpenDeal(workspace.getId(), pipelineId, stageId,
+                "Neutral open", "100.00", "USD", inHorizon);
+
+        Workspace otherWorkspace = newWorkspace();
+        int otherPipelineId = insertPipeline(otherWorkspace.getId(), "Other neutral pipeline");
+        int otherStageId = insertStage(otherWorkspace.getId(), otherPipelineId, "Other neutral stage", 1);
+        insertClosedDeal(otherWorkspace.getId(), otherPipelineId, otherStageId,
+                "Other neutral won", "10.00", "USD", true, today.minusMonths(1));
+
+        int reportId = createReport(session, workspace, FORECAST_BODY);
+        MvcResult result = mockMvc.perform(post("/api/reports/{id}/generate", reportId)
+                .header("X-Workspace-Id", workspace.getId())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{}")
+                .session(session)
+                .with(csrf()))
+            .andExpect(status().isOk())
+            .andReturn();
+
+        JsonNode widgets = objectMapper.readTree(result.getResponse().getContentAsString()).get("widgets");
+        String key = "USD:" + YearMonth.from(inHorizon);
+        assertDecimal("100", pointValues(widgets.get(0)).get(key));
+        assertDecimal("50", pointValues(widgets.get(1)).get(key));
+        assertDecimal("25", pointValues(widgets.get(2)).get(key));
     }
 
     @Test
@@ -520,6 +797,41 @@ class ReportIntegrationTest {
         return objectMapper.readTree(result.getResponse().getContentAsString()).get("id").asInt();
     }
 
+    private static JsonNode findTemplate(JsonNode templates, String key) {
+        for (JsonNode template : templates) {
+            if (key.equals(template.get("key").asText())) {
+                return template;
+            }
+        }
+        return null;
+    }
+
+    private static Map<String, BigDecimal> pointValues(JsonNode widget) {
+        Map<String, BigDecimal> values = new LinkedHashMap<>();
+        for (JsonNode point : widget.get("points")) {
+            values.put(point.get("key").asText(), point.get("value").decimalValue());
+        }
+        return values;
+    }
+
+    private static void assertDecimal(String expected, BigDecimal actual) {
+        assertNotNull(actual);
+        assertEquals(0, new BigDecimal(expected).compareTo(actual));
+    }
+
+    private static void assertDecimal(BigDecimal expected, BigDecimal actual) {
+        assertNotNull(expected);
+        assertNotNull(actual);
+        assertEquals(0, expected.compareTo(actual));
+    }
+
+    private static BigDecimal sumCurrency(Map<String, BigDecimal> values, String currency) {
+        return values.entrySet().stream()
+                .filter(entry -> entry.getKey().startsWith(currency + ":"))
+                .map(Map.Entry::getValue)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+    }
+
     private void insertActivity(int workspaceId, int userId, String timestamp) {
         jdbcTemplate.update(
                 "INSERT INTO activity (workspace_id, type, subject, created_by_id, timestamp) VALUES (?, ?, ?, ?, ?)",
@@ -536,12 +848,16 @@ class ReportIntegrationTest {
     }
 
     private int insertStage(int workspaceId, int pipelineId, String name) {
+        return insertStage(workspaceId, pipelineId, name, 1);
+    }
+
+    private int insertStage(int workspaceId, int pipelineId, String name, int position) {
         jdbcTemplate.update(
                 "INSERT INTO stage (workspace_id, name, pipeline_id, position) VALUES (?, ?, ?, ?)",
-                workspaceId, name, pipelineId, 1);
+                workspaceId, name, pipelineId, position);
         return jdbcTemplate.queryForObject(
                 "SELECT id FROM stage WHERE workspace_id = ? AND pipeline_id = ? AND position = ?",
-                Integer.class, workspaceId, pipelineId, 1);
+                Integer.class, workspaceId, pipelineId, position);
     }
 
     private int insertCompany(int workspaceId, String name) {
@@ -581,6 +897,24 @@ class ReportIntegrationTest {
                 Integer.class, workspaceId, name);
     }
 
+    private void insertOpenDeal(int workspaceId, int pipelineId, int stageId,
+            String name, String value, String currency, LocalDate expectedCloseDate) {
+        jdbcTemplate.update(
+                "INSERT INTO deal (workspace_id, name, value, currency, pipeline_id, stage_id, "
+                        + "expected_close_date, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                workspaceId, name, value, currency, pipelineId, stageId,
+                expectedCloseDate, LocalDateTime.now(clock).minusMonths(1));
+    }
+
+    private void insertClosedDeal(int workspaceId, int pipelineId, int stageId,
+            String name, String value, String currency, boolean won, LocalDate expectedCloseDate) {
+        jdbcTemplate.update(
+                "INSERT INTO deal (workspace_id, name, value, currency, pipeline_id, stage_id, "
+                        + "expected_close_date, closed_at, won, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                workspaceId, name, value, currency, pipelineId, stageId, expectedCloseDate,
+                LocalDateTime.now(clock).minusMonths(1), won, LocalDateTime.now(clock).minusMonths(2));
+    }
+
     private void insertDealPerson(int dealId, int personId) {
         jdbcTemplate.update(
                 "INSERT INTO deal_person (deal_id, person_id, role) VALUES (?, ?, ?)",
@@ -604,6 +938,16 @@ class ReportIntegrationTest {
         Workspace workspace = new Workspace();
         workspace.setName(slug);
         workspace.setSlug(slug);
+        workspaceMapper.insert(workspace);
+        return workspace;
+    }
+
+    private Workspace newWorkspaceInOrg(int orgId) {
+        String slug = "report-" + UUID.randomUUID().toString().substring(0, 8);
+        Workspace workspace = new Workspace();
+        workspace.setName(slug);
+        workspace.setSlug(slug);
+        workspace.setOrgId(orgId);
         workspaceMapper.insert(workspace);
         return workspace;
     }

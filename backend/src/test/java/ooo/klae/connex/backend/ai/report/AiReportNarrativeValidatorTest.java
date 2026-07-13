@@ -81,6 +81,55 @@ class AiReportNarrativeValidatorTest {
     }
 
     @Test
+    void forecastingFacts_areLocalizedAndAccepted() {
+        ReportAppendixRowDto source = new ReportAppendixRowDto(
+                "forecast.weighted", "forecast", "forecast_weighted · USD · 2026-09",
+                new BigDecimal("125000"), null, "USD");
+        String claim = AiReportFacts.claim(source);
+        String recommendation = AiReportFacts.claims(source).get(1);
+        AiReportContext context = new AiReportContext(
+                "Forecasting", LocalDate.of(2026, 7, 1), LocalDate.of(2026, 9, 30), List.of(source));
+        AiReportNarrativeContent content = new AiReportNarrativeContent(
+                List.of(new AiReportNarrativeContent.Section(
+                        "Executive summary",
+                        List.of(new AiReportNarrativeContent.Claim(claim, List.of(source.sourceId()))))),
+                List.of(new AiReportNarrativeContent.Claim(recommendation, List.of(source.sourceId()))));
+
+        assertEquals(
+                "Likely forecast (weighted) · USD · 2026-09 is a deterministic forward forecast.",
+                claim);
+        assertTrue(recommendation.contains("weighted forecast at risk"));
+        assertEquals("Best-case forecast · Total", AiReportFacts.label(new ReportAppendixRowDto(
+                "forecast.best", "forecast", "forecast_best · Total",
+                new BigDecimal("250000"), null, "USD")));
+        assertEquals("Commit forecast · Total", AiReportFacts.label(new ReportAppendixRowDto(
+                "forecast.worst", "forecast", "forecast_worst · Total",
+                new BigDecimal("75000"), null, "USD")));
+        assertTrue(AiReportNarrativeValidator.validate(content, context).isPresent());
+
+        LocaleContextHolder.setLocale(Locale.JAPANESE);
+        String japaneseClaim = AiReportFacts.claim(source);
+        String japaneseRecommendation = AiReportFacts.claims(source).get(1);
+        AiReportNarrativeContent japaneseContent = new AiReportNarrativeContent(
+                List.of(new AiReportNarrativeContent.Section(
+                        "エグゼクティブサマリー",
+                        List.of(new AiReportNarrativeContent.Claim(
+                                japaneseClaim, List.of(source.sourceId()))))),
+                List.of(new AiReportNarrativeContent.Claim(
+                        japaneseRecommendation, List.of(source.sourceId()))));
+
+        assertEquals("見込み予測（加重） · USD · 2026-09は確定的に計算された将来予測です。", japaneseClaim);
+        assertTrue(japaneseRecommendation.contains("加重予測"));
+        assertEquals("最良ケース予測 · 合計", AiReportFacts.label(new ReportAppendixRowDto(
+                "forecast.best", "forecast", "forecast_best · Total",
+                new BigDecimal("250000"), null, "USD")));
+        assertEquals("コミット予測 · 合計", AiReportFacts.label(new ReportAppendixRowDto(
+                "forecast.worst", "forecast", "forecast_worst · Total",
+                new BigDecimal("75000"), null, "USD")));
+        assertTrue(AiReportNarrativeValidator.validate(japaneseContent, context).isPresent());
+    }
+
+    @Test
     void validate_unknownCitation_failsClosed() {
         AiReportNarrativeContent content = content(
                 new AiReportNarrativeContent.Claim("Unsupported claim.", List.of("unknown.source")));

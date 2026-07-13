@@ -48,6 +48,10 @@
         "name": "パイプライン健全性",
         "description": "オープンパイプライン、ステージ網羅率、関係性リスク。"
       },
+      "forecasting": {
+        "name": "売上予測",
+        "description": "今後3か月を対象に、ステージごとの過去の勝率で加重した最良・見込み・コミット予測。"
+      },
       "relationship-coverage": {
         "name": "関係性カバレッジ",
         "description": "温度分布とアカウントのカバレッジ。"
@@ -181,7 +185,10 @@
       "coverage_gap_count": "カバレッジ不足の会社数",
       "coverage_gap_open_pipeline_value": "カバレッジ不足のオープンパイプライン金額",
       "single_threaded_deal_count": "単一接点案件数",
-      "single_threaded_deal_value": "単一接点案件金額"
+      "single_threaded_deal_value": "単一接点案件金額",
+      "forecast_best": "最良ケース予測",
+      "forecast_weighted": "見込み予測（加重）",
+      "forecast_worst": "コミット予測"
     },
     "group": {
       "none": "グループ化なし",

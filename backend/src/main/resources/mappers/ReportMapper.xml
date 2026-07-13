@@ -239,6 +239,70 @@
     </choose>
   </select>
 
+  <sql id="forecastGroupKey">
+    <choose>
+      <when test="query.groupBy == 'date'">DATE_FORMAT(d.expected_close_date, '%Y-%m')</when>
+      <otherwise><include refid="dealGroupKey"/></otherwise>
+    </choose>
+  </sql>
+
+  <sql id="forecastGroupLabel">
+    <choose>
+      <when test="query.groupBy == 'date'">DATE_FORMAT(d.expected_close_date, '%Y-%m')</when>
+      <otherwise><include refid="dealGroupLabel"/></otherwise>
+    </choose>
+  </sql>
+
+  <sql id="forecastWinRate">
+    COALESCE(stage_history.win_rate, workspace_history.win_rate, #{query.fallbackWinRate})
+  </sql>
+
+  <select id="aggregateForecast" resultType="ooo.klae.connex.backend.dto.ReportForecastAggregateRow">
+    SELECT
+      CONCAT(COALESCE(d.currency, ''), ':', <include refid="forecastGroupKey"/>) AS group_key,
+      CONCAT(COALESCE(d.currency, ''), ' · ', <include refid="forecastGroupLabel"/>) AS group_label,
+      COALESCE(d.currency, '') AS unit,
+      COALESCE(SUM(GREATEST(d.value, 0)), 0) AS best_value,
+      COALESCE(SUM(GREATEST(d.value, 0) * <include refid="forecastWinRate"/>), 0)
+        AS weighted_value,
+      COALESCE(SUM(
+        GREATEST(d.value, 0) * <include refid="forecastWinRate"/> * <include refid="forecastWinRate"/>
+      ), 0) AS worst_value
+    FROM deal d
+    LEFT JOIN pipeline p ON p.id = d.pipeline_id AND p.workspace_id = #{query.workspaceId}
+    LEFT JOIN stage s ON s.id = d.stage_id AND s.pipeline_id = d.pipeline_id
+      AND s.workspace_id = #{query.workspaceId}
+    LEFT JOIN company c ON c.id = d.company_id AND c.workspace_id = #{query.workspaceId}
+    LEFT JOIN (
+      SELECT historical_deal.pipeline_id,
+             historical_deal.stage_id,
+             1.0 * SUM(CASE WHEN historical_deal.won = TRUE THEN 1 ELSE 0 END)
+               / NULLIF(COUNT(*), 0) AS win_rate
+      FROM deal historical_deal
+      WHERE historical_deal.workspace_id = #{query.workspaceId}
+        AND historical_deal.won IS NOT NULL
+      GROUP BY historical_deal.pipeline_id, historical_deal.stage_id
+    ) stage_history ON stage_history.pipeline_id = d.pipeline_id
+      AND stage_history.stage_id = d.stage_id
+    CROSS JOIN (
+      SELECT 1.0 * SUM(CASE WHEN workspace_deal.won = TRUE THEN 1 ELSE 0 END)
+               / NULLIF(COUNT(*), 0) AS win_rate
+      FROM deal workspace_deal
+      WHERE workspace_deal.workspace_id = #{query.workspaceId}
+        AND workspace_deal.won IS NOT NULL
+    ) workspace_history
+    WHERE d.workspace_id = #{query.workspaceId}
+      AND d.won IS NULL
+      AND d.expected_close_date &gt;= #{query.startDate}
+      AND d.expected_close_date &lt; #{query.endDateExclusive}
+    <include refid="dealFilters"/>
+    GROUP BY group_key, group_label, unit
+    <choose>
+      <when test="query.groupBy == 'stage'">ORDER BY MIN(d.pipeline_id), MIN(s.position), group_key</when>
+      <otherwise>ORDER BY group_key</otherwise>
+    </choose>
+  </select>
+
   <sql id="activityGroupKey">
     <choose>
       <when test="query.groupBy == 'date'">
