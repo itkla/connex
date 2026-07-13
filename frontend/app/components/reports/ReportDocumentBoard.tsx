@@ -210,7 +210,7 @@ export default function ReportDocumentBoard({
     };
 
     return (
-        <div className="report-page min-h-full bg-muted/30 px-2 pb-16 pt-8">
+        <div className="report-page min-h-full px-2 pb-16 pt-8">
             <div className="mx-auto w-full max-w-[100rem]">
                 <div className="report-controls mb-6 flex flex-wrap items-end justify-between gap-4 rounded-2xl border border-border bg-card p-4">
                     <div className="flex flex-wrap items-end gap-3">
