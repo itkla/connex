@@ -9,6 +9,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -23,6 +24,7 @@ import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.beans.WorkspaceMailConfig;
 import ooo.klae.connex.backend.dto.MailConfigRequest;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
+import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.mail.EmailTemplateRenderer;
 import ooo.klae.connex.backend.mail.MailConfigResolver;
 import ooo.klae.connex.backend.mail.MailProperties;
@@ -55,14 +57,15 @@ class WorkspaceMailConfigServiceTest {
     private final MailProperties mailProperties = new MailProperties();
 
     @BeforeEach
-    void allowInternalHostsByDefault() {
+    void configureDefaultMailProperties() {
+        mailProperties.setManaged(false);
         mailProperties.setAllowInternalHosts(true);
     }
 
     private WorkspaceMailConfigService service() {
         return new WorkspaceMailConfigService(mailConfigMapper, workspaceService, auditService,
                 secretCipher, mailConfigResolver, mailService, templateRenderer, userMapper,
-                sessionSecurityService, new SmtpDestinationGuard(mailProperties));
+                sessionSecurityService, new SmtpDestinationGuard(mailProperties), mailProperties);
     }
 
     private MailConfigRequest enabledRequest() {
@@ -78,6 +81,48 @@ class WorkspaceMailConfigServiceTest {
     void getConfig_requiresWorkspaceSettingsPermission() {
         service().getConfig(3, 9);
         verify(workspaceService).requirePermission(3, 9, Permission.WORKSPACE_SETTINGS);
+    }
+
+    @Test
+    void getConfig_managed_stillReadsWorkspaceConfig() {
+        mailProperties.setManaged(true);
+        WorkspaceMailConfig existing = new WorkspaceMailConfig();
+        when(mailConfigMapper.findByWorkspace(3)).thenReturn(existing);
+
+        service().getConfig(3, 9);
+
+        verify(workspaceService).requirePermission(3, 9, Permission.WORKSPACE_SETTINGS);
+        verify(mailConfigMapper).findByWorkspace(3);
+    }
+
+    @Test
+    void saveConfig_managed_rejectedWithoutWork() {
+        mailProperties.setManaged(true);
+
+        assertThrows(ForbiddenException.class, () -> service().saveConfig(3, 9, enabledRequest()));
+
+        verifyNoInteractions(workspaceService, sessionSecurityService, mailConfigMapper, secretCipher,
+                mailConfigResolver, mailService, templateRenderer, userMapper, auditService);
+    }
+
+    @Test
+    void deleteConfig_managed_rejectedWithoutWork() {
+        mailProperties.setManaged(true);
+
+        assertThrows(ForbiddenException.class, () -> service().deleteConfig(3, 9));
+
+        verifyNoInteractions(workspaceService, sessionSecurityService, mailConfigMapper, secretCipher,
+                mailConfigResolver, mailService, templateRenderer, userMapper, auditService);
+    }
+
+    @Test
+    void sendTest_managed_rejectedWithoutWork() {
+        mailProperties.setManaged(true);
+
+        assertThrows(ForbiddenException.class, () -> service().sendTest(3, 9));
+
+        verifyNoInteractions(workspaceService, sessionSecurityService, mailConfigMapper, secretCipher,
+                mailConfigResolver, mailService, templateRenderer, userMapper, auditService);
     }
 
     @Test

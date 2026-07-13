@@ -85,6 +85,25 @@ class MailConfigResolverTest {
     }
 
     @Test
+    void resolveForWorkspace_managed_returnsInstanceWithoutWorkspaceLookup() {
+        enableInstance();
+        properties.setManaged(true);
+        WorkspaceMailConfig ws = new WorkspaceMailConfig();
+        ws.setEnabled(true);
+        ws.setWorkspaceId(7);
+        ws.setHost("smtp.workspace.test");
+        ws.setFromAddress("team@workspace.test");
+        lenient().when(mailConfigMapper.findByWorkspace(7)).thenReturn(ws);
+
+        ResolvedMailConfig resolved = resolver.resolveForWorkspace(7);
+
+        assertEquals("smtp.instance.test", resolved.host());
+        assertEquals("no-reply@instance.test", resolved.fromAddress());
+        verify(mailConfigMapper, never()).findByWorkspace(7);
+        verify(secretCipher, never()).decryptForWorkspace(7, ws.getPasswordEnc());
+    }
+
+    @Test
     void resolveForWorkspace_authDisabledDoesNotDecryptStalePassword() {
         WorkspaceMailConfig ws = new WorkspaceMailConfig();
         ws.setEnabled(true);
@@ -156,6 +175,16 @@ class MailConfigResolverTest {
         enableInstance();
         when(mailConfigMapper.findByWorkspace(7)).thenReturn(null);
         assertNull(resolver.resolveWorkspaceOnly(7));
+    }
+
+    @Test
+    void resolveWorkspaceOnly_managed_returnsNullWithoutWorkspaceLookup() {
+        properties.setManaged(true);
+        lenient().when(mailConfigMapper.findByWorkspace(7)).thenReturn(new WorkspaceMailConfig());
+
+        assertNull(resolver.resolveWorkspaceOnly(7));
+
+        verify(mailConfigMapper, never()).findByWorkspace(7);
     }
 
     @Test

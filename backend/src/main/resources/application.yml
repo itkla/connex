@@ -204,6 +204,10 @@ connex:
         # Settings → Email; its SMTP password is stored in the central secret store.
         # app-base-url is the frontend origin used to build invite links (never a request header).
         enabled: ${CONNEX_MAIL_ENABLED:false}
+        # When true, per-workspace SMTP overrides are disabled and the instance transport
+        # (enabled + host/from below) is authoritative for all workspace mail; if the instance
+        # transport is left unconfigured, workspace mail is disabled entirely.
+        managed: ${CONNEX_MAIL_MANAGED:false}
         host: ${CONNEX_MAIL_HOST:}
         port: ${CONNEX_MAIL_PORT:587}
         username: ${CONNEX_MAIL_USERNAME:}
