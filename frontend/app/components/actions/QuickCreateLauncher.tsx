@@ -20,7 +20,7 @@ import { useIsMobile } from '@/app/hooks/useIsMobile';
 import { useActions, useAvailableActions } from '@/app/hooks/useActions';
 import { deriveCreateDefaults } from '@/app/lib/actions/createDefaults';
 import { getContacts, getDeals, getUsers } from '@/app/lib/api';
-import { easeOut, instant, springJiggle } from '@/app/lib/motion';
+import { easeOut, instant, springJiggle, springSmooth, springSnappy } from '@/app/lib/motion';
 import type { AppAction, ActionContext } from '@/app/lib/actions/types';
 import type { Contact, Deal, User } from '@/app/lib/types';
 
@@ -484,7 +484,7 @@ function MobileCreateFlow({ actions, context, currentUserId, onFallback, onClose
                             <TypeSelector actions={actions} onSelect={select} />
                         </div>
                     ) : refs === null || currentUserId == null ? (
-                        <div className="grid min-h-[18rem] place-items-center">
+                        <div className="grid min-h-[28rem] place-items-center">
                             <Loader2Icon className="size-5 animate-spin text-muted-foreground" />
                         </div>
                     ) : view === 'task' ? (
@@ -522,17 +522,24 @@ function MobileCreateFlow({ actions, context, currentUserId, onFallback, onClose
 }
 
 const MORPH_VARIANTS = {
-    hidden: (d: number) => ({ opacity: 0, x: d >= 0 ? 16 : -16 }),
-    show: { opacity: 1, x: 0 },
-    exit: (d: number) => ({ opacity: 0, x: d >= 0 ? -16 : 16 }),
-    still: { opacity: 0, x: 0 },
+    enter: (d: number) => ({ opacity: 0, x: d >= 0 ? 12 : -12, filter: 'blur(3px)' }),
+    center: { opacity: 1, x: 0, filter: 'blur(0px)' },
+    exit: (d: number) => ({ opacity: 0, x: d >= 0 ? -12 : 12, filter: 'blur(3px)' }),
+    still: { opacity: 0, x: 0, filter: 'blur(0px)' },
+};
+
+const MORPH_CONTENT_TRANSITION = {
+    x: springSnappy,
+    opacity: { duration: 0.16, ease: easeOut },
+    filter: { duration: 0.16, ease: easeOut },
 };
 
 /**
- * Wraps the morphing drawer content: crossfades/slides between the selector and a form while animating
- * the drawer's height to the measured height of the active view, so the swap reads as one surface
- * changing rather than two panels appearing. Height stays observed so later growth (comboboxes, field
- * errors, the editor) keeps the sheet sized correctly.
+ * Wraps the morphing drawer content: crossfades/slides between the selector and a form while the drawer's
+ * height springs to the measured height of the active view, so the swap reads as one surface reshaping
+ * rather than two panels appearing. The height stays observed (later growth from comboboxes, field errors
+ * or the editor keeps the sheet sized), and the very first sizing is instant so it never competes with the
+ * drawer's own slide-up.
  */
 function MorphingBody({
     viewKey,
@@ -547,21 +554,26 @@ function MorphingBody({
 }) {
     const measureRef = useRef<HTMLDivElement | null>(null);
     const [height, setHeight] = useState<number | 'auto'>('auto');
+    const [animateHeight, setAnimateHeight] = useState(false);
 
     useLayoutEffect(() => {
         const node = measureRef.current;
         if (!node) return;
         const measure = () => setHeight(node.offsetHeight);
         measure();
+        const raf = requestAnimationFrame(() => setAnimateHeight(true));
         const observer = new ResizeObserver(measure);
         observer.observe(node);
-        return () => observer.disconnect();
+        return () => {
+            cancelAnimationFrame(raf);
+            observer.disconnect();
+        };
     }, []);
 
     return (
         <motion.div
             animate={reduceMotion ? undefined : { height }}
-            transition={{ duration: 0.22, ease: easeOut }}
+            transition={animateHeight ? springSmooth : instant}
             style={{ overflow: 'hidden' }}
         >
             <div ref={measureRef} className="relative">
@@ -570,10 +582,10 @@ function MorphingBody({
                         key={viewKey}
                         custom={direction}
                         variants={MORPH_VARIANTS}
-                        initial={reduceMotion ? 'still' : 'hidden'}
-                        animate="show"
+                        initial={reduceMotion ? 'still' : 'enter'}
+                        animate="center"
                         exit={reduceMotion ? 'still' : 'exit'}
-                        transition={{ duration: 0.18, ease: easeOut }}
+                        transition={reduceMotion ? { duration: 0.12 } : MORPH_CONTENT_TRANSITION}
                     >
                         {children}
                     </motion.div>
