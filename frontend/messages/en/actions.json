@@ -4,20 +4,7 @@
       "trigger": "New",
       "title": "Create",
       "description": "Create a record",
-      "back": "Back to types",
-      "close": "Close",
-      "create": "Create",
-      "moreDetails": "More details",
-      "linkedTo": "Linked to",
-      "task": {
-        "descriptionLabel": "Task",
-        "descriptionPlaceholder": "What needs to be done?",
-        "dueDateLabel": "Due date"
-      },
-      "note": {
-        "contentLabel": "Note",
-        "contentPlaceholder": "Write a note…"
-      }
+      "close": "Close"
     },
     "palette": {
       "trigger": "Search & commands",

@@ -2,11 +2,10 @@
 
 import { useCallback, useEffect, useId, useRef, useState, useSyncExternalStore } from 'react';
 import { createPortal } from 'react-dom';
-import dynamic from 'next/dynamic';
 import { useTranslations } from 'next-intl';
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
 import { PlusIcon } from '@heroicons/react/16/solid';
-import { ArrowLeftIcon, XMarkIcon } from '@heroicons/react/24/outline';
+import { XMarkIcon } from '@heroicons/react/24/outline';
 
 import {
     Drawer,
@@ -17,29 +16,8 @@ import {
 } from '@/components/ui/drawer';
 import { useIsMobile } from '@/app/hooks/useIsMobile';
 import { useActions, useAvailableActions } from '@/app/hooks/useActions';
-import { deriveCreateDefaults } from '@/app/lib/actions/createDefaults';
 import { easeOut, instant, springJiggle } from '@/app/lib/motion';
-import type { AppAction, RecordType } from '@/app/lib/actions/types';
-
-const TaskQuickForm = dynamic(() => import('@/app/components/actions/create/TaskQuickForm'));
-const NoteQuickForm = dynamic(() => import('@/app/components/actions/create/NoteQuickForm'));
-const ActivityQuickForm = dynamic(() => import('@/app/components/actions/create/ActivityQuickForm'));
-
-type FormKind = 'task' | 'note' | 'activity';
-type View = 'selector' | FormKind;
-
-/** Create action ids that render a compact form inline; all others hand off to their full dialog. */
-const IN_PANEL_FORMS: Record<string, FormKind> = {
-    'create.task': 'task',
-    'create.note': 'note',
-    'create.activity': 'activity',
-};
-
-const FORM_TO_RECORD_TYPE: Record<FormKind, RecordType> = {
-    task: 'task',
-    note: 'note',
-    activity: 'activity',
-};
+import type { AppAction } from '@/app/lib/actions/types';
 
 const PANEL_WIDTH = 380;
 const PANEL_GAP = 12;
@@ -57,31 +35,26 @@ function useIsClient(): boolean {
 }
 
 /**
- * The global Quick Create launcher. It replaces the sidebar's actions menu with a two-step surface:
- * a registry-driven type selector that morphs open from the trigger, then a compact in-panel form for
- * the self-contained record types or a hand-off to the full dialog for company/person/deal. On desktop
- * it renders as a portal'd panel anchored beside the sidebar (no navigation reflow); on mobile it uses
- * a bottom sheet. Focus is trapped while open and restored to the trigger on close.
+ * The global Quick Create launcher. The sidebar's "New" button morphs open a registry-driven type
+ * selector; choosing a record type hands off to that type's full creation dialog (shell-owned overlay).
+ * On desktop it renders as a portal'd panel anchored beside the sidebar (no navigation reflow); on
+ * mobile it uses a bottom sheet. Focus is trapped while open and restored to the trigger on close.
  */
 export default function QuickCreateLauncher() {
     const t = useTranslations('Actions');
-    const { context, openOverlay, run } = useActions();
+    const { run } = useActions();
     const createActions = useAvailableActions('create');
     const reduceMotion = useReducedMotion() ?? false;
 
     const mounted = useIsClient();
     const isMobile = useIsMobile();
     const [open, setOpen] = useState(false);
-    const [view, setView] = useState<View>('selector');
     const [anchor, setAnchor] = useState<Anchor | null>(null);
-    const [pending, setPending] = useState(false);
 
     const triggerRef = useRef<HTMLButtonElement>(null);
     const rootRef = useRef<HTMLDivElement>(null);
     const panelRef = useRef<HTMLDivElement>(null);
     const titleId = useId();
-
-    const currentUserId = context.user?.id ?? null;
 
     const computeAnchor = useCallback((): Anchor | null => {
         const rect = rootRef.current?.getBoundingClientRect();
@@ -94,33 +67,16 @@ export default function QuickCreateLauncher() {
         };
     }, []);
 
-    const forceCloseLauncher = useCallback(() => {
-        setPending(false);
+    const closeLauncher = useCallback(() => {
         setOpen(false);
-        setView('selector');
         const trigger = triggerRef.current;
         if (trigger) requestAnimationFrame(() => trigger.focus());
     }, []);
 
-    const closeLauncher = useCallback(() => {
-        if (pending) return;
-        forceCloseLauncher();
-    }, [forceCloseLauncher, pending]);
-
     const openLauncher = useCallback(() => {
-        setPending(false);
-        setView('selector');
         setAnchor(computeAnchor());
         setOpen(true);
     }, [computeAnchor]);
-
-    const returnToSelector = useCallback(() => {
-        if (!pending) setView('selector');
-    }, [pending]);
-
-    const handleCreated = useCallback(() => {
-        forceCloseLauncher();
-    }, [forceCloseLauncher]);
 
     useEffect(() => {
         if (!open || isMobile) return;
@@ -140,40 +96,21 @@ export default function QuickCreateLauncher() {
             target?.focus();
         });
         return () => cancelAnimationFrame(raf);
-    }, [open, view, isMobile]);
+    }, [open, isMobile]);
 
     const selectAction = useCallback(
         (action: AppAction) => {
-            const formKind = IN_PANEL_FORMS[action.id];
-            if (formKind) {
-                setView(formKind);
-                return;
-            }
             closeLauncher();
             void run(action.id, { source: 'menu' });
         },
         [closeLauncher, run],
     );
 
-    const escalateToDialog = useCallback(
-        (kind: FormKind, draft: Record<string, string>) => {
-            const recordType = FORM_TO_RECORD_TYPE[kind];
-            const defaults = deriveCreateDefaults(context, recordType);
-            if (kind === 'task')
-                openOverlay({ kind: 'create-task', defaults, draft: { description: draft.description, dueDate: draft.dueDate } });
-            else if (kind === 'note') openOverlay({ kind: 'create-note', defaults, draft: { content: draft.content } });
-            else openOverlay({ kind: 'create-activity', defaults, draft });
-            closeLauncher();
-        },
-        [context, openOverlay, closeLauncher],
-    );
-
     const handlePanelKeyDown = useCallback(
         (event: React.KeyboardEvent<HTMLDivElement>) => {
             if (event.key === 'Escape') {
                 event.preventDefault();
-                if (view === 'selector') closeLauncher();
-                else returnToSelector();
+                closeLauncher();
                 return;
             }
             if (event.key !== 'Tab' || !panelRef.current) return;
@@ -191,23 +128,15 @@ export default function QuickCreateLauncher() {
                 first.focus();
             }
         },
-        [view, closeLauncher, returnToSelector],
+        [closeLauncher],
     );
 
     const body = (
         <QuickCreatePanelBody
-            view={view}
             actions={createActions}
-            defaults={view === 'selector' ? undefined : deriveCreateDefaults(context, FORM_TO_RECORD_TYPE[view])}
-            currentUserId={currentUserId}
             titleId={titleId}
             onSelect={selectAction}
-            onBack={returnToSelector}
             onClose={closeLauncher}
-            onCreated={handleCreated}
-            onMoreDetails={escalateToDialog}
-            onPendingChange={setPending}
-            pending={pending}
             showChrome={!isMobile}
         />
     );
@@ -220,7 +149,6 @@ export default function QuickCreateLauncher() {
                 aria-haspopup="dialog"
                 aria-expanded={open}
                 aria-label={t('quickCreate.trigger')}
-                disabled={open && pending}
                 onClick={() => (open ? closeLauncher() : openLauncher())}
                 whileTap={reduceMotion ? undefined : { scale: 0.95 }}
                 transition={reduceMotion ? instant : springJiggle}
@@ -234,25 +162,11 @@ export default function QuickCreateLauncher() {
                 <Drawer open={open} onOpenChange={(next) => (next ? openLauncher() : closeLauncher())} swipeDirection="down">
                     <DrawerContent showCloseButton={false} className="max-h-[85dvh] gap-0 rounded-t-2xl p-0">
                         <DrawerHeader className="flex-row items-center gap-2 border-b border-border px-5 py-4">
-                            {view !== 'selector' ? (
-                                <button
-                                    type="button"
-                                    onClick={returnToSelector}
-                                    disabled={pending}
-                                    aria-label={t('quickCreate.back')}
-                                    className="grid size-7 shrink-0 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
-                                >
-                                    <ArrowLeftIcon className="size-4" />
-                                </button>
-                            ) : null}
-                            <DrawerTitle className="flex-1">
-                                {view === 'selector' ? t('quickCreate.title') : t(`create.${view}`)}
-                            </DrawerTitle>
+                            <DrawerTitle className="flex-1">{t('quickCreate.title')}</DrawerTitle>
                             <DrawerDescription className="sr-only">{t('quickCreate.description')}</DrawerDescription>
                             <button
                                 type="button"
                                 onClick={closeLauncher}
-                                disabled={pending}
                                 aria-label={t('quickCreate.close')}
                                 className="grid size-7 shrink-0 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
                             >
@@ -274,7 +188,6 @@ export default function QuickCreateLauncher() {
                                       aria-hidden
                                       tabIndex={-1}
                                       onClick={closeLauncher}
-                                      disabled={pending}
                                       className="fixed inset-0 z-40 cursor-default"
                                   />
                                   <motion.div
@@ -313,67 +226,31 @@ export default function QuickCreateLauncher() {
 }
 
 type PanelBodyProps = {
-    view: View;
     actions: readonly AppAction[];
-    defaults: ReturnType<typeof deriveCreateDefaults>;
-    currentUserId: number | null;
     titleId: string;
     onSelect: (action: AppAction) => void;
-    onBack: () => void;
     onClose: () => void;
-    onCreated: () => void;
-    onMoreDetails: (kind: FormKind, draft: Record<string, string>) => void;
-    onPendingChange: (pending: boolean) => void;
-    pending: boolean;
     showChrome: boolean;
 };
 
 /**
- * The shared inner content of the launcher — the selector or a compact form — rendered inside both the
- * desktop panel and the mobile sheet. On desktop it draws its own header chrome (back/title/close); the
- * sheet supplies its own header, so chrome is suppressed there.
+ * The shared inner content of the launcher — the type selector — rendered inside both the desktop panel
+ * and the mobile sheet. On desktop it draws its own header chrome (title/close); the sheet supplies its
+ * own header, so chrome is suppressed there.
  */
-function QuickCreatePanelBody({
-    view,
-    actions,
-    defaults,
-    currentUserId,
-    titleId,
-    onSelect,
-    onBack,
-    onClose,
-    onCreated,
-    onMoreDetails,
-    onPendingChange,
-    pending,
-    showChrome,
-}: PanelBodyProps) {
+function QuickCreatePanelBody({ actions, titleId, onSelect, onClose, showChrome }: PanelBodyProps) {
     const t = useTranslations('Actions');
-    const reduceMotion = useReducedMotion() ?? false;
-    const isForm = view !== 'selector';
 
     return (
         <div className="flex min-h-0 flex-col">
             {showChrome ? (
                 <header className="flex shrink-0 items-center gap-2 border-b border-border px-4 py-3">
-                    {isForm ? (
-                        <button
-                            type="button"
-                            onClick={onBack}
-                            disabled={pending}
-                            aria-label={t('quickCreate.back')}
-                            className="grid size-7 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
-                        >
-                            <ArrowLeftIcon className="size-4" />
-                        </button>
-                    ) : null}
                     <h2 id={titleId} className="flex-1 text-sm font-semibold tracking-tight">
-                        {isForm ? t(`create.${view}`) : t('quickCreate.title')}
+                        {t('quickCreate.title')}
                     </h2>
                     <button
                         type="button"
                         onClick={onClose}
-                        disabled={pending}
                         aria-label={t('quickCreate.close')}
                         className="grid size-7 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
                     >
@@ -383,46 +260,7 @@ function QuickCreatePanelBody({
             ) : null}
 
             <div className="min-h-0 overflow-y-auto p-4">
-                <AnimatePresence mode="wait">
-                    <motion.div
-                        key={view}
-                        initial={reduceMotion ? { opacity: 0 } : { opacity: 0, y: 4 }}
-                        animate={reduceMotion ? { opacity: 1 } : { opacity: 1, y: 0 }}
-                        exit={reduceMotion ? { opacity: 0 } : { opacity: 0, y: -4 }}
-                        transition={{ duration: 0.12, ease: easeOut }}
-                    >
-                        {view === 'selector' ? (
-                            <TypeSelector actions={actions} onSelect={onSelect} />
-                        ) : currentUserId == null ? null : view === 'task' ? (
-                            <TaskQuickForm
-                                defaults={defaults}
-                                currentUserId={currentUserId}
-                                onCreated={onCreated}
-                                onMoreDetails={(draft) => onMoreDetails('task', draft)}
-                                onPendingChange={onPendingChange}
-                                pending={pending}
-                            />
-                        ) : view === 'note' ? (
-                            <NoteQuickForm
-                                defaults={defaults}
-                                currentUserId={currentUserId}
-                                onCreated={onCreated}
-                                onMoreDetails={(draft) => onMoreDetails('note', draft)}
-                                onPendingChange={onPendingChange}
-                                pending={pending}
-                            />
-                        ) : (
-                            <ActivityQuickForm
-                                defaults={defaults}
-                                currentUserId={currentUserId}
-                                onCreated={onCreated}
-                                onMoreDetails={(draft) => onMoreDetails('activity', draft)}
-                                onPendingChange={onPendingChange}
-                                pending={pending}
-                            />
-                        )}
-                    </motion.div>
-                </AnimatePresence>
+                <TypeSelector actions={actions} onSelect={onSelect} />
             </div>
         </div>
     );
