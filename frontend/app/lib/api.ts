@@ -49,6 +49,11 @@ const CLIENT_IDENTITY_EVENT_KEY = "connex:client-request-identity";
 let csrfTokenCache: CsrfBootstrap | null = null;
 let clientRequestIdentityEpoch = 0;
 const inFlightAiMutations = new Map<string, InFlightAiMutation>();
+const inFlightReportGenerations = new Map<string, {
+    controller: AbortController;
+    request: Promise<Types.ReportDocument>;
+}>();
+const inFlightReportRequests = new Set<AbortController>();
 
 if (typeof window !== "undefined") {
     window.addEventListener("storage", (event) => {
@@ -107,6 +112,14 @@ function invalidateClientRequestIdentity() {
         mutation.controller.abort();
     }
     inFlightAiMutations.clear();
+    for (const generation of inFlightReportGenerations.values()) {
+        generation.controller.abort();
+    }
+    inFlightReportGenerations.clear();
+    for (const controller of inFlightReportRequests) {
+        controller.abort();
+    }
+    inFlightReportRequests.clear();
 }
 
 function broadcastClientRequestIdentityTransition(refreshTabs: boolean) {
@@ -2498,9 +2511,178 @@ export function resetDashboardLayout(init: RequestInit = {}) {
     return deleteJson<void>(`/api/dashboard-layout`, init);
 }
 
+export function getReportTemplates(init: RequestInit = {}) {
+    return getJson<Types.ReportTemplate[]>(`/api/reports/templates`, { cache: "no-store", ...init });
+}
+
+export function getReports(init: RequestInit = {}) {
+    return getJson<Types.ReportDefinition[]>(`/api/reports`, { cache: "no-store", ...init });
+}
+
+export function getReportsFromCookie(cookie: string | null) {
+    return safeWithCookie<Types.ReportDefinition>((init) => getReports(init), cookie);
+}
+
+export function getReportTemplatesFromCookie(cookie: string | null) {
+    return safeWithCookie<Types.ReportTemplate>((init) => getReportTemplates(init), cookie);
+}
+
+export function getReport(id: number, init: RequestInit = {}) {
+    return getJson<Types.ReportDefinition>(`/api/reports/${id}`, { cache: "no-store", ...init });
+}
+
+export function createReport(payload: Types.ReportDefinitionInput) {
+    return postJson<Types.ReportDefinition>(`/api/reports`, payload);
+}
+
+export function updateReport(id: number, payload: Types.ReportDefinitionInput) {
+    return putJson<Types.ReportDefinition>(`/api/reports/${id}`, payload);
+}
+
+export function deleteReport(id: number) {
+    return deleteJson<void>(`/api/reports/${id}`);
+}
+
+export async function generateReport(id: number, payload: Types.ReportGenerateInput = {}) {
+    if (typeof window === "undefined") {
+        return postJson<Types.ReportDocument>(`/api/reports/${id}/generate`, payload);
+    }
+    const identity = await currentClientRequestIdentity();
+    if (identity == null) {
+        throw new Error("Unable to establish the authenticated report request identity");
+    }
+    const path = `/api/reports/${id}/generate`;
+    const key = `${identity}\u0000${path}\u0000${JSON.stringify(payload)}`;
+    const existing = inFlightReportGenerations.get(key);
+    if (existing) {
+        return existing.request;
+    }
+    const controller = new AbortController();
+    const request = (async () => {
+        const response = await postJson<Types.ReportDocument>(path, payload, { signal: controller.signal });
+        if (await currentClientRequestIdentity() !== identity) {
+            throw new Error("AI request identity changed before completion");
+        }
+        return response;
+    })().finally(() => {
+        if (inFlightReportGenerations.get(key)?.request === request) {
+            inFlightReportGenerations.delete(key);
+        }
+    });
+    inFlightReportGenerations.set(key, { controller, request });
+    return request;
+}
+
+export function getReportSnapshots(id: number, init: RequestInit = {}) {
+    return getJson<Types.ReportSnapshotSummary[]>(`/api/reports/${id}/snapshots`, { cache: "no-store", ...init });
+}
+
+export function createReportSnapshot(id: number, payload: Types.ReportGenerateInput = {}) {
+    return withReportRequestIdentity((signal) =>
+        postJson<Types.ReportSnapshot>(`/api/reports/${id}/snapshots`, payload, { signal }));
+}
+
+export function getReportSnapshot(id: number, snapshotId: number, init: RequestInit = {}) {
+    if (Object.keys(init).length > 0) {
+        return getJson<Types.ReportSnapshot>(`/api/reports/${id}/snapshots/${snapshotId}`, {
+            cache: "no-store",
+            ...init,
+        });
+    }
+    return withReportRequestIdentity((signal) =>
+        getJson<Types.ReportSnapshot>(`/api/reports/${id}/snapshots/${snapshotId}`, {
+            cache: "no-store",
+            signal,
+        }));
+}
+
+export function deleteReportSnapshot(id: number, snapshotId: number) {
+    return withReportRequestIdentity((signal) =>
+        deleteJson<void>(`/api/reports/${id}/snapshots/${snapshotId}`, { signal }));
+}
+
+async function withReportRequestIdentity<T>(request: (signal?: AbortSignal) => Promise<T>): Promise<T> {
+    if (typeof window === "undefined") {
+        return request();
+    }
+    const identity = await currentClientRequestIdentity();
+    if (identity == null) {
+        throw new Error("Unable to establish the authenticated report request identity");
+    }
+    const controller = new AbortController();
+    inFlightReportRequests.add(controller);
+    try {
+        const result = await request(controller.signal);
+        if (await currentClientRequestIdentity() !== identity) {
+            throw new Error("Report request identity changed before completion");
+        }
+        return result;
+    } finally {
+        inFlightReportRequests.delete(controller);
+    }
+}
+
+function downloadBlob(blob: Blob, filename: string): void {
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = filename;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    URL.revokeObjectURL(url);
+}
+
+async function fetchReportCsv(path: string, init: RequestInit): Promise<Blob> {
+    return withReportRequestIdentity(async (signal) => {
+        const locale = localeFromCookieHeader(document.cookie);
+        const workspaceId = clientWorkspaceId();
+        const mutating = isMutating(init.method);
+        const send = (csrf: Record<string, string>) => fetch(`${API_BASE}${path}`, {
+                ...init,
+                signal,
+                credentials: "include",
+                headers: {
+                    "Accept-Language": locale,
+                    ...(workspaceId ? { "X-Workspace-Id": workspaceId } : {}),
+                    ...csrf,
+                    ...init.headers,
+                },
+            });
+        let res = await send(mutating ? await csrfHeader() : {});
+        if (await shouldRetryWithFreshCsrf(path, res, mutating)) {
+            res = await send(await csrfHeader(true));
+        }
+        if (!res.ok) {
+            throw await getApiError(res);
+        }
+        return res.blob();
+    });
+}
+
+export async function exportReportCsv(
+    id: number,
+    payload: Types.ReportGenerateInput = {},
+    filename = `report-${id}.csv`,
+): Promise<void> {
+    const blob = await fetchReportCsv(`/api/reports/${id}/export.csv`, {
+        method: "POST",
+        headers: {
+            "Content-Type": "application/json",
+        },
+        body: JSON.stringify(payload),
+    });
+    downloadBlob(blob, filename);
+}
+
+export async function exportReportSnapshotCsv(id: number, snapshotId: number): Promise<void> {
+    const blob = await fetchReportCsv(`/api/reports/${id}/snapshots/${snapshotId}/export.csv`, {});
+    downloadBlob(blob, `report-${id}-snapshot-${snapshotId}.csv`);
+}
+
 /*
-* == Smart segments
-*/
+ * == Smart segments
+ */
 
 export function evaluateSegments(recordType: Types.SavedViewRecordType, definition: Types.SegmentDefinition) {
     return postJson<Types.SegmentResult>(`/api/segments/evaluate`, { recordType, definition });

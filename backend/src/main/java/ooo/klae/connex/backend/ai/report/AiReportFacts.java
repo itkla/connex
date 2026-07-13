@@ -1,0 +1,122 @@
+package ooo.klae.connex.backend.ai.report;
+
+import java.math.BigDecimal;
+import java.util.Arrays;
+import java.util.List;
+import java.util.Map;
+import java.util.Locale;
+import java.util.Set;
+
+import org.springframework.context.i18n.LocaleContextHolder;
+
+import ooo.klae.connex.backend.dto.ReportAppendixRowDto;
+
+/**
+ * Produces the only narrative clauses and headings that report AI output may select.
+ */
+final class AiReportFacts {
+    private static final List<String> ENGLISH_TITLES = List.of(
+            "Executive summary", "Performance commentary", "Key findings");
+    private static final List<String> JAPANESE_TITLES = List.of(
+            "エグゼクティブサマリー", "パフォーマンス分析", "主な所見");
+    private static final Map<String, String> ENGLISH_LABELS = Map.ofEntries(
+            Map.entry("count", "Count"),
+            Map.entry("new_pipeline_value", "New pipeline value"),
+            Map.entry("won_revenue", "Won revenue"),
+            Map.entry("win_rate", "Win rate"),
+            Map.entry("avg_cycle_days", "Average cycle days"),
+            Map.entry("open_pipeline_value", "Open pipeline value"),
+            Map.entry("open_deal_count", "Open deal count"),
+            Map.entry("at_risk_revenue", "At-risk revenue"),
+            Map.entry("total", "Total"),
+            Map.entry("unassigned", "Unassigned"),
+            Map.entry("unspecified", "Unspecified"));
+    private static final Map<String, String> JAPANESE_LABELS = Map.ofEntries(
+            Map.entry("count", "件数"),
+            Map.entry("new_pipeline_value", "新規パイプライン金額"),
+            Map.entry("won_revenue", "受注売上"),
+            Map.entry("win_rate", "受注率"),
+            Map.entry("avg_cycle_days", "平均商談日数"),
+            Map.entry("open_pipeline_value", "進行中パイプライン金額"),
+            Map.entry("open_deal_count", "進行中商談数"),
+            Map.entry("at_risk_revenue", "リスク売上"),
+            Map.entry("total", "合計"),
+            Map.entry("unassigned", "未割り当て"),
+            Map.entry("unspecified", "未指定"),
+            Map.entry("open", "進行中"),
+            Map.entry("won", "受注"),
+            Map.entry("lost", "失注"),
+            Map.entry("todo", "未着手"),
+            Map.entry("in progress", "進行中"),
+            Map.entry("done", "完了"),
+            Map.entry("hot", "非常に良好"),
+            Map.entry("warm", "良好"),
+            Map.entry("cool", "低下傾向"),
+            Map.entry("cold", "要注意"),
+            Map.entry("high", "高"),
+            Map.entry("medium", "中"),
+            Map.entry("low", "低"),
+            Map.entry("rising", "上昇"),
+            Map.entry("steady", "安定"),
+            Map.entry("cooling", "低下"));
+
+    private AiReportFacts() {
+    }
+
+    static List<String> titles() {
+        return japanese() ? JAPANESE_TITLES : ENGLISH_TITLES;
+    }
+
+    static Set<String> titleSet() {
+        return Set.copyOf(titles());
+    }
+
+    static String claim(ReportAppendixRowDto source) {
+        String label = label(source);
+        BigDecimal current = source.value();
+        BigDecimal prior = source.priorValue();
+        if (prior == null) {
+            return japanese()
+                    ? label + "には当期の確定結果があります。"
+                    : label + " has a deterministic current-period result.";
+        }
+        int comparison = current.compareTo(prior);
+        if (japanese()) {
+            if (comparison > 0) {
+                return label + "は前期間より増加しました。";
+            }
+            if (comparison < 0) {
+                return label + "は前期間より減少しました。";
+            }
+            return label + "は前期間と同水準でした。";
+        }
+        if (comparison > 0) {
+            return label + " increased from the prior period.";
+        }
+        if (comparison < 0) {
+            return label + " decreased from the prior period.";
+        }
+        return label + " was unchanged from the prior period.";
+    }
+
+    static List<String> claims(ReportAppendixRowDto source) {
+        String label = label(source);
+        String recommendation = japanese()
+                ? label + "を担当チームで確認し、次の対応を記録してください。"
+                : "Review " + label + " with the responsible team and record the next action.";
+        return List.of(claim(source), recommendation);
+    }
+
+    static String label(ReportAppendixRowDto source) {
+        Map<String, String> labels = japanese() ? JAPANESE_LABELS : ENGLISH_LABELS;
+        return Arrays.stream(source.label().split(" · ", -1))
+                .map(part -> labels.getOrDefault(part.toLowerCase(Locale.ROOT), part))
+                .reduce((left, right) -> left + " · " + right)
+                .orElse(source.label());
+    }
+
+    private static boolean japanese() {
+        Locale locale = LocaleContextHolder.getLocale();
+        return Locale.JAPANESE.getLanguage().equals(locale.getLanguage());
+    }
+}

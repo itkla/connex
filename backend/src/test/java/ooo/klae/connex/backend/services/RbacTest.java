@@ -41,6 +41,11 @@ class RbacTest extends AbstractServiceTest {
         Set<Permission> memberPerms = workspaceService.permissionsFor(ws.getId(), member.getId());
         assertTrue(memberPerms.contains(Permission.DEAL_DELETE));
         assertTrue(memberPerms.contains(Permission.PERSON_CREATE));
+        assertTrue(memberPerms.containsAll(Set.of(
+            Permission.REPORT_READ,
+            Permission.REPORT_CREATE,
+            Permission.REPORT_UPDATE,
+            Permission.REPORT_DELETE)));
         assertFalse(memberPerms.contains(Permission.COMPANY_DELETE));
         assertFalse(memberPerms.contains(Permission.TAG_MANAGE));
         assertFalse(memberPerms.contains(Permission.MEMBER_MANAGE));
