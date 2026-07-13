@@ -1,0 +1,86 @@
+package ooo.klae.connex.backend.capability;
+
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.when;
+
+import java.util.Map;
+import java.util.Set;
+
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
+
+import ooo.klae.connex.backend.config.DeploymentProperties;
+import ooo.klae.connex.backend.mail.MailProperties;
+import ooo.klae.connex.backend.services.SsoConnectionService;
+import ooo.klae.connex.backend.sso.SocialLoginClientRegistrations;
+
+@ExtendWith(MockitoExtension.class)
+class CapabilityRegistryTest {
+
+    @Mock private SsoConnectionService ssoConnectionService;
+    @Mock private SocialLoginClientRegistrations socialLoginClientRegistrations;
+    @Mock private MailProperties mailProperties;
+    @Mock private DeploymentProperties deploymentProperties;
+
+    private CapabilityRegistry capabilityRegistry;
+
+    @BeforeEach
+    void setUp() {
+        capabilityRegistry = new CapabilityRegistry(ssoConnectionService,
+                socialLoginClientRegistrations, mailProperties, deploymentProperties);
+    }
+
+    @Test
+    void operatorSettingsDetermineAvailabilityWhenProfileIsUnset() {
+        when(deploymentProperties.isConfigured()).thenReturn(false);
+        when(socialLoginClientRegistrations.isGoogleEnabled()).thenReturn(true);
+        when(mailProperties.isManaged()).thenReturn(true);
+
+        assertFalse(capabilityRegistry.isAvailable(Capability.SSO));
+        assertTrue(capabilityRegistry.isAvailable(Capability.SOCIAL_LOGIN_GOOGLE));
+        assertFalse(capabilityRegistry.isAvailable(Capability.SOCIAL_LOGIN_MICROSOFT));
+        assertTrue(capabilityRegistry.isAvailable(Capability.MANAGED_MAIL));
+
+        verify(ssoConnectionService).isInstanceEnabled();
+        verify(socialLoginClientRegistrations).isGoogleEnabled();
+        verify(socialLoginClientRegistrations).isMicrosoftEnabled();
+        verify(mailProperties).isManaged();
+    }
+
+    @Test
+    void operatorSettingRemainsAvailableUnderANonForbiddingProfile() {
+        when(deploymentProperties.isConfigured()).thenReturn(true);
+        when(deploymentProperties.getProfile()).thenReturn(DeploymentProperties.PROFILE_SAAS);
+        when(ssoConnectionService.isInstanceEnabled()).thenReturn(true);
+
+        assertTrue(capabilityRegistry.isAvailable(Capability.SSO));
+    }
+
+    @Test
+    void forbiddenProfileOverridesTheOperatorSetting() {
+        CapabilityRegistry restrictedRegistry = new CapabilityRegistry(
+                ssoConnectionService,
+                socialLoginClientRegistrations,
+                mailProperties,
+                deploymentProperties,
+                Map.of(Capability.SSO, Set.of(DeploymentProperties.PROFILE_SAAS)));
+        when(deploymentProperties.isConfigured()).thenReturn(true);
+        when(deploymentProperties.getProfile()).thenReturn(DeploymentProperties.PROFILE_SAAS);
+
+        assertFalse(restrictedRegistry.isAvailable(Capability.SSO));
+
+        verifyNoInteractions(ssoConnectionService);
+    }
+
+    @Test
+    void nullCapabilityIsRejected() {
+        assertThrows(NullPointerException.class, () -> capabilityRegistry.isAvailable(null));
+    }
+}
