@@ -256,6 +256,47 @@ class ReportIntegrationTest {
           }
         }
         """;
+    private static final String ATTAINMENT_BODY = """
+        {
+          "name": "July Quota Attainment",
+          "description": "Revenue targets and actuals",
+          "cadence": "monthly",
+          "templateKey": "quota-attainment",
+          "config": {
+            "widgets": [
+              {
+                "id": "owner-attainment",
+                "title": "Attainment by owner",
+                "dataSource": "deals",
+                "measure": "attainment",
+                "groupBy": "owner",
+                "chartType": "bar"
+              },
+              {
+                "id": "workspace-attainment",
+                "title": "Overall attainment",
+                "dataSource": "deals",
+                "measure": "attainment",
+                "groupBy": "none",
+                "chartType": "kpi"
+              }
+            ],
+            "filters": {
+              "pipelineIds": null,
+              "ownerIds": null,
+              "statuses": null,
+              "tagIds": null,
+              "warmthBands": null
+            },
+            "range": null,
+            "bucket": "month",
+            "layout": [
+              {"widgetId": "owner-attainment", "x": 0, "y": 0, "width": 6, "height": 4},
+              {"widgetId": "workspace-attainment", "x": 6, "y": 0, "width": 6, "height": 4}
+            ]
+          }
+        }
+        """;
 
     @Autowired private WebApplicationContext context;
     @Autowired @Qualifier("springSecurityFilterChain") private Filter springSecurityFilterChain;
@@ -424,6 +465,191 @@ class ReportIntegrationTest {
             measures.add(widget.get("measure").asText());
         }
         assertTrue(measures.containsAll(List.of("forecast_best", "forecast_weighted", "forecast_worst")));
+    }
+
+    @Test
+    void quotaAttainmentUsesMatchingPeriodCurrencyScopeAndWorkspace() throws Exception {
+        RequestContextHolder.resetRequestAttributes();
+        Workspace workspace = newWorkspace();
+        User manager = newMember(workspace, "admin");
+        User zeroActualOwner = newMember(workspace, "member");
+        User actualWithoutGoal = newMember(workspace, "member");
+        MockHttpSession session = login(manager.getUsername());
+
+        createRevenueGoal(session, workspace, manager.getId(), "2026-07-01", "100.00", "USD");
+        createRevenueGoal(session, workspace, zeroActualOwner.getId(), "2026-07-01", "50.00", "USD");
+        createRevenueGoal(session, workspace, null, "2026-07-01", "200.00", "USD");
+        createRevenueGoal(session, workspace, manager.getId(), "2026-06-01", "900.00", "USD");
+
+        int pipelineId = insertPipeline(workspace.getId(), "Attainment pipeline");
+        int stageId = insertStage(workspace.getId(), pipelineId, "Won", 1);
+        insertWonRevenue(workspace.getId(), pipelineId, stageId, manager.getId(),
+                "Matched revenue", "40.00", "USD", "2026-07-05 10:00:00");
+        insertWonRevenue(workspace.getId(), pipelineId, stageId, manager.getId(),
+                "Wrong currency", "900.00", "EUR", "2026-07-06 10:00:00");
+        insertWonRevenue(workspace.getId(), pipelineId, stageId, actualWithoutGoal.getId(),
+                "Workspace-only revenue", "50.00", "USD", "2026-07-07 10:00:00");
+
+        Workspace otherWorkspace = newWorkspace();
+        User otherManager = newMember(otherWorkspace, "admin");
+        int otherPipelineId = insertPipeline(otherWorkspace.getId(), "Other attainment pipeline");
+        int otherStageId = insertStage(otherWorkspace.getId(), otherPipelineId, "Other won", 1);
+        insertWonRevenue(otherWorkspace.getId(), otherPipelineId, otherStageId, otherManager.getId(),
+                "Other tenant revenue", "1000.00", "USD", "2026-07-05 10:00:00");
+        jdbcTemplate.update(
+                "INSERT INTO report_goal (workspace_id, owner_id, metric, period_type, period_start, "
+                        + "target_value, currency, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                otherWorkspace.getId(), otherManager.getId(), "won_revenue", "month", "2026-07-01",
+                "1.00", "USD", otherManager.getId());
+
+        int reportId = createReport(session, workspace, ATTAINMENT_BODY);
+        MvcResult result = mockMvc.perform(post("/api/reports/{id}/generate", reportId)
+                .header("X-Workspace-Id", workspace.getId())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{}")
+                .session(session)
+                .with(csrf()))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.widgets[0].total").value(40.00))
+            .andExpect(jsonPath("$.widgets[0].priorTotal").value(150.00))
+            .andExpect(jsonPath("$.widgets[0].changePercent").value(26.67))
+            .andExpect(jsonPath("$.widgets[1].total").value(90.00))
+            .andExpect(jsonPath("$.widgets[1].priorTotal").value(200.00))
+            .andExpect(jsonPath("$.widgets[1].changePercent").value(45.00))
+            .andReturn();
+
+        JsonNode document = objectMapper.readTree(result.getResponse().getContentAsString());
+        JsonNode ownerWidget = document.get("widgets").get(0);
+        assertEquals(2, ownerWidget.get("points").size());
+        Map<String, BigDecimal> actuals = pointValues(ownerWidget);
+        Map<String, BigDecimal> targets = pointPriorValues(ownerWidget);
+        assertDecimal("40.00", actuals.get("USD:" + manager.getId()));
+        assertDecimal("0.00", actuals.get("USD:" + zeroActualOwner.getId()));
+        assertDecimal("100.00", targets.get("USD:" + manager.getId()));
+        assertDecimal("50.00", targets.get("USD:" + zeroActualOwner.getId()));
+        assertTrue(actuals.keySet().stream().noneMatch(key -> key.endsWith(":" + actualWithoutGoal.getId())));
+        assertTrue(actuals.keySet().stream().noneMatch(key -> key.startsWith("EUR:")));
+        assertTrue(actuals.values().stream().noneMatch(value -> value.compareTo(new BigDecimal("1000.00")) == 0));
+    }
+
+    @Test
+    void quarterlyAttainmentUsesCalendarQuarterGoalAndActualWindow() throws Exception {
+        RequestContextHolder.resetRequestAttributes();
+        Workspace workspace = newWorkspace();
+        User manager = newMember(workspace, "admin");
+        MockHttpSession session = login(manager.getUsername());
+        createRevenueGoal(
+                session, workspace, null, "quarter", "2026-07-01", "300.00", "USD");
+
+        int pipelineId = insertPipeline(workspace.getId(), "Quarter attainment pipeline");
+        int stageId = insertStage(workspace.getId(), pipelineId, "Quarter won", 1);
+        insertWonRevenue(workspace.getId(), pipelineId, stageId, manager.getId(),
+                "Quarter revenue", "75.00", "USD", "2026-07-05 10:00:00");
+        insertWonRevenue(workspace.getId(), pipelineId, stageId, manager.getId(),
+                "Prior quarter revenue", "500.00", "USD", "2026-06-30 10:00:00");
+
+        int reportId = createReport(
+                session, workspace, ATTAINMENT_BODY.replace("\"cadence\": \"monthly\"", "\"cadence\": \"quarterly\""));
+        mockMvc.perform(post("/api/reports/{id}/generate", reportId)
+                .header("X-Workspace-Id", workspace.getId())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{}")
+                .session(session)
+                .with(csrf()))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.widgets[1].total").value(75.00))
+            .andExpect(jsonPath("$.widgets[1].priorTotal").value(300.00))
+            .andExpect(jsonPath("$.widgets[1].changePercent").value(25.00));
+    }
+
+    @Test
+    void attainmentRejectsInvalidScopeAndDistinguishesMissingGoalsFromZeroTargets() throws Exception {
+        RequestContextHolder.resetRequestAttributes();
+        Workspace workspace = newWorkspace();
+        User manager = newMember(workspace, "admin");
+        MockHttpSession session = login(manager.getUsername());
+        int reportId = createReport(session, workspace, ATTAINMENT_BODY);
+
+        mockMvc.perform(post("/api/reports/{id}/generate", reportId)
+                .header("X-Workspace-Id", workspace.getId())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{}")
+                .session(session)
+                .with(csrf()))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.widgets[0].total").doesNotExist())
+            .andExpect(jsonPath("$.widgets[0].priorTotal").doesNotExist())
+            .andExpect(jsonPath("$.widgets[0].points.length()").value(0))
+            .andExpect(jsonPath("$.widgets[1].total").doesNotExist())
+            .andExpect(jsonPath("$.widgets[1].priorTotal").doesNotExist());
+
+        createRevenueGoal(session, workspace, manager.getId(), "2026-07-01", "0.00", "USD");
+        createRevenueGoal(session, workspace, null, "2026-07-01", "0.00", "USD");
+        mockMvc.perform(post("/api/reports/{id}/generate", reportId)
+                .header("X-Workspace-Id", workspace.getId())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{}")
+                .session(session)
+                .with(csrf()))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.widgets[0].total").value(0.00))
+            .andExpect(jsonPath("$.widgets[0].priorTotal").value(0.00))
+            .andExpect(jsonPath("$.widgets[0].changePercent").doesNotExist())
+            .andExpect(jsonPath("$.widgets[1].total").value(0.00))
+            .andExpect(jsonPath("$.widgets[1].priorTotal").value(0.00))
+            .andExpect(jsonPath("$.widgets[1].changePercent").doesNotExist());
+
+        mockMvc.perform(post("/api/reports/{id}/generate", reportId)
+                .header("X-Workspace-Id", workspace.getId())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"start\":\"2026-07-15\",\"end\":\"2026-08-14\"}")
+                .session(session)
+                .with(csrf()))
+            .andExpect(status().isBadRequest());
+
+        String filtered = ATTAINMENT_BODY.replace("\"pipelineIds\": null", "\"pipelineIds\": [999]");
+        mockMvc.perform(post("/api/reports")
+                .header("X-Workspace-Id", workspace.getId())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(filtered)
+                .session(session)
+                .with(csrf()))
+            .andExpect(status().isBadRequest());
+
+        MvcResult snapshotResult = mockMvc.perform(post("/api/reports/{id}/snapshots", reportId)
+                .header("X-Workspace-Id", workspace.getId())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{}")
+                .session(session)
+                .with(csrf()))
+            .andExpect(status().isCreated())
+            .andReturn();
+        int snapshotId = responseId(snapshotResult);
+
+        WorkspaceRole role = new WorkspaceRole();
+        role.setWorkspaceId(workspace.getId());
+        role.setName("Report Only " + UUID.randomUUID().toString().substring(0, 8));
+        roleMapper.insertRole(role);
+        roleMapper.insertPermissions(workspace.getId(), role.getId(), List.of("REPORT_READ"));
+        workspaceMapper.setMemberCustomRole(workspace.getId(), manager.getId(), role.getId());
+
+        mockMvc.perform(post("/api/reports/{id}/generate", reportId)
+                .header("X-Workspace-Id", workspace.getId())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{}")
+                .session(session)
+                .with(csrf()))
+            .andExpect(status().isForbidden());
+
+        mockMvc.perform(get("/api/reports/{id}/snapshots/{snapshotId}", reportId, snapshotId)
+                .header("X-Workspace-Id", workspace.getId())
+                .session(session))
+            .andExpect(status().isForbidden());
+
+        mockMvc.perform(get("/api/reports/{id}/snapshots/{snapshotId}/export.csv", reportId, snapshotId)
+                .header("X-Workspace-Id", workspace.getId())
+                .session(session))
+            .andExpect(status().isForbidden());
     }
 
     @Test
@@ -793,6 +1019,46 @@ class ReportIntegrationTest {
         return responseId(result);
     }
 
+    private int createRevenueGoal(
+            MockHttpSession session,
+            Workspace workspace,
+            Integer ownerId,
+            String periodStart,
+            String target,
+            String currency) throws Exception {
+        return createRevenueGoal(session, workspace, ownerId, "month", periodStart, target, currency);
+    }
+
+    private int createRevenueGoal(
+            MockHttpSession session,
+            Workspace workspace,
+            Integer ownerId,
+            String periodType,
+            String periodStart,
+            String target,
+            String currency) throws Exception {
+        String owner = ownerId == null ? "null" : ownerId.toString();
+        String body = """
+            {
+              "ownerId": %s,
+              "metric": "won_revenue",
+              "periodType": "%s",
+              "periodStart": "%s",
+              "targetValue": %s,
+              "currency": "%s"
+            }
+            """.formatted(owner, periodType, periodStart, target, currency);
+        MvcResult result = mockMvc.perform(post("/api/goals")
+                .header("X-Workspace-Id", workspace.getId())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(body)
+                .session(session)
+                .with(csrf()))
+            .andExpect(status().isCreated())
+            .andReturn();
+        return responseId(result);
+    }
+
     private int responseId(MvcResult result) throws Exception {
         return objectMapper.readTree(result.getResponse().getContentAsString()).get("id").asInt();
     }
@@ -810,6 +1076,14 @@ class ReportIntegrationTest {
         Map<String, BigDecimal> values = new LinkedHashMap<>();
         for (JsonNode point : widget.get("points")) {
             values.put(point.get("key").asText(), point.get("value").decimalValue());
+        }
+        return values;
+    }
+
+    private static Map<String, BigDecimal> pointPriorValues(JsonNode widget) {
+        Map<String, BigDecimal> values = new LinkedHashMap<>();
+        for (JsonNode point : widget.get("points")) {
+            values.put(point.get("key").asText(), point.get("priorValue").decimalValue());
         }
         return values;
     }
@@ -913,6 +1187,22 @@ class ReportIntegrationTest {
                         + "expected_close_date, closed_at, won, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 workspaceId, name, value, currency, pipelineId, stageId, expectedCloseDate,
                 LocalDateTime.now(clock).minusMonths(1), won, LocalDateTime.now(clock).minusMonths(2));
+    }
+
+    private void insertWonRevenue(
+            int workspaceId,
+            int pipelineId,
+            int stageId,
+            int ownerId,
+            String name,
+            String actualValue,
+            String currency,
+            String closedAt) {
+        jdbcTemplate.update(
+                "INSERT INTO deal (workspace_id, name, value, actual_value, currency, pipeline_id, stage_id, "
+                        + "owner_id, closed_at, won, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                workspaceId, name, actualValue, actualValue, currency, pipelineId, stageId,
+                ownerId, closedAt, true, "2026-06-01 00:00:00");
     }
 
     private void insertDealPerson(int dealId, int personId) {

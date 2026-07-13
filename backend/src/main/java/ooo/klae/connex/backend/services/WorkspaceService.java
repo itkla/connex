@@ -75,7 +75,7 @@ public class WorkspaceService {
             Permission.TASK_CREATE, Permission.TASK_UPDATE, Permission.TASK_DELETE,
             Permission.ATTACHMENT_CREATE, Permission.ATTACHMENT_DELETE,
             Permission.REPORT_READ, Permission.REPORT_CREATE, Permission.REPORT_UPDATE,
-            Permission.REPORT_DELETE);
+            Permission.REPORT_DELETE, Permission.GOAL_READ);
     }
 
     private static EnumSet<Permission> adminPermissions() {
@@ -84,7 +84,7 @@ public class WorkspaceService {
             Permission.COMPANY_DELETE, Permission.PIPELINE_MANAGE, Permission.TAG_MANAGE,
             Permission.CUSTOM_FIELD_MANAGE, Permission.SHARE_MANAGE, Permission.MEMBER_MANAGE,
             Permission.AUDIT_READ, Permission.WORKSPACE_SETTINGS, Permission.RULE_MANAGE,
-            Permission.AI_USE));
+            Permission.AI_USE, Permission.GOAL_MANAGE));
         return permissions;
     }
 
@@ -307,6 +307,11 @@ public class WorkspaceService {
             return EnumSet.noneOf(Permission.class);
         }
         return builtInPermissions(role);
+    }
+
+    /** Returns the current member's effective permissions in the active workspace. */
+    public Set<Permission> getCurrentPermissions() {
+        return permissionsFor(getCurrentWorkspaceId(), currentUser().getId());
     }
 
     /** The fixed permission bundle backing a built-in role. */

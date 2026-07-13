@@ -31,6 +31,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 
 import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.ai.report.AiReportNarrativeService;
+import ooo.klae.connex.backend.beans.ReportGoal;
 import ooo.klae.connex.backend.beans.ReportDefinition;
 import ooo.klae.connex.backend.beans.ReportSnapshot;
 import ooo.klae.connex.backend.beans.User;
@@ -59,6 +60,7 @@ import ooo.klae.connex.backend.dto.ReportWidgetDataDto;
 import ooo.klae.connex.backend.dto.RelationshipTemperatureDto;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
+import ooo.klae.connex.backend.mappers.GoalMapper;
 import ooo.klae.connex.backend.mappers.ReportMapper;
 import ooo.klae.connex.backend.tenant.Permission;
 import ooo.klae.connex.backend.tenant.RequirePermission;
@@ -91,7 +93,7 @@ public class ReportService {
             "count", "new_pipeline_value", "won_revenue", "win_rate", "avg_cycle_days",
             "open_pipeline_value", "open_deal_count", "at_risk_revenue",
             "single_threaded_deal_count", "single_threaded_deal_value",
-            "forecast_best", "forecast_weighted", "forecast_worst");
+            "forecast_best", "forecast_weighted", "forecast_worst", "attainment");
     private static final Set<String> FORECAST_MEASURES = Set.of(
             "forecast_best", "forecast_weighted", "forecast_worst");
     private static final Set<String> COMPANY_MEASURES = Set.of(
@@ -110,9 +112,10 @@ public class ReportService {
     private static final Set<String> WARMTH_BANDS = Set.of("hot", "warm", "cool", "cold");
     private static final Set<String> TEMPLATE_KEYS = Set.of(
             "sales-performance", "pipeline-health", "relationship-coverage", "relationship-health",
-            "forecasting", "activity-team");
+            "forecasting", "quota-attainment", "activity-team");
 
     private final ReportMapper reportMapper;
+    private final GoalMapper goalMapper;
     private final WorkspaceService workspaceService;
     private final AuthService authService;
     private final ScoringService scoringService;
@@ -137,7 +140,7 @@ public class ReportService {
         return toDefinitionDto(requireDefinition(id));
     }
 
-    /** Returns the six built-in report starting points. */
+    /** Returns the seven built-in report starting points. */
     @RequirePermission(Permission.REPORT_READ)
     public List<ReportTemplateDto> templates() {
         return List.of(
@@ -146,6 +149,15 @@ public class ReportService {
                                 widget("revenue", "Won revenue", "deals", "won_revenue", "date", "line-area"),
                                 widget("win-rate", "Win rate", "deals", "win_rate", "none", "kpi"),
                                 widget("new-pipeline", "New pipeline", "deals", "new_pipeline_value", "pipeline", "bar"))),
+                template("quota-attainment", "Quota Attainment",
+                        "Owner and workspace revenue targets compared with won revenue.",
+                        "monthly", "month", List.of(
+                                widget("attainment-by-owner", "Attainment by owner", "deals",
+                                        "attainment", "owner", "bar"),
+                                widget("overall-attainment", "Overall attainment", "deals",
+                                        "attainment", "none", "kpi"),
+                                widget("won-by-owner", "Won revenue by owner", "deals",
+                                        "won_revenue", "owner", "bar"))),
                 template("pipeline-health", "Pipeline Health", "Open pipeline, stage coverage, and relationship risk.",
                         "weekly", List.of(
                                 widget("pipeline-value", "Open pipeline", "deals", "open_pipeline_value", "pipeline", "bar"),
@@ -309,7 +321,9 @@ public class ReportService {
         if (snapshot == null) {
             throw new ResourceNotFoundException("Report snapshot not found with id: " + snapshotId);
         }
-        return toSnapshotDto(snapshot);
+        ReportSnapshotDto dto = toSnapshotDto(snapshot);
+        requireGoalReadForAttainment(dto.computedResult());
+        return dto;
     }
 
     /** Deletes one frozen report snapshot. */
@@ -341,6 +355,7 @@ public class ReportService {
         ReportConfig config = parseConfig(definition.getConfigJson());
         validateConfig(definition.getCadence(), definition.getTemplateKey(), config);
         PeriodWindow period = resolvePeriod(definition.getCadence(), config.range(), request, config.bucket());
+        validateAttainmentPeriod(config, period);
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         GeneratedFigures figures = generateFigures(workspaceId, config, period);
         ReportNarrativeDto narrative = includeNarrative
@@ -401,6 +416,8 @@ public class ReportService {
                             companies ? inputs.currentCompanyRelationships() : inputs.currentRelationships()),
                     relationshipRows(widget, filters,
                             companies ? inputs.priorCompanyRelationships() : inputs.priorRelationships()));
+        } else if ("attainment".equals(widget.measure())) {
+            return aggregateAttainment(workspaceId, widget, filters, period, inputs);
         } else if ("at_risk_revenue".equals(widget.measure())) {
             return new RowPair(
                     riskRows(workspaceId, widget, filters, period.start(), period.end(), period.zone(), inputs),
@@ -506,9 +523,14 @@ public class ReportService {
         String unit = units.size() == 1 ? units.iterator().next() : "mixed";
         boolean additive = !Set.of("win_rate", "avg_cycle_days").contains(widget.measure())
                 || "none".equals(normalizeGroup(widget.groupBy()));
-        BigDecimal publicTotal = units.size() <= 1 && additive ? total : null;
-        BigDecimal publicPrior = units.size() <= 1 && additive && priorComparable ? priorTotal : null;
-        BigDecimal change = percentChange(publicTotal, publicPrior);
+        boolean emptyAttainment = "attainment".equals(widget.measure()) && current.isEmpty();
+        BigDecimal publicTotal = units.size() <= 1 && additive && !emptyAttainment ? total : null;
+        BigDecimal publicPrior = units.size() <= 1 && additive && priorComparable && !emptyAttainment
+                ? priorTotal
+                : null;
+        BigDecimal change = "attainment".equals(widget.measure())
+                ? attainmentPercent(publicTotal, publicPrior)
+                : percentChange(publicTotal, publicPrior);
         ReportWidgetDataDto data = new ReportWidgetDataDto(
                 widget.id(), displayTitle(widget), widget.chartType(), widget.dataSource(), widget.measure(),
                 widget.groupBy(), unit, publicTotal, publicPrior, change, List.copyOf(points));
@@ -533,6 +555,68 @@ public class ReportService {
             return rows;
         }
         return List.of(new ReportAggregateRow("total", "Total", "count", BigDecimal.ZERO));
+    }
+
+    /**
+     * Aligns won-revenue actuals to same-currency goals. Owner actuals without a
+     * matching goal are omitted; workspace goals include all workspace actuals.
+     */
+    private RowPair aggregateAttainment(
+            int workspaceId,
+            ReportWidgetConfig widget,
+            ReportFilters filters,
+            PeriodWindow period,
+            GenerationInputs inputs) {
+        workspaceService.requirePermission(Permission.GOAL_READ);
+        String periodType = switch (period.cadence()) {
+            case "monthly" -> "month";
+            case "quarterly" -> "quarter";
+            default -> throw new BadRequestException("Attainment requires a monthly or quarterly report cadence");
+        };
+        LocalDate goalPeriodStart = "month".equals(periodType)
+                ? period.start().withDayOfMonth(1)
+                : LocalDate.of(
+                        period.start().getYear(),
+                        ((period.start().getMonthValue() - 1) / 3) * 3 + 1,
+                        1);
+        ReportWidgetConfig actualWidget = new ReportWidgetConfig(
+                widget.id(), widget.title(), "deals", "won_revenue", widget.groupBy(), widget.chartType());
+        List<ReportAggregateRow> actualRows = reportMapper.aggregateDeals(query(
+                workspaceId, actualWidget, filters, "month",
+                period.currentStartUtc(), period.currentEndUtc(), period.zone()));
+        Map<String, BigDecimal> actualByKey = new HashMap<>();
+        for (ReportAggregateRow row : actualRows) {
+            int separator = row.groupKey().indexOf(':');
+            String suffix = separator >= 0 ? row.groupKey().substring(separator + 1) : row.groupKey();
+            actualByKey.put(normalizedUnit(row.unit()) + ':' + suffix, safe(row.value()));
+        }
+        String group = normalizeGroup(widget.groupBy());
+        List<ReportAggregateRow> current = new ArrayList<>();
+        List<ReportAggregateRow> targets = new ArrayList<>();
+        Set<String> emitted = new HashSet<>();
+        for (ReportGoal goal : goalMapper.getGoalsForPeriod(
+                workspaceId, "won_revenue", periodType, goalPeriodStart)) {
+            if ("owner".equals(group) != (goal.getOwnerId() != null)) {
+                continue;
+            }
+            if ("owner".equals(group) && filters != null && filters.ownerIds() != null
+                    && !filters.ownerIds().isEmpty() && !filters.ownerIds().contains(goal.getOwnerId())) {
+                continue;
+            }
+            String currency = normalizedUnit(goal.getCurrency());
+            String ownerKey = goal.getOwnerId() == null ? "total" : Integer.toString(goal.getOwnerId());
+            String key = currency + ':' + ownerKey;
+            if (!emitted.add(key)) {
+                continue;
+            }
+            String label = currency + " · " + (goal.getOwnerId() == null
+                    ? "Workspace-wide"
+                    : inputs.ownerLabels().getOrDefault(ownerKey, "Unassigned"));
+            current.add(new ReportAggregateRow(
+                    key, label, currency, actualByKey.getOrDefault(key, BigDecimal.ZERO)));
+            targets.add(new ReportAggregateRow(key, label, currency, safe(goal.getTargetValue())));
+        }
+        return new RowPair(List.copyOf(current), List.copyOf(targets));
     }
 
     private static boolean priorComparable(ReportWidgetConfig widget, ReportFilters filters) {
@@ -843,6 +927,22 @@ public class ReportService {
                 throw new BadRequestException("Duplicate report widget id: " + widget.id());
             }
         }
+        List<ReportWidgetConfig> attainmentWidgets = config.widgets().stream()
+                .filter(widget -> "attainment".equals(widget.measure()))
+                .toList();
+        if (!attainmentWidgets.isEmpty() && !Set.of("monthly", "quarterly").contains(cadence)) {
+            throw new BadRequestException("Attainment widgets require a monthly or quarterly report cadence");
+        }
+        if (!attainmentWidgets.isEmpty() && config.filters() != null && (
+                hasValues(config.filters().pipelineIds())
+                || hasValues(config.filters().statuses())
+                || hasValues(config.filters().tagIds()))) {
+            throw new BadRequestException("Attainment widgets do not support pipeline, status, or tag filters");
+        }
+        if (attainmentWidgets.stream().anyMatch(widget -> "none".equals(normalizeGroup(widget.groupBy())))
+                && config.filters() != null && hasValues(config.filters().ownerIds())) {
+            throw new BadRequestException("Workspace-wide attainment does not support owner filters");
+        }
         if (config.layout() == null || config.layout().size() != widgetIds.size()) {
             throw new BadRequestException("Report layout must contain every widget exactly once");
         }
@@ -902,7 +1002,10 @@ public class ReportService {
                 || Set.of("coverage_gap_count", "coverage_gap_open_pipeline_value").contains(measure)
                         && !Set.of("none", "company").contains(group)
                 || FORECAST_MEASURES.contains(measure)
-                        && !Set.of("none", "date", "pipeline", "stage").contains(group)) {
+                        && !Set.of("none", "date", "pipeline", "stage").contains(group)
+                || "attainment".equals(measure) && (
+                        !Set.of("none", "owner").contains(group)
+                        || !Set.of("bar", "kpi").contains(chart))) {
             throw new BadRequestException("Unsupported report measure or grouping");
         }
     }
@@ -992,7 +1095,7 @@ public class ReportService {
             priorEnd = start.minusDays(1);
             priorStart = priorEnd.minusDays(days - 1);
         }
-        return new PeriodWindow(start, end, priorStart, priorEnd, userZone());
+        return new PeriodWindow(start, end, priorStart, priorEnd, userZone(), cadence);
     }
 
     private static void validateDates(LocalDate start, LocalDate end) {
@@ -1002,6 +1105,36 @@ public class ReportService {
         if (ChronoUnit.DAYS.between(start, end) + 1 > MAX_RANGE_DAYS) {
             throw new BadRequestException("Report range cannot exceed five years");
         }
+    }
+
+    private static void validateAttainmentPeriod(ReportConfig config, PeriodWindow period) {
+        if (config.widgets().stream().noneMatch(widget -> "attainment".equals(widget.measure()))) {
+            return;
+        }
+        LocalDate expectedStart = switch (period.cadence()) {
+            case "monthly" -> period.start().withDayOfMonth(1);
+            case "quarterly" -> LocalDate.of(
+                    period.start().getYear(),
+                    ((period.start().getMonthValue() - 1) / 3) * 3 + 1,
+                    1);
+            default -> throw new BadRequestException("Attainment requires a monthly or quarterly report cadence");
+        };
+        LocalDate nextPeriod = "monthly".equals(period.cadence())
+                ? expectedStart.plusMonths(1)
+                : expectedStart.plusMonths(3);
+        if (!period.start().equals(expectedStart) || !period.end().isBefore(nextPeriod)) {
+            throw new BadRequestException("Attainment generation must stay within one calendar period");
+        }
+    }
+
+    private void requireGoalReadForAttainment(ReportDocumentDto document) {
+        if (document.widgets().stream().anyMatch(widget -> "attainment".equals(widget.measure()))) {
+            workspaceService.requirePermission(Permission.GOAL_READ);
+        }
+    }
+
+    private static boolean hasValues(List<?> values) {
+        return values != null && !values.isEmpty();
     }
 
     private ZoneId userZone() {
@@ -1157,6 +1290,13 @@ public class ReportService {
                 .divide(prior.abs(), 2, RoundingMode.HALF_UP);
     }
 
+    private static BigDecimal attainmentPercent(BigDecimal actual, BigDecimal target) {
+        if (actual == null || target == null || target.compareTo(BigDecimal.ZERO) == 0) {
+            return null;
+        }
+        return actual.multiply(BigDecimal.valueOf(100)).divide(target, 2, RoundingMode.HALF_UP);
+    }
+
     private static BigDecimal safe(BigDecimal value) {
         return value == null ? BigDecimal.ZERO : value;
     }
@@ -1293,7 +1433,8 @@ public class ReportService {
             LocalDate end,
             LocalDate priorStart,
             LocalDate priorEnd,
-            ZoneId zone) {
+            ZoneId zone,
+            String cadence) {
 
         LocalDateTime currentStartUtc() {
             return utc(start);
