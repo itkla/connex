@@ -29,6 +29,7 @@ import org.springframework.security.config.annotation.web.configuration.EnableWe
 import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.web.authentication.HttpStatusEntryPoint;
 import org.springframework.security.core.session.SessionRegistry;
@@ -166,7 +167,8 @@ public class SecurityConfig {
         }
         http
             .authorizeHttpRequests(auth -> {
-                auth.requestMatchers("/api/auth/webauthn/authenticate/**").permitAll()
+                auth.requestMatchers(HttpMethod.GET, "/api/mail/managed").permitAll()
+                    .requestMatchers("/api/auth/webauthn/authenticate/**").permitAll()
                     .requestMatchers("/api/auth/webauthn/**").authenticated()
                     .requestMatchers("/api/auth/**").permitAll();
                 if (oauthEnabled) {

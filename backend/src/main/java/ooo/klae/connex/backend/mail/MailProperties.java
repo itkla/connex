@@ -22,6 +22,9 @@ public class MailProperties {
     /** Master switch: when false, no SMTP transport is built and real sending is disabled. */
     private boolean enabled = false;
 
+    /** Managed mode: when true, workspace SMTP overrides are disabled. */
+    private boolean managed = false;
+
     private String host;
     private int port = 587;
     private String username;

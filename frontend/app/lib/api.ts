@@ -2584,6 +2584,10 @@ export function addWorkspaceAllowedDomain(workspaceId: number, domain: string) {
 export function removeWorkspaceAllowedDomain(workspaceId: number, domain: string) {
     return deleteJson<void>(`/api/workspaces/${workspaceId}/allowed-domains?domain=${encodeURIComponent(domain)}`);
 }
+export function getMailManaged(init: RequestInit = {}) {
+    return getJson<{ managed: boolean }>("/api/mail/managed", { cache: "no-store", ...init });
+}
+
 export function getWorkspaceMailConfig(workspaceId: number, init: RequestInit = {}) {
     return getJson<Types.MailConfig>(`/api/workspaces/${workspaceId}/mail-config`, { cache: "no-store", ...init });
 }

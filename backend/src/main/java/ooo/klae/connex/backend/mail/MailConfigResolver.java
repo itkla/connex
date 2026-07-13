@@ -10,10 +10,10 @@ import ooo.klae.connex.backend.mappers.MailConfigMapper;
 
 /**
  * Resolves the effective SMTP settings for a send. Account-level mail uses the
- * instance default ({@code connex.mail.*}); workspace-scoped mail prefers the
- * workspace's own enabled config and otherwise falls back to the instance
- * default. Returns {@code null} when no usable config exists, which callers treat
- * as "sending disabled".
+ * instance default ({@code connex.mail.*}); workspace-scoped mail uses that same
+ * transport in managed mode, otherwise preferring the workspace's own enabled
+ * config and falling back to the instance default. Returns {@code null} when no
+ * usable config exists, which callers treat as "sending disabled".
  */
 @Component
 @RequiredArgsConstructor
@@ -38,12 +38,15 @@ public class MailConfigResolver {
     }
 
     /**
-     * The sender for a workspace: its own enabled config if present and usable,
-     * else the instance default.
+     * The sender for a workspace: the instance config in managed mode, otherwise
+     * its own enabled config if present and usable, then the instance default.
      * @param workspaceId the workspace whose mail is being sent
      * @return the resolved config, or null when nothing usable is configured
      */
     public ResolvedMailConfig resolveForWorkspace(int workspaceId) {
+        if (properties.isManaged()) {
+            return resolveInstance();
+        }
         WorkspaceMailConfig ws = mailConfigMapper.findByWorkspace(workspaceId);
         if (ws != null && ws.isEnabled()) {
             ResolvedMailConfig resolved = fromWorkspace(ws);
@@ -58,11 +61,15 @@ public class MailConfigResolver {
 
     /**
      * The workspace's own sender only, with no instance fallback. Used by the test-send
-     * action so it validates exactly what the workspace has configured.
+     * action so it validates exactly what the workspace has configured. Returns no
+     * override in managed mode.
      * @param workspaceId the workspace
      * @return the workspace's resolved config, or null when it has none enabled/usable
      */
     public ResolvedMailConfig resolveWorkspaceOnly(int workspaceId) {
+        if (properties.isManaged()) {
+            return null;
+        }
         WorkspaceMailConfig ws = mailConfigMapper.findByWorkspace(workspaceId);
         if (ws != null && ws.isEnabled()) {
             ResolvedMailConfig resolved = fromWorkspace(ws);
