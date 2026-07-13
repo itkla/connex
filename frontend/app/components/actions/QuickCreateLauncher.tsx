@@ -17,6 +17,7 @@ import {
     DrawerDescription,
 } from '@/components/ui/drawer';
 import { useIsMobile } from '@/app/hooks/useIsMobile';
+import { cn } from '@/lib/utils';
 import { useActions, useAvailableActions } from '@/app/hooks/useActions';
 import { deriveCreateDefaults } from '@/app/lib/actions/createDefaults';
 import { getContacts, getDeals, getUsers } from '@/app/lib/api';
@@ -87,6 +88,7 @@ export default function QuickCreateLauncher() {
     const [anchor, setAnchor] = useState<Anchor | null>(null);
     const [pending, setPending] = useState(false);
     const [openCount, setOpenCount] = useState(0);
+    const [expanded, setExpanded] = useState(false);
 
     const triggerRef = useRef<HTMLButtonElement>(null);
     const rootRef = useRef<HTMLDivElement>(null);
@@ -115,6 +117,7 @@ export default function QuickCreateLauncher() {
 
     const openLauncher = useCallback(() => {
         setPending(false);
+        setExpanded(false);
         setOpenCount((count) => count + 1);
         setAnchor(computeAnchor());
         setOpen(true);
@@ -212,7 +215,21 @@ export default function QuickCreateLauncher() {
                     onOpenChange={(next) => (next ? openLauncher() : closeLauncher())}
                     swipeDirection="down"
                 >
-                    <DrawerContent showCloseButton={false} className="max-h-[85dvh] gap-0 rounded-t-2xl p-0">
+                    <DrawerContent
+                        showCloseButton={false}
+                        className={cn(
+                            'gap-0 p-0 transition-[max-height,width,margin,border-radius] duration-300 ease-[cubic-bezier(0.32,0.72,0,1)]',
+                            expanded
+                                ? 'h-[100dvh] max-h-[100dvh] w-full rounded-t-2xl'
+                                : 'mb-3 max-h-[82dvh] w-[calc(100%-1.5rem)] rounded-3xl',
+                        )}
+                    >
+                        <DrawerPullBar
+                            expanded={expanded}
+                            onExpand={() => setExpanded(true)}
+                            onCollapse={() => setExpanded(false)}
+                            onDismiss={closeLauncher}
+                        />
                         <MobileCreateFlow
                             key={openCount}
                             actions={createActions}
@@ -393,6 +410,62 @@ type EmbeddedKind = EmbeddedFormKind | EmbeddedContainerKind;
 type FlowView = 'selector' | EmbeddedKind;
 type FlowRefs = { persons: Contact[]; deals: Deal[]; users: User[] };
 
+const PULL_BAR_DRAG_THRESHOLD = 36;
+
+/**
+ * The grab bar pinned to the top of the mobile Quick Create drawer. Drag it up (or tap) to expand the
+ * drawer to full screen; drag it down (or tap while expanded) to collapse back to the floating sheet;
+ * dragging down from the collapsed state dismisses the drawer. Its pointer handling is self-contained
+ * (captured + stopped) so it never competes with the drawer's own swipe-to-dismiss.
+ */
+function DrawerPullBar({
+    expanded,
+    onExpand,
+    onCollapse,
+    onDismiss,
+}: {
+    expanded: boolean;
+    onExpand: () => void;
+    onCollapse: () => void;
+    onDismiss: () => void;
+}) {
+    const startY = useRef<number | null>(null);
+
+    const handlePointerDown = (event: React.PointerEvent<HTMLButtonElement>) => {
+        event.stopPropagation();
+        startY.current = event.clientY;
+        event.currentTarget.setPointerCapture(event.pointerId);
+    };
+
+    const handlePointerUp = (event: React.PointerEvent<HTMLButtonElement>) => {
+        if (startY.current == null) return;
+        const dy = event.clientY - startY.current;
+        startY.current = null;
+        if (dy < -PULL_BAR_DRAG_THRESHOLD) {
+            onExpand();
+        } else if (dy > PULL_BAR_DRAG_THRESHOLD) {
+            if (expanded) onCollapse();
+            else onDismiss();
+        } else if (expanded) {
+            onCollapse();
+        } else {
+            onExpand();
+        }
+    };
+
+    return (
+        <button
+            type="button"
+            aria-label={expanded ? 'Collapse' : 'Expand'}
+            onPointerDown={handlePointerDown}
+            onPointerUp={handlePointerUp}
+            className="flex shrink-0 touch-none cursor-grab justify-center py-2.5 outline-none active:cursor-grabbing"
+        >
+            <span aria-hidden className="h-1.5 w-10 rounded-full bg-border transition-colors" />
+        </button>
+    );
+}
+
 type MobileCreateFlowProps = {
     actions: readonly AppAction[];
     context: ActionContext;
@@ -467,7 +540,7 @@ function MobileCreateFlow({ actions, context, currentUserId, onFallback, onClose
     const defaultDeal = refs?.deals.find((d) => d.id === defaults?.dealId) ?? null;
 
     return (
-        <div className="flex min-h-0 flex-col">
+        <div className="flex min-h-0 flex-1 flex-col">
             <DrawerHeader className="flex-row items-center gap-2 border-b border-border px-4 py-3.5">
                 {view !== 'selector' ? (
                     <button
