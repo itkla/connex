@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 
-import NewContactDialog from '@/app/components/records/contacts/NewContactDialog';
+import NewContactDialog, { NewContactForm } from '@/app/components/records/contacts/NewContactDialog';
 import { createContact, isFieldError, updateContact } from '@/app/lib/api';
 import { toastError, toastSuccess } from '@/app/lib/toast';
 import { uploadContactPicture } from '@/app/lib/utils';
@@ -22,10 +22,16 @@ export default function ContactCreateContainer({
     open,
     onOpenChange,
     defaults,
+    embedded = false,
+    onCancel,
 }: {
     open: boolean;
     onOpenChange: (open: boolean) => void;
     defaults?: CreateDefaults;
+    /** Renders the shell-less {@link NewContactForm} directly, for embedding in the morphing launcher. */
+    embedded?: boolean;
+    /** Cancel handler for embedded mode — steps back to the launcher selector. */
+    onCancel?: () => void;
 }) {
     const router = useRouter();
     const t = useTranslations('Actions');
@@ -72,6 +78,22 @@ export default function ContactCreateContainer({
             toastError(err instanceof Error ? err.message : t('feedback.createFailed'));
         }
     };
+
+    if (embedded) {
+        return (
+            <NewContactForm
+                active
+                onCancel={onCancel ?? (() => onOpenChange(false))}
+                newContactPayload={payload}
+                setNewContactPayload={setPayload}
+                imageFile={imageFile}
+                setImageFile={setImageFile}
+                isCreating={creating}
+                isSuccess={succeeded}
+                createNewContact={createNewContact}
+            />
+        );
+    }
 
     return (
         <NewContactDialog

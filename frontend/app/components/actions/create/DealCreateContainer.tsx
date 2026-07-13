@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 
-import NewDealDialog from '@/app/components/records/deals/NewDealDialog';
+import NewDealDialog, { NewDealForm } from '@/app/components/records/deals/NewDealDialog';
 import { createDeal, getPipelines, getStagesByPipelineId, isFieldError } from '@/app/lib/api';
 import { toastError, toastSuccess } from '@/app/lib/toast';
 import type { CreateDealPayload, Pipeline, Stage } from '@/app/lib/types';
@@ -31,10 +31,16 @@ export default function DealCreateContainer({
     open,
     onOpenChange,
     defaults,
+    embedded = false,
+    onCancel,
 }: {
     open: boolean;
     onOpenChange: (open: boolean) => void;
     defaults?: CreateDefaults;
+    /** Renders the shell-less {@link NewDealForm} directly, for embedding in the morphing launcher. */
+    embedded?: boolean;
+    /** Cancel handler for embedded mode — steps back to the launcher selector. */
+    onCancel?: () => void;
 }) {
     const router = useRouter();
     const t = useTranslations('Actions');
@@ -127,6 +133,22 @@ export default function DealCreateContainer({
             toastError(err instanceof Error ? err.message : t('feedback.createFailed'));
         }
     };
+
+    if (embedded) {
+        return (
+            <NewDealForm
+                active
+                onCancel={onCancel ?? (() => onOpenChange(false))}
+                payload={payload}
+                setPayload={setPayload}
+                pipelines={pipelines}
+                stagesByPipeline={stagesByPipeline}
+                isCreating={creating}
+                isSuccess={succeeded}
+                createNewDeal={createNewDeal}
+            />
+        );
+    }
 
     return (
         <NewDealDialog
