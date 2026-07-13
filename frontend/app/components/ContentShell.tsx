@@ -63,7 +63,7 @@ export default function ContentShell({
     }, [mobileOpen]);
 
     return (
-        <div className="flex h-dvh overflow-hidden">
+        <div data-app-shell className="flex h-dvh overflow-hidden">
             <div
                 aria-hidden
                 onClick={() => setMobileOpen(false)}
@@ -82,7 +82,7 @@ export default function ContentShell({
             </div>
 
             <div className="flex min-w-0 flex-1 flex-col">
-                <div className="relative flex w-full shrink-0 items-center gap-3 p-6 md:justify-center">
+                <div data-app-toolbar className="relative flex w-full shrink-0 items-center gap-3 p-6 md:justify-center">
                     <Button
                         type="button"
                         variant="ghost"
@@ -119,7 +119,7 @@ export default function ContentShell({
                     </div>
                 </div>
 
-                <main className="flex-1 overflow-x-hidden overflow-y-auto p-6">
+                <main data-app-main className="flex-1 overflow-x-hidden overflow-y-auto p-6">
                     {children}
                 </main>
             </div>
