@@ -816,15 +816,24 @@ export function deletePasskey(credentialId: string) {
 */
 
 /**
- * Looks up, pre-login, whether an email's domain signs in through an IdP. Returns the
- * registration to start and whether password login is disabled for that organization.
- * @param email the identifier typed on the login screen
+ * Fetches the instance capability flags that gate optional UI: enterprise SSO, consumer social
+ * login, and instance-managed mail. Consolidates the former per-feature `/enabled` endpoints.
  * @param init optional fetch overrides
- * @returns the discovery result (unavailable when the domain has no enabled connection)
+ * @returns the resolved instance capabilities
  */
-export function getSsoInstanceEnabled(init: RequestInit = {}) {
-    return getJson<{ enabled: boolean }>("/api/auth/sso/enabled", { cache: "no-store", ...init });
+export function getCapabilities(init: RequestInit = {}) {
+    return getJson<Types.InstanceCapabilities>("/api/capabilities", { cache: "no-store", ...init });
 }
+
+/**
+ * The fail-safe capabilities used when {@link getCapabilities} cannot be reached: everything off,
+ * so optional UI stays hidden rather than rendering a feature the backend will reject.
+ */
+export const DEFAULT_CAPABILITIES: Types.InstanceCapabilities = {
+    sso: false,
+    socialLogin: { google: false, microsoft: false },
+    mailManaged: false,
+};
 
 export function discoverSso(email: string, init: RequestInit = {}) {
     return getJson<Types.SsoDiscovery>(
@@ -866,19 +875,6 @@ export function ssoStartPath(registrationId: string, protocol: Types.SsoProtocol
 /*
 * == Consumer social login
 */
-
-/**
- * Reports which consumer social login providers are enabled and configured on this instance,
- * so the login screen only offers the ones that will actually complete.
- * @param init optional fetch overrides
- * @returns whether Google and Microsoft sign-in are available
- */
-export function getSocialLoginProviders(init: RequestInit = {}) {
-    return getJson<{ google: boolean; microsoft: boolean }>("/api/auth/social-login/providers", {
-        cache: "no-store",
-        ...init,
-    });
-}
 
 /**
  * The backend entry point a browser must fully navigate to (not fetch) to begin a consumer
@@ -2766,10 +2762,6 @@ export function addWorkspaceAllowedDomain(workspaceId: number, domain: string) {
 export function removeWorkspaceAllowedDomain(workspaceId: number, domain: string) {
     return deleteJson<void>(`/api/workspaces/${workspaceId}/allowed-domains?domain=${encodeURIComponent(domain)}`);
 }
-export function getMailManaged(init: RequestInit = {}) {
-    return getJson<{ managed: boolean }>("/api/mail/managed", { cache: "no-store", ...init });
-}
-
 export function getWorkspaceMailConfig(workspaceId: number, init: RequestInit = {}) {
     return getJson<Types.MailConfig>(`/api/workspaces/${workspaceId}/mail-config`, { cache: "no-store", ...init });
 }

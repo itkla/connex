@@ -1,5 +1,5 @@
 import { AuthForm } from "@/app/components/AuthForm";
-import { getSocialLoginProviders, getSsoInstanceEnabled } from "@/app/lib/api";
+import { DEFAULT_CAPABILITIES, getCapabilities } from "@/app/lib/api";
 
 export default async function LoginPage({
     searchParams,
@@ -7,20 +7,14 @@ export default async function LoginPage({
     searchParams: Promise<{ redirect?: string; sso_error?: string }>;
 }) {
     const { redirect, sso_error } = await searchParams;
-    const ssoEnabled = await getSsoInstanceEnabled()
-        .then((r) => r.enabled)
-        .catch(() => false);
-    const socialProviders = await getSocialLoginProviders().catch(() => ({
-        google: false,
-        microsoft: false,
-    }));
+    const capabilities = await getCapabilities().catch(() => DEFAULT_CAPABILITIES);
     return (
         <AuthForm
             mode="login"
             redirectUrl={redirect ?? null}
             ssoError={sso_error === "1"}
-            ssoEnabled={ssoEnabled}
-            socialProviders={socialProviders}
+            ssoEnabled={capabilities.sso}
+            socialProviders={capabilities.socialLogin}
         />
     );
 }

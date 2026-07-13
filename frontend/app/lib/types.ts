@@ -1818,6 +1818,12 @@ export type MailTestResult = {
     error: string | null;
 };
 
+export type InstanceCapabilities = {
+    sso: boolean;
+    socialLogin: { google: boolean; microsoft: boolean };
+    mailManaged: boolean;
+};
+
 export type SsoProtocol = "oidc" | "saml";
 
 export type SsoDiscovery = {
