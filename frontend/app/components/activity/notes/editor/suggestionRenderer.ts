@@ -48,6 +48,8 @@ export function createSuggestionRenderer<Item>(
                 popup = document.createElement("div");
                 popup.style.position = "fixed";
                 popup.style.zIndex = "60";
+                popup.style.pointerEvents = "auto";
+                popup.setAttribute("data-slot", "editor-suggestion");
                 popup.appendChild(renderer.element);
                 document.body.appendChild(popup);
                 place(props.clientRect?.());

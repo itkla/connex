@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { toastError, toastSuccess } from '@/app/lib/toast';
 import { Loader2Icon } from 'lucide-react';
-import { Bars3BottomLeftIcon, UserIcon, BriefcaseIcon } from '@heroicons/react/24/outline';
+import { UserIcon, BriefcaseIcon } from '@heroicons/react/24/outline';
 
 import {
     ResponsiveDialog,
@@ -26,9 +26,9 @@ import {
 } from '@/components/ui/combobox';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
-import MentionEditor from './MentionEditor';
+import RichNoteEditor from './RichNoteEditor';
 import { InputGroupAddon } from '@/components/ui/input-group';
-import { DialogStatusCover, resolveDialogStatus, fieldInputClass } from '@/components/ui/dialog-status-cover';
+import { DialogStatusCover, resolveDialogStatus } from '@/components/ui/dialog-status-cover';
 import { cn } from '@/lib/utils';
 
 import { ApiError, createNote, updateNote, isFieldError } from '@/app/lib/api';
@@ -208,20 +208,27 @@ function NoteDialogForm({
                 <form onSubmit={handleSubmit} className="grid gap-5">
                     <div className="ncd-rise grid gap-1.5" style={{ animationDelay: '90ms' }}>
                         <Label htmlFor="note-content">{t('contentLabel')}</Label>
-                        <div className="group relative">
-                            <Bars3BottomLeftIcon className="pointer-events-none absolute left-3 top-3 size-4 text-muted-foreground transition-colors group-focus-within:text-brand" />
-                            <MentionEditor
-                                id="note-content"
+                        <div
+                            id="note-content"
+                            tabIndex={-1}
+                            aria-invalid={fieldErrors.content ? true : undefined}
+                            aria-describedby={fieldErrors.content ? 'note-content-error' : undefined}
+                            className={cn(
+                                'overflow-hidden rounded-xl border bg-background transition-[box-shadow,border-color] focus-within:ring-2 focus-within:ring-brand/60',
+                                fieldErrors.content
+                                    ? 'border-destructive focus-within:ring-destructive/50'
+                                    : 'border-border focus-within:border-brand',
+                            )}
+                        >
+                            <RichNoteEditor
+                                compact
                                 value={content}
                                 onChange={(next) => {
                                     setContent(next);
                                     clearError('content');
                                 }}
-                                placeholder={t('contentPlaceholder')}
-                                ariaInvalid={Boolean(fieldErrors.content)}
-                                ariaDescribedby={fieldErrors.content ? 'note-content-error' : undefined}
-                                autoFocus
-                                className={cn(fieldInputClass, 'pl-9 pr-3 py-2')}
+                                excludeUserId={currentUserId}
+                                autofocus
                             />
                         </div>
                         {fieldErrors.content && <p id="note-content-error" className="text-sm text-destructive">{fieldErrors.content}</p>}
