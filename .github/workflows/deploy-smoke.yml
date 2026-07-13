@@ -1,0 +1,92 @@
+name: Deploy smoke
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    paths:
+      - 'deploy/**'
+      - 'backend/**'
+      - '.github/workflows/deploy-smoke.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-smoke-${{ github.workflow }}-${{ github.head_ref || github.sha }}
+  cancel-in-progress: true
+
+jobs:
+  compose-config:
+    name: Validate compose bundle
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: docker compose config
+        working-directory: deploy
+        run: |
+          cp eval.env.example .env
+          docker compose -f docker-compose.yml -f docker-compose.build.yml config -q
+
+  profile-boot:
+    name: Boot every deployment profile
+    runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:9.7
+        env:
+          MYSQL_ROOT_PASSWORD: ci-${{ github.run_id }}-root
+          MYSQL_DATABASE: connexdb
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -pci-${{ github.run_id }}-root"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=15
+    steps:
+      - uses: actions/checkout@v7
+      - name: Set up JDK 26
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '26'
+          cache: gradle
+      - name: Allow non-SUPER routine creation under binary logging
+        run: mysql -h 127.0.0.1 -uroot -pci-${{ github.run_id }}-root -e "SET GLOBAL log_bin_trust_function_creators = 1;"
+      - name: Build bootWar
+        working-directory: backend
+        run: bash gradlew bootWar --no-daemon -Pversion=ci
+      - name: Boot saas, silo, on-prem and smoke the public endpoints
+        working-directory: backend
+        env:
+          SPRING_PROFILES_ACTIVE: dev
+          CONNEX_DB_URL: jdbc:mysql://127.0.0.1:3306/connexdb?sslMode=DISABLED
+          CONNEX_DB_USERNAME: root
+          CONNEX_DB_PASSWORD: ci-${{ github.run_id }}-root
+        run: |
+          set -euo pipefail
+          WAR=$(find build/libs -name '*.war' ! -name '*-plain.war' | head -1)
+          for PROFILE in saas silo on-prem; do
+            echo "=== booting deployment profile: $PROFILE ==="
+            CONNEX_DEPLOYMENT_PROFILE="$PROFILE" java -jar "$WAR" > "/tmp/boot-$PROFILE.log" 2>&1 &
+            PID=$!
+            BOOTED=0
+            for _ in $(seq 1 90); do
+              if curl -sf http://localhost:8080/api/version > /dev/null 2>&1; then BOOTED=1; break; fi
+              if ! kill -0 "$PID" 2>/dev/null; then break; fi
+              sleep 2
+            done
+            if [ "$BOOTED" != 1 ]; then
+              echo "::error::deployment profile $PROFILE failed to boot"
+              tail -60 "/tmp/boot-$PROFILE.log"
+              kill "$PID" 2>/dev/null || true
+              exit 1
+            fi
+            curl -sf http://localhost:8080/api/capabilities | grep -q '"mailManaged"' \
+              || { echo "::error::capabilities smoke failed for $PROFILE"; kill "$PID" 2>/dev/null || true; exit 1; }
+            echo "profile $PROFILE booted and smoked OK"
+            kill "$PID" 2>/dev/null || true
+            wait "$PID" 2>/dev/null || true
+            sleep 3
+          done
