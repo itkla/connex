@@ -170,6 +170,35 @@ public class DealService {
         return referenceService.hydrateDeals(workspaceId, List.of(deal)).get(0);
     }
 
+    private static Deal mutableCopy(Deal source) {
+        Deal copy = new Deal();
+        copy.setId(source.getId());
+        copy.setWorkspaceId(source.getWorkspaceId());
+        copy.setOwnerId(source.getOwnerId());
+        copy.setName(source.getName());
+        copy.setValue(source.getValue());
+        copy.setActualValue(source.getActualValue());
+        copy.setCurrency(source.getCurrency());
+        copy.setPipelineId(source.getPipelineId());
+        copy.setStageId(source.getStageId());
+        copy.setPosition(source.getPosition());
+        copy.setCompanyId(source.getCompanyId());
+        copy.setPeople(source.getPeople());
+        copy.setActivities(source.getActivities());
+        copy.setNotes(source.getNotes());
+        copy.setTasks(source.getTasks());
+        copy.setTags(source.getTags());
+        copy.setExpectedCloseDate(source.getExpectedCloseDate());
+        copy.setClosedAt(source.getClosedAt());
+        copy.setClosedReason(source.getClosedReason());
+        copy.setWon(source.getWon());
+        copy.setRiskExcluded(source.isRiskExcluded());
+        copy.setCreatedAt(source.getCreatedAt());
+        copy.setUpdatedAt(source.getUpdatedAt());
+        copy.setReferences(source.getReferences());
+        return copy;
+    }
+
     private User currentActorOrNull() {
         try {
             return authService.getCurrentUser();
@@ -678,6 +707,7 @@ public class DealService {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         Deal before = dealMapper.getDealById(workspaceId, id);
         if (before == null) throw new ResourceNotFoundException("Deal not found with id: " + id);
+        Boolean previousOutcome = before.getWon();
         deal.setId(id);
         deal.setWorkspaceId(workspaceId);
         deal.setOwnerId(before.getOwnerId());
@@ -689,11 +719,11 @@ public class DealService {
             ? dealMapper.nextDealPosition(workspaceId, newStage)
             : before.getPosition());
         reconcileCloseState(deal);
-        boolean reopened = before.getWon() != null && deal.getWon() == null;
+        boolean reopened = previousOutcome != null && deal.getWon() == null;
         dealMapper.update(deal);
         if ((stageChanged || reopened) && newStage != null) {
             dealStageHistoryService.recordTransition(
-                workspaceId, id, newStage, before.getWon(), deal.getWon());
+                workspaceId, id, newStage, previousOutcome, deal.getWon());
         }
         auditService.record("deal.update", "deal", id, deal.getName(),
             "Updated deal " + deal.getName(),
@@ -773,7 +803,7 @@ public class DealService {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         Deal before = dealMapper.getDealById(workspaceId, id);
         if (before == null) throw new ResourceNotFoundException("Deal not found with id: " + id);
-        Deal deal = dealMapper.getDealById(workspaceId, id);
+        Deal deal = mutableCopy(before);
         deal.setWon(won != null ? won : Boolean.FALSE);
         if (reason != null && !reason.isBlank()) deal.setClosedReason(reason);
         if (actualValue != null) deal.setActualValue(actualValue);
@@ -799,8 +829,9 @@ public class DealService {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         Deal before = dealMapper.getDealById(workspaceId, id);
         if (before == null) throw new ResourceNotFoundException("Deal not found with id: " + id);
-        Deal deal = dealMapper.getDealById(workspaceId, id);
-        boolean wasClosed = before.getWon() != null;
+        Boolean previousOutcome = before.getWon();
+        Deal deal = mutableCopy(before);
+        boolean wasClosed = previousOutcome != null;
         deal.setWon(null); // reconcile clears closedAt + reason
         Integer stageId = deal.getStageId();
         boolean terminal = stageId != null && !"normal".equals(dealMapper.getStageOutcome(workspaceId, stageId));
@@ -819,7 +850,7 @@ public class DealService {
         dealMapper.update(deal);
         if (wasClosed && deal.getStageId() != null) {
             dealStageHistoryService.recordTransition(
-                workspaceId, id, deal.getStageId(), before.getWon(), deal.getWon());
+                workspaceId, id, deal.getStageId(), previousOutcome, deal.getWon());
         }
         auditService.record("deal.reopen", "deal", id, deal.getName(),
             "Reopened deal " + deal.getName(),
@@ -1171,6 +1202,7 @@ public class DealService {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         Deal before = dealMapper.getDealById(workspaceId, dealId);
         if (before == null) throw new ResourceNotFoundException("Deal not found with id: " + dealId);
+        Boolean previousOutcome = before.getWon();
         Stage stage = pipelineMapper.getVisibleStageById(workspaceId, stageId);
         if (stage == null) throw new ResourceNotFoundException("Stage not found with id: " + stageId);
         Integer stagePipelineId = stage.getPipeline() != null ? stage.getPipeline().getId() : null;
@@ -1195,14 +1227,14 @@ public class DealService {
             }
         }
 
-        Deal deal = dealMapper.getDealById(workspaceId, dealId);
+        Deal deal = mutableCopy(before);
         deal.setStageId(stageId);
         deal.setPosition(index);
         reconcileCloseState(deal);
         dealMapper.update(deal);
         if (stageChanged) {
             dealStageHistoryService.recordTransition(
-                workspaceId, dealId, stageId, before.getWon(), deal.getWon());
+                workspaceId, dealId, stageId, previousOutcome, deal.getWon());
         }
         for (int i = 0; i < target.size(); i++) {
             int id = target.get(i);
