@@ -43,7 +43,7 @@ import tools.jackson.databind.ObjectMapper;
 public class ScheduleService {
     private static final Set<String> CADENCES = Set.of("weekly", "monthly", "quarterly");
     private static final Set<Permission> BASE_DELIVERY_PERMISSIONS =
-            Set.of(Permission.REPORT_READ, Permission.REPORT_CREATE);
+            Set.of(Permission.REPORT_READ);
 
     private final ScheduleMapper scheduleMapper;
     private final ReportMapper reportMapper;
@@ -166,7 +166,7 @@ public class ScheduleService {
 
     /**
      * Atomically claims a due occurrence for the expected run-as member. The short
-     * transaction commits before snapshot generation or email enqueueing.
+     * transaction commits before report generation or email enqueueing.
      */
     @Transactional
     public ReportSchedule claimDue(
@@ -304,7 +304,6 @@ public class ScheduleService {
 
     private void requireRunAsPermissions(int workspaceId, int userId, boolean attainment) {
         workspaceService.requirePermission(workspaceId, userId, Permission.REPORT_READ);
-        workspaceService.requirePermission(workspaceId, userId, Permission.REPORT_CREATE);
         if (attainment) {
             workspaceService.requirePermission(workspaceId, userId, Permission.GOAL_READ);
         }

@@ -99,6 +99,25 @@ class ScheduleServiceTest extends AbstractServiceTest {
     }
 
     @Test
+    void reportManagerCanScheduleWithoutSnapshotCreateAccess() {
+        int reportId = createReport("count").id();
+        User manager = newUser();
+        WorkspaceRole reportManager = roleService.createRole(
+                workspace.getId(), currentUser.getId(), "Report manager " + unique(),
+                List.of("REPORT_READ", "REPORT_UPDATE"));
+        workspaceService.assignCustomRole(
+                workspace.getId(), currentUser.getId(), manager.getId(), reportManager.getId());
+        authenticateAs(manager, workspace.getId());
+
+        ReportScheduleDto created = scheduleService.create(
+                reportId, request("weekly", List.of(manager.getId()), 9, true));
+
+        assertEquals(manager.getId(), created.runAsUserId());
+        assertTrue(scheduleService.deliveryAccess(
+                scheduleMapper.getByReport(workspace.getId(), reportId)).allowed());
+    }
+
+    @Test
     void scheduleInAnotherWorkspaceIsNotVisible() {
         int reportId = createReport("count").id();
         scheduleService.create(reportId, request("weekly", List.of(currentUser.getId()), 9, true));
@@ -120,7 +139,7 @@ class ScheduleServiceTest extends AbstractServiceTest {
         User manager = newUser();
         WorkspaceRole reportManager = roleService.createRole(
                 workspace.getId(), currentUser.getId(), "Report manager " + unique(),
-                List.of("REPORT_READ", "REPORT_CREATE", "REPORT_UPDATE"));
+                List.of("REPORT_READ", "REPORT_UPDATE"));
         workspaceService.assignCustomRole(
                 workspace.getId(), currentUser.getId(), manager.getId(), reportManager.getId());
         authenticateAs(manager, workspace.getId());
