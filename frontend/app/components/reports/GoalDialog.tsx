@@ -7,7 +7,7 @@ import type {
     ReportGoal,
     ReportGoalInput,
     ReportGoalPeriodType,
-    User,
+    WorkspaceMember,
 } from '@/app/lib/types';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -32,7 +32,7 @@ import {
 type GoalDialogProps = {
     open: boolean;
     editing: ReportGoal | null;
-    owners: User[];
+    owners: WorkspaceMember[];
     onOpenChange: (open: boolean) => void;
     onSubmit: (payload: ReportGoalInput) => Promise<void>;
 };
@@ -86,7 +86,7 @@ function GoalForm({
     onSubmit,
 }: {
     editing: ReportGoal | null;
-    owners: User[];
+    owners: WorkspaceMember[];
     saving: boolean;
     onSubmit: (payload: ReportGoalInput) => Promise<void>;
 }) {

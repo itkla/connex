@@ -4,14 +4,14 @@ import { getTranslations } from 'next-intl/server';
 
 import ReportBuilderBoard from '@/app/components/reports/ReportBuilderBoard';
 import {
+    getActiveWorkspaceMembersResultFromCookie,
     getCurrentUserFromCookie,
     getEffectivePermissionsFromCookie,
     getPipelinesFromCookie,
     getReport,
     getTagsFromCookie,
-    getUsers,
 } from '@/app/lib/api';
-import type { Tag, User } from '@/app/lib/types';
+import type { Tag } from '@/app/lib/types';
 
 export async function generateMetadata() {
     const t = await getTranslations('Reports');
@@ -26,10 +26,10 @@ export default async function EditReportPage({ params }: { params: Promise<{ id:
     const user = await getCurrentUserFromCookie(cookie);
     if (!user) redirect('/auth/login');
     const init = { headers: { cookie: cookie ?? '' } } as const;
-    const [report, pipelines, users, tags, effectivePermissions] = await Promise.all([
+    const [report, pipelines, ownersResult, tags, effectivePermissions] = await Promise.all([
         getReport(id, init).catch(() => null),
         getPipelinesFromCookie(cookie),
-        getUsers(init).catch((): User[] => []),
+        getActiveWorkspaceMembersResultFromCookie(cookie),
         getTagsFromCookie(cookie).catch((): Tag[] => []),
         getEffectivePermissionsFromCookie(cookie),
     ]);
@@ -43,7 +43,8 @@ export default async function EditReportPage({ params }: { params: Promise<{ id:
         <ReportBuilderBoard
             initialReport={report}
             pipelines={pipelines}
-            users={users}
+            owners={ownersResult.ok ? ownersResult.data : []}
+            ownersFailed={!ownersResult.ok}
             tags={tags}
             canReadGoals={canReadGoals}
         />

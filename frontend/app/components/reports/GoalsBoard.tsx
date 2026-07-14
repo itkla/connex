@@ -15,7 +15,7 @@ import {
 import GoalDialog from '@/app/components/reports/GoalDialog';
 import { createGoal, deleteGoal, updateGoal } from '@/app/lib/api';
 import { toastError, toastSuccess } from '@/app/lib/toast';
-import type { ReportGoal, ReportGoalInput, User } from '@/app/lib/types';
+import type { ReportGoal, ReportGoalInput, WorkspaceMember } from '@/app/lib/types';
 import { Button } from '@/components/ui/button';
 import {
     Dialog,
@@ -29,7 +29,7 @@ import {
 
 type GoalsBoardProps = {
     initialGoals: ReportGoal[];
-    owners: User[];
+    owners: WorkspaceMember[];
     canManage: boolean;
     goalsFailed: boolean;
     ownersFailed: boolean;

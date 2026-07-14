@@ -4,10 +4,10 @@ import { getTranslations } from 'next-intl/server';
 
 import GoalsBoard from '@/app/components/reports/GoalsBoard';
 import {
+    getActiveWorkspaceMembersResultFromCookie,
     getCurrentUserFromCookie,
     getEffectivePermissionsFromCookie,
     getGoalsResultFromCookie,
-    getUsersResultFromCookie,
 } from '@/app/lib/api';
 
 export async function generateMetadata() {
@@ -25,7 +25,7 @@ export default async function GoalsPage() {
 
     const [goalsResult, ownersResult] = await Promise.all([
         getGoalsResultFromCookie(cookie),
-        getUsersResultFromCookie(cookie),
+        getActiveWorkspaceMembersResultFromCookie(cookie),
     ]);
 
     return (
