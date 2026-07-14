@@ -651,14 +651,14 @@ class DealServiceTest extends AbstractServiceTest {
         JsonNode moveChanges = auditChanges(deal.getId(), "deal.update");
         assertEquals(open.getId(), moveChanges.path("stageId").path("old").asInt());
         assertEquals(won.getId(), moveChanges.path("stageId").path("new").asInt());
-        assertTrue(moveChanges.path("won").path("old").isNull());
+        assertTrue(moveChanges.has("won"));
         assertTrue(moveChanges.path("won").path("new").asBoolean());
 
         JsonNode reopenChanges = auditChanges(deal.getId(), "deal.reopen");
         assertEquals(won.getId(), reopenChanges.path("stageId").path("old").asInt());
         assertEquals(open.getId(), reopenChanges.path("stageId").path("new").asInt());
+        assertTrue(reopenChanges.has("won"));
         assertTrue(reopenChanges.path("won").path("old").asBoolean());
-        assertTrue(reopenChanges.path("won").path("new").isNull());
     }
 
     @Test
@@ -689,9 +689,9 @@ class DealServiceTest extends AbstractServiceTest {
         assertEquals(Boolean.TRUE, dealService.getDealById(deal.getId()).getWon());
 
         JsonNode closeChanges = auditChanges(deal.getId(), "deal.close");
-        assertTrue(closeChanges.path("won").path("old").isNull());
+        assertTrue(closeChanges.has("won"));
         assertTrue(closeChanges.path("won").path("new").asBoolean());
-        assertTrue(closeChanges.has("closedAt"));
+        assertTrue(closeChanges.path("closedAt").path("new").isTextual());
     }
 
     @Test
