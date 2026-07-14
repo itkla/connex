@@ -31,6 +31,17 @@ function clientWorkspaceId(): string | null {
     return match ? decodeURIComponent(match[1]) : null;
 }
 
+function workspaceIdFromCookieHeader(cookie: string): number | null {
+    const match = cookie.match(/(?:^|;\s*)connex_workspace=([^;]+)/);
+    if (!match) return null;
+    const value = match[1].trim();
+    if (!/^[+-]?\d+$/.test(value)) return null;
+    const workspaceId = Number(value);
+    return Number.isInteger(workspaceId) && workspaceId > 0 && workspaceId <= 2_147_483_647
+        ? workspaceId
+        : null;
+}
+
 // CSRF token, fetched once from the backend and echoed in a header on state-changing requests.
 // The frontend and backend can be different origins, so the token is delivered via this endpoint
 // rather than a cookie the JS would otherwise be unable to read cross-origin.
@@ -2289,6 +2300,24 @@ export function leaveWorkspace(id: number) {
 
 export function getWorkspaceMembers(workspaceId: number, init: RequestInit = {}) {
     return getJson<Types.WorkspaceMember[]>(`/api/workspaces/${workspaceId}/members`, { cache: "no-store", ...init });
+}
+
+/** Active members of the workspace selected by the forwarded request cookie. */
+export async function getActiveWorkspaceMembersResultFromCookie(
+    cookie: string | null,
+): Promise<CookieResult<Types.WorkspaceMember[]>> {
+    if (!cookie) return { ok: false };
+    const activeWorkspaceId = workspaceIdFromCookieHeader(cookie);
+    if (activeWorkspaceId == null) return { ok: false };
+    const membersResult = await resultWithCookie(
+        (init) => getWorkspaceMembers(activeWorkspaceId, init),
+        cookie,
+    );
+    if (!membersResult.ok) return membersResult;
+    return {
+        ok: true,
+        data: membersResult.data.filter((member) => member.status === "active"),
+    };
 }
 
 /** Members of the active workspace (read from the connex_workspace cookie); empty when none is set. */

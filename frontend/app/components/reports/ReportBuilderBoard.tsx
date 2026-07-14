@@ -39,7 +39,7 @@ import type {
     ReportTemplate,
     ReportWidgetConfig,
     Tag,
-    User,
+    WorkspaceMember,
 } from '@/app/lib/types';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -80,14 +80,16 @@ export default function ReportBuilderBoard({
     initialReport,
     initialTemplate,
     pipelines,
-    users,
+    owners,
+    ownersFailed,
     tags,
     canReadGoals,
 }: {
     initialReport?: ReportDefinition;
     initialTemplate?: ReportTemplate;
     pipelines: Pipeline[];
-    users: User[];
+    owners: WorkspaceMember[];
+    ownersFailed: boolean;
     tags: Tag[];
     canReadGoals: boolean;
 }) {
@@ -125,6 +127,22 @@ export default function ReportBuilderBoard({
         [config.layout],
     );
     const filters = selectedFilters(config.filters);
+    const ownerOptions = useMemo(() => {
+        const options = owners.map((owner) => ({ value: owner.id, label: owner.displayName }));
+        const availableIds = new Set(owners.map((owner) => owner.id));
+        for (const ownerId of filters.ownerIds ?? []) {
+            if (!availableIds.has(ownerId)) {
+                options.push({ value: ownerId, label: t('builder.unavailableOwner', { id: ownerId }) });
+                availableIds.add(ownerId);
+            }
+        }
+        return options;
+    }, [filters.ownerIds, owners, t]);
+    const unavailableOwnerIds = useMemo(() => {
+        const availableIds = new Set(owners.map((owner) => owner.id));
+        return [...new Set((filters.ownerIds ?? []).filter((ownerId) => !availableIds.has(ownerId)))];
+    }, [filters.ownerIds, owners]);
+    const ownerFiltersUnresolved = unavailableOwnerIds.length > 0;
     const hasAttainment = config.widgets.some((widget) => widget.measure === 'attainment');
     const hasWorkspaceAttainment = config.widgets.some((widget) =>
         widget.measure === 'attainment' && (widget.groupBy ?? 'none') === 'none');
@@ -223,8 +241,17 @@ export default function ReportBuilderBoard({
             filters: { ...selectedFilters(current.filters), ...patch },
         }));
     };
+    const clearUnavailableOwners = () => {
+        const availableIds = new Set(owners.map((owner) => owner.id));
+        const ownerIds = (filters.ownerIds ?? []).filter((ownerId) => availableIds.has(ownerId));
+        updateFilters({ ownerIds: ownerIds.length > 0 ? ownerIds : null });
+    };
 
     const save = async () => {
+        if (ownerFiltersUnresolved) {
+            toastError(t(ownersFailed ? 'builder.ownersLoadBlocked' : 'builder.ownersUnavailable'));
+            return;
+        }
         const trimmedName = name.trim();
         if (!trimmedName) {
             toastError(t('builder.nameRequired'));
@@ -273,7 +300,7 @@ export default function ReportBuilderBoard({
                         <Button variant="outline" onClick={() => router.back()} disabled={saving}>
                             {t('common.cancel')}
                         </Button>
-                        <Button variant="brand" onClick={save} disabled={saving}>
+                        <Button variant="brand" onClick={save} disabled={saving || ownerFiltersUnresolved}>
                             {saving ? t('common.saving') : t('builder.save')}
                         </Button>
                     </div>
@@ -366,11 +393,30 @@ export default function ReportBuilderBoard({
                                 />
                                 <FilterChecklist
                                     label={t('builder.owners')}
-                                    options={users.map((user) => ({ value: user.id, label: user.displayName }))}
+                                    options={ownerOptions}
                                     values={filters.ownerIds}
                                     onChange={(value) => updateFilters({ ownerIds: toggleValue(filters.ownerIds, value) })}
                                     disabled={hasWorkspaceAttainment}
                                 />
+                                {ownersFailed || ownerFiltersUnresolved ? (
+                                    <div role="alert" className="rounded-xl border border-destructive/30 bg-destructive/5 p-3 text-xs text-destructive">
+                                        <p>{t(ownersFailed
+                                            ? ownerFiltersUnresolved ? 'builder.ownersLoadBlocked' : 'builder.ownersLoadError'
+                                            : 'builder.ownersUnavailable')}</p>
+                                        <div className="mt-3 flex flex-wrap gap-2">
+                                            {ownerFiltersUnresolved ? (
+                                                <Button variant="outline" size="sm" onClick={clearUnavailableOwners}>
+                                                    {t('builder.clearUnavailableOwners')}
+                                                </Button>
+                                            ) : null}
+                                            {ownersFailed ? (
+                                                <Button variant="outline" size="sm" onClick={() => router.refresh()}>
+                                                    {t('common.retry')}
+                                                </Button>
+                                            ) : null}
+                                        </div>
+                                    </div>
+                                ) : null}
                                 <FilterChecklist
                                     label={t('builder.statuses')}
                                     options={STATUSES.map((value) => ({ value, label: t(`status.${value}`) }))}
