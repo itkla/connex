@@ -8,7 +8,9 @@ import lombok.NoArgsConstructor;
  * append-only, so a deal that re-enters a stage has one row per entry. {@code stageName} is a
  * snapshot taken when the row was created, so the history reads correctly even after a stage is
  * renamed or deleted ({@code stageId} becomes null on deletion). Mapped via
- * {@code DealStageHistoryMapper}.
+ * {@code DealStageHistoryMapper}. {@code conversionEligible} records whether the row is safe
+ * evidence that the deal occupied the stage while its outcome was pending, so later moves of
+ * already-closed deals do not become conversion evidence.
  */
 @Data
 @NoArgsConstructor
@@ -19,4 +21,5 @@ public class DealStageHistory {
     private int stageId;
     private String stageName;
     private String achievedAt;
+    private boolean conversionEligible = true;
 }

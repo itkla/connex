@@ -25,6 +25,35 @@ import ooo.klae.connex.backend.dto.ReportOffsetSegment;
 class ReportMapperXmlTest {
 
     @Test
+    void conversionMigrationKeepsAmbiguousLegacyHistoryFailClosed() throws Exception {
+        String resource = "db/migration/tenant/V71__deal_stage_history_conversion.sql";
+        try (InputStream input = getClass().getClassLoader().getResourceAsStream(resource)) {
+            assertNotNull(input);
+            String sql = new String(input.readAllBytes(), StandardCharsets.UTF_8);
+            assertTrue(sql.contains("conversion_eligible BOOLEAN NOT NULL DEFAULT FALSE"));
+            assertFalse(sql.contains("UPDATE deal_stage_history"));
+            assertTrue(sql.indexOf("ALTER TABLE deal_stage_history")
+                == sql.lastIndexOf("ALTER TABLE deal_stage_history"));
+            assertTrue(sql.contains("workspace_id, conversion_eligible, stage_id, deal_id"));
+        }
+    }
+
+    @Test
+    void conversionSeedUsesOnlyLatestCurrentStageOfOpenDeals() throws Exception {
+        String resource = "db/migration/tenant/V72__seed_open_deal_conversion_history.sql";
+        try (InputStream input = getClass().getClassLoader().getResourceAsStream(resource)) {
+            assertNotNull(input);
+            String sql = new String(input.readAllBytes(), StandardCharsets.UTF_8);
+            assertTrue(sql.contains("MAX(stage_event.id) AS history_id"));
+            assertTrue(sql.contains("stage_event.workspace_id = open_deal.workspace_id"));
+            assertTrue(sql.contains("stage_event.deal_id = open_deal.id"));
+            assertTrue(sql.contains("stage_event.stage_id = open_deal.stage_id"));
+            assertTrue(sql.contains("open_deal.won IS NULL"));
+            assertTrue(sql.contains("SET eligible_history.conversion_eligible = TRUE"));
+        }
+    }
+
+    @Test
     void mapperXmlParsesAndBuildsAggregateStatements() throws Exception {
         Configuration configuration = new Configuration();
         configuration.getTypeAliasRegistry().registerAlias("ReportDefinition", ReportDefinition.class);
@@ -62,6 +91,9 @@ class ReportMapperXmlTest {
         assertTrue(filteredForecast.contains("d.owner_id IN"));
         assertTrue(filteredForecast.contains("CASE WHEN d.won = TRUE"));
         assertTrue(filteredForecast.contains("FROM deal_tag"));
+        assertTrue(filteredForecast.contains("FROM deal_stage_history stage_event"));
+        assertTrue(filteredForecast.contains("COUNT(DISTINCT stage_event.deal_id)"));
+        assertTrue(filteredForecast.contains("reached_stage_history.won_count"));
         for (String statement : new String[] {"getVisiblePersonIdsAt", "getVisibleCompanyIdsAt"}) {
             assertNotNull(configuration.getMappedStatement(ReportMapper.class.getName() + "." + statement)
                     .getBoundSql(Map.of(
@@ -91,7 +123,11 @@ class ReportMapperXmlTest {
         assertTrue(sql.contains("p.workspace_id = ?"));
         assertTrue(sql.contains("s.workspace_id = ?"));
         assertTrue(sql.contains("c.workspace_id = ?"));
-        assertTrue(sql.contains("historical_deal.workspace_id = ?"));
+        assertTrue(sql.contains("closed_stage_deal.workspace_id = ?"));
+        assertTrue(sql.contains("stage_event.workspace_id = ?"));
+        assertTrue(sql.contains("stage_event.conversion_eligible = TRUE"));
+        assertTrue(sql.contains("reached_deal.workspace_id = stage_event.workspace_id"));
+        assertTrue(sql.contains("reached_deal.workspace_id = ?"));
         assertTrue(sql.contains("workspace_deal.workspace_id = ?"));
         assertTrue(sql.contains("d.workspace_id = ?"));
         assertFalse(sql.contains("${"));
@@ -124,6 +160,7 @@ class ReportMapperXmlTest {
                 LocalDate.of(2026, 1, 1), LocalDate.of(2026, 2, 1),
                 pipelineIds, ownerIds, statuses, tagIds, null,
                 new BigDecimal("0.5"),
+                10,
                 java.util.List.of(new ReportOffsetSegment(
                         LocalDateTime.of(2026, 1, 1, 0, 0),
                         LocalDateTime.of(2026, 2, 1, 0, 0),

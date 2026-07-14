@@ -5,6 +5,7 @@ import java.util.Map;
 import java.util.stream.Collectors;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -14,7 +15,11 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
 
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+
 import ooo.klae.connex.backend.beans.Activity;
+import ooo.klae.connex.backend.beans.AuditLog;
 import ooo.klae.connex.backend.beans.Company;
 import ooo.klae.connex.backend.beans.Deal;
 import ooo.klae.connex.backend.beans.DealStageHistory;
@@ -45,7 +50,9 @@ import ooo.klae.connex.backend.mappers.ShareMapper;
 class DealServiceTest extends AbstractServiceTest {
 
     @Autowired DealService dealService;
+    @Autowired AuditService auditService;
     @Autowired JdbcTemplate jdbcTemplate;
+    @Autowired ObjectMapper objectMapper;
     @Autowired ShareMapper shareMapper;
 
     @Test
@@ -617,7 +624,7 @@ class DealServiceTest extends AbstractServiceTest {
     }
 
     @Test
-    void reopen_fromTerminalStage_recordsReturnStageHistory() {
+    void reopen_fromTerminalStage_recordsReturnStageHistory() throws Exception {
         Pipeline pipeline = newPipeline();
         Stage open = newStage(pipeline, 0);
         Stage won = new Stage();
@@ -636,8 +643,72 @@ class DealServiceTest extends AbstractServiceTest {
         List<DealStageHistory> history = dealService.getStageHistory(deal.getId());
         assertEquals(2, history.size());
         assertEquals(won.getId(), history.get(0).getStageId());
+        assertTrue(history.get(0).isConversionEligible());
         assertEquals(open.getId(), history.get(1).getStageId());
+        assertTrue(history.get(1).isConversionEligible());
         assertEquals(open.getId(), dealService.getDealById(deal.getId()).getStageId());
+
+        JsonNode moveChanges = auditChanges(deal.getId(), "deal.update");
+        assertEquals(open.getId(), moveChanges.path("stageId").path("old").asInt());
+        assertEquals(won.getId(), moveChanges.path("stageId").path("new").asInt());
+        assertTrue(moveChanges.has("won"));
+        assertTrue(moveChanges.path("won").path("new").asBoolean());
+
+        JsonNode reopenChanges = auditChanges(deal.getId(), "deal.reopen");
+        assertEquals(won.getId(), reopenChanges.path("stageId").path("old").asInt());
+        assertEquals(open.getId(), reopenChanges.path("stageId").path("new").asInt());
+        assertTrue(reopenChanges.has("won"));
+        assertTrue(reopenChanges.path("won").path("old").asBoolean());
+    }
+
+    @Test
+    void reopen_closedDealInNormalStage_restoresConversionEligibility() throws Exception {
+        Pipeline pipeline = newPipeline();
+        Stage open = newStage(pipeline, 0);
+        Stage postClose = newStage(pipeline, 1);
+        Stage won = new Stage();
+        won.setName("Won " + unique());
+        won.setPipeline(pipeline);
+        won.setPosition(2);
+        won.setWorkspaceId(workspace.getId());
+        won.setSuccess(true);
+        pipelineMapper.insertStage(won);
+        Deal deal = newDeal(pipeline, open, newCompany());
+
+        dealService.move(deal.getId(), won.getId(), 0);
+        dealService.move(deal.getId(), postClose.getId(), 0);
+        dealService.reopen(deal.getId());
+        dealService.close(deal.getId(), Boolean.TRUE, null, null);
+
+        List<DealStageHistory> history = dealService.getStageHistory(deal.getId());
+        assertEquals(3, history.size());
+        assertTrue(history.get(0).isConversionEligible());
+        assertFalse(history.get(1).isConversionEligible());
+        assertEquals(postClose.getId(), history.get(2).getStageId());
+        assertTrue(history.get(2).isConversionEligible());
+        assertEquals(Boolean.TRUE, dealService.getDealById(deal.getId()).getWon());
+
+        JsonNode closeChanges = auditChanges(deal.getId(), "deal.close");
+        assertTrue(closeChanges.has("won"));
+        assertTrue(closeChanges.path("won").path("new").asBoolean());
+        assertTrue(closeChanges.path("closedAt").path("new").isTextual());
+    }
+
+    @Test
+    void update_reopeningInSameStage_recordsEligibleStageHistory() {
+        Pipeline pipeline = newPipeline();
+        Stage stage = newStage(pipeline, 0);
+        Deal deal = newDeal(pipeline, stage, newCompany());
+        dealService.close(deal.getId(), Boolean.FALSE, null, null);
+
+        deal.setWon(null);
+        deal.setClosedAt(null);
+        dealService.update(deal.getId(), deal);
+
+        List<DealStageHistory> history = dealService.getStageHistory(deal.getId());
+        assertEquals(1, history.size());
+        assertEquals(stage.getId(), history.get(0).getStageId());
+        assertTrue(history.get(0).isConversionEligible());
     }
 
     @Test
@@ -894,6 +965,15 @@ class DealServiceTest extends AbstractServiceTest {
 
     private Map<String, Long> facetCounts(List<FacetCount> facets) {
         return facets.stream().collect(Collectors.toMap(FacetCount::getKey, FacetCount::getCount));
+    }
+
+    private JsonNode auditChanges(int dealId, String action) throws Exception {
+        AuditLog audit = auditService.forEntity("deal", dealId, 20, 0).stream()
+            .filter(entry -> action.equals(entry.getAction()))
+            .findFirst()
+            .orElseThrow();
+        assertNotNull(audit.getChanges());
+        return objectMapper.readTree(audit.getChanges());
     }
 
     private Map<String, Double> monthTotals(List<DealMonthTotalDto> totals) {

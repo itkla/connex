@@ -439,7 +439,8 @@ public class ImportService {
                 Deal bean = beans.get(i);
                 PlanRow row = toCreate.get(i);
                 if (bean.getStageId() != null) {
-                    dealStageHistoryService.record(workspaceId, bean.getId(), bean.getStageId());
+                    dealStageHistoryService.recordTransition(
+                        workspaceId, bean.getId(), bean.getStageId(), null, bean.getWon());
                 }
                 attachDealTags(workspaceId, bean.getId(), row.tagNames, tagByName);
                 linkDealPeople(workspaceId, bean.getId(), row.peopleEmails, personByEmail);
@@ -489,6 +490,7 @@ public class ImportService {
         Deal existing = dealMapper.getDealById(workspaceId, row.matchedId);
         if (existing == null) return;
         Integer beforeStageId = existing.getStageId();
+        Boolean beforeOutcome = existing.getWon();
         existing.setName(merge(action, existing.getName(), row.std.get("name")));
         existing.setCurrency(merge(action, existing.getCurrency(), row.std.get("currency")));
         existing.setExpectedCloseDate(merge(action, existing.getExpectedCloseDate(), row.std.get("expectedCloseDate")));
@@ -508,7 +510,8 @@ public class ImportService {
         dealMapper.update(existing);
         Integer afterStageId = existing.getStageId();
         if (afterStageId != null && !afterStageId.equals(beforeStageId)) {
-            dealStageHistoryService.record(workspaceId, existing.getId(), afterStageId);
+            dealStageHistoryService.recordTransition(
+                workspaceId, existing.getId(), afterStageId, beforeOutcome, existing.getWon());
         }
         attachDealTags(workspaceId, existing.getId(), row.tagNames, tagByName);
         linkDealPeople(workspaceId, existing.getId(), row.peopleEmails, personByEmail);
