@@ -101,6 +101,7 @@ public class ReportService {
             "count", "coverage_gap_count", "coverage_gap_open_pipeline_value");
     private static final Set<String> RELATIONSHIP_MEASURES = Set.of("count", "company_count");
     private static final Set<String> COUNT_MEASURES = Set.of("count");
+    private static final Set<String> SUPPORTED_MEASURES = supportedMeasureCatalog();
     private static final Set<String> DEAL_GROUPS = Set.of(
             "none", "date", "pipeline", "stage", "owner", "status", "company", "deal", "risk");
     private static final Set<String> ACTIVITY_GROUPS = Set.of("none", "date", "activity_type", "owner");
@@ -906,7 +907,7 @@ public class ReportService {
         return new ValidatedDefinition(cadence, templateKey, configJson);
     }
 
-    private void validateConfig(String cadence, String templateKey, ReportConfig config) {
+    static void validateConfig(String cadence, String templateKey, ReportConfig config) {
         if (!CADENCES.contains(cadence)) {
             throw new BadRequestException("Invalid report cadence: " + cadence);
         }
@@ -959,7 +960,19 @@ public class ReportService {
         }
     }
 
-    private void validateWidget(ReportWidgetConfig widget) {
+    static Set<String> supportedMeasures() {
+        return SUPPORTED_MEASURES;
+    }
+
+    private static Set<String> supportedMeasureCatalog() {
+        Set<String> measures = new HashSet<>(DEAL_MEASURES);
+        measures.addAll(COMPANY_MEASURES);
+        measures.addAll(RELATIONSHIP_MEASURES);
+        measures.addAll(COUNT_MEASURES);
+        return Set.copyOf(measures);
+    }
+
+    private static void validateWidget(ReportWidgetConfig widget) {
         if (widget == null || widget.id() == null || !widget.id().matches("[A-Za-z0-9_-]{1,64}")) {
             throw new BadRequestException("Invalid report widget id");
         }
@@ -1013,7 +1026,7 @@ public class ReportService {
         }
     }
 
-    private void validateFilters(ReportFilters filters) {
+    private static void validateFilters(ReportFilters filters) {
         if (filters == null) {
             return;
         }
@@ -1040,7 +1053,7 @@ public class ReportService {
         }
     }
 
-    private void validateRange(String cadence, ReportRange range) {
+    private static void validateRange(String cadence, ReportRange range) {
         if ("custom".equals(cadence) && (range == null || range.start() == null || range.end() == null)) {
             throw new BadRequestException("Custom reports require a start and end date");
         }

@@ -19,6 +19,7 @@ import ooo.klae.connex.backend.beans.WorkspaceRole;
 import ooo.klae.connex.backend.dto.ReportConfig;
 import ooo.klae.connex.backend.dto.ReportDefinitionDto;
 import ooo.klae.connex.backend.dto.ReportDefinitionRequest;
+import ooo.klae.connex.backend.dto.ReportDocumentDto;
 import ooo.klae.connex.backend.dto.ReportFilters;
 import ooo.klae.connex.backend.dto.ReportLayoutItem;
 import ooo.klae.connex.backend.dto.ReportScheduleDto;
@@ -111,10 +112,17 @@ class ScheduleServiceTest extends AbstractServiceTest {
 
         ReportScheduleDto created = scheduleService.create(
                 reportId, request("weekly", List.of(manager.getId()), 9, true));
+        ReportSchedule stored = scheduleMapper.getByReport(workspace.getId(), reportId);
+        ReportDocumentDto document = reportService.generate(reportId, null);
 
         assertEquals(manager.getId(), created.runAsUserId());
-        assertTrue(scheduleService.deliveryAccess(
-                scheduleMapper.getByReport(workspace.getId(), reportId)).allowed());
+        assertTrue(scheduleService.deliveryAccess(stored).allowed());
+        assertEquals(
+                List.of(manager.getId()),
+                scheduleService.activeReportReaders(stored).stream().map(User::getId).toList());
+        assertEquals(
+                List.of(manager.getId()),
+                scheduleService.activeRecipientsForDocument(stored, document).stream().map(User::getId).toList());
     }
 
     @Test
@@ -134,18 +142,83 @@ class ScheduleServiceTest extends AbstractServiceTest {
     }
 
     @Test
-    void attainmentScheduleRequiresGoalReadFromRunAsMember() {
+    void attainmentScheduleChecksRunAsBeforeRecipientAccess() {
         int reportId = createReport("attainment").id();
+        User recipient = newUser();
+        assignRole(recipient, "Report reader", List.of("REPORT_READ"));
         User manager = newUser();
-        WorkspaceRole reportManager = roleService.createRole(
-                workspace.getId(), currentUser.getId(), "Report manager " + unique(),
-                List.of("REPORT_READ", "REPORT_UPDATE"));
-        workspaceService.assignCustomRole(
-                workspace.getId(), currentUser.getId(), manager.getId(), reportManager.getId());
+        assignRole(manager, "Report manager", List.of("REPORT_READ", "REPORT_UPDATE"));
         authenticateAs(manager, workspace.getId());
 
         assertThrows(ForbiddenException.class, () -> scheduleService.create(
-                reportId, request("monthly", List.of(manager.getId()), 9, true)));
+                reportId, request("monthly", List.of(recipient.getId()), 9, true)));
+    }
+
+    @Test
+    void attainmentScheduleRejectsRecipientWithoutGoalReadOnCreate() {
+        int reportId = createReport("attainment").id();
+        User recipient = newUser();
+        assignRole(recipient, "Report reader", List.of("REPORT_READ"));
+
+        BadRequestException exception = assertThrows(BadRequestException.class, () -> scheduleService.create(
+                reportId, request("monthly", List.of(recipient.getId()), 9, true)));
+
+        assertEquals("Report recipients lack permissions required by this report", exception.getMessage());
+    }
+
+    @Test
+    void attainmentScheduleRejectsRecipientWithoutGoalReadOnUpdate() {
+        int reportId = createReport("attainment").id();
+        User eligible = newUser();
+        assignRole(eligible, "Attainment reader", List.of("REPORT_READ", "GOAL_READ"));
+        User ineligible = newUser();
+        assignRole(ineligible, "Report reader", List.of("REPORT_READ"));
+        scheduleService.create(reportId, request("monthly", List.of(eligible.getId()), 9, true));
+
+        assertThrows(BadRequestException.class, () -> scheduleService.update(
+                reportId, request("quarterly", List.of(ineligible.getId()), 10, true)));
+
+        ReportScheduleDto unchanged = scheduleService.get(reportId);
+        assertEquals("monthly", unchanged.cadence());
+        assertEquals(List.of(eligible.getId()), unchanged.recipientUserIds());
+    }
+
+    @Test
+    void attainmentDeliveryExcludesRecipientAfterGoalReadLoss() {
+        int reportId = createReport("attainment").id();
+        User recipient = newUser();
+        WorkspaceRole recipientRole = assignRole(
+                recipient, "Attainment reader", List.of("REPORT_READ", "GOAL_READ"));
+        scheduleService.create(reportId, request("monthly", List.of(recipient.getId()), 9, true));
+        roleService.updateRole(
+                workspace.getId(), currentUser.getId(), recipientRole.getId(), recipientRole.getName(),
+                List.of("REPORT_READ"));
+        ReportSchedule stored = scheduleMapper.getByReport(workspace.getId(), reportId);
+        ReportDocumentDto document = reportService.generate(reportId, null);
+
+        assertEquals(
+                List.of(recipient.getId()),
+                scheduleService.activeReportReaders(stored).stream().map(User::getId).toList());
+        assertTrue(scheduleService.activeRecipientsForDocument(stored, document).isEmpty());
+    }
+
+    @Test
+    void exactDocumentAuthorizationUsesLatestScheduleRecipients() {
+        int reportId = createReport("count").id();
+        User removed = newUser();
+        User replacement = newUser();
+        scheduleService.create(reportId, request("monthly", List.of(removed.getId()), 9, true));
+        ReportSchedule claimed = scheduleMapper.getByReport(workspace.getId(), reportId);
+        ReportDocumentDto document = reportService.generate(reportId, null);
+
+        scheduleService.update(reportId, request("monthly", List.of(replacement.getId()), 9, true));
+
+        assertEquals(
+                List.of(replacement.getId()),
+                scheduleService.activeReportReaders(claimed).stream().map(User::getId).toList());
+        assertEquals(
+                List.of(replacement.getId()),
+                scheduleService.activeRecipientsForDocument(claimed, document).stream().map(User::getId).toList());
     }
 
     private ReportDefinitionDto createReport(String measure) {
@@ -164,6 +237,14 @@ class ScheduleServiceTest extends AbstractServiceTest {
             int hour,
             boolean enabled) {
         return new ReportScheduleRequest(cadence, recipients, "UTC", hour, enabled);
+    }
+
+    private WorkspaceRole assignRole(User member, String name, List<String> permissions) {
+        WorkspaceRole role = roleService.createRole(
+                workspace.getId(), currentUser.getId(), name + " " + unique(), permissions);
+        workspaceService.assignCustomRole(
+                workspace.getId(), currentUser.getId(), member.getId(), role.getId());
+        return role;
     }
 
     private User detachedUser() {

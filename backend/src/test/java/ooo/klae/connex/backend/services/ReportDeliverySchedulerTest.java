@@ -11,6 +11,7 @@ import static org.mockito.ArgumentMatchers.same;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import java.math.BigDecimal;
@@ -83,18 +84,17 @@ class ReportDeliverySchedulerTest {
                 automationExecutor, reportService, workspaceService, auditService,
                 templateRenderer, mailProperties, mailService, CLOCK);
         ReflectionTestUtils.setField(scheduler, "schedulingEnabled", true);
-        when(tenantWorkScope.unrouted(ArgumentMatchers.<Supplier<Object>>any()))
-                .thenAnswer(invocation -> {
-                    Supplier<?> work = invocation.getArgument(0);
-                    return work.get();
-                });
     }
 
     @Test
     void dueDeliveryGeneratesRenderedEmailWithoutCreatingSnapshot() {
-        stubClaimedDelivery(List.of(user()), List.of(user()));
-        when(reportService.generate(REPORT_ID, null)).thenReturn(documentWithContent());
+        stubAuditScope();
+        ReportDocumentDto document = documentWithContent();
+        ReportSchedule schedule = stubClaimedDelivery(List.of(user()));
+        when(reportService.generate(REPORT_ID, null)).thenReturn(document);
+        when(scheduleService.activeRecipientsForDocument(schedule, document)).thenReturn(List.of(user()));
         when(mailProperties.getAppBaseUrl()).thenReturn("https://app.example.com");
+        when(workspaceService.getOrgId(WORKSPACE_ID)).thenReturn(77);
 
         scheduler.deliverDue();
 
@@ -121,9 +121,13 @@ class ReportDeliverySchedulerTest {
 
     @Test
     void dueDeliveryRendersFallbackWithoutNarrativeOrTotals() {
-        stubClaimedDelivery(List.of(user()), List.of(user()));
-        when(reportService.generate(REPORT_ID, null)).thenReturn(document());
+        stubAuditScope();
+        ReportDocumentDto document = document();
+        ReportSchedule schedule = stubClaimedDelivery(List.of(user()));
+        when(reportService.generate(REPORT_ID, null)).thenReturn(document);
+        when(scheduleService.activeRecipientsForDocument(schedule, document)).thenReturn(List.of(user()));
         when(mailProperties.getAppBaseUrl()).thenReturn("https://app.example.com");
+        when(workspaceService.getOrgId(WORKSPACE_ID)).thenReturn(77);
 
         scheduler.deliverDue();
 
@@ -137,7 +141,10 @@ class ReportDeliverySchedulerTest {
 
     @Test
     void dueDeliveryWithoutEligibleRecipientsRecordsFailureBeforeGeneration() {
-        stubClaimedDelivery(List.of(), List.of());
+        stubAuditScope();
+        ReportSchedule schedule = stubClaimedDelivery(List.of());
+        when(scheduleService.isCurrentDeliverySchedule(schedule)).thenReturn(true);
+        when(workspaceService.getOrgId(WORKSPACE_ID)).thenReturn(77);
 
         scheduler.deliverDue();
 
@@ -151,13 +158,19 @@ class ReportDeliverySchedulerTest {
     }
 
     @Test
-    void dueDeliveryRevalidatesRecipientsAfterGeneration() {
-        stubClaimedDelivery(List.of(user()), List.of());
-        when(reportService.generate(REPORT_ID, null)).thenReturn(document());
+    void dueDeliveryAuthorizesRecipientsAgainstGeneratedDocument() {
+        stubAuditScope();
+        ReportDocumentDto document = attainmentDocument();
+        ReportSchedule schedule = stubClaimedDelivery(List.of(user()));
+        when(reportService.generate(REPORT_ID, null)).thenReturn(document);
+        when(scheduleService.activeRecipientsForDocument(schedule, document)).thenReturn(List.of());
+        when(scheduleService.isCurrentDeliverySchedule(schedule)).thenReturn(true);
+        when(workspaceService.getOrgId(WORKSPACE_ID)).thenReturn(77);
 
         scheduler.deliverDue();
 
         verify(reportService).generate(REPORT_ID, null);
+        verify(scheduleService).activeRecipientsForDocument(schedule, document);
         verify(mailService, never()).sendForWorkspace(anyInt(), any());
         verify(auditService).recordFailureScoped(
                 "report.schedule.delivery", "report_schedule", SCHEDULE_ID,
@@ -165,7 +178,21 @@ class ReportDeliverySchedulerTest {
                 "Scheduled report delivery failed", "no eligible report recipients");
     }
 
-    private void stubClaimedDelivery(List<User> beforeGeneration, List<User> afterGeneration) {
+    @Test
+    void dueDeliveryCancellationAfterGenerationDoesNotRecordRecipientFailure() {
+        ReportDocumentDto document = document();
+        ReportSchedule schedule = stubClaimedDelivery(List.of(user()));
+        when(reportService.generate(REPORT_ID, null)).thenReturn(document);
+        when(scheduleService.activeRecipientsForDocument(schedule, document)).thenReturn(List.of());
+        when(scheduleService.isCurrentDeliverySchedule(schedule)).thenReturn(false);
+
+        scheduler.deliverDue();
+
+        verify(mailService, never()).sendForWorkspace(anyInt(), any());
+        verifyNoInteractions(auditService);
+    }
+
+    private ReportSchedule stubClaimedDelivery(List<User> beforeGeneration) {
         LocalDateTime now = LocalDateTime.ofInstant(NOW, ZoneOffset.UTC);
         ReportScheduleRef ref = new ReportScheduleRef(WORKSPACE_ID, SCHEDULE_ID);
         User runAs = user();
@@ -192,8 +219,16 @@ class ReportDeliverySchedulerTest {
             return work.get();
         }).when(automationExecutor).runAs(eq(WORKSPACE_ID), same(runAs), eq("owner"), any());
         when(scheduleService.claimDue(SCHEDULE_ID, USER_ID, now)).thenReturn(schedule);
-        when(scheduleService.activeRecipients(schedule)).thenReturn(beforeGeneration).thenReturn(afterGeneration);
-        when(workspaceService.getOrgId(WORKSPACE_ID)).thenReturn(77);
+        when(scheduleService.activeReportReaders(schedule)).thenReturn(beforeGeneration);
+        return schedule;
+    }
+
+    private void stubAuditScope() {
+        when(tenantWorkScope.unrouted(ArgumentMatchers.<Supplier<Object>>any()))
+                .thenAnswer(invocation -> {
+                    Supplier<?> work = invocation.getArgument(0);
+                    return work.get();
+                });
     }
 
     private static User user() {
@@ -260,6 +295,32 @@ class ReportDeliverySchedulerTest {
                 base.priorPeriodEnd(),
                 narrative,
                 List.of(widget),
+                base.appendix(),
+                base.citations(),
+                base.generatedAt());
+    }
+
+    private static ReportDocumentDto attainmentDocument() {
+        ReportDocumentDto base = document();
+        ReportWidgetConfig configuredWidget = new ReportWidgetConfig(
+                "headline", "Goal attainment", "deals", "attainment", "none", "kpi");
+        ReportConfig config = new ReportConfig(
+                List.of(configuredWidget),
+                new ReportFilters(null, null, null, null, null),
+                null,
+                "day",
+                List.of(new ReportLayoutItem("headline", 0, 0, 6, 4)));
+        ReportDefinitionDto definition = new ReportDefinitionDto(
+                REPORT_ID, "Quota-safe report", "Delivery test", "monthly", null,
+                config, USER_ID, "2026-07-01 00:00:00", "2026-07-01 00:00:00");
+        return new ReportDocumentDto(
+                definition,
+                base.periodStart(),
+                base.periodEnd(),
+                base.priorPeriodStart(),
+                base.priorPeriodEnd(),
+                base.narrative(),
+                List.of(),
                 base.appendix(),
                 base.citations(),
                 base.generatedAt());

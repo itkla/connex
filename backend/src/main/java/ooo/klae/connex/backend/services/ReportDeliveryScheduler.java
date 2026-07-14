@@ -121,15 +121,19 @@ public class ReportDeliveryScheduler {
         if (claimed == null) {
             return;
         }
-        List<User> recipients = scheduleService.activeRecipients(claimed);
+        List<User> recipients = scheduleService.activeReportReaders(claimed);
         if (recipients.isEmpty()) {
-            auditFailure(ref, "no eligible report recipients");
+            if (scheduleService.isCurrentDeliverySchedule(claimed)) {
+                auditFailure(ref, "no eligible report recipients");
+            }
             return;
         }
         ReportDocumentDto document = reportService.generate(claimed.getReportDefinitionId(), null);
-        recipients = scheduleService.activeRecipients(claimed);
+        recipients = scheduleService.activeRecipientsForDocument(claimed, document);
         if (recipients.isEmpty()) {
-            auditFailure(ref, "no eligible report recipients");
+            if (scheduleService.isCurrentDeliverySchedule(claimed)) {
+                auditFailure(ref, "no eligible report recipients");
+            }
             return;
         }
         for (User recipient : recipients) {
