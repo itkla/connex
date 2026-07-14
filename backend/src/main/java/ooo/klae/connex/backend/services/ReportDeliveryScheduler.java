@@ -22,9 +22,9 @@ import org.springframework.web.util.UriComponentsBuilder;
 import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.beans.ReportSchedule;
 import ooo.klae.connex.backend.beans.User;
+import ooo.klae.connex.backend.dto.ReportDocumentDto;
 import ooo.klae.connex.backend.dto.ReportNarrativeSectionDto;
 import ooo.klae.connex.backend.dto.ReportScheduleRef;
-import ooo.klae.connex.backend.dto.ReportSnapshotDto;
 import ooo.klae.connex.backend.dto.ReportWidgetDataDto;
 import ooo.klae.connex.backend.mail.EmailTemplateRenderer;
 import ooo.klae.connex.backend.mail.MailMessage;
@@ -34,7 +34,7 @@ import ooo.klae.connex.backend.mappers.ScheduleMapper;
 import ooo.klae.connex.backend.tenant.TenantWorkScope;
 
 /**
- * Claims, freezes, and queues due saved-report deliveries under each schedule's
+ * Claims, generates, and queues due saved-report deliveries under each schedule's
  * real member identity. Claims commit before generation and sending, providing
  * at-most-once enqueue semantics. Multi-instance leadership or distributed
  * deduplication is out of scope, matching the application's sibling schedulers.
@@ -121,21 +121,32 @@ public class ReportDeliveryScheduler {
         if (claimed == null) {
             return;
         }
-        ReportSnapshotDto snapshot = reportService.createSnapshot(claimed.getReportDefinitionId(), null);
-        for (User recipient : scheduleService.activeRecipients(claimed)) {
-            send(recipient, claimed, snapshot);
+        List<User> recipients = scheduleService.activeRecipients(claimed);
+        if (recipients.isEmpty()) {
+            auditFailure(ref, "no eligible report recipients");
+            return;
         }
+        ReportDocumentDto document = reportService.generate(claimed.getReportDefinitionId(), null);
+        recipients = scheduleService.activeRecipients(claimed);
+        if (recipients.isEmpty()) {
+            auditFailure(ref, "no eligible report recipients");
+            return;
+        }
+        for (User recipient : recipients) {
+            send(recipient, claimed, document);
+        }
+        auditQueued(ref, document, recipients.size());
     }
 
-    private void send(User recipient, ReportSchedule schedule, ReportSnapshotDto snapshot) {
-        String reportName = snapshot.computedResult().definition().name();
-        String period = PERIOD_DATE.format(snapshot.periodStart()) + " - " + PERIOD_DATE.format(snapshot.periodEnd());
-        List<Headline> headlines = snapshot.computedResult().widgets().stream()
+    private void send(User recipient, ReportSchedule schedule, ReportDocumentDto document) {
+        String reportName = document.definition().name();
+        String period = PERIOD_DATE.format(document.periodStart()) + " - " + PERIOD_DATE.format(document.periodEnd());
+        List<Headline> headlines = document.widgets().stream()
                 .filter(widget -> widget.total() != null)
                 .limit(2)
                 .map(this::headline)
                 .toList();
-        Headline first = headlines.isEmpty() ? new Headline("Snapshot", "Ready") : headlines.getFirst();
+        Headline first = headlines.isEmpty() ? new Headline("Report", "Ready") : headlines.getFirst();
         Headline second = headlines.size() < 2 ? new Headline("", "") : headlines.get(1);
         String actionUrl = UriComponentsBuilder.fromUriString(mailProperties.getAppBaseUrl())
                 .path("/overview/reports/")
@@ -145,7 +156,7 @@ public class ReportDeliveryScheduler {
         String body = templateRenderer.render("report-delivery", "en", Map.of(
                 "reportName", reportName,
                 "period", period,
-                "summary", summary(snapshot),
+                "summary", summary(document),
                 "headlineOneLabel", first.label(),
                 "headlineOneValue", first.value(),
                 "headlineTwoLabel", second.label(),
@@ -159,13 +170,11 @@ public class ReportDeliveryScheduler {
         return new Headline(widget.title(), formatValue(widget.total(), widget.unit()));
     }
 
-    private String summary(ReportSnapshotDto snapshot) {
-        if (snapshot.computedResult() == null
-                || snapshot.computedResult().narrative() == null
-                || snapshot.computedResult().narrative().sections() == null) {
-            return "A frozen report snapshot is ready to review in Connex.";
+    private String summary(ReportDocumentDto document) {
+        if (document.narrative() == null || document.narrative().sections() == null) {
+            return "Your scheduled report is ready to review in Connex.";
         }
-        for (ReportNarrativeSectionDto section : snapshot.computedResult().narrative().sections()) {
+        for (ReportNarrativeSectionDto section : document.narrative().sections()) {
             if (section.claims() != null && !section.claims().isEmpty()) {
                 String text = section.claims().getFirst().text();
                 if (text != null && !text.isBlank()) {
@@ -173,7 +182,7 @@ public class ReportDeliveryScheduler {
                 }
             }
         }
-        return "A frozen report snapshot is ready to review in Connex.";
+        return "Your scheduled report is ready to review in Connex.";
     }
 
     private static java.util.Currency safeCurrency(String unit) {
@@ -227,6 +236,16 @@ public class ReportDeliveryScheduler {
                     "report.schedule.skip", "report_schedule", ref.scheduleId(),
                     ref.workspaceId(), workspaceService.getOrgId(ref.workspaceId()), null,
                     "Skipped scheduled report delivery", reason);
+            return null;
+        });
+    }
+
+    private void auditQueued(ReportScheduleRef ref, ReportDocumentDto document, int recipientCount) {
+        tenantWorkScope.unrouted(() -> {
+            auditService.recordScoped(
+                    "report.schedule.delivery", "report_schedule", ref.scheduleId(),
+                    ref.workspaceId(), workspaceService.getOrgId(ref.workspaceId()), document.definition().name(),
+                    "Queued scheduled report delivery", Map.of("recipientCount", recipientCount));
             return null;
         });
     }

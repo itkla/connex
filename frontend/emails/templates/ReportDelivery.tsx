@@ -88,7 +88,7 @@ export default function ReportDelivery({
             </Section>
             <Section style={styles.buttonWrap}>
                 <Button href={actionUrl} style={content.button}>
-                    {japanese ? "Connex で表示" : "View frozen report"}
+                    {japanese ? "Connex で表示" : "View report"}
                 </Button>
             </Section>
         </Layout>
