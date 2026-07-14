@@ -22,7 +22,7 @@ import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.beans.ReportDefinition;
 import ooo.klae.connex.backend.beans.ReportSchedule;
 import ooo.klae.connex.backend.beans.User;
-import ooo.klae.connex.backend.dto.ReportConfig;
+import ooo.klae.connex.backend.dto.ReportDocumentDto;
 import ooo.klae.connex.backend.dto.ReportScheduleDto;
 import ooo.klae.connex.backend.dto.ReportScheduleRecipientDto;
 import ooo.klae.connex.backend.dto.ReportScheduleRequest;
@@ -42,8 +42,6 @@ import tools.jackson.databind.ObjectMapper;
 @RequiredArgsConstructor
 public class ScheduleService {
     private static final Set<String> CADENCES = Set.of("weekly", "monthly", "quarterly");
-    private static final Set<Permission> BASE_DELIVERY_PERMISSIONS =
-            Set.of(Permission.REPORT_READ);
 
     private final ScheduleMapper scheduleMapper;
     private final ReportMapper reportMapper;
@@ -51,6 +49,7 @@ public class ScheduleService {
     private final AuthService authService;
     private final AuditService auditService;
     private final TenantWorkScope tenantWorkScope;
+    private final ReportPermissionPolicy reportPermissionPolicy;
     private final ObjectMapper objectMapper;
     private final Clock clock;
 
@@ -68,9 +67,10 @@ public class ScheduleService {
     public ReportScheduleDto create(int reportDefinitionId, ReportScheduleRequest request) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         ReportDefinition definition = requireDefinition(workspaceId, reportDefinitionId);
-        ValidatedSchedule validated = validate(workspaceId, request);
+        Set<Permission> requiredPermissions = reportPermissionPolicy.requiredFor(definition);
         int currentUserId = authService.getCurrentUser().getId();
-        requireRunAsPermissions(workspaceId, currentUserId, hasAttainment(definition));
+        requireReportPermissions(workspaceId, currentUserId, requiredPermissions);
+        ValidatedSchedule validated = validate(workspaceId, request, requiredPermissions);
 
         ReportSchedule schedule = new ReportSchedule();
         schedule.setWorkspaceId(workspaceId);
@@ -95,9 +95,10 @@ public class ScheduleService {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         ReportDefinition definition = requireDefinition(workspaceId, reportDefinitionId);
         ReportSchedule schedule = requireSchedule(workspaceId, reportDefinitionId);
-        ValidatedSchedule validated = validate(workspaceId, request);
+        Set<Permission> requiredPermissions = reportPermissionPolicy.requiredFor(definition);
         int currentUserId = authService.getCurrentUser().getId();
-        requireRunAsPermissions(workspaceId, currentUserId, hasAttainment(definition));
+        requireReportPermissions(workspaceId, currentUserId, requiredPermissions);
+        ValidatedSchedule validated = validate(workspaceId, request, requiredPermissions);
 
         schedule.setRunAsUserId(currentUserId);
         apply(schedule, validated);
@@ -150,11 +151,9 @@ public class ScheduleService {
         if (control.user() == null || control.role() == null) {
             return DeliveryAccess.denied("run-as user is not an active workspace member");
         }
-        Set<Permission> required = new LinkedHashSet<>(BASE_DELIVERY_PERMISSIONS);
+        Set<Permission> required;
         try {
-            if (hasAttainment(definition)) {
-                required.add(Permission.GOAL_READ);
-            }
+            required = reportPermissionPolicy.requiredFor(definition);
         } catch (BadRequestException exception) {
             return DeliveryAccess.denied("report definition configuration is invalid");
         }
@@ -206,18 +205,64 @@ public class ScheduleService {
         return scheduleMapper.markSkipped(workspaceId, scheduleId, nextRunAt) > 0;
     }
 
-    /** Returns currently active, report-readable recipients from the ids stored on a claimed schedule. */
-    public List<User> activeRecipients(ReportSchedule schedule) {
+    /** Returns recipients eligible for the exact generated document being delivered. */
+    public List<User> activeRecipientsForDocument(ReportSchedule schedule, ReportDocumentDto document) {
+        if (schedule == null || document == null || document.definition() == null
+                || document.definition().id() != schedule.getReportDefinitionId()) {
+            throw new BadRequestException("Generated report does not match delivery schedule");
+        }
+        ReportSchedule current = currentDeliverySchedule(schedule);
+        if (current == null) {
+            return List.of();
+        }
+        return activeRecipients(current, reportPermissionPolicy.requiredFor(document));
+    }
+
+    /** Returns currently active recipients with baseline report-read access. */
+    public List<User> activeReportReaders(ReportSchedule schedule) {
+        ReportSchedule current = currentDeliverySchedule(schedule);
+        return current == null
+                ? List.of()
+                : activeRecipients(current, Set.of(Permission.REPORT_READ));
+    }
+
+    /** Returns whether the claimed occurrence still belongs to the active saved schedule. */
+    public boolean isCurrentDeliverySchedule(ReportSchedule schedule) {
+        return currentDeliverySchedule(schedule) != null;
+    }
+
+    private List<User> activeRecipients(ReportSchedule schedule, Set<Permission> requiredPermissions) {
+        if (requiredPermissions == null || !requiredPermissions.contains(Permission.REPORT_READ)) {
+            throw new BadRequestException("Report recipient permissions are invalid");
+        }
+        Set<Permission> immutableRequiredPermissions = Set.copyOf(requiredPermissions);
         Set<Integer> recipientIds = Set.copyOf(readRecipientIds(schedule.getRecipientUserIds()));
         int workspaceId = schedule.getWorkspaceId();
         return tenantWorkScope.unrouted(() -> workspaceService.getMembers(workspaceId).stream()
                 .filter(user -> recipientIds.contains(user.getId()))
                 .filter(user -> user.getEmail() != null && !user.getEmail().isBlank())
-                .filter(user -> canReadReports(workspaceId, user.getId()))
+                .filter(user -> hasReportPermissions(workspaceId, user.getId(), immutableRequiredPermissions))
                 .toList());
     }
 
-    private ValidatedSchedule validate(int workspaceId, ReportScheduleRequest request) {
+    private ReportSchedule currentDeliverySchedule(ReportSchedule claimed) {
+        if (claimed == null) {
+            return null;
+        }
+        ReportSchedule current = scheduleMapper.getById(claimed.getWorkspaceId(), claimed.getId());
+        if (current == null
+                || !current.isEnabled()
+                || current.getReportDefinitionId() != claimed.getReportDefinitionId()
+                || current.getRunAsUserId() != claimed.getRunAsUserId()) {
+            return null;
+        }
+        return current;
+    }
+
+    private ValidatedSchedule validate(
+            int workspaceId,
+            ReportScheduleRequest request,
+            Set<Permission> requiredPermissions) {
         if (request == null) {
             throw new BadRequestException("Report delivery schedule is required");
         }
@@ -248,8 +293,9 @@ public class ScheduleService {
         if (!activeMemberIds.containsAll(recipientIds)) {
             throw new BadRequestException("Report recipients must be active workspace members");
         }
-        if (recipientIds.stream().anyMatch(id -> !canReadReports(workspaceId, id))) {
-            throw new BadRequestException("Report recipients must have permission to read reports");
+        if (recipientIds.stream().anyMatch(
+                id -> !hasReportPermissions(workspaceId, id, requiredPermissions))) {
+            throw new BadRequestException("Report recipients lack permissions required by this report");
         }
         LocalDateTime nextRunAt = ReportScheduleCalculator.initial(
                 cadence, timezone, request.hourOfDay(), Instant.now(clock));
@@ -298,23 +344,19 @@ public class ScheduleService {
         return new ControlAccess(user, role, permissions);
     }
 
-    private boolean canReadReports(int workspaceId, int userId) {
-        return workspaceService.permissionsFor(workspaceId, userId).contains(Permission.REPORT_READ);
+    private boolean hasReportPermissions(
+            int workspaceId,
+            int userId,
+            Set<Permission> requiredPermissions) {
+        return workspaceService.permissionsFor(workspaceId, userId).containsAll(requiredPermissions);
     }
 
-    private void requireRunAsPermissions(int workspaceId, int userId, boolean attainment) {
-        workspaceService.requirePermission(workspaceId, userId, Permission.REPORT_READ);
-        if (attainment) {
-            workspaceService.requirePermission(workspaceId, userId, Permission.GOAL_READ);
-        }
-    }
-
-    private boolean hasAttainment(ReportDefinition definition) {
-        try {
-            ReportConfig config = objectMapper.readValue(definition.getConfigJson(), ReportConfig.class);
-            return config.widgets().stream().anyMatch(widget -> "attainment".equals(widget.measure()));
-        } catch (JacksonException | IllegalArgumentException exception) {
-            throw new BadRequestException("Corrupt report configuration");
+    private void requireReportPermissions(
+            int workspaceId,
+            int userId,
+            Set<Permission> requiredPermissions) {
+        for (Permission permission : requiredPermissions) {
+            workspaceService.requirePermission(workspaceId, userId, permission);
         }
     }
 

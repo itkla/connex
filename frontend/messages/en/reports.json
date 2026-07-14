@@ -284,7 +284,7 @@
       "recipients": "Recipients",
       "recipientsPlaceholder": "Search active workspace members",
       "recipientsEmpty": "No active workspace members found.",
-      "recipientsHint": "Recipients must be active workspace members with report read access.",
+      "recipientsHint": "Recipients must be active workspace members with all permissions required to view this report.",
       "removeRecipient": "Remove {name}",
       "recipientsUnavailable": "No saved recipients are currently active.",
       "recipientsChanged": "Some saved recipients are no longer eligible and will be removed when you save.",
@@ -314,7 +314,7 @@
       "validation": {
         "recipients": "Choose at least one active workspace member.",
         "recipientLimit": "Choose no more than 100 recipients.",
-        "recipientAccess": "Every recipient must be an active workspace member with report read access.",
+        "recipientAccess": "Every recipient must be an active workspace member with all permissions required to view this report.",
         "timezone": "Choose a valid IANA time zone.",
         "hour": "Choose a delivery hour from 0 through 23."
       }
