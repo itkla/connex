@@ -82,6 +82,7 @@ public class ReportService {
     private static final long MAX_SNAPSHOT_BYTES_PER_WORKSPACE = 268_435_456;
     private static final int RISK_ID_BATCH_SIZE = 1_000;
     private static final int FORECAST_HORIZON_MONTHS = 3;
+    private static final int FORECAST_HISTORY_PRIOR_DEALS = 10;
     private static final long MAX_RANGE_DAYS = 1_826;
     private static final BigDecimal FORECAST_NEUTRAL_WIN_RATE = new BigDecimal("0.5");
     private static final Set<String> CADENCES = Set.of("weekly", "monthly", "quarterly", "custom");
@@ -731,16 +732,17 @@ public class ReportService {
 
     /**
      * Aggregates the forward window {@code [today, today + 3 months)} into expected-close months.
-     * For each non-negative open-deal value {@code v}, the probability {@code p} is the deal stage's
-     * all-time {@code won / (won + lost)} rate. A stage with no closed history falls back to the
-     * workspace-wide closed-deal rate; a workspace with no closed deals uses the neutral rate
+     * For each non-negative open-deal value {@code v}, the probability {@code p} is an empirical
+     * blend of distinct closed deals that reached the stage before closing and the legacy
+     * close-at-stage rate. The legacy rate contributes ten prior deals while transition history
+     * accrues, and falls back to the workspace-wide closed-deal rate and then the neutral rate
      * {@code 0.5}. Best is {@code sum(v)}, likely is {@code sum(v * p)}, and commit/worst is
-     * {@code sum(v * p^2)}. Squaring is a conservative floor and, because {@code 0 <= p <= 1},
-     * guarantees {@code worst <= likely <= best}. One mapper statement computes all three bands
-     * from one database snapshot, and the result is reused by sibling widgets with the same
-     * grouping. All groupings in one generated report share the service's repeatable-read
-     * transaction. The mapper defensively treats negative stored values as zero to preserve the
-     * invariant for legacy data.
+     * {@code sum(v * p^2)}.
+     * Squaring is a conservative floor and, because {@code 0 <= p <= 1}, guarantees
+     * {@code worst <= likely <= best}. One mapper statement computes all three bands from one
+     * database snapshot, and the result is reused by sibling widgets with the same grouping. The
+     * mapper defensively treats negative stored values as zero to preserve the invariant for legacy
+     * data.
      */
     private List<ReportAggregateRow> aggregateForecast(
             int workspaceId,
@@ -866,6 +868,7 @@ public class ReportService {
                 LocalDate.ofInstant(endUtc.toInstant(ZoneOffset.UTC), zone),
                 safeFilters.pipelineIds(), safeFilters.ownerIds(),
                 safeFilters.statuses(), safeFilters.tagIds(), riskIds, fallbackWinRate,
+                FORECAST_HISTORY_PRIOR_DEALS,
                 offsetSegments(startUtc, endUtc, zone));
     }
 

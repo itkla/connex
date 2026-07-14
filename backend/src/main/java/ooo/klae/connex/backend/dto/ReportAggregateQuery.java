@@ -21,6 +21,7 @@ import java.util.List;
  * @param tagIds tag filters
  * @param riskIds deterministic at-risk deal ids
  * @param fallbackWinRate neutral forecast rate when no closed-deal history exists
+ * @param forecastHistoryPriorDeals legacy forecast-rate weight while stage-reach history is sparse
  * @param offsets constant-offset intervals for local calendar bucketing
  */
 public record ReportAggregateQuery(
@@ -38,5 +39,6 @@ public record ReportAggregateQuery(
         List<Integer> tagIds,
         List<Integer> riskIds,
         BigDecimal fallbackWinRate,
+        int forecastHistoryPriorDeals,
         List<ReportOffsetSegment> offsets) {
 }

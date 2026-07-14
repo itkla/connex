@@ -10,15 +10,18 @@
     <result property="stageId"     column="stage_id"/>
     <result property="stageName"   column="stage_name"/>
     <result property="achievedAt"  column="achieved_at"/>
+    <result property="conversionEligible" column="conversion_eligible"/>
   </resultMap>
 
   <insert id="insert" useGeneratedKeys="true" keyProperty="id">
-    INSERT INTO deal_stage_history (workspace_id, deal_id, stage_id, stage_name, achieved_at)
-    VALUES (#{workspaceId}, #{dealId}, #{stageId}, #{stageName}, #{achievedAt})
+    INSERT INTO deal_stage_history (
+      workspace_id, deal_id, stage_id, stage_name, achieved_at, conversion_eligible
+    )
+    VALUES (#{workspaceId}, #{dealId}, #{stageId}, #{stageName}, #{achievedAt}, #{conversionEligible})
   </insert>
 
   <select id="getByDealId" resultMap="DealStageHistoryResult">
-    SELECT id, workspace_id, deal_id, stage_id, stage_name, achieved_at
+    SELECT id, workspace_id, deal_id, stage_id, stage_name, achieved_at, conversion_eligible
     FROM deal_stage_history
     WHERE workspace_id = #{workspaceId} AND deal_id = #{dealId} AND stage_id IS NOT NULL
     ORDER BY achieved_at ASC, id ASC

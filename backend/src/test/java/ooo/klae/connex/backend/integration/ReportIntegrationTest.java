@@ -832,6 +832,72 @@ class ReportIntegrationTest {
     }
 
     @Test
+    void forecastingBlendsDistinctPreCloseStageOutcomesWithoutTenantLeakage() throws Exception {
+        RequestContextHolder.resetRequestAttributes();
+        Workspace workspace = newWorkspace();
+        User member = newMember(workspace, "member");
+        MockHttpSession session = login(member.getUsername());
+        LocalDate today = LocalDate.now(clock.withZone(ZoneOffset.UTC));
+        LocalDate inHorizon = today.plusDays(7);
+        LocalDateTime reachedAt = LocalDateTime.now(clock).minusMonths(2);
+
+        int pipelineId = insertPipeline(workspace.getId(), "Reached-stage forecast pipeline");
+        int reachedStageId = insertStage(workspace.getId(), pipelineId, "Reached stage", 1);
+        int wonStageId = insertStage(workspace.getId(), pipelineId, "Won stage", 2);
+        int lostStageId = insertStage(workspace.getId(), pipelineId, "Lost stage", 3);
+        int reachedWonDealId = insertClosedDeal(workspace.getId(), pipelineId, wonStageId,
+                "Reached-stage won", "10.00", "USD", true, today.minusMonths(1));
+        int postCloseWonDealId = insertClosedDeal(workspace.getId(), pipelineId, wonStageId,
+                "Post-close stage won", "10.00", "USD", true, today.minusMonths(1));
+        for (int index = 0; index < 2; index++) {
+            insertClosedDeal(workspace.getId(), pipelineId, wonStageId,
+                    "Workspace-only won " + index, "10.00", "USD", true, today.minusMonths(1));
+        }
+        int reachedLostDealId = insertClosedDeal(workspace.getId(), pipelineId, lostStageId,
+                "Reached-stage lost", "10.00", "USD", false, today.minusMonths(1));
+        insertDealStageHistory(workspace.getId(), reachedWonDealId, reachedStageId, reachedAt);
+        insertDealStageHistory(workspace.getId(), reachedWonDealId, reachedStageId, reachedAt.plusDays(1));
+        insertDealStageHistory(workspace.getId(), reachedLostDealId, reachedStageId, reachedAt);
+        insertDealStageHistory(
+                workspace.getId(), postCloseWonDealId, reachedStageId, reachedAt.plusMonths(2), false);
+        int openDealId = insertOpenDeal(workspace.getId(), pipelineId, reachedStageId,
+                "Reached-stage open", "16.00", "USD", inHorizon);
+        insertDealStageHistory(workspace.getId(), openDealId, reachedStageId, reachedAt.plusMonths(1));
+
+        Integer orgId = workspaceMapper.getOrgId(workspace.getId());
+        assertNotNull(orgId);
+        Workspace otherWorkspace = newWorkspaceInOrg(orgId);
+        assertEquals(1, shareMapper.sharePipeline(
+                pipelineId, workspace.getId(), otherWorkspace.getId(), member.getId(), false));
+        for (int index = 0; index < 8; index++) {
+            int otherWonDealId = insertClosedDeal(otherWorkspace.getId(), pipelineId, wonStageId,
+                    "Other reached-stage won " + index, "10.00", "USD", true, today.minusMonths(1));
+            insertDealStageHistory(otherWorkspace.getId(), otherWonDealId, reachedStageId, reachedAt);
+        }
+
+        int reportId = createReport(session, workspace, FORECAST_BODY);
+        MvcResult result = mockMvc.perform(post("/api/reports/{id}/generate", reportId)
+                .header("X-Workspace-Id", workspace.getId())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{}")
+                .session(session)
+                .with(csrf()))
+            .andExpect(status().isOk())
+            .andReturn();
+
+        JsonNode widgets = objectMapper.readTree(result.getResponse().getContentAsString()).get("widgets");
+        String key = "USD:" + YearMonth.from(inHorizon);
+        BigDecimal best = pointValues(widgets.get(0)).get(key);
+        BigDecimal weighted = pointValues(widgets.get(1)).get(key);
+        BigDecimal worst = pointValues(widgets.get(2)).get(key);
+        assertDecimal("16", best);
+        assertDecimal("12", weighted);
+        assertDecimal("9", worst);
+        assertTrue(worst.compareTo(weighted) <= 0);
+        assertTrue(weighted.compareTo(best) <= 0);
+    }
+
+    @Test
     void forecastingUsesNeutralDefaultWithoutClosedHistory() throws Exception {
         RequestContextHolder.resetRequestAttributes();
         Workspace workspace = newWorkspace();
@@ -1171,22 +1237,49 @@ class ReportIntegrationTest {
                 Integer.class, workspaceId, name);
     }
 
-    private void insertOpenDeal(int workspaceId, int pipelineId, int stageId,
+    private int insertOpenDeal(int workspaceId, int pipelineId, int stageId,
             String name, String value, String currency, LocalDate expectedCloseDate) {
         jdbcTemplate.update(
                 "INSERT INTO deal (workspace_id, name, value, currency, pipeline_id, stage_id, "
                         + "expected_close_date, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                 workspaceId, name, value, currency, pipelineId, stageId,
                 expectedCloseDate, LocalDateTime.now(clock).minusMonths(1));
+        return jdbcTemplate.queryForObject(
+                "SELECT id FROM deal WHERE workspace_id = ? AND name = ?",
+                Integer.class, workspaceId, name);
     }
 
-    private void insertClosedDeal(int workspaceId, int pipelineId, int stageId,
+    private int insertClosedDeal(int workspaceId, int pipelineId, int stageId,
             String name, String value, String currency, boolean won, LocalDate expectedCloseDate) {
         jdbcTemplate.update(
                 "INSERT INTO deal (workspace_id, name, value, currency, pipeline_id, stage_id, "
                         + "expected_close_date, closed_at, won, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 workspaceId, name, value, currency, pipelineId, stageId, expectedCloseDate,
                 LocalDateTime.now(clock).minusMonths(1), won, LocalDateTime.now(clock).minusMonths(2));
+        return jdbcTemplate.queryForObject(
+                "SELECT id FROM deal WHERE workspace_id = ? AND name = ?",
+                Integer.class, workspaceId, name);
+    }
+
+    private void insertDealStageHistory(
+            int workspaceId, int dealId, int stageId, LocalDateTime achievedAt) {
+        insertDealStageHistory(workspaceId, dealId, stageId, achievedAt, true);
+    }
+
+    private void insertDealStageHistory(
+            int workspaceId,
+            int dealId,
+            int stageId,
+            LocalDateTime achievedAt,
+            boolean conversionEligible) {
+        String stageName = jdbcTemplate.queryForObject(
+                "SELECT name FROM stage WHERE id = ?", String.class, stageId);
+        assertNotNull(stageName);
+        jdbcTemplate.update(
+                "INSERT INTO deal_stage_history ("
+                        + "workspace_id, deal_id, stage_id, stage_name, achieved_at, conversion_eligible"
+                        + ") VALUES (?, ?, ?, ?, ?, ?)",
+                workspaceId, dealId, stageId, stageName, achievedAt, conversionEligible);
     }
 
     private void insertWonRevenue(

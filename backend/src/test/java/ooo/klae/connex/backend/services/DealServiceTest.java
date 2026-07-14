@@ -5,6 +5,7 @@ import java.util.Map;
 import java.util.stream.Collectors;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -636,8 +637,55 @@ class DealServiceTest extends AbstractServiceTest {
         List<DealStageHistory> history = dealService.getStageHistory(deal.getId());
         assertEquals(2, history.size());
         assertEquals(won.getId(), history.get(0).getStageId());
+        assertTrue(history.get(0).isConversionEligible());
         assertEquals(open.getId(), history.get(1).getStageId());
+        assertTrue(history.get(1).isConversionEligible());
         assertEquals(open.getId(), dealService.getDealById(deal.getId()).getStageId());
+    }
+
+    @Test
+    void reopen_closedDealInNormalStage_restoresConversionEligibility() {
+        Pipeline pipeline = newPipeline();
+        Stage open = newStage(pipeline, 0);
+        Stage postClose = newStage(pipeline, 1);
+        Stage won = new Stage();
+        won.setName("Won " + unique());
+        won.setPipeline(pipeline);
+        won.setPosition(2);
+        won.setWorkspaceId(workspace.getId());
+        won.setSuccess(true);
+        pipelineMapper.insertStage(won);
+        Deal deal = newDeal(pipeline, open, newCompany());
+
+        dealService.move(deal.getId(), won.getId(), 0);
+        dealService.move(deal.getId(), postClose.getId(), 0);
+        dealService.reopen(deal.getId());
+        dealService.close(deal.getId(), Boolean.TRUE, null, null);
+
+        List<DealStageHistory> history = dealService.getStageHistory(deal.getId());
+        assertEquals(3, history.size());
+        assertTrue(history.get(0).isConversionEligible());
+        assertFalse(history.get(1).isConversionEligible());
+        assertEquals(postClose.getId(), history.get(2).getStageId());
+        assertTrue(history.get(2).isConversionEligible());
+        assertEquals(Boolean.TRUE, dealService.getDealById(deal.getId()).getWon());
+    }
+
+    @Test
+    void update_reopeningInSameStage_recordsEligibleStageHistory() {
+        Pipeline pipeline = newPipeline();
+        Stage stage = newStage(pipeline, 0);
+        Deal deal = newDeal(pipeline, stage, newCompany());
+        dealService.close(deal.getId(), Boolean.FALSE, null, null);
+
+        deal.setWon(null);
+        deal.setClosedAt(null);
+        dealService.update(deal.getId(), deal);
+
+        List<DealStageHistory> history = dealService.getStageHistory(deal.getId());
+        assertEquals(1, history.size());
+        assertEquals(stage.getId(), history.get(0).getStageId());
+        assertTrue(history.get(0).isConversionEligible());
     }
 
     @Test

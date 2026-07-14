@@ -654,7 +654,8 @@ public class DealService {
         }
         dealMapper.insert(deal);
         if (deal.getStageId() != null) {
-            dealStageHistoryService.record(workspaceId, deal.getId(), deal.getStageId());
+            dealStageHistoryService.recordTransition(
+                workspaceId, deal.getId(), deal.getStageId(), null, deal.getWon());
         }
         auditService.record("deal.create", "deal", deal.getId(), deal.getName(),
             "Created deal " + deal.getName(),
@@ -688,9 +689,11 @@ public class DealService {
             ? dealMapper.nextDealPosition(workspaceId, newStage)
             : before.getPosition());
         reconcileCloseState(deal);
+        boolean reopened = before.getWon() != null && deal.getWon() == null;
         dealMapper.update(deal);
-        if (stageChanged) {
-            dealStageHistoryService.record(workspaceId, id, newStage);
+        if ((stageChanged || reopened) && newStage != null) {
+            dealStageHistoryService.recordTransition(
+                workspaceId, id, newStage, before.getWon(), deal.getWon());
         }
         auditService.record("deal.update", "deal", id, deal.getName(),
             "Updated deal " + deal.getName(),
@@ -797,6 +800,7 @@ public class DealService {
         Deal before = dealMapper.getDealById(workspaceId, id);
         if (before == null) throw new ResourceNotFoundException("Deal not found with id: " + id);
         Deal deal = dealMapper.getDealById(workspaceId, id);
+        boolean wasClosed = before.getWon() != null;
         deal.setWon(null); // reconcile clears closedAt + reason
         Integer stageId = deal.getStageId();
         boolean terminal = stageId != null && !"normal".equals(dealMapper.getStageOutcome(workspaceId, stageId));
@@ -813,8 +817,9 @@ public class DealService {
         }
         reconcileCloseState(deal);
         dealMapper.update(deal);
-        if (terminal) {
-            dealStageHistoryService.record(workspaceId, id, deal.getStageId());
+        if (wasClosed && deal.getStageId() != null) {
+            dealStageHistoryService.recordTransition(
+                workspaceId, id, deal.getStageId(), before.getWon(), deal.getWon());
         }
         auditService.record("deal.reopen", "deal", id, deal.getName(),
             "Reopened deal " + deal.getName(),
@@ -1196,7 +1201,8 @@ public class DealService {
         reconcileCloseState(deal);
         dealMapper.update(deal);
         if (stageChanged) {
-            dealStageHistoryService.record(workspaceId, dealId, stageId);
+            dealStageHistoryService.recordTransition(
+                workspaceId, dealId, stageId, before.getWon(), deal.getWon());
         }
         for (int i = 0; i < target.size(); i++) {
             int id = target.get(i);
