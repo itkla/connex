@@ -60,27 +60,27 @@ type Suggestion = {
 };
 
 function memberSuggestions(members: WorkspaceMember[], excludeUserId?: number): Suggestion[] {
-    return members
-        .filter((member) => member.id !== excludeUserId)
-        .map((member): Suggestion => ({
+    return members.flatMap((member): Suggestion[] =>
+        member.id === excludeUserId ? [] : [{
             type: 'user',
             id: member.id,
             label: member.displayName,
             sublabel: `@${member.username}`,
             avatarUrl: member.profilePictureUrl,
-        }));
+        }],
+    );
 }
 
 function searchSuggestions(results: SearchResults, excludeUserId?: number): Suggestion[] {
-    const users = (results.users ?? [])
-        .filter((user) => user.id !== excludeUserId)
-        .map((user): Suggestion => ({
+    const users = (results.users ?? []).flatMap((user): Suggestion[] =>
+        user.id === excludeUserId ? [] : [{
             type: 'user',
             id: user.id,
             label: user.displayName,
             sublabel: `@${user.username}`,
             avatarUrl: user.profilePictureUrl,
-        }));
+        }],
+    );
     const people = (results.people ?? []).map((person): Suggestion => ({
         type: 'person',
         id: person.id,

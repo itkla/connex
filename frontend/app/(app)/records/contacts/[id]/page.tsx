@@ -34,10 +34,10 @@ export default async function ContactPage({ params }: { params: { id: number } }
     const activeWorkspaceCookie = cookieStore.get("connex_workspace")?.value;
     const activeWorkspaceId = activeWorkspaceCookie ? Number(activeWorkspaceCookie) : null;
     const init = { headers: { cookie } } as const;
-    const t = await getTranslations("ContactsPage");
-    const locale = await getLocale();
 
-    const [contact, currentUser, allTags, allPersons, allDeals, attachments, notificationPage, employment, connections, introPath, customFields] = await Promise.all([
+    const [t, locale, contact, currentUser, allTags, allPersons, allDeals, attachments, notificationPage, employment, connections, introPath, customFields] = await Promise.all([
+        getTranslations("ContactsPage"),
+        getLocale(),
         getContactById(id, init) as Promise<Contact>,
         getCurrentUserFromCookie(cookie),
         getTags(init).catch(() => [] as Tag[]),

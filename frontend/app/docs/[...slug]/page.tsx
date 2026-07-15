@@ -83,9 +83,11 @@ async function renderCategory(categorySlug: string) {
     const category = getCategory(categorySlug);
     if (!category) notFound();
 
-    const meta = await getTranslations("DocsMeta");
-    const t = await getTranslations();
-    const blocks = await readCategoryBlocks(category);
+    const [meta, t, blocks] = await Promise.all([
+        getTranslations("DocsMeta"),
+        getTranslations(),
+        readCategoryBlocks(category),
+    ]);
     const title = t(`${category.namespace}.title`);
 
     return (
@@ -156,9 +158,11 @@ async function renderArticle(categorySlug: string, articleSlug: string) {
     if (!resolved) notFound();
 
     const { category, article } = resolved;
-    const meta = await getTranslations("DocsMeta");
-    const t = await getTranslations();
-    const blocks = await readArticleBlocks(category, article);
+    const [meta, t, blocks] = await Promise.all([
+        getTranslations("DocsMeta"),
+        getTranslations(),
+        readArticleBlocks(category, article),
+    ]);
     const headings = extractHeadings(blocks);
     const { previous, next } = articleNeighbors(categorySlug, articleSlug);
 

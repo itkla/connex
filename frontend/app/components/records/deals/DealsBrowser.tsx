@@ -143,6 +143,16 @@ const DEAL_SORT_TOKENS: Record<string, string> = {
 };
 
 const EMPTY_DEAL_METRICS: DealMetrics = { byCurrency: [], totalCount: 0 };
+const EMPTY_DEAL_DRAFT: CreateDealPayload = {
+    name: '',
+    value: 0,
+    actualValue: 0,
+    currency: 'USD',
+    pipeline: 0,
+    stage: 0,
+    company: null,
+    expectedCloseDate: undefined,
+};
 
 const DEAL_FILTER_KEYS = ['status', 'company', 'pipeline', 'stage', 'risk'] as const;
 
@@ -152,7 +162,7 @@ function resolveNamedFacetIds<T extends { id: number; name: string }>(values: st
         if (value === FILTER_EMPTY) return [];
         const id = Number(value);
         if (Number.isInteger(id) && id > 0) return [id];
-        return items.filter((item) => item.name === value).map((item) => item.id);
+        return items.flatMap((item) => item.name === value ? [item.id] : []);
     });
     if (ids.length > 0) return Array.from(new Set(ids));
     return values.some((value) => value !== FILTER_EMPTY) ? [0] : undefined;
@@ -164,8 +174,12 @@ function resolveCompanyFacetIds(values: string[] | undefined, facets: DealFacets
         if (value === FILTER_EMPTY) return [];
         const id = Number(value);
         if (Number.isInteger(id) && id > 0) return [id];
-        return facets.flatMap((facet) => facet.label === value ? [Number(facet.key)] : []);
-    }).filter((id) => Number.isInteger(id) && id > 0);
+        return facets.flatMap((facet) => {
+            if (facet.label !== value) return [];
+            const facetId = Number(facet.key);
+            return Number.isInteger(facetId) && facetId > 0 ? [facetId] : [];
+        });
+    });
     if (ids.length > 0) return Array.from(new Set(ids));
     return values.some((value) => value !== FILTER_EMPTY) ? [0] : undefined;
 }
@@ -476,25 +490,15 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
     const [drafts, setDrafts] = useState<Record<number, DealDraft>>({});
     const [isSaving, setIsSaving] = useState(false);
 
-    const emptyDraft: CreateDealPayload = {
-        name: '',
-        value: 0,
-        actualValue: 0,
-        currency: 'USD',
-        pipeline: 0,
-        stage: 0,
-        company: null,
-        expectedCloseDate: undefined,
-    };
     const [newDialogOpen, setNewDialogOpen] = useState(false);
     const [isCreating, setIsCreating] = useState(false);
     const [creationSucceeded, setCreationSucceeded] = useState(false);
-    const [newPayload, setNewPayload] = useState<CreateDealPayload>(emptyDraft);
+    const [newPayload, setNewPayload] = useState<CreateDealPayload>(EMPTY_DEAL_DRAFT);
 
     const closeNewDialog = (open: boolean) => {
         setNewDialogOpen(open);
         if (!open) {
-            setNewPayload(emptyDraft);
+            setNewPayload(EMPTY_DEAL_DRAFT);
             setCreationSucceeded(false);
         }
     };

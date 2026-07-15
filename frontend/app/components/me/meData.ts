@@ -29,23 +29,22 @@ export function constellationNodes(
     cap: number,
 ): ConstellationNode[] {
     const byId = new Map(contacts.map((c) => [c.id, c]));
-    return [...temps]
-        .sort((a, b) => b.score - a.score)
-        .slice(0, cap)
-        .map((temp) => {
-            const contact = byId.get(temp.id);
-            return {
-                id: temp.id,
-                name: contact?.name ?? "",
-                company: contact?.company?.name ?? null,
-                imageUrl: contact?.imageUrl ?? null,
-                band: temp.band,
-                score: temp.score,
-                daysSinceTouch: temp.daysSinceTouch ?? null,
-                trend: temp.trend,
-            };
-        })
-        .filter((node) => node.name.length > 0);
+    const nodes: ConstellationNode[] = [];
+    for (const temp of [...temps].sort((a, b) => b.score - a.score).slice(0, cap)) {
+        const contact = byId.get(temp.id);
+        if (!contact?.name) continue;
+        nodes.push({
+            id: temp.id,
+            name: contact.name,
+            company: contact.company?.name ?? null,
+            imageUrl: contact.imageUrl ?? null,
+            band: temp.band,
+            score: temp.score,
+            daysSinceTouch: temp.daysSinceTouch ?? null,
+            trend: temp.trend,
+        });
+    }
+    return nodes;
 }
 
 /** Cooling relationships that need a touch, most-urgent first, joined to their contact. */
@@ -55,15 +54,17 @@ export function coolingRelationships(
     cap: number,
 ): CoolingItem[] {
     const byId = new Map(contacts.map((c) => [c.id, c]));
-    return temps
+    const items: CoolingItem[] = [];
+    const coolingTemps = temps
         .filter((temp) => temp.trend === "cooling")
         .sort((a, b) => (a.daysUntilCold ?? Infinity) - (b.daysUntilCold ?? Infinity))
-        .slice(0, cap)
-        .map((temp) => {
-            const contact = byId.get(temp.id);
-            return { id: temp.id, name: contact?.name ?? "", company: contact?.company?.name ?? null, temp };
-        })
-        .filter((item) => item.name.length > 0);
+        .slice(0, cap);
+    for (const temp of coolingTemps) {
+        const contact = byId.get(temp.id);
+        if (!contact?.name) continue;
+        items.push({ id: temp.id, name: contact.name, company: contact.company?.name ?? null, temp });
+    }
+    return items;
 }
 
 /** The current user's at-risk deals, highest risk first, joined to display fields. */

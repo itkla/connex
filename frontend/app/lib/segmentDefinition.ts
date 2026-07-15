@@ -12,20 +12,25 @@ function evaluableCondition(condition: SegmentCondition): SegmentCondition | nul
     if (condition.op !== 'in') return condition;
     return {
         ...condition,
-        values: condition.values?.map((value) => value.trim()).filter((value) => value !== ''),
+        values: condition.values?.flatMap((value) => {
+            const trimmedValue = value.trim();
+            return trimmedValue ? [trimmedValue] : [];
+        }),
     };
 }
 
 /** Removes incomplete field conditions while preserving nested-group and negation semantics. */
 export function evaluableSegmentDefinition(definition: SegmentDefinition): SegmentDefinition {
-    const groups = (definition.groups ?? [])
-        .map(evaluableSegmentDefinition)
-        .filter(hasSegmentConditions);
+    const groups = (definition.groups ?? []).flatMap((group) => {
+        const evaluableGroup = evaluableSegmentDefinition(group);
+        return hasSegmentConditions(evaluableGroup) ? [evaluableGroup] : [];
+    });
     return {
         match: definition.match,
-        conditions: definition.conditions
-            .map(evaluableCondition)
-            .filter((condition): condition is SegmentCondition => condition !== null),
+        conditions: definition.conditions.flatMap((condition) => {
+            const evaluable = evaluableCondition(condition);
+            return evaluable ? [evaluable] : [];
+        }),
         groups: groups.length > 0 ? groups : undefined,
         negate: definition.negate,
     };

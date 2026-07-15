@@ -83,6 +83,13 @@ function metricsFromEngagement(engagement: CompanyEngagement, users: User[]): Co
 const searchFields = (c: Company) => [c.name, c.website, c.industry, c.phone, c.address];
 
 const NO_ITEMS: Company[] = [];
+const EMPTY_COMPANY_DRAFT: CreateCompanyPayload = {
+    name: '',
+    website: '',
+    industry: '',
+    phone: '',
+    address: '',
+};
 
 function cleanCompanyPayload(payload: CreateCompanyPayload): CreateCompanyPayload {
     return {
@@ -274,11 +281,10 @@ export default function CompaniesBrowser({ savedViews }: { savedViews: SavedView
     const [drafts, setDrafts] = useState<Record<number, CompanyDraft>>({});
     const [isSaving, setIsSaving] = useState(false);
 
-    const emptyDraft: CreateCompanyPayload = { name: '', website: '', industry: '', phone: '', address: '' };
     const [newDialogOpen, setNewDialogOpen] = useState(false);
     const [isCreating, setIsCreating] = useState(false);
     const [creationSucceeded, setCreationSucceeded] = useState(false);
-    const [newPayload, setNewPayload] = useState<CreateCompanyPayload>(emptyDraft);
+    const [newPayload, setNewPayload] = useState<CreateCompanyPayload>(EMPTY_COMPANY_DRAFT);
     const [logoFile, setLogoFile] = useState<File | null>(null);
     const [pendingContacts, setPendingContacts] = useState<PendingContact[]>([]);
 
@@ -350,7 +356,7 @@ export default function CompaniesBrowser({ savedViews }: { savedViews: SavedView
     }, [metricsStatusByCompanyId, t]);
 
     const openNewDialog = () => {
-        setNewPayload(emptyDraft);
+        setNewPayload(EMPTY_COMPANY_DRAFT);
         setLogoFile(null);
         setPendingContacts([]);
         setCreationSucceeded(false);
@@ -570,14 +576,15 @@ export default function CompaniesBrowser({ savedViews }: { savedViews: SavedView
     const chips: FilterChipData[] = [
         ...(query.trim() ? [{ id: 'q', label: tf('chipSearch', { query: query.trim() }), onRemove: () => setQuery('') }] : []),
         ...facetChips(facets, filterState, setFilterState),
-        ...definition.conditions
-            .map((condition, index) => ({ condition, index }))
-            .filter(({ condition }) => condition.type === 'predicate' || (condition.value ?? '').trim() !== '')
-            .map(({ condition, index }) => ({
-                id: `segment:${index}`,
-                label: segmentConditionLabel(condition, tSeg, resolveTagName),
-                onRemove: () => setDefinition({ ...definition, conditions: definition.conditions.filter((_, i) => i !== index) }),
-            })),
+        ...definition.conditions.flatMap((condition, index) =>
+            condition.type === 'predicate' || (condition.value ?? '').trim() !== ''
+                ? [{
+                    id: `segment:${index}`,
+                    label: segmentConditionLabel(condition, tSeg, resolveTagName),
+                    onRemove: () => setDefinition({ ...definition, conditions: definition.conditions.filter((_, i) => i !== index) }),
+                }]
+                : [],
+        ),
     ];
 
     const selectionActions = (

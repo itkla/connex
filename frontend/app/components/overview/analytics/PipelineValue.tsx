@@ -30,18 +30,22 @@ export default function PipelineValue({
 
     const rows = useMemo<Row[]>(() => {
         const nameById = new Map(pipelines.map((p) => [p.id, p.name]));
-        return values
-            .filter((v): v is DealPipelineValue & { pipelineId: number } => v.pipelineId != null)
-            .map((v) => ({
-                id: v.pipelineId,
-                name: nameById.get(v.pipelineId) ?? '',
-                won: v.wonValue,
-                open: v.openValue,
-                openCount: v.openCount,
-                total: v.wonValue + v.openValue,
-            }))
-            .filter((r) => r.name !== '' && r.total > 0)
-            .sort((a, b) => b.total - a.total);
+        const rows: Row[] = [];
+        for (const value of values) {
+            if (value.pipelineId == null) continue;
+            const name = nameById.get(value.pipelineId) ?? '';
+            const total = value.wonValue + value.openValue;
+            if (!name || total <= 0) continue;
+            rows.push({
+                id: value.pipelineId,
+                name,
+                won: value.wonValue,
+                open: value.openValue,
+                openCount: value.openCount,
+                total,
+            });
+        }
+        return rows.sort((a, b) => b.total - a.total);
     }, [values, pipelines]);
 
     if (rows.length === 0) {

@@ -43,10 +43,10 @@ export default async function CompanyPage({ params }: { params: { id: number } }
     const { id } = await params;
     const cookie = (await cookies()).toString();
     const init = { headers: { cookie } } as const;
-    const t = await getTranslations("CompaniesDetail");
-    const locale = await getLocale();
 
     const [
+        t,
+        locale,
         company,
         currentUser,
         allTags,
@@ -59,6 +59,8 @@ export default async function CompanyPage({ params }: { params: { id: number } }
         attachments,
         customFields,
     ] = await Promise.all([
+        getTranslations("CompaniesDetail"),
+        getLocale(),
         getCompanyById(id, init) as Promise<Company>,
         getCurrentUserFromCookie(cookie),
         getTags(init).catch(() => [] as Tag[]),

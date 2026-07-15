@@ -62,15 +62,14 @@ export default async function TaskDetailPage({ params }: { params: Promise<{ id:
         notFound();
     }
 
-    const [persons, deals, users] = await Promise.all([
+    const [persons, deals, users, t, tTasks, locale] = await Promise.all([
         getContactsFromCookie(cookie),
         getDealsFromCookie(cookie),
         (init ? getUsers(init) : Promise.resolve([])).catch(() => [] as User[]),
+        getTranslations("ActivityTaskDetail"),
+        getTranslations("ActivityTasks"),
+        getLocale(),
     ]);
-
-    const t = await getTranslations("ActivityTaskDetail");
-    const tTasks = await getTranslations("ActivityTasks");
-    const locale = await getLocale();
 
     const person = task.personId ? persons.find((p) => p.id === task.personId) ?? null : null;
     const deal = task.dealId ? deals.find((d) => d.id === task.dealId) ?? null : null;

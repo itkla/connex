@@ -120,6 +120,15 @@ const EMPTY_TASK_SUMMARY: TaskSummaryCounts = {
     dueSoon: 0,
 };
 
+const EMPTY_ATTACHMENT_FACETS: AttachmentFacets = {
+    sources: [],
+    kinds: [],
+    tags: [],
+    orphaned: 0,
+    total: 0,
+    totalSize: 0,
+};
+
 const EMPTY_WARMTH_SUMMARY: WarmthSummary = {
     contacts: { hot: 0, warm: 0, cool: 0, cold: 0 },
     companies: { hot: 0, warm: 0, cool: 0, cold: 0 },
@@ -170,7 +179,6 @@ export default async function Dashboard() {
     }
 
     const init = { headers: { cookie: cookie ?? '' } } as const;
-    const emptyFacets: AttachmentFacets = { sources: [], kinds: [], tags: [], orphaned: 0, total: 0, totalSize: 0 };
     const [contacts, deals, pipelines, stages, tasks, upcomingTasks, activities, notes, users, recentFiles, fileFacets, recentMoves, introSuggestions, relationshipDashboard, layoutResponse, notifications, dealMetrics, companiesPage, contactsPage, activityVolume, leaderboard, taskSummary, upcomingActivityCount, closingSoonCount, closingSoonDeals] =
         await Promise.all([
             getContactsPage({ page: 1, size: 100 }, init).then((response) => response.items),
@@ -185,7 +193,7 @@ export default async function Dashboard() {
             getAttachmentsPage({ size: 6, sort: 'newest' }, init).catch(
                 () => ({ items: [], total: 0 }) as Page<Attachment>,
             ),
-            getAttachmentFacets(init).catch(() => emptyFacets),
+            getAttachmentFacets(init).catch(() => EMPTY_ATTACHMENT_FACETS),
             getRecentMovesFromCookie(cookie),
             getIntroSuggestionsFromCookie(cookie, 4),
             getRelationshipDashboardFromCookie(cookie).catch(() => EMPTY_RELATIONSHIP_DASHBOARD),
@@ -204,9 +212,7 @@ export default async function Dashboard() {
         ]);
 
     const relatedCompanyIds = new Set(
-        closingSoonDeals
-            .map((deal) => deal.company)
-            .filter((companyId): companyId is number => companyId != null),
+        closingSoonDeals.flatMap((deal) => deal.company == null ? [] : [deal.company]),
     );
     const insightCompanies = [
         ...relationshipDashboard.coolingCompanies.map((item) => item.company),
@@ -214,9 +220,11 @@ export default async function Dashboard() {
     ];
     const loadedInsightCompanyIds = new Set(insightCompanies.map((company) => company.id));
     const relatedCompanies = await Promise.all(
-        [...relatedCompanyIds]
-            .filter((companyId) => !loadedInsightCompanyIds.has(companyId))
-            .map((companyId) => getCompanyById(companyId, init).catch(() => null)),
+        [...relatedCompanyIds].flatMap((companyId) =>
+            loadedInsightCompanyIds.has(companyId)
+                ? []
+                : [getCompanyById(companyId, init).catch(() => null)],
+        ),
     ).then((items) => items.filter(present));
 
     const companyById = new Map(

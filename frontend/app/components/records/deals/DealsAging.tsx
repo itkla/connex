@@ -29,21 +29,23 @@ export default function DealsAging({ aging, stageById }: { aging: DealAging[]; s
         [t],
     );
     const data = useMemo<Row[]>(() => {
-        return aging
-            .filter((entry) => entry.stageId != null)
-            .map((entry) => ({
-                stage: stageById.get(entry.stageId as number)?.name ?? `Stage ${entry.stageId}`,
+        const rows: Row[] = [];
+        for (const entry of aging) {
+            if (entry.stageId == null) continue;
+            const row = {
+                stage: stageById.get(entry.stageId)?.name ?? `Stage ${entry.stageId}`,
                 fresh: entry.fresh,
                 active: entry.active,
                 aging: entry.aging,
                 stalled: entry.stalled,
-            }))
-            .filter((row) => row.fresh + row.active + row.aging + row.stalled > 0)
-            .sort((a, b) => {
-                const totalA = a.fresh + a.active + a.aging + a.stalled;
-                const totalB = b.fresh + b.active + b.aging + b.stalled;
-                return totalB - totalA;
-            });
+            };
+            if (row.fresh + row.active + row.aging + row.stalled > 0) rows.push(row);
+        }
+        return rows.sort((a, b) => {
+            const totalA = a.fresh + a.active + a.aging + a.stalled;
+            const totalB = b.fresh + b.active + b.aging + b.stalled;
+            return totalB - totalA;
+        });
     }, [aging, stageById]);
 
     if (data.length === 0) {
@@ -105,14 +107,14 @@ function AgingTooltip({ active, payload, bucketLabel, dealsLabel }: AgingTooltip
         <div className="rounded-md bg-popover text-popover-foreground p-2 text-xs border border-border shadow-md">
             <div className="font-medium text-popover-foreground mb-1.5">{row.stage}</div>
             <div className="space-y-0.5">
-                {payload
-                    .filter((p) => p.value > 0)
-                    .map((p) => (
+                {payload.map((p) =>
+                    p.value > 0 ? (
                         <div key={p.dataKey} className="flex items-center gap-1.5 text-muted-foreground">
                             <span className="inline-block size-2 rounded-sm" style={{ backgroundColor: p.fill }} />
                             {bucketLabel ? bucketLabel(p.dataKey as BucketKey) : p.dataKey} · {dealsLabel ? dealsLabel(p.value) : p.value}
                         </div>
-                    ))}
+                    ) : null,
+                )}
             </div>
         </div>
     );
