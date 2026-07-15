@@ -6,6 +6,7 @@ import java.io.IOException;
 import java.util.Iterator;
 import java.util.Locale;
 import java.util.Set;
+import java.util.concurrent.Semaphore;
 
 import javax.imageio.ImageIO;
 import javax.imageio.ImageReader;
@@ -17,6 +18,7 @@ import org.springframework.web.multipart.MultipartFile;
 import ooo.klae.connex.backend.exceptions.RequestBodyTooLargeException;
 import ooo.klae.connex.backend.exceptions.UnprocessableBusinessCardException;
 import ooo.klae.connex.backend.exceptions.UnsupportedBusinessCardMediaTypeException;
+import ooo.klae.connex.backend.exceptions.TooManyRequestsException;
 
 /**
  * Verifies business-card image signatures and fully decodes bounded JPEG, PNG, and WebP inputs.
@@ -29,6 +31,7 @@ public class BusinessCardImageValidator {
     private static final Set<String> GENERIC_DECLARED_TYPES = Set.of("", "application/octet-stream");
 
     private final BusinessCardProperties properties;
+    private final Semaphore validation = new Semaphore(1);
 
     public BusinessCardImageValidator(BusinessCardProperties properties) {
         this.properties = properties;
@@ -42,6 +45,17 @@ public class BusinessCardImageValidator {
      * @return validated immutable metadata and original bytes
      */
     public ValidatedBusinessCardImage validate(MultipartFile image) {
+        if (!validation.tryAcquire()) {
+            throw new TooManyRequestsException("Image processing is busy; retry shortly");
+        }
+        try {
+            return validateAcquired(image);
+        } finally {
+            validation.release();
+        }
+    }
+
+    private ValidatedBusinessCardImage validateAcquired(MultipartFile image) {
         if (image == null || image.isEmpty()) {
             throw new UnprocessableBusinessCardException("Business-card image is empty");
         }

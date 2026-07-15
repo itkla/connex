@@ -178,5 +178,57 @@ class ConcurrencyTest(unittest.TestCase):
         self.assertEqual([200], first_status)
 
 
+class InferenceDeadlineTest(unittest.TestCase):
+    def test_marks_unready_and_invokes_fatal_handler_after_deadline(self) -> None:
+        token = "test-service-token-0000000000000000"
+        engine = BlockingEngine()
+        fatal_timeout = threading.Event()
+        config = ServiceConfig(
+            host="127.0.0.1",
+            port=0,
+            service_token=token,
+            max_image_bytes=128,
+            max_width=100,
+            max_height=100,
+            max_pixels=10_000,
+            request_timeout_seconds=0.25,
+        )
+        server = create_server(config, engine, fatal_timeout.set)
+        server_thread = threading.Thread(target=server.serve_forever, daemon=True)
+        server_thread.start()
+        base_url = f"http://127.0.0.1:{server.server_port}"
+        request = urllib.request.Request(
+            base_url + "/v1/ocr",
+            data=b"image",
+            headers={
+                "Authorization": "Bearer " + token,
+                "Content-Type": "image/jpeg",
+            },
+            method="POST",
+        )
+        request_status: list[int] = []
+
+        def invoke() -> None:
+            with urllib.request.urlopen(request, timeout=5) as response:
+                request_status.append(response.status)
+
+        request_thread = threading.Thread(target=invoke)
+        request_thread.start()
+        self.assertTrue(engine.started.wait(2))
+
+        try:
+            self.assertTrue(fatal_timeout.wait(2))
+            with urllib.request.urlopen(base_url + "/health", timeout=2) as response:
+                self.assertEqual({"ready": False}, json.load(response))
+        finally:
+            engine.release.set()
+            request_thread.join(5)
+            server.shutdown()
+            server.server_close()
+            server_thread.join(2)
+
+        self.assertEqual([200], request_status)
+
+
 if __name__ == "__main__":
     unittest.main()

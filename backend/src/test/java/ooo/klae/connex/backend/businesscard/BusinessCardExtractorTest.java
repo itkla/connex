@@ -4,9 +4,15 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.io.IOException;
+import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
 
 import org.junit.jupiter.api.Test;
+
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 
 import ooo.klae.connex.backend.dto.BusinessCardScanResponse;
 
@@ -58,6 +64,17 @@ class BusinessCardExtractorTest {
     }
 
     @Test
+    void treatsAnUnlabeledUppercasePersonAsANameWithoutInventingACompany() {
+        BusinessCardScanResponse response = extractor.extract(List.of(
+                line("ADA LOVELACE", 0.98, 20),
+                line("Principal Engineer", 0.96, 80),
+                line("ada.lovelace@example.test", 0.99, 140)));
+
+        assertEquals("ADA LOVELACE", response.fields().name().value());
+        assertNull(response.company().value());
+    }
+
+    @Test
     void reportsEmptyRecognitionWithoutInventingFields() {
         BusinessCardScanResponse response = extractor.extract(List.of(
                 line("···", 0.43, 20)));
@@ -68,6 +85,34 @@ class BusinessCardExtractorTest {
         assertNull(response.fields().title().value());
         assertNull(response.company().value());
         assertEquals(List.of("no_recognizable_fields"), response.warnings());
+    }
+
+    @Test
+    void perfectBenchmarkOcrMeetsTheDeterministicTitleGate() throws IOException {
+        Path manifestPath = Path.of(System.getProperty("user.dir"))
+                .resolve("../ocr/benchmark/manifest.json")
+                .normalize();
+        JsonNode cases = new ObjectMapper().readTree(manifestPath.toFile()).path("cases");
+        int correctTitles = 0;
+        List<String> missedCases = new ArrayList<>();
+        for (JsonNode benchmarkCase : cases) {
+            JsonNode fields = benchmarkCase.path("fields");
+            BusinessCardScanResponse response = extractor.extract(List.of(
+                    line(fields.path("company").asText(), 1, 20),
+                    line(fields.path("name").asText(), 1, 80),
+                    line(fields.path("title").asText(), 1, 140),
+                    line("EMAIL " + fields.path("email").asText(), 1, 200),
+                    line("TEL " + fields.path("phone").asText(), 1, 260)));
+            if (fields.path("title").asText().equals(response.fields().title().value())) {
+                correctTitles++;
+            } else {
+                missedCases.add(benchmarkCase.path("id").asText());
+            }
+        }
+
+        assertTrue(cases.size() >= 40);
+        assertTrue(correctTitles / (double) cases.size() >= 0.8,
+                "Perfect OCR missed benchmark titles: " + missedCases);
     }
 
     private static OcrLine line(String text, double confidence, int y) {

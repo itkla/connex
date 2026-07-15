@@ -18,6 +18,10 @@ services:
     cpus: 2.0
     mem_limit: 2g
     pids_limit: 128
+    dns:
+      - 127.0.0.1
+    networks:
+      - ocr_internal
 
   db:
     image: mysql:latest
@@ -38,3 +42,9 @@ services:
     restart: always
     ports:
       - 9001:8080
+
+networks:
+  ocr_internal:
+    driver: bridge
+    driver_opts:
+      com.docker.network.bridge.enable_ip_masquerade: "false"

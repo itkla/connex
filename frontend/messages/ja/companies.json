@@ -153,7 +153,7 @@
     "contactBack": "戻る",
     "contactDone": "完了",
     "contactPhotoLabel": "プロフィール写真",
-    "contactPhotoHint": "プロフィール写真を追加（任意）",
+    "contactPhotoHint": "JPEG・PNG・WebPのプロフィール写真を追加（任意）",
     "contactAddedAnnounce": "{name} を追加しました",
     "contactUpdatedAnnounce": "{name} を更新しました",
     "contactRemovedAnnounce": "{name} を削除しました",

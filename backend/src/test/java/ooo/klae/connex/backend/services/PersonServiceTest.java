@@ -1,7 +1,11 @@
 package ooo.klae.connex.backend.services;
 
+import java.awt.image.BufferedImage;
+import java.io.ByteArrayOutputStream;
 import java.util.Arrays;
 import java.util.List;
+
+import javax.imageio.ImageIO;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -45,6 +49,23 @@ class PersonServiceTest extends AbstractServiceTest {
     @Autowired PersonService personService;
     @Autowired ShareMapper shareMapper;
     @Autowired JdbcTemplate jdbcTemplate;
+
+    @Test
+    void genericUpdatePreservesAndReturnsCurrentManagedImage() {
+        Person person = newPerson(newCompany());
+        String managed = "/api/persons/" + person.getId()
+            + "/profile-picture/550e8400-e29b-41d4-a716-446655440000.png";
+        assertEquals(1, personMapper.updateImageUrlIfCurrent(
+            workspace.getId(), person.getId(), null, managed));
+        Person update = personDraft(person.getCompany());
+        update.setImageUrl("https://attacker.example/image.png");
+
+        Person updated = personService.update(person.getId(), update);
+
+        assertEquals(managed, updated.getImageUrl());
+        assertEquals(managed,
+            personMapper.getPersonById(workspace.getId(), person.getId()).getImageUrl());
+    }
 
     @Test
     void updateEvaluationExclusions_updatesOwnedContactOnly() {
@@ -159,7 +180,7 @@ class PersonServiceTest extends AbstractServiceTest {
     }
 
     @Test
-    void profilePictureUploadPreservesCompanyAssociation() {
+    void profilePictureUploadPreservesCompanyAssociation() throws Exception {
         Company company = newCompany();
         Person person = newPerson(company);
 
@@ -379,28 +400,12 @@ class PersonServiceTest extends AbstractServiceTest {
         return tag;
     }
 
-    private static byte[] png(int width, int height) {
-        byte[] bytes = new byte[33];
-        byte[] signature = {
-            (byte) 0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a
-        };
-        System.arraycopy(signature, 0, bytes, 0, signature.length);
-        writeInt32(bytes, 8, 13);
-        bytes[12] = 'I';
-        bytes[13] = 'H';
-        bytes[14] = 'D';
-        bytes[15] = 'R';
-        writeInt32(bytes, 16, width);
-        writeInt32(bytes, 20, height);
-        bytes[24] = 8;
-        bytes[25] = 2;
-        return bytes;
-    }
-
-    private static void writeInt32(byte[] bytes, int offset, int value) {
-        bytes[offset] = (byte) (value >>> 24);
-        bytes[offset + 1] = (byte) (value >>> 16);
-        bytes[offset + 2] = (byte) (value >>> 8);
-        bytes[offset + 3] = (byte) value;
+    private static byte[] png(int width, int height) throws Exception {
+        BufferedImage image = new BufferedImage(width, height, BufferedImage.TYPE_INT_RGB);
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        if (!ImageIO.write(image, "png", output)) {
+            throw new IllegalStateException("PNG writer is unavailable");
+        }
+        return output.toByteArray();
     }
 }

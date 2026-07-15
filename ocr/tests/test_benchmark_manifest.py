@@ -3,6 +3,8 @@ import unittest
 from collections import Counter
 from pathlib import Path
 
+from benchmark.run_benchmark import candidate, summarize
+
 
 class BenchmarkManifestTest(unittest.TestCase):
     def test_manifest_has_required_coverage_and_synthetic_contacts(self) -> None:
@@ -21,6 +23,32 @@ class BenchmarkManifestTest(unittest.TestCase):
             self.assertTrue(fields["name"])
             self.assertTrue(fields["email"].endswith("@example.test"))
             self.assertRegex(fields["phone"], r"^\+\d{11}$")
+
+    def test_scoring_includes_title_and_company_candidates(self) -> None:
+        payload = {
+            "fields": {
+                "title": {"value": "Principal Engineer"},
+            },
+            "company": {"value": "Analytical Labs"},
+        }
+        outcome = {
+            "latencySeconds": 1.0,
+            "correct": {
+                "name": True,
+                "email": True,
+                "phone": True,
+                "title": True,
+                "company": True,
+            },
+        }
+
+        self.assertEqual("Principal Engineer", candidate(payload, "title"))
+        self.assertEqual("Analytical Labs", candidate(payload, "company"))
+        report = summarize([outcome])
+        self.assertEqual(1.0, report["accuracy"]["title"])
+        self.assertEqual(1.0, report["accuracy"]["company"])
+        self.assertTrue(report["gates"]["title"]["passed"])
+        self.assertTrue(report["gates"]["company"]["passed"])
 
 
 if __name__ == "__main__":

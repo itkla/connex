@@ -22,12 +22,16 @@ jobs:
         with:
           python-version: '3.12'
       - name: Install lightweight image test dependencies
-        run: python -m pip install Pillow==12.3.0 numpy==2.5.1
+        run: python -m pip install Pillow==12.3.0 numpy==2.3.5
       - name: Test service protocol and benchmark manifest
         working-directory: ocr
         env:
           PYTHONPATH: .
         run: python -m unittest discover -s tests -v
+      - name: Build deployable OCR image
+        run: docker build --tag connex-ocr-ci ocr
+      - name: Smoke-test Paddle imports
+        run: docker run --rm --entrypoint python connex-ocr-ci -c "import paddle; from paddleocr import PaddleOCR; print(paddle.__version__, PaddleOCR.__name__)"
 
   migrations:
     name: Migrations — forward-only guard

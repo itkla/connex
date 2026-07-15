@@ -8,11 +8,13 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
+import java.util.concurrent.Semaphore;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -25,6 +27,7 @@ import ooo.klae.connex.backend.businesscard.BusinessCardImageValidator;
 import ooo.klae.connex.backend.businesscard.BusinessCardImportRecord;
 import ooo.klae.connex.backend.businesscard.BusinessCardOcrClient;
 import ooo.klae.connex.backend.businesscard.BusinessCardProperties;
+import ooo.klae.connex.backend.businesscard.BusinessCardRateLimiter;
 import ooo.klae.connex.backend.businesscard.BusinessCardTextNormalizer;
 import ooo.klae.connex.backend.businesscard.ValidatedBusinessCardImage;
 import ooo.klae.connex.backend.dto.AttachmentDto;
@@ -38,6 +41,7 @@ import ooo.klae.connex.backend.dto.PersonDto;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.exceptions.ServiceUnavailableException;
+import ooo.klae.connex.backend.exceptions.TooManyRequestsException;
 import ooo.klae.connex.backend.mappers.BusinessCardImportRequestMapper;
 import ooo.klae.connex.backend.tenant.Permission;
 import ooo.klae.connex.backend.tenant.RequirePermission;
@@ -60,6 +64,8 @@ public class BusinessCardService {
     private final WorkspaceService workspaceService;
     private final AuthService authService;
     private final BusinessCardImportRequestMapper importRequestMapper;
+    private final BusinessCardRateLimiter rateLimiter;
+    private final Semaphore processing = new Semaphore(1, true);
 
     public BusinessCardService(
             BusinessCardProperties properties,
@@ -72,7 +78,8 @@ public class BusinessCardService {
             AttachmentService attachmentService,
             WorkspaceService workspaceService,
             AuthService authService,
-            BusinessCardImportRequestMapper importRequestMapper) {
+            BusinessCardImportRequestMapper importRequestMapper,
+            BusinessCardRateLimiter rateLimiter) {
         this.properties = properties;
         this.imageValidator = imageValidator;
         this.ocrClient = ocrClient;
@@ -84,6 +91,7 @@ public class BusinessCardService {
         this.workspaceService = workspaceService;
         this.authService = authService;
         this.importRequestMapper = importRequestMapper;
+        this.rateLimiter = rateLimiter;
     }
 
     /**
@@ -96,6 +104,15 @@ public class BusinessCardService {
     }
 
     /**
+     * Returns whether reviewed manual imports can retain their source image without OCR.
+     *
+     * @return manual import capability readiness
+     */
+    public boolean isImportAvailable() {
+        return properties.isEnabled() && binaryStore.isReady();
+    }
+
+    /**
      * Extracts an editable draft from one validated image without persisting the image or OCR text.
      *
      * @param image uploaded card image
@@ -105,9 +122,15 @@ public class BusinessCardService {
     public BusinessCardScanResponse scan(MultipartFile image) {
         workspaceService.requirePermission(Permission.ATTACHMENT_CREATE);
         requireStorageReady();
-        ValidatedBusinessCardImage validated = imageValidator.validate(image);
-        BusinessCardScanResponse draft = extractor.extract(ocrClient.recognize(validated));
-        return withCompanyMatch(draft);
+        rateLimiter.requireScanAllowed();
+        acquireProcessingPermit();
+        try {
+            ValidatedBusinessCardImage validated = imageValidator.validate(image);
+            BusinessCardScanResponse draft = extractor.extract(ocrClient.recognize(validated));
+            return withCompanyMatch(draft);
+        } finally {
+            processing.release();
+        }
     }
 
     /**
@@ -130,48 +153,83 @@ public class BusinessCardService {
         Objects.requireNonNull(contact, "contact");
         Objects.requireNonNull(companyAction, "companyAction");
         workspaceService.requirePermission(Permission.ATTACHMENT_CREATE);
+        rateLimiter.requireImportAllowed();
         String requestId = canonicalIdempotencyKey(idempotencyKey);
         requireFeatureEnabled();
-        ValidatedBusinessCardImage validated = imageValidator.validate(image);
-        ReviewedImport reviewed = normalizeRequest(contact, companyAction);
-        int workspaceId = workspaceService.getCurrentWorkspaceId();
-        byte[] requestFingerprint = fingerprint(validated.content(), reviewed);
-        int claimed = importRequestMapper.claim(workspaceId, requestId, requestFingerprint);
-        if (claimed == 0) {
-            return replay(workspaceId, requestId, requestFingerprint);
-        }
-        if (claimed != 1) {
-            throw new IllegalStateException("Business-card import idempotency claim was not unique");
-        }
-        requireBinaryStorageReady();
-        Company company = resolveCompany(reviewed);
-        Person person = personService.create(toPerson(reviewed, company));
-        String fileName = "business-card." + validated.extension();
-        BusinessCardBinaryStore.StoredBusinessCard stored = binaryStore.store(
-                workspaceId, fileName, validated.contentType(), validated.content());
-        boolean synchronizedTransaction = TransactionSynchronizationManager.isSynchronizationActive();
+        boolean releaseAfterTransaction = acquireProcessingPermitForTransaction();
         try {
-            requireStored(stored, validated.content().length);
-            Attachment attachment = attachment(validated, stored, fileName, person.getId());
-            Attachment createdAttachment = attachmentService.create(attachment);
-            int completed = importRequestMapper.complete(
-                    workspaceId,
-                    requestId,
-                    person.getId(),
-                    createdAttachment.getId(),
-                    company == null ? null : company.getId());
-            if (completed != 1) {
-                throw new IllegalStateException("Business-card import idempotency result was not recorded");
+            ValidatedBusinessCardImage validated = imageValidator.validate(image);
+            ReviewedImport reviewed = normalizeRequest(contact, companyAction);
+            int workspaceId = workspaceService.getCurrentWorkspaceId();
+            byte[] requestFingerprint = fingerprint(validated.content(), reviewed);
+            int claimed = importRequestMapper.claim(workspaceId, requestId, requestFingerprint);
+            if (claimed == 0) {
+                return replay(workspaceId, requestId, requestFingerprint);
             }
-            return new BusinessCardImportResponse(
-                    PersonDto.from(person),
-                    AttachmentDto.from(createdAttachment),
-                    CompanyDto.from(company));
+            if (claimed != 1) {
+                throw new IllegalStateException("Business-card import idempotency claim was not unique");
+            }
+            requireBinaryStorageReady();
+            Company company = resolveCompany(reviewed);
+            Person person = personService.create(toPerson(reviewed, company));
+            String fileName = "business-card." + validated.extension();
+            BusinessCardBinaryStore.StoredBusinessCard stored = binaryStore.store(
+                    workspaceId, fileName, validated.contentType(), validated.content());
+            boolean synchronizedTransaction = TransactionSynchronizationManager.isSynchronizationActive()
+                    && TransactionSynchronizationManager.isActualTransactionActive();
+            try {
+                requireStored(stored, validated.content().length);
+                Attachment attachment = attachment(validated, stored, fileName, person.getId());
+                Attachment createdAttachment = attachmentService.createManaged(attachment);
+                int completed = importRequestMapper.complete(
+                        workspaceId,
+                        requestId,
+                        person.getId(),
+                        createdAttachment.getId(),
+                        company == null ? null : company.getId());
+                if (completed != 1) {
+                    throw new IllegalStateException("Business-card import idempotency result was not recorded");
+                }
+                return new BusinessCardImportResponse(
+                        PersonDto.from(person),
+                        AttachmentDto.from(createdAttachment),
+                        CompanyDto.from(company));
+            } catch (RuntimeException exception) {
+                if (!synchronizedTransaction && stored != null
+                        && stored.url() != null && !stored.url().isBlank()) {
+                    deleteStored(workspaceId, stored.url());
+                }
+                throw exception;
+            }
+        } finally {
+            if (!releaseAfterTransaction) {
+                processing.release();
+            }
+        }
+    }
+
+    private void acquireProcessingPermit() {
+        if (!processing.tryAcquire()) {
+            throw new TooManyRequestsException("Business-card processing is busy; retry shortly");
+        }
+    }
+
+    private boolean acquireProcessingPermitForTransaction() {
+        acquireProcessingPermit();
+        if (!TransactionSynchronizationManager.isSynchronizationActive()
+                || !TransactionSynchronizationManager.isActualTransactionActive()) {
+            return false;
+        }
+        try {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCompletion(int status) {
+                    processing.release();
+                }
+            });
+            return true;
         } catch (RuntimeException exception) {
-            if (!synchronizedTransaction && stored != null
-                    && stored.url() != null && !stored.url().isBlank()) {
-                deleteStored(workspaceId, stored.url());
-            }
+            processing.release();
             throw exception;
         }
     }

@@ -1,6 +1,7 @@
 package ooo.klae.connex.backend.businesscard;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -8,6 +9,9 @@ import java.awt.image.BufferedImage;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.util.Base64;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 
 import javax.imageio.ImageIO;
 
@@ -16,6 +20,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.mock.web.MockMultipartFile;
 
 import ooo.klae.connex.backend.exceptions.RequestBodyTooLargeException;
+import ooo.klae.connex.backend.exceptions.TooManyRequestsException;
 import ooo.klae.connex.backend.exceptions.UnprocessableBusinessCardException;
 import ooo.klae.connex.backend.exceptions.UnsupportedBusinessCardMediaTypeException;
 
@@ -125,6 +130,49 @@ class BusinessCardImageValidatorTest {
         assertThrows(RequestBodyTooLargeException.class,
                 () -> validator.validate(new MockMultipartFile(
                         "image", "card.png", "image/png", new byte[4])));
+    }
+
+    @Test
+    void rejectsOverlappingImageDecodes() throws Exception {
+        byte[] content = image("png", BufferedImage.TYPE_INT_ARGB, 240, 140);
+        CountDownLatch readStarted = new CountDownLatch(1);
+        CountDownLatch releaseRead = new CountDownLatch(1);
+        MockMultipartFile blocking = new MockMultipartFile(
+                "image", "card.png", "image/png", content) {
+            @Override
+            public byte[] getBytes() throws IOException {
+                readStarted.countDown();
+                try {
+                    if (!releaseRead.await(5, TimeUnit.SECONDS)) {
+                        throw new IOException("test timeout");
+                    }
+                } catch (InterruptedException exception) {
+                    Thread.currentThread().interrupt();
+                    throw new IOException("test interrupted", exception);
+                }
+                return super.getBytes();
+            }
+        };
+        AtomicReference<Throwable> failure = new AtomicReference<>();
+        Thread first = Thread.startVirtualThread(() -> {
+            try {
+                validator.validate(blocking);
+            } catch (Throwable exception) {
+                failure.set(exception);
+            }
+        });
+        assertTrue(readStarted.await(5, TimeUnit.SECONDS));
+
+        try {
+            assertThrows(TooManyRequestsException.class, () -> validator.validate(
+                    new MockMultipartFile("image", "card.png", "image/png", content)));
+        } finally {
+            releaseRead.countDown();
+            first.join(5_000);
+        }
+
+        assertTrue(!first.isAlive());
+        assertNull(failure.get());
     }
 
     private static byte[] image(String format, int type, int width, int height) throws IOException {

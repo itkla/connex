@@ -36,7 +36,7 @@ public class BusinessCardExtractor {
     private static final Pattern COMPANY_WORD = Pattern.compile(
             "(?iu)(?:\\b(?:labs?|studio|solutions?|systems?|group|holdings?|technologies|technology|partners?|bank|university)\\b|銀行|大学|研究所|事務所|病院)");
     private static final Pattern TITLE_WORD = Pattern.compile(
-            "(?iu)(?:\\b(?:chief|ceo|cto|cfo|coo|founder|president|vice president|vp|director|manager|engineer|consultant|sales|marketing|designer|developer|partner|attorney)\\b|代表取締役|取締役|社長|副社長|専務|常務|部長|次長|課長|係長|マネージャー|エンジニア|デザイナー|営業|顧問|代表)");
+            "(?iu)(?:\\b(?:chief|ceo|cto|cfo|coo|founder|president|vice president|vp|director|manager|engineer|consultant|sales|marketing|designer|developer|partner|attorney|admiral|mathematician|professor|architect|scientist|fellow|chair)\\b|代表取締役|取締役|社長|副社長|専務|常務|部長|次長|課長|係長|マネージャー|エンジニア|デザイナー|コンサルタント|営業|顧問|代表)");
     private static final Pattern ENGLISH_NAME = Pattern.compile(
             "(?iu)^[\\p{L}][\\p{L}'’\\-]+(?:\\s+[\\p{L}][\\p{L}'’\\-]+){1,4}$");
     private static final Pattern JAPANESE_NAME = Pattern.compile(
@@ -164,6 +164,7 @@ public class BusinessCardExtractor {
 
     private static Candidate company(List<Line> lines) {
         Candidate best = null;
+        Candidate uppercaseFallback = null;
         for (Line line : lines) {
             Matcher label = COMPANY_LABEL.matcher(line.text());
             if (label.matches()) {
@@ -173,18 +174,33 @@ public class BusinessCardExtractor {
             boolean suffix = COMPANY_SUFFIX.matcher(line.text()).find();
             boolean companyWord = COMPANY_WORD.matcher(line.text()).find();
             boolean uppercase = uppercaseWordmark(line.text());
-            if ((suffix || companyWord || uppercase)
-                    && !TITLE_WORD.matcher(line.text()).find()
+            if (!TITLE_WORD.matcher(line.text()).find()
                     && !CONTACT_LABEL.matcher(line.text()).find()
                     && !EMAIL.matcher(line.text().replace(" ", "")).find()
                     && !PHONE.matcher(line.text()).find()
                     && !WEB.matcher(line.text()).find()) {
-                double evidence = suffix ? 0.98 : companyWord ? 0.88 : 0.76;
-                evidence += Math.min(0.08, line.heightRatio() * 0.08);
-                best = better(best, candidate(line.text(), line, evidence));
+                if (suffix || companyWord) {
+                    double evidence = (suffix ? 0.98 : 0.88)
+                            + Math.min(0.08, line.heightRatio() * 0.08);
+                    best = better(best, candidate(line.text(), line, evidence));
+                } else if (uppercase && (!personShape(line.text())
+                        || hasAlternatePersonName(lines, line.index()))) {
+                    double evidence = 0.76 + Math.min(0.08, line.heightRatio() * 0.08);
+                    uppercaseFallback = better(
+                            uppercaseFallback, candidate(line.text(), line, evidence));
+                }
             }
         }
-        return best;
+        return best == null ? uppercaseFallback : best;
+    }
+
+    private static boolean hasAlternatePersonName(List<Line> lines, int excludedIndex) {
+        return lines.stream()
+                .anyMatch(line -> line.index() != excludedIndex
+                        && personShape(line.text())
+                        && !TITLE_WORD.matcher(line.text()).find()
+                        && !COMPANY_SUFFIX.matcher(line.text()).find()
+                        && !COMPANY_WORD.matcher(line.text()).find());
     }
 
     private static Candidate name(List<Line> lines, Candidate title, Candidate company) {
@@ -205,9 +221,7 @@ public class BusinessCardExtractor {
                     || WEB.matcher(line.text()).find()) {
                 continue;
             }
-            boolean personShape = ENGLISH_NAME.matcher(line.text()).matches()
-                    || JAPANESE_NAME.matcher(line.text()).matches();
-            if (!personShape) {
+            if (!personShape(line.text())) {
                 continue;
             }
             double evidence = 0.72 + Math.min(0.18, line.heightRatio() * 0.18);
@@ -217,6 +231,10 @@ public class BusinessCardExtractor {
             best = better(best, candidate(line.text(), line, evidence));
         }
         return best;
+    }
+
+    private static boolean personShape(String text) {
+        return ENGLISH_NAME.matcher(text).matches() || JAPANESE_NAME.matcher(text).matches();
     }
 
     private static boolean uppercaseWordmark(String text) {

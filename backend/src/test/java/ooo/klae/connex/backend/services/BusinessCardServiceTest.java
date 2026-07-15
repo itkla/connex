@@ -14,6 +14,8 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -34,6 +36,7 @@ import ooo.klae.connex.backend.businesscard.BusinessCardImageValidator;
 import ooo.klae.connex.backend.businesscard.BusinessCardImportRecord;
 import ooo.klae.connex.backend.businesscard.BusinessCardOcrClient;
 import ooo.klae.connex.backend.businesscard.BusinessCardProperties;
+import ooo.klae.connex.backend.businesscard.BusinessCardRateLimiter;
 import ooo.klae.connex.backend.businesscard.OcrLine;
 import ooo.klae.connex.backend.businesscard.ValidatedBusinessCardImage;
 import ooo.klae.connex.backend.dto.BusinessCardCompanyAction;
@@ -46,6 +49,7 @@ import ooo.klae.connex.backend.dto.BusinessCardScanResponse.Fields;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.exceptions.ServiceUnavailableException;
+import ooo.klae.connex.backend.exceptions.TooManyRequestsException;
 import ooo.klae.connex.backend.mappers.BusinessCardImportRequestMapper;
 import ooo.klae.connex.backend.tenant.Permission;
 
@@ -63,6 +67,7 @@ class BusinessCardServiceTest {
     @Mock private WorkspaceService workspaceService;
     @Mock private AuthService authService;
     @Mock private BusinessCardImportRequestMapper importRequestMapper;
+    @Mock private BusinessCardRateLimiter rateLimiter;
 
     private BusinessCardProperties properties;
     private BusinessCardService service;
@@ -84,7 +89,8 @@ class BusinessCardServiceTest {
                 attachmentService,
                 workspaceService,
                 authService,
-                importRequestMapper);
+                importRequestMapper,
+                rateLimiter);
         image = new MockMultipartFile("image", "card.jpg", "image/jpeg", new byte[] {1, 2, 3});
         validated = new ValidatedBusinessCardImage(
                 image.getBytes(), "image/jpeg", "jpg", 120, 70);
@@ -109,6 +115,7 @@ class BusinessCardServiceTest {
         assertEquals(17, response.company().matchedCompanyId());
         assertTrue(response.warnings().isEmpty());
         verify(workspaceService).requirePermission(Permission.ATTACHMENT_CREATE);
+        verify(rateLimiter).requireScanAllowed();
     }
 
     @Test
@@ -124,6 +131,46 @@ class BusinessCardServiceTest {
 
         assertNull(response.company().matchedCompanyId());
         assertTrue(response.warnings().contains("company_match_ambiguous"));
+    }
+
+    @Test
+    void scanRejectsConcurrentBusinessCardProcessing() throws Exception {
+        CountDownLatch validationStarted = new CountDownLatch(1);
+        CountDownLatch releaseValidation = new CountDownLatch(1);
+        when(imageValidator.validate(image)).thenAnswer(invocation -> {
+            validationStarted.countDown();
+            try {
+                if (!releaseValidation.await(5, TimeUnit.SECONDS)) {
+                    throw new IllegalStateException("test timeout");
+                }
+            } catch (InterruptedException exception) {
+                Thread.currentThread().interrupt();
+                throw new IllegalStateException("test interrupted", exception);
+            }
+            return validated;
+        });
+        when(ocrClient.recognize(validated)).thenReturn(List.of());
+        when(extractor.extract(List.of())).thenReturn(draft(null));
+        AtomicReference<Throwable> failure = new AtomicReference<>();
+        Thread first = Thread.startVirtualThread(() -> {
+            try {
+                service.scan(image);
+            } catch (Throwable exception) {
+                failure.set(exception);
+            }
+        });
+        assertTrue(validationStarted.await(5, TimeUnit.SECONDS));
+
+        try {
+            assertThrows(TooManyRequestsException.class, () -> service.scan(image));
+        } finally {
+            releaseValidation.countDown();
+            first.join(5_000);
+        }
+
+        assertNull(failure.get());
+        assertTrue(!first.isAlive());
+        verify(imageValidator).validate(image);
     }
 
     @Test
@@ -145,7 +192,7 @@ class BusinessCardServiceTest {
         User user = new User();
         user.setId(9);
         when(authService.getCurrentUser()).thenReturn(user);
-        when(attachmentService.create(any())).thenAnswer(invocation -> {
+        when(attachmentService.createManaged(any())).thenAnswer(invocation -> {
             Attachment attachment = invocation.getArgument(0);
             attachment.setId(41);
             return attachment;
@@ -160,7 +207,7 @@ class BusinessCardServiceTest {
         assertEquals("ADA@EXAMPLE.TEST", personCaptor.getValue().getEmail());
         assertEquals(company, personCaptor.getValue().getCompany());
         ArgumentCaptor<Attachment> attachmentCaptor = ArgumentCaptor.forClass(Attachment.class);
-        verify(attachmentService).create(attachmentCaptor.capture());
+        verify(attachmentService).createManaged(attachmentCaptor.capture());
         assertEquals("person", attachmentCaptor.getValue().getEntityType());
         assertEquals(31, attachmentCaptor.getValue().getEntityId());
         assertEquals("business-card.jpg", attachmentCaptor.getValue().getFileName());
@@ -169,6 +216,7 @@ class BusinessCardServiceTest {
         assertEquals(41, response.attachment().getId());
         assertEquals(17, response.company().getId());
         verify(importRequestMapper).complete(5, IDEMPOTENCY_KEY, 31, 41, 17);
+        verify(rateLimiter).requireImportAllowed();
     }
 
     @Test
@@ -213,7 +261,7 @@ class BusinessCardServiceTest {
                 .thenReturn(new BusinessCardBinaryStore.StoredBusinessCard(
                         "/attachments/person/card-31.jpg", validated.content().length));
         when(authService.getCurrentUser()).thenReturn(new User());
-        when(attachmentService.create(any())).thenThrow(new ServiceUnavailableException("failed"));
+        when(attachmentService.createManaged(any())).thenThrow(new ServiceUnavailableException("failed"));
 
         assertThrows(ServiceUnavailableException.class, () -> service.importCard(
                 image, contact, new BusinessCardCompanyAction.None(), IDEMPOTENCY_KEY));
@@ -236,7 +284,7 @@ class BusinessCardServiceTest {
                 image, contact, new BusinessCardCompanyAction.None(), IDEMPOTENCY_KEY));
 
         verify(binaryStore).delete(5, "/attachments/person/card.jpg");
-        verify(attachmentService, never()).create(any());
+        verify(attachmentService, never()).createManaged(any());
     }
 
     @Test

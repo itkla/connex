@@ -9,6 +9,7 @@ import { Loader2Icon } from "lucide-react";
 import type { User } from "@/app/lib/types";
 import { ApiError, updateMyTimezone, updateUser, uploadCurrentUserProfilePicture } from "@/app/lib/api";
 import { persistAuthenticatedLocale } from "@/app/lib/locale-preference";
+import { isManagedImageFile, MANAGED_IMAGE_ACCEPT } from "@/app/lib/managed-image";
 import { toastError, toastSuccess } from "@/app/lib/toast";
 import { formatDate, formatDateTime } from "@/app/lib/utils";
 import type { Locale } from "@/i18n/config";
@@ -119,6 +120,7 @@ export default function ProfilePanel({ user }: Props) {
         photo !== null && uploadedPhotoUrl !== confirmedUser.profilePictureUrl;
 
     const selectPhoto = (file: File | null) => {
+        if (file && !isManagedImageFile(file)) return;
         if (previewUrlRef.current) URL.revokeObjectURL(previewUrlRef.current);
         const nextPreview = file ? URL.createObjectURL(file) : null;
         previewUrlRef.current = nextPreview;
@@ -277,7 +279,7 @@ export default function ProfilePanel({ user }: Props) {
                             <input
                                 ref={fileInputRef}
                                 type="file"
-                                accept="image/*"
+                                accept={MANAGED_IMAGE_ACCEPT}
                                 tabIndex={-1}
                                 aria-hidden
                                 className="sr-only"

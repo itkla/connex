@@ -1,6 +1,10 @@
 package ooo.klae.connex.backend.services;
 
+import java.awt.image.BufferedImage;
+import java.io.ByteArrayOutputStream;
 import java.util.List;
+
+import javax.imageio.ImageIO;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -28,6 +32,7 @@ import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.AuditLogMapper;
+import ooo.klae.connex.backend.storage.UploadSource;
 
 class UserServiceTest extends AbstractServiceTest {
 
@@ -113,13 +118,14 @@ class UserServiceTest extends AbstractServiceTest {
     }
 
     @Test
-    void updateProfilePicture_byNonAdminMember_onAnotherUsersAccount_isForbidden() {
+    void updateProfilePicture_byNonAdminMember_onAnotherUsersAccount_isForbidden() throws Exception {
         User attacker = newUser();
         User victim = newUser();
         authenticateAs(attacker);
 
         assertThrows(ForbiddenException.class,
-            () -> userService.updateProfilePictureUrl(victim.getId(), "/profile-pictures/x.png"));
+            () -> userService.updateCurrentProfilePicture(
+                victim.getId(), UploadSource.from("portrait.png", "image/png", png())));
     }
 
     @Test
@@ -142,6 +148,22 @@ class UserServiceTest extends AbstractServiceTest {
 
         assertEquals("en", updated.getLocale());
         assertEquals("en", userMapper.getUserById(member.getId()).getLocale());
+    }
+
+    @Test
+    void genericProfileUpdateCannotChangeProfilePicture() {
+        User member = newUser();
+        authenticateAs(member);
+        String managed = "/api/users/" + member.getId()
+            + "/profile-picture/550e8400-e29b-41d4-a716-446655440000.png";
+        assertEquals(1, userMapper.updateProfilePictureUrlIfCurrent(member.getId(), null, managed));
+        User update = profileUpdate(member, member.getDisplayName());
+        update.setProfilePictureUrl("https://attacker.example/image.png");
+
+        User updated = userService.update(member.getId(), update);
+
+        assertEquals(managed, updated.getProfilePictureUrl());
+        assertEquals(managed, userMapper.getUserById(member.getId()).getProfilePictureUrl());
     }
 
     @Test
@@ -272,5 +294,14 @@ class UserServiceTest extends AbstractServiceTest {
         update.setDisplayName(newDisplayName);
         update.setTimezone(base.getTimezone());
         return update;
+    }
+
+    private static byte[] png() throws Exception {
+        BufferedImage image = new BufferedImage(10, 10, BufferedImage.TYPE_INT_ARGB);
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        if (!ImageIO.write(image, "png", output)) {
+            throw new IllegalStateException("PNG writer is unavailable");
+        }
+        return output.toByteArray();
     }
 }

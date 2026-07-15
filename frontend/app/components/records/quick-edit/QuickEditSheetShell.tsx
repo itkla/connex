@@ -17,6 +17,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Label } from '@/components/ui/label';
+import { isManagedImageFile, MANAGED_IMAGE_ACCEPT } from '@/app/lib/managed-image';
 import { cn } from '@/lib/utils';
 
 export const EASE_OUT: [number, number, number, number] = [0.23, 1, 0.32, 1];
@@ -199,9 +200,13 @@ export function QuickEditMediaUpload({ id, label, shape, file, existingUrl, fall
             <input
                 id={id}
                 type="file"
-                accept="image/*"
+                accept={MANAGED_IMAGE_ACCEPT}
                 aria-label={label}
-                onChange={(e) => onSelect(e.target.files?.[0] ?? null)}
+                onChange={(event) => {
+                    const selectedFile = event.currentTarget.files?.[0];
+                    event.currentTarget.value = '';
+                    if (selectedFile && isManagedImageFile(selectedFile)) onSelect(selectedFile);
+                }}
                 className="sr-only"
             />
         </label>

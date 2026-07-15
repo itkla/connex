@@ -175,6 +175,27 @@ class PersonMapperTest extends AbstractMapperTest {
         assertNull(found.getCompany());
     }
 
+    @Test
+    void genericUpdateCannotReplaceManagedImageAndCasRejectsStaleReplacement() {
+        Person person = newPerson(newCompany());
+        String first = "/api/persons/" + person.getId()
+            + "/profile-picture/550e8400-e29b-41d4-a716-446655440000.png";
+        String second = "/api/persons/" + person.getId()
+            + "/profile-picture/550e8400-e29b-41d4-a716-446655440001.png";
+        assertEquals(1, personMapper.updateImageUrlIfCurrent(
+            workspace.getId(), person.getId(), null, first));
+
+        person.setImageUrl("https://attacker.example/image.png");
+        personMapper.update(person);
+
+        assertEquals(first,
+            personMapper.getPersonById(workspace.getId(), person.getId()).getImageUrl());
+        assertEquals(0, personMapper.updateImageUrlIfCurrent(
+            workspace.getId(), person.getId(), null, second));
+        assertEquals(1, personMapper.updateImageUrlIfCurrent(
+            workspace.getId(), person.getId(), first, second));
+    }
+
     /**
      * Deletes a person and checks if the person is removed.
      */

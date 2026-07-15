@@ -25,14 +25,14 @@ import type {
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { isManagedImageFile, MANAGED_IMAGE_ACCEPT } from '@/app/lib/managed-image';
 import { cn } from '@/lib/utils';
-
-const CARD_IMAGE_ACCEPT = 'image/jpeg,image/png,image/webp';
 
 type ConfidenceField = 'name' | 'email' | 'phone' | 'title' | 'company';
 
 type BusinessCardCaptureProps = {
     available: boolean;
+    scanAvailable: boolean;
     file: File | null;
     previewUrl: string | null;
     result: BusinessCardScanResult | null;
@@ -81,6 +81,7 @@ function confidenceItems(result: BusinessCardScanResult): Array<{ field: Confide
 
 export function BusinessCardCapture({
     available,
+    scanAvailable,
     file,
     previewUrl,
     result,
@@ -104,7 +105,7 @@ export function BusinessCardCapture({
     const handleFileChange = (event: ChangeEvent<HTMLInputElement>) => {
         const selectedFile = event.currentTarget.files?.[0];
         event.currentTarget.value = '';
-        if (selectedFile) onFileSelected(selectedFile);
+        if (selectedFile && isManagedImageFile(selectedFile)) onFileSelected(selectedFile);
     };
 
     const errorMessage = (kind: BusinessCardRequestErrorKind) => {
@@ -205,7 +206,7 @@ export function BusinessCardCapture({
                     ref={cameraInputRef}
                     id={cameraInputId}
                     type="file"
-                    accept={CARD_IMAGE_ACCEPT}
+                    accept={MANAGED_IMAGE_ACCEPT}
                     capture="environment"
                     onChange={handleFileChange}
                     aria-label={file ? t('scanAnotherCard') : t('scanCard')}
@@ -216,7 +217,7 @@ export function BusinessCardCapture({
                     ref={uploadInputRef}
                     id={uploadInputId}
                     type="file"
-                    accept={CARD_IMAGE_ACCEPT}
+                    accept={MANAGED_IMAGE_ACCEPT}
                     onChange={handleFileChange}
                     aria-label={file ? t('chooseAnotherCard') : t('uploadCard')}
                     className="sr-only"
@@ -249,7 +250,7 @@ export function BusinessCardCapture({
                             <span className={cn(requestError ? 'text-destructive' : 'text-muted-foreground')}>
                                 {status === 'scanning' && t('cardScanning')}
                                 {status === 'ready' && t('cardScanReady')}
-                                {status === 'manual' && t('cardManualFallback')}
+                                {status === 'manual' && t(scanAvailable ? 'cardManualFallback' : 'cardManualOnly')}
                                 {status === 'error' && requestError && errorMessage(requestError)}
                             </span>
                         </div>
@@ -282,7 +283,7 @@ export function BusinessCardCapture({
                 </Button>
             )}
 
-            {(status === 'manual' || status === 'error') && file && (
+            {scanAvailable && (status === 'manual' || status === 'error') && file && (
                 <Button type="button" variant="ghost" size="xs" className="w-fit" disabled={disabled} onClick={onRetryScan}>
                     <ArrowPathIcon data-icon="inline-start" />
                     {t('retryCardScan')}

@@ -1,61 +1,67 @@
 package ooo.klae.connex.backend.storage;
 
+import java.awt.image.BufferedImage;
+import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
-import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
+import java.util.Iterator;
 import java.util.Locale;
+import java.util.Set;
+import java.util.concurrent.Semaphore;
+
+import javax.imageio.ImageIO;
+import javax.imageio.ImageReader;
+import javax.imageio.stream.ImageInputStream;
 
 import org.springframework.stereotype.Component;
 
-import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ServiceUnavailableException;
 import ooo.klae.connex.backend.exceptions.UnsupportedUploadMediaTypeException;
 
 /**
- * Signature and pixel-bound validation for inline managed raster images.
+ * Fully decodes bounded, single-frame managed raster image uploads.
  */
 @Component
-@RequiredArgsConstructor
 public class ImageUploadValidator {
     private static final byte[] PNG_SIGNATURE = {
         (byte) 0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a
     };
+    private static final Set<String> GENERIC_CONTENT_TYPES = Set.of("", "application/octet-stream");
 
     private final ObjectStorageProperties properties;
     private final UploadPolicy uploadPolicy;
+    private final Semaphore decodePermits;
+
+    public ImageUploadValidator(ObjectStorageProperties properties, UploadPolicy uploadPolicy) {
+        this.properties = properties;
+        this.uploadPolicy = uploadPolicy;
+        this.decodePermits = new Semaphore(properties.getMaxConcurrentImageDecodes(), true);
+        ImageIO.setUseCache(false);
+    }
 
     public ValidatedImage validate(UploadSource source) {
         uploadPolicy.validateLength(source.contentLength());
         byte[] bytes = read(source);
-        ImageDimensions dimensions;
-        String contentType;
-        String extension;
-        if (isPng(bytes)) {
-            dimensions = pngDimensions(bytes);
-            contentType = "image/png";
-            extension = "png";
-        } else if (isJpeg(bytes)) {
-            dimensions = jpegDimensions(bytes);
-            contentType = "image/jpeg";
-            extension = "jpg";
-        } else if (isWebp(bytes)) {
-            dimensions = webpDimensions(bytes);
-            contentType = "image/webp";
-            extension = "webp";
-        } else {
-            throw new UnsupportedUploadMediaTypeException("Only JPEG, PNG, or WebP images are allowed");
+        ImageFormat format = detect(bytes);
+        validateDeclaredContentType(source.contentType(), format.contentType());
+        if (!decodePermits.tryAcquire()) {
+            throw new ServiceUnavailableException("Image validation is busy; retry shortly");
         }
-        validateDeclaredContentType(source.contentType(), contentType);
-        validateDimensions(dimensions);
-        return new ValidatedImage(contentType, extension);
+        try {
+            decode(bytes);
+        } finally {
+            decodePermits.release();
+        }
+        return new ValidatedImage(bytes, format.contentType(), format.extension());
     }
 
     private byte[] read(UploadSource source) {
+        int expected = Math.toIntExact(source.contentLength());
         try (InputStream input = source.openStream()) {
-            byte[] bytes = input.readAllBytes();
-            if (bytes.length != source.contentLength()) {
+            byte[] bytes = input.readNBytes(expected + 1);
+            if (bytes.length != expected || input.read() != -1) {
                 throw new BadRequestException("Uploaded image length is invalid");
             }
             return bytes;
@@ -64,178 +70,136 @@ public class ImageUploadValidator {
         }
     }
 
-    private void validateDeclaredContentType(String declared, String detected) {
-        if (declared == null || declared.isBlank()) {
+    private static ImageFormat detect(byte[] bytes) {
+        if (startsWith(bytes, PNG_SIGNATURE)) {
+            return ImageFormat.PNG;
+        }
+        if (bytes.length >= 3
+                && Byte.toUnsignedInt(bytes[0]) == 0xff
+                && Byte.toUnsignedInt(bytes[1]) == 0xd8
+                && Byte.toUnsignedInt(bytes[2]) == 0xff) {
+            return ImageFormat.JPEG;
+        }
+        if (bytes.length >= 12 && ascii(bytes, 0, "RIFF") && ascii(bytes, 8, "WEBP")) {
+            return ImageFormat.WEBP;
+        }
+        throw new UnsupportedUploadMediaTypeException("Only JPEG, PNG, or WebP images are allowed");
+    }
+
+    private static void validateDeclaredContentType(String declared, String detected) {
+        String normalized = declared == null
+            ? ""
+            : declared.split(";", 2)[0].trim().toLowerCase(Locale.ROOT);
+        if (GENERIC_CONTENT_TYPES.contains(normalized)) {
             return;
         }
-        String normalized = declared.split(";", 2)[0].trim().toLowerCase(Locale.ROOT);
+        if (normalized.equals("image/jpg")) {
+            normalized = "image/jpeg";
+        }
         if (!normalized.equals(detected)) {
-            throw new UnsupportedUploadMediaTypeException("Image content does not match its declared media type");
+            throw new UnsupportedUploadMediaTypeException(
+                "Image content does not match its declared media type");
         }
     }
 
-    private void validateDimensions(ImageDimensions dimensions) {
-        if (dimensions.width() <= 0 || dimensions.height() <= 0
-                || dimensions.width() > properties.getMaxImagePixels() / dimensions.height()) {
+    private void decode(byte[] bytes) {
+        try (ImageInputStream input = ImageIO.createImageInputStream(new ByteArrayInputStream(bytes))) {
+            if (input == null) {
+                throw malformed();
+            }
+            Iterator<ImageReader> readers = ImageIO.getImageReaders(input);
+            if (!readers.hasNext()) {
+                throw malformed();
+            }
+            ImageReader reader = readers.next();
+            try {
+                reader.setInput(input, false, true);
+                int width = reader.getWidth(0);
+                int height = reader.getHeight(0);
+                validateDimensions(width, height);
+                if (reader.getNumImages(true) != 1) {
+                    throw new UnsupportedUploadMediaTypeException(
+                        "Animated or multi-frame images are not supported");
+                }
+                BufferedImage decoded = reader.read(0);
+                if (decoded == null || decoded.getWidth() != width || decoded.getHeight() != height) {
+                    throw malformed();
+                }
+            } finally {
+                reader.dispose();
+            }
+        } catch (BadRequestException | UnsupportedUploadMediaTypeException exception) {
+            throw exception;
+        } catch (IOException | RuntimeException exception) {
+            throw malformed();
+        }
+    }
+
+    private void validateDimensions(int width, int height) {
+        long pixels = (long) width * height;
+        if (width <= 0 || height <= 0 || pixels > properties.getMaxImagePixels()) {
             throw new BadRequestException("Uploaded image dimensions are invalid or too large");
         }
     }
 
-    private static boolean isPng(byte[] bytes) {
-        return bytes.length >= 33
-            && Arrays.equals(Arrays.copyOf(bytes, PNG_SIGNATURE.length), PNG_SIGNATURE)
-            && readInt32(bytes, 8) == 13
-            && asciiEquals(bytes, 12, "IHDR");
+    private static boolean startsWith(byte[] bytes, byte[] expected) {
+        return bytes.length >= expected.length
+            && Arrays.equals(Arrays.copyOf(bytes, expected.length), expected);
     }
 
-    private static ImageDimensions pngDimensions(byte[] bytes) {
-        if (containsAscii(bytes, "acTL")) {
-            throw new UnsupportedUploadMediaTypeException("Animated images are not supported");
-        }
-        return new ImageDimensions(readInt32(bytes, 16), readInt32(bytes, 20));
-    }
-
-    private static boolean isJpeg(byte[] bytes) {
-        return bytes.length >= 4 && unsigned(bytes[0]) == 0xff && unsigned(bytes[1]) == 0xd8;
-    }
-
-    private static ImageDimensions jpegDimensions(byte[] bytes) {
-        int offset = 2;
-        while (offset + 3 < bytes.length) {
-            while (offset < bytes.length && unsigned(bytes[offset]) != 0xff) {
-                offset++;
-            }
-            while (offset < bytes.length && unsigned(bytes[offset]) == 0xff) {
-                offset++;
-            }
-            if (offset >= bytes.length) {
-                break;
-            }
-            int marker = unsigned(bytes[offset++]);
-            if (marker == 0xd8 || marker == 0xd9) {
-                continue;
-            }
-            if (marker == 0xda || offset + 1 >= bytes.length) {
-                break;
-            }
-            int segmentLength = readUInt16(bytes, offset);
-            if (segmentLength < 2 || offset + segmentLength > bytes.length) {
-                break;
-            }
-            if (isStartOfFrame(marker) && segmentLength >= 7) {
-                return new ImageDimensions(
-                    readUInt16(bytes, offset + 5),
-                    readUInt16(bytes, offset + 3)
-                );
-            }
-            offset += segmentLength;
-        }
-        throw new BadRequestException("JPEG dimensions could not be read");
-    }
-
-    private static boolean isStartOfFrame(int marker) {
-        return marker >= 0xc0 && marker <= 0xcf
-            && marker != 0xc4 && marker != 0xc8 && marker != 0xcc;
-    }
-
-    private static boolean isWebp(byte[] bytes) {
-        return bytes.length >= 20
-            && asciiEquals(bytes, 0, "RIFF")
-            && asciiEquals(bytes, 8, "WEBP")
-            && Integer.toUnsignedLong(readInt32LittleEndian(bytes, 4)) + 8L <= bytes.length;
-    }
-
-    private static ImageDimensions webpDimensions(byte[] bytes) {
-        if (bytes.length >= 30 && asciiEquals(bytes, 12, "VP8X")) {
-            if ((unsigned(bytes[20]) & 0x02) != 0) {
-                throw new UnsupportedUploadMediaTypeException("Animated images are not supported");
-            }
-            return new ImageDimensions(1 + readUInt24(bytes, 24), 1 + readUInt24(bytes, 27));
-        }
-        if (asciiEquals(bytes, 12, "VP8L") && bytes.length >= 25 && unsigned(bytes[20]) == 0x2f) {
-            int b1 = unsigned(bytes[21]);
-            int b2 = unsigned(bytes[22]);
-            int b3 = unsigned(bytes[23]);
-            int b4 = unsigned(bytes[24]);
-            int width = 1 + b1 + ((b2 & 0x3f) << 8);
-            int height = 1 + ((b2 & 0xc0) >> 6) + (b3 << 2) + ((b4 & 0x0f) << 10);
-            return new ImageDimensions(width, height);
-        }
-        if (asciiEquals(bytes, 12, "VP8 ") && bytes.length >= 30
-                && unsigned(bytes[23]) == 0x9d && unsigned(bytes[24]) == 0x01 && unsigned(bytes[25]) == 0x2a) {
-            int width = readUInt16LittleEndian(bytes, 26) & 0x3fff;
-            int height = readUInt16LittleEndian(bytes, 28) & 0x3fff;
-            return new ImageDimensions(width, height);
-        }
-        throw new BadRequestException("WebP dimensions could not be read");
-    }
-
-    private static int readInt32(byte[] bytes, int offset) {
-        return (unsigned(bytes[offset]) << 24)
-            | (unsigned(bytes[offset + 1]) << 16)
-            | (unsigned(bytes[offset + 2]) << 8)
-            | unsigned(bytes[offset + 3]);
-    }
-
-    private static int readUInt24(byte[] bytes, int offset) {
-        return unsigned(bytes[offset])
-            | (unsigned(bytes[offset + 1]) << 8)
-            | (unsigned(bytes[offset + 2]) << 16);
-    }
-
-    private static int readUInt16(byte[] bytes, int offset) {
-        return (unsigned(bytes[offset]) << 8) | unsigned(bytes[offset + 1]);
-    }
-
-    private static int readUInt16LittleEndian(byte[] bytes, int offset) {
-        return unsigned(bytes[offset]) | (unsigned(bytes[offset + 1]) << 8);
-    }
-
-    private static int readInt32LittleEndian(byte[] bytes, int offset) {
-        return unsigned(bytes[offset])
-            | (unsigned(bytes[offset + 1]) << 8)
-            | (unsigned(bytes[offset + 2]) << 16)
-            | (unsigned(bytes[offset + 3]) << 24);
-    }
-
-    private static int unsigned(byte value) {
-        return Byte.toUnsignedInt(value);
-    }
-
-    private static boolean asciiEquals(byte[] bytes, int offset, String value) {
-        byte[] expected = value.getBytes(StandardCharsets.US_ASCII);
-        if (offset < 0 || offset + expected.length > bytes.length) {
+    private static boolean ascii(byte[] bytes, int offset, String value) {
+        if (offset < 0 || offset + value.length() > bytes.length) {
             return false;
         }
-        for (int index = 0; index < expected.length; index++) {
-            if (bytes[offset + index] != expected[index]) {
+        for (int index = 0; index < value.length(); index++) {
+            if (bytes[offset + index] != value.charAt(index)) {
                 return false;
             }
         }
         return true;
     }
 
-    private static boolean containsAscii(byte[] bytes, String value) {
-        byte[] expected = value.getBytes(StandardCharsets.US_ASCII);
-        outer:
-        for (int offset = 0; offset <= bytes.length - expected.length; offset++) {
-            for (int index = 0; index < expected.length; index++) {
-                if (bytes[offset + index] != expected[index]) {
-                    continue outer;
-                }
-            }
-            return true;
+    private static BadRequestException malformed() {
+        return new BadRequestException("Uploaded image could not be safely decoded");
+    }
+
+    private enum ImageFormat {
+        JPEG("image/jpeg", "jpg"),
+        PNG("image/png", "png"),
+        WEBP("image/webp", "webp");
+
+        private final String contentType;
+        private final String extension;
+
+        ImageFormat(String contentType, String extension) {
+            this.contentType = contentType;
+            this.extension = extension;
         }
-        return false;
+
+        String contentType() {
+            return contentType;
+        }
+
+        String extension() {
+            return extension;
+        }
     }
 
     /**
-     * Trusted detected image metadata.
+     * Trusted image bytes and detected metadata.
      *
+     * @param content fully decoded original bytes
      * @param contentType detected media type
      * @param extension canonical extension without a leading dot
      */
-    public record ValidatedImage(String contentType, String extension) {}
+    public record ValidatedImage(byte[] content, String contentType, String extension) {
+        public ValidatedImage {
+            content = content.clone();
+        }
 
-    private record ImageDimensions(int width, int height) {}
+        @Override
+        public byte[] content() {
+            return content.clone();
+        }
+    }
 }

@@ -23,6 +23,7 @@ import { initials } from '@/app/lib/utils';
 import { isFieldError } from '@/app/lib/api';
 import { useFieldErrors } from '@/app/hooks/useFieldErrors';
 import { useCompanySearch } from '@/app/hooks/useCompanySearch';
+import { isManagedImageFile, MANAGED_IMAGE_ACCEPT } from '@/app/lib/managed-image';
 import { toastError } from '@/app/lib/toast';
 import { DialogStatusCover, resolveDialogStatus, fieldInputClass, fieldErrorClass, fieldLeadIconClass } from '@/components/ui/dialog-status-cover';
 import {
@@ -187,7 +188,8 @@ export function NewContactForm({
 
     const handleImageChange = (e: ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
-        if (!file) return;
+        e.target.value = '';
+        if (!file || !isManagedImageFile(file)) return;
         if (imagePreview) URL.revokeObjectURL(imagePreview);
         setImagePreview(URL.createObjectURL(file));
         setImageFile(file);
@@ -231,7 +233,7 @@ export function NewContactForm({
                         <input
                             id="imageUrl"
                             type="file"
-                            accept="image/*"
+                            accept={MANAGED_IMAGE_ACCEPT}
                             onChange={handleImageChange}
                             className="sr-only"
                         />
@@ -253,6 +255,7 @@ export function NewContactForm({
                 >
                     <BusinessCardCapture
                         available={businessCard.available}
+                        scanAvailable={businessCard.scanAvailable}
                         file={businessCard.file}
                         previewUrl={businessCard.previewUrl}
                         result={businessCard.result}

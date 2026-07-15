@@ -1926,6 +1926,7 @@ export type InstanceCapabilities = {
     socialLogin: { google: boolean; microsoft: boolean };
     mailManaged: boolean;
     businessCardScanning: boolean;
+    businessCardImport: boolean;
 };
 
 export type SsoProtocol = "oidc" | "saml";

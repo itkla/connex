@@ -28,6 +28,7 @@ import ooo.klae.connex.backend.dto.PageResponse;
 import ooo.klae.connex.backend.dto.SegmentDefinition;
 import ooo.klae.connex.backend.businesscard.BusinessCardTextNormalizer;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
+import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.exceptions.DuplicateResourceException;
 import ooo.klae.connex.backend.storage.ManagedObjectService;
@@ -360,19 +361,17 @@ public class CompanyService {
         Company before = requireOwnedCompany(workspaceId, id);
         company.setId(id);
         company.setWorkspaceId(workspaceId);
+        company.setLogoUrl(before.getLogoUrl());
         assertUniqueWebsite(company);
         int updated = companyMapper.update(company);
-        if (!Objects.equals(before.getLogoUrl(), company.getLogoUrl())) {
-            managedObjectService.deleteCompanyImageAfterCommit(
-                before.getWorkspaceId(), id, before.getLogoUrl());
-        }
-        auditService.record("company.update", "company", id, company.getName(),
-            "Updated company " + company.getName(),
-            auditService.diff(before, company, AUDIT_FIELDS));
+        Company after = requireOwnedCompany(workspaceId, id);
+        auditService.record("company.update", "company", id, after.getName(),
+            "Updated company " + after.getName(),
+            auditService.diff(before, after, AUDIT_FIELDS));
         if (updated > 0) {
             ruleTriggers.publish(workspaceId, "company", id, "company.updated");
         }
-        return company;
+        return after;
     }
 
     @Transactional
@@ -382,7 +381,11 @@ public class CompanyService {
         Company before = requireOwnedCompany(workspaceId, id);
         StoredImage stored = managedObjectService.storeCompanyImage(workspaceId, id, source);
         managedObjectService.compensateCompanyImageOnRollback(workspaceId, id, stored.url());
-        companyMapper.updateLogoUrl(workspaceId, id, stored.url());
+        int updated = companyMapper.updateLogoUrlIfCurrent(
+            workspaceId, id, before.getLogoUrl(), stored.url());
+        if (updated != 1) {
+            throw new ConflictException("Company logo changed while the image was uploading; retry");
+        }
         managedObjectService.deleteCompanyImageAfterCommit(
             before.getWorkspaceId(), id, before.getLogoUrl());
         Company after = requireOwnedCompany(workspaceId, id);
@@ -406,6 +409,9 @@ public class CompanyService {
     @RequirePermission(Permission.COMPANY_DELETE)
     public void deleteCompany(int id) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
+        if (companyMapper.lockById(workspaceId, id) == null) {
+            throw new ResourceNotFoundException("Company not found with id: " + id);
+        }
         Company before = requireOwnedCompany(workspaceId, id);
         managedObjectService.deleteCompanyImageAfterCommit(
             before.getWorkspaceId(), id, before.getLogoUrl());

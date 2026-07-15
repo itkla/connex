@@ -1,13 +1,13 @@
 import io
 import json
 import math
-import os
 from collections.abc import Mapping, Sequence
 from numbers import Real
-from pathlib import Path
 from typing import Protocol
 
 from .config import ServiceConfig
+from .models import model_paths, models_ready
+from .platform_support import require_supported_cpu
 
 
 class OcrEngine(Protocol):
@@ -33,7 +33,8 @@ class PaddleEngine:
         "image/webp": "WEBP",
     }
 
-    def __init__(self, config: ServiceConfig, allow_download: bool = False) -> None:
+    def __init__(self, config: ServiceConfig) -> None:
+        require_supported_cpu()
         from paddleocr import PaddleOCR
 
         self._config = config
@@ -48,14 +49,11 @@ class PaddleEngine:
             "device": "cpu",
             "cpu_threads": 2,
         }
-        model_paths = _model_paths()
-        if not allow_download:
-            if any(not path.is_dir() for path in model_paths.values()):
-                raise RuntimeError("Pre-fetched OCR models are unavailable")
-            arguments.update({argument: str(path) for argument, path in model_paths.items()})
+        paths = model_paths()
+        if not models_ready(paths):
+            raise RuntimeError("Pre-fetched OCR models are unavailable")
+        arguments.update({argument: str(path) for argument, path in paths.items()})
         self._ocr = PaddleOCR(**arguments)
-        if allow_download and any(not path.is_dir() for path in model_paths.values()):
-            raise RuntimeError("OCR model prefetch did not populate the locked cache")
         self._ready = True
 
     @property
@@ -132,21 +130,6 @@ def _extract_lines(results: object) -> list[dict[str, object]]:
             if len(lines) > 256:
                 raise RuntimeError("OCR result contains too many lines")
     return lines
-
-
-def _model_paths() -> dict[str, Path]:
-    root = Path(os.environ.get(
-        "CONNEX_OCR_MODEL_ROOT",
-        str(Path.home() / ".paddlex" / "official_models"),
-    ))
-    return {
-        "doc_orientation_classify_model_dir": root / "PP-LCNet_x1_0_doc_ori",
-        "textline_orientation_model_dir": root / "PP-LCNet_x0_25_textline_ori",
-        "text_detection_model_dir": root / "PP-OCRv6_small_det",
-        "text_recognition_model_dir": root / "PP-OCRv6_small_rec",
-    }
-
-
 def _result_payload(result: object) -> Mapping[str, object]:
     value = getattr(result, "json", result)
     if callable(value):

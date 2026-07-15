@@ -2,6 +2,8 @@ services:
   ocr:
     build:
       context: ../ocr
+      args:
+        VERSION: ${CONNEX_VERSION:-dev}
     image: ghcr.io/itkla/connex-ocr:${CONNEX_VERSION:-dev}
 
   backend:

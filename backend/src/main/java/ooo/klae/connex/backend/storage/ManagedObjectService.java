@@ -15,6 +15,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
@@ -42,6 +43,7 @@ public class ManagedObjectService {
     private final UploadPolicy uploadPolicy;
     private final ImageUploadValidator imageUploadValidator;
     private final ObjectStorageProperties properties;
+    private final WorkspaceObjectStorageQuotaService quotaService;
     private final Object readinessMonitor = new Object();
     private volatile ReadinessSnapshot readinessSnapshot;
 
@@ -69,48 +71,62 @@ public class ManagedObjectService {
         }
     }
 
+    @Transactional
     public StoredBinary storeAttachment(int workspaceId, UploadSource source) {
+        return storeAttachmentInternal(workspaceId, source);
+    }
+
+    private StoredBinary storeAttachmentInternal(int workspaceId, UploadSource source) {
         ValidatedUpload upload = uploadPolicy.validateGeneric(source);
         String token = token(upload.extension());
         String key = attachmentKey(workspaceId, token);
         String url = ATTACHMENT_URL_PREFIX + token;
-        store(key, source, upload.contentType());
+        storeTenant(workspaceId, key, source, upload.contentType());
         return new StoredBinary(url, upload.fileName(), upload.contentType(), source.contentLength());
     }
 
+    @Transactional
     public StoredBinary storeAttachment(
             int workspaceId,
             String fileName,
             String contentType,
             byte[] bytes) {
-        return storeAttachment(workspaceId, UploadSource.from(fileName, contentType, bytes));
+        return storeAttachmentInternal(workspaceId, UploadSource.from(fileName, contentType, bytes));
     }
 
+    @Transactional
     public StoredImage storePersonImage(int workspaceId, int personId, UploadSource source) {
         ValidatedImage image = imageUploadValidator.validate(source);
+        byte[] content = image.content();
+        UploadSource validatedSource = UploadSource.from(source.fileName(), image.contentType(), content);
         String token = token(image.extension());
         String key = personImageKey(workspaceId, personId, token);
         String url = personImageUrl(personId, token);
-        store(key, source, image.contentType());
-        return new StoredImage(url, source.contentLength(), image.contentType());
+        storeTenant(workspaceId, key, validatedSource, image.contentType());
+        return new StoredImage(url, content.length, image.contentType());
     }
 
+    @Transactional
     public StoredImage storeCompanyImage(int workspaceId, int companyId, UploadSource source) {
         ValidatedImage image = imageUploadValidator.validate(source);
+        byte[] content = image.content();
+        UploadSource validatedSource = UploadSource.from(source.fileName(), image.contentType(), content);
         String token = token(image.extension());
         String key = companyImageKey(workspaceId, companyId, token);
         String url = companyImageUrl(companyId, token);
-        store(key, source, image.contentType());
-        return new StoredImage(url, source.contentLength(), image.contentType());
+        storeTenant(workspaceId, key, validatedSource, image.contentType());
+        return new StoredImage(url, content.length, image.contentType());
     }
 
     public StoredImage storeUserImage(int userId, UploadSource source) {
         ValidatedImage image = imageUploadValidator.validate(source);
+        byte[] content = image.content();
+        UploadSource validatedSource = UploadSource.from(source.fileName(), image.contentType(), content);
         String token = token(image.extension());
         String key = userImageKey(userId, token);
         String url = userImageUrl(userId, token);
-        store(key, source, image.contentType());
-        return new StoredImage(url, source.contentLength(), image.contentType());
+        store(key, validatedSource, image.contentType());
+        return new StoredImage(url, content.length, image.contentType());
     }
 
     public ManagedContent openAttachment(int workspaceId, Attachment attachment) {
@@ -198,6 +214,11 @@ public class ManagedObjectService {
         } catch (ObjectStorageException exception) {
             throw new ServiceUnavailableException("Private object storage is unavailable");
         }
+    }
+
+    private void storeTenant(int workspaceId, String key, UploadSource source, String contentType) {
+        quotaService.reserve(workspaceId, key, source.contentLength());
+        store(key, source, contentType);
     }
 
     private StoredObject get(String key) {

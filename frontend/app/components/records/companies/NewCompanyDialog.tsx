@@ -28,6 +28,7 @@ import {
 import { ImagePlusIcon, Loader2Icon } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { useFieldErrors } from '@/app/hooks/useFieldErrors';
+import { isManagedImageFile, MANAGED_IMAGE_ACCEPT } from '@/app/lib/managed-image';
 
 const inputBase = 'w-full rounded-lg bg-muted py-2 text-sm text-foreground placeholder:text-muted-foreground outline-none ring-1 ring-border transition focus:ring-2 focus:ring-brand';
 const inputError = 'ring-2 ring-destructive focus:ring-destructive';
@@ -134,7 +135,7 @@ export default function NewCompanyDialog({
     }, [logoPreview]);
 
     const applyFile = (file: File | undefined | null) => {
-        if (!file || !file.type.startsWith('image/')) return;
+        if (!file || !isManagedImageFile(file)) return;
         if (logoPreview) URL.revokeObjectURL(logoPreview);
         setLogoPreview(URL.createObjectURL(file));
         setLogoFile(file);
@@ -324,7 +325,7 @@ export default function NewCompanyDialog({
                             <input
                                 id="company-logo"
                                 type="file"
-                                accept="image/*"
+                                accept={MANAGED_IMAGE_ACCEPT}
                                 onChange={handleLogoChange}
                                 className="sr-only"
                             />
@@ -639,7 +640,7 @@ export function NewCompanyForm({
     }, [logoPreview]);
 
     const applyFile = (file: File | undefined | null) => {
-        if (!file || !file.type.startsWith('image/')) return;
+        if (!file || !isManagedImageFile(file)) return;
         if (logoPreview) URL.revokeObjectURL(logoPreview);
         setLogoPreview(URL.createObjectURL(file));
         setLogoFile(file);
@@ -727,7 +728,7 @@ export function NewCompanyForm({
                         <input
                             id="company-logo"
                             type="file"
-                            accept="image/*"
+                            accept={MANAGED_IMAGE_ACCEPT}
                             onChange={handleLogoChange}
                             className="sr-only"
                         />
@@ -922,4 +923,3 @@ export function NewCompanyForm({
         </>
     );
 }
-

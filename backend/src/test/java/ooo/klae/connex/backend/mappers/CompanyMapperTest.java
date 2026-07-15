@@ -273,6 +273,25 @@ class CompanyMapperTest extends AbstractMapperTest {
         assertEquals("+1-555-9999", found.getPhone());
     }
 
+    @Test
+    void genericUpdateCannotReplaceManagedLogoAndCasRejectsStaleReplacement() {
+        Company company = newCompany();
+        String first = "/api/companies/" + company.getId() + "/logo/550e8400-e29b-41d4-a716-446655440000.png";
+        String second = "/api/companies/" + company.getId() + "/logo/550e8400-e29b-41d4-a716-446655440001.png";
+        assertEquals(1, companyMapper.updateLogoUrlIfCurrent(
+            workspace.getId(), company.getId(), null, first));
+
+        company.setLogoUrl("https://attacker.example/logo.png");
+        companyMapper.update(company);
+
+        assertEquals(first,
+            companyMapper.getCompanyById(workspace.getId(), company.getId()).getLogoUrl());
+        assertEquals(0, companyMapper.updateLogoUrlIfCurrent(
+            workspace.getId(), company.getId(), null, second));
+        assertEquals(1, companyMapper.updateLogoUrlIfCurrent(
+            workspace.getId(), company.getId(), first, second));
+    }
+
     /**
      * Deletes a company and checks if the company is removed.
      */

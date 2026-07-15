@@ -19,6 +19,7 @@ import ooo.klae.connex.backend.beans.Tag;
 import ooo.klae.connex.backend.beans.Task;
 import ooo.klae.connex.backend.dto.CustomFieldEntryDto;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
+import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.storage.ManagedObjectService;
 import ooo.klae.connex.backend.storage.ManagedObjectService.ManagedContent;
@@ -186,22 +187,17 @@ public class PersonService {
         validateCompanyVisible(workspaceId, person);
         person.setId(id);
         person.setWorkspaceId(workspaceId);
-        if (person.getImageUrl() == null) {
-            person.setImageUrl(before.getImageUrl());
-        }
+        person.setImageUrl(before.getImageUrl());
         personMapper.update(person);
-        if (!Objects.equals(before.getImageUrl(), person.getImageUrl())) {
-            managedObjectService.deletePersonImageAfterCommit(
-                before.getWorkspaceId(), id, before.getImageUrl());
-        }
         if (!Objects.equals(companyIdOf(before), companyIdOf(person))) {
             employmentService.recordTransition(workspaceId, id, companyIdOf(person), person.getTitle());
         }
-        auditService.record("person.update", "person", id, person.getName(),
-            "Updated person " + person.getName(),
-            auditService.diff(before, person, AUDIT_FIELDS));
+        Person after = requireOwnedPerson(workspaceId, id);
+        auditService.record("person.update", "person", id, after.getName(),
+            "Updated person " + after.getName(),
+            auditService.diff(before, after, AUDIT_FIELDS));
         ruleTriggers.publish(workspaceId, "person", id, "person.updated");
-        return person;
+        return after;
     }
 
     @Transactional
@@ -211,7 +207,11 @@ public class PersonService {
         Person before = requireOwnedPerson(workspaceId, id);
         StoredImage stored = managedObjectService.storePersonImage(workspaceId, id, source);
         managedObjectService.compensatePersonImageOnRollback(workspaceId, id, stored.url());
-        personMapper.updateImageUrl(workspaceId, id, stored.url());
+        int updated = personMapper.updateImageUrlIfCurrent(
+            workspaceId, id, before.getImageUrl(), stored.url());
+        if (updated != 1) {
+            throw new ConflictException("Contact picture changed while the image was uploading; retry");
+        }
         managedObjectService.deletePersonImageAfterCommit(
             before.getWorkspaceId(), id, before.getImageUrl());
         Person after = requireOwnedPerson(workspaceId, id);
@@ -282,6 +282,9 @@ public class PersonService {
     @RequirePermission(Permission.PERSON_DELETE)
     public void delete(int id) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
+        if (personMapper.lockById(workspaceId, id) == null) {
+            throw new ResourceNotFoundException("Person not found with id: " + id);
+        }
         Person before = requireOwnedPerson(workspaceId, id);
         managedObjectService.deletePersonImageAfterCommit(
             before.getWorkspaceId(), id, before.getImageUrl());

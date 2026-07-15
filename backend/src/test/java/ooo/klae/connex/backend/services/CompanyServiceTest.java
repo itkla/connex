@@ -47,6 +47,23 @@ class CompanyServiceTest extends AbstractServiceTest {
     @Autowired JdbcTemplate jdbcTemplate;
 
     @Test
+    void genericUpdatePreservesAndReturnsCurrentManagedLogo() {
+        Company company = newCompany();
+        String managed = "/api/companies/" + company.getId()
+            + "/logo/550e8400-e29b-41d4-a716-446655440000.png";
+        assertEquals(1, companyMapper.updateLogoUrlIfCurrent(
+            workspace.getId(), company.getId(), null, managed));
+        company.setName("Renamed company");
+        company.setLogoUrl("https://attacker.example/logo.png");
+
+        Company updated = companyService.updateCompany(company.getId(), company);
+
+        assertEquals(managed, updated.getLogoUrl());
+        assertEquals(managed,
+            companyMapper.getCompanyById(workspace.getId(), company.getId()).getLogoUrl());
+    }
+
+    @Test
     void coreMutationsRejectSharedInCompanyBeforeSideEffects() {
         Workspace ownerWorkspace = newWorkspaceInSameOrg();
         Company shared = companyInWorkspace(ownerWorkspace);

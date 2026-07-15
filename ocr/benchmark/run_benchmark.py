@@ -70,10 +70,9 @@ def run_case(case: dict[str, object], images: Path, configuration: dict[str, str
     latency = time.perf_counter() - started
     expected = case["fields"]
     assert isinstance(expected, dict)
-    actual = payload.get("fields", {}) if isinstance(payload, dict) else {}
     scores = {
-        field: status == 200 and equal(field, expected[field], candidate(actual, field))
-        for field in ("name", "email", "phone")
+        field: status == 200 and equal(field, expected[field], candidate(payload, field))
+        for field in ("name", "email", "phone", "title", "company")
     }
     return {
         "id": case["id"],
@@ -96,10 +95,13 @@ def multipart(boundary: str, image: bytes, file_name: str) -> bytes:
     return prefix + image + suffix
 
 
-def candidate(fields: object, name: str) -> object:
-    if not isinstance(fields, dict):
+def candidate(payload: object, name: str) -> object:
+    if not isinstance(payload, dict):
         return None
-    value = fields.get(name)
+    container = payload.get("company") if name == "company" else payload.get("fields", {})
+    if not isinstance(container, dict):
+        return None
+    value = container if name == "company" else container.get(name)
     return value.get("value") if isinstance(value, dict) else None
 
 
@@ -121,7 +123,7 @@ def summarize(outcomes: list[dict[str, object]]) -> dict[str, object]:
     total = len(outcomes)
     accuracy = {
         field: sum(1 for outcome in outcomes if outcome["correct"][field]) / total
-        for field in ("name", "email", "phone")
+        for field in ("name", "email", "phone", "title", "company")
     }
     latencies = sorted(float(outcome["latencySeconds"]) for outcome in outcomes)
     p95 = latencies[max(0, math.ceil(len(latencies) * 0.95) - 1)]
@@ -133,6 +135,8 @@ def summarize(outcomes: list[dict[str, object]]) -> dict[str, object]:
             "email": {"threshold": 0.95, "actual": round(accuracy["email"], 4), "passed": accuracy["email"] >= 0.95},
             "phone": {"threshold": 0.95, "actual": round(accuracy["phone"], 4), "passed": accuracy["phone"] >= 0.95},
             "name": {"threshold": 0.85, "actual": round(accuracy["name"], 4), "passed": accuracy["name"] >= 0.85},
+            "title": {"threshold": 0.8, "actual": round(accuracy["title"], 4), "passed": accuracy["title"] >= 0.8},
+            "company": {"threshold": 0.8, "actual": round(accuracy["company"], 4), "passed": accuracy["company"] >= 0.8},
             "p95Latency": {"thresholdSeconds": 8, "actualSeconds": round(p95, 4), "passed": p95 <= 8},
         },
         "cases": outcomes,

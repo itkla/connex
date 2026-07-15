@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 
-FROM python:3.12-slim-bookworm
+FROM python:3.12-slim-bookworm@sha256:d50fb7611f86d04a3b0471b46d7557818d88983fc3136726336b2a4c657aa30b
 
 ARG VERSION=0.0.0-dev
 LABEL org.opencontainers.image.title="connex-ocr" \
@@ -9,10 +9,13 @@ LABEL org.opencontainers.image.title="connex-ocr" \
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    HOME=/opt/connex-ocr \
-    PADDLE_PDX_MODEL_SOURCE=bos
+    HOME=/opt/connex-ocr
 
 WORKDIR /opt/connex-ocr/app
+
+RUN apt-get update \
+    && apt-get install --no-install-recommends -y libgl1 libglib2.0-0 libgomp1 \
+    && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt ./
 RUN pip install --no-cache-dir --requirement requirements.txt

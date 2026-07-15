@@ -858,8 +858,8 @@ export function deletePasskey(credentialId: string) {
 
 /**
  * Fetches the instance capability flags that gate optional UI: enterprise SSO, consumer social
- * login, instance-managed mail, and business-card scanning. Consolidates the former per-feature
- * `/enabled` endpoints.
+ * login, instance-managed mail, business-card scanning, and source-image import. Consolidates the
+ * former per-feature `/enabled` endpoints.
  * @param init optional fetch overrides
  * @returns the resolved instance capabilities
  */
@@ -876,6 +876,7 @@ export const DEFAULT_CAPABILITIES: Types.InstanceCapabilities = {
     socialLogin: { google: false, microsoft: false },
     mailManaged: false,
     businessCardScanning: false,
+    businessCardImport: false,
 };
 
 export function discoverSso(email: string, init: RequestInit = {}) {

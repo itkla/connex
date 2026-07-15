@@ -18,7 +18,8 @@ ARG VERSION=0.0.0-dev
 LABEL org.opencontainers.image.title="connex-backend" \
       org.opencontainers.image.source="https://github.com/itkla/connex" \
       org.opencontainers.image.version="${VERSION}"
-ENV JAVA_OPTS=""
+ENV JAVA_OPTS="" \
+    CONNEX_OBJECT_STORAGE_FILESYSTEM_ROOT="/var/lib/connex/objects"
 RUN groupadd --system connex \
     && useradd --system --gid connex --home-dir /app connex \
     && install -d -o connex -g connex -m 0700 /var/lib/connex/objects

@@ -130,17 +130,6 @@ public class UserController {
     }
 
     /**
-     * PUT endpoint to update the profile picture of a user.
-     * @param id
-     * @param profilePictureUrl
-     * @return
-     */
-    @PutMapping("/{id}/profile-picture")
-    public UserDto updateProfilePicture(@PathVariable int id, @RequestBody String profilePictureUrl) {
-        return UserDto.from(userService.updateProfilePictureUrl(id, profilePictureUrl));
-    }
-
-    /**
      * Stores and assigns a private profile picture for the current user.
      */
     @PutMapping(value = "/me/profile-picture", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)

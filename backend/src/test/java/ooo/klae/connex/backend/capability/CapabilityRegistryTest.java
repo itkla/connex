@@ -46,18 +46,21 @@ class CapabilityRegistryTest {
         when(socialLoginClientRegistrations.isGoogleEnabled()).thenReturn(true);
         when(mailProperties.isManaged()).thenReturn(true);
         when(businessCardService.isAvailable()).thenReturn(true);
+        when(businessCardService.isImportAvailable()).thenReturn(true);
 
         assertFalse(capabilityRegistry.isAvailable(Capability.SSO));
         assertTrue(capabilityRegistry.isAvailable(Capability.SOCIAL_LOGIN_GOOGLE));
         assertFalse(capabilityRegistry.isAvailable(Capability.SOCIAL_LOGIN_MICROSOFT));
         assertTrue(capabilityRegistry.isAvailable(Capability.MANAGED_MAIL));
         assertTrue(capabilityRegistry.isAvailable(Capability.BUSINESS_CARD_SCANNING));
+        assertTrue(capabilityRegistry.isAvailable(Capability.BUSINESS_CARD_IMPORT));
 
         verify(ssoConnectionService).isInstanceEnabled();
         verify(socialLoginClientRegistrations).isGoogleEnabled();
         verify(socialLoginClientRegistrations).isMicrosoftEnabled();
         verify(mailProperties).isManaged();
         verify(businessCardService).isAvailable();
+        verify(businessCardService).isImportAvailable();
     }
 
     @Test

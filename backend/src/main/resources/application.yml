@@ -137,6 +137,9 @@ connex:
         filesystem-root: ${CONNEX_OBJECT_STORAGE_FILESYSTEM_ROOT:${user.home}/.connex/object-storage}
         max-upload-bytes: ${CONNEX_OBJECT_STORAGE_MAX_UPLOAD_BYTES:26214400}
         max-image-pixels: ${CONNEX_OBJECT_STORAGE_MAX_IMAGE_PIXELS:40000000}
+        max-concurrent-image-decodes: ${CONNEX_OBJECT_STORAGE_MAX_CONCURRENT_IMAGE_DECODES:2}
+        max-workspace-bytes: ${CONNEX_OBJECT_STORAGE_MAX_WORKSPACE_BYTES:10737418240}
+        max-workspace-objects: ${CONNEX_OBJECT_STORAGE_MAX_WORKSPACE_OBJECTS:10000}
         delete-retry-warning-entries: ${CONNEX_OBJECT_STORAGE_DELETE_RETRY_WARNING_ENTRIES:1000}
         delete-retry-batch-size: ${CONNEX_OBJECT_STORAGE_DELETE_RETRY_BATCH_SIZE:100}
         delete-retry-delay-ms: ${CONNEX_OBJECT_STORAGE_DELETE_RETRY_DELAY_MS:60000}
@@ -158,6 +161,9 @@ connex:
         max-width: ${CONNEX_BUSINESS_CARD_IMAGE_MAX_WIDTH:8192}
         max-height: ${CONNEX_BUSINESS_CARD_IMAGE_MAX_HEIGHT:8192}
         max-pixels: ${CONNEX_BUSINESS_CARD_IMAGE_MAX_PIXELS:24000000}
+        max-scans-per-minute: ${CONNEX_BUSINESS_CARD_MAX_SCANS_PER_MINUTE:12}
+        max-imports-per-minute: ${CONNEX_BUSINESS_CARD_MAX_IMPORTS_PER_MINUTE:12}
+        rate-limit-max-keys: ${CONNEX_BUSINESS_CARD_RATE_LIMIT_MAX_KEYS:10000}
     login:
         # Fixed-window failed-attempt throttle on POST /api/auth/login. Once either the
         # per-IP or per-username failure cap is hit within the window, further attempts are

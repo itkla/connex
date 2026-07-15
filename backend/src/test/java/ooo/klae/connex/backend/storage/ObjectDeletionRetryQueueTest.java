@@ -36,6 +36,7 @@ class ObjectDeletionRetryQueueTest {
     @Mock ObjectStorage objectStorage;
     @Mock ObjectDeletionQueueMapper tenantQueueMapper;
     @Mock UserObjectDeletionQueueMapper userQueueMapper;
+    @Mock ObjectDeletionTransactionExecutor transactionExecutor;
     @Mock PlacementRegistry placementRegistry;
     @Mock TenantCatalogResolver tenantCatalogResolver;
     @Mock WorkspaceMapper workspaceMapper;
@@ -47,7 +48,7 @@ class ObjectDeletionRetryQueueTest {
     @BeforeEach
     void setUp() {
         properties = new ObjectStorageProperties();
-        properties.setDeleteRetryBatchSize(2);
+        properties.setDeleteRetryBatchSize(3);
         TenantWorkScope tenantWorkScope = new TenantWorkScope(
             tenantContext, tenantCatalogResolver, workspaceMapper);
         queue = new ObjectDeletionRetryQueue(
@@ -55,6 +56,7 @@ class ObjectDeletionRetryQueueTest {
             properties,
             tenantQueueMapper,
             userQueueMapper,
+            transactionExecutor,
             placementRegistry,
             tenantWorkScope,
             Clock.fixed(Instant.parse("2026-07-14T12:00:00Z"), ZoneOffset.UTC));
@@ -66,21 +68,18 @@ class ObjectDeletionRetryQueueTest {
     }
 
     @Test
-    void persistsFailedTenantDeletionInRequestCatalog() {
+    void persistsTenantDeletionInAnIndependentTransactionInTheRequestCatalog() {
         tenantContext.set(7, 3, 9, "owner", "tenant_catalog");
         AtomicReference<String> catalog = new AtomicReference<>();
-        when(tenantQueueMapper.countPending(7)).thenReturn(1L);
         doAnswer(invocation -> {
             catalog.set(tenantContext.getCatalog());
-            return 1;
-        }).when(tenantQueueMapper).enqueue(anyInt(), any(), any());
-        doThrow(new ObjectStorageException("unavailable"))
-            .when(objectStorage).delete("workspaces/7/attachments/object.pdf");
+            return null;
+        }).when(transactionExecutor).enqueueTenant(anyInt(), any(), any());
 
         queue.enqueueAndProcessTenant(7, "workspaces/7/attachments/object.pdf");
 
         assertEquals("tenant_catalog", catalog.get());
-        verify(tenantQueueMapper).rescheduleByKey(
+        verify(transactionExecutor).processTenant(
             org.mockito.ArgumentMatchers.eq(7),
             org.mockito.ArgumentMatchers.eq("workspaces/7/attachments/object.pdf"),
             any());
@@ -92,18 +91,20 @@ class ObjectDeletionRetryQueueTest {
         AtomicReference<String> catalog = new AtomicReference<>("unset");
         doAnswer(invocation -> {
             catalog.set(tenantContext.getCatalog());
-            return 1;
-        }).when(userQueueMapper).enqueue(any(), any());
+            return null;
+        }).when(transactionExecutor).enqueueUser(any(), any());
 
         queue.enqueueAndProcessUser("users/9/profile-images/object.png");
 
         assertNull(catalog.get());
-        verify(userQueueMapper).deleteByKey("users/9/profile-images/object.png");
+        verify(transactionExecutor).processUser(
+            org.mockito.ArgumentMatchers.eq("users/9/profile-images/object.png"), any());
     }
 
     @Test
-    void retrySweepPinsTenantCatalogAndRemovesSuccessfulTask() {
+    void retrySweepPinsTenantCatalogAndDelegatesEachTask() {
         String key = "workspaces/7/attachments/object.pdf";
+        ObjectDeletionTask task = new ObjectDeletionTask(11, 7, key, 2);
         AtomicReference<String> enumerationCatalog = new AtomicReference<>();
         AtomicReference<String> taskCatalog = new AtomicReference<>();
         when(placementRegistry.activeCatalogs()).thenReturn(List.of("tenant_catalog"));
@@ -113,17 +114,49 @@ class ObjectDeletionRetryQueueTest {
             return List.of(7);
         });
         when(tenantQueueMapper.findDue(org.mockito.ArgumentMatchers.eq(7), any(), anyInt()))
-            .thenAnswer(invocation -> {
-                taskCatalog.set(tenantContext.getCatalog());
-                return List.of(new ObjectDeletionTask(11, 7, key, 2));
-            });
+            .thenReturn(List.of(task));
+        doAnswer(invocation -> {
+            taskCatalog.set(tenantContext.getCatalog());
+            return null;
+        }).when(transactionExecutor).retryTenant(org.mockito.ArgumentMatchers.eq(task), any());
 
         queue.retryPending();
 
         assertEquals("tenant_catalog", enumerationCatalog.get());
         assertEquals("tenant_catalog", taskCatalog.get());
+    }
+
+    @Test
+    void oneFailedRetryDoesNotAbortLaterTasks() {
+        ObjectDeletionTask first = new ObjectDeletionTask(
+            11, 7, "workspaces/7/attachments/first.pdf", 2);
+        ObjectDeletionTask second = new ObjectDeletionTask(
+            12, 7, "workspaces/7/attachments/second.pdf", 2);
+        when(placementRegistry.activeCatalogs()).thenReturn(Collections.singletonList(null));
+        when(userQueueMapper.findDue(any(), anyInt())).thenReturn(List.of());
+        when(tenantQueueMapper.workspaceIdsWithDueTasks(any(), anyInt())).thenReturn(List.of(7));
+        when(tenantQueueMapper.findDue(org.mockito.ArgumentMatchers.eq(7), any(), anyInt()))
+            .thenReturn(List.of(first, second));
+        doThrow(new IllegalStateException("database unavailable"))
+            .when(transactionExecutor).retryTenant(org.mockito.ArgumentMatchers.eq(first), any());
+
+        queue.retryPending();
+
+        verify(transactionExecutor).retryTenant(org.mockito.ArgumentMatchers.eq(second), any());
+    }
+
+    @Test
+    void directTenantFallbackReleasesQuotaAfterPhysicalDeletion() {
+        tenantContext.set(7, 3, 9, "owner", "tenant_catalog");
+        String key = "workspaces/7/attachments/object.pdf";
+        doThrow(new IllegalStateException("database unavailable"))
+            .when(transactionExecutor).enqueueTenant(7, key,
+                java.time.LocalDateTime.of(2026, 7, 14, 12, 0));
+
+        queue.enqueueAndProcessTenant(7, key);
+
         verify(objectStorage).delete(key);
-        verify(tenantQueueMapper).deleteById(7, 11);
+        verify(transactionExecutor).releaseTenantQuota(7, key);
     }
 
     @Test

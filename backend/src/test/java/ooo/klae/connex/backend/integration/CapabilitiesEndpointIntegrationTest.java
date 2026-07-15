@@ -43,7 +43,9 @@ class CapabilitiesEndpointIntegrationTest {
                 .andExpect(jsonPath("$.mailManaged").value(true))
                 .andExpect(jsonPath("$.sso").value(true))
                 .andExpect(jsonPath("$.socialLogin.google").value(false))
-                .andExpect(jsonPath("$.socialLogin.microsoft").value(false));
+                .andExpect(jsonPath("$.socialLogin.microsoft").value(false))
+                .andExpect(jsonPath("$.businessCardScanning").isBoolean())
+                .andExpect(jsonPath("$.businessCardImport").isBoolean());
     }
 
     @Test

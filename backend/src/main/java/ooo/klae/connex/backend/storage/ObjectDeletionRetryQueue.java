@@ -28,6 +28,7 @@ public class ObjectDeletionRetryQueue {
     private final ObjectStorageProperties properties;
     private final ObjectDeletionQueueMapper tenantQueueMapper;
     private final UserObjectDeletionQueueMapper userQueueMapper;
+    private final ObjectDeletionTransactionExecutor transactionExecutor;
     private final PlacementRegistry placementRegistry;
     private final TenantWorkScope tenantWorkScope;
     private final Clock clock;
@@ -46,12 +47,16 @@ public class ObjectDeletionRetryQueue {
         String validKey = ObjectStorageKey.requireValid(key);
         try {
             tenantWorkScope.inWorkspace(workspaceId, () -> {
-                tenantQueueMapper.enqueue(workspaceId, validKey, now());
-                warnTenantBacklog(workspaceId);
-                processTenantByKeyRaw(workspaceId, validKey);
+                try {
+                    transactionExecutor.enqueueTenant(workspaceId, validKey, now());
+                    transactionExecutor.processTenant(workspaceId, validKey, retryAt());
+                } catch (RuntimeException exception) {
+                    log.error("Could not persist a tenant object deletion task; attempting direct cleanup");
+                    deleteTenantWithoutQueue(workspaceId, validKey);
+                }
             });
         } catch (RuntimeException exception) {
-            log.error("Could not persist a tenant object deletion task; attempting direct cleanup");
+            log.error("Could not route tenant object cleanup; operator reconciliation is required");
             deleteWithoutQueue(validKey);
         }
     }
@@ -60,13 +65,17 @@ public class ObjectDeletionRetryQueue {
         String validKey = ObjectStorageKey.requireValid(key);
         try {
             tenantWorkScope.unrouted(() -> {
-                userQueueMapper.enqueue(validKey, now());
-                warnUserBacklog();
-                processUserByKeyRaw(validKey);
+                try {
+                    transactionExecutor.enqueueUser(validKey, now());
+                    transactionExecutor.processUser(validKey, retryAt());
+                } catch (RuntimeException exception) {
+                    log.error("Could not persist a user object deletion task; attempting direct cleanup");
+                    deleteWithoutQueue(validKey);
+                }
                 return null;
             });
         } catch (RuntimeException exception) {
-            log.error("Could not persist a user object deletion task; attempting direct cleanup");
+            log.error("Could not route user object cleanup; operator reconciliation is required");
             deleteWithoutQueue(validKey);
         }
     }
@@ -74,9 +83,8 @@ public class ObjectDeletionRetryQueue {
     public void processTenant(int workspaceId, String key) {
         String validKey = ObjectStorageKey.requireValid(key);
         try {
-            tenantWorkScope.inWorkspace(
-                workspaceId,
-                () -> processTenantByKeyRaw(workspaceId, validKey));
+            tenantWorkScope.inWorkspace(workspaceId,
+                () -> transactionExecutor.processTenant(workspaceId, validKey, retryAt()));
         } catch (RuntimeException exception) {
             log.warn("Deferred tenant object deletion remains queued for workspace {}", workspaceId);
         }
@@ -86,7 +94,7 @@ public class ObjectDeletionRetryQueue {
         String validKey = ObjectStorageKey.requireValid(key);
         try {
             tenantWorkScope.unrouted(() -> {
-                processUserByKeyRaw(validKey);
+                transactionExecutor.processUser(validKey, retryAt());
                 return null;
             });
         } catch (RuntimeException exception) {
@@ -118,7 +126,11 @@ public class ObjectDeletionRetryQueue {
                 List<ObjectDeletionTask> tasks = userQueueMapper.findDue(
                     now(), properties.getDeleteRetryBatchSize());
                 for (ObjectDeletionTask task : tasks) {
-                    retryUserTaskRaw(task);
+                    try {
+                        transactionExecutor.retryUser(task, retryAt());
+                    } catch (RuntimeException exception) {
+                        log.warn("User object deletion task could not be finalized");
+                    }
                 }
                 return null;
             });
@@ -138,50 +150,28 @@ public class ObjectDeletionRetryQueue {
             List<ObjectDeletionTask> tasks = tenantQueueMapper.findDue(
                 workspaceId, current, remaining);
             for (ObjectDeletionTask task : tasks) {
-                retryTenantTaskRaw(task);
+                try {
+                    transactionExecutor.retryTenant(task, retryAt());
+                } catch (RuntimeException exception) {
+                    log.warn("Tenant object deletion task could not be finalized for workspace {}",
+                        task.workspaceId());
+                }
             }
             remaining -= tasks.size();
         }
     }
 
-    private void retryTenantTaskRaw(ObjectDeletionTask task) {
-        try {
-            objectStorage.delete(task.objectKey());
-            tenantQueueMapper.deleteById(task.workspaceId(), task.id());
-        } catch (ObjectStorageException exception) {
-            tenantQueueMapper.reschedule(task.workspaceId(), task.id(), retryAt());
-        } catch (RuntimeException exception) {
-            log.warn("Tenant object deletion task could not be finalized for workspace {}",
-                task.workspaceId());
-        }
-    }
-
-    private void retryUserTaskRaw(ObjectDeletionTask task) {
-        try {
-            objectStorage.delete(task.objectKey());
-            userQueueMapper.deleteById(task.id());
-        } catch (ObjectStorageException exception) {
-            userQueueMapper.reschedule(task.id(), retryAt());
-        } catch (RuntimeException exception) {
-            log.warn("User object deletion task could not be finalized");
-        }
-    }
-
-    private void processTenantByKeyRaw(int workspaceId, String key) {
+    private void deleteTenantWithoutQueue(int workspaceId, String key) {
         try {
             objectStorage.delete(key);
-            tenantQueueMapper.deleteByKey(workspaceId, key);
         } catch (ObjectStorageException exception) {
-            tenantQueueMapper.rescheduleByKey(workspaceId, key, retryAt());
+            log.error("Direct private object cleanup failed; operator reconciliation is required");
+            return;
         }
-    }
-
-    private void processUserByKeyRaw(String key) {
         try {
-            objectStorage.delete(key);
-            userQueueMapper.deleteByKey(key);
-        } catch (ObjectStorageException exception) {
-            userQueueMapper.rescheduleByKey(key, retryAt());
+            transactionExecutor.releaseTenantQuota(workspaceId, key);
+        } catch (RuntimeException exception) {
+            log.error("Direct private object cleanup could not release quota; operator reconciliation is required");
         }
     }
 

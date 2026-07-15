@@ -26,7 +26,8 @@ public class CapabilityRegistry {
             Capability.SOCIAL_LOGIN_GOOGLE, Set.of(),
             Capability.SOCIAL_LOGIN_MICROSOFT, Set.of(),
             Capability.MANAGED_MAIL, Set.of(),
-            Capability.BUSINESS_CARD_SCANNING, Set.of());
+            Capability.BUSINESS_CARD_SCANNING, Set.of(),
+            Capability.BUSINESS_CARD_IMPORT, Set.of());
 
     private final SsoConnectionService ssoConnectionService;
     private final SocialLoginClientRegistrations socialLoginClientRegistrations;
@@ -116,6 +117,7 @@ public class CapabilityRegistry {
             case SOCIAL_LOGIN_MICROSOFT -> socialLoginClientRegistrations.isMicrosoftEnabled();
             case MANAGED_MAIL -> mailProperties.isManaged();
             case BUSINESS_CARD_SCANNING -> businessCardService.isAvailable();
+            case BUSINESS_CARD_IMPORT -> businessCardService.isImportAvailable();
         };
     }
 

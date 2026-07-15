@@ -16,6 +16,7 @@ public interface AttachmentMapper {
     Attachment getById(@Param("workspaceId") int workspaceId, @Param("id") int id);
     boolean exists(@Param("workspaceId") int workspaceId, @Param("id") int id);
     Attachment getByUrl(@Param("workspaceId") int workspaceId, @Param("url") String url);
+    int countUrl(@Param("workspaceId") int workspaceId, @Param("url") String url);
     int countUrlInOtherWorkspaces(@Param("workspaceId") int workspaceId, @Param("url") String url);
     List<Attachment> search(@Param("workspaceId") int workspaceId, @Param("query") String query);
     int insert(Attachment attachment);

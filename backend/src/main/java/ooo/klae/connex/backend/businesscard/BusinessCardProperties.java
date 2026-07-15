@@ -23,6 +23,9 @@ public class BusinessCardProperties {
     private int maxWidth = 8_192;
     private int maxHeight = 8_192;
     private long maxPixels = 24_000_000;
+    private int maxScansPerMinute = 12;
+    private int maxImportsPerMinute = 12;
+    private int rateLimitMaxKeys = 10_000;
 
     public boolean isEnabled() {
         return enabled;
@@ -110,5 +113,36 @@ public class BusinessCardProperties {
 
     public void setMaxPixels(long maxPixels) {
         this.maxPixels = maxPixels;
+    }
+
+    public int getMaxScansPerMinute() {
+        return maxScansPerMinute;
+    }
+
+    public void setMaxScansPerMinute(int maxScansPerMinute) {
+        this.maxScansPerMinute = positive(maxScansPerMinute, "maxScansPerMinute");
+    }
+
+    public int getMaxImportsPerMinute() {
+        return maxImportsPerMinute;
+    }
+
+    public void setMaxImportsPerMinute(int maxImportsPerMinute) {
+        this.maxImportsPerMinute = positive(maxImportsPerMinute, "maxImportsPerMinute");
+    }
+
+    public int getRateLimitMaxKeys() {
+        return rateLimitMaxKeys;
+    }
+
+    public void setRateLimitMaxKeys(int rateLimitMaxKeys) {
+        this.rateLimitMaxKeys = positive(rateLimitMaxKeys, "rateLimitMaxKeys");
+    }
+
+    private static int positive(int value, String name) {
+        if (value <= 0) {
+            throw new IllegalArgumentException(name + " must be positive");
+        }
+        return value;
     }
 }

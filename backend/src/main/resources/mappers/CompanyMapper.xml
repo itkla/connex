@@ -453,14 +453,20 @@
         website = #{website},
         industry = #{industry},
         phone = #{phone},
-        address = #{address},
-        logo_url = #{logoUrl}
+        address = #{address}
     WHERE workspace_id = #{workspaceId} AND id = #{id}
   </update>
 
-  <update id="updateLogoUrl">
+  <select id="lockById" resultType="java.lang.Integer">
+    SELECT id FROM company
+    WHERE workspace_id = #{workspaceId} AND id = #{id}
+    FOR UPDATE
+  </select>
+
+  <update id="updateLogoUrlIfCurrent">
     UPDATE company SET logo_url = #{logoUrl}
     WHERE workspace_id = #{workspaceId} AND id = #{id}
+      AND logo_url &lt;=&gt; #{currentLogoUrl}
   </update>
 
   <delete id="delete">DELETE FROM company WHERE workspace_id = #{workspaceId} AND id = #{id}</delete>

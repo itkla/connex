@@ -49,6 +49,8 @@ Attachments, contact pictures, company logos, user profile pictures, and busines
 
 Metadata replacement and removal must enqueue the old object in the matching durable deletion queue in the same database transaction, then attempt deletion after commit. Tenant-owned keys use `object_deletion_queue`; control-plane user keys use `user_object_deletion_queue`. New-object rollback compensation is best-effort because an ungraceful process exit between the object write and transaction callback can still orphan an object; preserve the operator reconciliation procedure in the deployment guide.
 
+Tenant-owned object admission must reserve exact key and byte usage through `WorkspaceObjectStorageQuotaService` in the metadata transaction. Release that reservation only after physical deletion succeeds; bypassing the ledger makes workspace quotas raceable or permanently inaccurate.
+
 ## Conventions
 
 - **Comments:** Javadoc on classes/methods only. **No inline comments.**

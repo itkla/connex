@@ -153,7 +153,7 @@
     "contactBack": "Back",
     "contactDone": "Done",
     "contactPhotoLabel": "Profile photo",
-    "contactPhotoHint": "Add a profile photo (optional)",
+    "contactPhotoHint": "Add a JPEG, PNG, or WebP profile photo (optional)",
     "contactAddedAnnounce": "{name} added",
     "contactUpdatedAnnounce": "{name} updated",
     "contactRemovedAnnounce": "{name} removed",

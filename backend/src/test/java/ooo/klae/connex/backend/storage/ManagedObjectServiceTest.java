@@ -13,9 +13,14 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
+import java.awt.image.BufferedImage;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicInteger;
+
+import javax.imageio.ImageIO;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -35,6 +40,7 @@ import ooo.klae.connex.backend.storage.ManagedObjectService.StoredBinary;
 class ManagedObjectServiceTest {
     @Mock ObjectStorage objectStorage;
     @Mock ObjectDeletionRetryQueue deletionRetryQueue;
+    @Mock WorkspaceObjectStorageQuotaService quotaService;
 
     private ManagedObjectService service;
 
@@ -48,7 +54,8 @@ class ManagedObjectServiceTest {
             deletionRetryQueue,
             uploadPolicy,
             imageValidator,
-            properties);
+            properties,
+            quotaService);
     }
 
     @Test
@@ -72,6 +79,29 @@ class ManagedObjectServiceTest {
         assertFalse(stored.url().contains("workspaces/17"));
         assertEquals("card.pdf", stored.fileName());
         assertArrayEquals(MessageDigest.getInstance("SHA-256").digest(bytes), checksum.getValue());
+        verify(quotaService).reserve(17, key.getValue(), bytes.length);
+    }
+
+    @Test
+    void storesTheValidatedImageBytesWhenTheOriginalSourceChanges() throws Exception {
+        byte[] valid = png(10, 20);
+        byte[] changed = "not an image".getBytes(StandardCharsets.UTF_8);
+        AtomicInteger opens = new AtomicInteger();
+        UploadSource source = new UploadSource(
+            "contact.png",
+            "image/png",
+            valid.length,
+            () -> new ByteArrayInputStream(opens.getAndIncrement() == 0 ? valid : changed));
+        ArgumentCaptor<UploadSource> storedSource = ArgumentCaptor.forClass(UploadSource.class);
+
+        service.storePersonImage(17, 23, source);
+
+        verify(objectStorage).put(anyString(), storedSource.capture(),
+            org.mockito.ArgumentMatchers.eq("image/png"), any(byte[].class));
+        try (java.io.InputStream input = storedSource.getValue().openStream()) {
+            assertArrayEquals(valid, input.readAllBytes());
+        }
+        assertEquals(1, opens.get());
     }
 
     @Test
@@ -167,5 +197,12 @@ class ManagedObjectServiceTest {
         assertTrue(service.isReady());
 
         verify(objectStorage, times(1)).isReady();
+    }
+
+    private static byte[] png(int width, int height) throws Exception {
+        BufferedImage image = new BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB);
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        assertTrue(ImageIO.write(image, "png", output));
+        return output.toByteArray();
     }
 }

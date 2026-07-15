@@ -35,6 +35,7 @@ class CapabilitiesControllerTest {
         when(capabilityRegistry.isAvailable(Capability.SOCIAL_LOGIN_MICROSOFT)).thenReturn(true);
         when(capabilityRegistry.isAvailable(Capability.MANAGED_MAIL)).thenReturn(false);
         when(capabilityRegistry.isAvailable(Capability.BUSINESS_CARD_SCANNING)).thenReturn(true);
+        when(capabilityRegistry.isAvailable(Capability.BUSINESS_CARD_IMPORT)).thenReturn(true);
 
         mockMvc.perform(get("/api/capabilities"))
                 .andExpect(status().isOk())
@@ -42,6 +43,7 @@ class CapabilitiesControllerTest {
                 .andExpect(jsonPath("$.socialLogin.google").value(false))
                 .andExpect(jsonPath("$.socialLogin.microsoft").value(true))
                 .andExpect(jsonPath("$.mailManaged").value(false))
-                .andExpect(jsonPath("$.businessCardScanning").value(true));
+                .andExpect(jsonPath("$.businessCardScanning").value(true))
+                .andExpect(jsonPath("$.businessCardImport").value(true));
     }
 }

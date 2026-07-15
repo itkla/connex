@@ -35,6 +35,8 @@ import lombok.RequiredArgsConstructor;
 @Service
 @RequiredArgsConstructor
 public class AttachmentService {
+    private static final String MANAGED_URL_PREFIX = "/api/attachments/content/";
+
     private final AttachmentMapper attachmentMapper;
     private final TagMapper tagMapper;
     private final CompanyMapper companyMapper;
@@ -212,7 +214,25 @@ public class AttachmentService {
     @RequirePermission(Permission.ATTACHMENT_CREATE)
     public Attachment create(Attachment attachment) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        return persist(workspaceId, attachment);
+        if (attachment.getUrl() != null && attachment.getUrl().startsWith(MANAGED_URL_PREFIX)) {
+            throw new BadRequestException("Managed attachment references cannot be submitted directly");
+        }
+        return persist(workspaceId, attachment, false);
+    }
+
+    /**
+     * Persists an internally generated managed attachment reference.
+     *
+     * @param attachment trusted managed attachment metadata
+     * @return persisted workspace-scoped attachment
+     */
+    @RequirePermission(Permission.ATTACHMENT_CREATE)
+    public Attachment createManaged(Attachment attachment) {
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        if (attachment.getUrl() == null || !attachment.getUrl().startsWith(MANAGED_URL_PREFIX)) {
+            throw new BadRequestException("Managed attachment reference is invalid");
+        }
+        return persist(workspaceId, attachment, true);
     }
 
     @Transactional
@@ -232,19 +252,20 @@ public class AttachmentService {
         attachment.setContentType(stored.contentType());
         attachment.setSize(stored.size());
         attachment.setUploadedBy(uploader);
-        return persist(workspaceId, attachment);
+        return persist(workspaceId, attachment, true);
     }
 
-    private Attachment persist(int workspaceId, Attachment attachment) {
+    private Attachment persist(int workspaceId, Attachment attachment, boolean managed) {
         attachment.setWorkspaceId(workspaceId);
         attachment.setEntityType(normalizeType(attachment.getEntityType()));
         validateUrl(attachment.getUrl());
-        if (attachmentMapper.countUrlInOtherWorkspaces(workspaceId, attachment.getUrl()) > 0) {
+        if (managed && attachmentMapper.countUrl(workspaceId, attachment.getUrl()) > 0) {
+            throw new BadRequestException("That managed attachment reference is already in use");
+        }
+        if (!managed && attachmentMapper.countUrlInOtherWorkspaces(workspaceId, attachment.getUrl()) > 0) {
             throw new BadRequestException("That attachment url is already in use");
         }
         attachmentMapper.insert(attachment);
-        // Audit from the inserted bean (id populated by the key generator) so a failed
-        // re-fetch can never NPE and break the create it is only meant to observe.
         auditService.record("attachment.create", "attachment", attachment.getId(), attachment.getFileName(),
             "Uploaded attachment " + attachment.getFileName(),
             auditService.diff(null, attachment, AUDIT_FIELDS));
@@ -274,7 +295,9 @@ public class AttachmentService {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         Attachment before = attachmentMapper.getById(workspaceId, id);
         if (before == null) throw new ResourceNotFoundException("Attachment not found with id: " + id);
-        managedObjectService.deleteAttachmentAfterCommit(workspaceId, before.getUrl());
+        if (attachmentMapper.countUrl(workspaceId, before.getUrl()) <= 1) {
+            managedObjectService.deleteAttachmentAfterCommit(workspaceId, before.getUrl());
+        }
         attachmentMapper.delete(workspaceId, id);
         referenceService.deleteReferencesTo(workspaceId, ReferenceService.TYPE_FILE, id);
         auditService.record("attachment.delete", "attachment", id, before.getFileName(),

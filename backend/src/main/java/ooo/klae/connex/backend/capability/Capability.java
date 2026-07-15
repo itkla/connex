@@ -17,5 +17,8 @@ public enum Capability {
     MANAGED_MAIL,
 
     /** Local business-card OCR with durable private card retention. */
-    BUSINESS_CARD_SCANNING
+    BUSINESS_CARD_SCANNING,
+
+    /** Reviewed business-card import with durable private card retention. */
+    BUSINESS_CARD_IMPORT
 }

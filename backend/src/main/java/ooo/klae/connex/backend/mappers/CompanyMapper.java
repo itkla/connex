@@ -79,11 +79,16 @@ public interface CompanyMapper {
     boolean exists(@Param("workspaceId") int workspaceId, @Param("id") int id);
     /** True only when the workspace OWNS the company (excludes records merely shared in); for write scoping. */
     boolean existsOwned(@Param("workspaceId") int workspaceId, @Param("id") int id);
+    Integer lockById(@Param("workspaceId") int workspaceId, @Param("id") int id);
     int insert(Company company);
     /** Bulk-insert companies in one statement (CSV import); generated ids are written back to each bean. */
     int insertBatch(List<Company> companies);
     int update(Company company);
-    int updateLogoUrl(@Param("workspaceId") int workspaceId, @Param("id") int id, @Param("logoUrl") String logoUrl);
+    int updateLogoUrlIfCurrent(
+        @Param("workspaceId") int workspaceId,
+        @Param("id") int id,
+        @Param("currentLogoUrl") String currentLogoUrl,
+        @Param("logoUrl") String logoUrl);
     int delete(@Param("workspaceId") int workspaceId, @Param("id") int id);
 
     int addTag(@Param("workspaceId") int workspaceId, @Param("companyId") int companyId, @Param("tagId") int tagId);

@@ -51,6 +51,7 @@ export function useBusinessCardCapture({
     setPayload: Dispatch<SetStateAction<CreateContactPayload>>;
 }) {
     const [available, setAvailable] = useState(false);
+    const [scanAvailable, setScanAvailable] = useState(false);
     const [canCreateCompany, setCanCreateCompany] = useState(false);
     const [file, setFile] = useState<File | null>(null);
     const [previewUrl, setPreviewUrl] = useState<string | null>(null);
@@ -115,15 +116,17 @@ export function useBusinessCardCapture({
             .then(([capabilities, permissions]) => {
                 if (cancelled) return;
                 setAvailable(
-                    capabilities.businessCardScanning
+                    capabilities.businessCardImport
                     && permissions.includes('PERSON_CREATE')
                     && permissions.includes('ATTACHMENT_CREATE'),
                 );
+                setScanAvailable(capabilities.businessCardScanning);
                 setCanCreateCompany(permissions.includes('COMPANY_CREATE'));
             })
             .catch(() => {
                 if (cancelled) return;
                 setAvailable(false);
+                setScanAvailable(false);
                 setCanCreateCompany(false);
             });
         return () => {
@@ -135,6 +138,7 @@ export function useBusinessCardCapture({
         setPreviousActive(active);
         if (!active) {
             setAvailable(false);
+            setScanAvailable(false);
             setCanCreateCompany(false);
             setFile(null);
             setPreviewUrl(null);
@@ -263,7 +267,16 @@ export function useBusinessCardCapture({
         suggestedCompanyNameRef.current = null;
         setCompanyValidationError(null);
         setImportError(null);
-        void runScan(image);
+        if (scanAvailable) {
+            void runScan(image);
+        } else {
+            scanRequestSequenceRef.current += 1;
+            controllerRef.current?.abort();
+            controllerRef.current = null;
+            setResult(null);
+            setRequestError(null);
+            setStatus('manual');
+        }
     };
 
     const cancelScan = () => {
@@ -369,6 +382,7 @@ export function useBusinessCardCapture({
 
     return {
         available,
+        scanAvailable,
         canCreateCompany,
         file,
         previewUrl,

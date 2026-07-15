@@ -10,7 +10,7 @@
   "AccountProfile": {
     "title": "プロフィール",
     "subtitle": "あなたの個人情報です。すべてのワークスペースで、チームメンバーにこの情報が表示されます。",
-    "photoHint": "正方形の PNG・JPG・GIF がおすすめです。",
+    "photoHint": "正方形のJPEG・PNG・WebP画像がおすすめです。",
     "changePhoto": "写真を変更",
     "photoAlt": "あなたのプロフィール写真",
     "changePhotoAria": "プロフィール写真を変更",

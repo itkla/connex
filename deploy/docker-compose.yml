@@ -36,6 +36,9 @@ services:
     depends_on:
       db:
         condition: service_healthy
+    networks:
+      - default
+      - ocr_internal
 
   ocr:
     image: ghcr.io/itkla/connex-ocr:${CONNEX_VERSION:?set CONNEX_VERSION in deploy/.env}
@@ -55,6 +58,8 @@ services:
     cpus: 2.0
     mem_limit: 2g
     pids_limit: 128
+    networks:
+      - ocr_internal
     healthcheck:
       test: ["CMD", "python", "-c", "import json,urllib.request; data=json.load(urllib.request.urlopen('http://127.0.0.1:8090/health',timeout=2)); raise SystemExit(0 if data.get('ready') is True else 1)"]
       interval: 15s
@@ -84,3 +89,7 @@ volumes:
   object_data:
   caddy_data:
   caddy_config:
+
+networks:
+  ocr_internal:
+    internal: true

@@ -55,6 +55,12 @@ class AttachmentServiceTest extends AbstractServiceTest {
     }
 
     @Test
+    void createRejectsReservedManagedAttachmentReferences() {
+        assertThrows(BadRequestException.class, () -> attachmentService.create(attachmentWithUrl(
+            "/api/attachments/content/550e8400-e29b-41d4-a716-446655440000.pdf")));
+    }
+
+    @Test
     void create_acceptsAppRelativeAndHttpUrls() {
         List<String> safe = List.of(
             "/attachments/company/1-file.png",

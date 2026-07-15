@@ -1,6 +1,8 @@
 import hmac
 import json
+import os
 import threading
+from collections.abc import Callable
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from .config import ServiceConfig
@@ -17,20 +19,73 @@ class OcrServer(ThreadingHTTPServer):
         handler: type[BaseHTTPRequestHandler],
         config: ServiceConfig,
         engine: OcrEngine,
+        fatal_timeout: Callable[[], None] | None = None,
     ) -> None:
         super().__init__(address, handler)
         self.config = config
         self.engine = engine
         self.invocation = threading.BoundedSemaphore(1)
+        self._fatal_timeout = fatal_timeout or _terminate_process
+        self._deadline_lock = threading.Lock()
+        self._deadline_generation = 0
+        self._active_generation: int | None = None
+        self._timed_out = False
 
     def get_request(self):
         connection, address = super().get_request()
         connection.settimeout(self.config.request_timeout_seconds)
         return connection, address
 
+    @property
+    def ready(self) -> bool:
+        with self._deadline_lock:
+            timed_out = self._timed_out
+        return self.engine.ready and not timed_out
 
-def create_server(config: ServiceConfig, engine: OcrEngine) -> OcrServer:
-    return OcrServer((config.host, config.port), OcrRequestHandler, config, engine)
+    def begin_inference(self) -> tuple[int, threading.Timer]:
+        with self._deadline_lock:
+            self._deadline_generation += 1
+            generation = self._deadline_generation
+            self._active_generation = generation
+        timer = threading.Timer(
+            self.config.request_timeout_seconds,
+            self._inference_timed_out,
+            args=(generation,),
+        )
+        timer.daemon = True
+        timer.start()
+        return generation, timer
+
+    def finish_inference(self, generation: int, timer: threading.Timer) -> None:
+        with self._deadline_lock:
+            if self._active_generation == generation:
+                self._active_generation = None
+        timer.cancel()
+
+    def _inference_timed_out(self, generation: int) -> None:
+        with self._deadline_lock:
+            if self._active_generation != generation:
+                return
+            self._timed_out = True
+        self._fatal_timeout()
+
+
+def _terminate_process() -> None:
+    os._exit(1)
+
+
+def create_server(
+    config: ServiceConfig,
+    engine: OcrEngine,
+    fatal_timeout: Callable[[], None] | None = None,
+) -> OcrServer:
+    return OcrServer(
+        (config.host, config.port),
+        OcrRequestHandler,
+        config,
+        engine,
+        fatal_timeout,
+    )
 
 
 class OcrRequestHandler(BaseHTTPRequestHandler):
@@ -41,7 +96,7 @@ class OcrRequestHandler(BaseHTTPRequestHandler):
         if self.path != "/health":
             self._respond(HTTPStatus.NOT_FOUND, {"error": "Not found"})
             return
-        self._respond(HTTPStatus.OK, {"ready": self.server.engine.ready})
+        self._respond(HTTPStatus.OK, {"ready": self.server.ready})
 
     def do_POST(self) -> None:
         if self.path != "/v1/ocr":
@@ -57,7 +112,7 @@ class OcrRequestHandler(BaseHTTPRequestHandler):
         if content_type not in {"image/jpeg", "image/png", "image/webp"}:
             self._respond(HTTPStatus.UNSUPPORTED_MEDIA_TYPE, {"error": "Unsupported image media type"})
             return
-        if not self.server.engine.ready:
+        if not self.server.ready:
             self._respond(HTTPStatus.SERVICE_UNAVAILABLE, {"error": "OCR unavailable"})
             return
         if not self.server.invocation.acquire(blocking=False):
@@ -68,14 +123,18 @@ class OcrRequestHandler(BaseHTTPRequestHandler):
             if len(content) != content_length:
                 self._respond(HTTPStatus.BAD_REQUEST, {"error": "Incomplete request body"})
                 return
+            generation, timer = self.server.begin_inference()
             try:
-                lines = self.server.engine.recognize(content, content_type)
-            except ImageRejected as exception:
-                self._respond(exception.status, {"error": exception.message})
-                return
-            except Exception:
-                self._respond(HTTPStatus.SERVICE_UNAVAILABLE, {"error": "OCR unavailable"})
-                return
+                try:
+                    lines = self.server.engine.recognize(content, content_type)
+                except ImageRejected as exception:
+                    self._respond(exception.status, {"error": exception.message})
+                    return
+                except Exception:
+                    self._respond(HTTPStatus.SERVICE_UNAVAILABLE, {"error": "OCR unavailable"})
+                    return
+            finally:
+                self.server.finish_inference(generation, timer)
             self._respond(HTTPStatus.OK, {"lines": lines})
         finally:
             self.server.invocation.release()

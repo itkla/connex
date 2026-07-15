@@ -14,6 +14,7 @@ import ooo.klae.connex.backend.beans.Activity;
 import ooo.klae.connex.backend.beans.Note;
 import ooo.klae.connex.backend.beans.Task;
 import ooo.klae.connex.backend.beans.User;
+import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.notifications.NotificationChangePublisher;
 import ooo.klae.connex.backend.storage.ManagedObjectService;
@@ -22,7 +23,6 @@ import ooo.klae.connex.backend.storage.ManagedObjectService.StoredImage;
 import ooo.klae.connex.backend.storage.UploadSource;
 
 import java.util.List;
-import java.util.Objects;
 import java.util.Set;
 
 import lombok.RequiredArgsConstructor;
@@ -118,14 +118,16 @@ public class UserService implements UserDetailsService {
             user.setTimezone(TimezoneSupport.validateIana(user.getTimezone(), null));
         }
         user.setLocale(before.getLocale());
+        user.setProfilePictureUrl(before.getProfilePictureUrl());
         userMapper.update(user);
-        if (!Objects.equals(before.getProfilePictureUrl(), user.getProfilePictureUrl())) {
-            managedObjectService.deleteUserImageAfterCommit(id, before.getProfilePictureUrl());
+        User after = userMapper.getUserById(id);
+        if (after == null) {
+            throw new ResourceNotFoundException("User not found with id: " + id);
         }
-        auditService.record("user.update", "user", id, user.getUsername(),
-            "Updated user " + user.getUsername(),
-            auditService.diff(before, user, AUDIT_FIELDS));
-        return user;
+        auditService.record("user.update", "user", id, after.getUsername(),
+            "Updated user " + after.getUsername(),
+            auditService.diff(before, after, AUDIT_FIELDS));
+        return after;
     }
 
     /**
@@ -193,33 +195,17 @@ public class UserService implements UserDetailsService {
         return referenceService.hydrate(workspaceId, noteMapper.getVisibleNotesByAuthorId(workspaceId, userId, workspaceService.getCurrentUserId()));
     }
 
-    /**
-     * Updates the profile picture of a user.
-     * @param userId
-     * @param profilePictureUrl
-     * @return
-     */
-    @Transactional
-    public User updateProfilePictureUrl(int userId, String profilePictureUrl) {
-        workspaceService.requireSelf(userId);
-        User before = getUserById(userId);
-        userMapper.updateProfilePictureUrl(userId, profilePictureUrl);
-        if (!Objects.equals(before.getProfilePictureUrl(), profilePictureUrl)) {
-            managedObjectService.deleteUserImageAfterCommit(userId, before.getProfilePictureUrl());
-        }
-        auditService.record("user.updateAvatar", "user", userId, before.getUsername(),
-            "Updated profile picture for " + before.getUsername(),
-            auditService.singleChange("profilePictureUrl", before.getProfilePictureUrl(), profilePictureUrl));
-        return userMapper.getUserById(userId);
-    }
-
     @Transactional
     public User updateCurrentProfilePicture(int userId, UploadSource source) {
         workspaceService.requireSelf(userId);
         User before = getUserById(userId);
         StoredImage stored = managedObjectService.storeUserImage(userId, source);
         managedObjectService.compensateUserImageOnRollback(userId, stored.url());
-        userMapper.updateProfilePictureUrl(userId, stored.url());
+        int updated = userMapper.updateProfilePictureUrlIfCurrent(
+            userId, before.getProfilePictureUrl(), stored.url());
+        if (updated != 1) {
+            throw new ConflictException("Profile picture changed while the image was uploading; retry");
+        }
         managedObjectService.deleteUserImageAfterCommit(userId, before.getProfilePictureUrl());
         User after = userMapper.getUserById(userId);
         auditService.record("user.updateAvatar", "user", userId, before.getUsername(),

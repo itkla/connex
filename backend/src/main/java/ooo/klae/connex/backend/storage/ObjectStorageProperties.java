@@ -33,6 +33,17 @@ public class ObjectStorageProperties {
     private long maxImagePixels = 40_000_000L;
 
     @Min(1)
+    @Max(32)
+    private int maxConcurrentImageDecodes = 2;
+
+    @Min(1)
+    private long maxWorkspaceBytes = 10L * 1024L * 1024L * 1024L;
+
+    @Min(1)
+    @Max(1_000_000)
+    private int maxWorkspaceObjects = 10_000;
+
+    @Min(1)
     @Max(100_000)
     private int deleteRetryWarningEntries = 1_000;
 
