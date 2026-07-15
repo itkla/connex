@@ -97,6 +97,27 @@
       )
   </select>
 
+  <select id="findCandidatePersonsForReport" resultType="ooo.klae.connex.backend.beans.IntroCandidatePerson">
+    SELECT p.id         AS id,
+           p.name       AS name,
+           p.title      AS title,
+           c.id         AS company_id,
+           c.name       AS company_name,
+           p.image_url  AS image_url
+    FROM person p
+    LEFT JOIN company c ON c.id = p.company_id AND <include refid="visibleCandidateCompany"/>
+    WHERE p.workspace_id = #{workspaceId}
+      AND p.intro_excluded = FALSE
+      AND (
+        EXISTS (SELECT 1 FROM activity a WHERE a.workspace_id = #{workspaceId} AND a.person_id = p.id)
+        OR EXISTS (SELECT 1 FROM note n
+          WHERE n.workspace_id = #{workspaceId} AND n.visibility = 'workspace' AND n.person_id = p.id)
+        OR EXISTS (SELECT 1 FROM task t WHERE t.workspace_id = #{workspaceId} AND t.person_id = p.id)
+      )
+    ORDER BY p.id
+    LIMIT #{limit}
+  </select>
+
   <select id="findWorkspaceEmployment" resultType="ooo.klae.connex.backend.beans.IntroEmploymentRow">
     SELECT person_id    AS person_id,
            company_id   AS company_id,
@@ -105,11 +126,47 @@
     WHERE workspace_id = #{workspaceId}
   </select>
 
+  <select id="findWorkspaceEmploymentForReport"
+          resultType="ooo.klae.connex.backend.beans.IntroEmploymentRow">
+    SELECT person_id    AS person_id,
+           company_id   AS company_id,
+           company_name AS company_name
+    FROM person_employment
+    WHERE workspace_id = #{workspaceId}
+      AND person_id IN
+      <foreach item="id" collection="personIds" open="(" separator="," close=")">#{id}</foreach>
+    ORDER BY person_id, id
+    LIMIT #{limit}
+  </select>
+
   <select id="findExistingPairs" resultType="ooo.klae.connex.backend.beans.Introduction">
     SELECT person_a_id AS person_a_id,
            person_b_id AS person_b_id
     FROM introduction
     WHERE workspace_id = #{workspaceId}
+  </select>
+
+  <select id="findExistingPairsForReport" resultType="ooo.klae.connex.backend.beans.Introduction">
+    SELECT person_a_id AS person_a_id,
+           person_b_id AS person_b_id
+    FROM introduction
+    WHERE workspace_id = #{workspaceId}
+    ORDER BY id
+    LIMIT #{limit}
+  </select>
+
+  <select id="findExistingPairsForReverseIntroReport"
+          resultType="ooo.klae.connex.backend.beans.Introduction">
+    SELECT person_a_id AS person_a_id,
+           person_b_id AS person_b_id
+    FROM introduction
+    WHERE workspace_id = #{workspaceId}
+      AND person_a_id IN
+      <foreach item="id" collection="personIds" open="(" separator="," close=")">#{id}</foreach>
+      AND person_b_id IN
+      <foreach item="id" collection="personIds" open="(" separator="," close=")">#{id}</foreach>
+    ORDER BY id
+    LIMIT #{limit}
   </select>
 
   <select id="countIntroducedAnywhere" resultType="int">

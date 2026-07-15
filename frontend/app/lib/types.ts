@@ -1046,6 +1046,9 @@ export type ReportMeasure =
     | "coverage_gap_open_pipeline_value"
     | "single_threaded_deal_count"
     | "single_threaded_deal_value"
+    | "warm_intro_opportunity_value"
+    | "warm_intro_reachable_account_count"
+    | "reverse_intro_weighted_opportunities"
     | "forecast_best"
     | "forecast_weighted"
     | "forecast_worst"
@@ -1064,7 +1067,9 @@ export type ReportGroupBy =
     | "activity_type"
     | "industry"
     | "warmth_band"
-    | "trend";
+    | "trend"
+    | "connector"
+    | "pair";
 
 export type ReportRange = {
     start: string;

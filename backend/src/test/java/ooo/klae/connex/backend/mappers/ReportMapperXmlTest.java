@@ -15,14 +15,87 @@ import org.apache.ibatis.builder.xml.XMLMapperBuilder;
 import org.apache.ibatis.session.Configuration;
 import org.junit.jupiter.api.Test;
 
+import ooo.klae.connex.backend.beans.Company;
+import ooo.klae.connex.backend.beans.Person;
+import ooo.klae.connex.backend.beans.PersonEdge;
 import ooo.klae.connex.backend.beans.ReportDefinition;
 import ooo.klae.connex.backend.beans.ReportSnapshot;
+import ooo.klae.connex.backend.beans.Tag;
 import ooo.klae.connex.backend.dto.ReportAggregateQuery;
 import ooo.klae.connex.backend.dto.ReportAggregateRow;
 import ooo.klae.connex.backend.dto.ReportOffsetSegment;
 
 /** Verifies the report mapper XML and every dynamic aggregate branch can be resolved. */
 class ReportMapperXmlTest {
+
+    @Test
+    void networkReportSourceQueriesAreBoundedBeforeMaterialization() throws Exception {
+        String people = resourceText("mappers/PersonMapper.xml");
+        assertTrue(people.contains("id=\"getPersonsForNetworkReport\""));
+        assertTrue(people.contains("LIMIT #{limit}"));
+
+        String edges = resourceText("mappers/PersonEdgeMapper.xml");
+        assertTrue(edges.contains("id=\"getEdgesForNetworkReport\""));
+        assertTrue(edges.contains("id=\"getEdgesForReverseIntroReport\""));
+        assertTrue(edges.contains("collection=\"personIds\""));
+        assertTrue(edges.contains("LIMIT #{limit}"));
+
+        String introductions = resourceText("mappers/IntroductionMapper.xml");
+        assertTrue(introductions.contains("id=\"findCandidatePersonsForReport\""));
+        assertTrue(introductions.contains("id=\"findWorkspaceEmploymentForReport\""));
+        assertTrue(introductions.contains("id=\"findExistingPairsForReport\""));
+        assertTrue(introductions.contains("id=\"findExistingPairsForReverseIntroReport\""));
+        assertTrue(introductions.contains("collection=\"personIds\""));
+        assertTrue(introductions.contains("LIMIT #{limit}"));
+        assertFalse(people.contains("${"));
+        assertFalse(edges.contains("${"));
+        assertFalse(introductions.contains("${"));
+    }
+
+    @Test
+    void boundedNetworkSourceStatementsParseAndBindLimits() throws Exception {
+        Configuration configuration = new Configuration();
+        configuration.getTypeAliasRegistry().registerAlias("Person", Person.class);
+        configuration.getTypeAliasRegistry().registerAlias("Company", Company.class);
+        configuration.getTypeAliasRegistry().registerAlias("Tag", Tag.class);
+        configuration.getTypeAliasRegistry().registerAlias("PersonEdge", PersonEdge.class);
+        for (String resource : new String[] {
+                "mappers/PersonMapper.xml",
+                "mappers/PersonEdgeMapper.xml",
+                "mappers/IntroductionMapper.xml"}) {
+            try (InputStream input = getClass().getClassLoader().getResourceAsStream(resource)) {
+                assertNotNull(input);
+                new XMLMapperBuilder(input, configuration, resource, configuration.getSqlFragments()).parse();
+            }
+        }
+        String peopleSql = configuration.getMappedStatement(
+                        PersonMapper.class.getName() + ".getPersonsForNetworkReport")
+                .getBoundSql(Map.of("workspaceId", 7, "limit", 101))
+                .getSql();
+        assertTrue(peopleSql.contains("LIMIT ?"));
+        String edgeSql = configuration.getMappedStatement(
+                        PersonEdgeMapper.class.getName() + ".getEdgesForReverseIntroReport")
+                .getBoundSql(Map.of("workspaceId", 7, "personIds", java.util.List.of(1, 2), "limit", 101))
+                .getSql();
+        assertTrue(edgeSql.contains("e.workspace_id = ?"));
+        assertTrue(edgeSql.contains("e.source_person_id IN"));
+        assertTrue(edgeSql.contains("LIMIT ?"));
+        for (String statement : new String[] {
+                "findCandidatePersonsForReport",
+                "findWorkspaceEmploymentForReport",
+                "findExistingPairsForReport",
+                "findExistingPairsForReverseIntroReport"}) {
+            Map<String, Object> parameters = statement.equals("findCandidatePersonsForReport")
+                    || statement.equals("findExistingPairsForReport")
+                    ? Map.of("workspaceId", 7, "limit", 101)
+                    : Map.of("workspaceId", 7, "personIds", java.util.List.of(1, 2), "limit", 101);
+            String sql = configuration.getMappedStatement(IntroductionMapper.class.getName() + "." + statement)
+                    .getBoundSql(parameters)
+                    .getSql();
+            assertTrue(sql.contains("workspace_id = ?"));
+            assertTrue(sql.contains("LIMIT ?"));
+        }
+    }
 
     @Test
     void conversionMigrationKeepsAmbiguousLegacyHistoryFailClosed() throws Exception {
@@ -81,6 +154,24 @@ class ReportMapperXmlTest {
                 query("single_threaded_deal_count", "none"));
         assertWorkspaceScoped(configuration, "aggregateSingleThreadedDeals",
                 query("single_threaded_deal_value", "deal"));
+        ReportAggregateQuery networkQuery = query(
+                "warm_intro_opportunity_value", "company",
+                java.util.List.of(1), java.util.List.of(2), java.util.List.of("open"), java.util.List.of(3));
+        String networkSql = configuration.getMappedStatement(
+                        ReportMapper.class.getName() + ".getNetworkAccountValues")
+                .getBoundSql(Map.of("query", networkQuery, "limit", 101))
+                .getSql();
+        assertTrue(networkSql.contains("network_deal.workspace_id = ?"));
+        assertTrue(networkSql.contains("network_deal.won IS NULL"));
+        assertTrue(networkSql.contains("SUM(GREATEST(network_deal.value, 0))"));
+        assertTrue(networkSql.contains("network_company.workspace_id = ?"));
+        assertTrue(networkSql.contains("FROM company_share network_company_share"));
+        assertTrue(networkSql.contains("ows.org_id = vws.org_id"));
+        assertTrue(networkSql.contains("network_deal.pipeline_id IN"));
+        assertTrue(networkSql.contains("network_deal.owner_id IN"));
+        assertTrue(networkSql.contains("AND 'open' IN"));
+        assertTrue(networkSql.contains("FROM company_tag network_company_tag"));
+        assertTrue(networkSql.contains("LIMIT ?"));
         for (String measure : new String[] {"forecast_best", "forecast_weighted", "forecast_worst"}) {
             for (String group : new String[] {"none", "date", "pipeline", "stage"}) {
                 assertForecastScoped(configuration, query(measure, group));
@@ -113,6 +204,13 @@ class ReportMapperXmlTest {
                 .getBoundSql(Map.of("query", query)).getSql();
         assertNotNull(sql);
         assertTrue(sql.contains("workspace_id = ?"));
+    }
+
+    private static String resourceText(String resource) throws Exception {
+        try (InputStream input = ReportMapperXmlTest.class.getClassLoader().getResourceAsStream(resource)) {
+            assertNotNull(input);
+            return new String(input.readAllBytes(), StandardCharsets.UTF_8);
+        }
     }
 
     private static void assertForecastScoped(

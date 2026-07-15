@@ -81,6 +81,31 @@ class AiReportNarrativeValidatorTest {
     }
 
     @Test
+    void networkFacts_areLocalizedAndActionable() {
+        ReportAppendixRowDto pathSource = new ReportAppendixRowDto(
+                "network.path", "path", "warm_intro_opportunity_value · USD · Total",
+                new BigDecimal("80000"), null, "USD");
+        ReportAppendixRowDto reverseSource = new ReportAppendixRowDto(
+                "network.reverse", "reverse", "reverse_intro_weighted_opportunities · Alice ↔ Bob",
+                new BigDecimal("0.8"), null, "opportunities");
+
+        assertEquals("Warm-intro opportunity value · USD · Total", AiReportFacts.label(pathSource));
+        assertTrue(AiReportFacts.claim(pathSource).contains("current-state snapshot"));
+        assertTrue(AiReportFacts.claims(pathSource).get(1).contains("appropriate connector"));
+        assertEquals(
+                "Weighted reverse-intro opportunities · Alice ↔ Bob",
+                AiReportFacts.label(reverseSource));
+        assertTrue(AiReportFacts.claims(reverseSource).get(1).contains("record or dismiss"));
+
+        LocaleContextHolder.setLocale(Locale.JAPANESE);
+        assertEquals("ウォーム紹介の機会価値 · USD · 合計", AiReportFacts.label(pathSource));
+        assertTrue(AiReportFacts.claim(pathSource).contains("現在状態"));
+        assertTrue(AiReportFacts.claims(pathSource).get(1).contains("コネクター"));
+        assertEquals("加重リバース紹介機会 · Alice ↔ Bob", AiReportFacts.label(reverseSource));
+        assertTrue(AiReportFacts.claims(reverseSource).get(1).contains("却下"));
+    }
+
+    @Test
     void forecastingFacts_areLocalizedAndAccepted() {
         ReportAppendixRowDto source = new ReportAppendixRowDto(
                 "forecast.weighted", "forecast", "forecast_weighted · USD · 2026-09",

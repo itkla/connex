@@ -689,6 +689,57 @@
     ORDER BY value DESC, group_label, group_key
   </select>
 
+  <select id="getNetworkAccountValues"
+          resultType="ooo.klae.connex.backend.dto.ReportNetworkAccountRow">
+    SELECT network_company.id AS company_id,
+           network_company.name AS company_name,
+           network_deal.currency AS currency,
+           COALESCE(SUM(GREATEST(network_deal.value, 0)), 0) AS account_value
+    FROM deal network_deal
+    JOIN company network_company ON network_company.id = network_deal.company_id
+      AND (
+        network_company.workspace_id = #{query.workspaceId}
+        OR EXISTS (
+          SELECT 1
+          FROM company_share network_company_share
+          JOIN workspace vws ON vws.id = network_company_share.workspace_id
+            AND vws.id = #{query.workspaceId}
+          JOIN workspace ows ON ows.id = network_company.workspace_id
+            AND ows.org_id = vws.org_id
+          WHERE network_company_share.company_id = network_company.id
+            AND network_company_share.workspace_id = #{query.workspaceId}
+        )
+      )
+    WHERE network_deal.workspace_id = #{query.workspaceId}
+      AND network_deal.won IS NULL
+    <if test="query.pipelineIds != null and !query.pipelineIds.isEmpty()">
+      AND network_deal.pipeline_id IN
+      <foreach item="id" collection="query.pipelineIds" open="(" separator="," close=")">#{id}</foreach>
+    </if>
+    <if test="query.ownerIds != null and !query.ownerIds.isEmpty()">
+      AND network_deal.owner_id IN
+      <foreach item="id" collection="query.ownerIds" open="(" separator="," close=")">#{id}</foreach>
+    </if>
+    <if test="query.statuses != null and !query.statuses.isEmpty()">
+      AND 'open' IN
+      <foreach item="status" collection="query.statuses" open="(" separator="," close=")">#{status}</foreach>
+    </if>
+    <if test="query.tagIds != null and !query.tagIds.isEmpty()">
+      AND EXISTS (
+        SELECT 1
+        FROM company_tag network_company_tag
+        JOIN tag network_tag ON network_tag.id = network_company_tag.tag_id
+          AND network_tag.workspace_id = #{query.workspaceId}
+        WHERE network_company_tag.company_id = network_company.id
+          AND network_company_tag.tag_id IN
+          <foreach item="id" collection="query.tagIds" open="(" separator="," close=")">#{id}</foreach>
+      )
+    </if>
+    GROUP BY network_company.id, network_company.name, network_deal.currency
+    ORDER BY network_deal.currency, network_company.name, network_company.id
+    LIMIT #{limit}
+  </select>
+
   <select id="getVisiblePersonIdsAt" resultType="int">
     SELECT p.id
     FROM person p

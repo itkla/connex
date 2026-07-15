@@ -170,6 +170,83 @@ class ReportIntegrationTest {
           }
         }
         """;
+    private static final String NETWORK_REPORT_BODY = """
+        {
+          "name": "Network Opportunities",
+          "description": "Warm introduction paths and connector coverage",
+          "cadence": "monthly",
+          "templateKey": "network-warm-intros",
+          "config": {
+            "widgets": [
+              {
+                "id": "reachable-pipeline",
+                "title": "Reachable pipeline value",
+                "dataSource": "companies",
+                "measure": "warm_intro_opportunity_value",
+                "groupBy": "none",
+                "chartType": "kpi"
+              },
+              {
+                "id": "closeable-gaps",
+                "title": "Network-closeable coverage gaps",
+                "dataSource": "companies",
+                "measure": "warm_intro_reachable_account_count",
+                "groupBy": "none",
+                "chartType": "kpi"
+              },
+              {
+                "id": "top-paths",
+                "title": "Top unactivated warm-intro paths",
+                "dataSource": "companies",
+                "measure": "warm_intro_opportunity_value",
+                "groupBy": "company",
+                "chartType": "table"
+              },
+              {
+                "id": "connector-coverage",
+                "title": "Connector coverage",
+                "dataSource": "companies",
+                "measure": "warm_intro_reachable_account_count",
+                "groupBy": "connector",
+                "chartType": "bar"
+              },
+              {
+                "id": "reverse-intro-value",
+                "title": "Reverse-intro opportunity value",
+                "dataSource": "relationships",
+                "measure": "reverse_intro_weighted_opportunities",
+                "groupBy": "none",
+                "chartType": "kpi"
+              },
+              {
+                "id": "reverse-intro-matches",
+                "title": "Top reverse-intro matches",
+                "dataSource": "relationships",
+                "measure": "reverse_intro_weighted_opportunities",
+                "groupBy": "pair",
+                "chartType": "table"
+              }
+            ],
+            "filters": {
+              "pipelineIds": null,
+              "ownerIds": null,
+              "statuses": null,
+              "tagIds": null,
+              "warmthBands": null
+            },
+            "range": null,
+            "bucket": "month",
+            "layout": [
+              {"widgetId": "reachable-pipeline", "x": 0, "y": 0, "width": 6, "height": 4},
+              {"widgetId": "closeable-gaps", "x": 6, "y": 0, "width": 6, "height": 4},
+              {"widgetId": "top-paths", "x": 0, "y": 4, "width": 6, "height": 4},
+              {"widgetId": "connector-coverage", "x": 6, "y": 4, "width": 6, "height": 4},
+              {"widgetId": "reverse-intro-value", "x": 0, "y": 8, "width": 6, "height": 4},
+              {"widgetId": "reverse-intro-matches", "x": 6, "y": 8, "width": 6, "height": 4}
+            ]
+          }
+        }
+        """;
     private static final String FORECAST_BODY = """
         {
           "name": "Forward Forecast",
@@ -439,6 +516,33 @@ class ReportIntegrationTest {
                 .session(session))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$[?(@.key == 'relationship-health')]").isNotEmpty());
+    }
+
+    @Test
+    void networkWarmIntroTemplateIsAvailableWithCanonicalMeasures() throws Exception {
+        RequestContextHolder.resetRequestAttributes();
+        Workspace workspace = newWorkspace();
+        User member = newMember(workspace, "member");
+        MockHttpSession session = login(member.getUsername());
+
+        MvcResult result = mockMvc.perform(get("/api/reports/templates")
+                .header("X-Workspace-Id", workspace.getId())
+                .session(session))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$[?(@.key == 'network-warm-intros')]").isNotEmpty())
+            .andReturn();
+
+        JsonNode template = findTemplate(
+                objectMapper.readTree(result.getResponse().getContentAsString()), "network-warm-intros");
+        assertNotNull(template);
+        List<String> measures = new ArrayList<>();
+        for (JsonNode widget : template.get("config").get("widgets")) {
+            measures.add(widget.get("measure").asText());
+        }
+        assertTrue(measures.containsAll(List.of(
+                "warm_intro_opportunity_value",
+                "warm_intro_reachable_account_count",
+                "reverse_intro_weighted_opportunities")));
     }
 
     @Test
@@ -728,6 +832,113 @@ class ReportIntegrationTest {
             .andExpect(jsonPath("$.widgets[3].priorTotal").doesNotExist())
             .andExpect(jsonPath("$.widgets[4].total").value(100))
             .andExpect(jsonPath("$.widgets[4].points[0].label").value("USD · Single Thread"));
+    }
+
+    @Test
+    void networkGenerationRanksPathsWeightsValueAndEnforcesShareAndTenantBoundaries() throws Exception {
+        RequestContextHolder.resetRequestAttributes();
+        Workspace workspace = newWorkspace();
+        User member = newMember(workspace, "member");
+        MockHttpSession session = login(member.getUsername());
+        Integer orgId = workspaceMapper.getOrgId(workspace.getId());
+        assertNotNull(orgId);
+
+        int pipelineId = insertPipeline(workspace.getId(), "Network pipeline");
+        int stageId = insertStage(workspace.getId(), pipelineId, "Open");
+        int connectorCompany = insertCompany(workspace.getId(), "Connector company");
+        int connectorOne = insertPerson(workspace.getId(), connectorCompany, "Primary Connector");
+        int connectorTwo = insertPerson(workspace.getId(), connectorCompany, "Secondary Connector");
+        insertPersonActivity(workspace.getId(), member.getId(), connectorOne, "2026-07-11 09:00:00");
+        insertPersonActivity(workspace.getId(), member.getId(), connectorTwo, "2026-07-11 10:00:00");
+
+        int alpha = insertCompany(workspace.getId(), "Alpha Reachable");
+        int alphaTarget = insertPerson(workspace.getId(), alpha, "Alpha Target");
+        insertDeal(workspace.getId(), pipelineId, stageId, alpha, "Alpha Pipeline", "300.00", false);
+        insertPersonEdge(workspace.getId(), connectorOne, alphaTarget, 3);
+
+        int beta = insertCompany(workspace.getId(), "Beta Reachable");
+        int betaTarget = insertPerson(workspace.getId(), beta, "Beta Target");
+        insertDeal(workspace.getId(), pipelineId, stageId, beta, "Beta Pipeline", "120.00", false);
+        insertPersonEdge(workspace.getId(), connectorTwo, betaTarget, 2);
+
+        Workspace sharedOwner = newWorkspaceInOrg(orgId);
+        int sharedCompany = insertCompany(sharedOwner.getId(), "Shared Reachable");
+        int sharedTarget = insertPerson(sharedOwner.getId(), sharedCompany, "Shared Target");
+        insertCompanyShare(sharedCompany, workspace.getId(), member.getId());
+        insertPersonShare(sharedTarget, workspace.getId(), member.getId());
+        insertDeal(workspace.getId(), pipelineId, stageId, sharedCompany, "Shared Pipeline", "90.00", false);
+        insertPersonEdge(workspace.getId(), connectorOne, sharedTarget, 3);
+
+        Workspace crossOrg = newWorkspace();
+        int crossCompany = insertCompany(crossOrg.getId(), "Cross Org Hidden");
+        int crossTarget = insertPerson(crossOrg.getId(), crossCompany, "Cross Org Target");
+        insertCompanyShare(crossCompany, workspace.getId(), member.getId());
+        insertPersonShare(crossTarget, workspace.getId(), member.getId());
+        insertDeal(workspace.getId(), pipelineId, stageId, crossCompany, "Cross Org Pipeline", "900.00", false);
+        insertPersonEdge(workspace.getId(), connectorOne, crossTarget, 3);
+
+        int actedCompany = insertCompany(workspace.getId(), "Acted Account");
+        int actedTarget = insertPerson(workspace.getId(), actedCompany, "Acted Target");
+        insertDeal(workspace.getId(), pipelineId, stageId, actedCompany, "Acted Pipeline", "800.00", false);
+        insertPersonEdge(workspace.getId(), connectorOne, actedTarget, 3);
+        insertIntroduction(workspace.getId(), member.getId(), connectorOne, actedTarget, "dismissed");
+
+        int warmCompany = insertCompany(workspace.getId(), "Already Warm");
+        int warmTarget = insertPerson(workspace.getId(), warmCompany, "Warm Target");
+        insertDeal(workspace.getId(), pipelineId, stageId, warmCompany, "Warm Pipeline", "700.00", false);
+        insertPersonActivity(workspace.getId(), member.getId(), warmTarget, "2026-07-11 11:00:00");
+        insertPersonEdge(workspace.getId(), connectorOne, warmTarget, 3);
+
+        int weakCompany = insertCompany(workspace.getId(), "Weak Path");
+        int weakTarget = insertPerson(workspace.getId(), weakCompany, "Weak Target");
+        insertDeal(workspace.getId(), pipelineId, stageId, weakCompany, "Weak Pipeline", "600.00", false);
+        insertPersonEdge(workspace.getId(), connectorOne, weakTarget, 1);
+
+        int reverseCompanyA = insertCompany(workspace.getId(), "Reverse A Company");
+        int reverseCompanyB = insertCompany(workspace.getId(), "Reverse B Company");
+        int mutualCompany = insertCompany(workspace.getId(), "Mutual Company");
+        int reverseA = insertPerson(workspace.getId(), reverseCompanyA, "Reverse Alice");
+        int reverseB = insertPerson(workspace.getId(), reverseCompanyB, "Reverse Bob");
+        int mutual = insertPerson(workspace.getId(), mutualCompany, "Mutual Contact");
+        insertPersonActivity(workspace.getId(), member.getId(), reverseA, "2026-07-11 12:00:00");
+        insertPersonActivity(workspace.getId(), member.getId(), reverseB, "2026-07-11 13:00:00");
+        insertPersonEdge(workspace.getId(), reverseA, mutual, 2);
+        insertPersonEdge(workspace.getId(), reverseB, mutual, 2);
+
+        int reportId = createReport(session, workspace, NETWORK_REPORT_BODY);
+        MvcResult result = mockMvc.perform(post("/api/reports/{id}/generate", reportId)
+                .header("X-Workspace-Id", workspace.getId())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{}")
+                .session(session)
+                .with(csrf()))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.widgets[1].total").value(3))
+            .andExpect(jsonPath("$.widgets[1].priorTotal").doesNotExist())
+            .andExpect(jsonPath("$.widgets[2].points.length()").value(3))
+            .andExpect(jsonPath("$.widgets[3].points[0].label").value("Primary Connector"))
+            .andExpect(jsonPath("$.widgets[3].points[0].value").value(2))
+            .andExpect(jsonPath("$.widgets[3].points[1].label").value("Secondary Connector"))
+            .andExpect(jsonPath("$.widgets[3].points[1].value").value(1))
+            .andExpect(jsonPath("$.widgets[4].unit").value("opportunities"))
+            .andExpect(jsonPath("$.widgets[4].priorTotal").doesNotExist())
+            .andExpect(jsonPath(
+                    "$.widgets[5].points[?(@.label == 'Reverse Alice ↔ Reverse Bob')]").isNotEmpty())
+            .andReturn();
+
+        JsonNode widgets = objectMapper.readTree(result.getResponse().getContentAsString()).get("widgets");
+        BigDecimal reachableValue = widgets.get(0).get("total").decimalValue();
+        assertTrue(reachableValue.compareTo(BigDecimal.ZERO) > 0);
+        assertTrue(reachableValue.compareTo(new BigDecimal("510.00")) < 0);
+        String document = result.getResponse().getContentAsString();
+        assertTrue(document.contains("Alpha Reachable"));
+        assertTrue(document.contains("Beta Reachable"));
+        assertTrue(document.contains("Shared Reachable"));
+        assertTrue(!document.contains("Cross Org Hidden"));
+        assertTrue(!document.contains("Acted Account"));
+        assertTrue(!document.contains("Already Warm"));
+        assertTrue(!document.contains("Weak Path"));
+        assertTrue(widgets.get(4).get("total").decimalValue().compareTo(BigDecimal.ZERO) > 0);
     }
 
     @Test
@@ -1302,6 +1513,26 @@ class ReportIntegrationTest {
         jdbcTemplate.update(
                 "INSERT INTO deal_person (deal_id, person_id, role) VALUES (?, ?, ?)",
                 dealId, personId, "stakeholder");
+    }
+
+    private void insertPersonEdge(int workspaceId, int personAId, int personBId, int strength) {
+        jdbcTemplate.update(
+                "INSERT INTO person_edge (workspace_id, source_person_id, target_person_id, type, strength) "
+                        + "VALUES (?, ?, ?, ?, ?)",
+                workspaceId, Math.min(personAId, personBId), Math.max(personAId, personBId), "knows", strength);
+    }
+
+    private void insertIntroduction(
+            int workspaceId, int introducerId, int personAId, int personBId, String status) {
+        jdbcTemplate.update(
+                "INSERT INTO introduction "
+                        + "(workspace_id, introducer_user_id, person_a_id, person_b_id, status) "
+                        + "VALUES (?, ?, ?, ?, ?)",
+                workspaceId,
+                introducerId,
+                Math.min(personAId, personBId),
+                Math.max(personAId, personBId),
+                status);
     }
 
     private void insertCompanyShare(int companyId, int workspaceId, int grantedBy) {

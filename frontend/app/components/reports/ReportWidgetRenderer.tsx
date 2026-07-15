@@ -18,6 +18,7 @@ import {
     YAxis,
 } from 'recharts';
 
+import { CURRENT_STATE_REPORT_MEASURES } from '@/app/components/reports/reportConfig';
 import type { ReportWidgetData } from '@/app/lib/types';
 import {
     ChartContainer,
@@ -123,8 +124,14 @@ export default function ReportWidgetRenderer({ widget }: { widget: ReportWidgetD
         [widget.points, localizeLabel],
     );
     const isAttainment = widget.measure === 'attainment';
+    const isCurrentState = CURRENT_STATE_REPORT_MEASURES.has(widget.measure);
     const config = {
-        current: { label: isAttainment ? t('document.actual') : t('document.currentPeriod'), color: 'var(--chart-1)' },
+        current: {
+            label: isAttainment
+                ? t('document.actual')
+                : isCurrentState ? t('document.value') : t('document.currentPeriod'),
+            color: 'var(--chart-1)',
+        },
         prior: { label: isAttainment ? t('document.target') : t('document.priorPeriod'), color: 'var(--chart-2)' },
     } satisfies ChartConfig;
 
@@ -187,7 +194,11 @@ export default function ReportWidgetRenderer({ widget }: { widget: ReportWidgetD
     }
 
     if (data.length === 0) {
-        return <div className="flex min-h-48 items-center justify-center text-sm text-muted-foreground">{t('document.noData')}</div>;
+        return (
+            <div className="flex min-h-48 items-center justify-center text-sm text-muted-foreground">
+                {t(isCurrentState ? 'document.noCurrentStateData' : 'document.noData')}
+            </div>
+        );
     }
 
     if (widget.chartType === 'table' || widget.unit === 'mixed') {
@@ -199,7 +210,9 @@ export default function ReportWidgetRenderer({ widget }: { widget: ReportWidgetD
                         <tr>
                             <th className="px-3 py-2 font-medium">{t('document.dimension')}</th>
                             <th className="px-3 py-2 text-right font-medium">
-                                {isAttainment ? t('document.actual') : t('document.currentPeriod')}
+                                {isAttainment
+                                    ? t('document.actual')
+                                    : isCurrentState ? t('document.value') : t('document.currentPeriod')}
                             </th>
                             {showPrior ? (
                                 <th className="px-3 py-2 text-right font-medium">

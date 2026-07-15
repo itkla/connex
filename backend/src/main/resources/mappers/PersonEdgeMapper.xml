@@ -93,4 +93,36 @@
       AND <include refid="visibleTargetPerson"/>
     WHERE e.workspace_id = #{workspaceId}
   </select>
+
+  <select id="getEdgesForNetworkReport" resultMap="PersonEdgeResult">
+    SELECT e.id, e.workspace_id, e.source_person_id, e.target_person_id,
+           e.type, e.strength, e.note, e.created_at
+    FROM person_edge e
+    JOIN person source_person ON source_person.id = e.source_person_id
+      AND <include refid="visibleSourcePerson"/>
+    JOIN person target_person ON target_person.id = e.target_person_id
+      AND <include refid="visibleTargetPerson"/>
+    WHERE e.workspace_id = #{workspaceId}
+    ORDER BY e.id
+    LIMIT #{limit}
+  </select>
+
+  <select id="getEdgesForReverseIntroReport" resultMap="PersonEdgeResult">
+    SELECT e.id, e.workspace_id, e.source_person_id, e.target_person_id,
+           e.type, e.strength, e.note, e.created_at
+    FROM person_edge e
+    JOIN person source_person ON source_person.id = e.source_person_id
+      AND <include refid="visibleSourcePerson"/>
+    JOIN person target_person ON target_person.id = e.target_person_id
+      AND <include refid="visibleTargetPerson"/>
+    WHERE e.workspace_id = #{workspaceId}
+      AND (
+        e.source_person_id IN
+        <foreach item="id" collection="personIds" open="(" separator="," close=")">#{id}</foreach>
+        OR e.target_person_id IN
+        <foreach item="id" collection="personIds" open="(" separator="," close=")">#{id}</foreach>
+      )
+    ORDER BY e.id
+    LIMIT #{limit}
+  </select>
 </mapper>
