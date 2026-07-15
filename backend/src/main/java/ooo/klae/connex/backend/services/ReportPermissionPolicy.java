@@ -26,7 +26,9 @@ public class ReportPermissionPolicy {
             "open_pipeline_value", "open_deal_count", "at_risk_revenue",
             "single_threaded_deal_count", "single_threaded_deal_value",
             "forecast_best", "forecast_weighted", "forecast_worst",
-            "coverage_gap_count", "coverage_gap_open_pipeline_value", "company_count");
+            "coverage_gap_count", "coverage_gap_open_pipeline_value", "company_count",
+            "warm_intro_opportunity_value", "warm_intro_reachable_account_count",
+            "reverse_intro_weighted_opportunities");
     private static final Set<String> MAPPED_MEASURES = mappedMeasureCatalog();
 
     private final ObjectMapper objectMapper;

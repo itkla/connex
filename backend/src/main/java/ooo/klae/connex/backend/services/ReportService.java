@@ -35,6 +35,7 @@ import ooo.klae.connex.backend.beans.ReportGoal;
 import ooo.klae.connex.backend.beans.ReportDefinition;
 import ooo.klae.connex.backend.beans.ReportSnapshot;
 import ooo.klae.connex.backend.beans.User;
+import ooo.klae.connex.backend.dto.IntroSuggestionDto;
 import ooo.klae.connex.backend.dto.ReportAggregateQuery;
 import ooo.klae.connex.backend.dto.ReportAggregateRow;
 import ooo.klae.connex.backend.dto.ReportAppendixRowDto;
@@ -98,8 +99,14 @@ public class ReportService {
     private static final Set<String> FORECAST_MEASURES = Set.of(
             "forecast_best", "forecast_weighted", "forecast_worst");
     private static final Set<String> COMPANY_MEASURES = Set.of(
-            "count", "coverage_gap_count", "coverage_gap_open_pipeline_value");
-    private static final Set<String> RELATIONSHIP_MEASURES = Set.of("count", "company_count");
+            "count", "coverage_gap_count", "coverage_gap_open_pipeline_value",
+            "warm_intro_opportunity_value", "warm_intro_reachable_account_count");
+    private static final Set<String> WARM_INTRO_MEASURES = Set.of(
+            "warm_intro_opportunity_value", "warm_intro_reachable_account_count");
+    private static final Set<String> RELATIONSHIP_MEASURES = Set.of(
+            "count", "company_count", "reverse_intro_weighted_opportunities");
+    private static final Set<String> REVERSE_INTRO_MEASURES = Set.of(
+            "reverse_intro_weighted_opportunities");
     private static final Set<String> COUNT_MEASURES = Set.of("count");
     private static final Set<String> SUPPORTED_MEASURES = supportedMeasureCatalog();
     private static final Set<String> DEAL_GROUPS = Set.of(
@@ -107,14 +114,14 @@ public class ReportService {
     private static final Set<String> ACTIVITY_GROUPS = Set.of("none", "date", "activity_type", "owner");
     private static final Set<String> TASK_GROUPS = Set.of("none", "date", "status", "owner");
     private static final Set<String> PEOPLE_GROUPS = Set.of("none", "company");
-    private static final Set<String> COMPANY_GROUPS = Set.of("none", "industry", "company");
-    private static final Set<String> RELATIONSHIP_GROUPS = Set.of("none", "warmth_band", "trend");
+    private static final Set<String> COMPANY_GROUPS = Set.of("none", "industry", "company", "connector");
+    private static final Set<String> RELATIONSHIP_GROUPS = Set.of("none", "warmth_band", "trend", "pair");
     private static final Set<String> DEAL_STATUSES = Set.of("open", "won", "lost");
     private static final Set<String> TASK_STATUSES = Set.of("todo", "in_progress", "done");
     private static final Set<String> WARMTH_BANDS = Set.of("hot", "warm", "cool", "cold");
     private static final Set<String> TEMPLATE_KEYS = Set.of(
             "sales-performance", "pipeline-health", "relationship-coverage", "relationship-health",
-            "forecasting", "quota-attainment", "activity-team");
+            "forecasting", "quota-attainment", "activity-team", "network-warm-intros");
 
     private final ReportMapper reportMapper;
     private final GoalMapper goalMapper;
@@ -122,6 +129,7 @@ public class ReportService {
     private final AuthService authService;
     private final ScoringService scoringService;
     private final DealRiskService dealRiskService;
+    private final ReportNetworkService reportNetworkService;
     private final AiReportNarrativeService aiReportNarrativeService;
     private final AuditService auditService;
     private final ObjectMapper objectMapper;
@@ -142,7 +150,7 @@ public class ReportService {
         return toDefinitionDto(requireDefinition(id));
     }
 
-    /** Returns the seven built-in report starting points. */
+    /** Returns the eight built-in report starting points. */
     @RequirePermission(Permission.REPORT_READ)
     public List<ReportTemplateDto> templates() {
         return List.of(
@@ -197,6 +205,21 @@ public class ReportService {
                                         "single_threaded_deal_count", "none", "kpi"),
                                 widget("single-thread-value", "Single-threaded deal value", "deals",
                                         "single_threaded_deal_value", "deal", "table"))),
+                template("network-warm-intros", "Network & Warm Introductions",
+                        "Reachable pipeline, unactivated paths, connector coverage, and reverse-intro potential.",
+                        "monthly", List.of(
+                                widget("reachable-pipeline", "Reachable pipeline value", "companies",
+                                        "warm_intro_opportunity_value", "none", "kpi"),
+                                widget("closeable-gaps", "Network-closeable coverage gaps", "companies",
+                                        "warm_intro_reachable_account_count", "none", "kpi"),
+                                widget("top-paths", "Top unactivated warm-intro paths", "companies",
+                                        "warm_intro_opportunity_value", "company", "table"),
+                                widget("connector-coverage", "Connector coverage", "companies",
+                                        "warm_intro_reachable_account_count", "connector", "bar"),
+                                widget("reverse-intro-value", "Reverse-intro opportunity value", "relationships",
+                                        "reverse_intro_weighted_opportunities", "none", "kpi"),
+                                widget("reverse-intro-matches", "Top reverse-intro matches", "relationships",
+                                        "reverse_intro_weighted_opportunities", "pair", "table"))),
                 template("activity-team", "Activity & Team", "Team activity and task execution.",
                         "weekly", List.of(
                                 widget("activity", "Activity volume", "activities", "count", "date", "line-area"),
@@ -411,7 +434,11 @@ public class ReportService {
             String bucket,
             PeriodWindow period,
             GenerationInputs inputs) {
-        if ("relationships".equals(widget.dataSource())) {
+        if (REVERSE_INTRO_MEASURES.contains(widget.measure())) {
+            return new RowPair(
+                    ReportNetworkService.aggregateReverseIntro(widget, inputs.reverseIntroSuggestions()),
+                    List.of());
+        } else if ("relationships".equals(widget.dataSource())) {
             boolean companies = "company_count".equals(widget.measure());
             return new RowPair(
                     relationshipRows(widget, filters,
@@ -446,6 +473,10 @@ public class ReportService {
                     workspaceId, widget, filters, bucket, period.currentStartUtc(),
                     period.currentEndUtc(), period.zone()));
             return new RowPair(countTotalRow(widget, current), List.of());
+        } else if (WARM_INTRO_MEASURES.contains(widget.measure())) {
+            return new RowPair(
+                    ReportNetworkService.aggregateWarmIntro(widget, inputs.warmIntroOpportunities()),
+                    List.of());
         }
         List<ReportAggregateRow> current = aggregate(widget.dataSource(), query(
                         workspaceId,
@@ -625,7 +656,9 @@ public class ReportService {
         if (Set.of(
                 "at_risk_revenue", "coverage_gap_open_pipeline_value",
                 "single_threaded_deal_count", "single_threaded_deal_value")
-                .contains(widget.measure()) || FORECAST_MEASURES.contains(widget.measure())) {
+                .contains(widget.measure()) || FORECAST_MEASURES.contains(widget.measure())
+                || WARM_INTRO_MEASURES.contains(widget.measure())
+                || REVERSE_INTRO_MEASURES.contains(widget.measure())) {
             return false;
         }
         if (!"coverage_gap_count".equals(widget.measure())) {
@@ -785,6 +818,29 @@ public class ReportService {
                 .anyMatch(widget -> "at_risk_revenue".equals(widget.measure()));
         boolean owners = config.widgets().stream()
                 .anyMatch(widget -> "owner".equals(normalizeGroup(widget.groupBy())));
+        List<ReportWidgetConfig> warmIntroWidgets = config.widgets().stream()
+                .filter(widget -> WARM_INTRO_MEASURES.contains(widget.measure()))
+                .toList();
+        boolean includeReverseIntros = config.widgets().stream()
+                .anyMatch(widget -> REVERSE_INTRO_MEASURES.contains(widget.measure()));
+        ReportNetworkService.NetworkSnapshot networkSnapshot;
+        if (warmIntroWidgets.isEmpty()) {
+            networkSnapshot = new ReportNetworkService.NetworkSnapshot(
+                    List.of(),
+                    includeReverseIntros
+                            ? reportNetworkService.reverseIntroSuggestions(workspaceId)
+                            : List.of());
+        } else {
+            ReportWidgetConfig networkWidget = warmIntroWidgets.getFirst();
+            networkSnapshot = reportNetworkService.snapshot(query(
+                        workspaceId,
+                        networkWidget,
+                        config.filters(),
+                        config.bucket(),
+                        period.currentStartUtc(),
+                        period.currentEndUtc(),
+                        period.zone()), includeReverseIntros);
+        }
         Set<Integer> currentPeople = contactRelationships
                 ? new HashSet<>(reportMapper.getVisiblePersonIdsAt(
                         workspaceId,
@@ -837,6 +893,8 @@ public class ReportService {
                 currentCompanyRelationships,
                 priorCompanyRelationships,
                 risk ? dealRiskService.assessWorkspace(workspaceId) : List.of(),
+                networkSnapshot.warmIntroOpportunities(),
+                networkSnapshot.reverseIntroSuggestions(),
                 Map.copyOf(ownerLabels),
                 LocalDate.now(clock.withZone(period.zone())),
                 new HashMap<>(),
@@ -1014,9 +1072,19 @@ public class ReportService {
                 || Set.of("single_threaded_deal_count", "single_threaded_deal_value").contains(measure)
                         && !Set.of("none", "company", "deal").contains(group)
                 || "company".equals(group) && "companies".equals(source)
-                        && !Set.of("coverage_gap_count", "coverage_gap_open_pipeline_value").contains(measure)
+                        && !Set.of(
+                                "coverage_gap_count", "coverage_gap_open_pipeline_value",
+                                "warm_intro_opportunity_value").contains(measure)
                 || Set.of("coverage_gap_count", "coverage_gap_open_pipeline_value").contains(measure)
                         && !Set.of("none", "company").contains(group)
+                || "warm_intro_opportunity_value".equals(measure)
+                        && !Set.of("none", "company", "connector").contains(group)
+                || "warm_intro_reachable_account_count".equals(measure)
+                        && !Set.of("none", "connector").contains(group)
+                || "connector".equals(group) && !WARM_INTRO_MEASURES.contains(measure)
+                || "reverse_intro_weighted_opportunities".equals(measure)
+                        && !Set.of("none", "pair").contains(group)
+                || "pair".equals(group) && !REVERSE_INTRO_MEASURES.contains(measure)
                 || FORECAST_MEASURES.contains(measure)
                         && !Set.of("none", "date", "pipeline", "stage").contains(group)
                 || "attainment".equals(measure) && (
@@ -1402,7 +1470,7 @@ public class ReportService {
             return "count";
         }
         String unit = value.strip();
-        if (Set.of("count", "percent", "days", "mixed").contains(unit)) {
+        if (Set.of("count", "percent", "days", "mixed", "opportunities").contains(unit)) {
             return unit;
         }
         return unit.matches("[A-Za-z]{3,8}") ? unit.toUpperCase(Locale.ROOT) : "currency";
@@ -1429,6 +1497,8 @@ public class ReportService {
             List<RelationshipTemperatureDto> currentCompanyRelationships,
             List<RelationshipTemperatureDto> priorCompanyRelationships,
             List<DealRiskDto> risks,
+            List<ReportNetworkService.WarmIntroOpportunity> warmIntroOpportunities,
+            List<IntroSuggestionDto> reverseIntroSuggestions,
             Map<String, String> ownerLabels,
             LocalDate forecastStart,
             Map<String, List<ReportForecastAggregateRow>> forecastRows,

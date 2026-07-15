@@ -67,6 +67,10 @@
         "name": "関係性の健全性",
         "description": "関係性が低下しているアカウント、カバレッジ不足、単一接点に依存する案件リスク。"
       },
+      "network-warm-intros": {
+        "name": "ネットワークとウォーム紹介",
+        "description": "到達可能なパイプライン、未活用の紹介経路、コネクターのカバレッジ、リバース紹介の可能性。"
+      },
       "activity-team": {
         "name": "活動とチーム",
         "description": "チーム活動とタスク実行状況。"
@@ -89,7 +93,7 @@
       "startDate": "開始日",
       "endDate": "終了日",
       "filtersTitle": "共通フィルター",
-      "filtersSubtitle": "これらのフィルターはレポート内のすべての根拠ブロックに適用されます。",
+      "filtersSubtitle": "各フィルターは、レポート内の対応する根拠ブロックにのみ適用されます。",
       "attainmentFilters": "達成率は目標の範囲全体を使用します。パイプライン、ステータス、タグのフィルターは使用できず、担当者フィルターはワークスペース全体の達成率ブロックがない場合のみ使用できます。",
       "pipelines": "パイプライン",
       "owners": "所有者",
@@ -158,6 +162,7 @@
       "generatedBy": "Connexがワークスペースの確定的な数値から生成",
       "widgetScope": "{source}・{group}別",
       "currentPeriod": "当期",
+      "currentStateAsOf": "現在状態の数値の基準時点",
       "priorPeriod": "前期",
       "actual": "実績",
       "target": "目標",
@@ -172,6 +177,7 @@
       "attainmentValue": "達成率 {value}%",
       "dimension": "区分",
       "noData": "この期間のデータはありません",
+      "noCurrentStateData": "現在状態のデータはありません",
       "source": "出典",
       "metric": "指標"
     },
@@ -208,6 +214,9 @@
       "coverage_gap_open_pipeline_value": "カバレッジ不足のオープンパイプライン金額",
       "single_threaded_deal_count": "単一接点案件数",
       "single_threaded_deal_value": "単一接点案件金額",
+      "warm_intro_opportunity_value": "ウォーム紹介の機会価値",
+      "warm_intro_reachable_account_count": "ウォーム紹介で到達可能なアカウント",
+      "reverse_intro_weighted_opportunities": "加重リバース紹介機会",
       "forecast_best": "最良ケース予測",
       "forecast_weighted": "見込み予測（加重）",
       "forecast_worst": "コミット予測",
@@ -226,7 +235,9 @@
       "activity_type": "活動タイプ",
       "industry": "業界",
       "warmth_band": "温度帯",
-      "trend": "傾向"
+      "trend": "傾向",
+      "connector": "コネクター",
+      "pair": "提案された組み合わせ"
     },
     "chart": {
       "bar": "棒グラフ",

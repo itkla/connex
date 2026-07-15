@@ -16,6 +16,7 @@ import {
 } from '@heroicons/react/24/outline';
 
 import ReportWidgetRenderer, { formatReportValue } from '@/app/components/reports/ReportWidgetRenderer';
+import { CURRENT_STATE_REPORT_MEASURES } from '@/app/components/reports/reportConfig';
 import ScheduleManager from '@/app/components/reports/ScheduleManager';
 import {
     createReportSnapshot,
@@ -359,11 +360,19 @@ function ReportPaper({
     const measureByWidgetId = new Map(document.widgets.map((widget) => [widget.widgetId, widget.measure]));
     const hasComparison = document.widgets.some((widget) => widget.measure !== 'attainment' && (
         widget.priorTotal != null || widget.points.some((point) => point.priorValue != null)));
+    const hasCurrentStateWidgets = document.widgets.some((widget) =>
+        CURRENT_STATE_REPORT_MEASURES.has(widget.measure));
     const hasAttainmentRows = document.appendix.some((row) => measureByWidgetId.get(row.widgetId) === 'attainment');
     const hasNonAttainmentRows = document.appendix.some((row) => measureByWidgetId.get(row.widgetId) !== 'attainment');
-    const hasMixedSemantics = hasAttainmentRows && hasNonAttainmentRows;
+    const hasCurrentStateRows = document.appendix.some((row) =>
+        CURRENT_STATE_REPORT_MEASURES.has(measureByWidgetId.get(row.widgetId) ?? 'count'));
+    const hasPeriodRows = document.appendix.some((row) =>
+        !CURRENT_STATE_REPORT_MEASURES.has(measureByWidgetId.get(row.widgetId) ?? 'count'));
+    const hasMixedSemantics = (hasAttainmentRows && hasNonAttainmentRows)
+        || (hasCurrentStateRows && hasPeriodRows);
     const hasPriorRows = document.appendix.some((row) =>
         measureByWidgetId.get(row.widgetId) !== 'attainment' && row.priorValue != null);
+    const hasComparisonRows = document.appendix.some((row) => row.priorValue != null);
     const localizedSourceLabel = (label: string, widgetId: string) => {
         const display = sourceDisplayLabel(label, measureLabelByWidgetId.get(widgetId));
         const separator = display.lastIndexOf(' · ');
@@ -431,6 +440,14 @@ function ReportPaper({
                             <div>
                                 <dt className="text-xs uppercase tracking-[0.12em] text-muted-foreground">{t('document.comparison')}</dt>
                                 <dd className="mt-1 text-foreground">{formatRange(document.priorPeriodStart, document.priorPeriodEnd, locale)}</dd>
+                            </div>
+                        ) : null}
+                        {hasCurrentStateWidgets ? (
+                            <div>
+                                <dt className="text-xs uppercase tracking-[0.12em] text-muted-foreground">
+                                    {t('document.currentStateAsOf')}
+                                </dt>
+                                <dd className="mt-1 text-foreground">{formatDateTime(document.generatedAt, locale)}</dd>
                             </div>
                         ) : null}
                         {snapshot ? (
@@ -532,19 +549,23 @@ function ReportPaper({
                                 <th className="px-4 py-3 font-medium">{t('document.source')}</th>
                                 <th className="px-4 py-3 font-medium">{t('document.metric')}</th>
                                 <th className="px-4 py-3 text-right font-medium">
-                                    {hasMixedSemantics
+                                    {!hasComparisonRows
+                                        ? t('document.value')
+                                        : hasMixedSemantics
                                         ? t('document.value')
                                         : hasAttainmentRows && !hasPriorRows
                                             ? t('document.actual')
                                             : t('document.currentPeriod')}
                                 </th>
-                                <th className="px-4 py-3 text-right font-medium">
-                                    {hasMixedSemantics
-                                        ? t('document.comparisonValue')
-                                        : hasAttainmentRows
-                                        ? hasPriorRows ? t('document.priorOrTarget') : t('document.target')
-                                        : t('document.priorPeriod')}
-                                </th>
+                                {hasComparisonRows ? (
+                                    <th className="px-4 py-3 text-right font-medium">
+                                        {hasMixedSemantics
+                                            ? t('document.comparisonValue')
+                                            : hasAttainmentRows
+                                            ? hasPriorRows ? t('document.priorOrTarget') : t('document.target')
+                                            : t('document.priorPeriod')}
+                                    </th>
+                                ) : null}
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-border">
@@ -559,9 +580,11 @@ function ReportPaper({
                                     <td className="px-4 py-3 text-right tabular-nums text-foreground">
                                         {formatReportValue(row.value, row.unit, locale)}
                                     </td>
-                                    <td className="px-4 py-3 text-right tabular-nums text-muted-foreground">
-                                        {formatReportValue(row.priorValue, row.unit, locale)}
-                                    </td>
+                                    {hasComparisonRows ? (
+                                        <td className="px-4 py-3 text-right tabular-nums text-muted-foreground">
+                                            {formatReportValue(row.priorValue, row.unit, locale)}
+                                        </td>
+                                    ) : null}
                                 </tr>
                             ))}
                         </tbody>

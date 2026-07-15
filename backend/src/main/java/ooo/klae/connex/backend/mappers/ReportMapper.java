@@ -9,6 +9,7 @@ import ooo.klae.connex.backend.beans.ReportSnapshot;
 import ooo.klae.connex.backend.dto.ReportAggregateQuery;
 import ooo.klae.connex.backend.dto.ReportAggregateRow;
 import ooo.klae.connex.backend.dto.ReportForecastAggregateRow;
+import ooo.klae.connex.backend.dto.ReportNetworkAccountRow;
 import ooo.klae.connex.backend.dto.ReportSnapshotSummaryDto;
 
 /**
@@ -72,6 +73,10 @@ public interface ReportMapper {
     List<ReportAggregateRow> aggregateCoverageGaps(@Param("query") ReportAggregateQuery query);
 
     List<ReportAggregateRow> aggregateSingleThreadedDeals(@Param("query") ReportAggregateQuery query);
+
+    List<ReportNetworkAccountRow> getNetworkAccountValues(
+        @Param("query") ReportAggregateQuery query,
+        @Param("limit") int limit);
 
     List<Integer> getVisiblePersonIdsAt(
         @Param("workspaceId") int workspaceId,

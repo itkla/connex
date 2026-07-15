@@ -19,6 +19,10 @@ final class AiReportFacts {
             "Executive summary", "Performance commentary", "Key findings");
     private static final List<String> JAPANESE_TITLES = List.of(
             "エグゼクティブサマリー", "パフォーマンス分析", "主な所見");
+    private static final Set<String> CURRENT_STATE_MEASURES = Set.of(
+            "warm_intro_opportunity_value",
+            "warm_intro_reachable_account_count",
+            "reverse_intro_weighted_opportunities");
     private static final Map<String, String> ENGLISH_LABELS = Map.ofEntries(
             Map.entry("count", "Count"),
             Map.entry("new_pipeline_value", "New pipeline value"),
@@ -34,6 +38,9 @@ final class AiReportFacts {
             Map.entry("coverage_gap_open_pipeline_value", "Coverage-gap open pipeline value"),
             Map.entry("single_threaded_deal_count", "Single-threaded deal count"),
             Map.entry("single_threaded_deal_value", "Single-threaded deal value"),
+            Map.entry("warm_intro_opportunity_value", "Warm-intro opportunity value"),
+            Map.entry("warm_intro_reachable_account_count", "Warm-intro reachable account count"),
+            Map.entry("reverse_intro_weighted_opportunities", "Weighted reverse-intro opportunities"),
             Map.entry("forecast_best", "Best-case forecast"),
             Map.entry("forecast_weighted", "Likely forecast (weighted)"),
             Map.entry("forecast_worst", "Commit forecast"),
@@ -72,6 +79,9 @@ final class AiReportFacts {
             Map.entry("coverage_gap_open_pipeline_value", "カバレッジ不足の進行中パイプライン金額"),
             Map.entry("single_threaded_deal_count", "単一接点案件数"),
             Map.entry("single_threaded_deal_value", "単一接点案件金額"),
+            Map.entry("warm_intro_opportunity_value", "ウォーム紹介の機会価値"),
+            Map.entry("warm_intro_reachable_account_count", "ウォーム紹介で到達可能なアカウント数"),
+            Map.entry("reverse_intro_weighted_opportunities", "加重リバース紹介機会"),
             Map.entry("forecast_best", "最良ケース予測"),
             Map.entry("forecast_weighted", "見込み予測（加重）"),
             Map.entry("forecast_worst", "コミット予測"),
@@ -136,6 +146,11 @@ final class AiReportFacts {
             return label + " has met quota.";
         }
         if (prior == null) {
+            if (CURRENT_STATE_MEASURES.contains(measure(source))) {
+                return japanese()
+                        ? label + "は生成時点の現在状態を示す確定的なスナップショットです。"
+                        : label + " is a deterministic current-state snapshot as of generation time.";
+            }
             if (Set.of("forecast_best", "forecast_weighted", "forecast_worst").contains(measure(source))) {
                 return japanese()
                         ? label + "は確定的に計算された将来予測です。"
@@ -172,6 +187,16 @@ final class AiReportFacts {
             recommendation = japanese()
                     ? label + "を確認し、追加の関係構築担当者を割り当ててください。"
                     : "Review " + label + " and assign an additional relationship owner.";
+        } else if (Set.of("warm_intro_opportunity_value", "warm_intro_reachable_account_count")
+                .contains(measure)) {
+            recommendation = japanese()
+                    ? label + "を優先し、適切なコネクターを割り当てて対象となる紹介経路を開始してください。"
+                    : "Prioritize " + label
+                            + " and assign the appropriate connector to activate a qualifying introduction path.";
+        } else if ("reverse_intro_weighted_opportunities".equals(measure)) {
+            recommendation = japanese()
+                    ? label + "を確認し、提案された紹介を記録するか却下してください。"
+                    : "Review " + label + " and record or dismiss the suggested introduction.";
         } else if (Set.of("single_threaded_deal_count", "single_threaded_deal_value").contains(measure)) {
             recommendation = japanese()
                     ? label + "を確認し、案件に追加のステークホルダーを登録してください。"

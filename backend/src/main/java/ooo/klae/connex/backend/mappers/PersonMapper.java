@@ -17,6 +17,9 @@ import ooo.klae.connex.backend.dto.RelationshipScoreAggregateDto;
 
 public interface PersonMapper {
     List<Person> getAllPersons(int workspaceId);
+    List<Person> getPersonsForNetworkReport(
+            @Param("workspaceId") int workspaceId,
+            @Param("limit") int limit);
     List<RelationshipScoreAggregateDto> getRelationshipScoreAggregates(
             @Param("workspaceId") int workspaceId,
             @Param("reference") LocalDateTime reference);

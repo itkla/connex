@@ -39,6 +39,30 @@ class ReportPermissionPolicyTest {
     }
 
     @Test
+    void networkContentRequiresReportReadAndValidatesCanonicalGroups() throws JacksonException {
+        List<ReportWidgetConfig> widgets = List.of(
+                new ReportWidgetConfig(
+                        "paths", "Paths", "companies", "warm_intro_opportunity_value", "company", "table"),
+                new ReportWidgetConfig(
+                        "connectors", "Connectors", "companies",
+                        "warm_intro_reachable_account_count", "connector", "bar"),
+                new ReportWidgetConfig(
+                        "reverse", "Reverse", "relationships",
+                        "reverse_intro_weighted_opportunities", "pair", "table"));
+        ReportConfig config = new ReportConfig(
+                widgets,
+                new ReportFilters(null, null, null, null, null),
+                null,
+                "month",
+                List.of(
+                        new ReportLayoutItem("paths", 0, 0, 6, 4),
+                        new ReportLayoutItem("connectors", 6, 0, 6, 4),
+                        new ReportLayoutItem("reverse", 0, 4, 6, 4)));
+
+        assertEquals(Set.of(Permission.REPORT_READ), policy.requiredFor(definition(config)));
+    }
+
+    @Test
     void persistedDefinitionAndGeneratedDocumentRequireGoalReadForAttainment() throws JacksonException {
         ReportConfig config = config("attainment");
 
@@ -82,6 +106,16 @@ class ReportPermissionPolicyTest {
     void unsupportedAndNonNormalizedMeasuresFailClosed() throws JacksonException {
         assertThrows(BadRequestException.class, () -> policy.requiredFor(definition(config("future_sensitive"))));
         assertThrows(BadRequestException.class, () -> policy.requiredFor(definition(config("attainment "))));
+    }
+
+    @Test
+    void networkMeasuresRejectUnrelatedGroups() throws JacksonException {
+        assertThrows(BadRequestException.class, () -> policy.requiredFor(definition(
+                config("companies", "count", "connector"))));
+        assertThrows(BadRequestException.class, () -> policy.requiredFor(definition(
+                config("companies", "warm_intro_reachable_account_count", "company"))));
+        assertThrows(BadRequestException.class, () -> policy.requiredFor(definition(
+                config("relationships", "reverse_intro_weighted_opportunities", "trend"))));
     }
 
     @Test
@@ -134,8 +168,12 @@ class ReportPermissionPolicyTest {
     }
 
     private static ReportConfig config(String measure) {
+        return config("deals", measure, "none");
+    }
+
+    private static ReportConfig config(String source, String measure, String group) {
         ReportWidgetConfig widget = new ReportWidgetConfig(
-                "summary", "Summary", "deals", measure, "none", "kpi");
+                "summary", "Summary", source, measure, group, "kpi");
         return new ReportConfig(
                 List.of(widget),
                 new ReportFilters(null, null, null, null, null),

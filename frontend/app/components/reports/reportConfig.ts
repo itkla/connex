@@ -19,6 +19,12 @@ export const REPORT_DATA_SOURCES: ReportDataSource[] = [
 
 export const REPORT_CHART_TYPES: ReportChartType[] = ['bar', 'line-area', 'donut', 'funnel', 'table', 'kpi'];
 
+export const CURRENT_STATE_REPORT_MEASURES: ReadonlySet<ReportMeasure> = new Set([
+    'warm_intro_opportunity_value',
+    'warm_intro_reachable_account_count',
+    'reverse_intro_weighted_opportunities',
+]);
+
 export const REPORT_MEASURES: Record<ReportDataSource, ReportMeasure[]> = {
     deals: [
         'count',
@@ -37,10 +43,16 @@ export const REPORT_MEASURES: Record<ReportDataSource, ReportMeasure[]> = {
         'single_threaded_deal_value',
     ],
     people: ['count'],
-    companies: ['count', 'coverage_gap_count', 'coverage_gap_open_pipeline_value'],
+    companies: [
+        'count',
+        'coverage_gap_count',
+        'coverage_gap_open_pipeline_value',
+        'warm_intro_opportunity_value',
+        'warm_intro_reachable_account_count',
+    ],
     activities: ['count'],
     tasks: ['count'],
-    relationships: ['count', 'company_count'],
+    relationships: ['count', 'company_count', 'reverse_intro_weighted_opportunities'],
 };
 
 export const REPORT_GROUPS: Record<ReportDataSource, ReportGroupBy[]> = {
@@ -63,6 +75,9 @@ export function reportGroupsForMeasure(
     if (measure === 'coverage_gap_count' || measure === 'coverage_gap_open_pipeline_value') {
         return ['none', 'company'];
     }
+    if (measure === 'warm_intro_opportunity_value') return ['none', 'company', 'connector'];
+    if (measure === 'warm_intro_reachable_account_count') return ['none', 'connector'];
+    if (measure === 'reverse_intro_weighted_opportunities') return ['none', 'pair'];
     if (measure === 'forecast_best' || measure === 'forecast_weighted' || measure === 'forecast_worst') {
         return ['none', 'date', 'pipeline', 'stage'];
     }

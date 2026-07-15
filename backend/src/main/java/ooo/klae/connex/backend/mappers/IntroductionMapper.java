@@ -35,12 +35,30 @@ public interface IntroductionMapper {
     /** Workspace-owned contacts the team has engaged, with the attributes ranking/display need. */
     List<IntroCandidatePerson> findCandidatePersons(@Param("workspaceId") int workspaceId);
 
+    List<IntroCandidatePerson> findCandidatePersonsForReport(
+            @Param("workspaceId") int workspaceId,
+            @Param("limit") int limit);
+
     /** Every employment record in the workspace, for shared-employer detection. */
     List<IntroEmploymentRow> findWorkspaceEmployment(@Param("workspaceId") int workspaceId);
+
+    List<IntroEmploymentRow> findWorkspaceEmploymentForReport(
+            @Param("workspaceId") int workspaceId,
+            @Param("personIds") List<Integer> personIds,
+            @Param("limit") int limit);
 
     /** Pairs already recorded (made or dismissed), excluded from fresh suggestions. Only the
      *  {@code personAId}/{@code personBId} of each returned row are populated. */
     List<Introduction> findExistingPairs(@Param("workspaceId") int workspaceId);
+
+    List<Introduction> findExistingPairsForReport(
+            @Param("workspaceId") int workspaceId,
+            @Param("limit") int limit);
+
+    List<Introduction> findExistingPairsForReverseIntroReport(
+            @Param("workspaceId") int workspaceId,
+            @Param("personIds") List<Integer> personIds,
+            @Param("limit") int limit);
 
     /**
      * Counts introductions brokered by a user across all workspaces.

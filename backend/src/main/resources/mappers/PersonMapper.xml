@@ -69,6 +69,15 @@
     ORDER BY p.name
   </select>
 
+  <select id="getPersonsForNetworkReport" resultMap="PersonResult">
+    SELECT <include refid="personColumns"/>, <include refid="companyJoinColumns"/>
+    FROM person p
+    <include refid="companyJoin"/>
+    WHERE <include refid="visible"/>
+    ORDER BY p.name, p.id
+    LIMIT #{limit}
+  </select>
+
   <select id="getRelationshipScoreAggregates"
           resultType="ooo.klae.connex.backend.dto.RelationshipScoreAggregateDto">
     SELECT p.id,

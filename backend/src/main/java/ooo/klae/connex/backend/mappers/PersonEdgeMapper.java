@@ -20,4 +20,11 @@ public interface PersonEdgeMapper {
     List<PersonConnectionDto> getConnections(@Param("workspaceId") int workspaceId,
             @Param("personId") int personId);
     List<PersonEdge> getAllEdges(int workspaceId);
+    List<PersonEdge> getEdgesForNetworkReport(
+            @Param("workspaceId") int workspaceId,
+            @Param("limit") int limit);
+    List<PersonEdge> getEdgesForReverseIntroReport(
+            @Param("workspaceId") int workspaceId,
+            @Param("personIds") List<Integer> personIds,
+            @Param("limit") int limit);
 }

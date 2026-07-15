@@ -13,6 +13,7 @@ import {
     HeartIcon,
     PresentationChartLineIcon,
     ShieldExclamationIcon,
+    ShareIcon,
     SparklesIcon,
     TrashIcon,
     UserGroupIcon,
@@ -46,6 +47,7 @@ const TEMPLATE_ICONS: Record<string, ComponentType<{ className?: string }>> = {
     'quota-attainment': FlagIcon,
     'relationship-coverage': HeartIcon,
     'relationship-health': ShieldExclamationIcon,
+    'network-warm-intros': ShareIcon,
     'activity-team': UserGroupIcon,
 };
 
