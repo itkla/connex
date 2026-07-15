@@ -25,8 +25,8 @@ spring:
             initialize-schema: never
     servlet:
         multipart:
-            max-file-size: ${CONNEX_OBJECT_STORAGE_MAX_UPLOAD_BYTES:26214400}B
-            max-request-size: ${CONNEX_UPLOAD_MAX_BODY_BYTES:28311552}B
+            max-file-size: ${CONNEX_MULTIPART_MAX_FILE_SIZE:64MB}
+            max-request-size: ${CONNEX_MULTIPART_MAX_REQUEST_SIZE:72MB}
             resolve-lazily: true
     jackson:
         default-property-inclusion: non_null
@@ -129,6 +129,7 @@ connex:
         max-body-bytes: ${CONNEX_API_MAX_BODY_BYTES:10485760}
         import-max-body-bytes: ${CONNEX_IMPORT_MAX_BODY_BYTES:67108864}
         upload-max-body-bytes: ${CONNEX_UPLOAD_MAX_BODY_BYTES:28311552}
+        business-card-max-body-bytes: ${CONNEX_BUSINESS_CARD_MAX_BODY_BYTES:12582912}
         webauthn-max-body-bytes: ${CONNEX_WEBAUTHN_MAX_BODY_BYTES:65536}
         form-max-body-bytes: ${CONNEX_FORM_MAX_BODY_BYTES:1048576}
     object-storage:
@@ -145,6 +146,18 @@ connex:
             region: ${CONNEX_OBJECT_STORAGE_S3_REGION:}
             endpoint: ${CONNEX_OBJECT_STORAGE_S3_ENDPOINT:}
             path-style: ${CONNEX_OBJECT_STORAGE_S3_PATH_STYLE:false}
+    business-cards:
+        enabled: ${CONNEX_BUSINESS_CARD_SCANNING_ENABLED:false}
+        ocr-base-url: ${CONNEX_OCR_BASE_URL:}
+        ocr-service-token: ${CONNEX_OCR_SERVICE_TOKEN:}
+        connect-timeout: ${CONNEX_OCR_CONNECT_TIMEOUT:2s}
+        request-timeout: ${CONNEX_OCR_REQUEST_TIMEOUT:15s}
+        readiness-cache: ${CONNEX_OCR_READINESS_CACHE:5s}
+        max-response-bytes: ${CONNEX_OCR_MAX_RESPONSE_BYTES:1048576}
+        max-image-bytes: ${CONNEX_BUSINESS_CARD_IMAGE_MAX_BYTES:8388608}
+        max-width: ${CONNEX_BUSINESS_CARD_IMAGE_MAX_WIDTH:8192}
+        max-height: ${CONNEX_BUSINESS_CARD_IMAGE_MAX_HEIGHT:8192}
+        max-pixels: ${CONNEX_BUSINESS_CARD_IMAGE_MAX_PIXELS:24000000}
     login:
         # Fixed-window failed-attempt throttle on POST /api/auth/login. Once either the
         # per-IP or per-username failure cap is hit within the window, further attempts are

@@ -7,6 +7,7 @@ on:
     paths:
       - 'deploy/**'
       - 'backend/**'
+      - 'ocr/**'
       - '.github/workflows/deploy-smoke.yml'
 
 permissions:
@@ -22,11 +23,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - name: docker compose config
+      - name: docker compose config with and without OCR
         working-directory: deploy
         run: |
+          set -euo pipefail
           cp eval.env.example .env
           docker compose -f docker-compose.yml -f docker-compose.build.yml config -q
+          ! docker compose -f docker-compose.yml -f docker-compose.build.yml config --services | grep -qx ocr
+          docker compose -f docker-compose.yml -f docker-compose.build.yml --profile ocr config -q
+          docker compose -f docker-compose.yml -f docker-compose.build.yml --profile ocr config --services | grep -qx ocr
 
   profile-boot:
     name: Boot every deployment profile
@@ -83,7 +88,7 @@ jobs:
               kill "$PID" 2>/dev/null || true
               exit 1
             fi
-            curl -sf http://localhost:8080/api/capabilities | grep -q '"mailManaged"' \
+            curl -sf http://localhost:8080/api/capabilities | grep -q '"businessCardScanning"' \
               || { echo "::error::capabilities smoke failed for $PROFILE"; kill "$PID" 2>/dev/null || true; exit 1; }
             echo "profile $PROFILE booted and smoked OK"
             kill "$PID" 2>/dev/null || true

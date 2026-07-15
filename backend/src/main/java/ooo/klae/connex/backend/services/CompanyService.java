@@ -26,6 +26,7 @@ import ooo.klae.connex.backend.dto.CompanyEngagementWeekDto;
 import ooo.klae.connex.backend.dto.CompanyRevenueCurrencyDto;
 import ooo.klae.connex.backend.dto.PageResponse;
 import ooo.klae.connex.backend.dto.SegmentDefinition;
+import ooo.klae.connex.backend.businesscard.BusinessCardTextNormalizer;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.exceptions.DuplicateResourceException;
@@ -35,6 +36,7 @@ import ooo.klae.connex.backend.storage.ManagedObjectService.StoredImage;
 import ooo.klae.connex.backend.storage.UploadSource;
 import ooo.klae.connex.backend.tenant.Permission;
 import ooo.klae.connex.backend.tenant.RequirePermission;
+import ooo.klae.connex.backend.util.LikePattern;
 
 import java.time.Clock;
 import java.time.Instant;
@@ -80,6 +82,7 @@ public class CompanyService {
         Set.of("name", "website", "industry", "phone", "address", "logoUrl");
 
     private static final int MAX_MATCHING_IDS = 1000;
+    private static final int COMPANY_NAME_CANDIDATE_LIMIT = 16;
     private static final int ENGAGEMENT_PREVIEW_SIZE = 5;
     private static final int ENGAGEMENT_WEEKS = 12;
     private static final long WEEK_MILLIS = 7L * 24 * 60 * 60 * 1000;
@@ -91,6 +94,27 @@ public class CompanyService {
      */
     public List<Company> getAllCompanies() {
         return companyMapper.getAllCompanies(workspaceService.getCurrentWorkspaceId());
+    }
+
+    /**
+     * Returns visible companies whose names exactly match after Unicode NFKC, whitespace, and
+     * case normalization. More than one result is intentionally preserved so callers never bind
+     * an ambiguous OCR candidate automatically.
+     */
+    public List<Company> findVisibleByNormalizedName(String name) {
+        String key = BusinessCardTextNormalizer.companyKey(name);
+        if (key.isBlank()) {
+            return List.of();
+        }
+        String pattern = java.util.Arrays.stream(key.split(" "))
+                .map(LikePattern::escape)
+                .collect(Collectors.joining("%", "", "%"));
+        return companyMapper.findVisibleNameCandidates(
+                        workspaceService.getCurrentWorkspaceId(), pattern, key,
+                        COMPANY_NAME_CANDIDATE_LIMIT)
+                .stream()
+                .filter(company -> key.equals(BusinessCardTextNormalizer.companyKey(company.getName())))
+                .toList();
     }
 
     public CompanyEngagementDto getCompanyEngagement(int companyId) {

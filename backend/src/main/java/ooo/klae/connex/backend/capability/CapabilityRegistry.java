@@ -11,6 +11,7 @@ import org.springframework.stereotype.Service;
 
 import ooo.klae.connex.backend.config.DeploymentProperties;
 import ooo.klae.connex.backend.mail.MailProperties;
+import ooo.klae.connex.backend.services.BusinessCardService;
 import ooo.klae.connex.backend.services.SsoConnectionService;
 import ooo.klae.connex.backend.sso.SocialLoginClientRegistrations;
 
@@ -24,11 +25,13 @@ public class CapabilityRegistry {
             Capability.SSO, Set.of(),
             Capability.SOCIAL_LOGIN_GOOGLE, Set.of(),
             Capability.SOCIAL_LOGIN_MICROSOFT, Set.of(),
-            Capability.MANAGED_MAIL, Set.of());
+            Capability.MANAGED_MAIL, Set.of(),
+            Capability.BUSINESS_CARD_SCANNING, Set.of());
 
     private final SsoConnectionService ssoConnectionService;
     private final SocialLoginClientRegistrations socialLoginClientRegistrations;
     private final MailProperties mailProperties;
+    private final BusinessCardService businessCardService;
     private final DeploymentProperties deploymentProperties;
     private final CapabilityEntitlement capabilityEntitlement;
     private final Map<Capability, Set<String>> forbiddenProfiles;
@@ -39,6 +42,7 @@ public class CapabilityRegistry {
      * @param ssoConnectionService SSO capability source
      * @param socialLoginClientRegistrations social-login capability source
      * @param mailProperties mail capability source
+     * @param businessCardService business-card capability source
      * @param deploymentProperties active deployment profile
      * @param capabilityEntitlement capability entitlement source
      */
@@ -46,15 +50,17 @@ public class CapabilityRegistry {
     public CapabilityRegistry(SsoConnectionService ssoConnectionService,
             SocialLoginClientRegistrations socialLoginClientRegistrations,
             MailProperties mailProperties,
+            BusinessCardService businessCardService,
             DeploymentProperties deploymentProperties,
             CapabilityEntitlement capabilityEntitlement) {
-        this(ssoConnectionService, socialLoginClientRegistrations, mailProperties,
+        this(ssoConnectionService, socialLoginClientRegistrations, mailProperties, businessCardService,
                 deploymentProperties, capabilityEntitlement, FORBIDDEN_PROFILES);
     }
 
     CapabilityRegistry(SsoConnectionService ssoConnectionService,
             SocialLoginClientRegistrations socialLoginClientRegistrations,
             MailProperties mailProperties,
+            BusinessCardService businessCardService,
             DeploymentProperties deploymentProperties,
             CapabilityEntitlement capabilityEntitlement,
             Map<Capability, Set<String>> forbiddenProfiles) {
@@ -62,6 +68,7 @@ public class CapabilityRegistry {
         this.socialLoginClientRegistrations = Objects.requireNonNull(
                 socialLoginClientRegistrations, "socialLoginClientRegistrations");
         this.mailProperties = Objects.requireNonNull(mailProperties, "mailProperties");
+        this.businessCardService = Objects.requireNonNull(businessCardService, "businessCardService");
         this.deploymentProperties = Objects.requireNonNull(deploymentProperties, "deploymentProperties");
         this.capabilityEntitlement = Objects.requireNonNull(capabilityEntitlement, "capabilityEntitlement");
         this.forbiddenProfiles = immutableForbiddenProfiles(forbiddenProfiles);
@@ -108,6 +115,7 @@ public class CapabilityRegistry {
             case SOCIAL_LOGIN_GOOGLE -> socialLoginClientRegistrations.isGoogleEnabled();
             case SOCIAL_LOGIN_MICROSOFT -> socialLoginClientRegistrations.isMicrosoftEnabled();
             case MANAGED_MAIL -> mailProperties.isManaged();
+            case BUSINESS_CARD_SCANNING -> businessCardService.isAvailable();
         };
     }
 

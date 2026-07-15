@@ -15,9 +15,16 @@ Single-origin means cookies, WebAuthn (RP = the serving host), and realtime all 
 browser-facing backend URL. Internally the frontend still talks to `backend:8080` directly.
 
 ```
-browser ──▶ caddy :80 ─┬─ /api/*, /saml2/*  ─▶ backend:8080 ─▶ db:3306
+browser ──▶ caddy :80 ─┬─ /api/*, /saml2/*  ─▶ backend:8080 ───▶ db:3306
                        └─ everything else    ─▶ frontend:3000
+                                                    backend ──▶ ocr:8090 (optional profile)
 ```
+
+The opt-in OCR service is reachable only on the private Compose network. It accepts authenticated raw
+JPEG/PNG/WebP bytes from the backend, returns bounded recognized lines, and has no Caddy route.
+Paddle models are fetched from the documented BOS source while the image is built, then mounted
+from an explicit read-only cache; production inference never downloads models or calls an external
+OCR/AI provider.
 
 ## Prerequisites
 
@@ -42,7 +49,25 @@ Fill every `REPLACE_*` value. Generate secrets, e.g.:
 ```bash
 openssl rand -base64 32   # CONNEX_SECRET_STORE_MASTER_KEY
 openssl rand -hex 32      # CONNEX_AUDIT_INTEGRITY_HMAC_SECRET
+openssl rand -hex 32      # CONNEX_OCR_SERVICE_TOKEN
 ```
+
+Business-card scanning is disabled by default so deployments that cannot spare the OCR sidecar's
+resources do not start it. To enable it, set `CONNEX_BUSINESS_CARD_SCANNING_ENABLED=true`, keep
+`CONNEX_OCR_BASE_URL=http://ocr:8090`, generate a unique 32+ character
+`CONNEX_OCR_SERVICE_TOKEN`, and start Compose with the `ocr` profile:
+
+```bash
+docker compose --profile ocr pull
+docker compose --profile ocr up -d
+```
+
+The same token is supplied to the backend through `.env` and to the OCR container by Compose.
+Starting the base stack without `--profile ocr` does not interpolate a required OCR secret or start
+the sidecar. Disabling the feature or losing OCR or private binary-storage readiness makes the
+public capability return false and scan/import fail closed. The OCR container is capped at two
+CPUs, 2 GiB memory, 128 processes, and one concurrent inference; excess concurrent work receives
+`429` instead of entering an unbounded queue.
 
 `CONNEX_DEPLOYMENT_PROFILE` drives fail-closed posture enforcement (issue #497): `saas` forbids the
 internal-access opt-ins (bootstrap, private SSO issuer hosts, internal AI/SMTP hosts); `silo` and
@@ -131,6 +156,9 @@ cp eval.env.example .env
 CONNEX_VERSION=dev docker compose -f docker-compose.yml -f docker-compose.build.yml up --build -d
 curl -s http://localhost:8088/api/version
 ```
+
+To include local OCR, set the three OCR variables described above and add `--profile ocr` before
+`up`.
 
 ## CI coverage
 

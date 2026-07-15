@@ -1,0 +1,34 @@
+# syntax=docker/dockerfile:1
+
+FROM python:3.12-slim-bookworm
+
+ARG VERSION=0.0.0-dev
+LABEL org.opencontainers.image.title="connex-ocr" \
+      org.opencontainers.image.source="https://github.com/itkla/connex" \
+      org.opencontainers.image.version="${VERSION}"
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    HOME=/opt/connex-ocr \
+    PADDLE_PDX_MODEL_SOURCE=bos
+
+WORKDIR /opt/connex-ocr/app
+
+COPY requirements.txt ./
+RUN pip install --no-cache-dir --requirement requirements.txt
+
+COPY ocr_service ./ocr_service
+RUN mkdir -p /opt/connex-ocr/.paddlex \
+    && python -m ocr_service.prefetch \
+    && chmod -R a-w /opt/connex-ocr/.paddlex
+
+RUN useradd --system --uid 10001 --home-dir /opt/connex-ocr --shell /usr/sbin/nologin connex-ocr \
+    && chown -R root:root /opt/connex-ocr \
+    && chmod -R a-w /opt/connex-ocr
+
+USER 10001
+EXPOSE 8090
+
+HEALTHCHECK --interval=15s --timeout=3s --start-period=90s --retries=4 CMD ["python", "-c", "import json,urllib.request; data=json.load(urllib.request.urlopen('http://127.0.0.1:8090/health',timeout=2)); raise SystemExit(0 if data.get('ready') is True else 1)"]
+
+ENTRYPOINT ["python", "-m", "ocr_service"]

@@ -121,6 +121,30 @@ class CompanyServiceTest extends AbstractServiceTest {
     }
 
     @Test
+    void normalizedNameMatchUsesBoundedVisibleCandidateQuery() {
+        CompanyMapper mapper = mock(CompanyMapper.class);
+        WorkspaceService workspaceService = mock(WorkspaceService.class);
+        Company exact = new Company();
+        exact.setId(11);
+        exact.setName("ANALYTICAL   LABS");
+        Company prefixOnly = new Company();
+        prefixOnly.setId(12);
+        prefixOnly.setName("Analytical Labs Group");
+        when(workspaceService.getCurrentWorkspaceId()).thenReturn(7);
+        when(mapper.findVisibleNameCandidates(
+                7, "analytical%labs%", "analytical labs", 16))
+            .thenReturn(List.of(exact, prefixOnly));
+        CompanyService service = companyService(mapper, workspaceService);
+
+        assertEquals(List.of(exact),
+            service.findVisibleByNormalizedName("  Ａnalytical　Labs  "));
+
+        verify(mapper).findVisibleNameCandidates(
+            7, "analytical%labs%", "analytical labs", 16);
+        verify(mapper, never()).getAllCompanies(7);
+    }
+
+    @Test
     void getMatchingCompanyIdsForwardsEveryFilterWithinTheCurrentWorkspace() {
         CompanyMapper mapper = mock(CompanyMapper.class);
         WorkspaceService workspaceService = mock(WorkspaceService.class);

@@ -40,6 +40,16 @@
     ORDER BY c.name, c.id
   </select>
 
+  <select id="findVisibleNameCandidates" resultType="Company">
+    SELECT c.id, c.workspace_id, c.name
+    FROM company c
+    WHERE <include refid="visible"/>
+      AND c.name LIKE #{pattern}
+    ORDER BY CASE WHEN LOWER(c.name) = #{normalizedName} THEN 0 ELSE 1 END,
+      CHAR_LENGTH(c.name), c.id
+    LIMIT #{limit}
+  </select>
+
   <select id="getRelationshipScoreAggregates"
           resultType="ooo.klae.connex.backend.dto.RelationshipScoreAggregateDto">
     SELECT c.id,

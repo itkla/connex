@@ -1,6 +1,6 @@
 # Release & artifact distribution
 
-This is **Release pipeline v0** (issue #496, epic #502). It builds Connex as two container images — a **version-locked pair** — and publishes them to GHCR, signed and with SBOM attestations. The same images serve every deployment form (SaaS, silo, on-prem); the deployment mode is chosen at runtime, never by a different build.
+This is **Release pipeline v0** (issue #496, epic #502). It builds Connex as three container images — a **version-locked set** — and publishes them to GHCR, signed and with SBOM attestations. The same images serve every deployment form (SaaS, silo, on-prem); the deployment mode is chosen at runtime, never by a different build.
 
 ## The artifacts
 
@@ -8,8 +8,9 @@ This is **Release pipeline v0** (issue #496, epic #502). It builds Connex as two
 | --- | --- | --- |
 | `ghcr.io/itkla/connex-backend:<version>` | Spring Boot executable WAR on a Temurin 26 JRE | `java -jar app.war`, serves `:8080` |
 | `ghcr.io/itkla/connex-frontend:<version>` | Next.js standalone server | `node server.js`, serves `:3000` |
+| `ghcr.io/itkla/connex-ocr:<version>` | CPU-only PaddleOCR with pre-fetched EN/JA card models | private Python service, serves `:8090` |
 
-Both images are tagged with the **same product version** (from the git tag) plus an immutable `sha-<commit>` tag. A release is always the pair at one version — the two are never upgraded independently. The running backend version is exposed at `GET /api/version`.
+All images are tagged with the **same product version** (from the git tag) plus an immutable `sha-<commit>` tag. A release is always the set at one version — the components are never upgraded independently. The running backend version is exposed at `GET /api/version`.
 
 The frontend image bakes the **internal** backend address (`BACKEND_URL`, default `http://backend:8080`) into its build-time route rewrites, and defaults the server-side fetch base (`API_URL`) to the same. Because that is the internal service hop (the browser always talks to the frontend origin), the one image is portable across all deployment modes as long as the bundle names the backend service `backend`. Decoupling this behind an ingress proxy is a follow-up (#499).
 
@@ -67,7 +68,7 @@ Two, no more:
 Staging currently checks out `main` and runs it via an out-of-repo systemd unit on the staging host. To consume the pipeline instead, on that host:
 
 1. Authenticate to GHCR (`docker login ghcr.io`).
-2. Replace the checkout-and-run unit with one that `docker pull`s the pinned `ghcr.io/itkla/connex-{backend,frontend}:<version>` pair and runs them with the existing staging env (the fail-closed security env staging already requires — DB `sslMode`, secret-store + audit secrets).
+2. Replace the checkout-and-run unit with one that `docker pull`s the pinned `ghcr.io/itkla/connex-{backend,frontend}:<version>` set and runs them with the existing staging env (the fail-closed security env staging already requires — DB `sslMode`, secret-store, and audit secrets). When local OCR is enabled, pull the matching OCR image too, configure its token, and activate the `ocr` Compose profile.
 3. Bump the pinned version to roll forward.
 
 This step lives on the host because the systemd units and cloudflared config are not in the repository.

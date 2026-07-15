@@ -20,6 +20,11 @@ import ooo.klae.connex.backend.dto.RelationshipScoreAggregateDto;
 
 public interface CompanyMapper {
     List<Company> getAllCompanies(int workspaceId);
+    List<Company> findVisibleNameCandidates(
+            @Param("workspaceId") int workspaceId,
+            @Param("pattern") String pattern,
+            @Param("normalizedName") String normalizedName,
+            @Param("limit") int limit);
     List<RelationshipScoreAggregateDto> getRelationshipScoreAggregates(
             @Param("workspaceId") int workspaceId,
             @Param("reference") LocalDateTime reference);

@@ -75,6 +75,7 @@ public final class TablePlaneRegistry {
         "ai_output_cache",
         "attachment",
         "attachment_tag",
+        "business_card_import_request",
         "company",
         "company_share",
         "company_tag",

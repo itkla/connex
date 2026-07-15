@@ -29,6 +29,7 @@ class ApiRequestBodySizeFilterTest {
         properties.setImportMaxBodyBytes(16);
         properties.setUploadMaxBodyBytes(12);
         properties.setWebauthnMaxBodyBytes(4);
+        properties.setBusinessCardMaxBodyBytes(20);
         filter = new ApiRequestBodySizeFilter(properties);
     }
 
@@ -160,6 +161,20 @@ class ApiRequestBodySizeFilterTest {
             assertEquals(413, rejectedResponse.getStatus(), path);
             assertNull(rejectedChain.getRequest(), path);
         }
+    }
+
+    @Test
+    void appliesDedicatedLimitToBusinessCardRoutes() throws Exception {
+        MockHttpServletRequest request = new MockHttpServletRequest("POST", "/api/business-cards/scan");
+        request.setContentType("multipart/form-data; boundary=x");
+        request.setContent(new byte[21]);
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        MockFilterChain chain = new MockFilterChain();
+
+        filter.doFilter(request, response, chain);
+
+        assertEquals(413, response.getStatus());
+        assertNull(chain.getRequest());
     }
 
     @Test

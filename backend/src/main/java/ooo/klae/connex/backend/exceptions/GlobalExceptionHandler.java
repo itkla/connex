@@ -13,6 +13,7 @@ import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.MissingServletRequestParameterException;
+import org.springframework.web.multipart.support.MissingServletRequestPartException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
@@ -33,6 +34,17 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(BadRequestException.class)
     public ResponseEntity<String> badRequest(BadRequestException ex) {
         return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(ex.getMessage());
+    }
+
+    @ExceptionHandler(UnsupportedBusinessCardMediaTypeException.class)
+    public ResponseEntity<String> unsupportedBusinessCardMediaType(
+            UnsupportedBusinessCardMediaTypeException ex) {
+        return ResponseEntity.status(HttpStatus.UNSUPPORTED_MEDIA_TYPE).body(ex.getMessage());
+    }
+
+    @ExceptionHandler(UnprocessableBusinessCardException.class)
+    public ResponseEntity<String> unprocessableBusinessCard(UnprocessableBusinessCardException ex) {
+        return ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY).body(ex.getMessage());
     }
 
     @ExceptionHandler(PasskeyEnrollmentRequiredException.class)
@@ -122,6 +134,12 @@ public class GlobalExceptionHandler {
                 .body("Missing required parameter: " + ex.getParameterName());
     }
 
+    @ExceptionHandler(MissingServletRequestPartException.class)
+    public ResponseEntity<String> missingPart(MissingServletRequestPartException ex) {
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                .body("Missing required multipart part: " + ex.getRequestPartName());
+    }
+
     @ExceptionHandler(HttpRequestMethodNotSupportedException.class)
     public ResponseEntity<String> methodNotSupported(HttpRequestMethodNotSupportedException ex) {
         return ResponseEntity.status(ex.getStatusCode())
@@ -135,8 +153,8 @@ public class GlobalExceptionHandler {
     }
 
     @ExceptionHandler(MaxUploadSizeExceededException.class)
-    public ResponseEntity<String> maxUploadSizeExceeded(MaxUploadSizeExceededException ex) {
-        return ResponseEntity.status(HttpStatus.PAYLOAD_TOO_LARGE).body("Uploaded file is too large");
+    public ResponseEntity<String> uploadTooLarge(MaxUploadSizeExceededException ex) {
+        return ResponseEntity.status(HttpStatus.PAYLOAD_TOO_LARGE).body("Request body is too large");
     }
 
     @ExceptionHandler(UnsupportedUploadMediaTypeException.class)

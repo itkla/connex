@@ -37,6 +37,31 @@ services:
       db:
         condition: service_healthy
 
+  ocr:
+    image: ghcr.io/itkla/connex-ocr:${CONNEX_VERSION:?set CONNEX_VERSION in deploy/.env}
+    profiles: ["ocr"]
+    restart: unless-stopped
+    environment:
+      CONNEX_OCR_SERVICE_TOKEN: ${CONNEX_OCR_SERVICE_TOKEN:-}
+    expose:
+      - "8090"
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777,noexec,nosuid,nodev
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cpus: 2.0
+    mem_limit: 2g
+    pids_limit: 128
+    healthcheck:
+      test: ["CMD", "python", "-c", "import json,urllib.request; data=json.load(urllib.request.urlopen('http://127.0.0.1:8090/health',timeout=2)); raise SystemExit(0 if data.get('ready') is True else 1)"]
+      interval: 15s
+      timeout: 3s
+      start_period: 90s
+      retries: 4
+
   db:
     image: mysql:8.4
     restart: unless-stopped

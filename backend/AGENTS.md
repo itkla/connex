@@ -6,7 +6,7 @@ The root [`/AGENTS.md`](../AGENTS.md) applies here in full. This file adds backe
 
 Spring Boot 4 on **Java 26** · MyBatis · Flyway + MySQL · Spring Security with **WebAuthn** · Lombok · JUnit 5. Multi-tenant, RBAC-enforced. Package root: `ooo.klae.connex.backend`.
 
-Layout: `controllers/` · `services/` · `mappers/` (+ XML in `resources/mappers/`) · `dto/` · `beans/` · `tenant/` · `notifications/` · `config/` · `exceptions/`. Migrations in `resources/db/migration/`.
+Layout: `controllers/` · `services/` · `mappers/` (+ XML in `resources/mappers/`) · `dto/` · `beans/` · `tenant/` · `notifications/` · `businesscard/` · `config/` · `exceptions/`. Migrations in `resources/db/migration/`.
 
 ## Architecture — keep the layers clean
 
@@ -35,6 +35,7 @@ This is the most load-bearing property of Connex. A change that leaks data acros
 - **Auth/WebAuthn** flows are sensitive: don't weaken session handling, CSRF, or credential verification to simplify a change.
 - **Authenticated session generations are opaque.** Every authentication method must continue through `AuthService.establishAuthenticatedSession`, which rotates the servlet session and the non-authorizing opaque `requestIdentity` returned by `/api/auth/csrf`; never return a principal id or servlet session id for client-side request correlation.
 - Prefer parameterized MyBatis (`#{}`) over string substitution (`${}`) to avoid SQL injection.
+- Business-card uploads accept only bounded, fully decoded JPEG/PNG/WebP bytes. The OCR sidecar is private and bearer-authenticated; never log card bytes or recognized contact text, and never make runtime OCR model downloads or remote-image fetching possible. Confirmed imports require a caller-retained UUID `Idempotency-Key`; claims, request fingerprints, and result IDs stay workspace-scoped in `business_card_import_request` so retries cannot create duplicates or replay a different payload.
 
 ## Data, migrations & MyBatis
 
@@ -85,7 +86,7 @@ Rules for any new AI-powered feature:
 
 ## Definition of Done (backend) — the verify loop is required
 
-1. **Run a test server:** `./gradlew bootRun` (MySQL via `docker-compose up -d db`, see `docker-compose.yml` — db on `:3306`, adminer on `:9001`).
+1. **Run a test server:** `./gradlew bootRun` (MySQL via `docker-compose up -d db`, see `docker-compose.yml` — db on `:3306`, adminer on `:9001`). For business-card scanning, also start the optional private sidecar with `docker compose --profile ocr up -d ocr`, use the same 32+ character `CONNEX_OCR_SERVICE_TOKEN` in both processes, set `CONNEX_OCR_BASE_URL=http://127.0.0.1:8090`, and enable the feature explicitly.
 2. **Curl every changed `*Controller` endpoint** at `http://localhost:8080/api/...`. Confirm status, body, and — critically — auth, tenant isolation, and RBAC behavior with real requests. Protected endpoints need a session: `POST /api/auth/login` to obtain the `JSESSIONID` cookie, `GET /api/auth/csrf` for a CSRF token, then send both on mutating calls. Exercise an unauthorized and an other-tenant caller too — prove the request is *rejected*, not just that the happy path works.
 3. **Write automated tests and make them pass:** `./gradlew test`. Cover services and mappers for new behavior; keep arch tests green.
 4. **Scrutinize intensely** for bugs and future failure modes: tenant leakage, RBAC gaps, null/edge cases, N+1 queries, transaction boundaries, migration safety and reversibility.
@@ -106,4 +107,5 @@ Rules for any new AI-powered feature:
 - Build: `./gradlew build`
 - DB up: create `backend/.env` from `backend/.env.example`, fill local-only passwords, then run `docker compose up -d db` (from `backend/`)
 - Private uploads (local): the default root is `~/.connex/object-storage`; override it with `CONNEX_OBJECT_STORAGE_FILESYSTEM_ROOT` when tests or parallel worktrees need isolation.
+- OCR up: set a unique local `CONNEX_OCR_SERVICE_TOKEN` in `backend/.env`, then run `docker compose --profile ocr up -d ocr` (from `backend/`); see `../ocr/AGENTS.md` for model, test, benchmark, and resource rules
 - Routing integration test: `TenantCatalogRoutingIntegrationTest` creates a scratch catalog `connexdb_routing_it`; when the test DB user lacks the privilege (CI runs as root and has it) the test self-skips with instructions. To run it locally, grant once as root: ``GRANT ALL PRIVILEGES ON `connexdb\_routing\_%`.* TO 'connexuser'@'%';``
