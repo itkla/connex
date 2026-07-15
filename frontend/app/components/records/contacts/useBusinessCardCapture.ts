@@ -72,6 +72,8 @@ export function useBusinessCardCapture({
     const suggestedCompanyNameRef = useRef<string | null>(null);
     const companyNameRef = useRef('');
     const ocrOwnedFieldsRef = useRef<Partial<Record<BusinessCardContactField, OcrOwnedField>>>({});
+    const userTouchedFieldsRef = useRef<Set<BusinessCardContactField>>(new Set());
+    const userTouchedCompanyNameRef = useRef(false);
 
     useLayoutEffect(() => {
         payloadRef.current = payload;
@@ -148,6 +150,7 @@ export function useBusinessCardCapture({
 
     useEffect(() => {
         if (!active) return;
+        const userTouchedFields = userTouchedFieldsRef.current;
         return () => {
             scanRequestSequenceRef.current += 1;
             controllerRef.current?.abort();
@@ -159,6 +162,8 @@ export function useBusinessCardCapture({
             suggestedCompanyIdRef.current = null;
             suggestedCompanyNameRef.current = null;
             companyNameRef.current = '';
+            userTouchedFields.clear();
+            userTouchedCompanyNameRef.current = false;
         };
     }, [active, revertOcrOwnedValues]);
 
@@ -187,8 +192,9 @@ export function useBusinessCardCapture({
             const previousCompanySuggestion = suggestedCompanyNameRef.current;
             const currentCompanyName = companyNameRef.current;
             const nextCompanySuggestion = nextResult.company.value?.trim() ?? '';
-            if (!currentCompanyName.trim()
-                || (previousCompanySuggestion != null && currentCompanyName === previousCompanySuggestion)) {
+            if (!userTouchedCompanyNameRef.current
+                && (!currentCompanyName.trim()
+                || (previousCompanySuggestion != null && currentCompanyName === previousCompanySuggestion))) {
                 companyNameRef.current = nextCompanySuggestion;
                 suggestedCompanyNameRef.current = nextCompanySuggestion || null;
                 setCompanyName(nextCompanySuggestion);
@@ -203,7 +209,8 @@ export function useBusinessCardCapture({
             for (const field of BUSINESS_CARD_CONTACT_FIELDS) {
                 const previousOwnership = previousOwnedFields[field];
                 const isUntouchedOcrValue = previousOwnership != null && current[field] === previousOwnership.value;
-                if (!current[field].trim() || isUntouchedOcrValue) {
+                if (!userTouchedFieldsRef.current.has(field)
+                    && (!current[field].trim() || isUntouchedOcrValue)) {
                     const nextValue = scannedContactValue(nextResult, field);
                     next[field] = nextValue;
                     if (isUntouchedOcrValue && previousOwnership) {
@@ -242,6 +249,8 @@ export function useBusinessCardCapture({
         const preserveExisting = payloadRef.current.companyId != null
             && (!hadSelectedCard || companyModeRef.current === 'existing');
         hasSelectedCardRef.current = true;
+        userTouchedFieldsRef.current.clear();
+        userTouchedCompanyNameRef.current = false;
         importRequestIdRef.current = crypto.randomUUID();
         suggestedCompanyIdRef.current = null;
         setFile(image);
@@ -284,6 +293,8 @@ export function useBusinessCardCapture({
         companyModeRef.current = null;
         suggestedCompanyIdRef.current = null;
         suggestedCompanyNameRef.current = null;
+        userTouchedFieldsRef.current.clear();
+        userTouchedCompanyNameRef.current = false;
         setCompanyMode(null);
         setCompanyName('');
         companyNameRef.current = '';
@@ -312,6 +323,7 @@ export function useBusinessCardCapture({
     };
 
     const updateCompanyName = (value: string) => {
+        userTouchedCompanyNameRef.current = true;
         suggestedCompanyNameRef.current = null;
         companyNameRef.current = value;
         setCompanyName(value);
@@ -344,6 +356,7 @@ export function useBusinessCardCapture({
     };
 
     const updateContactField = (field: BusinessCardContactField, value: string) => {
+        userTouchedFieldsRef.current.add(field);
         delete ocrOwnedFieldsRef.current[field];
         commitPayload({ ...payloadRef.current, [field]: value });
         setImportError(null);
