@@ -60,7 +60,7 @@
   </select>
 
   <select id="getMembers" resultType="User">
-    SELECT u.id, u.username, u.display_name, u.email, u.password_hash, u.timezone,
+    SELECT u.id, u.username, u.display_name, u.email, u.password_hash, u.timezone, u.locale,
            u.last_login_at, u.profile_picture_url, u.created_at, u.updated_at
     FROM app_user u
     JOIN workspace_member wm ON wm.user_id = u.id

@@ -23,4 +23,17 @@ class WorkspaceMapperTest extends AbstractMapperTest {
         assertFalse(workspaceMapper.isMember(other.getId(), member.getId()));
         assertEquals(1, workspaceMapper.getWorkspacesForUser(member.getId()).size());
     }
+
+    @Test
+    void getMembersHydratesLocale() {
+        User member = newUser();
+        userMapper.updateLocale(member.getId(), "ja");
+
+        User hydrated = workspaceMapper.getMembers(workspace.getId()).stream()
+                .filter(user -> user.getId() == member.getId())
+                .findFirst()
+                .orElseThrow();
+
+        assertEquals("ja", hydrated.getLocale());
+    }
 }

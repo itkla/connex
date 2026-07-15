@@ -8,8 +8,10 @@ import { Loader2Icon } from "lucide-react";
 
 import type { User } from "@/app/lib/types";
 import { ApiError, updateMyTimezone, updateUser } from "@/app/lib/api";
+import { persistAuthenticatedLocale } from "@/app/lib/locale-preference";
 import { toastError, toastSuccess } from "@/app/lib/toast";
 import { formatDate, formatDateTime } from "@/app/lib/utils";
+import type { Locale } from "@/i18n/config";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -21,6 +23,13 @@ import {
     ComboboxItem,
     ComboboxList,
 } from "@/components/ui/combobox";
+import {
+    Select,
+    SelectContent,
+    SelectItem,
+    SelectTrigger,
+    SelectValue,
+} from "@/components/ui/select";
 import Rise from "@/app/components/motion/Rise";
 import SectionHeader from "@/app/components/dashboard/SectionHeader";
 
@@ -28,8 +37,19 @@ type Props = {
     user: User;
 };
 
+type ProfileMutationChanges = Partial<Pick<
+    User,
+    "username" | "displayName" | "profilePictureUrl" | "timezone" | "locale"
+>>;
+
+type ProfileMutationResult =
+    | { ok: true; value: ProfileMutationChanges | null }
+    | { ok: false; error: unknown };
+
 const comboboxInputClass =
     "rounded-lg border-0 bg-muted shadow-none ring-1 ring-border dark:bg-muted has-[[data-slot=input-group-control]:focus-visible]:ring-2 has-[[data-slot=input-group-control]:focus-visible]:ring-brand";
+const selectTriggerClass =
+    "w-full rounded-lg border-0 bg-muted shadow-none ring-1 ring-border focus-visible:ring-2 focus-visible:ring-brand dark:bg-muted";
 
 function supportedTimeZones(): string[] {
     const intl = Intl as typeof Intl & { supportedValuesOf?: (key: string) => string[] };
@@ -51,6 +71,16 @@ async function uploadProfilePicture(file: File): Promise<string> {
     return data.profilePictureUrl;
 }
 
+async function settleProfileMutation(
+    mutation: Promise<ProfileMutationChanges | null>,
+): Promise<ProfileMutationResult> {
+    try {
+        return { ok: true, value: await mutation };
+    } catch (error: unknown) {
+        return { ok: false, error };
+    }
+}
+
 export default function ProfilePanel({ user }: Props) {
     const t = useTranslations("AccountProfile");
     const locale = useLocale();
@@ -60,20 +90,31 @@ export default function ProfilePanel({ user }: Props) {
     const [displayName, setDisplayName] = useState(user.displayName);
     const [username, setUsername] = useState(user.username);
     const [timezone, setTimezone] = useState(user.timezone);
+    const [preferredLocale, setPreferredLocale] = useState<Locale>(user.locale);
+    const [confirmation, setConfirmation] = useState({ source: user, value: user });
     const [photo, setPhoto] = useState<File | null>(null);
     const [photoPreview, setPhotoPreview] = useState<string | null>(null);
     const [uploadedPhotoUrl, setUploadedPhotoUrl] = useState<string | null>(null);
     const previewUrlRef = useRef<string | null>(null);
     const [submitting, setSubmitting] = useState(false);
     const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+    const confirmedUser = confirmation.value;
+
+    if (confirmation.source !== user) {
+        setDisplayName((current) => current === confirmedUser.displayName ? user.displayName : current);
+        setUsername((current) => current === confirmedUser.username ? user.username : current);
+        setTimezone((current) => current === confirmedUser.timezone ? user.timezone : current);
+        setPreferredLocale((current) => current === confirmedUser.locale ? user.locale : current);
+        setConfirmation({ source: user, value: user });
+    }
 
     const timeZones = useMemo(() => {
         const zones = supportedTimeZones();
-        if (user.timezone && !zones.includes(user.timezone)) {
-            return [user.timezone, ...zones];
+        if (confirmedUser.timezone && !zones.includes(confirmedUser.timezone)) {
+            return [confirmedUser.timezone, ...zones];
         }
         return zones;
-    }, [user.timezone]);
+    }, [confirmedUser.timezone]);
 
     useEffect(() => {
         return () => {
@@ -82,10 +123,11 @@ export default function ProfilePanel({ user }: Props) {
     }, []);
 
     const dirty =
-        displayName.trim() !== user.displayName ||
-        username.trim() !== user.username ||
-        timezone !== user.timezone ||
-        photo !== null;
+        displayName.trim() !== confirmedUser.displayName ||
+        username.trim() !== confirmedUser.username ||
+        timezone !== confirmedUser.timezone ||
+        preferredLocale !== confirmedUser.locale ||
+        photo !== null && uploadedPhotoUrl !== confirmedUser.profilePictureUrl;
 
     const selectPhoto = (file: File | null) => {
         if (previewUrlRef.current) URL.revokeObjectURL(previewUrlRef.current);
@@ -97,11 +139,16 @@ export default function ProfilePanel({ user }: Props) {
     };
 
     const reset = () => {
-        setDisplayName(user.displayName);
-        setUsername(user.username);
-        setTimezone(user.timezone);
+        setDisplayName(confirmedUser.displayName);
+        setUsername(confirmedUser.username);
+        setTimezone(confirmedUser.timezone);
+        setPreferredLocale(confirmedUser.locale);
         selectPhoto(null);
         setFieldErrors({});
+    };
+
+    const confirmUser = (nextUser: User) => {
+        setConfirmation((current) => ({ ...current, value: nextUser }));
     };
 
     const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
@@ -110,30 +157,71 @@ export default function ProfilePanel({ user }: Props) {
         setSubmitting(true);
         setFieldErrors({});
 
+        const savedUser = confirmedUser;
+        let completedMutation = false;
         try {
-            let profilePictureUrl = user.profilePictureUrl;
-            if (photo) {
-                profilePictureUrl = uploadedPhotoUrl ?? (await uploadProfilePicture(photo));
-                if (!uploadedPhotoUrl) setUploadedPhotoUrl(profilePictureUrl);
-            }
+            const localeMutation: Promise<ProfileMutationChanges | null> =
+                preferredLocale !== savedUser.locale
+                    ? persistAuthenticatedLocale(preferredLocale).then((locale) => ({ locale }))
+                    : Promise.resolve(null);
+            const profileMutation = (async (): Promise<ProfileMutationChanges | null> => {
+                let profilePictureUrl = savedUser.profilePictureUrl;
+                if (photo) {
+                    profilePictureUrl = uploadedPhotoUrl ?? (await uploadProfilePicture(photo));
+                    if (!uploadedPhotoUrl) setUploadedPhotoUrl(profilePictureUrl);
+                }
 
-            const profileChanged =
-                displayName.trim() !== user.displayName ||
-                username.trim() !== user.username ||
-                photo !== null;
+                const profileChanged =
+                    displayName.trim() !== savedUser.displayName ||
+                    username.trim() !== savedUser.username ||
+                    profilePictureUrl !== savedUser.profilePictureUrl;
+                if (!profileChanged) return null;
 
-            if (profileChanged) {
-                await updateUser(user.id, {
+                const updatedUser = await updateUser(savedUser.id, {
                     username: username.trim(),
                     displayName: displayName.trim(),
-                    email: user.email,
+                    email: savedUser.email,
                     profilePictureUrl,
                 });
-            }
+                return {
+                    username: updatedUser.username,
+                    displayName: updatedUser.displayName,
+                    profilePictureUrl: updatedUser.profilePictureUrl,
+                };
+            })();
+            const profileThenTimezone = (async () => {
+                const profileResult = await settleProfileMutation(profileMutation);
+                const timezoneMutation: Promise<ProfileMutationChanges | null> =
+                    timezone !== savedUser.timezone
+                        ? updateMyTimezone(timezone).then((updatedUser) => ({ timezone: updatedUser.timezone }))
+                        : Promise.resolve(null);
+                const timezoneResult = await settleProfileMutation(timezoneMutation);
+                return { profileResult, timezoneResult };
+            })();
 
-            if (timezone !== user.timezone) {
-                await updateMyTimezone(timezone);
+            const [sequentialResults, localeResult] = await Promise.all([
+                profileThenTimezone,
+                settleProfileMutation(localeMutation),
+            ]);
+            const results = [
+                sequentialResults.profileResult,
+                sequentialResults.timezoneResult,
+                localeResult,
+            ];
+            let nextUser = savedUser;
+            let mutationFailed = false;
+            let mutationError: unknown;
+            for (const result of results) {
+                if (result.ok && result.value !== null) {
+                    nextUser = { ...nextUser, ...result.value };
+                    completedMutation = true;
+                } else if (!result.ok && !mutationFailed) {
+                    mutationFailed = true;
+                    mutationError = result.error;
+                }
             }
+            if (completedMutation) confirmUser(nextUser);
+            if (mutationFailed) throw mutationError;
 
             selectPhoto(null);
             toastSuccess(t("saved"));
@@ -149,13 +237,14 @@ export default function ProfilePanel({ user }: Props) {
                       ? err.message
                       : t("saveFailed");
             toastError(message);
+            if (completedMutation) router.refresh();
         } finally {
             setSubmitting(false);
         }
     };
 
-    const previewUrl = photoPreview ?? user.profilePictureUrl ?? null;
-    const initial = user.displayName?.slice(0, 1).toUpperCase() || "?";
+    const previewUrl = photoPreview ?? confirmedUser.profilePictureUrl ?? null;
+    const initial = confirmedUser.displayName?.slice(0, 1).toUpperCase() || "?";
 
     return (
         <div className="space-y-10">
@@ -255,7 +344,7 @@ export default function ProfilePanel({ user }: Props) {
                             <Combobox
                                 items={timeZones}
                                 value={timezone}
-                                onValueChange={(value) => setTimezone((value as string | null) ?? user.timezone)}
+                                onValueChange={(value) => setTimezone((value as string | null) ?? confirmedUser.timezone)}
                                 itemToStringLabel={(tz: string) => tz}
                             >
                                 <ComboboxInput
@@ -275,6 +364,27 @@ export default function ProfilePanel({ user }: Props) {
                                 </ComboboxContent>
                             </Combobox>
                             <p className="text-sm text-muted-foreground">{t("timezoneHint")}</p>
+                        </div>
+
+                        <div className="grid gap-2">
+                            <Label htmlFor="account-language">{t("languageLabel")}</Label>
+                            <Select
+                                value={preferredLocale}
+                                onValueChange={(value) => {
+                                    if (value === "en" || value === "ja") {
+                                        setPreferredLocale(value);
+                                    }
+                                }}
+                            >
+                                <SelectTrigger id="account-language" className={selectTriggerClass}>
+                                    <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value="en">{t("languageEnglish")}</SelectItem>
+                                    <SelectItem value="ja">{t("languageJapanese")}</SelectItem>
+                                </SelectContent>
+                            </Select>
+                            <p className="text-sm text-muted-foreground">{t("languageHint")}</p>
                         </div>
                     </div>
 

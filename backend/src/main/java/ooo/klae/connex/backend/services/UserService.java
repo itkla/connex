@@ -44,7 +44,7 @@ public class UserService implements UserDetailsService {
 
     private static final Set<String> AUDIT_FIELDS =
         Set.of("username", "displayName", "email", "department", "title",
-               "employeeId", "phoneNumber", "profilePictureUrl", "timezone");
+               "employeeId", "phoneNumber", "profilePictureUrl", "timezone", "locale");
 
     /**
      * Resolves the authenticating principal by login identifier, which may be either a
@@ -110,6 +110,7 @@ public class UserService implements UserDetailsService {
         } else {
             user.setTimezone(TimezoneSupport.validateIana(user.getTimezone(), null));
         }
+        user.setLocale(before.getLocale());
         userMapper.update(user);
         auditService.record("user.update", "user", id, user.getUsername(),
             "Updated user " + user.getUsername(),
@@ -206,6 +207,20 @@ public class UserService implements UserDetailsService {
             "Updated timezone for " + before.getUsername(),
             auditService.singleChange("timezone", before.getTimezone(), validated));
         notificationChanges.publish(workspaceService.getCurrentWorkspaceId(), "user", userId);
+        return userMapper.getUserById(userId);
+    }
+
+    public User updateLocale(int userId, String locale) {
+        workspaceService.requireSelf(userId);
+        User before = getUserById(userId);
+        String validated = LocaleSupport.validate(locale, null);
+        if (validated.equals(before.getLocale())) {
+            return before;
+        }
+        userMapper.updateLocale(userId, validated);
+        auditService.record("user.updateLocale", "user", userId, before.getUsername(),
+            "Updated locale for " + before.getUsername(),
+            auditService.singleChange("locale", before.getLocale(), validated));
         return userMapper.getUserById(userId);
     }
 }

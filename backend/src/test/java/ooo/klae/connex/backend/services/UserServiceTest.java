@@ -17,17 +17,24 @@ import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.security.core.userdetails.UsernameNotFoundException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 
+import tools.jackson.databind.ObjectMapper;
+
 import ooo.klae.connex.backend.beans.Activity;
+import ooo.klae.connex.backend.beans.AuditLog;
 import ooo.klae.connex.backend.beans.Note;
 import ooo.klae.connex.backend.beans.Task;
 import ooo.klae.connex.backend.beans.User;
+import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
+import ooo.klae.connex.backend.mappers.AuditLogMapper;
 
 class UserServiceTest extends AbstractServiceTest {
 
     @Autowired UserService userService;
+    @Autowired AuditLogMapper auditLogMapper;
     @Autowired AuthenticationManager authenticationManager;
+    @Autowired ObjectMapper objectMapper;
     @Autowired PasswordEncoder passwordEncoder;
 
     @Test
@@ -125,12 +132,66 @@ class UserServiceTest extends AbstractServiceTest {
     }
 
     @Test
+    void genericProfileUpdateCannotChangeLocale() {
+        User member = newUser();
+        authenticateAs(member);
+        User update = profileUpdate(member, member.getDisplayName());
+        update.setLocale("ja");
+
+        User updated = userService.update(member.getId(), update);
+
+        assertEquals("en", updated.getLocale());
+        assertEquals("en", userMapper.getUserById(member.getId()).getLocale());
+    }
+
+    @Test
     void update_byWorkspaceAdmin_onAnotherUsersAccount_isForbidden() {
         User member = newUser();
 
         assertThrows(ForbiddenException.class,
             () -> userService.update(member.getId(), profileUpdate(member, "Renamed By Admin")));
         assertEquals(member.getDisplayName(), userMapper.getUserById(member.getId()).getDisplayName());
+    }
+
+    @Test
+    void updateLocale_onOwnAccountPersistsSupportedValue() throws Exception {
+        User member = newUser();
+        authenticateAs(member);
+
+        User updated = userService.updateLocale(member.getId(), "ja");
+
+        assertEquals("ja", updated.getLocale());
+        assertEquals("ja", userMapper.getUserById(member.getId()).getLocale());
+        AuditLog audit = auditLogMapper.findRecent(workspace.getId(), 50, 0).stream()
+                .filter(entry -> "user.updateLocale".equals(entry.getAction()))
+                .filter(entry -> Integer.valueOf(member.getId()).equals(entry.getEntityId()))
+                .findFirst()
+                .orElseThrow();
+        assertEquals(member.getId(), audit.getActorId());
+        var changes = objectMapper.readTree(audit.getChanges());
+        assertEquals("en", changes.path("locale").path("old").asText());
+        assertEquals("ja", changes.path("locale").path("new").asText());
+    }
+
+    @Test
+    void updateLocale_rejectsUnsupportedValueWithoutChangingAccount() {
+        User member = newUser();
+        authenticateAs(member);
+        long before = localeAuditCount(member.getId());
+
+        assertThrows(BadRequestException.class, () -> userService.updateLocale(member.getId(), "fr"));
+        assertEquals("en", userMapper.getUserById(member.getId()).getLocale());
+        assertEquals(before, localeAuditCount(member.getId()));
+    }
+
+    @Test
+    void updateLocale_onAnotherAccountIsForbidden() {
+        User attacker = newUser();
+        User victim = newUser();
+        authenticateAs(attacker);
+
+        assertThrows(ForbiddenException.class, () -> userService.updateLocale(victim.getId(), "ja"));
+        assertEquals("en", userMapper.getUserById(victim.getId()).getLocale());
     }
 
     @Test
@@ -190,6 +251,13 @@ class UserServiceTest extends AbstractServiceTest {
         user.setTimezone("UTC");
         userMapper.insert(user);
         return user;
+    }
+
+    private long localeAuditCount(int userId) {
+        return auditLogMapper.findRecent(workspace.getId(), 100, 0).stream()
+                .filter(entry -> "user.updateLocale".equals(entry.getAction()))
+                .filter(entry -> Integer.valueOf(userId).equals(entry.getEntityId()))
+                .count();
     }
 
     private void authenticateAs(User user) {

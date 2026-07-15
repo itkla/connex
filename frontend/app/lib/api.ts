@@ -910,6 +910,10 @@ export function updateMyTimezone(timezone: string) {
     return patchJson<Types.User>("/api/users/me", { timezone });
 }
 
+export function updateMyLocale(locale: Types.User["locale"]) {
+    return patchJson<Types.User>("/api/users/me/locale", { locale });
+}
+
 export function createUser(payload: Types.RegisterPayload) {
     return postJson<Types.User>(`/api/users`, payload);
 }

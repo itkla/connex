@@ -4,7 +4,7 @@
 <mapper namespace="ooo.klae.connex.backend.mappers.UserMapper">
 
   <sql id="userColumns">
-    id, username, display_name, email, email_verified, password_hash, timezone, last_login_at, profile_picture_url, created_at, updated_at
+    id, username, display_name, email, email_verified, password_hash, timezone, locale, last_login_at, profile_picture_url, created_at, updated_at
   </sql>
 
   <select id="getAllUsers" resultType="User">
@@ -36,7 +36,7 @@
   </select>
 
   <select id="search" resultType="User">
-    SELECT u.id, u.username, u.display_name, u.email, u.password_hash, u.timezone,
+    SELECT u.id, u.username, u.display_name, u.email, u.password_hash, u.timezone, u.locale,
            u.last_login_at, u.profile_picture_url, u.created_at, u.updated_at
     FROM app_user u
     JOIN workspace_member wm ON wm.user_id = u.id AND wm.workspace_id = #{workspaceId}
@@ -46,8 +46,8 @@
   </select>
 
   <insert id="insert" useGeneratedKeys="true" keyProperty="id">
-    INSERT INTO app_user (username, display_name, email, email_verified, password_hash, timezone, profile_picture_url)
-    VALUES (#{username}, #{displayName}, #{email}, #{emailVerified}, #{passwordHash}, COALESCE(#{timezone}, 'UTC'), #{profilePictureUrl})
+    INSERT INTO app_user (username, display_name, email, email_verified, password_hash, timezone, locale, profile_picture_url)
+    VALUES (#{username}, #{displayName}, #{email}, #{emailVerified}, #{passwordHash}, COALESCE(#{timezone}, 'UTC'), COALESCE(#{locale}, 'en'), #{profilePictureUrl})
   </insert>
 
   <update id="update">
@@ -96,6 +96,12 @@
   <update id="updateTimezone">
     UPDATE app_user
     SET timezone = #{timezone}
+    WHERE id = #{id}
+  </update>
+
+  <update id="updateLocale">
+    UPDATE app_user
+    SET locale = #{locale}
     WHERE id = #{id}
   </update>
 

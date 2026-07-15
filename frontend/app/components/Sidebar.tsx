@@ -33,14 +33,17 @@ import {
 } from "@heroicons/react/24/outline";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { DropdownMenu } from "radix-ui";
 import { type User } from "@/app/lib/types";
 // import { BubblesIcon, PanelLeftOpenIcon } from "lucide-react";
-import { useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 import { useTheme } from "next-themes";
-import { DropdownMenuItem, DropdownMenuPortal, DropdownMenuSub, DropdownMenuSubContent, DropdownMenuSubTrigger } from "@/components/ui/dropdown-menu";
+import { DropdownMenuItem, DropdownMenuPortal, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuSub, DropdownMenuSubContent, DropdownMenuSubTrigger } from "@/components/ui/dropdown-menu";
 // import {  } from "@heroicons/react/24/solid";
+import { persistAuthenticatedLocale } from '@/app/lib/locale-preference';
+import { toastError } from '@/app/lib/toast';
+import type { Locale } from '@/i18n/config';
 import UserAvatar from '@/app/components/records/users/UserAvatar';
 import NotificationBell from '@/app/components/notifications/NotificationBell';
 import WorkspaceSwitcher from '@/app/components/WorkspaceSwitcher';
@@ -231,6 +234,25 @@ function ThemeSubmenu() {
 
 function UserMenu({ user, onLogout }: { user: User; onLogout: () => void }) {
     const t = useTranslations("CommonSidebar");
+    const locale = useLocale();
+    const router = useRouter();
+    const [pendingLocale, setPendingLocale] = useState<Locale | null>(null);
+    const localeRequestRef = useRef(0);
+
+    async function selectLanguage(nextLocale: Locale) {
+        const requestId = localeRequestRef.current + 1;
+        localeRequestRef.current = requestId;
+        setPendingLocale(nextLocale);
+        try {
+            await persistAuthenticatedLocale(nextLocale);
+            if (localeRequestRef.current === requestId) router.refresh();
+        } catch {
+            if (localeRequestRef.current === requestId) toastError(t("languageSaveFailed"));
+        } finally {
+            if (localeRequestRef.current === requestId) setPendingLocale(null);
+        }
+    }
+
     return (
         <DropdownMenu.Root>
             <DropdownMenu.Trigger asChild>
@@ -289,21 +311,27 @@ function UserMenu({ user, onLogout }: { user: User; onLogout: () => void }) {
                     </DropdownMenu.Item>
                     <DropdownMenu.Item asChild>
                         <DropdownMenuSub>
-                            <DropdownMenuSubTrigger onClick={() => {
-                            }}>
+                            <DropdownMenuSubTrigger>
                                 <GlobeAltIcon className="size-4" />
-                                Language
+                                {t("language")}
                                 <DropdownMenuPortal>
                                     <DropdownMenuSubContent>
-                                        {/* // set cookie to store the language for next-intl */}
-                                        <DropdownMenuItem onClick={() => {
-                                            document.cookie = "NEXT_LOCALE=en; path=/";
-                                            window.location.reload();
-                                        }}>English</DropdownMenuItem>
-                                        <DropdownMenuItem onClick={() => {
-                                            document.cookie = "NEXT_LOCALE=ja; path=/";
-                                            window.location.reload();
-                                        }}>日本語</DropdownMenuItem>
+                                        <DropdownMenuRadioGroup
+                                            value={pendingLocale ?? locale}
+                                            onValueChange={(value) => {
+                                                if (value === "en" || value === "ja") {
+                                                    void selectLanguage(value);
+                                                }
+                                            }}
+                                            aria-busy={pendingLocale !== null}
+                                        >
+                                            <DropdownMenuRadioItem value="en">
+                                                {t("languageEnglish")}
+                                            </DropdownMenuRadioItem>
+                                            <DropdownMenuRadioItem value="ja">
+                                                {t("languageJapanese")}
+                                            </DropdownMenuRadioItem>
+                                        </DropdownMenuRadioGroup>
                                     </DropdownMenuSubContent>
                                 </DropdownMenuPortal>
                             </DropdownMenuSubTrigger>

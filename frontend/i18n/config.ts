@@ -22,17 +22,27 @@ export function resolveLocale(value: string | null | undefined): Locale {
  * @returns a supported locale, defaulting to English
  */
 export function localeFromCookieHeader(cookieHeader: string | null | undefined): Locale {
+    return localePreferenceFromCookieHeader(cookieHeader) ?? defaultLocale;
+}
+
+/**
+ * Reads an explicit supported locale preference from a Cookie header.
+ * @param cookieHeader serialized cookies
+ * @returns the explicit locale, or null when the cookie is absent or invalid
+ */
+export function localePreferenceFromCookieHeader(cookieHeader: string | null | undefined): Locale | null {
     const encodedLocale = cookieHeader
         ?.split(";")
         .map((part) => part.trim())
         .find((part) => part.startsWith(`${LOCALE_COOKIE}=`))
         ?.slice(LOCALE_COOKIE.length + 1);
     if (!encodedLocale) {
-        return defaultLocale;
+        return null;
     }
     try {
-        return resolveLocale(decodeURIComponent(encodedLocale));
+        const decoded = decodeURIComponent(encodedLocale);
+        return isLocale(decoded) ? decoded : null;
     } catch {
-        return defaultLocale;
+        return null;
     }
 }

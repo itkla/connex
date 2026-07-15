@@ -111,6 +111,10 @@
     "themeLight": "ライト",
     "themeDark": "ダーク",
     "themeSystem": "システム",
+    "language": "言語",
+    "languageEnglish": "英語",
+    "languageJapanese": "日本語",
+    "languageSaveFailed": "言語を更新できませんでした。もう一度お試しください。",
     "profilePictureAlt": "{name}さんのプロフィール画像"
   },
   "CommonContentShell": {

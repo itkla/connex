@@ -1,6 +1,7 @@
 // transplanted from /me 
 
 import { type DealRiskSeverity, type TemperatureBand, type UploadedFile } from '@/app/lib/types';
+import { LOCALE_COOKIE, type Locale } from '@/i18n/config';
 
 export function formatShortDate(value: string | undefined, locale: string) {
     if (!value) {
@@ -21,8 +22,8 @@ export function formatShortDate(value: string | undefined, locale: string) {
  * Persists the user's locale preference.
  * @param locale - the locale code to persist (e.g. "en", "ja")
  */
-export function setLocaleCookie(locale: string) {
-    document.cookie = `NEXT_LOCALE=${locale};path=/;max-age=31536000;samesite=lax`;
+export function setLocaleCookie(locale: Locale) {
+    document.cookie = `${LOCALE_COOKIE}=${locale};path=/;max-age=31536000;samesite=lax`;
 }
 
 export function timeOf(value?: string) {
