@@ -82,7 +82,7 @@ class BusinessCardImportRequestMapperTest {
     }
 
     @Test
-    void concurrentRetryWaitsForAndReusesTheFirstResult() throws Exception {
+    void concurrentRetryUsesTheFirstResultAfterAnEarlierConsistentRead() throws Exception {
         int workspaceId = workspaceId();
         String requestId = requestId();
         byte[] fingerprint = fingerprint((byte) 9);
@@ -103,6 +103,10 @@ class BusinessCardImportRequestMapperTest {
             assertTrue(firstClaimed.await(2, TimeUnit.SECONDS));
             Future<Attempt> second = executor.submit(() ->
                     new TransactionTemplate(transactionManager).execute(status -> {
+                        assertEquals(0, jdbcTemplate.queryForObject(
+                                "SELECT COUNT(*) FROM business_card_import_request WHERE workspace_id = ?",
+                                Integer.class,
+                                workspaceId));
                         secondAttempting.countDown();
                         int claimed = mapper.claim(workspaceId, requestId, fingerprint);
                         return new Attempt(claimed, mapper.get(workspaceId, requestId));

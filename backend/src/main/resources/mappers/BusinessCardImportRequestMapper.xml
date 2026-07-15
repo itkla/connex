@@ -17,6 +17,7 @@
       company_id AS companyId
     FROM business_card_import_request
     WHERE workspace_id = #{workspaceId} AND idempotency_key = #{idempotencyKey}
+    FOR UPDATE
   </select>
 
   <update id="complete">
