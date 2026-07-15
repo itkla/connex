@@ -32,10 +32,10 @@ export default async function UserPage({ params }: { params: { id: number } }) {
     const { id } = await params;
     const cookie = (await headers()).get("cookie");
     const init = { headers: { cookie: cookie ?? "" } } as const;
-    const t = await getTranslations("UsersPage");
-    const locale = await getLocale();
 
-    const [user, currentUser, tasks, activities, notes, users, persons, deals, attachments] = await Promise.all([
+    const [t, locale, user, currentUser, tasks, activities, notes, users, persons, deals, attachments] = await Promise.all([
+        getTranslations("UsersPage"),
+        getLocale(),
         getUserById(id, init).catch(() => null),
         getCurrentUserFromCookie(cookie),
         getUserTasksFromCookie(id, cookie),

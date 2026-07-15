@@ -289,7 +289,7 @@ function Flow({ graph, focusId, replay, extraEdges, highlightId }: FlowProps) {
     const mergeExtra = useCallback((extra: RelationEdgeType[]) => {
         setEdges((snapshot) => {
             const have = new Set(snapshot.map((e) => e.id));
-            const additions = extra.filter((e) => !have.has(e.id)).map((e) => ({ ...e, hidden: true }));
+            const additions = extra.flatMap((edge) => have.has(edge.id) ? [] : [{ ...edge, hidden: true }]);
             return additions.length > 0 ? [...snapshot, ...additions] : snapshot;
         });
     }, []);

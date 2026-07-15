@@ -65,10 +65,12 @@ export default function StageFunnel({
             if (row.pipelineId == null || row.openCount <= 0) continue;
             counts.set(row.pipelineId, (counts.get(row.pipelineId) ?? 0) + row.openCount);
         }
-        return pipelines
-            .filter((p) => (counts.get(p.id) ?? 0) > 0)
-            .map((p) => ({ id: p.id, name: p.name, openCount: counts.get(p.id) ?? 0 }))
-            .sort((a, b) => b.openCount - a.openCount);
+        const options: { id: number; name: string; openCount: number }[] = [];
+        for (const pipeline of pipelines) {
+            const openCount = counts.get(pipeline.id) ?? 0;
+            if (openCount > 0) options.push({ id: pipeline.id, name: pipeline.name, openCount });
+        }
+        return options.sort((a, b) => b.openCount - a.openCount);
     }, [distribution, pipelines]);
 
     const activeId =
@@ -79,18 +81,20 @@ export default function StageFunnel({
         const pipelineStages = stages
             .filter((s) => s.pipeline === activeId)
             .sort((a, b) => a.position - b.position);
-        return pipelineStages
-            .map((stage, i) => {
-                const entry = distByStage.get(stage.id);
-                return {
-                    id: stage.id,
-                    name: stage.name,
-                    count: entry?.openCount ?? 0,
-                    value: entry?.openValue ?? 0,
-                    fill: stageFill(i, pipelineStages.length, classifyStage(stage)),
-                };
-            })
-            .filter((r) => r.count > 0);
+        const rows: Row[] = [];
+        for (const [index, stage] of pipelineStages.entries()) {
+            const entry = distByStage.get(stage.id);
+            const count = entry?.openCount ?? 0;
+            if (count <= 0) continue;
+            rows.push({
+                id: stage.id,
+                name: stage.name,
+                count,
+                value: entry?.openValue ?? 0,
+                fill: stageFill(index, pipelineStages.length, classifyStage(stage)),
+            });
+        }
+        return rows;
     }, [activeId, stages, distByStage]);
 
     if (available.length === 0) {

@@ -77,6 +77,7 @@ function diffDraft(a: PipelineDraft, b: PipelineDraft): boolean {
 }
 
 const searchFields = (p: Pipeline) => [p.name];
+const EMPTY_PIPELINE_DRAFT: CreatePipelinePayload = { name: '' };
 
 export default function PipelinesBrowser({ pipelines }: { pipelines: Pipeline[] }) {
     const router = useRouter();
@@ -107,11 +108,10 @@ export default function PipelinesBrowser({ pipelines }: { pipelines: Pipeline[] 
     const [drafts, setDrafts] = useState<Record<number, PipelineDraft>>({});
     const [isSaving, setIsSaving] = useState(false);
 
-    const emptyPipelineDraft: CreatePipelinePayload = { name: '' };
     const [newPipelineDialogOpen, setNewPipelineDialogOpen] = useState(false);
     const [isCreating, setIsCreating] = useState(false);
     const [creationSucceeded, setCreationSucceeded] = useState(false);
-    const [newPipelinePayload, setNewPipelinePayload] = useState<CreatePipelinePayload>(emptyPipelineDraft);
+    const [newPipelinePayload, setNewPipelinePayload] = useState<CreatePipelinePayload>(EMPTY_PIPELINE_DRAFT);
 
     const [stagesByPipeline, setStagesByPipeline] = useState<Map<number, Stage[]>>(new Map());
     const [allDeals, setAllDeals] = useState<Deal[]>([]);
@@ -151,16 +151,17 @@ export default function PipelinesBrowser({ pipelines }: { pipelines: Pipeline[] 
     const closeNewPipelineDialog = (open: boolean) => {
         setNewPipelineDialogOpen(open);
         if (!open) {
-            setNewPipelinePayload(emptyPipelineDraft);
+            setNewPipelinePayload(EMPTY_PIPELINE_DRAFT);
             setCreationSucceeded(false);
         }
     };
 
     const createNewPipeline = async () => {
         const { stages: rawStages, ...pipelineFields } = newPipelinePayload;
-        const validStages = (rawStages ?? [])
-            .map((s) => ({ ...s, name: s.name.trim() }))
-            .filter((s) => s.name.length > 0);
+        const validStages = (rawStages ?? []).flatMap((stage) => {
+            const trimmedStage = { ...stage, name: stage.name.trim() };
+            return trimmedStage.name ? [trimmedStage] : [];
+        });
 
         if (validStages.filter((s) => s.success).length > 1 || validStages.filter((s) => s.failure).length > 1) {
             toastError(t('singleTerminalPerType'));

@@ -209,7 +209,7 @@ export default function RecordsRenderView<T extends { id: SelectionId; name?: st
     const stickyHeaderBg = "bg-card before:absolute before:inset-0 before:-z-10 before:bg-muted/60 before:content-['']";
 
     const gridSortOptions =
-        sortOptions ?? columns.filter(isSortableColumn).map((c) => ({ key: c.key, label: c.label }));
+        sortOptions ?? columns.flatMap((column) => isSortableColumn(column) ? [{ key: column.key, label: column.label }] : []);
     const activeSortOption = gridSortOptions.find((o) => o.key === activeSortKey);
     const gridSortBar =
         !controlled && displayMode === 'grid' && gridSortOptions.length > 0 ? (

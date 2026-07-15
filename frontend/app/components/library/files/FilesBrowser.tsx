@@ -196,12 +196,18 @@ export default function FilesBrowser() {
 
     const kindOptions = useMemo(() => {
         const counts = new Map((facets?.kinds ?? []).map((f) => [f.key, f.count]));
-        return FILE_KINDS.filter((k) => counts.has(k)).map((k) => ({ kind: k, count: counts.get(k)! }));
+        return FILE_KINDS.flatMap((kind) => {
+            const count = counts.get(kind);
+            return count === undefined ? [] : [{ kind, count }];
+        });
     }, [facets]);
 
     const sourceOptions = useMemo(() => {
         const counts = new Map((facets?.sources ?? []).map((f) => [f.key, f.count]));
-        return SOURCE_TYPES.filter((s) => counts.has(s)).map((s) => ({ source: s, count: counts.get(s)! }));
+        return SOURCE_TYPES.flatMap((source) => {
+            const count = counts.get(source);
+            return count === undefined ? [] : [{ source, count }];
+        });
     }, [facets]);
 
     const tagById = useMemo(() => new Map(allTags.map((tg) => [tg.id, tg])), [allTags]);

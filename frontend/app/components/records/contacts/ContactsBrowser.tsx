@@ -43,6 +43,7 @@ import TemperaturePill from '@/app/components/records/TemperaturePill';
 
 const NO_ITEMS: Contact[] = [];
 const searchFields = (c: Contact) => [c.name, c.email, c.phone, c.title];
+const EMPTY_CONTACT_DRAFT: CreateContactPayload = { name: '', email: '', phone: '', title: '' };
 
 function toDraft(c: Contact): ContactDraft {
     return {
@@ -224,16 +225,15 @@ export default function ContactsBrowser({ savedViews }: { savedViews: SavedView[
         };
     }, [contacts]);
 
-    const emptyContactDraft: CreateContactPayload = { name: '', email: '', phone: '', title: '' };
     const [newContactDialogOpen, setNewContactDialogOpen] = useState(false);
     const [isCreating, setIsCreating] = useState(false);
     const [creationSucceeded, setCreationSucceeded] = useState(false);
-    const [newContactPayload, setNewContactPayload] = useState<CreateContactPayload>(emptyContactDraft);
+    const [newContactPayload, setNewContactPayload] = useState<CreateContactPayload>(EMPTY_CONTACT_DRAFT);
     const [imageFile, setImageFile] = useState<File | null>(null);
     const closeNewContactDialog = (open: boolean) => {
         setNewContactDialogOpen(open);
         if (!open) {
-            setNewContactPayload(emptyContactDraft);
+            setNewContactPayload(EMPTY_CONTACT_DRAFT);
             setImageFile(null);
             setCreationSucceeded(false);
         }

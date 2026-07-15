@@ -172,9 +172,12 @@ function CustomFieldForm({
     const keyValid = /^[a-z][a-z0-9_]{0,63}$/.test(derivedKey);
     const isSelect = fieldType === "select";
 
-    const submitOptions = options
-        .filter((option) => option.label.trim().length > 0)
-        .map((option) => ({ key: option.key || toKey(option.label.trim()), label: option.label.trim() }));
+    const submitOptions = options.flatMap((option) => {
+        const trimmedOptionLabel = option.label.trim();
+        return trimmedOptionLabel
+            ? [{ key: option.key || toKey(trimmedOptionLabel), label: trimmedOptionLabel }]
+            : [];
+    });
     const optionKeys = submitOptions.map((option) => option.key);
     const optionsUnique = new Set(optionKeys).size === optionKeys.length;
     const optionsValid = !isSelect || (submitOptions.length > 0 && optionsUnique);

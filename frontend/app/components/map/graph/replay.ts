@@ -26,7 +26,10 @@ export type ComputedFrame = {
  * rebuilding the graph) lets employment moves render by toggling edge presence without relaying out.
  */
 export function employmentEdges(base: Graph, frames: ReplayFrame[]): RelationEdge[] {
-    const companyNodeIds = new Set(base.nodes.filter((n) => n.data.kind === 'company').map((n) => n.id));
+    const companyNodeIds = new Set<string>();
+    for (const node of base.nodes) {
+        if (node.data.kind === 'company') companyNodeIds.add(node.id);
+    }
 
     const employersByContact = new Map<number, Set<number>>();
     const unaffiliated = new Set<number>();
@@ -95,12 +98,15 @@ export function frameAvgBand(frame: ReplayFrame): TemperatureBand {
  * unaffiliated), and a user's connector edge appears only once the user itself is present.
  */
 export function toComputedFrames(frames: ReplayFrame[], master: Graph): ComputedFrame[] {
-    const alwaysPresent = new Set(master.nodes.filter((n) => n.data.kind === 'uc').map((n) => n.id));
+    const alwaysPresent = new Set<string>();
     const userCreatedOn = new Map<string, string>();
-    for (const n of master.nodes) {
-        if (n.data.kind === 'user') userCreatedOn.set(n.id, n.data.user.createdAt.slice(0, 10));
+    const companyNodeIds = new Set<string>();
+    for (const node of master.nodes) {
+        const kind = node.data.kind;
+        if (kind === 'uc') alwaysPresent.add(node.id);
+        if (kind === 'user') userCreatedOn.set(node.id, node.data.user.createdAt.slice(0, 10));
+        if (kind === 'company') companyNodeIds.add(node.id);
     }
-    const companyNodeIds = new Set(master.nodes.filter((n) => n.data.kind === 'company').map((n) => n.id));
 
     const dealsByCompanyNode = new Map<string, DealSummary[]>();
     for (const e of master.edges) {

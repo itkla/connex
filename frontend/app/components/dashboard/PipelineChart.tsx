@@ -28,6 +28,8 @@ const MONTHS_BACK: Record<RangeKey, number> = { '30d': 4, '90d': 7, '12m': 12 };
 type Metric = 'profit' | 'projections';
 type Bucket = { key: string; label: string; profit: number; projections: number };
 
+const METRICS: readonly Metric[] = ['profit', 'projections'];
+
 function forwardHorizon(series: DealRevenueSeries, now: number): number {
     const reference = new Date(now);
     const base = reference.getFullYear() * 12 + reference.getMonth();
@@ -114,8 +116,6 @@ export default function PipelineChart({
         projections: { label: t('projections'), color: 'var(--color-brand)' },
     } satisfies ChartConfig;
 
-    const metrics: Metric[] = ['profit', 'projections'];
-
     return (
         <div className="flex h-full flex-col overflow-hidden rounded-2xl border border-border bg-card">
             <div className="flex flex-col border-b border-border sm:flex-row sm:items-stretch">
@@ -132,7 +132,7 @@ export default function PipelineChart({
                 </div>
                 <TooltipProvider delayDuration={150}>
                     <div className="flex">
-                        {metrics.map((key) => {
+                        {METRICS.map((key) => {
                             const isActive = active === key;
                             return (
                                 <Tooltip key={key}>

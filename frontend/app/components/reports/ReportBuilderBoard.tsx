@@ -564,9 +564,11 @@ function WidgetEditor({
                     label={t('builder.measure')}
                     value={widget.measure}
                     onChange={onMeasureChange}
-                    options={REPORT_MEASURES[widget.dataSource]
-                        .filter((value) => canReadGoals || value !== 'attainment')
-                        .map((value) => ({ value, label: t(`measure.${value}`) }))}
+                    options={REPORT_MEASURES[widget.dataSource].flatMap((value) =>
+                        canReadGoals || value !== 'attainment'
+                            ? [{ value, label: t(`measure.${value}`) }]
+                            : [],
+                    )}
                 />
                 <FieldSelect
                     label={t('builder.groupBy')}

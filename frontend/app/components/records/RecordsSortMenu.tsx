@@ -25,9 +25,11 @@ export default function RecordsSortMenu<T>({
     onSortChange: (key: string) => void;
 }) {
     const t = useTranslations('RecordsRenderView');
-    const options = columns
-        .filter((column) => column.sortable !== false && !!column.getSortValue)
-        .map((column) => ({ key: column.key, label: column.label }));
+    const options = columns.flatMap((column) =>
+        column.sortable !== false && column.getSortValue
+            ? [{ key: column.key, label: column.label }]
+            : [],
+    );
     if (options.length === 0) return null;
     const active = options.find((o) => o.key === sortKey);
 

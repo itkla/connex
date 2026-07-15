@@ -80,11 +80,11 @@ export default async function DealPage({ params }: { params: { id: number } }) {
     const { id } = await params;
     const cookie = (await cookies()).toString();
     const init = { headers: { cookie } } as const;
-    const t = await getTranslations('DealsPage');
-    const locale = await getLocale();
 
-    const [deal, currentUser, activities, notes, tasks, tags, peopleRaw, allPipelines, allPersons, allDeals, allUsers, attachments, notificationPage, collaborators, customFields, risk, stageHistory] =
+    const [t, locale, deal, currentUser, activities, notes, tasks, tags, peopleRaw, allPipelines, allPersons, allDeals, allUsers, attachments, notificationPage, collaborators, customFields, risk, stageHistory] =
         await Promise.all([
+            getTranslations('DealsPage'),
+            getLocale(),
             getDealById(id, init).catch(() => null),
             getCurrentUserFromCookie(cookie),
             getActivitiesForDeal(id, init).catch(() => [] as Activity[]),

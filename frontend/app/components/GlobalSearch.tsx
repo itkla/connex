@@ -163,15 +163,13 @@ export default function GlobalSearch() {
 
     const commandGroups = useMemo(() => {
         const groupsToScan = lowerQuery ? ACTION_GROUPS : EMPTY_GROUP_ORDER;
-        return groupsToScan
-            .map((group) => {
-                const actions = available.filter(
-                    (action) => action.group === group && (!lowerQuery || actionSearchText(action, tActions).includes(lowerQuery)),
-                );
-                if (lowerQuery) actions.sort((a, b) => rankAction(a, lowerQuery, tActions) - rankAction(b, lowerQuery, tActions));
-                return { group, actions };
-            })
-            .filter((entry) => entry.actions.length > 0);
+        return groupsToScan.flatMap((group) => {
+            const actions = available.filter(
+                (action) => action.group === group && (!lowerQuery || actionSearchText(action, tActions).includes(lowerQuery)),
+            );
+            if (lowerQuery) actions.sort((a, b) => rankAction(a, lowerQuery, tActions) - rankAction(b, lowerQuery, tActions));
+            return actions.length > 0 ? [{ group, actions }] : [];
+        });
     }, [available, lowerQuery, tActions]);
 
     const closePalette = useCallback(() => {
