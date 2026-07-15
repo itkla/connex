@@ -495,6 +495,7 @@ export type BusinessCardCompanyAction =
     | { type: 'none' };
 
 export type BusinessCardImportDraft = {
+    requestId: string;
     image: File;
     contact: CreateContactPayload;
     companyAction: BusinessCardCompanyAction;

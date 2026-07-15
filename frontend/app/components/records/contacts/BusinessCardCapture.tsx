@@ -48,6 +48,7 @@ type BusinessCardCaptureProps = {
 
 type BusinessCardCompanyChoiceProps = {
     active: boolean;
+    canCreateCompany: boolean;
     mode: BusinessCardCompanyActionMode;
     existingCompanyName: string | null;
     companyName: string;
@@ -303,6 +304,7 @@ export function BusinessCardCapture({
 
 export function BusinessCardCompanyChoice({
     active,
+    canCreateCompany,
     mode,
     existingCompanyName,
     companyName,
@@ -335,30 +337,34 @@ export function BusinessCardCompanyChoice({
                 />
                 <span>{existingCompanyName ? t('cardUseExistingCompany', { name: existingCompanyName }) : t('cardSelectExistingCompany')}</span>
             </label>
-            <label className="flex items-start gap-2 text-sm">
-                <input
-                    type="radio"
-                    name={groupId}
-                    value="create"
-                    checked={mode === 'create'}
-                    disabled={disabled}
-                    onChange={() => onModeChange('create')}
-                    className="mt-0.5 size-4 accent-brand"
-                />
-                <span>{t('cardCreateCompany')}</span>
-            </label>
-            {mode === 'create' && (
-                <div className="ml-6 grid gap-1.5">
-                    <Label htmlFor={`${groupId}-company-name`}>{t('cardCompanyName')}</Label>
-                    <Input
-                        id={`${groupId}-company-name`}
-                        value={companyName}
-                        disabled={disabled}
-                        onChange={(event) => onCompanyNameChange(event.target.value)}
-                        aria-invalid={validationError === 'companyName'}
-                        className={cn(validationError === 'companyName' && 'border-destructive ring-destructive/30')}
-                    />
-                </div>
+            {canCreateCompany && (
+                <>
+                    <label className="flex items-start gap-2 text-sm">
+                        <input
+                            type="radio"
+                            name={groupId}
+                            value="create"
+                            checked={mode === 'create'}
+                            disabled={disabled}
+                            onChange={() => onModeChange('create')}
+                            className="mt-0.5 size-4 accent-brand"
+                        />
+                        <span>{t('cardCreateCompany')}</span>
+                    </label>
+                    {mode === 'create' && (
+                        <div className="ml-6 grid gap-1.5">
+                            <Label htmlFor={`${groupId}-company-name`}>{t('cardCompanyName')}</Label>
+                            <Input
+                                id={`${groupId}-company-name`}
+                                value={companyName}
+                                disabled={disabled}
+                                onChange={(event) => onCompanyNameChange(event.target.value)}
+                                aria-invalid={validationError === 'companyName'}
+                                className={cn(validationError === 'companyName' && 'border-destructive ring-destructive/30')}
+                            />
+                        </div>
+                    )}
+                </>
             )}
             <label className="flex items-start gap-2 text-sm">
                 <input

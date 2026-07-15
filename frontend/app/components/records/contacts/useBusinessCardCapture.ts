@@ -1,8 +1,21 @@
 'use client';
 
-import { type Dispatch, type SetStateAction, useEffect, useRef, useState } from 'react';
+import {
+    type Dispatch,
+    type SetStateAction,
+    useCallback,
+    useEffect,
+    useLayoutEffect,
+    useRef,
+    useState,
+} from 'react';
 
-import { businessCardRequestErrorKind, getCapabilities, scanBusinessCard } from '@/app/lib/api';
+import {
+    businessCardRequestErrorKind,
+    getCapabilities,
+    getEffectivePermissions,
+    scanBusinessCard,
+} from '@/app/lib/api';
 import type {
     BusinessCardCompanyAction,
     BusinessCardImportDraft,
@@ -14,6 +27,18 @@ import type {
 export type BusinessCardScanStatus = 'idle' | 'scanning' | 'ready' | 'manual' | 'error';
 export type BusinessCardCompanyActionMode = BusinessCardCompanyAction['type'] | null;
 export type BusinessCardCompanyValidationError = 'choice' | 'companyName' | null;
+export type BusinessCardContactField = 'name' | 'email' | 'phone' | 'title';
+
+const BUSINESS_CARD_CONTACT_FIELDS: BusinessCardContactField[] = ['name', 'email', 'phone', 'title'];
+
+type OcrOwnedField = {
+    value: string;
+    baseline: string;
+};
+
+function scannedContactValue(result: BusinessCardScanResult, field: BusinessCardContactField): string {
+    return result.fields[field].value?.trim() ?? '';
+}
 
 /** Manages the cancellable business-card scan and reviewed import draft for the contact form. */
 export function useBusinessCardCapture({
@@ -26,6 +51,7 @@ export function useBusinessCardCapture({
     setPayload: Dispatch<SetStateAction<CreateContactPayload>>;
 }) {
     const [available, setAvailable] = useState(false);
+    const [canCreateCompany, setCanCreateCompany] = useState(false);
     const [file, setFile] = useState<File | null>(null);
     const [previewUrl, setPreviewUrl] = useState<string | null>(null);
     const [result, setResult] = useState<BusinessCardScanResult | null>(null);
@@ -36,21 +62,67 @@ export function useBusinessCardCapture({
     const [companyName, setCompanyName] = useState('');
     const [companyValidationError, setCompanyValidationError] = useState<BusinessCardCompanyValidationError>(null);
     const [previousActive, setPreviousActive] = useState(active);
+    const payloadRef = useRef(payload);
     const controllerRef = useRef<AbortController | null>(null);
-    const requestIdRef = useRef(0);
+    const scanRequestSequenceRef = useRef(0);
+    const importRequestIdRef = useRef<string | null>(null);
     const hasSelectedCardRef = useRef(false);
     const companyModeRef = useRef<BusinessCardCompanyActionMode>(null);
     const suggestedCompanyIdRef = useRef<number | null>(null);
+    const suggestedCompanyNameRef = useRef<string | null>(null);
+    const companyNameRef = useRef('');
+    const ocrOwnedFieldsRef = useRef<Partial<Record<BusinessCardContactField, OcrOwnedField>>>({});
+
+    useLayoutEffect(() => {
+        payloadRef.current = payload;
+    }, [payload]);
+
+    const commitPayload = useCallback((next: CreateContactPayload) => {
+        payloadRef.current = next;
+        setPayload(next);
+    }, [setPayload]);
+
+    const revertOcrOwnedValues = useCallback(() => {
+        const ownedFields = ocrOwnedFieldsRef.current;
+        const suggestedCompanyId = suggestedCompanyIdRef.current;
+        const current = payloadRef.current;
+        const next = { ...current };
+        let changed = false;
+        for (const field of BUSINESS_CARD_CONTACT_FIELDS) {
+            const ownership = ownedFields[field];
+            if (ownership && current[field] === ownership.value) {
+                next[field] = ownership.baseline;
+                changed = true;
+            }
+        }
+        if (suggestedCompanyId != null
+            && companyModeRef.current == null
+            && current.companyId === suggestedCompanyId) {
+            next.companyId = undefined;
+            changed = true;
+        }
+        ocrOwnedFieldsRef.current = {};
+        suggestedCompanyIdRef.current = null;
+        if (changed) commitPayload(next);
+    }, [commitPayload]);
 
     useEffect(() => {
-        if (!active) return;
         let cancelled = false;
-        getCapabilities()
-            .then((capabilities) => {
-                if (!cancelled) setAvailable(capabilities.businessCardScanning);
+        if (!active) return;
+        Promise.all([getCapabilities(), getEffectivePermissions()])
+            .then(([capabilities, permissions]) => {
+                if (cancelled) return;
+                setAvailable(
+                    capabilities.businessCardScanning
+                    && permissions.includes('PERSON_CREATE')
+                    && permissions.includes('ATTACHMENT_CREATE'),
+                );
+                setCanCreateCompany(permissions.includes('COMPANY_CREATE'));
             })
             .catch(() => {
-                if (!cancelled) setAvailable(false);
+                if (cancelled) return;
+                setAvailable(false);
+                setCanCreateCompany(false);
             });
         return () => {
             cancelled = true;
@@ -60,6 +132,8 @@ export function useBusinessCardCapture({
     if (active !== previousActive) {
         setPreviousActive(active);
         if (!active) {
+            setAvailable(false);
+            setCanCreateCompany(false);
             setFile(null);
             setPreviewUrl(null);
             setResult(null);
@@ -75,14 +149,18 @@ export function useBusinessCardCapture({
     useEffect(() => {
         if (!active) return;
         return () => {
-            requestIdRef.current += 1;
+            scanRequestSequenceRef.current += 1;
             controllerRef.current?.abort();
             controllerRef.current = null;
+            revertOcrOwnedValues();
+            importRequestIdRef.current = null;
             hasSelectedCardRef.current = false;
             companyModeRef.current = null;
             suggestedCompanyIdRef.current = null;
+            suggestedCompanyNameRef.current = null;
+            companyNameRef.current = '';
         };
-    }, [active]);
+    }, [active, revertOcrOwnedValues]);
 
     useEffect(() => {
         return () => {
@@ -91,8 +169,8 @@ export function useBusinessCardCapture({
     }, [previewUrl]);
 
     const runScan = async (image: File) => {
-        const requestId = requestIdRef.current + 1;
-        requestIdRef.current = requestId;
+        const requestSequence = scanRequestSequenceRef.current + 1;
+        scanRequestSequenceRef.current = requestSequence;
         controllerRef.current?.abort();
         const controller = new AbortController();
         controllerRef.current = controller;
@@ -103,25 +181,53 @@ export function useBusinessCardCapture({
 
         try {
             const nextResult = await scanBusinessCard(image, { signal: controller.signal });
-            if (requestId !== requestIdRef.current) return;
+            if (requestSequence !== scanRequestSequenceRef.current) return;
             controllerRef.current = null;
             setResult(nextResult);
-            setCompanyName((current) => current.trim() ? current : nextResult.company.value?.trim() ?? '');
-            suggestedCompanyIdRef.current = companyModeRef.current == null
-                ? nextResult.company.matchedCompanyId
-                : null;
-            setPayload((current) => ({
-                ...current,
-                name: current.name.trim() ? current.name : nextResult.fields.name.value?.trim() ?? '',
-                email: current.email.trim() ? current.email : nextResult.fields.email.value?.trim() ?? '',
-                phone: current.phone.trim() ? current.phone : nextResult.fields.phone.value?.trim() ?? '',
-                title: current.title.trim() ? current.title : nextResult.fields.title.value?.trim() ?? '',
-                companyId: current.companyId
-                    ?? (companyModeRef.current == null ? nextResult.company.matchedCompanyId ?? undefined : undefined),
-            }));
+            const previousCompanySuggestion = suggestedCompanyNameRef.current;
+            const currentCompanyName = companyNameRef.current;
+            const nextCompanySuggestion = nextResult.company.value?.trim() ?? '';
+            if (!currentCompanyName.trim()
+                || (previousCompanySuggestion != null && currentCompanyName === previousCompanySuggestion)) {
+                companyNameRef.current = nextCompanySuggestion;
+                suggestedCompanyNameRef.current = nextCompanySuggestion || null;
+                setCompanyName(nextCompanySuggestion);
+            } else {
+                suggestedCompanyNameRef.current = null;
+            }
+
+            const current = payloadRef.current;
+            const previousOwnedFields = ocrOwnedFieldsRef.current;
+            const nextOwnedFields: Partial<Record<BusinessCardContactField, OcrOwnedField>> = {};
+            const next = { ...current };
+            for (const field of BUSINESS_CARD_CONTACT_FIELDS) {
+                const previousOwnership = previousOwnedFields[field];
+                const isUntouchedOcrValue = previousOwnership != null && current[field] === previousOwnership.value;
+                if (!current[field].trim() || isUntouchedOcrValue) {
+                    const nextValue = scannedContactValue(nextResult, field);
+                    next[field] = nextValue;
+                    if (isUntouchedOcrValue && previousOwnership) {
+                        nextOwnedFields[field] = { value: nextValue, baseline: previousOwnership.baseline };
+                    } else if (nextValue !== current[field]) {
+                        nextOwnedFields[field] = { value: nextValue, baseline: current[field] };
+                    }
+                }
+            }
+
+            const previousSuggestedCompanyId = suggestedCompanyIdRef.current;
+            const canApplyCompanySuggestion = companyModeRef.current == null
+                && (current.companyId == null || current.companyId === previousSuggestedCompanyId);
+            if (canApplyCompanySuggestion) {
+                next.companyId = nextResult.company.matchedCompanyId ?? undefined;
+                suggestedCompanyIdRef.current = nextResult.company.matchedCompanyId;
+            } else {
+                suggestedCompanyIdRef.current = null;
+            }
+            ocrOwnedFieldsRef.current = nextOwnedFields;
+            commitPayload(next);
             setStatus('ready');
         } catch (error) {
-            if (requestId !== requestIdRef.current) return;
+            if (requestSequence !== scanRequestSequenceRef.current) return;
             controllerRef.current = null;
             const kind = businessCardRequestErrorKind(error);
             if (kind === 'aborted') return;
@@ -132,13 +238,11 @@ export function useBusinessCardCapture({
 
     const selectFile = (image: File) => {
         const hadSelectedCard = hasSelectedCardRef.current;
-        const previousSuggestion = suggestedCompanyIdRef.current;
-        const preserveExisting = payload.companyId != null
+        revertOcrOwnedValues();
+        const preserveExisting = payloadRef.current.companyId != null
             && (!hadSelectedCard || companyModeRef.current === 'existing');
-        if (hadSelectedCard && companyModeRef.current == null && payload.companyId === previousSuggestion) {
-            setPayload((current) => ({ ...current, companyId: undefined }));
-        }
         hasSelectedCardRef.current = true;
+        importRequestIdRef.current = crypto.randomUUID();
         suggestedCompanyIdRef.current = null;
         setFile(image);
         setPreviewUrl(URL.createObjectURL(image));
@@ -146,12 +250,15 @@ export function useBusinessCardCapture({
         companyModeRef.current = nextCompanyMode;
         setCompanyMode(nextCompanyMode);
         setCompanyName('');
+        companyNameRef.current = '';
+        suggestedCompanyNameRef.current = null;
         setCompanyValidationError(null);
+        setImportError(null);
         void runScan(image);
     };
 
     const cancelScan = () => {
-        requestIdRef.current += 1;
+        scanRequestSequenceRef.current += 1;
         controllerRef.current?.abort();
         controllerRef.current = null;
         setRequestError(null);
@@ -163,27 +270,28 @@ export function useBusinessCardCapture({
     };
 
     const removeCard = () => {
-        requestIdRef.current += 1;
+        scanRequestSequenceRef.current += 1;
         controllerRef.current?.abort();
         controllerRef.current = null;
+        revertOcrOwnedValues();
+        importRequestIdRef.current = null;
         setFile(null);
         setPreviewUrl(null);
         setResult(null);
         setStatus('idle');
         setRequestError(null);
         setImportError(null);
-        if (payload.companyId === suggestedCompanyIdRef.current) {
-            setPayload((current) => ({ ...current, companyId: undefined }));
-        }
         companyModeRef.current = null;
         suggestedCompanyIdRef.current = null;
+        suggestedCompanyNameRef.current = null;
         setCompanyMode(null);
         setCompanyName('');
+        companyNameRef.current = '';
         setCompanyValidationError(null);
     };
 
     const selectExistingCompany = (companyId: number | undefined) => {
-        setPayload((current) => ({ ...current, companyId }));
+        commitPayload({ ...payloadRef.current, companyId });
         const nextCompanyMode = companyId == null ? null : 'existing';
         companyModeRef.current = nextCompanyMode;
         suggestedCompanyIdRef.current = null;
@@ -194,7 +302,7 @@ export function useBusinessCardCapture({
 
     const selectCompanyMode = (mode: Exclude<BusinessCardCompanyActionMode, null>) => {
         if (mode !== 'existing') {
-            setPayload((current) => ({ ...current, companyId: undefined }));
+            commitPayload({ ...payloadRef.current, companyId: undefined });
         }
         companyModeRef.current = mode;
         suggestedCompanyIdRef.current = null;
@@ -204,18 +312,23 @@ export function useBusinessCardCapture({
     };
 
     const updateCompanyName = (value: string) => {
+        suggestedCompanyNameRef.current = null;
+        companyNameRef.current = value;
         setCompanyName(value);
         if (value.trim()) setCompanyValidationError(null);
         setImportError(null);
     };
 
     const prepareImportDraft = (): BusinessCardImportDraft | undefined => {
-        if (!file) return undefined;
+        setImportError(null);
+        const requestId = importRequestIdRef.current;
+        if (!file || !requestId) return undefined;
 
         let companyAction: BusinessCardCompanyAction;
-        if (companyMode === 'existing' && payload.companyId != null) {
-            companyAction = { type: 'existing', companyId: payload.companyId };
-        } else if (companyMode === 'create' && companyName.trim()) {
+        const currentPayload = payloadRef.current;
+        if (companyMode === 'existing' && currentPayload.companyId != null) {
+            companyAction = { type: 'existing', companyId: currentPayload.companyId };
+        } else if (companyMode === 'create' && canCreateCompany && companyName.trim()) {
             companyAction = { type: 'create', companyName: companyName.trim() };
         } else if (companyMode === 'none') {
             companyAction = { type: 'none' };
@@ -225,9 +338,15 @@ export function useBusinessCardCapture({
         }
 
         const contact = companyAction.type === 'existing'
-            ? { ...payload, companyId: companyAction.companyId }
-            : { ...payload, companyId: undefined };
-        return { image: file, contact, companyAction };
+            ? { ...currentPayload, companyId: companyAction.companyId }
+            : { ...currentPayload, companyId: undefined };
+        return { requestId, image: file, contact, companyAction };
+    };
+
+    const updateContactField = (field: BusinessCardContactField, value: string) => {
+        delete ocrOwnedFieldsRef.current[field];
+        commitPayload({ ...payloadRef.current, [field]: value });
+        setImportError(null);
     };
 
     const captureImportError = (error: unknown) => {
@@ -237,6 +356,7 @@ export function useBusinessCardCapture({
 
     return {
         available,
+        canCreateCompany,
         file,
         previewUrl,
         result,
@@ -254,6 +374,7 @@ export function useBusinessCardCapture({
         selectExistingCompany,
         selectCompanyMode,
         updateCompanyName,
+        updateContactField,
         prepareImportDraft,
         captureImportError,
     };

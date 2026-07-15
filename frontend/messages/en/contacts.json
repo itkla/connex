@@ -209,7 +209,7 @@
     "dialogTitle": "New contact",
     "description": "Add a person to your contacts. These contacts will be shared with all users of this organization.",
     "businessCard": "Business card",
-    "businessCardDescription": "Scan a card or upload an image, then review every detail before creating the contact.",
+    "businessCardDescription": "Scan a card or upload an image, then review every detail. The original card image will be saved with the contact when you create it.",
     "scanCard": "Scan with camera",
     "uploadCard": "Upload image",
     "scanAnotherCard": "Scan another",

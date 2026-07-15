@@ -209,7 +209,7 @@
     "dialogTitle": "新規コンタクト",
     "description": "コンタクトに人物を追加します。追加したコンタクトは組織内の全ユーザーで共有されます。",
     "businessCard": "名刺",
-    "businessCardDescription": "名刺を撮影または画像を選択し、コンタクトを作成する前にすべての項目を確認してください。",
+    "businessCardDescription": "名刺を撮影または画像を選択し、すべての項目を確認してください。作成すると、元の名刺画像がコンタクトに保存されます。",
     "scanCard": "カメラで撮影",
     "uploadCard": "画像をアップロード",
     "scanAnotherCard": "別の名刺を撮影",

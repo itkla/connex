@@ -1573,7 +1573,12 @@ export function importBusinessCard(draft: Types.BusinessCardImportDraft, init: R
     body.append("image", draft.image, draft.image.name);
     body.append("contact", new Blob([JSON.stringify(draft.contact)], { type: "application/json" }));
     body.append("companyAction", new Blob([JSON.stringify(draft.companyAction)], { type: "application/json" }));
-    return postFormData<Types.BusinessCardImportResult>("/api/business-cards/import", body, init);
+    const headers: Record<string, string> = {};
+    new Headers(init.headers).forEach((value, key) => {
+        headers[key] = value;
+    });
+    headers["Idempotency-Key"] = draft.requestId;
+    return postFormData<Types.BusinessCardImportResult>("/api/business-cards/import", body, { ...init, headers });
 }
 
 export function deleteContact(id: number, init: RequestInit = {}) {

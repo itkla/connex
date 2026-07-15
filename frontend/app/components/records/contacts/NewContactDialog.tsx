@@ -2,7 +2,6 @@
 
 import { ResponsiveDialog, ResponsiveDialogContent, ResponsiveDialogTitle, ResponsiveDialogDescription } from '@/components/ui/responsive-dialog';
 import { Button } from '@/components/ui/button';
-import { Loader2Icon } from 'lucide-react';
 import Image from 'next/image';
 import { Combobox, ComboboxItem, ComboboxList, ComboboxContent, ComboboxEmpty, ComboboxInput } from '@/components/ui/combobox';
 import { InputGroupAddon } from '@/components/ui/input-group';
@@ -17,6 +16,7 @@ import {
     PhoneIcon,
     BriefcaseIcon,
     BuildingOffice2Icon,
+    ArrowPathIcon,
 } from '@heroicons/react/24/outline';
 import { useTranslations } from 'next-intl';
 import { initials } from '@/app/lib/utils';
@@ -275,7 +275,7 @@ export function NewContactForm({
                                 type="text"
                                 value={newContactPayload.name}
                                 onChange={(e) => {
-                                    setNewContactPayload((prev) => ({ ...prev, name: e.target.value }));
+                                    businessCard.updateContactField('name', e.target.value);
                                     clearError('name');
                                 }}
                                 className={cn(fieldInputClass, 'pl-9 pr-3', fieldErrors.name && fieldErrorClass)}
@@ -298,7 +298,7 @@ export function NewContactForm({
                                 type="email"
                                 value={newContactPayload.email}
                                 onChange={(e) => {
-                                    setNewContactPayload((prev) => ({ ...prev, email: e.target.value }));
+                                    businessCard.updateContactField('email', e.target.value);
                                     clearError('email');
                                 }}
                                 className={cn(fieldInputClass, 'pl-9 pr-3', fieldErrors.email && fieldErrorClass)}
@@ -320,7 +320,7 @@ export function NewContactForm({
                                     type="tel"
                                     value={newContactPayload.phone}
                                     onChange={(e) => {
-                                        setNewContactPayload((prev) => ({ ...prev, phone: e.target.value }));
+                                        businessCard.updateContactField('phone', e.target.value);
                                         clearError('phone');
                                     }}
                                     className={cn(fieldInputClass, 'pl-9 pr-3', fieldErrors.phone && fieldErrorClass)}
@@ -339,7 +339,7 @@ export function NewContactForm({
                                     id="title"
                                     type="text"
                                     value={newContactPayload.title}
-                                    onChange={(e) => setNewContactPayload((prev) => ({ ...prev, title: e.target.value }))}
+                                    onChange={(e) => businessCard.updateContactField('title', e.target.value)}
                                     className={cn(fieldInputClass, 'pl-9 pr-3')}
                                     placeholder={t('titlePlaceholder')}
                                 />
@@ -379,6 +379,7 @@ export function NewContactForm({
                         </Combobox>
                         <BusinessCardCompanyChoice
                             active={businessCard.file != null}
+                            canCreateCompany={businessCard.canCreateCompany}
                             mode={businessCard.companyMode}
                             existingCompanyName={resolvedCompany?.name ?? matchedCompanyName}
                             companyName={businessCard.companyName}
@@ -397,7 +398,7 @@ export function NewContactForm({
                             disabled={isCreating || isSuccess || businessCard.isScanning}
                             className="min-w-24 shadow-sm transition hover:shadow-md"
                         >
-                            {isCreating ? <Loader2Icon className="size-4 animate-spin" /> : businessCard.file ? t('createFromCard') : t('create')}
+                            {isCreating ? <ArrowPathIcon className="size-4 animate-spin motion-reduce:animate-none" /> : businessCard.file ? t('createFromCard') : t('create')}
                         </Button>
                     </div>
                 </form>
