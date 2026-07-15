@@ -16,7 +16,7 @@ public record ReportWidgetConfig(
         @NotBlank @Size(max = 64) String id,
         @Size(max = 160) String title,
         @NotBlank @Size(max = 32) String dataSource,
-        @NotBlank @Size(max = 32) String measure,
+        @NotBlank @Size(max = 64) String measure,
         @Size(max = 32) String groupBy,
         @NotBlank @Size(max = 16) String chartType) {
 }

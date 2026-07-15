@@ -51,12 +51,14 @@ import org.springframework.web.context.WebApplicationContext;
 import org.springframework.web.context.request.RequestContextHolder;
 
 import ooo.klae.connex.backend.ai.report.AiReportNarrativeService;
+import ooo.klae.connex.backend.beans.Organization;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.beans.Workspace;
 import ooo.klae.connex.backend.beans.WorkspaceRole;
 import ooo.klae.connex.backend.dto.ReportNarrativeClaimDto;
 import ooo.klae.connex.backend.dto.ReportNarrativeDto;
 import ooo.klae.connex.backend.dto.ReportNarrativeSectionDto;
+import ooo.klae.connex.backend.mappers.OrganizationMapper;
 import ooo.klae.connex.backend.mappers.RoleMapper;
 import ooo.klae.connex.backend.mappers.ShareMapper;
 import ooo.klae.connex.backend.mappers.UserMapper;
@@ -379,6 +381,7 @@ class ReportIntegrationTest {
     @Autowired @Qualifier("springSecurityFilterChain") private Filter springSecurityFilterChain;
     @Autowired private UserMapper userMapper;
     @Autowired private WorkspaceMapper workspaceMapper;
+    @Autowired private OrganizationMapper organizationMapper;
     @Autowired private RoleMapper roleMapper;
     @Autowired private ShareMapper shareMapper;
     @Autowired private PasswordEncoder passwordEncoder;
@@ -869,7 +872,7 @@ class ReportIntegrationTest {
         insertDeal(workspace.getId(), pipelineId, stageId, sharedCompany, "Shared Pipeline", "90.00", false);
         insertPersonEdge(workspace.getId(), connectorOne, sharedTarget, 3);
 
-        Workspace crossOrg = newWorkspace();
+        Workspace crossOrg = newWorkspaceInOrg(newOrganization().getId());
         int crossCompany = insertCompany(crossOrg.getId(), "Cross Org Hidden");
         int crossTarget = insertPerson(crossOrg.getId(), crossCompany, "Cross Org Target");
         insertCompanyShare(crossCompany, workspace.getId(), member.getId());
@@ -888,6 +891,7 @@ class ReportIntegrationTest {
         insertDeal(workspace.getId(), pipelineId, stageId, warmCompany, "Warm Pipeline", "700.00", false);
         insertPersonActivity(workspace.getId(), member.getId(), warmTarget, "2026-07-11 11:00:00");
         insertPersonEdge(workspace.getId(), connectorOne, warmTarget, 3);
+        insertIntroduction(workspace.getId(), member.getId(), warmTarget, actedTarget, "dismissed");
 
         int weakCompany = insertCompany(workspace.getId(), "Weak Path");
         int weakTarget = insertPerson(workspace.getId(), weakCompany, "Weak Target");
@@ -1564,6 +1568,15 @@ class ReportIntegrationTest {
         workspace.setOrgId(orgId);
         workspaceMapper.insert(workspace);
         return workspace;
+    }
+
+    private Organization newOrganization() {
+        String suffix = UUID.randomUUID().toString().substring(0, 8);
+        Organization organization = new Organization();
+        organization.setName("Report Org " + suffix);
+        organization.setSlug("report-org-" + suffix);
+        organizationMapper.insert(organization);
+        return organization;
     }
 
     private User newMember(Workspace workspace, String role) {
