@@ -1,3 +1,5 @@
+import type { Locale } from "@/i18n/config";
+
 // type definitions becaue the api.ts library was getting too bloated
 
 export type Page<T> = {
@@ -413,6 +415,7 @@ export type User = {
     lastLoginAt?: string;
     profilePictureUrl?: string;
     timezone: string;
+    locale: Locale;
 };
 
 export type LoginPayload = {

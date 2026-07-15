@@ -32,6 +32,7 @@ public interface UserMapper {
     int updateUsername(@Param("id") int id, @Param("username") String username);
     int updatePasswordHash(@Param("id") int id, @Param("passwordHash") String passwordHash);
     int updateTimezone(@Param("id") int id, @Param("timezone") String timezone);
+    int updateLocale(@Param("id") int id, @Param("locale") String locale);
     int updateCreatedAt(@Param("id") int id, @Param("createdAt") String createdAt);
     int updateUpdatedAt(@Param("id") int id, @Param("updatedAt") String updatedAt);
 }

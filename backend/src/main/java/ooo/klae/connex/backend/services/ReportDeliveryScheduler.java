@@ -43,9 +43,16 @@ import ooo.klae.connex.backend.tenant.TenantWorkScope;
 @RequiredArgsConstructor
 public class ReportDeliveryScheduler {
     private static final Logger log = LoggerFactory.getLogger(ReportDeliveryScheduler.class);
-    private static final Locale EMAIL_LOCALE = Locale.ENGLISH;
-    private static final DateTimeFormatter PERIOD_DATE =
-            DateTimeFormatter.ofLocalizedDate(FormatStyle.MEDIUM).withLocale(EMAIL_LOCALE);
+    private static final DeliveryCopy ENGLISH_COPY = new DeliveryCopy(
+            "Scheduled report: ",
+            "Your scheduled report is ready to review in Connex.",
+            "Report",
+            "Ready");
+    private static final DeliveryCopy JAPANESE_COPY = new DeliveryCopy(
+            "定期レポート: ",
+            "定期レポートを Connex で確認できます。",
+            "レポート",
+            "準備完了");
 
     private final ScheduleMapper scheduleMapper;
     private final PlacementRegistry placementRegistry;
@@ -143,40 +150,46 @@ public class ReportDeliveryScheduler {
     }
 
     private void send(User recipient, ReportSchedule schedule, ReportDocumentDto document) {
+        Locale locale = LocaleSupport.resolve(recipient.getLocale());
+        DeliveryCopy copy = deliveryCopy(locale);
+        DateTimeFormatter periodDate =
+                DateTimeFormatter.ofLocalizedDate(FormatStyle.MEDIUM).withLocale(locale);
         String reportName = document.definition().name();
-        String period = PERIOD_DATE.format(document.periodStart()) + " - " + PERIOD_DATE.format(document.periodEnd());
+        String period = periodDate.format(document.periodStart()) + " - " + periodDate.format(document.periodEnd());
         List<Headline> headlines = document.widgets().stream()
                 .filter(widget -> widget.total() != null)
                 .limit(2)
-                .map(this::headline)
+                .map(widget -> headline(widget, locale))
                 .toList();
-        Headline first = headlines.isEmpty() ? new Headline("Report", "Ready") : headlines.getFirst();
+        Headline first = headlines.isEmpty()
+                ? new Headline(copy.fallbackHeadlineLabel(), copy.fallbackHeadlineValue())
+                : headlines.getFirst();
         Headline second = headlines.size() < 2 ? new Headline("", "") : headlines.get(1);
         String actionUrl = UriComponentsBuilder.fromUriString(mailProperties.getAppBaseUrl())
                 .path("/overview/reports/")
                 .path(String.valueOf(schedule.getReportDefinitionId()))
                 .build()
                 .toUriString();
-        String body = templateRenderer.render("report-delivery", "en", Map.of(
+        String body = templateRenderer.render("report-delivery", locale.getLanguage(), Map.of(
                 "reportName", reportName,
                 "period", period,
-                "summary", summary(document),
+                "summary", summary(document, copy.fallbackSummary()),
                 "headlineOneLabel", first.label(),
                 "headlineOneValue", first.value(),
                 "headlineTwoLabel", second.label(),
                 "headlineTwoValue", second.value(),
                 "actionUrl", actionUrl));
         mailService.sendForWorkspace(schedule.getWorkspaceId(),
-                MailMessage.html(recipient.getEmail(), "Scheduled report: " + reportName, body));
+                MailMessage.html(recipient.getEmail(), copy.subjectPrefix() + reportName, body));
     }
 
-    private Headline headline(ReportWidgetDataDto widget) {
-        return new Headline(widget.title(), formatValue(widget.total(), widget.unit()));
+    private Headline headline(ReportWidgetDataDto widget, Locale locale) {
+        return new Headline(widget.title(), formatValue(widget.total(), widget.unit(), locale));
     }
 
-    private String summary(ReportDocumentDto document) {
+    private String summary(ReportDocumentDto document, String fallback) {
         if (document.narrative() == null || document.narrative().sections() == null) {
-            return "Your scheduled report is ready to review in Connex.";
+            return fallback;
         }
         for (ReportNarrativeSectionDto section : document.narrative().sections()) {
             if (section.claims() != null && !section.claims().isEmpty()) {
@@ -186,7 +199,7 @@ public class ReportDeliveryScheduler {
                 }
             }
         }
-        return "Your scheduled report is ready to review in Connex.";
+        return fallback;
     }
 
     private static java.util.Currency safeCurrency(String unit) {
@@ -197,14 +210,14 @@ public class ReportDeliveryScheduler {
         }
     }
 
-    private String formatValue(BigDecimal value, String unit) {
+    private String formatValue(BigDecimal value, String unit, Locale locale) {
         if (value == null) {
             return "-";
         }
         if (unit != null && unit.matches("[A-Z]{3}")) {
             java.util.Currency iso = safeCurrency(unit);
             if (iso != null) {
-                NumberFormat currency = NumberFormat.getCurrencyInstance(EMAIL_LOCALE);
+                NumberFormat currency = NumberFormat.getCurrencyInstance(locale);
                 currency.setCurrency(iso);
                 currency.setMaximumFractionDigits(0);
                 return currency.format(value);
@@ -218,6 +231,12 @@ public class ReportDeliveryScheduler {
             return formatted + " " + unit;
         }
         return formatted;
+    }
+
+    private static DeliveryCopy deliveryCopy(Locale locale) {
+        return Locale.JAPANESE.getLanguage().equals(locale.getLanguage())
+                ? JAPANESE_COPY
+                : ENGLISH_COPY;
     }
 
     private void skip(
@@ -265,5 +284,12 @@ public class ReportDeliveryScheduler {
     }
 
     private record Headline(String label, String value) {
+    }
+
+    private record DeliveryCopy(
+            String subjectPrefix,
+            String fallbackSummary,
+            String fallbackHeadlineLabel,
+            String fallbackHeadlineValue) {
     }
 }

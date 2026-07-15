@@ -6,6 +6,7 @@ import { useTransition } from "react";
 import { DropdownMenu } from "radix-ui";
 import { CheckIcon, ChevronDownIcon, GlobeAltIcon } from "@heroicons/react/16/solid";
 import { setLocaleCookie } from "@/app/lib/utils";
+import type { Locale } from "@/i18n/config";
 
 const LANGUAGES = [
     { code: "en", labelKey: "languageEnglish" },
@@ -22,7 +23,7 @@ export default function LanguageSwitcher({ align = "end" }: { align?: Align }) {
 
     const active = LANGUAGES.find((l) => l.code === locale) ?? LANGUAGES[0];
 
-    function selectLanguage(code: string) {
+    function selectLanguage(code: Locale) {
         if (code === locale) return;
         setLocaleCookie(code);
         startTransition(() => router.refresh());

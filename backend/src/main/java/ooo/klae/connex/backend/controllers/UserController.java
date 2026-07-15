@@ -14,6 +14,7 @@ import ooo.klae.connex.backend.dto.ActivityDto;
 import ooo.klae.connex.backend.dto.NoteDto;
 import ooo.klae.connex.backend.dto.RegisterDto;
 import ooo.klae.connex.backend.dto.TaskDto;
+import ooo.klae.connex.backend.dto.UpdateLocaleDto;
 import ooo.klae.connex.backend.dto.UpdateTimezoneDto;
 import ooo.klae.connex.backend.dto.UserDto;
 import ooo.klae.connex.backend.services.AuthService;
@@ -136,5 +137,10 @@ public class UserController {
     @PatchMapping("/me")
     public UserDto updateCurrentUser(@Valid @RequestBody UpdateTimezoneDto dto) {
         return UserDto.from(userService.updateTimezone(authService.getCurrentUser().getId(), dto.getTimezone()));
+    }
+
+    @PatchMapping("/me/locale")
+    public UserDto updateCurrentUserLocale(@Valid @RequestBody UpdateLocaleDto dto) {
+        return UserDto.from(userService.updateLocale(authService.getCurrentUser().getId(), dto.getLocale()));
     }
 }

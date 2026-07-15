@@ -103,6 +103,7 @@ class ScheduleServiceTest extends AbstractServiceTest {
     void reportManagerCanScheduleWithoutSnapshotCreateAccess() {
         int reportId = createReport("count").id();
         User manager = newUser();
+        userMapper.updateLocale(manager.getId(), "ja");
         WorkspaceRole reportManager = roleService.createRole(
                 workspace.getId(), currentUser.getId(), "Report manager " + unique(),
                 List.of("REPORT_READ", "REPORT_UPDATE"));
@@ -120,9 +121,9 @@ class ScheduleServiceTest extends AbstractServiceTest {
         assertEquals(
                 List.of(manager.getId()),
                 scheduleService.activeReportReaders(stored).stream().map(User::getId).toList());
-        assertEquals(
-                List.of(manager.getId()),
-                scheduleService.activeRecipientsForDocument(stored, document).stream().map(User::getId).toList());
+        List<User> recipients = scheduleService.activeRecipientsForDocument(stored, document);
+        assertEquals(List.of(manager.getId()), recipients.stream().map(User::getId).toList());
+        assertEquals("ja", recipients.getFirst().getLocale());
     }
 
     @Test

@@ -49,6 +49,6 @@ re-render and confirm the `{{token}}` markers survived (`grep '{{' ...`).
   deprecation notice; `pnpm audit` reports no vulnerabilities. It remains the
   standard React Email import and is build-only. Revisit if React Email
   consolidates the package.
-- Per-recipient locale selection remains future work because user profiles do not
-  currently persist a locale. Scheduled reports include English and Japanese
-  templates, while delivery follows the existing English default.
+- Scheduled report delivery selects the English or Japanese template from each
+  recipient's persisted account locale. Other transactional email services still
+  use their current template-specific locale behavior.

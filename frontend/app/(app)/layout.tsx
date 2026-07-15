@@ -9,6 +9,7 @@ import { NavTrailProvider } from "@/app/hooks/useNavTrail";
 import { ActionProvider } from "@/app/hooks/useActions";
 import NotificationActionsBridge from "@/app/components/actions/NotificationActionsBridge";
 import PreferenceActionsBridge from "@/app/components/actions/PreferenceActionsBridge";
+import { localePreferenceFromCookieHeader, resolveLocale } from "@/i18n/config";
 
 export default async function AppLayout({
     children,
@@ -36,7 +37,10 @@ export default async function AppLayout({
                 <NavTrailProvider>
                     <ActionProvider user={user}>
                         <NotificationActionsBridge />
-                        <PreferenceActionsBridge />
+                        <PreferenceActionsBridge
+                            userLocale={resolveLocale(user.locale)}
+                            cookieLocale={localePreferenceFromCookieHeader(cookie)}
+                        />
                         <ContentShell
                             sidebar={
                                 <Sidebar

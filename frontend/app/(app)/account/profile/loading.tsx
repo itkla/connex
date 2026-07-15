@@ -14,7 +14,7 @@ export default function AccountProfileLoading() {
                         <Skeleton className="h-3 w-44" />
                     </div>
                 </div>
-                {Array.from({ length: 4 }).map((_, i) => (
+                {Array.from({ length: 5 }).map((_, i) => (
                     <div key={i} className="space-y-2">
                         <Skeleton className="h-3.5 w-24" />
                         <Skeleton className="h-9 w-full rounded-lg" />

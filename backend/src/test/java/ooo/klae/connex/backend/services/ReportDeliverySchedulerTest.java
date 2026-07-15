@@ -10,6 +10,7 @@ import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.ArgumentMatchers.same;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -140,6 +141,87 @@ class ReportDeliverySchedulerTest {
     }
 
     @Test
+    void dueDeliveryRendersJapaneseFallbackForJapaneseRecipient() {
+        stubAuditScope();
+        ReportDocumentDto document = document();
+        User recipient = user(USER_ID, "recipient@example.com", "ja");
+        ReportSchedule schedule = stubClaimedDelivery(List.of(recipient));
+        when(reportService.generate(REPORT_ID, null)).thenReturn(document);
+        when(scheduleService.activeRecipientsForDocument(schedule, document)).thenReturn(List.of(recipient));
+        when(mailProperties.getAppBaseUrl()).thenReturn("https://app.example.com");
+        when(workspaceService.getOrgId(WORKSPACE_ID)).thenReturn(77);
+
+        scheduler.deliverDue();
+
+        ArgumentCaptor<MailMessage> message = ArgumentCaptor.forClass(MailMessage.class);
+        verify(mailService).sendForWorkspace(eq(WORKSPACE_ID), message.capture());
+        assertEquals("定期レポート: Quota-safe report", message.getValue().subject());
+        String body = message.getValue().htmlBody();
+        assertTrue(body.contains("<html lang=\"ja\">"));
+        assertTrue(body.contains("2026/07/07 - 2026/07/13"));
+        assertTrue(body.contains("定期レポートを Connex で確認できます。"));
+        assertTrue(body.contains(">レポート</p>"));
+        assertTrue(body.contains(">準備完了</p>"));
+        assertTrue(body.contains(">Connex で表示</a>"));
+        assertTrue(body.contains("このメールは、ワークスペースのレポート配信先に指定されているため送信されました。"));
+        assertFalse(body.contains("{{"));
+    }
+
+    @Test
+    void dueDeliveryLocalizesMixedRecipientsFromOneGeneratedDocument() {
+        stubAuditScope();
+        ReportDocumentDto document = documentWithContent();
+        User english = user(45, "english@example.com", "en");
+        User japanese = user(46, "japanese@example.com", "ja");
+        ReportSchedule schedule = stubClaimedDelivery(List.of(english, japanese));
+        when(reportService.generate(REPORT_ID, null)).thenReturn(document);
+        when(scheduleService.activeRecipientsForDocument(schedule, document)).thenReturn(List.of(english, japanese));
+        when(mailProperties.getAppBaseUrl()).thenReturn("https://app.example.com");
+        when(workspaceService.getOrgId(WORKSPACE_ID)).thenReturn(77);
+
+        scheduler.deliverDue();
+
+        ArgumentCaptor<MailMessage> messages = ArgumentCaptor.forClass(MailMessage.class);
+        verify(mailService, times(2)).sendForWorkspace(eq(WORKSPACE_ID), messages.capture());
+        Map<String, MailMessage> byRecipient = messages.getAllValues().stream()
+                .collect(java.util.stream.Collectors.toMap(MailMessage::to, message -> message));
+        MailMessage englishMessage = byRecipient.get("english@example.com");
+        MailMessage japaneseMessage = byRecipient.get("japanese@example.com");
+        assertEquals("Scheduled report: Quota-safe report", englishMessage.subject());
+        assertEquals("定期レポート: Quota-safe report", japaneseMessage.subject());
+        assertTrue(englishMessage.htmlBody().contains("Jul 7, 2026 - Jul 13, 2026"));
+        assertTrue(japaneseMessage.htmlBody().contains("2026/07/07 - 2026/07/13"));
+        assertTrue(englishMessage.htmlBody().contains("$125,000"));
+        assertTrue(japaneseMessage.htmlBody().contains("$125,000"));
+        assertTrue(englishMessage.htmlBody().contains("Revenue held above target."));
+        assertTrue(japaneseMessage.htmlBody().contains("Revenue held above target."));
+        verify(reportService).generate(REPORT_ID, null);
+        verify(auditService).recordScoped(
+                "report.schedule.delivery", "report_schedule", SCHEDULE_ID,
+                WORKSPACE_ID, 77, "Quota-safe report",
+                "Queued scheduled report delivery", Map.of("recipientCount", 2));
+    }
+
+    @Test
+    void dueDeliveryFallsBackToEnglishForUnsupportedStoredLocale() {
+        stubAuditScope();
+        ReportDocumentDto document = document();
+        User recipient = user(USER_ID, "recipient@example.com", "../../ja");
+        ReportSchedule schedule = stubClaimedDelivery(List.of(recipient));
+        when(reportService.generate(REPORT_ID, null)).thenReturn(document);
+        when(scheduleService.activeRecipientsForDocument(schedule, document)).thenReturn(List.of(recipient));
+        when(mailProperties.getAppBaseUrl()).thenReturn("https://app.example.com");
+        when(workspaceService.getOrgId(WORKSPACE_ID)).thenReturn(77);
+
+        scheduler.deliverDue();
+
+        ArgumentCaptor<MailMessage> message = ArgumentCaptor.forClass(MailMessage.class);
+        verify(mailService).sendForWorkspace(eq(WORKSPACE_ID), message.capture());
+        assertEquals("Scheduled report: Quota-safe report", message.getValue().subject());
+        assertTrue(message.getValue().htmlBody().contains("<html lang=\"en\">"));
+    }
+
+    @Test
     void dueDeliveryWithoutEligibleRecipientsRecordsFailureBeforeGeneration() {
         stubAuditScope();
         ReportSchedule schedule = stubClaimedDelivery(List.of());
@@ -232,10 +314,15 @@ class ReportDeliverySchedulerTest {
     }
 
     private static User user() {
+        return user(USER_ID, "recipient@example.com", "en");
+    }
+
+    private static User user(int id, String email, String locale) {
         User user = new User();
-        user.setId(USER_ID);
+        user.setId(id);
         user.setDisplayName("Recipient");
-        user.setEmail("recipient@example.com");
+        user.setEmail(email);
+        user.setLocale(locale);
         return user;
     }
 
