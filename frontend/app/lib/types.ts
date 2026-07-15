@@ -1616,13 +1616,6 @@ export type WarmthSummary = {
     contactDecay: WarmthDecayCounts;
 };
 
-export type UploadedFile = {
-    url: string;
-    fileName: string;
-    contentType: string;
-    size: number;
-};
-
 export type SearchResults = {
     companies: Company[];
     people: Contact[];

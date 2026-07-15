@@ -78,6 +78,7 @@ public interface CompanyMapper {
     /** Bulk-insert companies in one statement (CSV import); generated ids are written back to each bean. */
     int insertBatch(List<Company> companies);
     int update(Company company);
+    int updateLogoUrl(@Param("workspaceId") int workspaceId, @Param("id") int id, @Param("logoUrl") String logoUrl);
     int delete(@Param("workspaceId") int workspaceId, @Param("id") int id);
 
     int addTag(@Param("workspaceId") int workspaceId, @Param("companyId") int companyId, @Param("tagId") int tagId);

@@ -370,6 +370,11 @@
     WHERE workspace_id = #{workspaceId} AND id = #{id}
   </update>
 
+  <update id="updateImageUrl">
+    UPDATE person SET image_url = #{imageUrl}
+    WHERE workspace_id = #{workspaceId} AND id = #{id}
+  </update>
+
   <update id="updateEvaluationExclusions">
     UPDATE person
     <set>

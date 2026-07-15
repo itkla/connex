@@ -19,7 +19,9 @@ LABEL org.opencontainers.image.title="connex-backend" \
       org.opencontainers.image.source="https://github.com/itkla/connex" \
       org.opencontainers.image.version="${VERSION}"
 ENV JAVA_OPTS=""
-RUN groupadd --system connex && useradd --system --gid connex --home-dir /app connex
+RUN groupadd --system connex \
+    && useradd --system --gid connex --home-dir /app connex \
+    && install -d -o connex -g connex -m 0700 /var/lib/connex/objects
 COPY --from=build /workspace/app.war /app/app.war
 USER connex
 EXPOSE 8080

@@ -277,6 +277,45 @@ async function requestJson<T>(
     return JSON.parse(text) as T;
 }
 
+async function requestMultipart<T>(
+    path: string,
+    method: "POST" | "PUT",
+    body: FormData,
+): Promise<T> {
+    const locale = requestLocale({});
+    const workspaceId = clientWorkspaceId();
+    const stepUpGeneration = passkeyStepUpGeneration;
+    const send = (csrf: Record<string, string>) => fetch(`${API_BASE}${path}`, {
+        method,
+        body,
+        credentials: "include",
+        headers: {
+            "Accept-Language": locale,
+            ...(workspaceId ? { "X-Workspace-Id": workspaceId } : {}),
+            ...csrf,
+        },
+    });
+    const sendWithCsrfRetry = async () => {
+        let response = await send(await csrfHeader());
+        if (await shouldRetryWithFreshCsrf(path, response, true)) {
+            response = await send(await csrfHeader(true));
+        }
+        return response;
+    };
+    let response = await sendWithCsrfRetry();
+    if (await shouldRetryAfterPasskeyStepUp(path, response, true)) {
+        if (stepUpGeneration === passkeyStepUpGeneration) {
+            await performPasskeyStepUp();
+        }
+        response = await sendWithCsrfRetry();
+    }
+    if (!response.ok) {
+        throw await getApiError(response);
+    }
+    const text = await response.text();
+    return text ? JSON.parse(text) as T : undefined as T;
+}
+
 async function shouldRetryAfterPasskeyStepUp(path: string, res: Response, mutating: boolean): Promise<boolean> {
     const pathname = path.split("?")[0];
     if (!mutating || res.status !== 403 || typeof window === "undefined" || PASSKEY_STEP_UP_PATHS.has(pathname)) {
@@ -657,57 +696,6 @@ export async function getCurrentUserFromCookie(cookie: string | null) {
     }
 }
 
-// The attachment entity types (see the <Attachments> usages) mapped to their
-// workspace-scoped backend GET, used to authorize a blob write against the caller's
-// tenant. Types absent here are denied (fail closed).
-const ATTACHMENT_ENTITY_ENDPOINTS: Record<string, string> = {
-    company: "/api/companies",
-    person: "/api/persons",
-    deal: "/api/deals",
-    user: "/api/users",
-};
-
-/**
- * Server-side (route-handler) probe: performs a workspace-scoped backend GET with the
- * caller's forwarded cookie and reports whether it resolves (HTTP 2xx). Used by the
- * upload blob routes to authorize the target before writing/deleting a file, so a valid
- * session alone cannot touch another tenant's entity.
- * @param cookie the forwarded request cookie header (session + workspace)
- * @param path the backend path to probe (e.g. `/api/companies/12`)
- * @returns true when the backend resolves the resource for the caller's workspace
- */
-export async function backendResolves(cookie: string | null, path: string): Promise<boolean> {
-    if (!cookie) {
-        return false;
-    }
-    try {
-        const res = await fetch(`${API_BASE}${path}`, { headers: { cookie }, cache: "no-store" });
-        return res.ok;
-    } catch {
-        return false;
-    }
-}
-
-/**
- * Whether the caller's active workspace may access the given attachment entity,
- * checked against the backend. Unknown entity types or non-integer ids are denied.
- * @param cookie the forwarded request cookie header
- * @param entityType the owning entity type (company/person/deal/user)
- * @param entityId the owning entity id
- * @returns true when the caller's workspace owns the entity
- */
-export async function workspaceCanAccessEntity(
-    cookie: string | null,
-    entityType: string,
-    entityId: number,
-): Promise<boolean> {
-    const base = ATTACHMENT_ENTITY_ENDPOINTS[entityType.trim().toLowerCase()];
-    if (!base || !Number.isInteger(entityId)) {
-        return false;
-    }
-    return backendResolves(cookie, `${base}/${entityId}`);
-}
-
 export function logout() {
     return withClientRequestIdentityReset(() => postJson<void>("/api/auth/logout"));
 }
@@ -912,6 +900,16 @@ export function updateMyTimezone(timezone: string) {
 
 export function updateMyLocale(locale: Types.User["locale"]) {
     return patchJson<Types.User>("/api/users/me/locale", { locale });
+}
+
+export async function uploadCurrentUserProfilePicture(file: File) {
+    const formData = new FormData();
+    formData.append("file", file);
+    const user = await requestMultipart<Types.User>("/api/users/me/profile-picture", "PUT", formData);
+    if (!user.profilePictureUrl) {
+        throw new ApiError("Profile picture upload returned no URL", 502);
+    }
+    return user.profilePictureUrl;
 }
 
 export function createUser(payload: Types.RegisterPayload) {
@@ -1165,6 +1163,13 @@ export function createCompany(payload: Types.CreateCompanyPayload) {
 
 export function updateCompany(id: number, payload: Types.UpdateCompanyPayload) {
     return putJson<Types.Company>(`/api/companies/${id}`, payload);
+}
+
+export async function uploadCompanyLogo(companyId: number, file: File) {
+    const formData = new FormData();
+    formData.append("file", file);
+    const company = await requestMultipart<Types.Company>(`/api/companies/${companyId}/logo`, "PUT", formData);
+    return company.logoUrl;
 }
 
 export function deleteCompany(id: number, init: RequestInit = {}) {
@@ -1517,6 +1522,13 @@ export function deleteContact(id: number, init: RequestInit = {}) {
 
 export function updateContact(id: number, payload: Types.UpdateContactPayload) {
     return putJson<Types.Contact>(`/api/persons/${id}`, payload);
+}
+
+export async function uploadContactPicture(contactId: number, file: File) {
+    const formData = new FormData();
+    formData.append("file", file);
+    const contact = await requestMultipart<Types.Contact>(`/api/persons/${contactId}/profile-picture`, "PUT", formData);
+    return contact.imageUrl;
 }
 
 export function updateContactEvaluation(id: number, payload: Types.UpdateContactEvaluationPayload) {
@@ -2184,11 +2196,19 @@ export function getAttachmentFacets(init: RequestInit = {}) {
 }
 
 /**
- * Records an attachment after its binary has been stored via the Next.js upload route.
+ * Records legacy or externally hosted attachment metadata.
  * @param payload - The attachment metadata (entity, url, file name, etc.)
  */
 export function createAttachment(payload: Types.CreateAttachmentPayload) {
     return postJson<Types.Attachment>(`/api/attachments`, payload);
+}
+
+export function uploadAttachment(entityType: string, entityId: number, file: File) {
+    const formData = new FormData();
+    formData.append("entityType", entityType);
+    formData.append("entityId", String(entityId));
+    formData.append("file", file);
+    return requestMultipart<Types.Attachment>("/api/attachments/upload", "POST", formData);
 }
 
 export function getAttachment(id: number, init: RequestInit = {}) {

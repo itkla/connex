@@ -176,7 +176,8 @@ class CompanyServiceTest extends AbstractServiceTest {
             mock(AuditService.class),
             mock(RuleTriggerPublisher.class), workspaceService, mock(CustomFieldValueService.class),
             mock(SegmentService.class), mock(ReferenceService.class),
-            Clock.fixed(Instant.parse("2026-07-11T00:00:00Z"), ZoneOffset.UTC));
+            Clock.fixed(Instant.parse("2026-07-11T00:00:00Z"), ZoneOffset.UTC),
+            mock(ooo.klae.connex.backend.storage.ManagedObjectService.class));
 
         var engagement = service.getCompanyEngagement(9);
 
@@ -213,7 +214,8 @@ class CompanyServiceTest extends AbstractServiceTest {
             mapper, mock(TagMapper.class), personMapper, dealMapper,
             activityMapper, noteMapper, taskMapper, mock(AuditService.class),
             mock(RuleTriggerPublisher.class), workspaceService, mock(CustomFieldValueService.class),
-            mock(SegmentService.class), referenceService, Clock.systemUTC());
+            mock(SegmentService.class), referenceService, Clock.systemUTC(),
+            mock(ooo.klae.connex.backend.storage.ManagedObjectService.class));
 
         CompanyService.CompanyTimelineData timeline = service.getCompanyTimeline(9, 25);
 
@@ -241,7 +243,8 @@ class CompanyServiceTest extends AbstractServiceTest {
             mock(CustomFieldValueService.class),
             mock(SegmentService.class),
             mock(ReferenceService.class),
-            Clock.systemUTC()
+            Clock.systemUTC(),
+            mock(ooo.klae.connex.backend.storage.ManagedObjectService.class)
         );
     }
 

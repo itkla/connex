@@ -63,6 +63,7 @@ public class TenantScopeInterceptor implements Interceptor {
         MAPPERS + "RuleMapper",
         MAPPERS + "ActivityMapper",
         MAPPERS + "NoteMapper",
+        MAPPERS + "ObjectDeletionQueueMapper",
         MAPPERS + "EntityReferenceMapper",
         MAPPERS + "AttachmentMapper",
         MAPPERS + "DealMapper",
@@ -113,6 +114,7 @@ public class TenantScopeInterceptor implements Interceptor {
         MAPPERS + "SsoDomainMapper",
         MAPPERS + "SsoLinkChallengeMapper",
         MAPPERS + "UserMapper",
+        MAPPERS + "UserObjectDeletionQueueMapper",
         MAPPERS + "WebauthnCredentialMapper",
         MAPPERS + "WebauthnUserEntityMapper",
         MAPPERS + "WorkspaceMapper"

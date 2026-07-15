@@ -42,6 +42,12 @@ This is the most load-bearing property of Connex. A change that leaks data acros
 - New tenant-scoped tables need their workspace column from day one — follow the `*_workspace` migrations as the pattern.
 - **MyBatis mappers:** Java interface in `mappers/`, XML in `src/main/resources/mappers/{Entity}Mapper.xml`. Mirror an existing mapper pair. All data access lives here — no SQL elsewhere. Use `#{}` bindings.
 
+## Private object storage
+
+Attachments, contact pictures, company logos, user profile pictures, and business-card source images are stored by the backend through `ObjectStorage`; never write uploads into the frontend image or public directories. Managed object URLs are opaque authenticated backend endpoints, not public filesystem paths. The default local provider writes under `${user.home}/.connex/object-storage`; the deployment bundle mounts `/var/lib/connex/objects` from its durable `object_data` volume. Set `CONNEX_OBJECT_STORAGE_PROVIDER=s3` plus the bucket and region settings documented in [`../docs/DEPLOYMENT.md`](../docs/DEPLOYMENT.md) for S3-compatible storage.
+
+Metadata replacement and removal must enqueue the old object in the matching durable deletion queue in the same database transaction, then attempt deletion after commit. Tenant-owned keys use `object_deletion_queue`; control-plane user keys use `user_object_deletion_queue`. New-object rollback compensation is best-effort because an ungraceful process exit between the object write and transaction callback can still orphan an object; preserve the operator reconciliation procedure in the deployment guide.
+
 ## Conventions
 
 - **Comments:** Javadoc on classes/methods only. **No inline comments.**
@@ -99,4 +105,5 @@ Rules for any new AI-powered feature:
 - Test: load `CONNEX_DB_*` from your untracked `backend/.env`, then run `./gradlew test`
 - Build: `./gradlew build`
 - DB up: create `backend/.env` from `backend/.env.example`, fill local-only passwords, then run `docker compose up -d db` (from `backend/`)
+- Private uploads (local): the default root is `~/.connex/object-storage`; override it with `CONNEX_OBJECT_STORAGE_FILESYSTEM_ROOT` when tests or parallel worktrees need isolation.
 - Routing integration test: `TenantCatalogRoutingIntegrationTest` creates a scratch catalog `connexdb_routing_it`; when the test DB user lacks the privilege (CI runs as root and has it) the test self-skips with instructions. To run it locally, grant once as root: ``GRANT ALL PRIVILEGES ON `connexdb\_routing\_%`.* TO 'connexuser'@'%';``

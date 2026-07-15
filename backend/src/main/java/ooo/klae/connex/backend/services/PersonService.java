@@ -20,6 +20,10 @@ import ooo.klae.connex.backend.beans.Task;
 import ooo.klae.connex.backend.dto.CustomFieldEntryDto;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
+import ooo.klae.connex.backend.storage.ManagedObjectService;
+import ooo.klae.connex.backend.storage.ManagedObjectService.ManagedContent;
+import ooo.klae.connex.backend.storage.ManagedObjectService.StoredImage;
+import ooo.klae.connex.backend.storage.UploadSource;
 import ooo.klae.connex.backend.tenant.Permission;
 import ooo.klae.connex.backend.tenant.RequirePermission;
 import java.util.List;
@@ -51,6 +55,7 @@ public class PersonService {
     private final CustomFieldValueService customFieldValueService;
     private final ReferenceService referenceService;
     private final RuleTriggerPublisher ruleTriggers;
+    private final ManagedObjectService managedObjectService;
 
     private static final Set<String> AUDIT_FIELDS =
         Set.of("name", "email", "phone", "title", "imageUrl");
@@ -181,7 +186,14 @@ public class PersonService {
         validateCompanyVisible(workspaceId, person);
         person.setId(id);
         person.setWorkspaceId(workspaceId);
+        if (person.getImageUrl() == null) {
+            person.setImageUrl(before.getImageUrl());
+        }
         personMapper.update(person);
+        if (!Objects.equals(before.getImageUrl(), person.getImageUrl())) {
+            managedObjectService.deletePersonImageAfterCommit(
+                before.getWorkspaceId(), id, before.getImageUrl());
+        }
         if (!Objects.equals(companyIdOf(before), companyIdOf(person))) {
             employmentService.recordTransition(workspaceId, id, companyIdOf(person), person.getTitle());
         }
@@ -190,6 +202,31 @@ public class PersonService {
             auditService.diff(before, person, AUDIT_FIELDS));
         ruleTriggers.publish(workspaceId, "person", id, "person.updated");
         return person;
+    }
+
+    @Transactional
+    @RequirePermission(Permission.PERSON_UPDATE)
+    public Person updateProfilePicture(int id, UploadSource source) {
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        Person before = requireOwnedPerson(workspaceId, id);
+        StoredImage stored = managedObjectService.storePersonImage(workspaceId, id, source);
+        managedObjectService.compensatePersonImageOnRollback(workspaceId, id, stored.url());
+        personMapper.updateImageUrl(workspaceId, id, stored.url());
+        managedObjectService.deletePersonImageAfterCommit(
+            before.getWorkspaceId(), id, before.getImageUrl());
+        Person after = requireOwnedPerson(workspaceId, id);
+        auditService.record("person.updateAvatar", "person", id, before.getName(),
+            "Updated profile picture for " + before.getName(),
+            auditService.singleChange("imageUrl", before.getImageUrl(), after.getImageUrl()));
+        ruleTriggers.publish(workspaceId, "person", id, "person.updated");
+        return after;
+    }
+
+    public ManagedContent getProfilePictureContent(int id, String token) {
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        Person person = requirePerson(workspaceId, id);
+        return managedObjectService.openPersonImage(
+            person.getWorkspaceId(), id, person.getImageUrl(), token);
     }
 
     /**
@@ -246,6 +283,8 @@ public class PersonService {
     public void delete(int id) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         Person before = requireOwnedPerson(workspaceId, id);
+        managedObjectService.deletePersonImageAfterCommit(
+            before.getWorkspaceId(), id, before.getImageUrl());
         customFieldValueService.deleteByEntity("person", id);
         personMapper.delete(workspaceId, id);
         auditService.record("person.delete", "person", id, before.getName(),

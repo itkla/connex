@@ -24,9 +24,8 @@ import EditCompanySheet from '@/app/components/records/companies/EditCompanyShee
 import NewContactDialog from '@/app/components/records/contacts/NewContactDialog';
 import NewDealDialog from '@/app/components/records/deals/NewDealDialog';
 
-import { createContact, createDeal, deleteCompany, getPipelines, getStagesByPipelineId, updateContact, isFieldError } from '@/app/lib/api';
+import { createContact, createDeal, deleteCompany, getPipelines, getStagesByPipelineId, isFieldError, uploadContactPicture } from '@/app/lib/api';
 import { CreateContactPayload, type Company, type CreateDealPayload, type Pipeline, type Stage } from '@/app/lib/types';
-import { uploadContactPicture } from '@/app/lib/utils';
 import { useWorkspace } from '@/app/hooks/useWorkspace';
 
 export default function CompanyActionsMenu({
@@ -124,8 +123,7 @@ export default function CompanyActionsMenu({
             // console.log('newContactPayload', newContactPayload);
             const newContact = await createContact(newContactPayload);
             if (imageFile) {
-                const imageUrl = await uploadContactPicture(newContact.id, imageFile);
-                await updateContact(newContact.id, { ...newContactPayload, imageUrl });
+                await uploadContactPicture(newContact.id, imageFile);
             }
             toastSuccess(t('toastContactCreated'));
             setIsCreatingContact(false);

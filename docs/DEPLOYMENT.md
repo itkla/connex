@@ -54,6 +54,62 @@ The bundled MySQL is included for convenience. **Production requires TLS to the 
 configure TLS on the bundled MySQL and trust its CA in `CONNEX_DB_URL`, or point `CONNEX_DB_URL` at a
 managed database that terminates TLS. On-prem operators commonly use their own database.
 
+### Private object storage
+
+Connex stores attachments, contact pictures, company logos, user profile pictures, and scanned
+business-card source images privately. Downloads pass through authenticated, tenant-authorized
+backend endpoints; the object store must not be exposed as a public origin.
+
+The deployment templates use the filesystem provider and mount the Docker `object_data` volume at
+`/var/lib/connex/objects`. Include that volume in backups and restores alongside MySQL. To use an
+S3-compatible service instead, set:
+
+```dotenv
+CONNEX_OBJECT_STORAGE_PROVIDER=s3
+CONNEX_OBJECT_STORAGE_S3_BUCKET=REPLACE_PRIVATE_BUCKET
+CONNEX_OBJECT_STORAGE_S3_REGION=REPLACE_REGION
+# Optional for a non-AWS implementation:
+CONNEX_OBJECT_STORAGE_S3_ENDPOINT=https://objects.REPLACE.example.com
+CONNEX_OBJECT_STORAGE_S3_PATH_STYLE=false
+```
+
+S3 credentials come from the AWS SDK default credential chain, such as an instance/task role or
+the standard `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, and optional `AWS_SESSION_TOKEN`
+environment variables. Keep the bucket private, disable public ACLs/policies, require TLS, grant
+the backend only object read/write/delete/list access for this bucket, and enable the provider's
+at-rest encryption and lifecycle controls. A custom endpoint may use HTTP only for an explicitly
+trusted local development service; production endpoints should use HTTPS.
+
+The default per-file limit is 25 MiB
+(`CONNEX_OBJECT_STORAGE_MAX_UPLOAD_BYTES=26214400`), with a 27 MiB multipart request envelope
+(`CONNEX_UPLOAD_MAX_BODY_BYTES=28311552`). Image uploads also default to a 40-million-pixel decode
+limit (`CONNEX_OBJECT_STORAGE_MAX_IMAGE_PIXELS=40000000`).
+
+Object removal uses durable database queues: tenant-owned objects are recorded in
+`object_deletion_queue` in each tenant catalog, while user profile objects are recorded in the
+control-plane `user_object_deletion_queue`. The backend retries due rows every 60 seconds. Monitor
+backlog age and attempts without selecting the private object keys:
+
+```sql
+SELECT workspace_id, COUNT(*) AS pending, MAX(attempts) AS max_attempts,
+       MIN(created_at) AS oldest
+FROM object_deletion_queue
+GROUP BY workspace_id;
+
+SELECT COUNT(*) AS pending, MAX(attempts) AS max_attempts,
+       MIN(created_at) AS oldest
+FROM user_object_deletion_queue;
+```
+
+A hard process or host failure after an object is written but before its database mutation
+commits can leave an unreferenced object that no transaction callback can enqueue. Periodically
+inventory objects older than a conservative grace period and compare each opaque URL token with
+the `url`, `image_url`, `logo_url`, and `profile_picture_url` values in the appropriate tenant or
+control catalog before deleting it. Never delete solely from object age, and never emit object
+keys or upload metadata into logs. Existing database rows that reference legacy frontend-local
+upload paths are not automatically copied into the private store; preserve and migrate their
+source files before retiring an older deployment.
+
 ## Run
 
 ```bash

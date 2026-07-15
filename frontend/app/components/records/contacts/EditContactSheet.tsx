@@ -8,9 +8,8 @@ import { toastError, toastSuccess } from '@/app/lib/toast';
 
 import QuickEditSheet, { type ContactDraft } from '@/app/components/records/contacts/QuickEditSheet';
 import { CustomFieldsEditSection, type CustomFieldsEditHandle } from '@/app/components/records/CustomFieldsEditSection';
-import { getContactById, updateContact } from '@/app/lib/api';
+import { getContactById, updateContact, uploadContactPicture } from '@/app/lib/api';
 import { type Contact, type UpdateContactPayload } from '@/app/lib/types';
-import { uploadContactPicture } from '@/app/lib/utils';
 
 function toDraft(c: Contact): ContactDraft {
     return {

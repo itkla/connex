@@ -16,8 +16,13 @@ import ooo.klae.connex.backend.beans.Task;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.notifications.NotificationChangePublisher;
+import ooo.klae.connex.backend.storage.ManagedObjectService;
+import ooo.klae.connex.backend.storage.ManagedObjectService.ManagedContent;
+import ooo.klae.connex.backend.storage.ManagedObjectService.StoredImage;
+import ooo.klae.connex.backend.storage.UploadSource;
 
 import java.util.List;
+import java.util.Objects;
 import java.util.Set;
 
 import lombok.RequiredArgsConstructor;
@@ -41,6 +46,7 @@ public class UserService implements UserDetailsService {
     private final NotificationChangePublisher notificationChanges;
     private final ReferenceService referenceService;
     private final UserOffboardingService userOffboardingService;
+    private final ManagedObjectService managedObjectService;
 
     private static final Set<String> AUDIT_FIELDS =
         Set.of("username", "displayName", "email", "department", "title",
@@ -100,6 +106,7 @@ public class UserService implements UserDetailsService {
      * @param user the submitted profile fields
      * @return the updated user
      */
+    @Transactional
     public User update(int id, User user) {
         workspaceService.requireSelf(id);
         User before = getUserById(id);
@@ -112,6 +119,9 @@ public class UserService implements UserDetailsService {
         }
         user.setLocale(before.getLocale());
         userMapper.update(user);
+        if (!Objects.equals(before.getProfilePictureUrl(), user.getProfilePictureUrl())) {
+            managedObjectService.deleteUserImageAfterCommit(id, before.getProfilePictureUrl());
+        }
         auditService.record("user.update", "user", id, user.getUsername(),
             "Updated user " + user.getUsername(),
             auditService.diff(before, user, AUDIT_FIELDS));
@@ -141,6 +151,7 @@ public class UserService implements UserDetailsService {
         orgMemberService.assertNotSoleOwnerOfAnyOrg(id);
         userOffboardingService.assertNoAuthoredContent(id);
         User before = getUserById(id);
+        managedObjectService.deleteUserImageAfterCommit(id, before.getProfilePictureUrl());
         userOffboardingService.eraseOrgDataReferences(id, notificationLocks);
         auditService.record("user.delete", "user", id, before.getUsername(),
             "Deleted user " + before.getUsername(),
@@ -188,14 +199,38 @@ public class UserService implements UserDetailsService {
      * @param profilePictureUrl
      * @return
      */
+    @Transactional
     public User updateProfilePictureUrl(int userId, String profilePictureUrl) {
         workspaceService.requireSelf(userId);
         User before = getUserById(userId);
         userMapper.updateProfilePictureUrl(userId, profilePictureUrl);
+        if (!Objects.equals(before.getProfilePictureUrl(), profilePictureUrl)) {
+            managedObjectService.deleteUserImageAfterCommit(userId, before.getProfilePictureUrl());
+        }
         auditService.record("user.updateAvatar", "user", userId, before.getUsername(),
             "Updated profile picture for " + before.getUsername(),
             auditService.singleChange("profilePictureUrl", before.getProfilePictureUrl(), profilePictureUrl));
         return userMapper.getUserById(userId);
+    }
+
+    @Transactional
+    public User updateCurrentProfilePicture(int userId, UploadSource source) {
+        workspaceService.requireSelf(userId);
+        User before = getUserById(userId);
+        StoredImage stored = managedObjectService.storeUserImage(userId, source);
+        managedObjectService.compensateUserImageOnRollback(userId, stored.url());
+        userMapper.updateProfilePictureUrl(userId, stored.url());
+        managedObjectService.deleteUserImageAfterCommit(userId, before.getProfilePictureUrl());
+        User after = userMapper.getUserById(userId);
+        auditService.record("user.updateAvatar", "user", userId, before.getUsername(),
+            "Updated profile picture for " + before.getUsername(),
+            auditService.singleChange("profilePictureUrl", before.getProfilePictureUrl(), after.getProfilePictureUrl()));
+        return after;
+    }
+
+    public ManagedContent getProfilePictureContent(int userId, String token) {
+        User user = getUserById(userId);
+        return managedObjectService.openUserImage(userId, user.getProfilePictureUrl(), token);
     }
 
     public User updateTimezone(int userId, String timezone) {

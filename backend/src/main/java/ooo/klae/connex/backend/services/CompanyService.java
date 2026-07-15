@@ -29,6 +29,10 @@ import ooo.klae.connex.backend.dto.SegmentDefinition;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.exceptions.DuplicateResourceException;
+import ooo.klae.connex.backend.storage.ManagedObjectService;
+import ooo.klae.connex.backend.storage.ManagedObjectService.ManagedContent;
+import ooo.klae.connex.backend.storage.ManagedObjectService.StoredImage;
+import ooo.klae.connex.backend.storage.UploadSource;
 import ooo.klae.connex.backend.tenant.Permission;
 import ooo.klae.connex.backend.tenant.RequirePermission;
 
@@ -40,6 +44,7 @@ import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -69,6 +74,7 @@ public class CompanyService {
     private final SegmentService segmentService;
     private final ReferenceService referenceService;
     private final Clock clock;
+    private final ManagedObjectService managedObjectService;
 
     private static final Set<String> AUDIT_FIELDS =
         Set.of("name", "website", "industry", "phone", "address", "logoUrl");
@@ -323,6 +329,7 @@ public class CompanyService {
     /**
      * Updates an existing {@code Company} in the active workspace.
      */
+    @Transactional
     @RequirePermission(Permission.COMPANY_UPDATE)
     public Company updateCompany(int id, Company company) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
@@ -331,6 +338,10 @@ public class CompanyService {
         company.setWorkspaceId(workspaceId);
         assertUniqueWebsite(company);
         int updated = companyMapper.update(company);
+        if (!Objects.equals(before.getLogoUrl(), company.getLogoUrl())) {
+            managedObjectService.deleteCompanyImageAfterCommit(
+                before.getWorkspaceId(), id, before.getLogoUrl());
+        }
         auditService.record("company.update", "company", id, company.getName(),
             "Updated company " + company.getName(),
             auditService.diff(before, company, AUDIT_FIELDS));
@@ -338,6 +349,30 @@ public class CompanyService {
             ruleTriggers.publish(workspaceId, "company", id, "company.updated");
         }
         return company;
+    }
+
+    @Transactional
+    @RequirePermission(Permission.COMPANY_UPDATE)
+    public Company updateLogo(int id, UploadSource source) {
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        Company before = requireOwnedCompany(workspaceId, id);
+        StoredImage stored = managedObjectService.storeCompanyImage(workspaceId, id, source);
+        managedObjectService.compensateCompanyImageOnRollback(workspaceId, id, stored.url());
+        companyMapper.updateLogoUrl(workspaceId, id, stored.url());
+        managedObjectService.deleteCompanyImageAfterCommit(
+            before.getWorkspaceId(), id, before.getLogoUrl());
+        Company after = requireOwnedCompany(workspaceId, id);
+        auditService.record("company.updateLogo", "company", id, before.getName(),
+            "Updated logo for " + before.getName(),
+            auditService.singleChange("logoUrl", before.getLogoUrl(), after.getLogoUrl()));
+        ruleTriggers.publish(workspaceId, "company", id, "company.updated");
+        return after;
+    }
+
+    public ManagedContent getLogoContent(int id, String token) {
+        Company company = requireCompany(id);
+        return managedObjectService.openCompanyImage(
+            company.getWorkspaceId(), id, company.getLogoUrl(), token);
     }
 
     /**
@@ -348,6 +383,8 @@ public class CompanyService {
     public void deleteCompany(int id) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         Company before = requireOwnedCompany(workspaceId, id);
+        managedObjectService.deleteCompanyImageAfterCommit(
+            before.getWorkspaceId(), id, before.getLogoUrl());
         customFieldValueService.deleteByEntity("company", id);
         companyMapper.delete(workspaceId, id);
         auditService.record("company.delete", "company", id, before.getName(),

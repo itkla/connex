@@ -8,8 +8,7 @@ import NewContactDialog from "@/app/components/records/contacts/NewContactDialog
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { CreateContactPayload } from "@/app/lib/types";
-import { createContact, updateContact, isFieldError } from "@/app/lib/api";
-import { uploadContactPicture } from "@/app/lib/utils";
+import { createContact, isFieldError, uploadContactPicture } from "@/app/lib/api";
 import { toast } from "sonner";
 import { useTranslations } from "next-intl";
 
@@ -85,8 +84,7 @@ export default function ContactsGrid({ contacts, company, allTags }: { contacts:
                     try {
                         const newContact = await createContact(newContactPayload);
                         if (imageFile) {
-                            const imageUrl = await uploadContactPicture(newContact.id, imageFile);
-                            await updateContact(newContact.id, { ...newContactPayload, imageUrl });
+                            await uploadContactPicture(newContact.id, imageFile);
                         }
                         setNewContactPayload({
                             name: '',

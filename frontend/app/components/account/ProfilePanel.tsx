@@ -7,7 +7,7 @@ import { CameraIcon } from "@heroicons/react/24/outline";
 import { Loader2Icon } from "lucide-react";
 
 import type { User } from "@/app/lib/types";
-import { ApiError, updateMyTimezone, updateUser } from "@/app/lib/api";
+import { ApiError, updateMyTimezone, updateUser, uploadCurrentUserProfilePicture } from "@/app/lib/api";
 import { persistAuthenticatedLocale } from "@/app/lib/locale-preference";
 import { toastError, toastSuccess } from "@/app/lib/toast";
 import { formatDate, formatDateTime } from "@/app/lib/utils";
@@ -58,17 +58,6 @@ function supportedTimeZones(): string[] {
     } catch {
         return [];
     }
-}
-
-async function uploadProfilePicture(file: File): Promise<string> {
-    const formData = new FormData();
-    formData.append("profilePicture", file);
-    const res = await fetch("/api/users/me/profile-picture", { method: "PUT", body: formData });
-    if (!res.ok) {
-        throw new Error("upload-failed");
-    }
-    const data = (await res.json()) as { profilePictureUrl: string };
-    return data.profilePictureUrl;
 }
 
 async function settleProfileMutation(
@@ -167,7 +156,7 @@ export default function ProfilePanel({ user }: Props) {
             const profileMutation = (async (): Promise<ProfileMutationChanges | null> => {
                 let profilePictureUrl = savedUser.profilePictureUrl;
                 if (photo) {
-                    profilePictureUrl = uploadedPhotoUrl ?? (await uploadProfilePicture(photo));
+                    profilePictureUrl = uploadedPhotoUrl ?? (await uploadCurrentUserProfilePicture(photo));
                     if (!uploadedPhotoUrl) setUploadedPhotoUrl(profilePictureUrl);
                 }
 

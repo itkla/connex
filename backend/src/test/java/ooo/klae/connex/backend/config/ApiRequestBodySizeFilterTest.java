@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 
 import java.io.BufferedReader;
 import java.nio.charset.StandardCharsets;
+import java.util.List;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -26,6 +27,7 @@ class ApiRequestBodySizeFilterTest {
         RequestBodySizeProperties properties = new RequestBodySizeProperties();
         properties.setMaxBodyBytes(8);
         properties.setImportMaxBodyBytes(16);
+        properties.setUploadMaxBodyBytes(12);
         properties.setWebauthnMaxBodyBytes(4);
         filter = new ApiRequestBodySizeFilter(properties);
     }
@@ -126,6 +128,38 @@ class ApiRequestBodySizeFilterTest {
 
         assertEquals(413, response.getStatus());
         assertNull(chain.getRequest());
+    }
+
+    @Test
+    void appliesDedicatedUploadLimitToManagedMultipartRoutes() throws Exception {
+        List<String> paths = List.of(
+            "/api/attachments/upload",
+            "/api/users/me/profile-picture",
+            "/api/persons/7/profile-picture",
+            "/api/companies/7/logo");
+        for (String path : paths) {
+            MockHttpServletRequest allowed = new MockHttpServletRequest("POST", path);
+            allowed.setContentType("multipart/form-data; boundary=x");
+            allowed.setContent(new byte[12]);
+            MockHttpServletResponse allowedResponse = new MockHttpServletResponse();
+            MockFilterChain allowedChain = new MockFilterChain();
+
+            filter.doFilter(allowed, allowedResponse, allowedChain);
+
+            assertEquals(200, allowedResponse.getStatus(), path);
+            assertNotNull(allowedChain.getRequest(), path);
+
+            MockHttpServletRequest rejected = new MockHttpServletRequest("POST", path);
+            rejected.setContentType("multipart/form-data; boundary=x");
+            rejected.setContent(new byte[13]);
+            MockHttpServletResponse rejectedResponse = new MockHttpServletResponse();
+            MockFilterChain rejectedChain = new MockFilterChain();
+
+            filter.doFilter(rejected, rejectedResponse, rejectedChain);
+
+            assertEquals(413, rejectedResponse.getStatus(), path);
+            assertNull(rejectedChain.getRequest(), path);
+        }
     }
 
     @Test

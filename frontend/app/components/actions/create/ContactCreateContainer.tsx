@@ -5,9 +5,8 @@ import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 
 import NewContactDialog, { NewContactForm } from '@/app/components/records/contacts/NewContactDialog';
-import { createContact, isFieldError, updateContact } from '@/app/lib/api';
+import { createContact, isFieldError, uploadContactPicture } from '@/app/lib/api';
 import { toastError, toastSuccess } from '@/app/lib/toast';
-import { uploadContactPicture } from '@/app/lib/utils';
 import type { CreateContactPayload } from '@/app/lib/types';
 import type { CreateDefaults } from '@/app/lib/actions/types';
 
@@ -62,8 +61,7 @@ export default function ContactCreateContainer({
         try {
             const newContact = await createContact(payload);
             if (imageFile) {
-                const imageUrl = await uploadContactPicture(newContact.id, imageFile);
-                await updateContact(newContact.id, { ...payload, imageUrl });
+                await uploadContactPicture(newContact.id, imageFile);
             }
             toastSuccess(t('feedback.personCreated'));
             setCreating(false);

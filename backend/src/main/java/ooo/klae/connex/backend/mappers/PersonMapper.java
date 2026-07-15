@@ -65,6 +65,7 @@ public interface PersonMapper {
     /** Bulk-insert contacts in one statement (CSV import); generated ids are written back to each bean. */
     int insertBatch(List<Person> persons);
     int update(Person person);
+    int updateImageUrl(@Param("workspaceId") int workspaceId, @Param("id") int id, @Param("imageUrl") String imageUrl);
     /** Targeted update of the engine-evaluation opt-outs; a {@code null} flag is left unchanged. */
     int updateEvaluationExclusions(
         @Param("workspaceId") int workspaceId,

@@ -8,9 +8,8 @@ import { toastError, toastSuccess } from '@/app/lib/toast';
 
 import QuickEditCompanySheet, { type CompanyDraft } from '@/app/components/records/companies/QuickEditCompanySheet';
 import { CustomFieldsEditSection, type CustomFieldsEditHandle } from '@/app/components/records/CustomFieldsEditSection';
-import { getCompanyById, updateCompany } from '@/app/lib/api';
+import { getCompanyById, updateCompany, uploadCompanyLogo } from '@/app/lib/api';
 import { type Company, type UpdateCompanyPayload } from '@/app/lib/types';
-import { uploadCompanyLogo } from '@/app/lib/utils';
 
 function toDraft(c: Company): CompanyDraft {
     return {

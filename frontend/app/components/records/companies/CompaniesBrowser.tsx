@@ -35,10 +35,9 @@ import NewCompanyDialog from '@/app/components/records/companies/NewCompanyDialo
 import { type PendingContact, type PendingContactDraft } from '@/app/components/records/companies/CompanyContactsField';
 import QuickEditCompanySheet, { type CompanyDraft } from '@/app/components/records/companies/QuickEditCompanySheet';
 import { evaluableSegmentDefinition, hasSegmentConditions } from '@/app/lib/segmentDefinition';
-import { createCompany, createContact, updateContact, getUsers, updateCompany, getCompaniesPage, getCompaniesSegmentPage, getCompanyEngagement, getCompanyFacets, getCompanyIds, getCompanySegmentIds, getCompanyTemperatures, isFieldError, getSegmentFields, getTags, bulkAddTagToCompanies, bulkRemoveTagFromCompanies, bulkDeleteCompanies } from '@/app/lib/api';
+import { createCompany, createContact, getUsers, updateCompany, getCompaniesPage, getCompaniesSegmentPage, getCompanyEngagement, getCompanyFacets, getCompanyIds, getCompanySegmentIds, getCompanyTemperatures, isFieldError, getSegmentFields, getTags, bulkAddTagToCompanies, bulkRemoveTagFromCompanies, bulkDeleteCompanies, uploadCompanyLogo, uploadContactPicture } from '@/app/lib/api';
 import BulkTagDialog from '@/app/components/records/BulkTagDialog';
 import { notifyBulkResult } from '@/app/lib/bulkToast';
-import { uploadCompanyLogo, uploadContactPicture } from '@/app/lib/utils';
 import { type Company, type CompaniesPageParams, type CompanyEngagement, type CompanyFacets, type CreateCompanyPayload, type UpdateCompanyPayload, type User, type CompanyMetrics, type LoadStatus, type RelationshipTemperature, type SavedView, type SavedViewConfig, type SegmentDefinition, type SegmentFields, type Tag } from '@/app/lib/types';
 import TemperaturePill from '@/app/components/records/TemperaturePill';
 
@@ -304,8 +303,7 @@ export default function CompaniesBrowser({ savedViews }: { savedViews: SavedView
         };
         const newContact = await createContact(payload);
         if (c.imageFile) {
-            const imageUrl = await uploadContactPicture(newContact.id, c.imageFile).catch(() => null);
-            if (imageUrl) await updateContact(newContact.id, { ...payload, imageUrl }).catch(() => undefined);
+            await uploadContactPicture(newContact.id, c.imageFile).catch(() => undefined);
         }
         return newContact;
     };
@@ -374,8 +372,7 @@ export default function CompaniesBrowser({ savedViews }: { savedViews: SavedView
             const companyPayload = cleanCompanyPayload(newPayload);
             const created = await createCompany(companyPayload);
             if (logoFile) {
-                const logoUrl = await uploadCompanyLogo(created.id, logoFile);
-                await updateCompany(created.id, { ...companyPayload, logoUrl });
+                await uploadCompanyLogo(created.id, logoFile);
             }
             if (pendingContacts.length > 0) {
                 const results = await Promise.allSettled(pendingContacts.map((c) => createPendingContact(c, created.id)));

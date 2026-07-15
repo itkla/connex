@@ -11,11 +11,10 @@ import {
     createContact,
     getCompanies,
     isFieldError,
-    updateCompany,
-    updateContact,
+    uploadCompanyLogo,
+    uploadContactPicture,
 } from '@/app/lib/api';
 import { toastError, toastSuccess } from '@/app/lib/toast';
-import { uploadCompanyLogo, uploadContactPicture } from '@/app/lib/utils';
 import type { Company, CreateCompanyPayload } from '@/app/lib/types';
 
 const EMPTY_DRAFT: CreateCompanyPayload = { name: '', website: '', industry: '', phone: '', address: '' };
@@ -77,8 +76,7 @@ export default function CompanyCreateContainer({
         };
         const newContact = await createContact(contactPayload);
         if (c.imageFile) {
-            const imageUrl = await uploadContactPicture(newContact.id, c.imageFile).catch(() => null);
-            if (imageUrl) await updateContact(newContact.id, { ...contactPayload, imageUrl }).catch(() => undefined);
+            await uploadContactPicture(newContact.id, c.imageFile).catch(() => undefined);
         }
         return newContact;
     };
@@ -125,8 +123,7 @@ export default function CompanyCreateContainer({
             const companyPayload = cleanCompanyPayload(payload);
             const created = await createCompany(companyPayload);
             if (logoFile) {
-                const logoUrl = await uploadCompanyLogo(created.id, logoFile);
-                await updateCompany(created.id, { ...companyPayload, logoUrl });
+                await uploadCompanyLogo(created.id, logoFile);
             }
             if (pendingContacts.length > 0) {
                 const results = await Promise.allSettled(pendingContacts.map((c) => createPendingContact(c, created.id)));

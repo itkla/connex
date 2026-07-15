@@ -448,6 +448,11 @@
     WHERE workspace_id = #{workspaceId} AND id = #{id}
   </update>
 
+  <update id="updateLogoUrl">
+    UPDATE company SET logo_url = #{logoUrl}
+    WHERE workspace_id = #{workspaceId} AND id = #{id}
+  </update>
+
   <delete id="delete">DELETE FROM company WHERE workspace_id = #{workspaceId} AND id = #{id}</delete>
 
   <insert id="addTag">

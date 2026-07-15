@@ -36,8 +36,7 @@ import ContactAvatar from '@/app/components/records/contacts/ContactAvatar';
 import NewContactDialog from '@/app/components/records/contacts/NewContactDialog';
 import ChangeCompanyDialog from '@/app/components/records/contacts/ChangeCompanyDialog';
 import QuickEditSheet, { type ContactDraft } from '@/app/components/records/contacts/QuickEditSheet';
-import { updateContact, createContact, getContactsPage, getContactTemperatures, getPersonFacets, getTags, bulkAddTagToContacts, bulkRemoveTagFromContacts, bulkDeleteContacts, getContactIds, isFieldError } from '@/app/lib/api';
-import { uploadContactPicture } from '@/app/lib/utils';
+import { updateContact, createContact, getContactsPage, getContactTemperatures, getPersonFacets, getTags, bulkAddTagToContacts, bulkRemoveTagFromContacts, bulkDeleteContacts, getContactIds, isFieldError, uploadContactPicture } from '@/app/lib/api';
 import { type Contact, type UpdateContactPayload, type CreateContactPayload, type ContactsPageParams, type PersonFacets, type RelationshipTemperature, type Tag } from '@/app/lib/types';
 import TemperaturePill from '@/app/components/records/TemperaturePill';
 
@@ -245,8 +244,7 @@ export default function ContactsBrowser({ savedViews }: { savedViews: SavedView[
         try {
             const newContact = await createContact(newContactPayload);
             if (imageFile) {
-                const imageUrl = await uploadContactPicture(newContact.id, imageFile);
-                await updateContact(newContact.id, { ...newContactPayload, imageUrl });
+                await uploadContactPicture(newContact.id, imageFile);
             }
             toastSuccess(t('toastContactCreated'));
             setIsCreating(false);

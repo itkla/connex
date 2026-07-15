@@ -16,6 +16,7 @@ import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
+import org.springframework.web.multipart.MaxUploadSizeExceededException;
 
 import tools.jackson.core.exc.StreamConstraintsException;
 
@@ -131,6 +132,16 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(RequestBodyTooLargeException.class)
     public ResponseEntity<String> requestBodyTooLarge(RequestBodyTooLargeException ex) {
         return ResponseEntity.status(HttpStatus.PAYLOAD_TOO_LARGE).body("Request body is too large");
+    }
+
+    @ExceptionHandler(MaxUploadSizeExceededException.class)
+    public ResponseEntity<String> maxUploadSizeExceeded(MaxUploadSizeExceededException ex) {
+        return ResponseEntity.status(HttpStatus.PAYLOAD_TOO_LARGE).body("Uploaded file is too large");
+    }
+
+    @ExceptionHandler(UnsupportedUploadMediaTypeException.class)
+    public ResponseEntity<String> unsupportedUploadMediaType(UnsupportedUploadMediaTypeException ex) {
+        return ResponseEntity.status(HttpStatus.UNSUPPORTED_MEDIA_TYPE).body(ex.getMessage());
     }
 
     @ExceptionHandler(HttpMessageNotReadableException.class)

@@ -29,6 +29,8 @@ services:
     restart: unless-stopped
     env_file:
       - .env
+    volumes:
+      - object_data:/var/lib/connex/objects
     expose:
       - "8080"
     depends_on:
@@ -54,5 +56,6 @@ services:
 
 volumes:
   db_data:
+  object_data:
   caddy_data:
   caddy_config:

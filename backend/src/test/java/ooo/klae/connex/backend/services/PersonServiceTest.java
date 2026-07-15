@@ -38,6 +38,7 @@ import ooo.klae.connex.backend.mappers.PersonMapper;
 import ooo.klae.connex.backend.mappers.ShareMapper;
 import ooo.klae.connex.backend.mappers.TagMapper;
 import ooo.klae.connex.backend.mappers.TaskMapper;
+import ooo.klae.connex.backend.storage.UploadSource;
 
 class PersonServiceTest extends AbstractServiceTest {
 
@@ -158,6 +159,20 @@ class PersonServiceTest extends AbstractServiceTest {
     }
 
     @Test
+    void profilePictureUploadPreservesCompanyAssociation() {
+        Company company = newCompany();
+        Person person = newPerson(company);
+
+        Person updated = personService.updateProfilePicture(
+            person.getId(),
+            UploadSource.from("portrait.png", "image/png", png(10, 20)));
+
+        assertEquals(company.getId(), updated.getCompany().getId());
+        assertTrue(updated.getImageUrl().startsWith(
+            "/api/persons/" + person.getId() + "/profile-picture/"));
+    }
+
+    @Test
     void distinctCompanies_doesNotRevealUnsharedForeignCompanyName() {
         Workspace ownerWorkspace = newWorkspaceInSameOrg();
         Company ownerCompany = companyInWorkspace(ownerWorkspace);
@@ -204,7 +219,8 @@ class PersonServiceTest extends AbstractServiceTest {
             mock(EmploymentService.class),
             mock(CustomFieldValueService.class),
             mock(ReferenceService.class),
-            mock(RuleTriggerPublisher.class)
+            mock(RuleTriggerPublisher.class),
+            mock(ooo.klae.connex.backend.storage.ManagedObjectService.class)
         );
         when(workspaceService.getCurrentWorkspaceId()).thenReturn(7);
         when(mapper.countPersons(7, "Security", null, null, false)).thenReturn(1001L);
@@ -361,5 +377,30 @@ class PersonServiceTest extends AbstractServiceTest {
         tag.setColor("#abcdef");
         tagMapper.insert(tag);
         return tag;
+    }
+
+    private static byte[] png(int width, int height) {
+        byte[] bytes = new byte[33];
+        byte[] signature = {
+            (byte) 0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a
+        };
+        System.arraycopy(signature, 0, bytes, 0, signature.length);
+        writeInt32(bytes, 8, 13);
+        bytes[12] = 'I';
+        bytes[13] = 'H';
+        bytes[14] = 'D';
+        bytes[15] = 'R';
+        writeInt32(bytes, 16, width);
+        writeInt32(bytes, 20, height);
+        bytes[24] = 8;
+        bytes[25] = 2;
+        return bytes;
+    }
+
+    private static void writeInt32(byte[] bytes, int offset, int value) {
+        bytes[offset] = (byte) (value >>> 24);
+        bytes[offset + 1] = (byte) (value >>> 16);
+        bytes[offset + 2] = (byte) (value >>> 8);
+        bytes[offset + 3] = (byte) value;
     }
 }
