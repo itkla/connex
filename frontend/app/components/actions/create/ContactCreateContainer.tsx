@@ -5,9 +5,9 @@ import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 
 import NewContactDialog, { NewContactForm } from '@/app/components/records/contacts/NewContactDialog';
-import { createContact, isFieldError, uploadContactPicture } from '@/app/lib/api';
+import { createContact, importBusinessCard, isFieldError, uploadContactPicture } from '@/app/lib/api';
 import { toastError, toastSuccess } from '@/app/lib/toast';
-import type { CreateContactPayload } from '@/app/lib/types';
+import type { BusinessCardImportDraft, CreateContactPayload } from '@/app/lib/types';
 import type { CreateDefaults } from '@/app/lib/actions/types';
 
 const EMPTY_DRAFT: CreateContactPayload = { name: '', email: '', phone: '', title: '' };
@@ -55,24 +55,33 @@ export default function ContactCreateContainer({
         onOpenChange(next);
     };
 
-    const createNewContact = async () => {
+    const createNewContact = async (businessCard?: BusinessCardImportDraft) => {
         setSucceeded(false);
         setCreating(true);
         try {
-            const newContact = await createContact(payload);
+            const newContact = businessCard
+                ? (await importBusinessCard(businessCard)).contact
+                : await createContact(payload);
+            let avatarUploadFailed = false;
             if (imageFile) {
-                await uploadContactPicture(newContact.id, imageFile);
+                try {
+                    await uploadContactPicture(newContact.id, imageFile);
+                } catch (error) {
+                    if (!businessCard) throw error;
+                    avatarUploadFailed = true;
+                }
             }
-            toastSuccess(t('feedback.personCreated'));
+            if (!avatarUploadFailed) toastSuccess(t('feedback.personCreated'));
             setCreating(false);
             setSucceeded(true);
             setTimeout(() => {
                 onOpenChange(false);
                 router.refresh();
             }, 900);
+            return { avatarUploadFailed };
         } catch (err) {
             setCreating(false);
-            if (isFieldError(err)) throw err;
+            if (isFieldError(err) || businessCard) throw err;
             toastError(err instanceof Error ? err.message : t('feedback.createFailed'));
         }
     };

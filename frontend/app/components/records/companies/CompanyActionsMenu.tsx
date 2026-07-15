@@ -24,8 +24,8 @@ import EditCompanySheet from '@/app/components/records/companies/EditCompanyShee
 import NewContactDialog from '@/app/components/records/contacts/NewContactDialog';
 import NewDealDialog from '@/app/components/records/deals/NewDealDialog';
 
-import { createContact, createDeal, deleteCompany, getPipelines, getStagesByPipelineId, isFieldError, uploadContactPicture } from '@/app/lib/api';
-import { CreateContactPayload, type Company, type CreateDealPayload, type Pipeline, type Stage } from '@/app/lib/types';
+import { createContact, createDeal, deleteCompany, getPipelines, getStagesByPipelineId, importBusinessCard, isFieldError, uploadContactPicture } from '@/app/lib/api';
+import { type BusinessCardImportDraft, CreateContactPayload, type Company, type CreateDealPayload, type Pipeline, type Stage } from '@/app/lib/types';
 import { useWorkspace } from '@/app/hooks/useWorkspace';
 
 export default function CompanyActionsMenu({
@@ -116,24 +116,32 @@ export default function CompanyActionsMenu({
         }
     };
 
-    const createNewContact = async () => {
+    const createNewContact = async (businessCard?: BusinessCardImportDraft) => {
         setContactCreationSucceeded(false);
         setIsCreatingContact(true);
         try {
-            // console.log('newContactPayload', newContactPayload);
-            const newContact = await createContact(newContactPayload);
+            const newContact = businessCard
+                ? (await importBusinessCard(businessCard)).contact
+                : await createContact(newContactPayload);
+            let avatarUploadFailed = false;
             if (imageFile) {
-                await uploadContactPicture(newContact.id, imageFile);
+                try {
+                    await uploadContactPicture(newContact.id, imageFile);
+                } catch (error) {
+                    if (!businessCard) throw error;
+                    avatarUploadFailed = true;
+                }
             }
-            toastSuccess(t('toastContactCreated'));
+            if (!avatarUploadFailed) toastSuccess(t('toastContactCreated'));
             setIsCreatingContact(false);
             setContactCreationSucceeded(true);
             setTimeout(() => {
                 closeNewContactDialog(false);
                 router.refresh();
             }, 900);
+            return { avatarUploadFailed };
         } catch (err) {
-            if (isFieldError(err)) {
+            if (isFieldError(err) || businessCard) {
                 throw err;
             }
             console.error(err);

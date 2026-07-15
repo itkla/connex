@@ -234,13 +234,14 @@ async function requestJson<T>(
     const workspaceId = clientWorkspaceId();
     const mutating = isMutating(init.method);
     const stepUpGeneration = passkeyStepUpGeneration;
+    const hasMultipartBody = typeof FormData !== "undefined" && init.body instanceof FormData;
 
     const send = (csrf: Record<string, string>) =>
         fetch(`${API_BASE}${path}`, {
             ...init,
             credentials: "include",
             headers: {
-                ...(init.body ? { "Content-Type": "application/json" } : {}),
+                ...(init.body && !hasMultipartBody ? { "Content-Type": "application/json" } : {}),
                 "Accept-Language": locale,
                 ...(workspaceId ? { "X-Workspace-Id": workspaceId } : {}),
                 ...csrf,
@@ -407,6 +408,14 @@ async function postJson<T>(path: string, body: unknown = {}, init: RequestInit =
         ...init,
         method: "POST",
         body: JSON.stringify(body),
+    });
+}
+
+async function postFormData<T>(path: string, body: FormData, init: RequestInit = {}): Promise<T> {
+    return requestJson<T>(path, {
+        ...init,
+        method: "POST",
+        body,
     });
 }
 
@@ -610,6 +619,39 @@ export class ApiError extends Error {
 
 export function isFieldError(err: unknown): err is ApiError & { fieldErrors: ApiFieldErrors } {
     return err instanceof ApiError && !!err.fieldErrors && Object.keys(err.fieldErrors).length > 0;
+}
+
+/** Classifies card scan/import failures into stable UI states without exposing backend messages. */
+export function businessCardRequestErrorKind(error: unknown): Types.BusinessCardRequestErrorKind {
+    if (error instanceof Error && error.name === "AbortError") return "aborted";
+    if (!(error instanceof ApiError)) return "failed";
+
+    const code = error.code?.toUpperCase() ?? "";
+    if (code.includes("TIMEOUT")) return "timeout";
+    if (code.includes("UNAVAILABLE")) return "unavailable";
+
+    switch (error.status) {
+        case 401:
+            return "unauthorized";
+        case 403:
+            return "forbidden";
+        case 408:
+        case 504:
+            return "timeout";
+        case 413:
+            return "tooLarge";
+        case 415:
+            return "unsupportedType";
+        case 422:
+            return "unreadable";
+        case 429:
+            return "busy";
+        case 502:
+        case 503:
+            return "unavailable";
+        default:
+            return "failed";
+    }
 }
 
 function isStringRecord(value: unknown): value is Record<string, string> {
@@ -816,7 +858,8 @@ export function deletePasskey(credentialId: string) {
 
 /**
  * Fetches the instance capability flags that gate optional UI: enterprise SSO, consumer social
- * login, and instance-managed mail. Consolidates the former per-feature `/enabled` endpoints.
+ * login, instance-managed mail, and business-card scanning. Consolidates the former per-feature
+ * `/enabled` endpoints.
  * @param init optional fetch overrides
  * @returns the resolved instance capabilities
  */
@@ -832,6 +875,7 @@ export const DEFAULT_CAPABILITIES: Types.InstanceCapabilities = {
     sso: false,
     socialLogin: { google: false, microsoft: false },
     mailManaged: false,
+    businessCardScanning: false,
 };
 
 export function discoverSso(email: string, init: RequestInit = {}) {
@@ -1514,6 +1558,22 @@ export function dismissIntroSuggestion(payload: Types.IntroductionPayload, init:
 
 export function createContact(payload: Types.CreateContactPayload) {
     return postJson<Types.Contact>(`/api/persons`, payload);
+}
+
+/** Reads contact candidates from one business-card image without mutating workspace data. */
+export function scanBusinessCard(image: File, init: RequestInit = {}) {
+    const body = new FormData();
+    body.append("image", image, image.name);
+    return postFormData<Types.BusinessCardScanResult>("/api/business-cards/scan", body, init);
+}
+
+/** Creates the reviewed contact and stores its source card in one backend transaction. */
+export function importBusinessCard(draft: Types.BusinessCardImportDraft, init: RequestInit = {}) {
+    const body = new FormData();
+    body.append("image", draft.image, draft.image.name);
+    body.append("contact", new Blob([JSON.stringify(draft.contact)], { type: "application/json" }));
+    body.append("companyAction", new Blob([JSON.stringify(draft.companyAction)], { type: "application/json" }));
+    return postFormData<Types.BusinessCardImportResult>("/api/business-cards/import", body, init);
 }
 
 export function deleteContact(id: number, init: RequestInit = {}) {

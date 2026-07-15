@@ -471,6 +471,53 @@ export type CreateContactPayload = {
     companyId?: number;
 };
 
+export type BusinessCardDetectedField = {
+    value: string | null;
+    confidence: number | null;
+};
+
+export type BusinessCardScanResult = {
+    fields: {
+        name: BusinessCardDetectedField;
+        email: BusinessCardDetectedField;
+        phone: BusinessCardDetectedField;
+        title: BusinessCardDetectedField;
+    };
+    company: BusinessCardDetectedField & {
+        matchedCompanyId: number | null;
+    };
+    warnings: string[];
+};
+
+export type BusinessCardCompanyAction =
+    | { type: 'existing'; companyId: number }
+    | { type: 'create'; companyName: string }
+    | { type: 'none' };
+
+export type BusinessCardImportDraft = {
+    image: File;
+    contact: CreateContactPayload;
+    companyAction: BusinessCardCompanyAction;
+};
+
+export type BusinessCardImportResult = {
+    contact: Contact;
+    attachment: Attachment;
+    company: Company | null;
+};
+
+export type BusinessCardRequestErrorKind =
+    | 'aborted'
+    | 'unauthorized'
+    | 'forbidden'
+    | 'tooLarge'
+    | 'unsupportedType'
+    | 'unreadable'
+    | 'busy'
+    | 'timeout'
+    | 'unavailable'
+    | 'failed';
+
 export type CreateTaskPayload = {
     description: string;
     completed?: boolean;
@@ -1877,6 +1924,7 @@ export type InstanceCapabilities = {
     sso: boolean;
     socialLogin: { google: boolean; microsoft: boolean };
     mailManaged: boolean;
+    businessCardScanning: boolean;
 };
 
 export type SsoProtocol = "oidc" | "saml";

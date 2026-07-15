@@ -7,8 +7,8 @@ import { PlusIcon } from "@heroicons/react/24/outline";
 import NewContactDialog from "@/app/components/records/contacts/NewContactDialog";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { CreateContactPayload } from "@/app/lib/types";
-import { createContact, isFieldError, uploadContactPicture } from "@/app/lib/api";
+import { type BusinessCardImportDraft, CreateContactPayload } from "@/app/lib/types";
+import { createContact, importBusinessCard, isFieldError, uploadContactPicture } from "@/app/lib/api";
 import { toast } from "sonner";
 import { useTranslations } from "next-intl";
 
@@ -78,13 +78,21 @@ export default function ContactsGrid({ contacts, company, allTags }: { contacts:
                 selectedCompany={company}
                 isCreating={isCreating}
                 isSuccess={creationSucceeded}
-                createNewContact={async () => {
+                createNewContact={async (businessCard?: BusinessCardImportDraft) => {
                     setCreationSucceeded(false);
                     setIsCreating(true);
                     try {
-                        const newContact = await createContact(newContactPayload);
+                        const newContact = businessCard
+                            ? (await importBusinessCard(businessCard)).contact
+                            : await createContact(newContactPayload);
+                        let avatarUploadFailed = false;
                         if (imageFile) {
-                            await uploadContactPicture(newContact.id, imageFile);
+                            try {
+                                await uploadContactPicture(newContact.id, imageFile);
+                            } catch (error) {
+                                if (!businessCard) throw error;
+                                avatarUploadFailed = true;
+                            }
                         }
                         setNewContactPayload({
                             name: '',
@@ -94,15 +102,16 @@ export default function ContactsGrid({ contacts, company, allTags }: { contacts:
                             companyId: company?.id,
                         });
                         setImageFile(null);
-                        toast.success(t('toastContactCreated'));
+                        if (!avatarUploadFailed) toast.success(t('toastContactCreated'));
                         setIsCreating(false);
                         setCreationSucceeded(true);
                         setTimeout(() => {
                             closeNewContactDialog(false);
                             router.refresh();
                         }, 900);
+                        return { avatarUploadFailed };
                     } catch (error) {
-                        if (isFieldError(error)) {
+                        if (isFieldError(error) || businessCard) {
                             throw error;
                         }
                         console.error(error);

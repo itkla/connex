@@ -36,8 +36,8 @@ import ContactAvatar from '@/app/components/records/contacts/ContactAvatar';
 import NewContactDialog from '@/app/components/records/contacts/NewContactDialog';
 import ChangeCompanyDialog from '@/app/components/records/contacts/ChangeCompanyDialog';
 import QuickEditSheet, { type ContactDraft } from '@/app/components/records/contacts/QuickEditSheet';
-import { updateContact, createContact, getContactsPage, getContactTemperatures, getPersonFacets, getTags, bulkAddTagToContacts, bulkRemoveTagFromContacts, bulkDeleteContacts, getContactIds, isFieldError, uploadContactPicture } from '@/app/lib/api';
-import { type Contact, type UpdateContactPayload, type CreateContactPayload, type ContactsPageParams, type PersonFacets, type RelationshipTemperature, type Tag } from '@/app/lib/types';
+import { updateContact, createContact, importBusinessCard, getContactsPage, getContactTemperatures, getPersonFacets, getTags, bulkAddTagToContacts, bulkRemoveTagFromContacts, bulkDeleteContacts, getContactIds, isFieldError, uploadContactPicture } from '@/app/lib/api';
+import { type BusinessCardImportDraft, type Contact, type UpdateContactPayload, type CreateContactPayload, type ContactsPageParams, type PersonFacets, type RelationshipTemperature, type Tag } from '@/app/lib/types';
 import TemperaturePill from '@/app/components/records/TemperaturePill';
 
 const NO_ITEMS: Contact[] = [];
@@ -238,23 +238,32 @@ export default function ContactsBrowser({ savedViews }: { savedViews: SavedView[
         }
     };
 
-    const createNewContact = async () => {
+    const createNewContact = async (businessCard?: BusinessCardImportDraft) => {
         setCreationSucceeded(false);
         setIsCreating(true);
         try {
-            const newContact = await createContact(newContactPayload);
+            const newContact = businessCard
+                ? (await importBusinessCard(businessCard)).contact
+                : await createContact(newContactPayload);
+            let avatarUploadFailed = false;
             if (imageFile) {
-                await uploadContactPicture(newContact.id, imageFile);
+                try {
+                    await uploadContactPicture(newContact.id, imageFile);
+                } catch (error) {
+                    if (!businessCard) throw error;
+                    avatarUploadFailed = true;
+                }
             }
-            toastSuccess(t('toastContactCreated'));
+            if (!avatarUploadFailed) toastSuccess(t('toastContactCreated'));
             setIsCreating(false);
             setCreationSucceeded(true);
             setTimeout(() => {
                 closeNewContactDialog(false);
                 refresh();
             }, 900);
+            return { avatarUploadFailed };
         } catch (err) {
-            if (isFieldError(err)) {
+            if (isFieldError(err) || businessCard) {
                 throw err;
             }
             toastError(t('toastFailedCreate'));
