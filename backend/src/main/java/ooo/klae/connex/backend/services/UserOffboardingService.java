@@ -10,10 +10,12 @@ import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.mappers.ActivityMapper;
 import ooo.klae.connex.backend.mappers.AttachmentMapper;
+import ooo.klae.connex.backend.mappers.CompanyMapper;
 import ooo.klae.connex.backend.mappers.DealMapper;
 import ooo.klae.connex.backend.mappers.IntroductionMapper;
 import ooo.klae.connex.backend.mappers.NoteMapper;
 import ooo.klae.connex.backend.mappers.NotificationMapper;
+import ooo.klae.connex.backend.mappers.PersonMapper;
 import ooo.klae.connex.backend.mappers.ReportMapper;
 import ooo.klae.connex.backend.mappers.RuleMapper;
 import ooo.klae.connex.backend.mappers.SavedViewMapper;
@@ -52,6 +54,8 @@ public class UserOffboardingService {
     private final IntroductionMapper introductionMapper;
     private final NotificationMapper notificationMapper;
     private final DealMapper dealMapper;
+    private final CompanyMapper companyMapper;
+    private final PersonMapper personMapper;
     private final TaskMapper taskMapper;
     private final AttachmentMapper attachmentMapper;
     private final ReportMapper reportMapper;
@@ -121,8 +125,8 @@ public class UserOffboardingService {
 
     /**
      * Detaches a departing member's content within one workspace the way the
-     * dropped cross-plane constraints used to: tasks are unassigned and deal
-     * ownership cleared (SET NULL) so authored history survives, while the
+     * dropped cross-plane constraints used to: tasks are unassigned and record
+     * ownership is cleared so authored history survives, while the
      * member's notifications and deal-collaborator seats are deleted (CASCADE).
      * Per-workspace twin of {@link #eraseOrgDataReferences(int)}; called by the
      * membership removal flows inside their transaction.
@@ -134,6 +138,8 @@ public class UserOffboardingService {
         notificationMapper.lockRecipientMemberships(userId);
         taskMapper.unassignMemberTasks(workspaceId, userId);
         dealMapper.clearMemberDealOwnership(workspaceId, userId);
+        companyMapper.clearMemberOwnership(workspaceId, userId);
+        personMapper.clearMemberOwnership(workspaceId, userId);
         dealMapper.removeCollaboratorFromWorkspace(workspaceId, userId);
         notificationMapper.deleteAllForRecipient(workspaceId, userId);
     }
@@ -142,7 +148,7 @@ public class UserOffboardingService {
      * Erases or detaches every org-data reference to the user, in the same
      * shape the dropped constraints had: personal artifacts are deleted
      * (CASCADE — saved views, dashboards, notifications, collaborator seats)
-     * and shared-history references are nulled (SET NULL — deal ownership,
+     * and shared-history references are nulled (SET NULL — record ownership,
      * task assignment, uploader, notification actor, report actors, rule
      * principals, share grantors). Statements are grouped deletes-then-nulls
      * for readability; no data dependency exists between them, so the order is otherwise
@@ -185,6 +191,8 @@ public class UserOffboardingService {
                 .forEach(notificationStateVersionService::markChanged);
         }
         dealMapper.clearOwnershipAnywhere(userId);
+        companyMapper.clearOwnershipAnywhere(userId);
+        personMapper.clearOwnershipAnywhere(userId);
         taskMapper.unassignAnywhere(userId);
         attachmentMapper.clearUploaderAnywhere(userId);
         reportMapper.clearDefinitionCreatorsAnywhere(userId);

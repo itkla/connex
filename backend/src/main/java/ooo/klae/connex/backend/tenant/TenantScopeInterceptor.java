@@ -168,6 +168,8 @@ public class TenantScopeInterceptor implements Interceptor {
         MAPPERS + "NotificationMapper.deleteAllForRecipientAnywhere",
         MAPPERS + "NotificationMapper.clearActorAnywhere",
         MAPPERS + "DealMapper.clearOwnershipAnywhere",
+        MAPPERS + "CompanyMapper.clearOwnershipAnywhere",
+        MAPPERS + "PersonMapper.clearOwnershipAnywhere",
         MAPPERS + "DealMapper.removeCollaboratorAnywhere",
         MAPPERS + "DealMapper.removeCollaboratorFromWorkspace",
         MAPPERS + "TaskMapper.unassignAnywhere",
