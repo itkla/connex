@@ -146,7 +146,7 @@ class ScoringServiceTest {
         future.setId(31);
         future.setDeal(deal);
         List<Activity> activities = List.of(boundary, future);
-        when(personMapper.getExistingPersonIds(WS, List.of(1))).thenReturn(List.of(1));
+        when(personMapper.getProcessablePersonIds(WS, List.of(1))).thenReturn(List.of(1));
         when(activityMapper.getActivitiesByPersonIds(WS, List.of(1))).thenReturn(activities);
         when(noteMapper.getNotesByPersonIds(WS, List.of(1))).thenReturn(List.of());
         when(taskMapper.getTasksByPersonIds(WS, List.of(1))).thenReturn(List.of());
@@ -197,7 +197,7 @@ class ScoringServiceTest {
         Person person = person(1, null);
         Activity activity = activity(person, "meeting", "2026-06-29 12:00:00");
         activity.setId(10);
-        when(personMapper.getExistingPersonIds(WS, List.of(1, 2))).thenReturn(List.of(1));
+        when(personMapper.getProcessablePersonIds(WS, List.of(1, 2))).thenReturn(List.of(1));
         when(activityMapper.getActivitiesByPersonIds(WS, List.of(1))).thenReturn(List.of(activity));
         when(noteMapper.getNotesByPersonIds(WS, List.of(1))).thenReturn(List.of());
         when(taskMapper.getTasksByPersonIds(WS, List.of(1))).thenReturn(List.of());
@@ -230,7 +230,7 @@ class ScoringServiceTest {
         assertThrows(ooo.klae.connex.backend.exceptions.BadRequestException.class,
             () -> service.scoreContacts(WS, ids));
 
-        verify(personMapper, never()).getExistingPersonIds(anyInt(), org.mockito.ArgumentMatchers.anyList());
+        verify(personMapper, never()).getProcessablePersonIds(anyInt(), org.mockito.ArgumentMatchers.anyList());
         verify(activityMapper, never()).getActivitiesByPersonIds(anyInt(), org.mockito.ArgumentMatchers.anyList());
     }
 
@@ -252,7 +252,7 @@ class ScoringServiceTest {
         activity.setDeal(deal);
         when(companyMapper.getByIds(WS, List.of(10))).thenReturn(List.of(company));
         when(personMapper.getPersonsByCompanyIds(WS, List.of(10))).thenReturn(List.of(person));
-        when(personMapper.getExistingPersonIds(WS, List.of(1))).thenReturn(List.of(1));
+        when(personMapper.getProcessablePersonIds(WS, List.of(1))).thenReturn(List.of(1));
         when(dealMapper.getDealsByCompanyIds(WS, List.of(10))).thenReturn(List.of(deal));
         when(activityMapper.getActivitiesByCompanyIds(WS, List.of(10))).thenReturn(List.of(activity));
         when(noteMapper.getWorkspaceNotesByCompanyIds(WS, List.of(10))).thenReturn(List.of());
@@ -315,7 +315,7 @@ class ScoringServiceTest {
         privateNote.setVisibility("private");
         privateNote.setPerson(contact);
         privateNote.setCreatedAt("2026-06-29 12:00:00");
-        when(personMapper.getExistingPersonIds(WS, List.of(1))).thenReturn(List.of(1));
+        when(personMapper.getProcessablePersonIds(WS, List.of(1))).thenReturn(List.of(1));
         when(noteMapper.getNotesByPersonIds(WS, List.of(1))).thenReturn(List.of(privateNote));
         ActivityMapper activityMapper = mock(ActivityMapper.class);
         TaskMapper taskMapper = mock(TaskMapper.class);

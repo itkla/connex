@@ -509,6 +509,7 @@
       FROM company c
       LEFT JOIN person gap_person ON gap_person.company_id = c.id
         AND gap_person.created_at &lt; #{query.endUtc}
+        AND gap_person.suspended_at IS NULL
         AND (
           gap_person.workspace_id = #{query.workspaceId}
           OR EXISTS (
@@ -662,6 +663,8 @@
       SELECT d.id, d.name, d.value, d.currency, d.company_id
       FROM deal d
       JOIN deal_person single_link ON single_link.deal_id = d.id
+      JOIN person single_person ON single_person.id = single_link.person_id
+        AND single_person.suspended_at IS NULL
       WHERE d.workspace_id = #{query.workspaceId}
         AND d.won IS NULL
         AND d.risk_excluded = FALSE

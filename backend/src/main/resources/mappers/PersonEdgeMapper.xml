@@ -109,6 +109,8 @@
     JOIN person target_person ON target_person.id = e.target_person_id
       AND <include refid="visibleTargetPerson"/>
     WHERE e.workspace_id = #{workspaceId}
+      AND source_person.suspended_at IS NULL
+      AND target_person.suspended_at IS NULL
     ORDER BY e.id
     LIMIT #{limit}
   </select>
@@ -122,6 +124,8 @@
     JOIN person target_person ON target_person.id = e.target_person_id
       AND <include refid="visibleTargetPerson"/>
     WHERE e.workspace_id = #{workspaceId}
+      AND source_person.suspended_at IS NULL
+      AND target_person.suspended_at IS NULL
       AND (
         e.source_person_id IN
         <foreach item="id" collection="personIds" open="(" separator="," close=")">#{id}</foreach>

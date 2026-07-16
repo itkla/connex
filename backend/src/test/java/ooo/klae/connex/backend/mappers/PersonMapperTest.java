@@ -151,7 +151,7 @@ class PersonMapperTest extends AbstractMapperTest {
         assertTrue(processableIds.contains(normal.getId()));
         assertTrue(processableIds.contains(provisionCeased.getId()));
         assertFalse(processableIds.contains(suspended.getId()));
-        assertFalse(personMapper.getExistingPersonIds(
+        assertFalse(personMapper.getProcessablePersonIds(
             workspace.getId(), List.of(normal.getId(), suspended.getId(), provisionCeased.getId()))
             .contains(suspended.getId()));
         assertFalse(personMapper.getPersonsByCompanyIds(workspace.getId(), List.of(company.getId())).stream()
@@ -195,12 +195,12 @@ class PersonMapperTest extends AbstractMapperTest {
     }
 
     @Test
-    void getExistingPersonIdsIsWorkspaceScopedAndIgnoresMissingIds() {
+    void getProcessablePersonIdsIsWorkspaceScopedAndIgnoresMissingIds() {
         Person included = newPerson(newCompany());
         Workspace other = newWorkspace();
         Person foreign = newPersonIn(other);
 
-        List<Integer> ids = personMapper.getExistingPersonIds(
+        List<Integer> ids = personMapper.getProcessablePersonIds(
             workspace.getId(), List.of(included.getId(), foreign.getId(), Integer.MAX_VALUE));
 
         assertEquals(List.of(included.getId()), ids);

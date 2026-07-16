@@ -184,7 +184,7 @@
     WHERE <include refid="visible"/> AND p.id = #{id}
   </select>
 
-  <select id="getExistingPersonIds" resultType="int">
+  <select id="getProcessablePersonIds" resultType="int">
     SELECT p.id FROM person p
     WHERE <include refid="visible"/>
       AND p.suspended_at IS NULL

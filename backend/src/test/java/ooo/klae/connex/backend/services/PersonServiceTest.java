@@ -79,6 +79,25 @@ class PersonServiceTest extends AbstractServiceTest {
     }
 
     @Test
+    void ceasingProvisionRevokesStandingSharesAndAuditsTheCount() {
+        Person person = newPerson(newCompany());
+        Workspace grantee = newWorkspaceInSameOrg();
+        shareMapper.sharePerson(person.getId(), workspace.getId(), grantee.getId(), currentUser.getId(), false);
+        assertEquals(1, shareMapper.listPersonShares(workspace.getId(), person.getId()).size());
+
+        personService.updateProcessingRestrictions(person.getId(), false, true);
+
+        assertTrue(shareMapper.listPersonShares(workspace.getId(), person.getId()).isEmpty());
+        String changes = jdbcTemplate.queryForObject(
+            "SELECT changes FROM audit_log WHERE workspace_id = ? AND entity_type = 'person' "
+                + "AND entity_id = ? AND action = 'person.restrictions' ORDER BY id DESC LIMIT 1",
+            String.class, workspace.getId(), person.getId());
+        assertNotNull(changes);
+        assertTrue(changes.contains("revokedShares"));
+        assertTrue(changes.contains("provisionCeasedAt"));
+    }
+
+    @Test
     void updateProcessingRestrictionsRequiresPersonUpdatePermission() {
         Person person = newPerson(newCompany());
         User restricted = newUser();
@@ -247,6 +266,7 @@ class PersonServiceTest extends AbstractServiceTest {
         WorkspaceService workspaceService = mock(WorkspaceService.class);
         PersonService service = new PersonService(
             mapper,
+            mock(ShareMapper.class),
             mock(CompanyMapper.class),
             mock(TagMapper.class),
             mock(DealMapper.class),

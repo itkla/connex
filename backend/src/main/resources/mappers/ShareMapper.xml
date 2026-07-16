@@ -84,6 +84,11 @@
     JOIN person p ON p.id = s.person_id AND p.workspace_id = #{workspaceId}
     WHERE s.person_id = #{id} AND s.workspace_id = #{targetWorkspaceId}
   </delete>
+  <delete id="revokePersonShares">
+    DELETE s FROM person_share s
+    JOIN person p ON p.id = s.person_id AND p.workspace_id = #{workspaceId}
+    WHERE s.person_id = #{id}
+  </delete>
   <delete id="unsharePipeline">
     DELETE s FROM pipeline_share s
     JOIN pipeline pl ON pl.id = s.pipeline_id AND pl.workspace_id = #{workspaceId}

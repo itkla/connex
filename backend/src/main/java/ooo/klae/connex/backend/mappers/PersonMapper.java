@@ -31,7 +31,7 @@ public interface PersonMapper {
     List<Person> getPersonsByTagId(@Param("workspaceId") int workspaceId, @Param("tagId") int tagId);
     List<Person> getPersonsByDealId(@Param("workspaceId") int workspaceId, @Param("dealId") int dealId);
     Person getPersonById(@Param("workspaceId") int workspaceId, @Param("id") int id);
-    List<Integer> getExistingPersonIds(@Param("workspaceId") int workspaceId,
+    List<Integer> getProcessablePersonIds(@Param("workspaceId") int workspaceId,
             @Param("ids") List<Integer> ids);
     List<Person> getByIds(@Param("workspaceId") int workspaceId, @Param("ids") List<Integer> ids);
     List<Person> getPersonsByCompanyIds(@Param("workspaceId") int workspaceId,

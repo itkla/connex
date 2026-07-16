@@ -154,7 +154,7 @@ public class ScoringService {
             return List.of();
         }
         long reference = Instant.now(clock).toEpochMilli();
-        Set<Integer> existing = new HashSet<>(personMapper.getExistingPersonIds(workspaceId, requested));
+        Set<Integer> existing = new HashSet<>(personMapper.getProcessablePersonIds(workspaceId, requested));
         List<Integer> processable = requested.stream().filter(existing::contains).toList();
         if (processable.isEmpty()) {
             return List.of();
@@ -450,7 +450,7 @@ public class ScoringService {
         Set<Integer> processable = new HashSet<>();
         for (int from = 0; from < ids.size(); from += MAX_BATCH_CONTACTS) {
             int to = Math.min(ids.size(), from + MAX_BATCH_CONTACTS);
-            processable.addAll(personMapper.getExistingPersonIds(workspaceId, ids.subList(from, to)));
+            processable.addAll(personMapper.getProcessablePersonIds(workspaceId, ids.subList(from, to)));
         }
         return Set.copyOf(processable);
     }
