@@ -334,9 +334,10 @@ def run_case(case: dict[str, object], images: Path, configuration: dict[str, str
     latency = time.perf_counter() - started
     expected = case["fields"]
     assert isinstance(expected, dict)
+    actual = {field: candidate(payload, field) for field in SCORED_FIELDS}
     scores = {
-        field: status == 200 and equal(field, expected[field], candidate(payload, field))
-        for field in ("name", "email", "phone", "title", "company")
+        field: status == 200 and equal(field, expected[field], actual[field])
+        for field in SCORED_FIELDS
     }
     return {
         "id": case["id"],
@@ -345,6 +346,7 @@ def run_case(case: dict[str, object], images: Path, configuration: dict[str, str
         "condition": case["condition"],
         "status": status,
         "latencySeconds": round(latency, 4),
+        "actual": actual,
         "correct": scores,
     }
 
@@ -516,6 +518,7 @@ def verify_qualification_report(
         raise ValueError("Benchmark qualification report must contain exactly 40 cases")
     expected_ids: list[str] = []
     actual_ids: list[str] = []
+    verified_cases: list[dict[str, object]] = []
     for expected, actual in zip(expected_cases, actual_cases, strict=True):
         if not isinstance(expected, dict) or not isinstance(actual, dict):
             raise ValueError("Benchmark qualification cases must be objects")
@@ -532,6 +535,8 @@ def verify_qualification_report(
                 raise ValueError(f"Benchmark qualification case {selector} does not match the canonical suite")
         status = actual.get("status")
         latency = actual.get("latencySeconds")
+        expected_fields = expected.get("fields")
+        actual_fields = actual.get("actual")
         correct = actual.get("correct")
         if isinstance(status, bool) or not isinstance(status, int) or status != 200:
             raise ValueError("Every benchmark qualification request must return HTTP 200")
@@ -539,10 +544,31 @@ def verify_qualification_report(
             raise ValueError("Benchmark qualification latency must be numeric")
         if not math.isfinite(float(latency)) or float(latency) < 0:
             raise ValueError("Benchmark qualification latency must be finite and non-negative")
+        if (
+            not isinstance(expected_fields, dict)
+            or set(expected_fields) != set(SCORED_FIELDS)
+            or any(not isinstance(expected_fields[field], str) for field in SCORED_FIELDS)
+        ):
+            raise ValueError("Benchmark qualification manifest fields are invalid")
+        if (
+            not isinstance(actual_fields, dict)
+            or set(actual_fields) != set(SCORED_FIELDS)
+            or any(actual_fields[field] is not None and not isinstance(actual_fields[field], str) for field in SCORED_FIELDS)
+        ):
+            raise ValueError("Benchmark qualification actual fields are invalid")
         if not isinstance(correct, dict) or set(correct) != set(SCORED_FIELDS):
             raise ValueError("Benchmark qualification correctness fields are incomplete")
         if any(not isinstance(correct[field], bool) for field in SCORED_FIELDS):
             raise ValueError("Benchmark qualification correctness outcomes must be booleans")
+        recomputed_correct = {
+            field: equal(field, expected_fields[field], actual_fields[field])
+            for field in SCORED_FIELDS
+        }
+        if correct != recomputed_correct:
+            raise ValueError("Benchmark qualification correctness does not match canonical expected and actual values")
+        verified_case = dict(actual)
+        verified_case["correct"] = recomputed_correct
+        verified_cases.append(verified_case)
     if len(set(expected_ids)) != 40 or len(set(actual_ids)) != 40:
         raise ValueError("Benchmark qualification case ids must be unique")
     provenance_value = report.get("provenance")
@@ -550,7 +576,7 @@ def verify_qualification_report(
         raise ValueError("Benchmark qualification provenance is required")
     if source_revision is not None and provenance_value.get("sourceRevision") != source_revision:
         raise ValueError("Benchmark qualification source revision does not match the release")
-    recomputed = summarize(actual_cases, provenance_value)
+    recomputed = summarize(verified_cases, provenance_value)
     for selector in ("caseCount", "accuracy", "p95LatencySeconds", "gates"):
         if report.get(selector) != recomputed[selector]:
             raise ValueError(f"Benchmark qualification {selector} does not match raw case outcomes")

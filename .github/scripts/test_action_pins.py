@@ -40,13 +40,62 @@ class ActionPinCheckerTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             workflows = root / ".github" / "workflows"
+            local_action = root / "local"
             workflows.mkdir(parents=True)
+            local_action.mkdir()
             workflows.joinpath("ci.yml").write_text(
                 "jobs:\n  test:\n    steps:\n      - uses: ./local\n      - uses: owner/action/path@" + "b" * 40 + "\n",
                 encoding="utf-8",
             )
+            local_action.joinpath("action.yml").write_text(
+                "runs:\n  using: composite\n  steps:\n    - uses: owner/action@" + "c" * 40 + "\n",
+                encoding="utf-8",
+            )
 
             self.assertEqual([], CHECKER.invalid_pins(root))
+
+    def test_recursively_scans_referenced_actions_outside_github_actions(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            workflows = root / ".github" / "workflows"
+            outer = root / "custom" / "outer"
+            inner = root / "custom" / "inner"
+            workflows.mkdir(parents=True)
+            outer.mkdir(parents=True)
+            inner.mkdir(parents=True)
+            workflows.joinpath("ci.yml").write_text(
+                "jobs:\n  test:\n    steps:\n      - uses: ./custom/outer\n",
+                encoding="utf-8",
+            )
+            outer.joinpath("action.yml").write_text(
+                "runs:\n  using: composite\n  steps:\n    - uses: ./custom/inner\n",
+                encoding="utf-8",
+            )
+            inner.joinpath("action.yaml").write_text(
+                "runs:\n  using: composite\n  steps:\n    - uses: owner/unpinned@v1\n",
+                encoding="utf-8",
+            )
+
+            self.assertEqual(
+                ["custom/inner/action.yaml:document 1:runs.steps.0.uses: owner/unpinned@v1"],
+                CHECKER.invalid_pins(root),
+            )
+
+    def test_rejects_missing_and_escaping_local_references(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            workflows = root / ".github" / "workflows"
+            workflows.mkdir(parents=True)
+            workflows.joinpath("ci.yml").write_text(
+                "jobs:\n  test:\n    steps:\n      - uses: ./missing\n      - uses: ./../outside\n",
+                encoding="utf-8",
+            )
+
+            invalid = CHECKER.invalid_pins(root)
+
+            self.assertEqual(2, len(invalid))
+            self.assertIn("local reference does not exist", invalid[0])
+            self.assertIn("local reference resolves outside the repository", invalid[1])
 
 
 if __name__ == "__main__":

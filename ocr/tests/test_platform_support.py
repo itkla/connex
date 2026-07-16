@@ -3,6 +3,7 @@ import unittest
 from pathlib import Path
 
 from ocr_service.platform_support import _all_processors_support_avx, require_supported_cpu
+from ocr_service.startup import StartupFailure
 
 
 class PlatformSupportTest(unittest.TestCase):
@@ -22,12 +23,19 @@ class PlatformSupportTest(unittest.TestCase):
             cpuinfo = Path(temporary) / "cpuinfo"
             cpuinfo.write_text("processor: 0\nflags: sse4_2\n", encoding="utf-8")
 
-            with self.assertRaisesRegex(RuntimeError, "requires AVX"):
+            with self.assertRaises(StartupFailure) as raised:
                 require_supported_cpu("x86_64", cpuinfo)
+            self.assertEqual("avx_unavailable", raised.exception.reason)
 
     def test_preflight_rejects_other_architectures(self) -> None:
-        with self.assertRaisesRegex(RuntimeError, "x86-64"):
+        with self.assertRaises(StartupFailure) as raised:
             require_supported_cpu("aarch64", Path("/missing/cpuinfo"))
+        self.assertEqual("unsupported_cpu_architecture", raised.exception.reason)
+
+    def test_preflight_reports_unreadable_cpu_capabilities(self) -> None:
+        with self.assertRaises(StartupFailure) as raised:
+            require_supported_cpu("x86_64", Path("/missing/cpuinfo"))
+        self.assertEqual("cpu_capabilities_unreadable", raised.exception.reason)
 
 
 if __name__ == "__main__":

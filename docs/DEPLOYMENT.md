@@ -96,6 +96,11 @@ height, and pixel limits from `CONNEX_BUSINESS_CARD_IMAGE_MAX_BYTES`,
 `CONNEX_BUSINESS_CARD_IMAGE_MAX_PIXELS`, so one configured boundary applies before and after the
 private service hop.
 
+Worker startup failures emit an allowlisted `reason` code without exception messages. Operators can
+distinguish `unsupported_cpu_architecture`, `cpu_capabilities_unreadable`, `avx_unavailable`,
+`models_unavailable`, `runtime_dependency_unavailable`, `invalid_configuration`, and
+`engine_initialization_failed` in OCR container logs without exposing configuration values.
+
 The backend applies a process-wide budget of five scans per minute and a cross-workspace principal
 budget of three scans per minute by default (`CONNEX_BUSINESS_CARD_MAX_GLOBAL_SCANS_PER_MINUTE` and
 `CONNEX_BUSINESS_CARD_MAX_SCANS_PER_MINUTE`), leaving capacity that one principal cannot consume.

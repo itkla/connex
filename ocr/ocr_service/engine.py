@@ -8,6 +8,7 @@ from typing import Protocol
 from .config import ServiceConfig
 from .models import model_paths, models_ready
 from .platform_support import require_supported_cpu
+from .startup import StartupFailure
 
 
 class OcrEngine(Protocol):
@@ -51,7 +52,7 @@ class PaddleEngine:
         }
         paths = model_paths()
         if not models_ready(paths):
-            raise RuntimeError("Pre-fetched OCR models are unavailable")
+            raise StartupFailure("models_unavailable")
         arguments.update({argument: str(path) for argument, path in paths.items()})
         self._ocr = PaddleOCR(**arguments)
         self._ready = True

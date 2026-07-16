@@ -39,6 +39,7 @@ class BenchmarkManifestTest(unittest.TestCase):
                 "condition": case["condition"],
                 "status": 200,
                 "latencySeconds": 1.0,
+                "actual": dict(case["fields"]),
                 "correct": {
                     "name": True,
                     "email": True,
@@ -101,8 +102,17 @@ class BenchmarkManifestTest(unittest.TestCase):
 
         verify_qualification_report(report, manifest, "a" * 40)
 
+        outcomes[0]["actual"]["email"] = "incorrect@example.test"
         outcomes[0]["correct"]["email"] = False
         with self.assertRaisesRegex(ValueError, "raw case outcomes"):
+            verify_qualification_report(report, manifest, "a" * 40)
+
+    def test_qualification_rejects_self_reported_correctness(self) -> None:
+        manifest, outcomes = self.qualification_outcomes()
+        report = summarize(outcomes, {"sourceRevision": "a" * 40})
+        outcomes[0]["actual"]["email"] = "incorrect@example.test"
+
+        with self.assertRaisesRegex(ValueError, "correctness does not match"):
             verify_qualification_report(report, manifest, "a" * 40)
 
     def test_qualification_rejects_missing_or_duplicate_cases(self) -> None:

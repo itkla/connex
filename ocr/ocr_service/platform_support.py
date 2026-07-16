@@ -1,6 +1,8 @@
 import platform
 from pathlib import Path
 
+from .startup import StartupFailure
+
 
 _X86_64_MACHINES = frozenset({"amd64", "x86_64"})
 
@@ -11,13 +13,13 @@ def require_supported_cpu(
 ) -> None:
     selected_machine = platform.machine() if machine is None else machine
     if selected_machine.lower() not in _X86_64_MACHINES:
-        raise RuntimeError("PaddleOCR requires an x86-64 CPU with AVX support")
+        raise StartupFailure("unsupported_cpu_architecture")
     try:
         cpuinfo = cpuinfo_path.read_text(encoding="utf-8")
     except OSError as exception:
-        raise RuntimeError("Unable to verify PaddleOCR CPU support") from exception
+        raise StartupFailure("cpu_capabilities_unreadable") from exception
     if not _all_processors_support_avx(cpuinfo):
-        raise RuntimeError("PaddleOCR requires AVX CPU support")
+        raise StartupFailure("avx_unavailable")
 
 
 def _all_processors_support_avx(cpuinfo: str) -> bool:
