@@ -29,7 +29,7 @@ public interface SegmentMapper {
     /** Ids of companies that have at least one open deal ({@code won IS NULL}). */
     List<Integer> companyIdsWithOpenDeal(int workspaceId);
 
-    /** Ids of companies with no logged activity (via their people or deals) in the last {@code days} days. */
+    /** Ids of companies with no processable logged activity in the last {@code days} days. */
     List<Integer> companyIdsNoActivitySince(@Param("workspaceId") int workspaceId, @Param("days") int days);
 
     /**

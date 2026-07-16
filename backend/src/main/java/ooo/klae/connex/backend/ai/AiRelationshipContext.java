@@ -178,7 +178,9 @@ public class AiRelationshipContext {
         try {
             List<PersonConnectionDto> connections = new ArrayList<>();
             for (PersonConnectionDto connection : safeList(connectionService.getConnections(personId))) {
-                if (connection != null && !isBlank(connection.getPersonName())) {
+                if (connection != null && !isBlank(connection.getPersonName())
+                        && connection.getSuspendedAt() == null
+                        && connection.getProvisionCeasedAt() == null) {
                     connections.add(connection);
                 }
             }

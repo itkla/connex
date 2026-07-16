@@ -38,6 +38,20 @@ class IntroductionMapperTest extends AbstractMapperTest {
     }
 
     @Test
+    void suspendedPersonIsExcludedFromInteractiveAndReportCandidates() {
+        Person person = newPerson(newCompany());
+        engage(person);
+
+        assertTrue(candidateIds().contains(person.getId()));
+        assertTrue(reportCandidateIds().contains(person.getId()));
+
+        personMapper.updateProcessingRestrictions(workspace.getId(), person.getId(), true, false);
+
+        assertFalse(candidateIds().contains(person.getId()));
+        assertFalse(reportCandidateIds().contains(person.getId()));
+    }
+
+    @Test
     void privateNotesDoNotMakeContactsIntroductionCandidates() {
         Person privateOnly = newPerson(newCompany());
         Person workspaceVisible = newPerson(newCompany());
@@ -53,6 +67,12 @@ class IntroductionMapperTest extends AbstractMapperTest {
 
     private List<Integer> candidateIds() {
         return introductionMapper.findCandidatePersons(workspace.getId()).stream()
+            .map(IntroCandidatePerson::getId)
+            .toList();
+    }
+
+    private List<Integer> reportCandidateIds() {
+        return introductionMapper.findCandidatePersonsForReport(workspace.getId(), 1_000).stream()
             .map(IntroCandidatePerson::getId)
             .toList();
     }

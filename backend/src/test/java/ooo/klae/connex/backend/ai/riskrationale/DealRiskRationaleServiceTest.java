@@ -124,6 +124,23 @@ class DealRiskRationaleServiceTest {
     }
 
     @Test
+    void generate_noAiEligibleFactorsAfterAssembly_returnsNotAtRiskWithoutInvocation() {
+        DealRiskDto risk = atRisk();
+        RationaleAssembly eligible = assembly();
+        RationaleAssembly filtered = new RationaleAssembly(
+            eligible.context(), eligible.prompt(), false);
+        when(aiFeatureGate.isAiUsable()).thenReturn(true);
+        when(dealRiskService.assessDeal(WORKSPACE_ID, DEAL_ID)).thenReturn(risk);
+        when(dealRiskRationaleAssembler.assemble(WORKSPACE_ID, DEAL_ID, risk)).thenReturn(filtered);
+
+        DealRationaleDto result = service.generate(DEAL_ID);
+
+        assertUnavailable(result, "not_at_risk");
+        verify(aiInvocationService, never()).completeStructured(any(), any());
+        verify(aiOutputCacheStore, never()).contentHash(any(), any());
+    }
+
+    @Test
     void generate_happyPath_returnsDemaskedNarrativeActionsPersistsAndWarnings() {
         arrangeMiss(assembly());
         when(aiInvocationService.completeStructured(any(AiInvocation.class), eq(DealRiskRationaleContent.class)))

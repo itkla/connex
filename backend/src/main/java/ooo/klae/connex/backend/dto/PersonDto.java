@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.dto;
 
+import java.time.LocalDateTime;
 import java.util.Arrays;
 
 import com.fasterxml.jackson.annotation.JsonIdentityReference;
@@ -66,6 +67,12 @@ public class PersonDto {
     @JsonProperty(access = JsonProperty.Access.READ_ONLY)
     private Boolean introExcluded;
 
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
+    private LocalDateTime suspendedAt;
+
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
+    private LocalDateTime provisionCeasedAt;
+
     public static PersonDto from(Person p) {
         if (p == null) return null;
         return populate(new PersonDto(), p);
@@ -91,6 +98,8 @@ public class PersonDto {
         dto.setImageUrl(p.getImageUrl());
         dto.setRiskExcluded(p.isRiskExcluded());
         dto.setIntroExcluded(p.isIntroExcluded());
+        dto.setSuspendedAt(p.getSuspendedAt());
+        dto.setProvisionCeasedAt(p.getProvisionCeasedAt());
         return dto;
     }
 

@@ -41,6 +41,8 @@ public class DataSubjectDisclosureDto {
         private String imageUrl;
         private boolean riskExcluded;
         private boolean introExcluded;
+        private LocalDateTime suspendedAt;
+        private LocalDateTime provisionCeasedAt;
         private LocalDateTime createdAt;
         private LocalDateTime updatedAt;
     }

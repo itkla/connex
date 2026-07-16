@@ -37,6 +37,7 @@
     JOIN workspace ow ON ow.id = p.workspace_id
     JOIN workspace tw ON tw.id = #{targetWorkspaceId} AND tw.org_id = ow.org_id
     WHERE p.id = #{id} AND p.workspace_id = #{workspaceId}
+      AND p.provision_ceased_at IS NULL
     ON DUPLICATE KEY UPDATE can_edit = #{canEdit}, granted_by = #{grantedBy}
   </insert>
   <insert id="sharePipeline">

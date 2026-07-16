@@ -8,6 +8,7 @@ import static org.mockito.Mockito.when;
 
 import java.time.Clock;
 import java.time.Instant;
+import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
@@ -160,6 +161,30 @@ class AiRelationshipContextTest {
 
         assertEquals(AiRelationshipContext.MAX_CONNECTIONS,
                 countOccurrences(prompt.toString(), "Connection:"));
+    }
+
+    @Test
+    void appendStakeholderBackground_omitsRestrictedConnectionCounterparts() {
+        MaskingContext ctx = new MaskingContext();
+        String stakeholderToken = MaskingEngine.maskField(EntityKind.PERSON, "Champion Person", ctx);
+        PersonConnectionDto suspended = connection("Suspended Person", "knows", 9, "Suspended note");
+        suspended.setSuspendedAt(LocalDateTime.parse("2026-07-01T00:00:00"));
+        PersonConnectionDto ceased = connection("Ceased Person", "knows", 8, "Ceased note");
+        ceased.setProvisionCeasedAt(LocalDateTime.parse("2026-07-02T00:00:00"));
+        PersonConnectionDto allowed = connection("Allowed Person", "knows", 7, "Allowed note");
+        when(personService.getEmploymentHistory(PERSON_ID)).thenReturn(List.of());
+        when(connectionService.getConnections(PERSON_ID)).thenReturn(List.of(suspended, ceased, allowed));
+
+        StringBuilder prompt = new StringBuilder();
+        context.appendStakeholderBackground(prompt, PERSON_ID, stakeholderToken, ctx);
+        String out = prompt.toString();
+
+        assertFalse(out.contains("Suspended Person"));
+        assertFalse(out.contains("Suspended note"));
+        assertFalse(out.contains("Ceased Person"));
+        assertFalse(out.contains("Ceased note"));
+        assertTrue(out.contains("Allowed note"));
+        assertEquals(1, countOccurrences(out, "Connection:"));
     }
 
     @Test

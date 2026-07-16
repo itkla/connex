@@ -57,6 +57,9 @@ public class PersonService {
 
     private static final Set<String> EVALUATION_AUDIT_FIELDS = Set.of("riskExcluded", "introExcluded");
 
+    private static final Set<String> RESTRICTION_AUDIT_FIELDS =
+        Set.of("suspendedAt", "provisionCeasedAt");
+
     private static final int MAX_MATCHING_IDS = 1000;
 
     /**
@@ -185,11 +188,12 @@ public class PersonService {
         if (!Objects.equals(companyIdOf(before), companyIdOf(person))) {
             employmentService.recordTransition(workspaceId, id, companyIdOf(person), person.getTitle());
         }
-        auditService.record("person.update", "person", id, person.getName(),
-            "Updated person " + person.getName(),
-            auditService.diff(before, person, AUDIT_FIELDS));
+        Person after = requireOwnedPerson(workspaceId, id);
+        auditService.record("person.update", "person", id, after.getName(),
+            "Updated person " + after.getName(),
+            auditService.diff(before, after, AUDIT_FIELDS));
         ruleTriggers.publish(workspaceId, "person", id, "person.updated");
-        return person;
+        return after;
     }
 
     /**
@@ -213,6 +217,20 @@ public class PersonService {
         auditService.record("person.updateEvaluation", "person", id, before.getName(),
             "Updated engine evaluation opt-outs for " + before.getName(),
             auditService.diff(before, after, EVALUATION_AUDIT_FIELDS));
+        return after;
+    }
+
+    /** Sets or clears the contact's processing and third-party-provision restrictions. */
+    @Transactional
+    @RequirePermission(Permission.PERSON_UPDATE)
+    public Person updateProcessingRestrictions(int id, boolean suspended, boolean provisionCeased) {
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        Person before = requireOwnedPerson(workspaceId, id);
+        personMapper.updateProcessingRestrictions(workspaceId, id, suspended, provisionCeased);
+        Person after = requireOwnedPerson(workspaceId, id);
+        auditService.record("person.restrictions", "person", id, before.getName(),
+            "Updated processing restrictions for " + before.getName(),
+            auditService.diff(before, after, RESTRICTION_AUDIT_FIELDS));
         return after;
     }
 

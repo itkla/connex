@@ -10,6 +10,7 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import java.math.BigDecimal;
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -189,6 +190,24 @@ class ReportNetworkServiceTest {
         assertEquals(1, opportunities.size());
         assertEquals(60, opportunities.getFirst().companyId());
         assertEquals(List.of(1, 11), opportunities.getFirst().pathPersonIds());
+    }
+
+    @Test
+    void suspendedNodeIsNotTraversable() {
+        Person connector = person(1, "Connector", null, false);
+        Person suspendedBridge = person(2, "Suspended bridge", null, false);
+        suspendedBridge.setSuspendedAt(LocalDateTime.parse("2026-07-01T00:00:00"));
+        Person target = person(3, "Target", 10, false);
+
+        List<ReportNetworkService.WarmIntroOpportunity> opportunities =
+            ReportNetworkService.rankWarmIntroOpportunities(
+                List.of(connector, suspendedBridge, target),
+                List.of(edge(1, 2, 3), edge(2, 3, 3)),
+                List.of(score(1, 90), score(2, 0), score(3, 0)),
+                List.of(),
+                List.of(account(10, "Target account", "USD", "100")));
+
+        assertTrue(opportunities.isEmpty());
     }
 
     @Test

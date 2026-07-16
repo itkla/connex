@@ -186,7 +186,7 @@ public class ReportNetworkService {
 
         Map<Integer, PersonNode> traversableNodes = new HashMap<>();
         for (PersonNode node : allNodes.values()) {
-            if (!node.introExcluded()) {
+            if (!node.introExcluded() && !node.suspended()) {
                 traversableNodes.put(node.id(), node);
             }
         }
@@ -466,7 +466,8 @@ public class ReportNetworkService {
                     person.getId(),
                     displayName(person.getName(), person.getId()),
                     company == null ? null : company.getId(),
-                    person.isIntroExcluded()));
+                    person.isIntroExcluded(),
+                    person.getSuspendedAt() != null));
         }
         return nodes;
     }
@@ -624,7 +625,8 @@ public class ReportNetworkService {
             List<IntroSuggestionDto> reverseIntroSuggestions) {
     }
 
-    private record PersonNode(int id, String name, Integer companyId, boolean introExcluded) {
+    private record PersonNode(
+            int id, String name, Integer companyId, boolean introExcluded, boolean suspended) {
     }
 
     private record Neighbor(int id, int strength) {

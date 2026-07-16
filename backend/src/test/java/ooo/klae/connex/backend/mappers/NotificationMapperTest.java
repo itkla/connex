@@ -447,6 +447,11 @@ class NotificationMapperTest extends AbstractMapperTest {
         assertFalse(notificationMapper.findRelationshipNudgeCandidates(workspace.getId()).stream()
             .anyMatch(candidate -> candidate.getPersonId() == stakeholder.getId()));
 
+        personMapper.updateEvaluationExclusions(workspace.getId(), stakeholder.getId(), false, null);
+        personMapper.updateProcessingRestrictions(workspace.getId(), stakeholder.getId(), true, false);
+        assertFalse(notificationMapper.findRelationshipNudgeCandidates(workspace.getId()).stream()
+            .anyMatch(candidate -> candidate.getPersonId() == stakeholder.getId()));
+
         dealMapper.updateRiskExcluded(workspace.getId(), deal.getId(), true);
         assertFalse(notificationMapper.findOpenDealRecipients(workspace.getId()).stream()
             .anyMatch(recipient -> recipient.getDealId() == deal.getId()));

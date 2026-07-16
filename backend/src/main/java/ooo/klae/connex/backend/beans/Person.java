@@ -1,5 +1,7 @@
 package ooo.klae.connex.backend.beans;
 
+import java.time.LocalDateTime;
+
 import com.fasterxml.jackson.annotation.JsonIdentityInfo;
 import com.fasterxml.jackson.annotation.JsonIdentityReference;
 import com.fasterxml.jackson.annotation.ObjectIdGenerators;
@@ -36,6 +38,8 @@ public class Person {
     private String imageUrl;
     private boolean riskExcluded;
     private boolean introExcluded;
+    private LocalDateTime suspendedAt;
+    private LocalDateTime provisionCeasedAt;
 
     public int getId() {
         return id;

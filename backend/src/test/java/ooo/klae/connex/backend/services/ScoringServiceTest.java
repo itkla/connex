@@ -198,9 +198,9 @@ class ScoringServiceTest {
         Activity activity = activity(person, "meeting", "2026-06-29 12:00:00");
         activity.setId(10);
         when(personMapper.getExistingPersonIds(WS, List.of(1, 2))).thenReturn(List.of(1));
-        when(activityMapper.getActivitiesByPersonIds(WS, List.of(1, 2))).thenReturn(List.of(activity));
-        when(noteMapper.getNotesByPersonIds(WS, List.of(1, 2))).thenReturn(List.of());
-        when(taskMapper.getTasksByPersonIds(WS, List.of(1, 2))).thenReturn(List.of());
+        when(activityMapper.getActivitiesByPersonIds(WS, List.of(1))).thenReturn(List.of(activity));
+        when(noteMapper.getNotesByPersonIds(WS, List.of(1))).thenReturn(List.of());
+        when(taskMapper.getTasksByPersonIds(WS, List.of(1))).thenReturn(List.of());
         ScoringService service = new ScoringService(personMapper, companyMapper, dealMapper,
             activityMapper, noteMapper, taskMapper, Clock.fixed(NOW, ZoneOffset.UTC));
 
@@ -208,6 +208,9 @@ class ScoringServiceTest {
 
         assertEquals(List.of(1), scores.stream().map(RelationshipTemperatureDto::getId).toList());
         assertNotEquals("cold", scores.getFirst().getBand());
+        verify(activityMapper).getActivitiesByPersonIds(WS, List.of(1));
+        verify(noteMapper).getNotesByPersonIds(WS, List.of(1));
+        verify(taskMapper).getTasksByPersonIds(WS, List.of(1));
         verify(personMapper, never()).getAllPersons(anyInt());
         verify(activityMapper, never()).getAllActivities(anyInt());
         verify(personMapper, never()).exists(anyInt(), anyInt());
@@ -249,6 +252,7 @@ class ScoringServiceTest {
         activity.setDeal(deal);
         when(companyMapper.getByIds(WS, List.of(10))).thenReturn(List.of(company));
         when(personMapper.getPersonsByCompanyIds(WS, List.of(10))).thenReturn(List.of(person));
+        when(personMapper.getExistingPersonIds(WS, List.of(1))).thenReturn(List.of(1));
         when(dealMapper.getDealsByCompanyIds(WS, List.of(10))).thenReturn(List.of(deal));
         when(activityMapper.getActivitiesByCompanyIds(WS, List.of(10))).thenReturn(List.of(activity));
         when(noteMapper.getWorkspaceNotesByCompanyIds(WS, List.of(10))).thenReturn(List.of());
@@ -466,7 +470,7 @@ class ScoringServiceTest {
         ActivityMapper activityMapper = mock(ActivityMapper.class);
         NoteMapper noteMapper = mock(NoteMapper.class);
         TaskMapper taskMapper = mock(TaskMapper.class);
-        when(personMapper.getAllPersons(WS)).thenReturn(persons);
+        when(personMapper.getProcessablePersons(WS)).thenReturn(persons);
         when(companyMapper.getAllCompanies(WS)).thenReturn(companies);
         when(dealMapper.getAllDeals(WS)).thenReturn(deals);
         when(activityMapper.getAllActivities(WS)).thenReturn(activities);

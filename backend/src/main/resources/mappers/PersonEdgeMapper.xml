@@ -69,7 +69,11 @@
            c.name        AS company_name,
            e.type        AS type,
            e.strength    AS strength,
-           e.note        AS note
+           e.note        AS note,
+           IF(e.source_person_id = #{personId},
+              target_person.suspended_at, source_person.suspended_at) AS suspended_at,
+           IF(e.source_person_id = #{personId},
+              target_person.provision_ceased_at, source_person.provision_ceased_at) AS provision_ceased_at
     FROM person_edge e
     JOIN person source_person ON source_person.id = e.source_person_id
       AND <include refid="visibleSourcePerson"/>
@@ -92,6 +96,8 @@
     JOIN person target_person ON target_person.id = e.target_person_id
       AND <include refid="visibleTargetPerson"/>
     WHERE e.workspace_id = #{workspaceId}
+      AND source_person.suspended_at IS NULL
+      AND target_person.suspended_at IS NULL
   </select>
 
   <select id="getEdgesForNetworkReport" resultMap="PersonEdgeResult">

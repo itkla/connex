@@ -17,6 +17,7 @@ import ooo.klae.connex.backend.dto.RelationshipScoreAggregateDto;
 
 public interface PersonMapper {
     List<Person> getAllPersons(int workspaceId);
+    List<Person> getProcessablePersons(int workspaceId);
     List<Person> getPersonsForNetworkReport(
             @Param("workspaceId") int workspaceId,
             @Param("limit") int limit);
@@ -71,6 +72,12 @@ public interface PersonMapper {
         @Param("id") int id,
         @Param("riskExcluded") Boolean riskExcluded,
         @Param("introExcluded") Boolean introExcluded
+    );
+    int updateProcessingRestrictions(
+        @Param("workspaceId") int workspaceId,
+        @Param("id") int id,
+        @Param("suspended") boolean suspended,
+        @Param("provisionCeased") boolean provisionCeased
     );
     int delete(@Param("workspaceId") int workspaceId, @Param("id") int id);
 

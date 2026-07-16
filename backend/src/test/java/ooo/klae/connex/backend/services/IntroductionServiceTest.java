@@ -111,6 +111,18 @@ class IntroductionServiceTest extends AbstractServiceTest {
     }
 
     @Test
+    void suspendedMutualConnectorDoesNotCreateSuggestion() {
+        Person p1 = engagedPerson(newCompany());
+        Person p2 = engagedPerson(newCompany());
+        Person hub = newPerson(newCompany());
+        connect(hub.getId(), p1.getId());
+        connect(hub.getId(), p2.getId());
+        personMapper.updateProcessingRestrictions(workspace.getId(), hub.getId(), true, false);
+
+        assertFalse(hasPair(introductionService.getSuggestions(50), p1.getId(), p2.getId()));
+    }
+
+    @Test
     void dismissExcludesFromSuggestionsWithoutAddingLineage() {
         Person p1 = engagedPerson(newCompany());
         Person p2 = engagedPerson(newCompany());

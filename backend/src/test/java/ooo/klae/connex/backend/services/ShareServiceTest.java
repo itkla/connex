@@ -13,11 +13,14 @@ import org.springframework.beans.factory.annotation.Autowired;
 
 import ooo.klae.connex.backend.beans.Company;
 import ooo.klae.connex.backend.beans.Organization;
+import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.beans.Workspace;
 import ooo.klae.connex.backend.dto.WorkspaceMembershipDto;
+import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.mappers.OrganizationMapper;
+import ooo.klae.connex.backend.mappers.ShareMapper;
 import ooo.klae.connex.backend.tenant.TenantContext;
 
 class ShareServiceTest extends AbstractServiceTest {
@@ -26,6 +29,7 @@ class ShareServiceTest extends AbstractServiceTest {
     @Autowired WorkspaceService workspaceService;
     @Autowired TenantContext tenantContext;
     @Autowired OrganizationMapper organizationMapper;
+    @Autowired ShareMapper shareMapper;
 
     @AfterEach
     void clearContext() {
@@ -123,5 +127,28 @@ class ShareServiceTest extends AbstractServiceTest {
         tenantContext.set(a.getId(), workspaceService.getOrgId(a.getId()), currentUser.getId(), "owner", null);
         assertThrows(ForbiddenException.class,
             () -> shareService.share("company", company.getId(), otherOrgWs.getId(), false));
+    }
+
+    @Test
+    void provisionCeasedPersonBlocksNewShareButStillAllowsUnshare() {
+        WorkspaceMembershipDto owner = workspaceService.createWorkspace("Person Owner WS", currentUser.getId());
+        WorkspaceMembershipDto existingTarget = createSiblingWorkspace(owner, "Existing Target WS");
+        Person person = new Person();
+        person.setWorkspaceId(owner.getId());
+        person.setName("Provision ceased " + unique());
+        personMapper.insert(person);
+
+        shareService.share("person", person.getId(), existingTarget.getId(), false);
+        WorkspaceMembershipDto blockedTarget = createSiblingWorkspace(owner, "Blocked Target WS");
+        personMapper.updateProcessingRestrictions(owner.getId(), person.getId(), false, true);
+
+        assertEquals(0, shareMapper.sharePerson(
+            person.getId(), owner.getId(), blockedTarget.getId(), currentUser.getId(), false));
+        BadRequestException blocked = assertThrows(BadRequestException.class,
+            () -> shareService.share("person", person.getId(), blockedTarget.getId(), false));
+        assertEquals("Third-party provision has been ceased for this contact", blocked.getMessage());
+
+        shareService.unshare("person", person.getId(), existingTarget.getId());
+        assertTrue(shareService.listShares("person", person.getId()).isEmpty());
     }
 }
