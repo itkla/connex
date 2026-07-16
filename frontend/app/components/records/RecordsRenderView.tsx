@@ -203,7 +203,7 @@ export default function RecordsRenderView<T extends { id: SelectionId; name?: st
         [renderAvatar],
     );
     const stickySeam = cn(
-        "after:pointer-events-none after:absolute after:inset-y-0 after:right-0 after:w-4 after:translate-x-full after:bg-gradient-to-r after:from-black/15 after:to-transparent after:transition-opacity after:duration-200 after:content-[''] dark:after:from-black/45",
+        "after:pointer-events-none after:absolute after:inset-y-0 after:right-0 after:hidden after:w-4 after:translate-x-full after:bg-gradient-to-r after:from-black/15 after:to-transparent after:transition-opacity after:duration-200 after:content-[''] md:after:block dark:after:from-black/45",
         edges.left ? 'after:opacity-100' : 'after:opacity-0',
     );
     const stickyHeaderBg = "bg-card before:absolute before:inset-0 before:-z-10 before:bg-muted/60 before:content-['']";
@@ -419,7 +419,7 @@ export default function RecordsRenderView<T extends { id: SelectionId; name?: st
                     <table className="w-full min-w-max border-collapse text-left text-sm">
                         <thead>
                             <tr ref={headerRowRef} className="cursor-grab border-b border-border bg-muted/60">
-                                <th className={cn('sticky left-0 z-20 w-12 px-4 py-2.5', stickyHeaderBg)}>
+                                <th className={cn('w-12 px-4 py-2.5 md:sticky md:left-0 md:z-20', stickyHeaderBg)}>
                                     <Checkbox
                                         checked={someSelected ? 'indeterminate' : allSelected}
                                         onCheckedChange={(checked) => toggleAll(checked === true)}
@@ -427,7 +427,7 @@ export default function RecordsRenderView<T extends { id: SelectionId; name?: st
                                         className={CHECKBOX_CLASS}
                                     />
                                 </th>
-                                {renderAvatar && <th className={cn('sticky z-20 w-12 px-4 py-2.5', stickyHeaderBg)} style={{ left: frozenOffsets.avatar }} aria-hidden />}
+                                {renderAvatar && <th className={cn('w-12 px-4 py-2.5 md:sticky md:z-20', stickyHeaderBg)} style={{ left: frozenOffsets.avatar }} aria-hidden />}
                                 {columns.map((col, colIndex) => {
                                     const active = activeSortKey === col.key;
                                     const sortable = isSortableColumn(col);
@@ -451,7 +451,7 @@ export default function RecordsRenderView<T extends { id: SelectionId; name?: st
                                             className={cn(
                                                 'px-4 py-2.5 text-xs font-semibold tracking-wide whitespace-nowrap text-muted-foreground uppercase',
                                                 col.widthClass,
-                                                colIndex === 0 && cn('sticky z-20', stickyHeaderBg, stickySeam),
+                                                colIndex === 0 && cn('md:sticky md:z-20', stickyHeaderBg, stickySeam),
                                             )}
                                             style={colIndex === 0 ? { left: frozenOffsets.name } : undefined}
                                         >
@@ -500,7 +500,7 @@ export default function RecordsRenderView<T extends { id: SelectionId; name?: st
                                             else if (detailPath) router.push(detailPath(item));
                                         }}
                                     >
-                                        <td className={cn('sticky left-0 z-10 px-4 py-2.5', stickyBodyBg)} onClick={(e) => e.stopPropagation()}>
+                                        <td className={cn('px-4 py-2.5 md:sticky md:left-0 md:z-10', stickyBodyBg)} onClick={(e) => e.stopPropagation()}>
                                             <Checkbox
                                                 checked={isSelected}
                                                 onCheckedChange={(checked) => toggleOne(item.id, checked === true)}
@@ -508,7 +508,7 @@ export default function RecordsRenderView<T extends { id: SelectionId; name?: st
                                                 className={CHECKBOX_CLASS}
                                             />
                                         </td>
-                                        {renderAvatar && <td className={cn('sticky z-10 px-4 py-2.5', stickyBodyBg)} style={{ left: frozenOffsets.avatar }}>{renderAvatar(item)}</td>}
+                                        {renderAvatar && <td className={cn('px-4 py-2.5 md:sticky md:z-10', stickyBodyBg)} style={{ left: frozenOffsets.avatar }}>{renderAvatar(item)}</td>}
                                         {columns.map((col, colIndex) => {
                                             const content = col.render
                                                 ? col.render(item)
@@ -520,7 +520,7 @@ export default function RecordsRenderView<T extends { id: SelectionId; name?: st
                                                         key={col.key}
                                                         className={cn(
                                                             'px-4 py-2.5 whitespace-nowrap text-foreground transition-colors hover:text-brand-dark',
-                                                            colIndex === 0 && cn('sticky z-10', stickyBodyBg, stickySeam),
+                                                            colIndex === 0 && cn('md:sticky md:z-10', stickyBodyBg, stickySeam),
                                                         )}
                                                         style={colIndex === 0 ? { left: frozenOffsets.name } : undefined}
                                                         onClick={(e) => {
@@ -542,7 +542,7 @@ export default function RecordsRenderView<T extends { id: SelectionId; name?: st
                                                     key={col.key}
                                                     className={cn(
                                                         'px-4 py-2.5 whitespace-nowrap text-foreground',
-                                                        colIndex === 0 && cn('sticky z-10', stickyBodyBg, stickySeam),
+                                                        colIndex === 0 && cn('md:sticky md:z-10', stickyBodyBg, stickySeam),
                                                     )}
                                                     style={colIndex === 0 ? { left: frozenOffsets.name } : undefined}
                                                 >
