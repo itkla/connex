@@ -494,8 +494,14 @@ export type BusinessCardCompanyAction =
     | { type: 'create'; companyName: string }
     | { type: 'none' };
 
+export type BusinessCardRecoveryContext = {
+    scope: string;
+    workspaceId: string;
+};
+
 export type BusinessCardImportDraft = {
     requestId: string;
+    recoveryContext: BusinessCardRecoveryContext;
     image: File;
     contact: CreateContactPayload;
     companyAction: BusinessCardCompanyAction;

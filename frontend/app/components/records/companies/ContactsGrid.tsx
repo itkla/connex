@@ -64,7 +64,11 @@ export default function ContactsGrid({ contacts, company, allTags }: { contacts:
                 <h2 className="px-6 text-xs font-medium tracking-[0.12em] text-muted-foreground uppercase">
                     {t('contacts')}
                 </h2>
-                <button onClick={openNewContactDialog}>
+                <button
+                    type="button"
+                    aria-label={t('newContact')}
+                    onClick={openNewContactDialog}
+                >
                     <PlusIcon className="size-4 text-muted-foreground hover:text-foreground transition-colors duration-300 cursor-pointer" />
                 </button>
             </div>
@@ -102,12 +106,16 @@ export default function ContactsGrid({ contacts, company, allTags }: { contacts:
                 isCreating={isCreating}
                 isSuccess={creationSucceeded}
                 createNewContact={async (businessCard?: BusinessCardImportDraft) => {
+                    invalidatePendingClose();
+                    const operationGeneration = closeGenerationRef.current;
+                    const isCurrent = () => closeGenerationRef.current === operationGeneration;
                     setCreationSucceeded(false);
                     setIsCreating(true);
                     try {
                         const newContact = businessCard
                             ? (await importBusinessCard(businessCard)).contact
                             : await createContact(newContactPayload);
+                        if (!isCurrent()) return;
                         let avatarUploadFailed = false;
                         if (imageFile) {
                             try {
@@ -115,14 +123,15 @@ export default function ContactsGrid({ contacts, company, allTags }: { contacts:
                             } catch {
                                 avatarUploadFailed = true;
                             }
+                            if (!isCurrent()) return;
                         }
-                        setIsCreating(false);
+                        if (isCurrent()) setIsCreating(false);
                         let finalized = false;
                         return {
                             avatarUploadFailed,
                             avatarUploaded: imageFile != null && !avatarUploadFailed,
                             finalize: () => {
-                                if (finalized) return;
+                                if (finalized || !isCurrent()) return;
                                 finalized = true;
                                 setNewContactPayload(emptyContactPayload(company.id));
                                 setImageFile(null);
@@ -139,12 +148,13 @@ export default function ContactsGrid({ contacts, company, allTags }: { contacts:
                             },
                         };
                     } catch (error) {
+                        if (!isCurrent()) return;
                         if (isFieldError(error) || businessCard) {
                             throw error;
                         }
                         toast.error(t('toastCreateContactFailed'));
                     } finally {
-                        setIsCreating(false);
+                        if (isCurrent()) setIsCreating(false);
                     }
                 }}
             />

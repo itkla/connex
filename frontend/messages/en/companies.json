@@ -108,6 +108,7 @@
   },
   "CompaniesContactsGrid": {
     "contacts": "Contacts",
+    "newContact": "New contact",
     "noContacts": "No contacts associated with this company.",
     "toastContactCreated": "Contact created",
     "toastCreateContactFailed": "Failed to create contact"

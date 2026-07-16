@@ -108,6 +108,7 @@
   },
   "CompaniesContactsGrid": {
     "contacts": "コンタクト",
+    "newContact": "新規コンタクト",
     "noContacts": "この企業に紐づくコンタクトはありません。",
     "toastContactCreated": "コンタクトを作成しました",
     "toastCreateContactFailed": "コンタクトを作成できませんでした"

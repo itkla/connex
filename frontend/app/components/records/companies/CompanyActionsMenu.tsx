@@ -148,12 +148,16 @@ export default function CompanyActionsMenu({
     };
 
     const createNewContact = async (businessCard?: BusinessCardImportDraft) => {
+        invalidatePendingContactClose();
+        const operationGeneration = contactCloseGenerationRef.current;
+        const isCurrent = () => contactCloseGenerationRef.current === operationGeneration;
         setContactCreationSucceeded(false);
         setIsCreatingContact(true);
         try {
             const newContact = businessCard
                 ? (await importBusinessCard(businessCard)).contact
                 : await createContact(newContactPayload);
+            if (!isCurrent()) return;
             let avatarUploadFailed = false;
             if (imageFile) {
                 try {
@@ -161,14 +165,15 @@ export default function CompanyActionsMenu({
                 } catch {
                     avatarUploadFailed = true;
                 }
+                if (!isCurrent()) return;
             }
-            setIsCreatingContact(false);
+            if (isCurrent()) setIsCreatingContact(false);
             let finalized = false;
             return {
                 avatarUploadFailed,
                 avatarUploaded: imageFile != null && !avatarUploadFailed,
                 finalize: () => {
-                    if (finalized) return;
+                    if (finalized || !isCurrent()) return;
                     finalized = true;
                     toastSuccess(t('toastContactCreated'));
                     setContactCreationSucceeded(true);
@@ -183,12 +188,13 @@ export default function CompanyActionsMenu({
                 },
             };
         } catch (err) {
+            if (!isCurrent()) return;
             if (isFieldError(err) || businessCard) {
                 throw err;
             }
             toastError(t('toastCreateContactFailed'));
         } finally {
-            setIsCreatingContact(false);
+            if (isCurrent()) setIsCreatingContact(false);
         }
     };
 

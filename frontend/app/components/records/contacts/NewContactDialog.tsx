@@ -209,6 +209,8 @@ export function NewContactForm({
     const imageSelectionPendingRef = useRef(false);
     const cardSelectionPendingRef = useRef(false);
     const activeRef = useRef(active);
+    const submissionGenerationRef = useRef(0);
+    const submissionControllerRef = useRef<AbortController | null>(null);
     const recoveryInteractionRef = useRef(false);
     const acknowledgmentGenerationRef = useRef(0);
     const onCancelRef = useRef(onCancel);
@@ -249,12 +251,21 @@ export function NewContactForm({
         onRecoveredImportRef.current = onRecoveredImport;
         onSubmissionPendingChangeRef.current = onSubmissionPendingChange;
         if (!active) {
+            submissionGenerationRef.current += 1;
+            submissionControllerRef.current?.abort();
+            submissionControllerRef.current = null;
             acknowledgmentGenerationRef.current += 1;
             imageSelectionSequenceRef.current += 1;
             imageSelectionPendingRef.current = false;
             cardSelectionPendingRef.current = false;
         }
     }, [active, onCancel, onRecoveredImport, onSubmissionPendingChange]);
+
+    useEffect(() => () => {
+        submissionGenerationRef.current += 1;
+        submissionControllerRef.current?.abort();
+        submissionControllerRef.current = null;
+    }, []);
 
     useEffect(() => {
         if (companySearch.error) toastError(t('companySearchFailed'));
@@ -306,23 +317,31 @@ export function NewContactForm({
         return () => controller.abort();
     }, [acknowledgeRecoveredImport, active, recoveredImport, recoveredImportToken, router, t]);
 
-    const handleCreate = async () => {
+    const handleCreate = async (generation: number, signal: AbortSignal) => {
+        const canCommit = () => activeRef.current
+            && submissionGenerationRef.current === generation
+            && !signal.aborted;
         resetFieldErrors();
         let businessCardImport: BusinessCardImportDraft | undefined;
         try {
             businessCardImport = await businessCard.prepareImportDraft(imageFile != null);
+            if (!canCommit()) return;
             if (businessCard.file && !businessCardImport) return;
             const outcome = await createNewContact(businessCardImport);
+            if (!canCommit()) return;
             if (!outcome) return;
             if (businessCardImport && outcome.avatarUploaded) {
-                await businessCard.markImportAvatarCompleted();
+                await businessCard.markImportAvatarCompleted(signal);
+                if (!canCommit()) return;
             }
-            await businessCard.resolveImportRetry();
+            await businessCard.resolveImportRetry(signal);
+            if (!canCommit()) return;
             outcome.finalize();
             if (outcome?.avatarUploadFailed) {
                 toastError(t('cardAvatarUploadFailed'));
             }
         } catch (err) {
+            if (!canCommit()) return;
             captureFieldErrors(err);
             if (isFieldError(err)) {
                 const k = Object.keys(err.fieldErrors)[0];
@@ -345,13 +364,21 @@ export function NewContactForm({
             || recoveryDecisionRequired) return;
         submissionPendingRef.current = true;
         setSubmissionPending(true);
-        onSubmissionPendingChange?.(true);
+        onSubmissionPendingChangeRef.current?.(true);
+        const generation = submissionGenerationRef.current + 1;
+        submissionGenerationRef.current = generation;
+        submissionControllerRef.current?.abort();
+        const controller = new AbortController();
+        submissionControllerRef.current = controller;
         try {
-            await handleCreate();
+            await handleCreate(generation, controller.signal);
         } finally {
-            submissionPendingRef.current = false;
-            setSubmissionPending(false);
-            onSubmissionPendingChange?.(false);
+            if (submissionGenerationRef.current === generation) {
+                submissionControllerRef.current = null;
+                submissionPendingRef.current = false;
+                setSubmissionPending(false);
+                onSubmissionPendingChangeRef.current?.(false);
+            }
         }
     };
 

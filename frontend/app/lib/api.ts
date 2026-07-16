@@ -42,6 +42,12 @@ function workspaceIdFromCookieHeader(cookie: string): number | null {
         : null;
 }
 
+function clientRecoveryWorkspaceId(): string | null {
+    if (typeof document === "undefined") return null;
+    const workspaceId = workspaceIdFromCookieHeader(document.cookie);
+    return workspaceId == null ? null : String(workspaceId);
+}
+
 // CSRF token, fetched once from the backend and echoed in a header on state-changing requests.
 // The frontend and backend can be different origins, so the token is delivered via this endpoint
 // rather than a cookie the JS would otherwise be unable to read cross-origin.
@@ -191,10 +197,14 @@ async function currentClientRequestIdentity(): Promise<string | null> {
     return (await resolveClientRequestIdentity())?.request ?? null;
 }
 
-/** Returns a non-reversible browser-storage scope for the active user and workspace. */
-export async function clientRecoveryScope(init: RequestInit = {}): Promise<string | null> {
-    const workspaceId = clientWorkspaceId();
+/** Returns a non-reversible browser-storage context for the active user and workspace. */
+export async function clientRecoveryContext(
+    init: RequestInit = {},
+): Promise<Types.BusinessCardRecoveryContext | null> {
+    const workspaceId = clientRecoveryWorkspaceId();
     if (workspaceId == null || typeof window === "undefined" || !window.crypto.subtle) return null;
+    const headers = new Headers(init.headers);
+    headers.set("X-Workspace-Id", workspaceId);
     let body: unknown;
     try {
         body = await withBusinessCardRequestTimeout(
@@ -205,6 +215,7 @@ export async function clientRecoveryScope(init: RequestInit = {}): Promise<strin
                     ...init,
                     credentials: "include",
                     cache: "no-store",
+                    headers,
                     signal,
                 });
                 if (!response.ok) return null;
@@ -217,13 +228,46 @@ export async function clientRecoveryScope(init: RequestInit = {}): Promise<strin
         return null;
     }
     if (typeof body !== "object" || body === null || !("id" in body)) return null;
+    if (clientRecoveryWorkspaceId() !== workspaceId) return null;
     const userId = body.id;
     if (typeof userId !== "number" || !Number.isInteger(userId) || userId <= 0) return null;
     const digest = await window.crypto.subtle.digest(
         "SHA-256",
         new TextEncoder().encode([workspaceId, userId].join("\u0000")),
     );
-    return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
+    if (clientRecoveryWorkspaceId() !== workspaceId) return null;
+    return {
+        scope: Array.from(
+            new Uint8Array(digest),
+            (byte) => byte.toString(16).padStart(2, "0"),
+        ).join(""),
+        workspaceId,
+    };
+}
+
+async function requireBusinessCardRecoveryContext(
+    expected: Types.BusinessCardRecoveryContext,
+    signal?: AbortSignal | null,
+): Promise<void> {
+    const current = await clientRecoveryContext({ signal });
+    if (!current
+        || current.scope !== expected.scope
+        || current.workspaceId !== expected.workspaceId) {
+        throw new ApiError(
+            "Business-card request context changed",
+            409,
+            "BUSINESS_CARD_CONTEXT_CHANGED",
+        );
+    }
+}
+
+function businessCardRequestInit(
+    context: Types.BusinessCardRecoveryContext,
+    init: RequestInit,
+): RequestInit {
+    const headers = new Headers(init.headers);
+    headers.set("X-Workspace-Id", context.workspaceId);
+    return { ...init, headers };
 }
 
 async function withClientRequestIdentityReset<T>(request: () => Promise<T>): Promise<T> {
@@ -1643,24 +1687,40 @@ export function createContact(payload: Types.CreateContactPayload) {
 }
 
 /** Reads contact candidates from one business-card image without mutating workspace data. */
-export function scanBusinessCard(image: File, init: RequestInit = {}) {
+export function scanBusinessCard(
+    image: File,
+    context: Types.BusinessCardRecoveryContext,
+    init: RequestInit = {},
+) {
     const body = new FormData();
     body.append("image", image, image.name);
-    return postFormData<Types.BusinessCardScanResult>("/api/business-cards/scan", body, init);
+    return postFormData<Types.BusinessCardScanResult>(
+        "/api/business-cards/scan",
+        body,
+        businessCardRequestInit(context, init),
+    );
 }
 
 /** Reserves an opaque import key before private multipart content is submitted. */
-export function reserveBusinessCardImport(requestId: string, init: RequestInit = {}) {
-    const headers = new Headers(init.headers);
+export function reserveBusinessCardImport(
+    requestId: string,
+    context: Types.BusinessCardRecoveryContext,
+    init: RequestInit = {},
+) {
+    const boundInit = businessCardRequestInit(context, init);
+    const headers = new Headers(boundInit.headers);
     headers.set("Idempotency-Key", requestId);
     return withBusinessCardRequestTimeout(
         10_000,
         init.signal,
-        (signal) => postJson<Types.BusinessCardImportReservation>(
-            "/api/business-cards/import/reservation",
-            {},
-            { ...init, headers, signal },
-        ),
+        async (signal) => {
+            await requireBusinessCardRecoveryContext(context, signal);
+            return postJson<Types.BusinessCardImportReservation>(
+                "/api/business-cards/import/reservation",
+                {},
+                { ...boundInit, headers, signal },
+            );
+        },
     );
 }
 
@@ -1670,35 +1730,44 @@ export function importBusinessCard(draft: Types.BusinessCardImportDraft, init: R
     body.append("image", draft.image, draft.image.name);
     body.append("contact", new Blob([JSON.stringify(draft.contact)], { type: "application/json" }));
     body.append("companyAction", new Blob([JSON.stringify(draft.companyAction)], { type: "application/json" }));
-    const headers: Record<string, string> = {};
-    new Headers(init.headers).forEach((value, key) => {
-        headers[key] = value;
-    });
-    headers["Idempotency-Key"] = draft.requestId;
+    const boundInit = businessCardRequestInit(draft.recoveryContext, init);
+    const headers = new Headers(boundInit.headers);
+    headers.set("Idempotency-Key", draft.requestId);
     return withBusinessCardRequestTimeout(
         30_000,
         init.signal,
-        (signal) => postFormData<Types.BusinessCardImportResult>(
-            "/api/business-cards/import",
-            body,
-            { ...init, headers, signal },
-        ),
+        async (signal) => {
+            await requireBusinessCardRecoveryContext(draft.recoveryContext, signal);
+            return postFormData<Types.BusinessCardImportResult>(
+                "/api/business-cards/import",
+                body,
+                { ...boundInit, headers, signal },
+            );
+        },
     );
 }
 
 /** Reconciles a completed import without resubmitting private card or contact content. */
-export function getBusinessCardImportStatus(requestId: string, init: RequestInit = {}) {
-    const headers = new Headers(init.headers);
+export function getBusinessCardImportStatus(
+    requestId: string,
+    context: Types.BusinessCardRecoveryContext,
+    init: RequestInit = {},
+) {
+    const boundInit = businessCardRequestInit(context, init);
+    const headers = new Headers(boundInit.headers);
     headers.set("Idempotency-Key", requestId);
     return withBusinessCardRequestTimeout(
         10_000,
         init.signal,
-        (signal) => getJson<Types.BusinessCardImportResult>("/api/business-cards/import", {
-            ...init,
-            cache: "no-store",
-            headers,
-            signal,
-        }),
+        async (signal) => {
+            await requireBusinessCardRecoveryContext(context, signal);
+            return getJson<Types.BusinessCardImportResult>("/api/business-cards/import", {
+                ...boundInit,
+                cache: "no-store",
+                headers,
+                signal,
+            });
+        },
     );
 }
 

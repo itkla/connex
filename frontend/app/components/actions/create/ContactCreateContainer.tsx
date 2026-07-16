@@ -102,13 +102,18 @@ export default function ContactCreateContainer({
     };
 
     const createNewContact = async (businessCard?: BusinessCardImportDraft) => {
+        invalidatePendingClose();
+        const operationGeneration = closeGenerationRef.current;
+        const isCurrent = () => closeGenerationRef.current === operationGeneration;
         setSucceeded(false);
         creatingRef.current = true;
         setCreating(true);
         emitDismissLock();
         try {
             const imported = businessCard ? await importBusinessCard(businessCard) : null;
+            if (!isCurrent()) return;
             const newContact = imported?.contact ?? await createContact(payload);
+            if (!isCurrent()) return;
             let avatarUploadFailed = false;
             if (imageFile) {
                 try {
@@ -116,6 +121,7 @@ export default function ContactCreateContainer({
                 } catch {
                     avatarUploadFailed = true;
                 }
+                if (!isCurrent()) return;
             }
             creatingRef.current = false;
             setCreating(false);
@@ -125,7 +131,7 @@ export default function ContactCreateContainer({
                 avatarUploadFailed,
                 avatarUploaded: imageFile != null && !avatarUploadFailed,
                 finalize: () => {
-                    if (finalized) return;
+                    if (finalized || !isCurrent()) return;
                     finalized = true;
                     toastSuccess(t('feedback.personCreated'));
                     publishRecordMutation('contact');
@@ -142,6 +148,7 @@ export default function ContactCreateContainer({
                 },
             };
         } catch (err) {
+            if (!isCurrent()) return;
             creatingRef.current = false;
             setCreating(false);
             emitDismissLock();

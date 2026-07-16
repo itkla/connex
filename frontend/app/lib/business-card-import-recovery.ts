@@ -1,10 +1,13 @@
 import {
     ApiError,
-    clientRecoveryScope,
+    clientRecoveryContext,
     getBusinessCardImportStatus,
     reserveBusinessCardImport,
 } from '@/app/lib/api';
-import type { BusinessCardImportResult } from '@/app/lib/types';
+import type {
+    BusinessCardImportResult,
+    BusinessCardRecoveryContext,
+} from '@/app/lib/types';
 
 const STORAGE_PREFIX = 'connex:business-card-import-recovery:v2:';
 const LOCK_PREFIX = 'connex:business-card-import-recovery:';
@@ -33,6 +36,7 @@ export type RecoveredBusinessCardImport = {
 };
 
 export type BusinessCardImportRecoveryReconciliation = {
+    context: BusinessCardRecoveryContext;
     recovered: RecoveredBusinessCardImport | null;
     reusableRequestId: string | null;
     reusableRevision: number | null;
@@ -53,19 +57,25 @@ function parseRecoveryEntry(value: unknown): RecoveryEntry | null {
     if (typeof value.createdAt !== 'number' || !Number.isFinite(value.createdAt)) return null;
     if (typeof value.expiresAt !== 'number' || !Number.isFinite(value.expiresAt)) return null;
     if (value.expiresAt <= value.createdAt) return null;
-    const storedPhase = 'phase' in value ? value.phase : undefined;
-    const phase: RecoveryPhase = storedPhase === 'registered'
-        || storedPhase === 'reserved'
-        || storedPhase === 'submitted'
-        ? storedPhase
-        : 'legacy';
-    const pendingAvatar = 'pendingAvatar' in value && value.pendingAvatar === true;
-    const revision = 'revision' in value
-        && typeof value.revision === 'number'
-        && Number.isSafeInteger(value.revision)
-        && value.revision >= 0
-        ? value.revision
-        : 0;
+    let phase: RecoveryPhase = 'legacy';
+    if ('phase' in value) {
+        if (value.phase !== 'registered'
+            && value.phase !== 'reserved'
+            && value.phase !== 'submitted') return null;
+        phase = value.phase;
+    }
+    let pendingAvatar = false;
+    if ('pendingAvatar' in value) {
+        if (typeof value.pendingAvatar !== 'boolean') return null;
+        pendingAvatar = value.pendingAvatar;
+    }
+    let revision = 0;
+    if ('revision' in value) {
+        if (typeof value.revision !== 'number'
+            || !Number.isSafeInteger(value.revision)
+            || value.revision < 0) return null;
+        revision = value.revision;
+    }
     const expiresAt = phase === 'legacy'
         ? Math.max(value.expiresAt, value.createdAt + LEGACY_RECOVERY_TTL_MS)
         : value.expiresAt;
@@ -126,7 +136,12 @@ function readEntries(scope: string): RecoveryEntry[] {
                 removableKeys.push(key);
             }
         }
-        for (const key of removableKeys) window.localStorage.removeItem(key);
+        for (const key of removableKeys) {
+            window.localStorage.removeItem(key);
+            if (window.localStorage.getItem(key) !== null) {
+                throw new BusinessCardRecoveryStorageUnavailableError();
+            }
+        }
         return entries.sort((first, second) => first.createdAt - second.createdAt);
     } catch (error) {
         if (error instanceof BusinessCardRecoveryStorageUnavailableError) throw error;
@@ -138,9 +153,17 @@ function readEntry(scope: string, requestId: string): RecoveryEntry | null {
     try {
         const stored = window.localStorage.getItem(entryKey(scope, requestId));
         if (stored === null) return null;
-        const entry = parseRecoveryEntry(JSON.parse(stored));
+        let parsed: unknown;
+        try {
+            parsed = JSON.parse(stored);
+        } catch {
+            removeEntry(scope, requestId);
+            return null;
+        }
+        const entry = parseRecoveryEntry(parsed);
         if (!entry || entry.requestId !== requestId) {
-            throw new BusinessCardRecoveryStorageUnavailableError();
+            removeEntry(scope, requestId);
+            return null;
         }
         return entry;
     } catch (error) {
@@ -169,11 +192,22 @@ function persistEntry(scope: string, entry: RecoveryEntry): void {
     }
 }
 
-async function recoveryScope(signal?: AbortSignal): Promise<string> {
+async function recoveryContext(
+    expected?: BusinessCardRecoveryContext,
+    signal?: AbortSignal,
+): Promise<BusinessCardRecoveryContext> {
     if (typeof window === 'undefined') throw new BusinessCardRecoveryStorageUnavailableError();
-    const scope = await clientRecoveryScope({ signal });
-    if (!scope) throw new BusinessCardRecoveryStorageUnavailableError();
-    return scope;
+    const context = await clientRecoveryContext({ signal });
+    if (!context) throw new BusinessCardRecoveryStorageUnavailableError();
+    if (expected
+        && (context.scope !== expected.scope || context.workspaceId !== expected.workspaceId)) {
+        throw new ApiError(
+            'Business-card recovery context changed',
+            409,
+            'BUSINESS_CARD_CONTEXT_CHANGED',
+        );
+    }
+    return context;
 }
 
 function abortError(signal: AbortSignal): unknown {
@@ -241,9 +275,10 @@ async function removeCurrentEntry(
 /** Durably registers a fresh opaque key before any reservation request may begin. */
 export async function registerBusinessCardImportRecovery(
     pendingAvatar: boolean,
+    context: BusinessCardRecoveryContext,
     signal?: AbortSignal,
 ): Promise<string> {
-    const scope = await recoveryScope(signal);
+    const scope = (await recoveryContext(context, signal)).scope;
     return withRecoveryLock(scope, () => {
         const requestId = window.crypto.randomUUID();
         const createdAt = Date.now();
@@ -263,9 +298,10 @@ export async function registerBusinessCardImportRecovery(
 export async function prepareBusinessCardImportRecovery(
     requestId: string,
     pendingAvatar: boolean,
+    context: BusinessCardRecoveryContext,
     signal?: AbortSignal,
 ): Promise<number> {
-    const scope = await recoveryScope(signal);
+    const scope = (await recoveryContext(context, signal)).scope;
     const entry = await withRecoveryLock(scope, () => {
         const stored = readEntry(scope, requestId);
         const current = stored ?? {
@@ -288,7 +324,7 @@ export async function prepareBusinessCardImportRecovery(
         return current;
     }, signal);
 
-    const reservation = await reserveBusinessCardImport(requestId, { signal });
+    const reservation = await reserveBusinessCardImport(requestId, context, { signal });
     const expiresAt = Date.parse(reservation.expiresAt);
     if (!Number.isFinite(expiresAt) || expiresAt <= Date.now()) {
         throw new Error('Business-card import reservation is unavailable');
@@ -320,11 +356,13 @@ export async function prepareBusinessCardImportRecovery(
 
 async function checkInMemoryRequest(
     requestId: string,
+    context: BusinessCardRecoveryContext,
     signal?: AbortSignal,
 ): Promise<BusinessCardImportRecoveryReconciliation> {
     try {
-        const result = await getBusinessCardImportStatus(requestId, { signal });
+        const result = await getBusinessCardImportStatus(requestId, context, { signal });
         return {
+            context,
             recovered: {
                 requestId,
                 result,
@@ -339,6 +377,7 @@ async function checkInMemoryRequest(
         if (!(error instanceof ApiError)) throw error;
         if (error.status === 410) {
             return {
+                context,
                 recovered: {
                     requestId,
                     result: null,
@@ -352,6 +391,7 @@ async function checkInMemoryRequest(
         }
         if (error.status === 404 || error.status === 409) {
             return {
+                context,
                 recovered: null,
                 reusableRequestId: requestId,
                 reusableRevision: null,
@@ -364,9 +404,10 @@ async function checkInMemoryRequest(
 /** Records that the optional avatar upload completed before import recovery is cleared. */
 export async function markBusinessCardImportAvatarCompleted(
     requestId: string,
+    context: BusinessCardRecoveryContext,
     signal?: AbortSignal,
 ): Promise<number | null> {
-    const scope = await recoveryScope(signal);
+    const scope = (await recoveryContext(context, signal)).scope;
     return withRecoveryLock(scope, () => {
         const entry = readEntry(scope, requestId);
         if (!entry) return null;
@@ -384,10 +425,11 @@ export async function markBusinessCardImportAvatarCompleted(
 /** Removes a completed or conclusively rejected import UUID. */
 export async function clearBusinessCardImportRecovery(
     requestId: string,
+    context: BusinessCardRecoveryContext,
     signal?: AbortSignal,
     expectedRevision?: number | null,
 ): Promise<void> {
-    const scope = await recoveryScope(signal);
+    const scope = (await recoveryContext(context, signal)).scope;
     await withRecoveryLock(scope, () => {
         const entry = readEntry(scope, requestId);
         if (!entry) return;
@@ -410,16 +452,17 @@ type EntryCheckOutcome = {
 };
 
 async function checkEntries(
-    scope: string,
+    context: BusinessCardRecoveryContext,
     entries: RecoveryEntry[],
     signal?: AbortSignal,
 ): Promise<EntryCheckOutcome> {
+    const scope = context.scope;
     let pending = false;
     let reusableRequestId: string | null = null;
     let reusableRevision: number | null = null;
     for (const entry of entries) {
         try {
-            const result = await getBusinessCardImportStatus(entry.requestId, { signal });
+            const result = await getBusinessCardImportStatus(entry.requestId, context, { signal });
             const current = await currentEntry(scope, entry, signal);
             if (!current) continue;
             return {
@@ -477,21 +520,28 @@ export async function reconcileBusinessCardImportRecovery(
     signal?: AbortSignal,
     inMemoryRequestId?: string | null,
 ): Promise<BusinessCardImportRecoveryReconciliation> {
-    const scope = await recoveryScope(signal);
+    const context = await recoveryContext(undefined, signal);
+    const scope = context.scope;
     for (let attempt = 0; attempt <= RECOVERY_POLL_DELAYS_MS.length; attempt += 1) {
         const entries = await withRecoveryLock(scope, () => readEntries(scope), signal);
         const candidates = inMemoryRequestId
             ? entries.filter((entry) => entry.requestId === inMemoryRequestId)
             : entries.filter((entry) => entry.phase === 'submitted' || entry.phase === 'legacy');
         if (inMemoryRequestId && candidates.length === 0) {
-            return checkInMemoryRequest(inMemoryRequestId, signal);
+            return checkInMemoryRequest(inMemoryRequestId, context, signal);
         }
         if (candidates.length === 0) {
-            return { recovered: null, reusableRequestId: null, reusableRevision: null };
+            return {
+                context,
+                recovered: null,
+                reusableRequestId: null,
+                reusableRevision: null,
+            };
         }
-        const outcome = await checkEntries(scope, candidates, signal);
+        const outcome = await checkEntries(context, candidates, signal);
         if (outcome.recovered) {
             return {
+                context,
                 recovered: outcome.recovered,
                 reusableRequestId: null,
                 reusableRevision: null,
@@ -499,6 +549,7 @@ export async function reconcileBusinessCardImportRecovery(
         }
         if (!outcome.pending) {
             return {
+                context,
                 recovered: null,
                 reusableRequestId: outcome.reusableRequestId,
                 reusableRevision: outcome.reusableRevision,
@@ -510,5 +561,10 @@ export async function reconcileBusinessCardImportRecovery(
         }
         await delay(nextDelay, signal);
     }
-    return { recovered: null, reusableRequestId: null, reusableRevision: null };
+    return {
+        context,
+        recovered: null,
+        reusableRequestId: null,
+        reusableRevision: null,
+    };
 }

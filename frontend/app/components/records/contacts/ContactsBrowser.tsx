@@ -258,12 +258,16 @@ export default function ContactsBrowser({ savedViews }: { savedViews: SavedView[
     };
 
     const createNewContact = async (businessCard?: BusinessCardImportDraft) => {
+        invalidateNewContactClose();
+        const operationGeneration = newContactGenerationRef.current;
+        const isCurrent = () => newContactGenerationRef.current === operationGeneration;
         setCreationSucceeded(false);
         setIsCreating(true);
         try {
             const newContact = businessCard
                 ? (await importBusinessCard(businessCard)).contact
                 : await createContact(newContactPayload);
+            if (!isCurrent()) return;
             let avatarUploadFailed = false;
             if (imageFile) {
                 try {
@@ -271,14 +275,15 @@ export default function ContactsBrowser({ savedViews }: { savedViews: SavedView[
                 } catch {
                     avatarUploadFailed = true;
                 }
+                if (!isCurrent()) return;
             }
-            setIsCreating(false);
+            if (isCurrent()) setIsCreating(false);
             let finalized = false;
             return {
                 avatarUploadFailed,
                 avatarUploaded: imageFile != null && !avatarUploadFailed,
                 finalize: () => {
-                    if (finalized) return;
+                    if (finalized || !isCurrent()) return;
                     finalized = true;
                     toastSuccess(t('toastContactCreated'));
                     setCreationSucceeded(true);
@@ -293,12 +298,13 @@ export default function ContactsBrowser({ savedViews }: { savedViews: SavedView[
                 },
             };
         } catch (err) {
+            if (!isCurrent()) return;
             if (isFieldError(err) || businessCard) {
                 throw err;
             }
             toastError(t('toastFailedCreate'));
         } finally {
-            setIsCreating(false);
+            if (isCurrent()) setIsCreating(false);
         }
     };
 

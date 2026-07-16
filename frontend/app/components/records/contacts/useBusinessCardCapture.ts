@@ -11,7 +11,9 @@ import {
 } from 'react';
 
 import {
+    ApiError,
     businessCardRequestErrorKind,
+    clientRecoveryContext,
     getCapabilities,
     getEffectivePermissions,
     scanBusinessCard,
@@ -29,6 +31,7 @@ import type {
     BusinessCardCompanyAction,
     BusinessCardImportDraft,
     BusinessCardRequestErrorKind,
+    BusinessCardRecoveryContext,
     BusinessCardScanResult,
     CreateContactPayload,
 } from '@/app/lib/types';
@@ -99,6 +102,7 @@ export function useBusinessCardCapture({
     const scanRequestSequenceRef = useRef(0);
     const importRequestIdRef = useRef<string | null>(null);
     const importRevisionRef = useRef<number | null>(null);
+    const importRecoveryContextRef = useRef<BusinessCardRecoveryContext | null>(null);
     const recoveryResetPromiseRef = useRef<Promise<void> | null>(null);
     const requiresExactImportRetryRef = useRef(false);
     const hasSelectedCardRef = useRef(false);
@@ -199,6 +203,7 @@ export function useBusinessCardCapture({
                 if (reconciliation.recovered) {
                     importRevisionRef.current = reconciliation.recovered.revision;
                 }
+                importRecoveryContextRef.current = reconciliation.context;
                 setRecoveredImport(reconciliation.recovered);
                 if (!reconciliation.recovered
                     && !reconciliation.reusableRequestId
@@ -260,6 +265,7 @@ export function useBusinessCardCapture({
             revertOcrOwnedValues();
             importRequestIdRef.current = null;
             importRevisionRef.current = null;
+            importRecoveryContextRef.current = null;
             hasSelectedCardRef.current = false;
             companyModeRef.current = null;
             suggestedCompanyIdRef.current = null;
@@ -270,10 +276,17 @@ export function useBusinessCardCapture({
         };
     }, [active, revertOcrOwnedValues]);
 
-    const clearImportRequest = async () => {
+    const clearImportRequest = async (signal?: AbortSignal) => {
         const requestId = importRequestIdRef.current;
         if (!requestId) return;
-        await clearBusinessCardImportRecovery(requestId, undefined, importRevisionRef.current);
+        const context = importRecoveryContextRef.current;
+        if (!context) throw new BusinessCardRecoveryStorageUnavailableError();
+        await clearBusinessCardImportRecovery(
+            requestId,
+            context,
+            signal,
+            importRevisionRef.current,
+        );
         if (importRequestIdRef.current === requestId) {
             importRequestIdRef.current = null;
             importRevisionRef.current = null;
@@ -300,7 +313,7 @@ export function useBusinessCardCapture({
         };
     }, [previewUrl]);
 
-    const runScan = async (image: File) => {
+    const runScan = async (image: File, shouldScan = true) => {
         const requestSequence = scanRequestSequenceRef.current + 1;
         scanRequestSequenceRef.current = requestSequence;
         controllerRef.current?.abort();
@@ -316,7 +329,30 @@ export function useBusinessCardCapture({
             && !controller.signal.aborted;
 
         try {
-            const nextResult = await scanBusinessCard(image, { signal: controller.signal });
+            const nextContext = await clientRecoveryContext({ signal: controller.signal });
+            if (!nextContext) throw new BusinessCardRecoveryStorageUnavailableError();
+            const existingContext = importRecoveryContextRef.current;
+            if (existingContext
+                && (existingContext.scope !== nextContext.scope
+                    || existingContext.workspaceId !== nextContext.workspaceId)) {
+                throw new ApiError(
+                    'Business-card request context changed',
+                    409,
+                    'BUSINESS_CARD_CONTEXT_CHANGED',
+                );
+            }
+            if (!canCommit()) return;
+            importRecoveryContextRef.current = nextContext;
+            if (!shouldScan) {
+                controllerRef.current = null;
+                setStatus('manual');
+                return;
+            }
+            const nextResult = await scanBusinessCard(
+                image,
+                nextContext,
+                { signal: controller.signal },
+            );
             if (!canCommit()) return;
             controllerRef.current = null;
             setResult(nextResult);
@@ -389,6 +425,7 @@ export function useBusinessCardCapture({
         userTouchedFieldsRef.current.clear();
         userTouchedCompanyNameRef.current = false;
         clearImportRequestBestEffort();
+        importRecoveryContextRef.current = null;
         suggestedCompanyIdRef.current = null;
         setFile(image);
         setPreviewUrl(URL.createObjectURL(image));
@@ -400,16 +437,7 @@ export function useBusinessCardCapture({
         suggestedCompanyNameRef.current = null;
         setCompanyValidationError(null);
         setImportError(null);
-        if (scanAvailable) {
-            void runScan(image);
-        } else {
-            scanRequestSequenceRef.current += 1;
-            controllerRef.current?.abort();
-            controllerRef.current = null;
-            setResult(null);
-            setRequestError(null);
-            setStatus('manual');
-        }
+        void runScan(image, scanAvailable);
     };
 
     const cancelScan = () => {
@@ -463,6 +491,7 @@ export function useBusinessCardCapture({
             suggestedCompanyIdRef.current = null;
         }
         clearImportRequestBestEffort();
+        importRecoveryContextRef.current = null;
         hasSelectedCardRef.current = false;
         setFile(null);
         setPreviewUrl(null);
@@ -549,16 +578,27 @@ export function useBusinessCardCapture({
         importControllerRef.current?.abort();
         importControllerRef.current = controller;
         try {
+            let recoveryContext = importRecoveryContextRef.current;
+            if (!recoveryContext) {
+                recoveryContext = await clientRecoveryContext({ signal: controller.signal });
+                if (!recoveryContext) throw new BusinessCardRecoveryStorageUnavailableError();
+                importRecoveryContextRef.current = recoveryContext;
+            }
             if (importRequestIdRef.current) {
                 requestId = importRequestIdRef.current;
             } else {
-                requestId = await registerBusinessCardImportRecovery(pendingAvatar, controller.signal);
+                requestId = await registerBusinessCardImportRecovery(
+                    pendingAvatar,
+                    recoveryContext,
+                    controller.signal,
+                );
                 importRevisionRef.current = 0;
             }
             importRequestIdRef.current = requestId;
             importRevisionRef.current = await prepareBusinessCardImportRecovery(
                 requestId,
                 pendingAvatar,
+                recoveryContext,
                 controller.signal,
             );
         } catch (error) {
@@ -575,7 +615,9 @@ export function useBusinessCardCapture({
         const contact = companyAction.type === 'existing'
             ? { ...currentPayload, companyId: companyAction.companyId }
             : { ...currentPayload, companyId: undefined };
-        return { requestId, image: file, contact, companyAction };
+        const recoveryContext = importRecoveryContextRef.current;
+        if (!recoveryContext) return undefined;
+        return { requestId, recoveryContext, image: file, contact, companyAction };
     };
 
     const updateContactField = (field: BusinessCardContactField, value: string) => {
@@ -596,11 +638,11 @@ export function useBusinessCardCapture({
         onImportRetryRequiredChangeRef.current?.(retryRequired);
     };
 
-    const resolveImportRetry = async () => {
+    const resolveImportRetry = async (signal?: AbortSignal) => {
         try {
-            await clearImportRequest();
+            await clearImportRequest(signal);
         } catch (error) {
-            setRecoveryStatus('storageUnavailable');
+            if (!signal?.aborted && activeRef.current) setRecoveryStatus('storageUnavailable');
             throw error;
         }
         requiresExactImportRetryRef.current = false;
@@ -608,13 +650,19 @@ export function useBusinessCardCapture({
         onImportRetryRequiredChangeRef.current?.(false);
     };
 
-    const markImportAvatarCompleted = async () => {
+    const markImportAvatarCompleted = async (signal?: AbortSignal) => {
         const requestId = importRequestIdRef.current;
         if (!requestId) return;
+        const context = importRecoveryContextRef.current;
+        if (!context) throw new BusinessCardRecoveryStorageUnavailableError();
         try {
-            importRevisionRef.current = await markBusinessCardImportAvatarCompleted(requestId);
+            importRevisionRef.current = await markBusinessCardImportAvatarCompleted(
+                requestId,
+                context,
+                signal,
+            );
         } catch (error) {
-            setRecoveryStatus('storageUnavailable');
+            if (!signal?.aborted && activeRef.current) setRecoveryStatus('storageUnavailable');
             throw error;
         }
     };
@@ -622,6 +670,7 @@ export function useBusinessCardCapture({
     const deferImportRetry = () => {
         importRequestIdRef.current = null;
         importRevisionRef.current = null;
+        importRecoveryContextRef.current = null;
         requiresExactImportRetryRef.current = false;
         setRequiresExactImportRetry(false);
         setImportError(null);
@@ -641,10 +690,13 @@ export function useBusinessCardCapture({
 
     const acknowledgeRecoveredImport = useCallback(async (signal?: AbortSignal) => {
         if (!recoveredImport) return;
+        const context = importRecoveryContextRef.current;
+        if (!context) throw new BusinessCardRecoveryStorageUnavailableError();
         try {
             setRecoveryStatus('acknowledging');
             await clearBusinessCardImportRecovery(
                 recoveredImport.requestId,
+                context,
                 signal,
                 recoveredImport.revision,
             );
@@ -656,11 +708,13 @@ export function useBusinessCardCapture({
             setRecoveredImport(null);
             setRecoveryStatus('ready');
         } catch (error) {
-            setRecoveryStatus(
-                error instanceof BusinessCardRecoveryStorageUnavailableError
-                    ? 'storageUnavailable'
-                    : 'error',
-            );
+            if (!signal?.aborted && activeRef.current) {
+                setRecoveryStatus(
+                    error instanceof BusinessCardRecoveryStorageUnavailableError
+                        ? 'storageUnavailable'
+                        : 'error',
+                );
+            }
             throw error;
         }
     }, [recoveredImport]);

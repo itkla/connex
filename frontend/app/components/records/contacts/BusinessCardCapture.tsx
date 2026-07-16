@@ -217,10 +217,13 @@ export function BusinessCardCapture({
         onSelectionPendingChangeRef.current = onSelectionPendingChange;
     });
 
-    useEffect(() => () => {
-        activeRef.current = false;
-        selectionSequenceRef.current += 1;
-        onSelectionPendingChangeRef.current(false);
+    useEffect(() => {
+        activeRef.current = true;
+        return () => {
+            activeRef.current = false;
+            selectionSequenceRef.current += 1;
+            onSelectionPendingChangeRef.current(false);
+        };
     }, []);
 
     const setPending = (pending: boolean) => {
