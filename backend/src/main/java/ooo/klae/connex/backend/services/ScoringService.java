@@ -154,16 +154,20 @@ public class ScoringService {
             return List.of();
         }
         long reference = Instant.now(clock).toEpochMilli();
-        Set<Integer> existing = new HashSet<>(personMapper.getExistingPersonIds(workspaceId, requested));
+        Set<Integer> existing = new HashSet<>(personMapper.getProcessablePersonIds(workspaceId, requested));
+        List<Integer> processable = requested.stream().filter(existing::contains).toList();
+        if (processable.isEmpty()) {
+            return List.of();
+        }
         Map<Integer, List<Touch>> touches = new HashMap<>();
-        for (Activity activity : activityMapper.getActivitiesByPersonIds(workspaceId, requested)) {
+        for (Activity activity : activityMapper.getActivitiesByPersonIds(workspaceId, processable)) {
             Integer personId = personId(activity.getPerson());
             Long timestamp = epoch(activity.getTimestamp());
             if (personId != null && timestamp != null) {
                 add(touches, personId, new Touch(timestamp, activityWeight(activity.getType())));
             }
         }
-        for (Note note : noteMapper.getNotesByPersonIds(workspaceId, requested)) {
+        for (Note note : noteMapper.getNotesByPersonIds(workspaceId, processable)) {
             if (!isSharedNote(note)) continue;
             Integer personId = personId(note.getPerson());
             Long timestamp = epoch(note.getCreatedAt());
@@ -171,7 +175,7 @@ public class ScoringService {
                 add(touches, personId, new Touch(timestamp, NOTE_WEIGHT));
             }
         }
-        for (Task task : taskMapper.getTasksByPersonIds(workspaceId, requested)) {
+        for (Task task : taskMapper.getTasksByPersonIds(workspaceId, processable)) {
             Integer personId = personId(task.getPerson());
             Long timestamp = epoch(task.getCreatedAt());
             if (personId != null && timestamp != null) {
@@ -179,17 +183,15 @@ public class ScoringService {
             }
         }
         List<RelationshipTemperatureDto> out = new ArrayList<>(existing.size());
-        for (Integer personId : requested) {
-            if (existing.contains(personId)) {
-                out.add(temperature(personId, touches.getOrDefault(personId, List.of()), reference, reference));
-            }
+        for (Integer personId : processable) {
+            out.add(temperature(personId, touches.getOrDefault(personId, List.of()), reference, reference));
         }
         return out;
     }
 
     private List<RelationshipTemperatureDto> computeContactScores(int workspaceId, long reference, long cutoff) {
-        Map<Integer, List<Touch>> byPerson = collectContactTouches(workspaceId);
-        List<Person> persons = personMapper.getAllPersons(workspaceId);
+        List<Person> persons = personMapper.getProcessablePersons(workspaceId);
+        Map<Integer, List<Touch>> byPerson = collectContactTouches(workspaceId, personIds(persons));
         List<RelationshipTemperatureDto> out = new ArrayList<>(persons.size());
         for (Person p : persons) {
             out.add(temperature(p.getId(), byPerson.getOrDefault(p.getId(), List.of()), reference, cutoff));
@@ -198,23 +200,29 @@ public class ScoringService {
     }
 
     /** Buckets every contact-linked touch (activities, notes, tasks) by contact id. */
-    private Map<Integer, List<Touch>> collectContactTouches(int workspaceId) {
+    private Map<Integer, List<Touch>> collectContactTouches(int workspaceId, Set<Integer> processablePersonIds) {
         Map<Integer, List<Touch>> byPerson = new HashMap<>();
         for (Activity a : activityMapper.getAllActivities(workspaceId)) {
             Integer pid = personId(a.getPerson());
             Long ts = epoch(a.getTimestamp());
-            if (pid != null && ts != null) add(byPerson, pid, new Touch(ts, activityWeight(a.getType())));
+            if (pid != null && processablePersonIds.contains(pid) && ts != null) {
+                add(byPerson, pid, new Touch(ts, activityWeight(a.getType())));
+            }
         }
         for (Note n : noteMapper.getAllNotes(workspaceId)) {
             if (!isSharedNote(n)) continue;
             Integer pid = personId(n.getPerson());
             Long ts = epoch(n.getCreatedAt());
-            if (pid != null && ts != null) add(byPerson, pid, new Touch(ts, NOTE_WEIGHT));
+            if (pid != null && processablePersonIds.contains(pid) && ts != null) {
+                add(byPerson, pid, new Touch(ts, NOTE_WEIGHT));
+            }
         }
         for (Task t : taskMapper.getAllTasks(workspaceId)) {
             Integer pid = personId(t.getPerson());
             Long ts = epoch(t.getCreatedAt());
-            if (pid != null && ts != null) add(byPerson, pid, new Touch(ts, TASK_WEIGHT));
+            if (pid != null && processablePersonIds.contains(pid) && ts != null) {
+                add(byPerson, pid, new Touch(ts, TASK_WEIGHT));
+            }
         }
         return byPerson;
     }
@@ -258,16 +266,20 @@ public class ScoringService {
         List<Integer> visibleIds = companies.stream().map(Company::getId).toList();
         List<Person> persons = personMapper.getPersonsByCompanyIds(workspaceId, visibleIds);
         List<Deal> deals = dealMapper.getDealsByCompanyIds(workspaceId, visibleIds);
+        List<Activity> activities = activityMapper.getActivitiesByCompanyIds(workspaceId, visibleIds);
+        List<Note> notes = noteMapper.getWorkspaceNotesByCompanyIds(workspaceId, visibleIds).stream()
+            .filter(ScoringService::isSharedNote)
+            .toList();
+        List<Task> tasks = taskMapper.getTasksByCompanyIds(workspaceId, visibleIds);
         Map<Integer, Integer> personCompany = personCompanyMap(persons);
         Map<Integer, Integer> dealCompany = dealCompanyMap(deals);
         Map<Integer, List<Touch>> byCompany = new HashMap<>();
         collectCompanyTouches(
-            activityMapper.getActivitiesByCompanyIds(workspaceId, visibleIds),
-            noteMapper.getWorkspaceNotesByCompanyIds(workspaceId, visibleIds).stream()
-                .filter(ScoringService::isSharedNote)
-                .toList(),
-            taskMapper.getTasksByCompanyIds(workspaceId, visibleIds),
+            activities,
+            notes,
+            tasks,
             personCompany,
+            processablePersonIds(workspaceId, activities, notes, tasks),
             dealCompany,
             byCompany);
         long reference = Instant.now(clock).toEpochMilli();
@@ -364,7 +376,8 @@ public class ScoringService {
 
     /** Buckets every touch by the company of its linked contact and/or deal (present-day parentage). */
     private Map<Integer, List<Touch>> collectCompanyTouches(int workspaceId) {
-        Map<Integer, Integer> personCompany = personCompanyMap(personMapper.getAllPersons(workspaceId));
+        List<Person> persons = personMapper.getProcessablePersons(workspaceId);
+        Map<Integer, Integer> personCompany = personCompanyMap(persons);
         Map<Integer, Integer> dealCompany = dealCompanyMap(dealMapper.getAllDeals(workspaceId));
         Map<Integer, List<Touch>> byCompany = new HashMap<>();
         collectCompanyTouches(
@@ -372,6 +385,7 @@ public class ScoringService {
             noteMapper.getAllNotes(workspaceId).stream().filter(ScoringService::isSharedNote).toList(),
             taskMapper.getAllTasks(workspaceId),
             personCompany,
+            personIds(persons),
             dealCompany,
             byCompany);
         return byCompany;
@@ -382,6 +396,7 @@ public class ScoringService {
             List<Note> notes,
             List<Task> tasks,
             Map<Integer, Integer> personCompany,
+            Set<Integer> processablePersonIds,
             Map<Integer, Integer> dealCompany,
             Map<Integer, List<Touch>> byCompany) {
         for (Activity activity : activities) {
@@ -389,21 +404,21 @@ public class ScoringService {
             if (timestamp != null) {
                 attribute(activity.getPerson(), activity.getDeal(),
                     new Touch(timestamp, activityWeight(activity.getType())),
-                    personCompany, dealCompany, byCompany);
+                    personCompany, processablePersonIds, dealCompany, byCompany);
             }
         }
         for (Note note : notes) {
             Long timestamp = epoch(note.getCreatedAt());
             if (timestamp != null) {
                 attribute(note.getPerson(), note.getDeal(), new Touch(timestamp, NOTE_WEIGHT),
-                    personCompany, dealCompany, byCompany);
+                    personCompany, processablePersonIds, dealCompany, byCompany);
             }
         }
         for (Task task : tasks) {
             Long timestamp = epoch(task.getCreatedAt());
             if (timestamp != null) {
                 attribute(task.getPerson(), task.getDeal(), new Touch(timestamp, TASK_WEIGHT),
-                    personCompany, dealCompany, byCompany);
+                    personCompany, processablePersonIds, dealCompany, byCompany);
             }
         }
     }
@@ -415,6 +430,29 @@ public class ScoringService {
             if (companyId != null && companyId != 0) result.put(person.getId(), companyId);
         }
         return result;
+    }
+
+    private static Set<Integer> personIds(List<Person> persons) {
+        return persons.stream().map(Person::getId).collect(java.util.stream.Collectors.toUnmodifiableSet());
+    }
+
+    private Set<Integer> processablePersonIds(
+            int workspaceId, List<Activity> activities, List<Note> notes, List<Task> tasks) {
+        Set<Integer> requested = new HashSet<>();
+        activities.stream().map(Activity::getPerson).map(ScoringService::personId)
+            .filter(java.util.Objects::nonNull).forEach(requested::add);
+        notes.stream().map(Note::getPerson).map(ScoringService::personId)
+            .filter(java.util.Objects::nonNull).forEach(requested::add);
+        tasks.stream().map(Task::getPerson).map(ScoringService::personId)
+            .filter(java.util.Objects::nonNull).forEach(requested::add);
+        if (requested.isEmpty()) return Set.of();
+        List<Integer> ids = List.copyOf(requested);
+        Set<Integer> processable = new HashSet<>();
+        for (int from = 0; from < ids.size(); from += MAX_BATCH_CONTACTS) {
+            int to = Math.min(ids.size(), from + MAX_BATCH_CONTACTS);
+            processable.addAll(personMapper.getProcessablePersonIds(workspaceId, ids.subList(from, to)));
+        }
+        return Set.copyOf(processable);
     }
 
     private static Map<Integer, Integer> dealCompanyMap(List<Deal> deals) {
@@ -438,21 +476,21 @@ public class ScoringService {
      * with no qualifying touch (the caller defaults them to "cold").
      */
     public ReplayBands replayBands(int workspaceId, long[] frameMillis, EmployerResolver employerAt,
-            Map<Integer, Integer> dealCompany) {
+            Set<Integer> processablePersonIds, Map<Integer, Integer> dealCompany) {
         Map<Integer, List<Touch>> byPerson = new HashMap<>();
         List<CompanyTouch> companyTouches = new ArrayList<>();
         for (Activity a : activityMapper.getAllActivities(workspaceId)) {
             collectTouch(epoch(a.getTimestamp()), activityWeight(a.getType()), a.getPerson(), a.getDeal(),
-                dealCompany, byPerson, companyTouches);
+                processablePersonIds, dealCompany, byPerson, companyTouches);
         }
         for (Note n : noteMapper.getAllNotes(workspaceId)) {
             if (!isSharedNote(n)) continue;
             collectTouch(epoch(n.getCreatedAt()), NOTE_WEIGHT, n.getPerson(), n.getDeal(),
-                dealCompany, byPerson, companyTouches);
+                processablePersonIds, dealCompany, byPerson, companyTouches);
         }
         for (Task t : taskMapper.getAllTasks(workspaceId)) {
             collectTouch(epoch(t.getCreatedAt()), TASK_WEIGHT, t.getPerson(), t.getDeal(),
-                dealCompany, byPerson, companyTouches);
+                processablePersonIds, dealCompany, byPerson, companyTouches);
         }
 
         List<AttributedTouch> attributed = attributeCompanyTouches(companyTouches, employerAt);
@@ -482,10 +520,12 @@ public class ScoringService {
 
     /** Buckets one touch into the per-contact map and the company-attributable list in a single pass. */
     private static void collectTouch(Long ts, double weight, Person person, Deal deal,
-            Map<Integer, Integer> dealCompany, Map<Integer, List<Touch>> byPerson,
+            Set<Integer> processablePersonIds, Map<Integer, Integer> dealCompany,
+            Map<Integer, List<Touch>> byPerson,
             List<CompanyTouch> companyTouches) {
         if (ts == null) return;
         Integer pid = personId(person);
+        if (pid != null && !processablePersonIds.contains(pid)) return;
         if (pid != null) add(byPerson, pid, new Touch(ts, weight));
         companyTouches.add(new CompanyTouch(ts, weight, pid, dealCompanyFor(deal, dealCompany)));
     }
@@ -623,10 +663,12 @@ public class ScoringService {
 
     /** Attributes a touch to its contact's company and/or its deal's company (deduplicated). */
     private void attribute(Person person, Deal deal, Touch touch,
-            Map<Integer, Integer> personCompany, Map<Integer, Integer> dealCompany,
+            Map<Integer, Integer> personCompany, Set<Integer> processablePersonIds,
+            Map<Integer, Integer> dealCompany,
             Map<Integer, List<Touch>> byCompany) {
         Set<Integer> companies = new HashSet<>();
         Integer pid = personId(person);
+        if (pid != null && !processablePersonIds.contains(pid)) return;
         if (pid != null) {
             Integer cid = personCompany.get(pid);
             if (cid != null) companies.add(cid);

@@ -15,6 +15,8 @@
     <result property="imageUrl" column="image_url"/>
     <result property="riskExcluded" column="risk_excluded"/>
     <result property="introExcluded" column="intro_excluded"/>
+    <result property="suspendedAt" column="suspended_at"/>
+    <result property="provisionCeasedAt" column="provision_ceased_at"/>
     <association property="company" javaType="Company" notNullColumn="company_id">
       <id property="id" column="company_id"/>
       <result property="name" column="company_name"/>
@@ -32,7 +34,7 @@
 
   <sql id="personColumns">
     p.id, p.workspace_id, p.name, p.email, p.phone, p.title, p.created_at, p.updated_at, p.image_url,
-    p.risk_excluded, p.intro_excluded
+    p.risk_excluded, p.intro_excluded, p.suspended_at, p.provision_ceased_at
   </sql>
 
   <sql id="companyJoinColumns">
@@ -69,11 +71,21 @@
     ORDER BY p.name
   </select>
 
+  <select id="getProcessablePersons" resultMap="PersonResult">
+    SELECT <include refid="personColumns"/>, <include refid="companyJoinColumns"/>
+    FROM person p
+    <include refid="companyJoin"/>
+    WHERE <include refid="visible"/>
+      AND p.suspended_at IS NULL
+    ORDER BY p.name
+  </select>
+
   <select id="getPersonsForNetworkReport" resultMap="PersonResult">
     SELECT <include refid="personColumns"/>, <include refid="companyJoinColumns"/>
     FROM person p
     <include refid="companyJoin"/>
     WHERE <include refid="visible"/>
+      AND p.suspended_at IS NULL
     ORDER BY p.name, p.id
     LIMIT #{limit}
   </select>
@@ -116,6 +128,7 @@
       WHERE source.touched_at IS NOT NULL AND source.touched_at &lt;= #{reference}
     ) touch ON touch.entity_id = p.id
     WHERE <include refid="visible"/>
+      AND p.suspended_at IS NULL
     GROUP BY p.id
     ORDER BY p.id
   </select>
@@ -171,9 +184,10 @@
     WHERE <include refid="visible"/> AND p.id = #{id}
   </select>
 
-  <select id="getExistingPersonIds" resultType="int">
+  <select id="getProcessablePersonIds" resultType="int">
     SELECT p.id FROM person p
     WHERE <include refid="visible"/>
+      AND p.suspended_at IS NULL
       AND p.id IN
       <foreach item="id" collection="ids" open="(" separator="," close=")">#{id}</foreach>
   </select>
@@ -193,6 +207,7 @@
     FROM person p
     <include refid="companyJoin"/>
     WHERE <include refid="visible"/>
+      AND p.suspended_at IS NULL
       AND p.company_id IN
       <foreach item="id" collection="companyIds" open="(" separator="," close=")">#{id}</foreach>
     ORDER BY p.id
@@ -281,6 +296,7 @@
     FROM person p
     <include refid="companyJoin"/>
     <include refid="pageWhere"/>
+    AND p.suspended_at IS NULL
     ORDER BY p.name
   </select>
 
@@ -313,6 +329,7 @@
     ) engaged
     JOIN person p ON p.id = engaged.person_id
     WHERE <include refid="visible"/>
+      AND p.suspended_at IS NULL
   </select>
 
   <select id="search" resultMap="PersonResult">
@@ -387,6 +404,19 @@
       <if test="riskExcluded != null">risk_excluded = #{riskExcluded},</if>
       <if test="introExcluded != null">intro_excluded = #{introExcluded},</if>
     </set>
+    WHERE workspace_id = #{workspaceId} AND id = #{id}
+  </update>
+
+  <update id="updateProcessingRestrictions">
+    UPDATE person
+    SET suspended_at = CASE
+          WHEN #{suspended} THEN COALESCE(suspended_at, CURRENT_TIMESTAMP)
+          ELSE NULL
+        END,
+        provision_ceased_at = CASE
+          WHEN #{provisionCeased} THEN COALESCE(provision_ceased_at, CURRENT_TIMESTAMP)
+          ELSE NULL
+        END
     WHERE workspace_id = #{workspaceId} AND id = #{id}
   </update>
 

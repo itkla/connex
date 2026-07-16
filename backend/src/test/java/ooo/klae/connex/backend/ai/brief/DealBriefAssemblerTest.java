@@ -2,9 +2,15 @@ package ooo.klae.connex.backend.ai.brief;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -33,6 +39,7 @@ import ooo.klae.connex.backend.dto.DealRiskDto;
 import ooo.klae.connex.backend.dto.DealRiskFactor;
 import ooo.klae.connex.backend.dto.DealSummaryDto;
 import ooo.klae.connex.backend.dto.RelationshipTemperatureDto;
+import ooo.klae.connex.backend.mappers.PersonMapper;
 import ooo.klae.connex.backend.services.DealRiskService;
 import ooo.klae.connex.backend.services.DealService;
 import ooo.klae.connex.backend.services.ScoringService;
@@ -47,12 +54,26 @@ class DealBriefAssemblerTest {
     @Mock private ScoringService scoringService;
     @Mock private DealRiskService dealRiskService;
     @Mock private AiRelationshipContext aiRelationshipContext;
+    @Mock private PersonMapper personMapper;
 
     private DealBriefAssembler assembler;
 
     @BeforeEach
     void setUp() {
-        assembler = new DealBriefAssembler(dealService, scoringService, dealRiskService, aiRelationshipContext);
+        assembler = new DealBriefAssembler(
+            dealService, scoringService, dealRiskService, aiRelationshipContext, personMapper);
+        lenient().when(personMapper.getByIds(eq(WORKSPACE_ID), anyList())).thenAnswer(invocation -> {
+            List<?> ids = invocation.getArgument(1);
+            List<Person> people = new ArrayList<>();
+            for (Object value : ids) {
+                if (value instanceof Integer id) {
+                    Person person = new Person();
+                    person.setId(id);
+                    people.add(person);
+                }
+            }
+            return people;
+        });
     }
 
     @Test
@@ -144,6 +165,67 @@ class DealBriefAssemblerTest {
         } finally {
             LocaleContextHolder.resetLocaleContext();
         }
+    }
+
+    @Test
+    void assemble_omitsSuspendedAndProvisionCeasedStakeholdersBeforeMasking() {
+        Person suspended = person();
+        suspended.setSuspendedAt(LocalDateTime.parse("2026-07-01T00:00:00"));
+        Person ceased = new Person();
+        ceased.setId(74);
+        ceased.setName("Ceased Contact");
+        ceased.setProvisionCeasedAt(LocalDateTime.parse("2026-07-02T00:00:00"));
+        DealRiskFactor restrictedFactor = new DealRiskFactor(
+                "stakeholder_cold", "high", Map.of("personId", 74, "person", "Ceased Contact"));
+        when(dealService.getDealById(DEAL_ID)).thenReturn(deal());
+        when(dealService.getPeopleByDealId(DEAL_ID)).thenReturn(List.of(
+                new DealPerson(suspended, "Suspended role"),
+                new DealPerson(ceased, "Ceased role")));
+        when(dealRiskService.assessDeal(WORKSPACE_ID, DEAL_ID)).thenReturn(new DealRiskDto(
+                DEAL_ID, 0, null, "high", 50, List.of(restrictedFactor), "2026-07-09 18:30:00"));
+
+        String serialized = serialized(assembler.assemble(WORKSPACE_ID, DEAL_ID).prompt());
+
+        assertFalse(serialized.contains("Mina Patel"));
+        assertFalse(serialized.contains("Ceased Contact"));
+        assertFalse(serialized.contains("Suspended role"));
+        assertFalse(serialized.contains("Ceased role"));
+        assertFalse(serialized.contains("stakeholder_cold"));
+        verify(scoringService).scoreContacts(WORKSPACE_ID, Set.of());
+        verify(aiRelationshipContext, never()).appendStakeholderBackground(
+                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.anyInt(),
+                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
+    }
+
+    @Test
+    void assemble_omitsDealRecordsLinkedToRestrictedPeople() {
+        Person ceased = new Person();
+        ceased.setId(74);
+        ceased.setName("Ceased Contact");
+        ceased.setProvisionCeasedAt(LocalDateTime.parse("2026-07-02T00:00:00"));
+        Activity activity = new Activity();
+        activity.setPerson(ceased);
+        activity.setSubject("Activity for Ceased Contact");
+        Note note = new Note();
+        note.setPerson(ceased);
+        note.setTitle("Note for Ceased Contact");
+        Task task = new Task();
+        task.setPerson(ceased);
+        task.setDescription("Task for Ceased Contact");
+        when(dealService.getDealById(DEAL_ID)).thenReturn(deal());
+        when(dealService.getPeopleByDealId(DEAL_ID))
+            .thenReturn(List.of(new DealPerson(ceased, "Ceased role")));
+        when(dealService.getActivitiesByDealId(DEAL_ID)).thenReturn(List.of(activity));
+        when(dealService.getNotesByDealId(DEAL_ID)).thenReturn(List.of(note));
+        when(dealService.getTasksByDealId(DEAL_ID)).thenReturn(List.of(task));
+        when(personMapper.getByIds(WORKSPACE_ID, List.of(74))).thenReturn(List.of(ceased));
+
+        String serialized = serialized(assembler.assemble(WORKSPACE_ID, DEAL_ID).prompt());
+
+        assertFalse(serialized.contains("Ceased Contact"));
+        assertFalse(serialized.contains("Activity for"));
+        assertFalse(serialized.contains("Note for"));
+        assertFalse(serialized.contains("Task for"));
     }
 
     private static Deal deal() {

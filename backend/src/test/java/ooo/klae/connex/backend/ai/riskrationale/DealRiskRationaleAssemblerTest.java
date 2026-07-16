@@ -6,6 +6,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.util.List;
+import java.time.LocalDateTime;
 import java.util.Locale;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -132,6 +133,33 @@ class DealRiskRationaleAssemblerTest {
         assertTrue(serialized.contains("Value: 50000000 JPY"));
         assertFalse(serialized.contains("5.0E7"));
         assertFalse(serialized.contains("E7"));
+    }
+
+    @Test
+    void assemble_omitsProvisionCeasedStakeholderAndDerivedColdFactor() {
+        Person person = new Person();
+        person.setId(PERSON_ID);
+        person.setName("Ceased Contact");
+        person.setProvisionCeasedAt(LocalDateTime.parse("2026-07-01T00:00:00"));
+        DealRiskFactor coldFactor = new DealRiskFactor(
+                "stakeholder_cold",
+                "high",
+                Map.of("personId", PERSON_ID, "person", "Ceased Contact", "role", "Ceased role"));
+        DealRiskDto risk = new DealRiskDto(
+                DEAL_ID, 0, null, "high", 50, List.of(coldFactor), "2026-07-09 18:30:00");
+        when(dealService.getPeopleByDealId(DEAL_ID))
+                .thenReturn(List.of(new DealPerson(person, "Ceased role")));
+
+        RationaleAssembly assembly = assembler.assemble(WORKSPACE_ID, DEAL_ID, risk);
+        String serialized = serialized(assembly.prompt());
+
+        assertFalse(assembly.atRisk());
+        assertTrue(serialized.contains("Level: none"));
+        assertTrue(serialized.contains("Score: 0"));
+        assertFalse(serialized.contains("Ceased Contact"));
+        assertFalse(serialized.contains("Ceased role"));
+        assertFalse(serialized.contains("stakeholder_cold"));
+        verify(scoringService).scoreContacts(WORKSPACE_ID, java.util.Set.of());
     }
 
     @Test

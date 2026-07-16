@@ -299,7 +299,8 @@ public class SegmentService {
         }
         return switch (key) {
             case "open_deal" -> new HashSet<>(segmentMapper.companyIdsWithOpenDeal(workspaceId));
-            case "no_activity" -> new HashSet<>(segmentMapper.companyIdsNoActivitySince(workspaceId, resolveDays(condition.getDays())));
+            case "no_activity" -> new HashSet<>(segmentMapper.companyIdsNoActivitySince(
+                workspaceId, resolveDays(condition.getDays())));
             case "cooling" -> coolingCompanyIds(workspaceId);
             case "warm_intro_available" -> warmIntroCompanyIds(workspaceId, userId);
             default -> throw new BadRequestException("Unknown predicate: " + condition.getKey());

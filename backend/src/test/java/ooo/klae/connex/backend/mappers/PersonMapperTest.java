@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.mappers;
 
+import java.time.LocalDateTime;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -10,6 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.jdbc.core.JdbcTemplate;
 
 import ooo.klae.connex.backend.beans.Company;
 import ooo.klae.connex.backend.beans.Deal;
@@ -24,6 +26,7 @@ import ooo.klae.connex.backend.beans.Workspace;
 class PersonMapperTest extends AbstractMapperTest {
 
     @Autowired private NoteMapper noteMapper;
+    @Autowired private JdbcTemplate jdbcTemplate;
 
     /**
      * Inserts a new person and checks if the generated ID is not zero.
@@ -100,6 +103,85 @@ class PersonMapperTest extends AbstractMapperTest {
         assertTrue(personMapper.getPersonById(workspace.getId(), person.getId()).isRiskExcluded());
     }
 
+    @Test
+    void updateProcessingRestrictionsPreservesTimestampsClearsIndependentlyAndIsWorkspaceScoped() {
+        Person person = newPerson(newCompany());
+
+        assertEquals(1, personMapper.updateProcessingRestrictions(
+            workspace.getId(), person.getId(), true, true));
+        Person restricted = personMapper.getPersonById(workspace.getId(), person.getId());
+        assertNotNull(restricted.getSuspendedAt());
+        assertNotNull(restricted.getProvisionCeasedAt());
+
+        LocalDateTime preserved = LocalDateTime.parse("2025-01-02T03:04:05");
+        jdbcTemplate.update("UPDATE person SET suspended_at = ? WHERE id = ?", preserved, person.getId());
+        personMapper.updateProcessingRestrictions(workspace.getId(), person.getId(), true, true);
+        assertEquals(preserved, personMapper.getPersonById(workspace.getId(), person.getId()).getSuspendedAt());
+
+        personMapper.updateProcessingRestrictions(workspace.getId(), person.getId(), false, true);
+        restricted = personMapper.getPersonById(workspace.getId(), person.getId());
+        assertNull(restricted.getSuspendedAt());
+        assertNotNull(restricted.getProvisionCeasedAt());
+
+        Workspace other = newWorkspace();
+        assertEquals(0, personMapper.updateProcessingRestrictions(other.getId(), person.getId(), true, false));
+        assertNull(personMapper.getPersonById(workspace.getId(), person.getId()).getSuspendedAt());
+        assertNotNull(personMapper.getPersonById(workspace.getId(), person.getId()).getProvisionCeasedAt());
+    }
+
+    @Test
+    void suspendedContactsAreExcludedOnlyFromProcessingReads() {
+        Company company = newCompany();
+        Person normal = newPerson(company);
+        Person suspended = newPerson(company);
+        Person provisionCeased = newPerson(company);
+        User author = newUser();
+        addNote(normal, author, "workspace");
+        addNote(suspended, author, "workspace");
+        personMapper.updateProcessingRestrictions(workspace.getId(), suspended.getId(), true, false);
+        personMapper.updateProcessingRestrictions(workspace.getId(), provisionCeased.getId(), false, true);
+        Pipeline pipeline = newPipeline();
+        Stage stage = newStage(pipeline, 0);
+        Deal deal = newDeal(pipeline, stage, company);
+        dealMapper.addPerson(workspace.getId(), deal.getId(), suspended.getId(), "suspended");
+        dealMapper.addPerson(workspace.getId(), deal.getId(), provisionCeased.getId(), "ceased");
+
+        List<Integer> processableIds = personMapper.getProcessablePersons(workspace.getId()).stream()
+            .map(Person::getId).toList();
+        assertTrue(processableIds.contains(normal.getId()));
+        assertTrue(processableIds.contains(provisionCeased.getId()));
+        assertFalse(processableIds.contains(suspended.getId()));
+        assertFalse(personMapper.getProcessablePersonIds(
+            workspace.getId(), List.of(normal.getId(), suspended.getId(), provisionCeased.getId()))
+            .contains(suspended.getId()));
+        assertFalse(personMapper.getPersonsByCompanyIds(workspace.getId(), List.of(company.getId())).stream()
+            .anyMatch(person -> person.getId() == suspended.getId()));
+        assertFalse(personMapper.getRelationshipScoreAggregates(
+            workspace.getId(), LocalDateTime.now().plusDays(1)).stream()
+            .anyMatch(score -> score.id() == suspended.getId()));
+        assertFalse(personMapper.getEngagedPersonIds(workspace.getId()).contains(suspended.getId()));
+        assertFalse(personMapper.getPersonsForNetworkReport(workspace.getId(), 10_000).stream()
+            .anyMatch(person -> person.getId() == suspended.getId()));
+        assertFalse(personMapper.getPersonsFiltered(
+            workspace.getId(), null, null, null, false).stream()
+            .anyMatch(person -> person.getId() == suspended.getId()));
+
+        assertNotNull(personMapper.getPersonById(workspace.getId(), suspended.getId()));
+        assertTrue(personMapper.getAllPersons(workspace.getId()).stream()
+            .anyMatch(person -> person.getId() == suspended.getId()));
+        assertTrue(personMapper.getPersonsPage(
+            workspace.getId(), null, null, null, null, null, false, 10_000, 0).stream()
+            .anyMatch(person -> person.getId() == suspended.getId()));
+        assertTrue(personMapper.getPersonsByDealId(workspace.getId(), deal.getId()).stream()
+            .anyMatch(person -> person.getId() == suspended.getId()));
+        assertNotNull(dealMapper.getDealPeopleByDealId(workspace.getId(), deal.getId()).stream()
+            .filter(dealPerson -> dealPerson.getPerson().getId() == suspended.getId())
+            .findFirst().orElseThrow().getPerson().getSuspendedAt());
+        assertNotNull(dealMapper.getDealPeopleByDealId(workspace.getId(), deal.getId()).stream()
+            .filter(dealPerson -> dealPerson.getPerson().getId() == provisionCeased.getId())
+            .findFirst().orElseThrow().getPerson().getProvisionCeasedAt());
+    }
+
     /**
      * Gets all persons and checks if the returned list includes the inserted person.
      */
@@ -113,12 +195,12 @@ class PersonMapperTest extends AbstractMapperTest {
     }
 
     @Test
-    void getExistingPersonIdsIsWorkspaceScopedAndIgnoresMissingIds() {
+    void getProcessablePersonIdsIsWorkspaceScopedAndIgnoresMissingIds() {
         Person included = newPerson(newCompany());
         Workspace other = newWorkspace();
         Person foreign = newPersonIn(other);
 
-        List<Integer> ids = personMapper.getExistingPersonIds(
+        List<Integer> ids = personMapper.getProcessablePersonIds(
             workspace.getId(), List.of(included.getId(), foreign.getId(), Integer.MAX_VALUE));
 
         assertEquals(List.of(included.getId()), ids);

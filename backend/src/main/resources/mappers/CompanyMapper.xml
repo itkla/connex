@@ -79,6 +79,7 @@
           FROM activity a
           JOIN person p ON p.id = a.person_id
           WHERE a.workspace_id = #{workspaceId} AND p.company_id IS NOT NULL
+            AND p.suspended_at IS NULL
             AND <include refid="visiblePerson"/>
           UNION ALL
           SELECT 'activity' AS touch_kind, a.id AS touch_id, d.company_id,
@@ -93,13 +94,19 @@
           JOIN deal d ON d.id = a.deal_id
           WHERE a.workspace_id = #{workspaceId} AND d.workspace_id = #{workspaceId}
             AND d.company_id IS NOT NULL
+            AND (a.person_id IS NULL OR EXISTS (
+              SELECT 1 FROM person p
+              WHERE p.id = a.person_id AND p.suspended_at IS NULL
+                AND <include refid="visiblePerson"/>
+            ))
           UNION ALL
           SELECT 'note' AS touch_kind, n.id AS touch_id, p.company_id,
                  n.created_at AS touched_at, 0.4 AS weight
           FROM note n
           JOIN person p ON p.id = n.person_id
           WHERE n.workspace_id = #{workspaceId} AND n.visibility = 'workspace'
-            AND p.company_id IS NOT NULL AND <include refid="visiblePerson"/>
+            AND p.company_id IS NOT NULL AND p.suspended_at IS NULL
+            AND <include refid="visiblePerson"/>
           UNION ALL
           SELECT 'note' AS touch_kind, n.id AS touch_id, d.company_id,
                  n.created_at AS touched_at, 0.4 AS weight
@@ -107,12 +114,18 @@
           JOIN deal d ON d.id = n.deal_id
           WHERE n.workspace_id = #{workspaceId} AND n.visibility = 'workspace'
             AND d.workspace_id = #{workspaceId} AND d.company_id IS NOT NULL
+            AND (n.person_id IS NULL OR EXISTS (
+              SELECT 1 FROM person p
+              WHERE p.id = n.person_id AND p.suspended_at IS NULL
+                AND <include refid="visiblePerson"/>
+            ))
           UNION ALL
           SELECT 'task' AS touch_kind, t.id AS touch_id, p.company_id,
                  t.created_at AS touched_at, 0.3 AS weight
           FROM task t
           JOIN person p ON p.id = t.person_id
           WHERE t.workspace_id = #{workspaceId} AND p.company_id IS NOT NULL
+            AND p.suspended_at IS NULL
             AND <include refid="visiblePerson"/>
           UNION ALL
           SELECT 'task' AS touch_kind, t.id AS touch_id, d.company_id,
@@ -121,6 +134,11 @@
           JOIN deal d ON d.id = t.deal_id
           WHERE t.workspace_id = #{workspaceId} AND d.workspace_id = #{workspaceId}
             AND d.company_id IS NOT NULL
+            AND (t.person_id IS NULL OR EXISTS (
+              SELECT 1 FROM person p
+              WHERE p.id = t.person_id AND p.suspended_at IS NULL
+                AND <include refid="visiblePerson"/>
+            ))
         ) source
         WHERE source.touched_at IS NOT NULL AND source.touched_at &lt;= #{reference}
         GROUP BY source.touch_kind, source.touch_id, source.company_id,

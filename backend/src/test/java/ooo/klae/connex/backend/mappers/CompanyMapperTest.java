@@ -559,6 +559,16 @@ class CompanyMapperTest extends AbstractMapperTest {
         assertEquals("2026-07-11 00:00:00", companyScore.lastTouchAt());
         assertTrue(personScore.rawWeight() > 0);
         assertTrue(companyScore.rawWeight() > 0);
+
+        personMapper.updateProcessingRestrictions(workspace.getId(), person.getId(), true, false);
+        assertFalse(personMapper.getRelationshipScoreAggregates(workspace.getId(), reference).stream()
+            .anyMatch(score -> score.id() == person.getId()));
+        RelationshipScoreAggregateDto restrictedCompanyScore = companyMapper
+            .getRelationshipScoreAggregates(workspace.getId(), reference).stream()
+            .filter(score -> score.id() == company.getId())
+            .findFirst().orElseThrow();
+        assertEquals(0, restrictedCompanyScore.recentTouchCount());
+        assertEquals(0.0, restrictedCompanyScore.recentWeight(), 0.000001);
     }
 
     @Test

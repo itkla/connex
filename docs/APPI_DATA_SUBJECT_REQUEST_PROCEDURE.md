@@ -1,6 +1,6 @@
 # Connex — Data-Subject Request Handling Procedure (開示等の請求)
 
-> **Status:** Phase-0 **process** deliverable for the APPI pathway ([#224]) — issue [#221]. Request **tracking** and the **subject-scoped disclosure export** are productized (increment 1 of [#221]): org administrators log and track requests via `POST/GET/PUT /api/orgs/{orgId}/data-subject-requests` and assemble a disclosure via `GET /api/orgs/{orgId}/data-subject-requests/{id}/disclosure` (all endpoints are org-admin gated; create/update and the disclosure assembly additionally require recent authentication and write audit-log records — the disclosure fails closed if its audit record cannot be persisted). The suspension-of-use flag and cease-provision enforcement remain the manual process below pending increment 2 of [#221].
+> **Status:** Phase-0 **process** deliverable for the APPI pathway ([#224]) — issue [#221]. Request **tracking** and the **subject-scoped disclosure export** are productized (increment 1 of [#221]): org administrators log and track requests via `POST/GET/PUT /api/orgs/{orgId}/data-subject-requests` and assemble a disclosure via `GET /api/orgs/{orgId}/data-subject-requests/{id}/disclosure` (all endpoints are org-admin gated; create/update and the disclosure assembly additionally require recent authentication and write audit-log records — the disclosure fails closed if its audit record cannot be persisted). Cease-of-use and cease-of-provision are also productized (increment 2 of [#221]): `PUT /api/persons/{id}/restrictions` on the owning workspace suspends processing and/or ceases third-party provision.
 > **Not legal advice.** Confirm response methods, fees, and identity-verification standards with counsel and each customer's DPA ([APPI_DPA_TEMPLATE.md](APPI_DPA_TEMPLATE.md)).
 > **Owner:** {{PRIVACY_OWNER}} · **Contact point:** {{PRIVACY_CONTACT_EMAIL}} · **Last reviewed:** 2026-07-01
 
@@ -29,8 +29,8 @@ A data subject (or authorized representative) may request, regarding their **ret
 ## 5. Fulfil the request
 - **Disclosure:** assemble everything held about the subject via the subject-scoped export (`GET /api/orgs/{orgId}/data-subject-requests/{id}/disclosure`) — person record plus tags, custom-field values with classification metadata, activities, notes, tasks, attachment metadata, employment history, relationship edges, deal associations, introductions, third-party-provision/share records, and the person-scoped audit trail (capped at 1,000 entries; the uncapped total is included so truncation is visible). The export is **operator-facing raw material**: it can contain third-party personal data and confidential business information, so apply the Art. 33(2) exceptions and redact before releasing anything to the subject. Flag `special_care` custom fields and suspected special-care free-text locations under [SPECIAL_CARE_DATA_POLICY.md](SPECIAL_CARE_DATA_POLICY.md). Attachment binaries are not embedded — retrieve flagged files through the normal attachment endpoints. Do **not** substitute the workspace-wide CSV export, which over-discloses.
 - **Correction:** update via the standard record edit; log the change (captured in `audit_log`).
-- **Cease of use / erasure:** until the suspension-of-use flag in [#221] ships, cease processing manually and record the action; note that current deletion is hard-delete per record — confirm with the customer/operator before irreversible deletion.
-- **Cease third-party provision:** exclude the record from sharing and any outbound provision; record the instruction.
+- **Cease of use:** set `suspended: true` via `PUT /api/persons/{id}/restrictions` — the contact stops being processed (warmth/decay scoring, automation rules, intro suggestions, network reports, AI features, notification nudges, CSV exports) while staying visible for management and disclosure. For **erasure**, note that deletion is hard-delete per record — confirm with the customer/operator before irreversible deletion.
+- **Cease third-party provision:** set `provisionCeased: true` on the same endpoint — every standing cross-workspace share is revoked immediately (audited with the revoked count), new shares are refused, and the contact is excluded from AI outbound. Record the instruction on the request.
 
 ## 6. Respond
 - Respond in the manner prescribed by the APPI (the subject may specify electromagnetic-record format for disclosure).
@@ -46,7 +46,7 @@ A data subject (or authorized representative) may request, regarding their **ret
 
 ---
 
-**Remaining productization ([#221] increment 2):** the suspension-of-use (`suspended_at`) state and the cease-provision flag — until they land, cease-of-use and cease-provision are executed manually per §5. Known conscious exclusions from the disclosure export, pending increment 2: persisted AI outputs (`ai_output_cache`) referencing the subject, and audit `changes` payloads (the export lists audit actions/outcomes only). Keep this procedure as the human process around the tooling.
+**Known conscious exclusions** (tracked in [#579](https://github.com/itkla/connex/issues/579)): the disclosure export omits persisted AI outputs (`ai_output_cache`) and audit `changes` payloads (actions/outcomes only); pre-restriction AI cache rows are not purged (they stop being served); free text in *other* records naming the subject is outside the restriction's reach. Keep this procedure as the human process around the tooling.
 
 [#221]: https://github.com/itkla/connex/issues/221
 [#224]: https://github.com/itkla/connex/issues/224

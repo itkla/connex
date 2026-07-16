@@ -9,6 +9,7 @@ import javax.imageio.ImageIO;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -33,6 +34,7 @@ import ooo.klae.connex.backend.beans.Tag;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.beans.Workspace;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
+import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.ActivityMapper;
 import ooo.klae.connex.backend.mappers.CompanyMapper;
@@ -49,6 +51,71 @@ class PersonServiceTest extends AbstractServiceTest {
     @Autowired PersonService personService;
     @Autowired ShareMapper shareMapper;
     @Autowired JdbcTemplate jdbcTemplate;
+    @Autowired RoleService roleService;
+    @Autowired WorkspaceService workspaceService;
+
+    @Test
+    void updateProcessingRestrictionsPreservesTimestampClearsIndependentlyAndAuditsChanges() {
+        Company company = newCompany();
+        Person person = newPerson(company);
+
+        Person restricted = personService.updateProcessingRestrictions(person.getId(), true, true);
+        assertNotNull(restricted.getSuspendedAt());
+        assertNotNull(restricted.getProvisionCeasedAt());
+        Person normallyUpdated = personService.update(person.getId(), personDraft(company));
+        assertNotNull(normallyUpdated.getSuspendedAt());
+        assertNotNull(normallyUpdated.getProvisionCeasedAt());
+        String changes = jdbcTemplate.queryForObject(
+            "SELECT changes FROM audit_log WHERE workspace_id = ? AND entity_type = 'person' "
+                + "AND entity_id = ? AND action = 'person.restrictions' ORDER BY id DESC LIMIT 1",
+            String.class, workspace.getId(), person.getId());
+        assertNotNull(changes);
+        assertTrue(changes.contains("suspendedAt"));
+        assertTrue(changes.contains("provisionCeasedAt"));
+
+        var preserved = java.time.LocalDateTime.parse("2025-01-02T03:04:05");
+        jdbcTemplate.update("UPDATE person SET suspended_at = ? WHERE id = ?", preserved, person.getId());
+        Person idempotent = personService.updateProcessingRestrictions(person.getId(), true, true);
+        assertEquals(preserved, idempotent.getSuspendedAt());
+
+        Person partiallyCleared = personService.updateProcessingRestrictions(person.getId(), false, true);
+        assertNull(partiallyCleared.getSuspendedAt());
+        assertNotNull(partiallyCleared.getProvisionCeasedAt());
+    }
+
+    @Test
+    void ceasingProvisionRevokesStandingSharesAndAuditsTheCount() {
+        Person person = newPerson(newCompany());
+        Workspace grantee = newWorkspaceInSameOrg();
+        shareMapper.sharePerson(person.getId(), workspace.getId(), grantee.getId(), currentUser.getId(), false);
+        assertEquals(1, shareMapper.listPersonShares(workspace.getId(), person.getId()).size());
+
+        personService.updateProcessingRestrictions(person.getId(), false, true);
+
+        assertTrue(shareMapper.listPersonShares(workspace.getId(), person.getId()).isEmpty());
+        String changes = jdbcTemplate.queryForObject(
+            "SELECT changes FROM audit_log WHERE workspace_id = ? AND entity_type = 'person' "
+                + "AND entity_id = ? AND action = 'person.restrictions' ORDER BY id DESC LIMIT 1",
+            String.class, workspace.getId(), person.getId());
+        assertNotNull(changes);
+        assertTrue(changes.contains("revokedShares"));
+        assertTrue(changes.contains("provisionCeasedAt"));
+    }
+
+    @Test
+    void updateProcessingRestrictionsRequiresPersonUpdatePermission() {
+        Person person = newPerson(newCompany());
+        User restricted = newUser();
+        var role = roleService.createRole(
+            workspace.getId(), currentUser.getId(), "Restriction reader " + unique(), List.of("PERSON_CREATE"));
+        workspaceService.assignCustomRole(
+            workspace.getId(), currentUser.getId(), restricted.getId(), role.getId());
+        authenticateAs(restricted, workspace.getId());
+
+        assertThrows(ForbiddenException.class,
+            () -> personService.updateProcessingRestrictions(person.getId(), true, false));
+        assertNull(personMapper.getPersonById(workspace.getId(), person.getId()).getSuspendedAt());
+    }
 
     @Test
     void createRejectsClientSuppliedImageUrl() {
@@ -108,6 +175,12 @@ class PersonServiceTest extends AbstractServiceTest {
         Person ownerView = personMapper.getPersonById(other.getId(), foreign.getId());
         assertFalse(ownerView.isRiskExcluded());
         assertFalse(ownerView.isIntroExcluded());
+
+        assertThrows(ResourceNotFoundException.class,
+            () -> personService.updateProcessingRestrictions(foreign.getId(), true, true));
+        ownerView = personMapper.getPersonById(other.getId(), foreign.getId());
+        assertNull(ownerView.getSuspendedAt());
+        assertNull(ownerView.getProvisionCeasedAt());
     }
 
     @Test
@@ -240,6 +313,7 @@ class PersonServiceTest extends AbstractServiceTest {
         WorkspaceService workspaceService = mock(WorkspaceService.class);
         PersonService service = new PersonService(
             mapper,
+            mock(ShareMapper.class),
             mock(CompanyMapper.class),
             mock(TagMapper.class),
             mock(DealMapper.class),

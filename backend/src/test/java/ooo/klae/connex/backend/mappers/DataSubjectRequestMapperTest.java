@@ -3,6 +3,7 @@ package ooo.klae.connex.backend.mappers;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -141,10 +142,13 @@ class DataSubjectRequestMapperTest extends AbstractMapperTest {
         insertAudit(org.getId(), overlayWorkspace.getId(), other.getId(), "person.other");
         insertAudit(foreignOrg.getId(), foreignWorkspace.getId(), subject.getId(), "person.foreign");
 
-        assertEquals(subject.getId(), dataSubjectRequestMapper.findDisclosurePerson(
-            org.getId(), ownerWorkspace.getId(), subject.getId()).getId());
-        assertEquals("Subject Company", dataSubjectRequestMapper.findDisclosurePerson(
-            org.getId(), ownerWorkspace.getId(), subject.getId()).getCompanyName());
+        personMapper.updateProcessingRestrictions(ownerWorkspace.getId(), subject.getId(), true, true);
+        var disclosedPerson = dataSubjectRequestMapper.findDisclosurePerson(
+            org.getId(), ownerWorkspace.getId(), subject.getId());
+        assertEquals(subject.getId(), disclosedPerson.getId());
+        assertEquals("Subject Company", disclosedPerson.getCompanyName());
+        assertNotNull(disclosedPerson.getSuspendedAt());
+        assertNotNull(disclosedPerson.getProvisionCeasedAt());
         assertEquals(List.of(subjectTag.getId()), dataSubjectRequestMapper.findDisclosureTags(
             org.getId(), ownerWorkspace.getId(), subject.getId()).stream().map(row -> row.getId()).toList());
         assertEquals("special_care", dataSubjectRequestMapper.findDisclosureCustomFields(

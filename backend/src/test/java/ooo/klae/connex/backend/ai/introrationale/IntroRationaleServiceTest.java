@@ -8,6 +8,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -40,9 +41,11 @@ import ooo.klae.connex.backend.ai.masking.MaskingLeakException;
 import ooo.klae.connex.backend.ai.masking.PromptAssembly;
 import ooo.klae.connex.backend.ai.provider.AiProviderException;
 import ooo.klae.connex.backend.beans.AiOutputCache;
+import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.dto.IntroRationaleDto;
 import ooo.klae.connex.backend.dto.IntroSuggestionDto;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
+import ooo.klae.connex.backend.mappers.PersonMapper;
 import ooo.klae.connex.backend.services.IntroductionService;
 import ooo.klae.connex.backend.services.WorkspaceService;
 
@@ -62,6 +65,7 @@ class IntroRationaleServiceTest {
     @Mock private IntroductionService introductionService;
     @Mock private AiOutputCacheStore aiOutputCacheStore;
     @Mock private WorkspaceService workspaceService;
+    @Mock private PersonMapper personMapper;
 
     private IntroRationaleService service;
 
@@ -74,8 +78,10 @@ class IntroRationaleServiceTest {
                 introductionService,
                 aiOutputCacheStore,
                 workspaceService,
+                personMapper,
                 Clock.fixed(NOW, ZoneOffset.UTC));
         when(workspaceService.getCurrentWorkspaceId()).thenReturn(WORKSPACE_ID);
+        lenient().when(personMapper.getPersonById(eq(WORKSPACE_ID), anyInt())).thenReturn(new Person());
         LocaleContextHolder.setLocale(Locale.ENGLISH);
     }
 
@@ -100,6 +106,22 @@ class IntroRationaleServiceTest {
         when(aiFeatureGate.isAiUsable()).thenReturn(true);
         when(introductionService.computeSuggestions(WORKSPACE_ID, IntroRationaleService.RESOLVE_LIMIT))
                 .thenReturn(List.of(suggestion(7, 11)));
+
+        IntroRationaleDto result = service.generate(PERSON_A_ID, PERSON_B_ID);
+
+        assertUnavailable(result, "not_a_suggestion");
+        verify(introRationaleAssembler, never()).assemble(anyInt(), any());
+        verify(aiInvocationService, never()).completeStructured(any(), any());
+    }
+
+    @Test
+    void generate_restrictedParticipant_returnsNotASuggestionWithoutAssembly() {
+        when(aiFeatureGate.isAiUsable()).thenReturn(true);
+        when(introductionService.computeSuggestions(WORKSPACE_ID, IntroRationaleService.RESOLVE_LIMIT))
+                .thenReturn(List.of(suggestion(PERSON_A_ID, PERSON_B_ID)));
+        Person ceased = new Person();
+        ceased.setProvisionCeasedAt(java.time.LocalDateTime.parse("2026-07-01T00:00:00"));
+        when(personMapper.getPersonById(WORKSPACE_ID, PERSON_A_ID)).thenReturn(ceased);
 
         IntroRationaleDto result = service.generate(PERSON_A_ID, PERSON_B_ID);
 

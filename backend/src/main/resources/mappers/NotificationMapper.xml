@@ -501,6 +501,7 @@
       AND d.owner_id IS NOT NULL
       AND d.closed_at IS NULL
       AND p.risk_excluded = FALSE
+      AND p.suspended_at IS NULL
     ORDER BY d.id, p.id, recipients.recipient_id
   </select>
 

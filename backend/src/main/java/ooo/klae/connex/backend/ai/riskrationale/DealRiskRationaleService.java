@@ -78,6 +78,9 @@ public class DealRiskRationaleService {
         }
 
         RationaleAssembly assembly = dealRiskRationaleAssembler.assemble(workspaceId, dealId, risk);
+        if (!assembly.atRisk()) {
+            return DealRationaleDto.unavailable(dealId, NOT_AT_RISK);
+        }
         String cacheFeature = cacheFeature();
         String contentHash = aiOutputCacheStore.contentHash(assembly.prompt(), assembly.context());
         if (!refresh) {
