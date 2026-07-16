@@ -46,6 +46,7 @@ import ooo.klae.connex.backend.dto.DealStageDistributionDto;
 import ooo.klae.connex.backend.dto.DealStageHistoryDto;
 import ooo.klae.connex.backend.dto.DealSummaryDto;
 import ooo.klae.connex.backend.dto.DealTopDto;
+import ooo.klae.connex.backend.dto.MemberScope;
 import ooo.klae.connex.backend.dto.NoteDto;
 import ooo.klae.connex.backend.dto.PageResponse;
 import ooo.klae.connex.backend.dto.TagDto;
@@ -55,6 +56,7 @@ import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.services.BulkOperationService;
 import ooo.klae.connex.backend.services.DealRiskService;
 import ooo.klae.connex.backend.services.DealService;
+import ooo.klae.connex.backend.services.MemberScopeResolver;
 import ooo.klae.connex.backend.services.WorkspaceService;
 import ooo.klae.connex.backend.util.LikePattern;
 import ooo.klae.connex.backend.util.PageBounds;
@@ -91,6 +93,7 @@ public class DealController {
     private final DealBriefService dealBriefService;
     private final DealRiskRationaleService dealRiskRationaleService;
     private final WorkspaceService workspaceService;
+    private final MemberScopeResolver memberScopeResolver;
 
     /**
      * GET endpoint to retrieve deals, with filtering by pipelineId, stageId, companyId, personId, or tagId.
@@ -135,18 +138,21 @@ public class DealController {
         @RequestParam(required = false) List<Integer> companyId,
         @RequestParam(defaultValue = "false") boolean noCompany,
         @RequestParam(required = false) List<String> status,
-        @RequestParam(required = false) List<String> risk
+        @RequestParam(required = false) List<String> risk,
+        @RequestParam(required = false) String scope,
+        @RequestParam(required = false) List<Integer> memberIds
     ) {
         PageBounds bounds = PageBounds.of(page, size);
         String query = (q == null || q.isBlank()) ? null : LikePattern.containing(q);
         String direction = validateOptionalValue(dir, SORT_DIRECTIONS, "dir");
+        MemberScope memberScope = resolveMemberScope(scope, memberIds);
         PageResponse<Deal> result = dealService.queryDealsPage(
             query, sort, direction, currency,
             normalizeIds(pipelineId, "pipelineId"),
             normalizeIds(stageId, "stageId"),
             normalizeIds(companyId, "companyId"),
             noCompany, normalizeStatuses(status), normalizeValues(risk, DEAL_RISKS, "risk"),
-            bounds.size(), bounds.offset());
+            memberScope, bounds.size(), bounds.offset());
         return new PageResponse<>(result.items().stream().map(DealDto::from).toList(), result.total());
     }
 
@@ -162,7 +168,9 @@ public class DealController {
         @RequestParam(defaultValue = "false") boolean noCompany,
         @RequestParam(required = false) List<String> status,
         @RequestParam(required = false) List<String> risk,
-        @RequestParam(required = false) String q
+        @RequestParam(required = false) String q,
+        @RequestParam(required = false) String scope,
+        @RequestParam(required = false) List<Integer> memberIds
     ) {
         String query = (q == null || q.isBlank()) ? null : LikePattern.containing(q);
         return dealService.queryDealMetrics(
@@ -170,24 +178,32 @@ public class DealController {
             normalizeIds(pipelineId, "pipelineId"),
             normalizeIds(stageId, "stageId"),
             normalizeIds(companyId, "companyId"),
-            noCompany, normalizeStatuses(status), normalizeValues(risk, DEAL_RISKS, "risk"));
+            noCompany, normalizeStatuses(status), normalizeValues(risk, DEAL_RISKS, "risk"),
+            resolveMemberScope(scope, memberIds));
     }
 
-    /** Returns every deal in one bounded pipeline board so drag positions remain absolute. */
+    /** Returns every matching deal in one bounded member-scoped pipeline board. */
     @GetMapping("/board")
-    public List<DealDto> getDealBoard(@RequestParam int pipelineId) {
+    public List<DealDto> getDealBoard(
+            @RequestParam int pipelineId,
+            @RequestParam(required = false) String scope,
+            @RequestParam(required = false) List<Integer> memberIds) {
         if (pipelineId < 1) {
             throw new BadRequestException("pipelineId must be a positive integer");
         }
-        return dealService.getDealBoard(pipelineId).stream().map(DealDto::from).toList();
+        return dealService.getDealBoard(pipelineId, resolveMemberScope(scope, memberIds)).stream()
+            .map(DealDto::from)
+            .toList();
     }
 
     /**
-     * GET endpoint for workspace-wide deal filter facets.
+     * GET endpoint for member-scoped deal filter facets.
      */
     @GetMapping("/facets")
-    public DealFacets getDealFacets() {
-        return dealService.getDealFacets();
+    public DealFacets getDealFacets(
+            @RequestParam(required = false) String scope,
+            @RequestParam(required = false) List<Integer> memberIds) {
+        return dealService.getDealFacets(resolveMemberScope(scope, memberIds));
     }
 
     /** Returns the first visible contact for each requested deal without per-deal fan-out. */
@@ -323,6 +339,10 @@ public class DealController {
             normalized.add(value);
         }
         return List.copyOf(normalized);
+    }
+
+    private MemberScope resolveMemberScope(String scope, List<Integer> memberIds) {
+        return memberScopeResolver.resolve(scope, memberIds, workspaceService.getCurrentUserId());
     }
 
     private static List<String> normalizeStatuses(List<String> values) {

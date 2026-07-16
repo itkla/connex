@@ -36,6 +36,7 @@ import ooo.klae.connex.backend.dto.DealRevenueMonthBoundary;
 import ooo.klae.connex.backend.dto.DealRevenueRangeDto;
 import ooo.klae.connex.backend.dto.DealStageDistributionDto;
 import ooo.klae.connex.backend.dto.FacetCount;
+import ooo.klae.connex.backend.dto.MemberScope;
 
 class DealMapperTest extends AbstractMapperTest {
 
@@ -180,12 +181,12 @@ class DealMapperTest extends AbstractMapperTest {
 
         List<Deal> matches = dealMapper.getDealsPageFiltered(
             target.getId(), "%" + foreignCompany.getName() + "%", null, null, null,
-            null, null, null, false, null, null, 25, 0);
+            null, null, null, false, null, null, allTeamScope(), 25, 0);
 
         assertTrue(matches.isEmpty());
         assertEquals(0, dealMapper.countDealsFiltered(
             target.getId(), "%" + foreignCompany.getName() + "%", null,
-            null, null, null, false, null, null));
+            null, null, null, false, null, null, allTeamScope()));
     }
 
     @Test
@@ -199,12 +200,12 @@ class DealMapperTest extends AbstractMapperTest {
 
         List<Deal> matches = dealMapper.getDealsPageFiltered(
             target.getId(), "%" + stageName + "%", null, null, null,
-            null, null, null, false, null, null, 25, 0);
+            null, null, null, false, null, null, allTeamScope(), 25, 0);
 
         assertTrue(matches.isEmpty());
         assertEquals(0, dealMapper.countDealsFiltered(
             target.getId(), "%" + stageName + "%", null,
-            null, null, null, false, null, null));
+            null, null, null, false, null, null, allTeamScope()));
     }
 
     @Test
@@ -734,17 +735,19 @@ class DealMapperTest extends AbstractMapperTest {
         dealMapper.update(withoutCompany);
 
         assertEquals(Map.of("open", 1L, "won", 2L, "lost", 1L),
-            facetCounts(dealMapper.countsByStatus(workspace.getId())));
+            facetCounts(dealMapper.countsByStatus(workspace.getId(), allTeamScope())));
         assertEquals(Map.of(
             Integer.toString(firstStage.getId()), 3L,
             Integer.toString(secondStage.getId()), 1L
-        ), facetCounts(dealMapper.countsByStage(workspace.getId())));
+        ), facetCounts(dealMapper.countsByStage(workspace.getId(), allTeamScope())));
         assertEquals(Map.of(Integer.toString(pipeline.getId()), 4L),
-            facetCounts(dealMapper.countsByPipeline(workspace.getId())));
+            facetCounts(dealMapper.countsByPipeline(workspace.getId(), allTeamScope())));
         assertEquals(Map.of(Integer.toString(company.getId()), 3L, "__empty__", 1L),
-            facetCounts(dealMapper.countsByCompany(workspace.getId())));
+            facetCounts(dealMapper.countsByCompany(workspace.getId(), allTeamScope())));
+        assertEquals(Map.of("__empty__", 4L),
+            facetCounts(dealMapper.countsByOwner(workspace.getId(), allTeamScope())));
         assertEquals(Map.of("JPY", 3L, "USD", 1L),
-            facetCounts(dealMapper.countsByCurrency(workspace.getId())));
+            facetCounts(dealMapper.countsByCurrency(workspace.getId(), allTeamScope())));
     }
 
     @Test
@@ -1168,6 +1171,10 @@ class DealMapperTest extends AbstractMapperTest {
 
     private Map<String, Long> facetCounts(List<FacetCount> facets) {
         return facets.stream().collect(Collectors.toMap(FacetCount::getKey, FacetCount::getCount));
+    }
+
+    private MemberScope allTeamScope() {
+        return MemberScope.fromRequest(null, null, 1);
     }
 
     private Map<String, Double> monthTotals(List<DealMonthDecimalTotalDto> totals) {

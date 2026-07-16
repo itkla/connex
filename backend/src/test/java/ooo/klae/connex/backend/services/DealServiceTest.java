@@ -43,6 +43,7 @@ import ooo.klae.connex.backend.dto.DealStageDistributionDto;
 import ooo.klae.connex.backend.dto.DealSummaryDto;
 import ooo.klae.connex.backend.dto.DealTopDto;
 import ooo.klae.connex.backend.dto.FacetCount;
+import ooo.klae.connex.backend.dto.MemberScope;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.ShareMapper;
@@ -88,8 +89,9 @@ class DealServiceTest extends AbstractServiceTest {
         foreign.setClosedAt("2026-01-01 00:00:00");
         dealMapper.insert(foreign);
 
+        MemberScope allTeamScope = MemberScope.fromRequest(null, null, currentUser.getId());
         DealMetricsDto metrics = dealService.getDealMetrics(null, null, null, null, null, null);
-        DealFacets facets = dealService.getDealFacets();
+        DealFacets facets = dealService.getDealFacets(allTeamScope);
         List<Deal> page = dealService.getDealsPage(
             null, null, null, null, null, null, null, null, 25, 0);
         long count = dealService.countDeals(null, null, null, null, null, null);
@@ -103,11 +105,11 @@ class DealServiceTest extends AbstractServiceTest {
         var multiFilteredPage = dealService.queryDealsPage(
             "%Local Won%", "value", "desc", "JPY",
             List.of(pipeline.getId()), List.of(stage.getId()), List.of(company.getId()),
-            false, List.of("won", "lost"), null, 25, 0);
+            false, List.of("won", "lost"), null, allTeamScope, 25, 0);
         DealMetricsDto multiFilteredMetrics = dealService.queryDealMetrics(
             "%Local Won%", "JPY",
             List.of(pipeline.getId()), List.of(stage.getId()), List.of(company.getId()),
-            false, List.of("won", "lost"), null);
+            false, List.of("won", "lost"), null, allTeamScope);
 
         assertEquals(3, metrics.totalCount());
         assertEquals(1, metrics.byCurrency().size());
@@ -124,6 +126,7 @@ class DealServiceTest extends AbstractServiceTest {
         assertEquals(Map.of(Integer.toString(stage.getId()), 3L), facetCounts(facets.stages()));
         assertEquals(Map.of(Integer.toString(pipeline.getId()), 3L), facetCounts(facets.pipelines()));
         assertEquals(Map.of(Integer.toString(company.getId()), 3L), facetCounts(facets.companies()));
+        assertEquals(Map.of(Integer.toString(currentUser.getId()), 3L), facetCounts(facets.owners()));
         assertEquals(Map.of("JPY", 3L), facetCounts(facets.currencies()));
         assertEquals(3, count);
         assertEquals(3, page.size());
@@ -138,7 +141,7 @@ class DealServiceTest extends AbstractServiceTest {
         assertEquals(List.of(localWon.getId(), localWonLower.getId()),
             multiFilteredPage.items().stream().map(Deal::getId).toList());
         assertEquals(2, multiFilteredMetrics.totalCount());
-        assertEquals(3, dealService.getDealBoard(pipeline.getId()).size());
+        assertEquals(3, dealService.getDealBoard(pipeline.getId(), allTeamScope).size());
     }
 
     @Test
