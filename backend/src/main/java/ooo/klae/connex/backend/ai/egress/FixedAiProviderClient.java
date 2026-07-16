@@ -36,6 +36,7 @@ import org.apache.hc.core5.http.HttpEntity;
 import org.apache.hc.core5.http.io.entity.ByteArrayEntity;
 import org.apache.hc.core5.io.CloseMode;
 import org.apache.hc.core5.util.Timeout;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import ooo.klae.connex.backend.ai.AiProperties;
@@ -58,6 +59,7 @@ public class FixedAiProviderClient {
     private final ExecutorService resolverExecutor = resolverExecutor();
     private final Semaphore resolverSlots = new Semaphore(MAX_CONCURRENT_RESOLUTIONS, true);
 
+    @Autowired
     public FixedAiProviderClient(AiProperties aiProperties) {
         this(aiProperties, host -> AiEgressGuard.resolveFetchableHost(host, false));
     }

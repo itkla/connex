@@ -3,6 +3,7 @@ package ooo.klae.connex.backend.ai.egress;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -25,6 +26,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import com.sun.net.httpserver.HttpServer;
 import org.apache.hc.core5.http.ContentType;
 import org.junit.jupiter.api.Test;
+import org.springframework.context.annotation.AnnotationConfigApplicationContext;
 
 import ooo.klae.connex.backend.ai.AiProperties;
 import ooo.klae.connex.backend.ai.provider.AiProviderException;
@@ -32,6 +34,17 @@ import ooo.klae.connex.backend.ai.provider.AiProviderException;
 class FixedAiProviderClientTest {
     private static final String HOST = "fixed-provider.example.test";
     private static final byte[] REQUEST_BODY = "{}".getBytes(StandardCharsets.UTF_8);
+
+    @Test
+    void springSelectsTheProductionConstructor() {
+        try (AnnotationConfigApplicationContext context = new AnnotationConfigApplicationContext()) {
+            context.registerBean(AiProperties.class, AiProperties::new);
+            context.register(FixedAiProviderClient.class);
+            context.refresh();
+
+            assertNotNull(context.getBean(FixedAiProviderClient.class));
+        }
+    }
 
     @Test
     void postPinsTheValidatedAddressAndRefusesRedirects() throws Exception {
