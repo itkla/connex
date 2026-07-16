@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { LoaderCircle } from 'lucide-react';
 import { toastError, toastSuccess } from '@/app/lib/toast';
-import { EllipsisVerticalIcon, PencilSquareIcon, EyeIcon, PaperClipIcon, TrashIcon, PlusIcon, UserIcon, BriefcaseIcon, ShareIcon } from '@heroicons/react/24/outline';
+import { EllipsisVerticalIcon, PencilSquareIcon, EyeIcon, PaperClipIcon, TrashIcon, PlusIcon, UserIcon, UserCircleIcon, BriefcaseIcon, ShareIcon } from '@heroicons/react/24/outline';
 
 import { useAttachmentUploader } from '@/app/components/attachments/useAttachmentUploader';
 
@@ -20,12 +20,13 @@ import { ButtonGroup } from '@/components/ui/button-group';
 
 import DeleteRecordDialog from '@/app/components/records/DeleteRecordDialog';
 import ShareDialog from '@/app/components/records/ShareDialog';
+import OwnerAssignDialog from '@/app/components/records/OwnerAssignDialog';
 import EditCompanySheet from '@/app/components/records/companies/EditCompanySheet';
 import NewContactDialog from '@/app/components/records/contacts/NewContactDialog';
 import NewDealDialog from '@/app/components/records/deals/NewDealDialog';
 
-import { createContact, createDeal, deleteCompany, getPipelines, getStagesByPipelineId, importBusinessCard, isFieldError, uploadContactPicture } from '@/app/lib/api';
-import { type BusinessCardImportDraft, CreateContactPayload, type Company, type CreateDealPayload, type Pipeline, type Stage } from '@/app/lib/types';
+import { createContact, createDeal, deleteCompany, getActiveWorkspaceMembers, getPipelines, getStagesByPipelineId, importBusinessCard, isFieldError, updateCompanyOwner, uploadContactPicture } from '@/app/lib/api';
+import { type BusinessCardImportDraft, CreateContactPayload, type Company, type CreateDealPayload, type Pipeline, type Stage, type WorkspaceMember } from '@/app/lib/types';
 import { useWorkspace } from '@/app/hooks/useWorkspace';
 
 function emptyContactPayload(companyId: number): CreateContactPayload {
@@ -63,6 +64,8 @@ export default function CompanyActionsMenu({
     const { inputRef: attachmentInputRef, uploading: attachmentsUploading, openPicker: openAttachmentPicker, onFilesSelected: onAttachmentFilesSelected } = useAttachmentUploader('company', company.id);
     const [deleteOpen, setDeleteOpen] = useState(false);
     const [shareOpen, setShareOpen] = useState(false);
+    const [ownerOpen, setOwnerOpen] = useState(false);
+    const [members, setMembers] = useState<WorkspaceMember[]>([]);
     const [isDeleting, setIsDeleting] = useState(false);
     const [editOpen, setEditOpen] = useState(false);
     const [newContactDialogOpen, setNewContactDialogOpen] = useState(false);
@@ -100,6 +103,8 @@ export default function CompanyActionsMenu({
             setStagesByPipeline(Object.fromEntries(entries));
         }).catch(() => setPipelines([]));
     }, []);
+
+    useEffect(() => { getActiveWorkspaceMembers().then(setMembers).catch(() => setMembers([])); }, []);
 
     useEffect(
         () => () => invalidatePendingContactClose(),
@@ -292,6 +297,15 @@ export default function CompanyActionsMenu({
                         </Button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end" className="w-48">
+                        <DropdownMenuItem
+                            onSelect={(e) => {
+                                e.preventDefault();
+                                setOwnerOpen(true);
+                            }}
+                        >
+                            <UserCircleIcon className="size-4" />
+                            <span>{t('assignOwner')}</span>
+                        </DropdownMenuItem>
                         {owned && (
                             <DropdownMenuItem
                                 onSelect={(e) => {
@@ -333,6 +347,14 @@ export default function CompanyActionsMenu({
                 entityName={company.name}
                 open={shareOpen}
                 onOpenChange={setShareOpen}
+            />
+
+            <OwnerAssignDialog
+                open={ownerOpen}
+                onOpenChange={setOwnerOpen}
+                initialOwnerId={company.ownerId}
+                members={members}
+                onApply={(ownerId) => updateCompanyOwner(company.id, ownerId)}
             />
 
             <DeleteRecordDialog

@@ -1,11 +1,11 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { LoaderCircle } from 'lucide-react';
 import { toastError, toastSuccess } from '@/app/lib/toast';
-import { EllipsisVerticalIcon, PencilSquareIcon, EyeIcon, PlusIcon, ChatBubbleLeftRightIcon, DocumentTextIcon, CheckCircleIcon, PaperClipIcon } from '@heroicons/react/24/outline';
+import { EllipsisVerticalIcon, PencilSquareIcon, EyeIcon, PlusIcon, ChatBubbleLeftRightIcon, DocumentTextIcon, CheckCircleIcon, PaperClipIcon, UserCircleIcon } from '@heroicons/react/24/outline';
 import { BuildingOffice2Icon, NoSymbolIcon, TrashIcon, ShareIcon, ShieldExclamationIcon } from '@heroicons/react/24/outline';
 
 import { useAttachmentUploader } from '@/app/components/attachments/useAttachmentUploader';
@@ -23,13 +23,14 @@ import { ButtonGroup } from '@/components/ui/button-group';
 import ChangeCompanyDialog from '@/app/components/records/contacts/ChangeCompanyDialog';
 import DeleteRecordDialog from '@/app/components/records/DeleteRecordDialog';
 import ShareDialog from '@/app/components/records/ShareDialog';
+import OwnerAssignDialog from '@/app/components/records/OwnerAssignDialog';
 import { useWorkspace } from '@/app/hooks/useWorkspace';
 import NewActivityDialog from '@/app/components/records/contacts/NewActivityDialog';
 import NewTaskDialog from '@/app/components/records/contacts/NewTaskDialog';
 import NewNoteDialog from '@/app/components/activity/notes/NoteDialog';
 
-import { deleteContact, updateContact } from '@/app/lib/api';
-import { type Contact, type Deal } from '@/app/lib/types';
+import { deleteContact, getActiveWorkspaceMembers, updateContact, updateContactOwner } from '@/app/lib/api';
+import { type Contact, type Deal, type WorkspaceMember } from '@/app/lib/types';
 import EditContactSheet from '@/app/components/records/contacts/EditContactSheet';
 import RestrictionsDialog from '@/app/components/records/contacts/RestrictionsDialog';
 
@@ -57,6 +58,9 @@ export default function ContactActionsMenu({
     const [noteOpen, setNoteOpen] = useState(false);
     const [shareOpen, setShareOpen] = useState(false);
     const [restrictionsOpen, setRestrictionsOpen] = useState(false);
+    const [ownerOpen, setOwnerOpen] = useState(false);
+    const [members, setMembers] = useState<WorkspaceMember[]>([]);
+    useEffect(() => { getActiveWorkspaceMembers().then(setMembers).catch(() => setMembers([])); }, []);
     const { activeWorkspaceId } = useWorkspace();
     const owned = contact.workspaceId == null || contact.workspaceId === activeWorkspaceId;
     const handleRemoveCompany = async () => {
@@ -169,6 +173,15 @@ export default function ContactActionsMenu({
                             </Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end" className="w-48">
+                            <DropdownMenuItem
+                                onSelect={(e) => {
+                                    e.preventDefault();
+                                    setOwnerOpen(true);
+                                }}
+                            >
+                                <UserCircleIcon className="size-4" />
+                                <span>{t('assignOwner')}</span>
+                            </DropdownMenuItem>
                             <DropdownMenuItem
                                 onSelect={(e) => {
                                     e.preventDefault();
@@ -289,6 +302,14 @@ export default function ContactActionsMenu({
                     entityName={contact.name}
                     open={shareOpen}
                     onOpenChange={setShareOpen}
+                />
+
+                <OwnerAssignDialog
+                    open={ownerOpen}
+                    onOpenChange={setOwnerOpen}
+                    initialOwnerId={contact.ownerId}
+                    members={members}
+                    onApply={(ownerId) => updateContactOwner(contact.id, ownerId)}
                 />
             </div>
         </>

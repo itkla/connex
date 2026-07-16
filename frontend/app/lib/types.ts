@@ -15,13 +15,13 @@ export type PageParams = {
     dir?: 'asc' | 'desc';
 };
 
-export type ContactsPageParams = PageParams & {
+export type ContactsPageParams = PageParams & MemberScopeParams & {
     companies?: string[];
     titles?: string[];
     noCompany?: boolean;
 };
 
-export type CompaniesPageParams = PageParams & {
+export type CompaniesPageParams = PageParams & MemberScopeParams & {
     industry?: string[];
     noIndustry?: boolean;
     ids?: number[];
@@ -108,11 +108,13 @@ export type PersonFacets = {
     companies: string[];
     titles: string[];
     hasNoCompany: boolean;
+    owners: FacetCount[];
 };
 
 export type CompanyFacets = {
     industries: string[];
     hasNoIndustry: boolean;
+    owners: FacetCount[];
 };
 
 export type TemperatureBand = 'hot' | 'warm' | 'cool' | 'cold';
@@ -689,6 +691,8 @@ export type Company = {
     tags?: Tag[];
     createdAt: string;
     updatedAt: string;
+    /** Owning workspace member (issue #573); read-only, set via the owner endpoint. */
+    ownerId?: number | null;
 };
 
 // metrics for a company, filled via relationship traversal
@@ -756,6 +760,8 @@ export type Contact = {
     /** Engine-evaluation opt-outs (issue #358); read-only, set via the evaluation endpoint. */
     riskExcluded?: boolean;
     introExcluded?: boolean;
+    /** Owning workspace member (issue #573); read-only, set via the owner endpoint. */
+    ownerId?: number | null;
     /** APPI processing restrictions (issue #221); read-only, set via the restrictions endpoint. */
     suspendedAt?: string | null;
     provisionCeasedAt?: string | null;

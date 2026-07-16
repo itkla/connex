@@ -76,6 +76,8 @@ export default async function ContactPage({ params }: { params: { id: number } }
         await Promise.all(interactionUserIds.map((uid) => getUserById(uid, init).catch(() => null)))
     ).filter((u): u is User => u !== null);
 
+    const owner = contact.ownerId != null ? await getUserById(contact.ownerId, init).catch(() => null) : null;
+
     return (
         <div className="min-h-full bg-background px-2 pt-8 pb-12">
             <div className="mx-auto flex w-full max-w-5xl flex-col gap-10">
@@ -133,6 +135,10 @@ export default async function ContactPage({ params }: { params: { id: number } }
                                             </Link>
                                         </>
                                     ) : null}
+                                    <span className="inline-flex items-center gap-1.5 rounded-md bg-muted px-2 py-1 text-muted-foreground">
+                                        <UserIcon className="size-3.5" />
+                                        <span>{owner ? (owner.displayName || owner.username) : t('ownerUnassigned')}</span>
+                                    </span>
                                 </h3>
                             </div>
                         </div>

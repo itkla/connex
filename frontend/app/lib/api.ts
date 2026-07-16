@@ -2165,6 +2165,22 @@ export function updateDealOwner(id: number, ownerId: number | null) {
     return putJson<Types.Deal>(`/api/deals/${id}/owner`, { ownerId });
 }
 
+export function updateCompanyOwner(id: number, ownerId: number | null) {
+    return putJson<Types.Company>(`/api/companies/${id}/owner`, { ownerId });
+}
+
+export function bulkAssignCompanyOwner(ids: number[], ownerId: number | null) {
+    return runBulk(ids, (chunk) => postJson<Types.BulkOperationResult>(`/api/companies/bulk/owner`, { ids: chunk, ownerId }));
+}
+
+export function updateContactOwner(id: number, ownerId: number | null) {
+    return putJson<Types.Contact>(`/api/persons/${id}/owner`, { ownerId });
+}
+
+export function bulkAssignContactOwner(ids: number[], ownerId: number | null) {
+    return runBulk(ids, (chunk) => postJson<Types.BulkOperationResult>(`/api/persons/bulk/owner`, { ids: chunk, ownerId }));
+}
+
 export function updateDealEvaluation(id: number, payload: Types.UpdateDealEvaluationPayload) {
     return putJson<Types.Deal>(`/api/deals/${id}/evaluation`, payload);
 }

@@ -85,6 +85,7 @@ export default async function CompanyPage({ params }: { params: { id: number } }
     const { activities, tasks, notes } = timeline;
     const relatedUserIds = new Set(engagement.relatedUserIds);
     const interactionUsers = allUsers.filter((user) => relatedUserIds.has(user.id));
+    const owner = company.ownerId != null ? allUsers.find((user) => user.id === company.ownerId) : undefined;
 
     return (
         <div className="min-h-full bg-background px-2 pt-8 pb-12">
@@ -122,6 +123,10 @@ export default async function CompanyPage({ params }: { params: { id: number } }
                                             {company.industry}
                                         </Link>
                                     ) : null}
+                                    <span className="inline-flex items-center gap-1.5 rounded-md bg-muted px-2 py-1 text-muted-foreground">
+                                        <UserIcon className="size-3.5" />
+                                        <span>{owner ? (owner.displayName || owner.username) : t('ownerUnassigned')}</span>
+                                    </span>
                                 </h3>
                             </div>
                         </div>
