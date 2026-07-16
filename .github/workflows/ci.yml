@@ -24,27 +24,18 @@ jobs:
           python-version: '3.12'
       - name: Install lightweight image test dependencies
         run: python -m pip install Pillow==12.3.0 numpy==2.3.5
-      - name: Verify direct OCR pins match the deployable lock
+      - name: Install pinned OCR lock compiler
+        run: python -m pip install pip-tools==7.5.3
+      - name: Regenerate the deployable OCR lock
+        working-directory: ocr
         run: |
-          python - <<'PY'
-          import re
-          from pathlib import Path
-
-          def pins(path):
-              result = {}
-              for raw in Path(path).read_text().splitlines():
-                  if not raw or raw[0].isspace() or raw.lstrip().startswith("#") or "==" not in raw:
-                      continue
-                  name, version = raw.strip().removesuffix(" \\").split("==", 1)
-                  result[re.sub(r"[-_.]+", "-", name).lower()] = version
-              return result
-
-          direct = pins("ocr/requirements.txt")
-          locked = pins("ocr/requirements.lock")
-          stale = sorted(name for name, version in direct.items() if locked.get(name) != version)
-          if stale:
-              raise SystemExit("requirements.lock is stale for: " + ", ".join(stale))
-          PY
+          pip-compile \
+            --generate-hashes \
+            --strip-extras \
+            --allow-unsafe \
+            --output-file=requirements.lock \
+            requirements.txt
+          git diff --exit-code -- requirements.lock
       - name: Test service protocol and benchmark manifest
         working-directory: ocr
         env:

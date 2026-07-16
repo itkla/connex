@@ -25,6 +25,10 @@ docker run --detach \
     --mount "type=bind,src=$PWD/ocr/ci/runtime_smoke.py,dst=/opt/connex-ocr/app/runtime_smoke.py,readonly" \
     "$IMAGE" >/dev/null
 
+test "$(docker inspect "$NAME" --format '{{.HostConfig.NetworkMode}}')" = "none"
+test "$(docker inspect "$NAME" --format '{{range .Config.Env}}{{println .}}{{end}}' \
+    | awk -F= '$1 == "PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK" { print $2 }')" = "1"
+
 for _ in $(seq 1 60); do
     if docker exec "$NAME" python -c "import json,urllib.request; data=json.load(urllib.request.urlopen('http://127.0.0.1:8090/health',timeout=2)); raise SystemExit(0 if data.get('ready') is True else 1)" 2>/dev/null; then
         READY=1

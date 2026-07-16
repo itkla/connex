@@ -13,7 +13,8 @@ LABEL org.opencontainers.image.title="connex-ocr" \
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     HOME=/opt/connex-ocr \
-    PADDLE_PDX_CACHE_HOME=/tmp/paddlex
+    PADDLE_PDX_CACHE_HOME=/tmp/paddlex \
+    PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK=1
 
 WORKDIR /opt/connex-ocr/app
 

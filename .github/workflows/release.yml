@@ -133,7 +133,7 @@ jobs:
       - name: Verify pinned build toolchain
         run: |
           docker buildx version | grep -F 'v0.35.0'
-          docker buildx inspect --bootstrap | grep -F 'Buildkit: v0.31.1'
+          docker buildx inspect --bootstrap | grep -F 'BuildKit version: v0.31.1'
 
       - name: Log in to GHCR
         uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9
@@ -571,7 +571,7 @@ jobs:
       - name: Verify pinned build toolchain
         run: |
           docker buildx version | grep -F 'v0.35.0'
-          docker buildx inspect --bootstrap | grep -F 'Buildkit: v0.31.1'
+          docker buildx inspect --bootstrap | grep -F 'BuildKit version: v0.31.1'
 
       - name: Log in to GHCR
         uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9
@@ -696,6 +696,7 @@ jobs:
       - name: Publish the complete verified release atomically
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
           VERSION: ${{ needs.metadata.outputs.version }}
         run: |
           set -euo pipefail
