@@ -9,6 +9,12 @@ READY=0
 cleanup() {
     docker rm -f "$NAME" >/dev/null 2>&1 || true
 }
+
+report_failure() {
+    docker inspect --format 'running={{.State.Running}} exit={{.State.ExitCode}} oom={{.State.OOMKilled}} error={{.State.Error}}' "$NAME"
+    docker exec "$NAME" sh -c 'if [ -r /sys/fs/cgroup/memory.events ]; then cat /sys/fs/cgroup/memory.events; fi' || true
+    docker logs "$NAME"
+}
 trap cleanup EXIT
 
 docker run --detach \
@@ -42,9 +48,11 @@ for _ in $(seq 1 105); do
 done
 
 if [ "$READY" != 1 ]; then
-    docker inspect --format 'running={{.State.Running}} exit={{.State.ExitCode}} oom={{.State.OOMKilled}} error={{.State.Error}}' "$NAME"
-    docker logs "$NAME"
+    report_failure
     exit 1
 fi
 
-docker exec "$NAME" python /opt/connex-ocr/app/runtime_smoke.py
+if ! docker exec "$NAME" python /opt/connex-ocr/app/runtime_smoke.py; then
+    report_failure
+    exit 1
+fi

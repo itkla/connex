@@ -4,6 +4,7 @@ from unittest.mock import Mock, patch
 from ocr_service.__main__ import main
 from ocr_service.startup import (
     exception_type_chain,
+    report_inference_failure,
     report_startup_failure,
     startup_reason,
 )
@@ -46,6 +47,17 @@ class MainTest(unittest.TestCase):
         self.assertIn("component=worker", message)
         self.assertIn("reason=engine_initialization_failed", message)
         self.assertIn("exception_types=builtins.RuntimeError", message)
+        self.assertNotIn("private", message)
+
+    def test_inference_diagnostic_excludes_exception_messages(self) -> None:
+        with patch("ocr_service.startup.print") as rendered:
+            report_inference_failure(RuntimeError("private recognized card text"))
+
+        message = rendered.call_args.args[0]
+        self.assertEqual(
+            "OCR inference failed: exception_types=builtins.RuntimeError",
+            message,
+        )
         self.assertNotIn("private", message)
 
     def test_server_bind_failure_uses_safe_startup_diagnostic(self) -> None:

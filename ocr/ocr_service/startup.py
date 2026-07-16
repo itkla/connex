@@ -69,3 +69,11 @@ def report_startup_failure(
         f"exception_types={exception_type_chain(exception)}",
         file=sys.stderr,
     )
+
+
+def report_inference_failure(exception: BaseException) -> None:
+    print(
+        "OCR inference failed: "
+        f"exception_types={exception_type_chain(exception)}",
+        file=sys.stderr,
+    )

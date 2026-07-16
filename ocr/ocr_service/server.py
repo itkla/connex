@@ -9,6 +9,7 @@ from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from .config import ServiceConfig
 from .engine import ImageRejected, OcrEngine
+from .startup import report_inference_failure
 
 
 class OcrServer(ThreadingHTTPServer):
@@ -208,7 +209,8 @@ class OcrRequestHandler(BaseHTTPRequestHandler):
                 except ImageRejected as exception:
                     self._respond(exception.status, {"error": exception.message})
                     return
-                except Exception:
+                except Exception as exception:
+                    report_inference_failure(exception)
                     self.server.fail_inference()
                     self._respond(HTTPStatus.SERVICE_UNAVAILABLE, {"error": "OCR unavailable"})
                     return

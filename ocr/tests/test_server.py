@@ -6,6 +6,7 @@ import time
 import unittest
 import urllib.error
 import urllib.request
+from unittest.mock import patch
 
 from ocr_service.config import ServiceConfig
 from ocr_service.engine import ImageRejected
@@ -458,9 +459,14 @@ class InferenceFailureTest(unittest.TestCase):
         )
 
         try:
-            with self.assertRaises(urllib.error.HTTPError) as raised:
+            with (
+                patch("ocr_service.server.report_inference_failure") as reported,
+                self.assertRaises(urllib.error.HTTPError) as raised,
+            ):
                 urllib.request.urlopen(request, timeout=2)
             self.assertEqual(503, raised.exception.code)
+            reported.assert_called_once()
+            self.assertIsInstance(reported.call_args.args[0], RuntimeError)
             self.assertTrue(fatal_failure.wait(2))
             with urllib.request.urlopen(base_url + "/health", timeout=2) as response:
                 self.assertEqual(
