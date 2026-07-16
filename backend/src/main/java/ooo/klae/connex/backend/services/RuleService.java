@@ -58,8 +58,10 @@ public class RuleService {
     private static final Set<String> DEAL_EVENTS = Set.of(
         "deal.created", "deal.stage_changed", "deal.updated", "deal.won", "deal.lost",
         "deal.owner_changed", "deal.value_changed");
-    private static final Set<String> COMPANY_EVENTS = Set.of("company.created", "company.updated");
-    private static final Set<String> PERSON_EVENTS = Set.of("person.created", "person.updated", "person.job_changed");
+    private static final Set<String> COMPANY_EVENTS = Set.of(
+        "company.created", "company.updated", "company.owner_changed");
+    private static final Set<String> PERSON_EVENTS = Set.of(
+        "person.created", "person.updated", "person.job_changed", "person.owner_changed");
     private static final Set<String> TASK_EVENTS = Set.of("task.created", "task.completed");
     private static final Map<String, Set<String>> ACTION_RECORD_TYPES = Map.of(
         "create_task", Set.of("person", "deal"),

@@ -13,6 +13,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 
 import ooo.klae.connex.backend.beans.Company;
 import ooo.klae.connex.backend.beans.Deal;
+import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.beans.Pipeline;
 import ooo.klae.connex.backend.beans.ReportDefinition;
 import ooo.klae.connex.backend.beans.ReportSnapshot;
@@ -22,6 +23,7 @@ import ooo.klae.connex.backend.beans.Stage;
 import ooo.klae.connex.backend.beans.Task;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.beans.UserDashboard;
+import ooo.klae.connex.backend.beans.Workspace;
 import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.mappers.NotificationMapper;
 import ooo.klae.connex.backend.mappers.ReportMapper;
@@ -69,6 +71,12 @@ class UserOffboardingServiceTest extends AbstractServiceTest {
     void erasureDetachesAndDeletesEveryReferenceWhileTheUserStillExists() {
         User target = newUser();
         Company company = newCompany();
+        Person person = newPerson(company);
+        companyMapper.updateOwner(workspace.getId(), company.getId(), target.getId());
+        personMapper.updateOwner(workspace.getId(), person.getId(), target.getId());
+        Workspace otherWorkspace = newOtherWorkspace();
+        Company otherCompany = companyInWorkspace(otherWorkspace, target.getId());
+        Person otherPerson = personInWorkspace(otherWorkspace, target.getId());
         Pipeline pipeline = newPipeline();
         Stage stage = newStage(pipeline, 1);
 
@@ -85,6 +93,12 @@ class UserOffboardingServiceTest extends AbstractServiceTest {
 
         offboardingService.eraseOrgDataReferences(target.getId());
 
+        assertNull(companyMapper.getCompanyById(workspace.getId(), company.getId()).getOwnerId());
+        assertNull(personMapper.getPersonById(workspace.getId(), person.getId()).getOwnerId());
+        assertNull(companyMapper.getCompanyById(
+            otherWorkspace.getId(), otherCompany.getId()).getOwnerId());
+        assertNull(personMapper.getPersonById(
+            otherWorkspace.getId(), otherPerson.getId()).getOwnerId());
         assertNull(dealMapper.getDealById(workspace.getId(), deal.getId()).getOwnerId());
         assertTrue(dealMapper.getCollaborators(workspace.getId(), deal.getId()).isEmpty());
         assertNull(taskMapper.getTaskById(workspace.getId(), task.getId()).getAssignedTo());
@@ -104,17 +118,59 @@ class UserOffboardingServiceTest extends AbstractServiceTest {
     void memberDetachmentCleansContentWhileTheMembershipStillExists() {
         User member = newUser();
         Pipeline pipeline = newPipeline();
-        Deal deal = newDeal(pipeline, newStage(pipeline, 1), newCompany());
+        Company company = newCompany();
+        Person person = newPerson(company);
+        Deal deal = newDeal(pipeline, newStage(pipeline, 1), company);
+        companyMapper.updateOwner(workspace.getId(), company.getId(), member.getId());
+        personMapper.updateOwner(workspace.getId(), person.getId(), member.getId());
+        dealMapper.updateOwner(workspace.getId(), deal.getId(), member.getId());
+        Workspace otherWorkspace = newOtherWorkspace();
+        Company otherCompany = companyInWorkspace(otherWorkspace, member.getId());
+        Person otherPerson = personInWorkspace(otherWorkspace, member.getId());
         dealMapper.insertCollaborators(workspace.getId(), deal.getId(), List.of(member.getId()));
         newNotification(workspace.getId(), member.getId());
         Task task = newTask(member, null, null);
 
         offboardingService.detachMemberContent(workspace.getId(), member.getId());
 
+        assertNull(companyMapper.getCompanyById(workspace.getId(), company.getId()).getOwnerId());
+        assertNull(personMapper.getPersonById(workspace.getId(), person.getId()).getOwnerId());
+        assertNull(dealMapper.getDealById(workspace.getId(), deal.getId()).getOwnerId());
+        assertEquals(member.getId(),
+            companyMapper.getCompanyById(otherWorkspace.getId(), otherCompany.getId()).getOwnerId());
+        assertEquals(member.getId(),
+            personMapper.getPersonById(otherWorkspace.getId(), otherPerson.getId()).getOwnerId());
         assertTrue(dealMapper.getCollaborators(workspace.getId(), deal.getId()).isEmpty());
         assertEquals(0, notificationMapper.countPage(member.getId(), null, null, null, null));
         assertNull(taskMapper.getTaskById(workspace.getId(), task.getId()).getAssignedTo());
         assertTrue(workspaceMapper.isMember(workspace.getId(), member.getId()));
+    }
+
+    private Workspace newOtherWorkspace() {
+        Workspace other = new Workspace();
+        other.setName("Other Workspace");
+        other.setSlug("other-" + unique());
+        workspaceMapper.insert(other);
+        return other;
+    }
+
+    private Company companyInWorkspace(Workspace target, int ownerId) {
+        Company company = new Company();
+        company.setWorkspaceId(target.getId());
+        company.setOwnerId(ownerId);
+        company.setName("Company " + unique());
+        companyMapper.insert(company);
+        return company;
+    }
+
+    private Person personInWorkspace(Workspace target, int ownerId) {
+        Person person = new Person();
+        person.setWorkspaceId(target.getId());
+        person.setOwnerId(ownerId);
+        person.setName("Person " + unique());
+        person.setEmail(unique() + "@example.com");
+        personMapper.insert(person);
+        return person;
     }
 
     private SavedView savedView(User owner) {

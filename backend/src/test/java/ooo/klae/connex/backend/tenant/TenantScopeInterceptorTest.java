@@ -62,8 +62,12 @@ class TenantScopeInterceptorTest {
         assertFalse(interceptor.requiresResolvedContext(NS + "NotificationMapper.lockRecipientMemberships"));
         assertFalse(interceptor.requiresResolvedContext(NS + "NotificationMapper.findRecipientIdsByActor"));
         assertFalse(interceptor.requiresResolvedContext(NS + "NotificationMapper.lockRecipientIdsByActor"));
+        assertFalse(interceptor.requiresResolvedContext(NS + "CompanyMapper.clearOwnershipAnywhere"));
+        assertFalse(interceptor.requiresResolvedContext(NS + "PersonMapper.clearOwnershipAnywhere"));
         assertFalse(interceptor.requiresResolvedContext(NS + "ReportMapper.clearDefinitionCreatorsAnywhere"));
         assertFalse(interceptor.requiresResolvedContext(NS + "ReportMapper.clearSnapshotGeneratorsAnywhere"));
+        assertTrue(interceptor.requiresResolvedContext(NS + "CompanyMapper.clearMemberOwnership"));
+        assertTrue(interceptor.requiresResolvedContext(NS + "PersonMapper.clearMemberOwnership"));
     }
 
     @Test

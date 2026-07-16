@@ -71,6 +71,14 @@ public class BulkOperationService {
         return apply(ids, id -> personMapper.existsOwned(workspaceId, id), personService::delete);
     }
 
+    @RequirePermission(Permission.PERSON_UPDATE)
+    public BulkOperationResult assignOwnerToPersons(List<Integer> ids, Integer ownerId) {
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        if (ownerId != null) workspaceService.requireMember(workspaceId, ownerId);
+        return apply(ids, id -> personMapper.existsOwned(workspaceId, id),
+            id -> personService.updateOwner(id, ownerId));
+    }
+
     @RequirePermission(Permission.COMPANY_UPDATE)
     public BulkOperationResult addTagToCompanies(List<Integer> ids, int tagId) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
@@ -89,6 +97,14 @@ public class BulkOperationService {
     public BulkOperationResult deleteCompanies(List<Integer> ids) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         return apply(ids, id -> companyMapper.existsOwned(workspaceId, id), companyService::deleteCompany);
+    }
+
+    @RequirePermission(Permission.COMPANY_UPDATE)
+    public BulkOperationResult assignOwnerToCompanies(List<Integer> ids, Integer ownerId) {
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        if (ownerId != null) workspaceService.requireMember(workspaceId, ownerId);
+        return apply(ids, id -> companyMapper.existsOwned(workspaceId, id),
+            id -> companyService.updateOwner(id, ownerId));
     }
 
     @RequirePermission(Permission.DEAL_UPDATE)

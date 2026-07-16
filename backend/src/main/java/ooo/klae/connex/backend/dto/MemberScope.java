@@ -65,13 +65,18 @@ public record MemberScope(Mode mode, Integer userId, List<Integer> memberIds) {
     public static MemberScope fromRequest(String scope, List<Integer> memberIds, int currentUserId) {
         String normalizedScope = scope == null ? "" : scope.trim();
         return switch (normalizedScope) {
-            case "" -> new MemberScope(Mode.ALL_TEAM, null, List.of());
+            case "" -> allTeam();
             case "me" -> new MemberScope(Mode.ME, currentUserId, List.of());
             case "members" -> members(memberIds);
             case "unassigned" -> new MemberScope(Mode.UNASSIGNED, null, List.of());
             default -> throw new BadRequestException(
                 "scope must be blank or one of: me, members, unassigned");
         };
+    }
+
+    /** Returns the canonical unfiltered team scope. */
+    public static MemberScope allTeam() {
+        return new MemberScope(Mode.ALL_TEAM, null, List.of());
     }
 
     private static MemberScope members(List<Integer> memberIds) {

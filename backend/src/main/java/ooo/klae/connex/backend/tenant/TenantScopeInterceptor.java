@@ -139,7 +139,8 @@ public class TenantScopeInterceptor implements Interceptor {
      * run without a resolved workspace context.
      *
      * <p>The offboarding statements (#440 increment 3) replace the dropped
-     * cross-plane foreign keys. The {@code *Anywhere} guards and erasures run
+     * cross-plane foreign keys, including company, contact, and deal ownership.
+     * The {@code *Anywhere} guards and erasures run
      * during self-serve account deletion, which is identity-scoped
      * ({@code requireSelf}) and deliberately spans every workspace — including
      * ones the user has left, where no tenant context could be resolved. The
@@ -171,6 +172,8 @@ public class TenantScopeInterceptor implements Interceptor {
         MAPPERS + "NotificationMapper.deleteAllForRecipient",
         MAPPERS + "NotificationMapper.deleteAllForRecipientAnywhere",
         MAPPERS + "NotificationMapper.clearActorAnywhere",
+        MAPPERS + "CompanyMapper.clearOwnershipAnywhere",
+        MAPPERS + "PersonMapper.clearOwnershipAnywhere",
         MAPPERS + "DealMapper.clearOwnershipAnywhere",
         MAPPERS + "DealMapper.removeCollaboratorAnywhere",
         MAPPERS + "DealMapper.removeCollaboratorFromWorkspace",

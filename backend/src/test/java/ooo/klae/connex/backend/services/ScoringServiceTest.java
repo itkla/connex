@@ -34,6 +34,7 @@ import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.beans.Task;
 import ooo.klae.connex.backend.dto.BandCounts;
 import ooo.klae.connex.backend.dto.DecayCounts;
+import ooo.klae.connex.backend.dto.MemberScope;
 import ooo.klae.connex.backend.dto.RelationshipScoreAggregateDto;
 import ooo.klae.connex.backend.dto.RelationshipTemperatureDto;
 import ooo.klae.connex.backend.dto.TrendCounts;
@@ -275,7 +276,8 @@ class ScoringServiceTest {
     @Test
     void mapCompanyScoringRejectsOversizedWorkspacesBeforeScanning() {
         CompanyMapper companyMapper = mock(CompanyMapper.class);
-        when(companyMapper.countCompanies(WS, null, null, false, null)).thenReturn(2_001L);
+        when(companyMapper.countCompanies(
+            WS, null, null, false, null, MemberScope.allTeam())).thenReturn(2_001L);
         PersonMapper personMapper = mock(PersonMapper.class);
         ScoringService service = new ScoringService(
             personMapper, companyMapper, mock(DealMapper.class), mock(ActivityMapper.class),
@@ -400,7 +402,8 @@ class ScoringServiceTest {
     void mapCompanyScoringUsesOnlyCompactAggregatesWithinTheCap() {
         CompanyMapper companyMapper = mock(CompanyMapper.class);
         LocalDateTime reference = LocalDateTime.ofInstant(NOW, ZoneOffset.UTC);
-        when(companyMapper.countCompanies(WS, null, null, false, null)).thenReturn(1L);
+        when(companyMapper.countCompanies(
+            WS, null, null, false, null, MemberScope.allTeam())).thenReturn(1L);
         when(companyMapper.getRelationshipScoreAggregates(WS, reference)).thenReturn(List.of(
             new RelationshipScoreAggregateDto(
                 10, 1.0, 1.0, 0.0, "2026-06-29 12:00:00", 1)));

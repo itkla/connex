@@ -19,10 +19,12 @@ import ooo.klae.connex.backend.beans.Company;
 import ooo.klae.connex.backend.dto.ActivityDto;
 import ooo.klae.connex.backend.dto.BulkDeleteRequest;
 import ooo.klae.connex.backend.dto.BulkOperationResult;
+import ooo.klae.connex.backend.dto.BulkOwnerRequest;
 import ooo.klae.connex.backend.dto.BulkTagRequest;
 import ooo.klae.connex.backend.dto.CompanyDto;
 import ooo.klae.connex.backend.dto.CompanyEngagementDto;
 import ooo.klae.connex.backend.dto.CompanyFacets;
+import ooo.klae.connex.backend.dto.CompanyOwnerDto;
 import ooo.klae.connex.backend.dto.CompanySegmentQueryRequest;
 import ooo.klae.connex.backend.dto.CompanyTimelineDto;
 import ooo.klae.connex.backend.dto.CustomFieldEntryDto;
@@ -30,6 +32,7 @@ import ooo.klae.connex.backend.dto.CustomFieldValueRequest;
 import ooo.klae.connex.backend.dto.CustomFieldValuesRequest;
 import ooo.klae.connex.backend.dto.DealDto;
 import ooo.klae.connex.backend.dto.NoteDto;
+import ooo.klae.connex.backend.dto.MemberScope;
 import ooo.klae.connex.backend.dto.PageResponse;
 import ooo.klae.connex.backend.dto.PersonDto;
 import ooo.klae.connex.backend.dto.TagDto;
@@ -37,6 +40,8 @@ import ooo.klae.connex.backend.dto.TaskDto;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.services.BulkOperationService;
 import ooo.klae.connex.backend.services.CompanyService;
+import ooo.klae.connex.backend.services.MemberScopeResolver;
+import ooo.klae.connex.backend.services.WorkspaceService;
 import ooo.klae.connex.backend.util.LikePattern;
 import ooo.klae.connex.backend.util.PageBounds;
 import ooo.klae.connex.backend.storage.UploadSource;
@@ -58,6 +63,8 @@ import lombok.RequiredArgsConstructor;
 public class CompanyController {
     private final CompanyService companyService;
     private final BulkOperationService bulkOperationService;
+    private final WorkspaceService workspaceService;
+    private final MemberScopeResolver memberScopeResolver;
 
     /**
      * Retrieves all companies, optionally filtered by tag.
@@ -85,14 +92,18 @@ public class CompanyController {
         @RequestParam(required = false) String dir,
         @RequestParam(required = false) List<String> industry,
         @RequestParam(defaultValue = "false") boolean noIndustry,
-        @RequestParam(required = false) List<Integer> ids
+        @RequestParam(required = false) List<Integer> ids,
+        @RequestParam(required = false) String scope,
+        @RequestParam(required = false) List<Integer> memberIds
     ) {
         PageBounds bounds = PageBounds.of(page, size);
         String query = (q == null || q.isBlank()) ? null : LikePattern.containing(q);
+        MemberScope memberScope = resolveMemberScope(scope, memberIds);
         List<CompanyDto> items = companyService.getCompaniesPage(
-            query, sort, dir, industry, noIndustry, ids, bounds.size(), bounds.offset())
+            query, sort, dir, industry, noIndustry, ids, memberScope, bounds.size(), bounds.offset())
             .stream().map(CompanyDto::from).toList();
-        return new PageResponse<>(items, companyService.countCompanies(query, industry, noIndustry, ids));
+        return new PageResponse<>(items,
+            companyService.countCompanies(query, industry, noIndustry, ids, memberScope));
     }
 
     /** Returns bounded company-scoped engagement aggregates for one expanded company card. */
@@ -170,7 +181,8 @@ public class CompanyController {
     public CompanyFacets getCompanyFacets() {
         return new CompanyFacets(
             companyService.distinctIndustries(),
-            companyService.hasCompanyWithoutIndustry()
+            companyService.hasCompanyWithoutIndustry(),
+            companyService.countsByOwner()
         );
     }
 
@@ -223,6 +235,11 @@ public class CompanyController {
     @PutMapping("/{id}")
     public CompanyDto updateCompany(@PathVariable int id, @Valid @RequestBody CompanyDto dto) {
         return CompanyDto.from(companyService.updateCompany(id, dto.toBean()));
+    }
+
+    @PutMapping("/{id}/owner")
+    public CompanyDto updateOwner(@PathVariable int id, @Valid @RequestBody CompanyOwnerDto dto) {
+        return CompanyDto.from(companyService.updateOwner(id, dto.getOwnerId()));
     }
 
     /**
@@ -305,6 +322,11 @@ public class CompanyController {
         return bulkOperationService.deleteCompanies(request.getIds());
     }
 
+    @PostMapping("/bulk/owner")
+    public BulkOperationResult bulkAssignOwner(@Valid @RequestBody BulkOwnerRequest request) {
+        return bulkOperationService.assignOwnerToCompanies(request.getIds(), request.getOwnerId());
+    }
+
     /**
      * GET endpoint to retrieve people associated with a company.
      * @param id
@@ -363,5 +385,9 @@ public class CompanyController {
     @GetMapping("/custom-field-values")
     public Map<Integer, Map<Integer, Object>> getCustomFieldValuesForCompanies(@RequestParam List<Integer> ids) {
         return companyService.getCustomFieldValues(ids);
+    }
+
+    private MemberScope resolveMemberScope(String scope, List<Integer> memberIds) {
+        return memberScopeResolver.resolve(scope, memberIds, workspaceService.getCurrentUserId());
     }
 }

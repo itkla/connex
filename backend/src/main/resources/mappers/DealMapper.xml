@@ -200,7 +200,7 @@
 
   <select id="getDealPeopleByDealId" resultMap="DealPersonResult">
     SELECT dp.person_id AS deal_person_pid,
-           p.id, p.workspace_id, p.name, p.email, p.phone, p.title, p.created_at, p.updated_at,
+           p.id, p.workspace_id, p.owner_id, p.name, p.email, p.phone, p.title, p.created_at, p.updated_at,
            p.image_url, p.risk_excluded, p.intro_excluded, p.suspended_at, p.provision_ceased_at,
            c.id AS company_id, c.name AS company_name, c.logo_url AS company_logo_url,
            dp.role

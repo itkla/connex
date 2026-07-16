@@ -24,6 +24,8 @@ import ooo.klae.connex.backend.dto.CompanyEngagementUserDto;
 import ooo.klae.connex.backend.dto.CompanyEngagementWeekBucketDto;
 import ooo.klae.connex.backend.dto.CompanyEngagementWeekDto;
 import ooo.klae.connex.backend.dto.CompanyRevenueCurrencyDto;
+import ooo.klae.connex.backend.dto.FacetCount;
+import ooo.klae.connex.backend.dto.MemberScope;
 import ooo.klae.connex.backend.dto.PageResponse;
 import ooo.klae.connex.backend.dto.SegmentDefinition;
 import ooo.klae.connex.backend.businesscard.BusinessCardTextNormalizer;
@@ -35,6 +37,7 @@ import ooo.klae.connex.backend.storage.ManagedObjectService;
 import ooo.klae.connex.backend.storage.ManagedObjectService.ManagedContent;
 import ooo.klae.connex.backend.storage.ManagedObjectService.StoredImage;
 import ooo.klae.connex.backend.storage.UploadSource;
+import ooo.klae.connex.backend.notifications.NotificationChangePublisher;
 import ooo.klae.connex.backend.tenant.Permission;
 import ooo.klae.connex.backend.tenant.RequirePermission;
 import ooo.klae.connex.backend.util.LikePattern;
@@ -70,7 +73,9 @@ public class CompanyService {
     private final ActivityMapper activityMapper;
     private final NoteMapper noteMapper;
     private final TaskMapper taskMapper;
+    private final AuthService authService;
     private final AuditService auditService;
+    private final NotificationChangePublisher notificationChanges;
     private final RuleTriggerPublisher ruleTriggers;
     private final WorkspaceService workspaceService;
     private final CustomFieldValueService customFieldValueService;
@@ -212,14 +217,15 @@ public class CompanyService {
     ) {}
 
     public List<Company> getCompaniesPage(String query, String sort, String dir, List<String> industry,
-            boolean noIndustry, List<Integer> ids, int limit, int offset) {
+            boolean noIndustry, List<Integer> ids, MemberScope memberScope, int limit, int offset) {
         return companyMapper.getCompaniesPage(workspaceService.getCurrentWorkspaceId(), query, sort, dir,
-            industry, noIndustry, ids, limit, offset);
+            industry, noIndustry, ids, memberScope, limit, offset);
     }
 
-    public long countCompanies(String query, List<String> industry, boolean noIndustry, List<Integer> ids) {
+    public long countCompanies(String query, List<String> industry, boolean noIndustry, List<Integer> ids,
+            MemberScope memberScope) {
         return companyMapper.countCompanies(
-            workspaceService.getCurrentWorkspaceId(), query, industry, noIndustry, ids);
+            workspaceService.getCurrentWorkspaceId(), query, industry, noIndustry, ids, memberScope);
     }
 
     /**
@@ -286,7 +292,8 @@ public class CompanyService {
             throw new BadRequestException("At least one filter is required before selecting matching company ids");
         }
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        long total = companyMapper.countCompanies(workspaceId, query, industry, noIndustry, ids);
+        long total = companyMapper.countCompanies(
+            workspaceId, query, industry, noIndustry, ids, MemberScope.allTeam());
         if (total > MAX_MATCHING_IDS) {
             throw new BadRequestException("Too many matching companies; narrow the filters before selecting all");
         }
@@ -310,6 +317,10 @@ public class CompanyService {
         return companyMapper.hasCompanyWithoutIndustry(workspaceService.getCurrentWorkspaceId());
     }
 
+    public List<FacetCount> countsByOwner() {
+        return companyMapper.countsByOwner(workspaceService.getCurrentWorkspaceId());
+    }
+
     public List<Company> getCompaniesByTagId(int tagId) {
         return companyMapper.getCompaniesByTagId(workspaceService.getCurrentWorkspaceId(), tagId);
     }
@@ -331,6 +342,7 @@ public class CompanyService {
     @RequirePermission(Permission.COMPANY_CREATE)
     public Company createCompany(Company company) {
         company.setWorkspaceId(workspaceService.getCurrentWorkspaceId());
+        company.setOwnerId(authService.getCurrentUser().getId());
         company.setLogoUrl(null);
         assertUniqueWebsite(company);
         companyMapper.insert(company);
@@ -377,6 +389,7 @@ public class CompanyService {
         Company before = requireOwnedCompany(workspaceId, id);
         company.setId(id);
         company.setWorkspaceId(workspaceId);
+        company.setOwnerId(before.getOwnerId());
         company.setLogoUrl(before.getLogoUrl());
         assertUniqueWebsite(company);
         int updated = companyMapper.update(company);
@@ -388,6 +401,23 @@ public class CompanyService {
             ruleTriggers.publish(workspaceId, "company", id, "company.updated");
         }
         return after;
+    }
+
+    @Transactional
+    @RequirePermission(Permission.COMPANY_UPDATE)
+    public Company updateOwner(int companyId, Integer ownerId) {
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        Company before = requireOwnedCompany(workspaceId, companyId);
+        if (ownerId != null) workspaceService.requireMember(workspaceId, ownerId);
+        companyMapper.updateOwner(workspaceId, companyId, ownerId);
+        auditService.record("company.updateOwner", "company", companyId, before.getName(),
+            "Updated owner on " + before.getName(),
+            auditService.singleChange("ownerId", before.getOwnerId(), ownerId));
+        notificationChanges.publish(workspaceId, "company", companyId);
+        if (!Objects.equals(before.getOwnerId(), ownerId)) {
+            ruleTriggers.publish(workspaceId, "company", companyId, "company.owner_changed");
+        }
+        return requireOwnedCompany(workspaceId, companyId);
     }
 
     @Transactional
